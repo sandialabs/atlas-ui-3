@@ -9,7 +9,7 @@ def test_files_health_endpoint(monkeypatch):
     from infrastructure.app_factory import app_factory
     s3 = app_factory.get_file_storage()
     # No network call is made by files/health; but ensure attributes exist
-    assert hasattr(s3, "base_url")
+    assert hasattr(s3, "endpoint_url")
 
     client = TestClient(app)
     resp = client.get("/api/files/healthz", headers={"X-User-Email": "test@test.com"})

@@ -12,6 +12,18 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 - Python Package Manager: **uv** (NOT pip!)
 - Configuration: Pydantic with YAML/JSON configs
 
+# Style note
+
+No Emojis should ever be added in this repo. If you find one, then remove it. 
+
+# Tests
+
+Before you mark a job as finished, be sure to run the unit test script. 
+
+`bash run_test_shortcut.sh`
+
+All test must pass before a feature is pushed. 
+
 ## Critical Setup Requirements
 
 ### Python Package Manager

@@ -31,8 +31,8 @@ from core.capabilities import generate_file_token, verify_file_token  # type: ig
 class FakeS3:
     def __init__(self):
         self._store = {}
-        self.base_url = "mock://s3"
-        self.use_mock = True
+        self.endpoint_url = "mock://s3"
+        self.bucket_name = "test-bucket"
 
     async def upload_file(self, user_email: str, filename: str, content_base64: str, content_type: str = "application/octet-stream", tags=None, source_type: str = "user"):
         key = f"k_{len(self._store)+1}"

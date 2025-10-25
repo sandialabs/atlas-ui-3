@@ -76,5 +76,8 @@ test_e2e/playwright-report/
 test-results/
 **/test-results/
 
-# S3 Mock Storage
+# MinIO Data (persistent storage)
+data/minio/
+
+# Legacy S3 Mock Storage (deprecated)
 mocks/s3-mock/s3-mock-storage/

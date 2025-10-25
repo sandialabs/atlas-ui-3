@@ -19,6 +19,20 @@ if ! command_exists node || ! command_exists npm; then
 fi
 echo "Prerequisites met."
 
+# --- Cline CLI ---
+echo "--- Installing Cline CLI ---"
+if command_exists cline; then
+  echo "Cline CLI is already installed."
+else
+  echo "Installing via npm..."
+  if npm install -g cline; then
+    echo "Cline installed. Run 'cline' to get started."
+  else
+    echo "Failed to install Cline CLI." >&2
+  fi
+fi
+
+
 # --- OpenAI Codex CLI ---
 echo "--- Installing OpenAI Codex CLI ---"
 if command_exists codex; then

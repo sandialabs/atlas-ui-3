@@ -25,11 +25,17 @@ def create_authorization_manager(auth_check_func: Optional[Callable] = None) -> 
         def filter_authorized_servers(self, user_email, servers_config, get_server_groups_func):
             """Filter servers based on authorization - for basic chat, allow all."""
             # For now, return all server names as a list
+            # logger.info(f"DEBUG AUTH: user={user_email}, servers_config type={type(servers_config)}, has .servers={hasattr(servers_config, 'servers')}")
             if hasattr(servers_config, 'servers'):
-                return list(servers_config.servers.keys())
+                result = list(servers_config.servers.keys())
+                # logger.info(f"DEBUG AUTH: Returning servers from .servers attribute: {result}")
+                return result
             elif isinstance(servers_config, dict):
-                return list(servers_config.keys())
+                result = list(servers_config.keys())
+                # logger.info(f"DEBUG AUTH: Returning servers from dict keys: {result}")
+                return result
             else:
+                # logger.warning(f"DEBUG AUTH: servers_config is neither dict nor has .servers, returning empty list. Type: {type(servers_config)}")
                 return []
         
         def __call__(self, *args, **kwargs):

@@ -17,14 +17,18 @@ done
 # clear the log by setting to ""
 # backend/logs/app.jsonl
 
-# Clear mock S3 storage folder
-echo "Clearing mock S3 storage folder..."
-rm -rf ./mocks/s3-mock/s3-mock-storage/*
-echo "Mock S3 storage folder cleared"
-
 # Configuration
 USE_NEW_FRONTEND=${USE_NEW_FRONTEND:-true}
-START_S3_MOCK=true
+
+# Check if MinIO is running
+if ! docker ps | grep -q atlas-minio; then
+    echo "⚠️  MinIO is not running. Starting MinIO with docker-compose..."
+    docker-compose up -d minio minio-init
+    echo "✅ MinIO started successfully"
+    sleep 3
+else
+    echo "✅ MinIO is already running"
+fi
 
 # Kill any running uvicorn processes (skip if only rebuilding frontend)
 if [ "$ONLY_FRONTEND" = false ] && [ "$ONLY_BACKEND" = false ]; then
@@ -81,30 +85,11 @@ if [ "$ONLY_BACKEND" = true ]; then
     echo "Clearing log for fresh start"
     mkdir -p ./logs
     echo "NEW LOG" > ./logs/app.jsonl
-    
-    # Start S3 mock service if enabled
-    if [ "$START_S3_MOCK" = true ]; then
-        echo "Starting S3 mock service..."
-        cd mocks/s3-mock
-        python main.py &
-        cd ../../backend
-        echo "S3 mock service started on http://127.0.0.1:8003"
-    else
-        cd backend
-    fi
 
+    cd backend
     uvicorn main:app --host 0.0.0.0 --port 8000 &
     echo "Backend server started. Exiting as requested."
     exit 0
-fi
-
-# Start S3 mock service if enabled
-if [ "$START_S3_MOCK" = true ]; then
-    echo "Starting S3 mock service..."
-    cd ../mocks/s3-mock
-    python main.py &
-    cd ../../backend
-    echo "S3 mock service started on http://127.0.0.1:8003"
 fi
 
 uvicorn main:app --port 8000 &

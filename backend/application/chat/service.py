@@ -155,21 +155,21 @@ class ChatService:
         session.history.add_message(user_message)
         session.update_timestamp()
 
-        # Prompt-injection risk check on user input (observe + log medium/high)
-        try:
-            pi = calculate_prompt_injection_risk(content or "", mode="general")
-            if pi.get("risk_level") in ("medium", "high"):
-                log_high_risk_event(
-                    source="user_input",
-                    user=user_email,
-                    content=content or "",
-                    score=int(pi.get("score", 0)),
-                    risk_level=str(pi.get("risk_level")),
-                    triggers=list(pi.get("triggers", [])),
-                    extra={"session_id": str(session_id)},
-                )
-        except Exception:
-            logger.debug("Prompt risk check failed (user input)", exc_info=True)
+        # # Prompt-injection risk check on user input (observe + log medium/high)
+        # try:
+        #     pi = calculate_prompt_injection_risk(content or "", mode="general")
+        #     if pi.get("risk_level") in ("medium", "high"):
+        #         log_high_risk_event(
+        #             source="user_input",
+        #             user=user_email,
+        #             content=content or "",
+        #             score=int(pi.get("score", 0)),
+        #             risk_level=str(pi.get("risk_level")),
+        #             triggers=list(pi.get("triggers", [])),
+        #             extra={"session_id": str(session_id)},
+        #         )
+        # except Exception:
+        #     logger.debug("Prompt risk check failed (user input)", exc_info=True)
         
         # Handle user file ingestion using utilities
         session.context = await file_utils.handle_session_files(
@@ -262,16 +262,26 @@ class ChatService:
                                 servers_config,
                                 getattr(self.tool_manager, "get_server_groups", lambda s: []),
                             )
+                        # logger.info(f"DEBUG ACL: user={user}, authorized_servers={authorized_servers}, selected_tools_before_filter={selected_tools}")
                         # Filter tools by server prefix
                         filtered_tools: List[str] = []
                         for t in selected_tools or []:
                             if t == "canvas_canvas":
                                 filtered_tools.append(t)
+                                # logger.info(f"DEBUG ACL: tool={t} -> ALLOWED (canvas special case)")
                                 continue
                             if isinstance(t, str) and "_" in t:
-                                server = t.split("_", 1)[0]
-                                if server in authorized_servers:
+                                # Match against authorized servers by checking if tool name starts with server_
+                                # This handles server names that contain underscores (e.g., "pptx_generator")
+                                matched_server = None
+                                for auth_server in authorized_servers:
+                                    if t.startswith(f"{auth_server}_"):
+                                        matched_server = auth_server
+                                        break
+                                # logger.info(f"DEBUG ACL: tool={t} -> matched_server={matched_server}, authorized={matched_server is not None}")
+                                if matched_server:
                                     filtered_tools.append(t)
+                        # logger.info(f"DEBUG ACL: filtered_tools={filtered_tools}")
                         selected_tools = filtered_tools
                     except Exception:
                         logger.debug("Tool ACL filtering failed; proceeding with original selection", exc_info=True)

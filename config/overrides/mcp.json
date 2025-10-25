@@ -1,17 +1,6 @@
 {
 
 
-  "thinking": {
-    "command": ["python", "mcp/thinking/main.py"],
-    "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
-    "description": "Structured thinking and problem analysis tool",
-    "author": "Chat UI Team",
-    "short_description": "Structured problem analysis",
-    "help_email": "support@chatui.example.com"
-  },
-
   "calculator": {
     "command": ["python", "mcp/calculator/main.py"],
     "cwd": "backend",
@@ -23,79 +12,15 @@
     "help_email": "support@chatui.example.com"
   },
 
-
-  "prompts": {
-    "command": ["python", "mcp/prompts/main.py"],
-    "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
-    "description": "Specialized system prompts for AI behavior modification",
-    "author": "Chat UI Team",
-    "short_description": "AI behavior prompts",
-    "help_email": "support@chatui.example.com"
-  }, 
-  "ui-demo": {
-    "command": ["python", "mcp/ui-demo/main.py"],
-    "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
-    "description": "Demo server showcasing custom UI modification capabilities",
-    "author": "Chat UI Team",
-    "short_description": "UI customization demo",
-    "help_email": "support@chatui.example.com"
-  },
-
-  "order_database": {
-    "command": ["python", "mcp/order_database/main.py"],
-    "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
-    "description": "Customer order database with retrieval and status update functionality",
-    "author": "Chat UI Team",
-    "short_description": "Customer order management",
-    "help_email": "support@chatui.example.com"
-  }
-  ,
-  "csv_reporter": {
-    "command": ["python", "mcp/csv_reporter/main.py"],
-    "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
-    "description": "Generate reports from uploaded CSV files, demonstrating filename URL rewriting and username injection.",
-    "author": "Chat UI Team",
-    "short_description": "CSV reporting tool",
-    "help_email": "support@chatui.example.com"
-  },
-  
-    "code-executor": {
-    "command": ["python", "mcp/code-executor/main.py"],
-    "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
-    "description": "Execute Python, JavaScript, and other code snippets in a secure sandboxed environment with safety validation",
-    "author": "Chat UI Team",
-    "short_description": "Secure code execution sandbox",
-    "help_email": "support@chatui.example.com"
-  },
   "pptx_generator": {
     "command": ["python", "mcp/pptx_generator/main.py"],
     "cwd": "backend",
     "groups": ["users"],
     "is_exclusive": false,
-    "description": "Converts JSON input containing slide data into a PowerPoint presentation. Input should be a JSON object with a 'slides' array, each containing 'title' and 'content' fields.",
+    "description": "Create professional PowerPoint presentations from JSON data or Markdown content with automatic slide generation, bullet point formatting, and multimedia support",
     "author": "Chat UI Team",
-    "short_description": "JSON to PowerPoint converter",
-    "help_email": "support@chatui.example.com"
-  },
-
-  "progress_demo": {
-    "command": ["python", "mcp/progress_demo/main.py"],
-    "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
-    "description": "Demo long-running tool that reports progress updates every few seconds.",
-    "author": "Chat UI Team",
-    "short_description": "Progress reporting demo",
+    "short_description": "PowerPoint presentation generator",
     "help_email": "support@chatui.example.com"
   }
+
 }

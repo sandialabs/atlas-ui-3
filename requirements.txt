@@ -9,6 +9,7 @@ python-dotenv
 fastmcp>=2.3.5
 requests
 httpx
+boto3>=1.34.0
 litellm
 duckduckgo-search
 PyPDF2

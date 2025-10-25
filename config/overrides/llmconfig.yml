@@ -18,7 +18,7 @@ models:
       X-Title: "${OPENROUTER_SITE_NAME}"
 
 
-  openrouter-qween3-coder:
+  openrouter-qwen3-coder:
     model_url: "https://openrouter.ai/api/v1/chat/completions"
     model_name: "qwen/qwen3-coder"
     api_key: "${OPENROUTER_API_KEY}"

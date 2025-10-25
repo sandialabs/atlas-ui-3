@@ -84,8 +84,8 @@ async def files_health_check():
         "status": "healthy",
         "service": "files-api",
         "s3_config": {
-            "endpoint": s3_client.base_url if hasattr(s3_client, 'base_url') else "unknown",
-            "use_mock": s3_client.use_mock if hasattr(s3_client, 'use_mock') else False
+            "endpoint": s3_client.endpoint_url if hasattr(s3_client, 'endpoint_url') else "unknown",
+            "bucket": s3_client.bucket_name if hasattr(s3_client, 'bucket_name') else "unknown"
         }
     }
 
@@ -188,8 +188,8 @@ async def files_health_check():
         "status": "healthy",
     "service": "files-api",
         "s3_config": {
-            "endpoint": s3_client.base_url if hasattr(s3_client, 'base_url') else "unknown",
-            "use_mock": s3_client.use_mock if hasattr(s3_client, 'use_mock') else False
+            "endpoint": s3_client.endpoint_url if hasattr(s3_client, 'endpoint_url') else "unknown",
+            "bucket": s3_client.bucket_name if hasattr(s3_client, 'bucket_name') else "unknown"
         }
     }
 

@@ -106,7 +106,7 @@ def inspect_settings(args) -> None:
         "Banner": ["banner_enabled"],
         "Agent": ["feature_agent_mode_available", "agent_max_steps"],
         "Health": ["llm_health_check_interval", "mcp_health_check_interval"],
-        "S3": ["s3_endpoint", "s3_use_mock", "s3_timeout"],
+        "S3": ["s3_endpoint", "s3_bucket_name", "s3_access_key", "s3_secret_key", "s3_region", "s3_timeout", "s3_use_ssl"],
         "Admin": ["admin_group"]
     }
     

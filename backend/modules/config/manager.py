@@ -123,10 +123,14 @@ class AppSettings(BaseSettings):
     admin_group: str = "admin"
     test_user: str = "test@test.com"  # Test user for development
     
-    # S3 storage settings
-    s3_endpoint: str = "http://127.0.0.1:8003"
-    s3_use_mock: bool = True
+    # S3/MinIO storage settings
+    s3_endpoint: str = "http://localhost:9000"
+    s3_bucket_name: str = "atlas-files"
+    s3_access_key: str = "minioadmin"
+    s3_secret_key: str = "minioadmin"
+    s3_region: str = "us-east-1"
     s3_timeout: int = 30
+    s3_use_ssl: bool = False
     
     # Feature flags
     feature_workspaces_enabled: bool = False
