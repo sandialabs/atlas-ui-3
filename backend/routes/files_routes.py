@@ -51,6 +51,23 @@ class FileContentResponse(BaseModel):
     tags: Dict[str, str]
 
 
+@router.get("/files/healthz")
+async def files_health_check():
+    """Health check for files service.
+
+    Note: Declared before the dynamic /files/{file_key} route to avoid path capture.
+    """
+    s3_client = app_factory.get_file_storage()
+    return {
+        "status": "healthy",
+        "service": "files-api",
+        "s3_config": {
+            "endpoint": s3_client.endpoint_url if hasattr(s3_client, 'endpoint_url') else "unknown",
+            "bucket": s3_client.bucket_name if hasattr(s3_client, 'bucket_name') else "unknown"
+        }
+    }
+
+
 @router.post("/files", response_model=FileResponse)
 async def upload_file(
     request: FileUploadRequest,
@@ -186,20 +203,6 @@ async def get_user_file_stats(
     except Exception as e:
         logger.error(f"Error getting user stats: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
-
-
-@router.get("/files/healthz")
-async def files_health_check():
-    """Health check for files service."""
-    s3_client = app_factory.get_file_storage()
-    return {
-        "status": "healthy",
-    "service": "files-api",
-        "s3_config": {
-            "endpoint": s3_client.endpoint_url if hasattr(s3_client, 'endpoint_url') else "unknown",
-            "bucket": s3_client.bucket_name if hasattr(s3_client, 'bucket_name') else "unknown"
-        }
-    }
 
 
 @router.get("/files/download/{file_key:path}")
