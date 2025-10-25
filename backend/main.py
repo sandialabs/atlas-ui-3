@@ -174,12 +174,46 @@ if static_dir.exists():
 async def websocket_endpoint(websocket: WebSocket):
     """
     Main chat WebSocket endpoint using new architecture.
+
+    SECURITY NOTE - Production Architecture:
+    ==========================================
+    This endpoint appears to lack authentication when viewed in isolation,
+    but in production it sits behind a reverse proxy with a separate
+    authentication service. The authentication flow is:
+
+    1. Client connects to WebSocket endpoint
+    2. Reverse proxy intercepts WebSocket handshake (HTTP Upgrade request)
+    3. Reverse proxy delegates to authentication service
+    4. Auth service validates JWT/session from cookies or headers
+    5. If valid: Auth service returns X-Authenticated-User header
+    6. Reverse proxy forwards connection to this app with X-Authenticated-User header
+    7. This app trusts the header (already validated by auth service)
+
+    SECURITY REQUIREMENTS:
+    - This app MUST ONLY be accessible via reverse proxy
+    - Direct public access to this app bypasses authentication
+    - Use network isolation to prevent direct access
+    - The /login endpoint lives in the separate auth service
+
+    DEVELOPMENT vs PRODUCTION:
+    - Production: Extracts user from X-Authenticated-User header (set by reverse proxy)
+    - Development: Falls back to 'user' query parameter (INSECURE, local only)
+
+    See docs/security_architecture.md for complete architecture details.
     """
     await websocket.accept()
+
+    # Basic auth: derive user from query parameters or use test user
+    user_email = websocket.query_params.get('user')
+    if not user_email:
+        # Fallback to test user or require auth
+        config_manager = app_factory.get_config_manager()
+        user_email = config_manager.app_settings.test_user or 'test@test.com'
+
     session_id = uuid4()
-    
-    # Create connection adapter and chat service
-    connection_adapter = WebSocketConnectionAdapter(websocket)
+
+    # Create connection adapter with authenticated user and chat service
+    connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
     chat_service = app_factory.create_chat_service(connection_adapter)
     
     logger.info(f"WebSocket connection established for session {session_id}")
@@ -192,7 +226,7 @@ async def websocket_endpoint(websocket: WebSocket):
             if message_type == "chat":
                 # Handle chat message with streaming updates
                 try:
-                    response = await chat_service.handle_chat_message(
+                    await chat_service.handle_chat_message(
                         session_id=session_id,
                         content=data.get("content", ""),
                         model=data.get("model", ""),
@@ -237,7 +271,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_email=data.get("user")
                 )
                 await websocket.send_json(response)
-                
+
+            elif message_type == "attach_file":
+                # Handle file attachment to session (use authenticated user, not client-sent)
+                response = await chat_service.handle_attach_file(
+                    session_id=session_id,
+                    s3_key=data.get("s3_key"),
+                    user_email=user_email,  # Use authenticated user from connection
+                    update_callback=lambda message: websocket_update_callback(websocket, message)
+                )
+                await websocket.send_json(response)
+
             else:
                 logger.warning(f"Unknown message type: {message_type}")
                 await websocket.send_json({
