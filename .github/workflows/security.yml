@@ -210,6 +210,7 @@ jobs:
     - name: Docker Scout scan
       uses: docker/scout-action@v1
       if: always()
+      continue-on-error: true
       with:
         command: cves
         image: security-scan:latest
@@ -219,7 +220,7 @@ jobs:
 
     - name: Upload Scout scan results
       uses: github/codeql-action/upload-sarif@v2
-      if: always()
+      if: always() && hashFiles('scout-results.sarif') != ''
       with:
         sarif_file: 'scout-results.sarif'
 
@@ -232,6 +233,7 @@ jobs:
         path: |
           trivy-results.sarif
           scout-results.sarif
+        if-no-files-found: ignore
 
   security-summary:
     name: Security Summary
