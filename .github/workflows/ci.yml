@@ -35,9 +35,9 @@ jobs:
           type=ref,event=branch
           type=ref,event=pr
           # Add SHA tags safely for both branches and PRs without generating an invalid leading '-'
-          type=sha,enable={{is_branch}},prefix={{branch}}-
-          type=sha,enable={{is_pr}},prefix=pr-
-          type=raw,value=latest,enable={{is_default_branch}}
+          type=sha,enable=true,prefix=${{ github.ref_name }}-
+          type=sha,enable=${{ github.event_name == 'pull_request' }},prefix=pr-
+          type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
     
     - name: Build test Docker image
       uses: docker/build-push-action@v6
@@ -74,4 +74,3 @@ jobs:
           VITE_APP_NAME=Chat UI
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-
