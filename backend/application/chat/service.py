@@ -376,7 +376,8 @@ class ChatService:
                 update_callback=update_callback
             )
 
-            logger.info(f"Attached file ({s3_key}) to session {session_id}")
+            sanitized_s3_key = s3_key.replace('\r', '').replace('\n', '')
+            logger.info(f"Attached file ({sanitized_s3_key}) to session {session_id}")
 
             return {
                 "type": "file_attach",
