@@ -177,12 +177,12 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     await websocket.accept()
 
-    # Basic auth: derive user from query parameters or use test user
+    # Basic auth: derive user from query parameters - reject if not provided
     user_email = websocket.query_params.get('user')
     if not user_email:
-        # Fallback to test user or require auth
-        config_manager = app_factory.get_config_manager()
-        user_email = config_manager.app_settings.test_user or 'test@test.com'
+        # Reject connection if user is not provided or authentication fails
+        await websocket.close(code=4401, reason="Unauthorized: user authentication required")
+        return
 
     session_id = uuid4()
 

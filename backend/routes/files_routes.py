@@ -60,11 +60,12 @@ async def upload_file(
     # Validate base64 content size (configurable limit to prevent abuse)
     try:
         content_size = len(request.content_base64) * 3 // 4  # approximate decoded size
-        max_size = 50 * 1024 * 1024  # 50MB default (configurable)
-        if content_size > max_size:
-            raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {max_size // (1024*1024)}MB")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid base64 content")
+
+    max_size = 250 * 1024 * 1024  # 250MB default (configurable)
+    if content_size > max_size:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {max_size // (1024*1024)}MB")
 
     try:
         s3_client = app_factory.get_file_storage()
@@ -127,11 +128,8 @@ async def list_files(
         processed_files = []
         for file_data in result:
             processed_file = file_data.copy()
-            if isinstance(processed_file.get('last_modified'), str):
-                # If already a string, keep it
-                pass
-            else:
-                # Convert datetime to ISO format string
+            if not isinstance(processed_file.get('last_modified'), str):
+                # Convert datetime to ISO format string if it's not already a string
                 try:
                     processed_file['last_modified'] = processed_file['last_modified'].isoformat()
                 except AttributeError:
