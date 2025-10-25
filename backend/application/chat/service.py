@@ -321,6 +321,82 @@ class ChatService:
             "message": "New session created"
         }
 
+    async def handle_attach_file(
+        self,
+        session_id: UUID,
+        s3_key: str,
+        user_email: Optional[str] = None,
+        update_callback: Optional[UpdateCallback] = None
+    ) -> Dict[str, Any]:
+        """Attach a file from library to the current session."""
+        session = self.sessions.get(session_id)
+        if not session:
+            session = await self.create_session(session_id, user_email)
+
+        # Verify the file exists and belongs to the user
+        if not self.file_manager or not user_email:
+            return {
+                "type": "file_attach",
+                "s3_key": s3_key,
+                "success": False,
+                "error": "File manager not available or no user email"
+            }
+
+        try:
+            # Get file metadata
+            file_result = await self.file_manager.get_file(user_email, s3_key)
+            if not file_result:
+                return {
+                    "type": "file_attach",
+                    "s3_key": s3_key,
+                    "success": False,
+                    "error": "File not found"
+                }
+
+            filename = file_result.get("filename")
+            if not filename:
+                return {
+                    "type": "file_attach",
+                    "s3_key": s3_key,
+                    "success": False,
+                    "error": "Invalid file metadata"
+                }
+
+            # Add file to session context
+            session.context = await file_utils.handle_session_files(
+                session_context=session.context,
+                user_email=user_email,
+                files_map={
+                    filename: {
+                        "key": s3_key,
+                        "content_type": file_result.get("content_type"),
+                        "size": file_result.get("size"),
+                        "filename": filename
+                    }
+                },
+                file_manager=self.file_manager,
+                update_callback=update_callback
+            )
+
+            logger.info(f"Attached file {filename} ({s3_key}) to session {session_id}")
+
+            return {
+                "type": "file_attach",
+                "s3_key": s3_key,
+                "filename": filename,
+                "success": True,
+                "message": f"File {filename} attached to session"
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to attach file {s3_key} to session {session_id}: {e}")
+            return {
+                "type": "file_attach",
+                "s3_key": s3_key,
+                "success": False,
+                "error": str(e)
+            }
+
     async def _handle_plain_mode(
         self,
         session: Session,

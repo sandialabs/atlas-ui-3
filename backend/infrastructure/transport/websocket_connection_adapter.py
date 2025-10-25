@@ -1,6 +1,6 @@
 """WebSocket connection adapter implementing ChatConnectionProtocol."""
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import WebSocket
 
@@ -12,10 +12,11 @@ class WebSocketConnectionAdapter:
     Adapter that wraps FastAPI WebSocket to implement ChatConnectionProtocol.
     This isolates the application layer from FastAPI-specific types.
     """
-    
-    def __init__(self, websocket: WebSocket):
-        """Initialize with FastAPI WebSocket."""
+
+    def __init__(self, websocket: WebSocket, user_email: Optional[str] = None):
+        """Initialize with FastAPI WebSocket and associated user."""
         self.websocket = websocket
+        self.user_email = user_email
     
     async def send_json(self, data: Dict[str, Any]) -> None:
         """Send JSON data to the client."""

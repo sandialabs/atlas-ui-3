@@ -176,10 +176,18 @@ async def websocket_endpoint(websocket: WebSocket):
     Main chat WebSocket endpoint using new architecture.
     """
     await websocket.accept()
+
+    # Basic auth: derive user from query parameters or use test user
+    user_email = websocket.query_params.get('user')
+    if not user_email:
+        # Fallback to test user or require auth
+        config_manager = app_factory.get_config_manager()
+        user_email = config_manager.app_settings.test_user or 'test@test.com'
+
     session_id = uuid4()
-    
-    # Create connection adapter and chat service
-    connection_adapter = WebSocketConnectionAdapter(websocket)
+
+    # Create connection adapter with authenticated user and chat service
+    connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
     chat_service = app_factory.create_chat_service(connection_adapter)
     
     logger.info(f"WebSocket connection established for session {session_id}")
@@ -237,7 +245,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_email=data.get("user")
                 )
                 await websocket.send_json(response)
-                
+
+            elif message_type == "attach_file":
+                # Handle file attachment to session (use authenticated user, not client-sent)
+                response = await chat_service.handle_attach_file(
+                    session_id=session_id,
+                    s3_key=data.get("s3_key"),
+                    user_email=user_email,  # Use authenticated user from connection
+                    update_callback=lambda message: websocket_update_callback(websocket, message)
+                )
+                await websocket.send_json(response)
+
             else:
                 logger.warning(f"Unknown message type: {message_type}")
                 await websocket.send_json({

@@ -11,7 +11,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi import Query
 import base64
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.utils import get_current_user
 from infrastructure.app_factory import app_factory
@@ -26,7 +26,7 @@ class FileUploadRequest(BaseModel):
     filename: str
     content_base64: str
     content_type: Optional[str] = "application/octet-stream"
-    tags: Optional[Dict[str, str]] = {}
+    tags: Optional[Dict[str, str]] = Field(default_factory=dict)
 
 
 class FileResponse(BaseModel):
@@ -57,6 +57,15 @@ async def upload_file(
     current_user: str = Depends(get_current_user)
 ) -> FileResponse:
     """Upload a file to S3 storage."""
+    # Validate base64 content size (configurable limit to prevent abuse)
+    try:
+        content_size = len(request.content_base64) * 3 // 4  # approximate decoded size
+        max_size = 50 * 1024 * 1024  # 50MB default (configurable)
+        if content_size > max_size:
+            raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {max_size // (1024*1024)}MB")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 content")
+
     try:
         s3_client = app_factory.get_file_storage()
         result = await s3_client.upload_file(
@@ -73,21 +82,6 @@ async def upload_file(
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
-
-
-# Place health endpoint before dynamic /files/{file_key} routes to avoid capture
-@router.get("/files/healthz")
-async def files_health_check():
-    """Health check for files service."""
-    s3_client = app_factory.get_file_storage()
-    return {
-        "status": "healthy",
-        "service": "files-api",
-        "s3_config": {
-            "endpoint": s3_client.endpoint_url if hasattr(s3_client, 'endpoint_url') else "unknown",
-            "bucket": s3_client.bucket_name if hasattr(s3_client, 'bucket_name') else "unknown"
-        }
-    }
 
 
 @router.get("/files/{file_key}", response_model=FileContentResponse)
@@ -128,9 +122,25 @@ async def list_files(
             file_type=file_type,
             limit=limit
         )
-        
-        return [FileResponse(**file_data) for file_data in result]
-        
+
+        # Convert any datetime objects to ISO format strings for pydantic validation
+        processed_files = []
+        for file_data in result:
+            processed_file = file_data.copy()
+            if isinstance(processed_file.get('last_modified'), str):
+                # If already a string, keep it
+                pass
+            else:
+                # Convert datetime to ISO format string
+                try:
+                    processed_file['last_modified'] = processed_file['last_modified'].isoformat()
+                except AttributeError:
+                    # If it's not a datetime object, convert to string
+                    processed_file['last_modified'] = str(processed_file['last_modified'])
+            processed_files.append(processed_file)
+
+        return [FileResponse(**file_data) for file_data in processed_files]
+
     except Exception as e:
         logger.error(f"Error listing files: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to list files: {str(e)}")
