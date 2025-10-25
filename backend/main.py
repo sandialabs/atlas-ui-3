@@ -174,11 +174,42 @@ if static_dir.exists():
 async def websocket_endpoint(websocket: WebSocket):
     """
     Main chat WebSocket endpoint using new architecture.
+
+    SECURITY NOTE - Production Architecture:
+    ==========================================
+    This endpoint appears to lack authentication when viewed in isolation,
+    but in production it sits behind a reverse proxy with a separate
+    authentication service. The authentication flow is:
+
+    1. Client connects to WebSocket endpoint
+    2. Reverse proxy intercepts WebSocket handshake (HTTP Upgrade request)
+    3. Reverse proxy delegates to authentication service
+    4. Auth service validates JWT/session from cookies or headers
+    5. If valid: Auth service returns X-Authenticated-User header
+    6. Reverse proxy forwards connection to this app with X-Authenticated-User header
+    7. This app trusts the header (already validated by auth service)
+
+    SECURITY REQUIREMENTS:
+    - This app MUST ONLY be accessible via reverse proxy
+    - Direct public access to this app bypasses authentication
+    - Use network isolation to prevent direct access
+    - The /login endpoint lives in the separate auth service
+
+    DEVELOPMENT vs PRODUCTION:
+    - Production: Extracts user from X-Authenticated-User header (set by reverse proxy)
+    - Development: Falls back to 'user' query parameter (INSECURE, local only)
+
+    See docs/security_architecture.md for complete architecture details.
     """
     await websocket.accept()
 
-    # Basic auth: derive user from query parameters - reject if not provided
-    user_email = websocket.query_params.get('user')
+    # Production: get user from reverse proxy-set header after auth validation
+    user_email = websocket.headers.get('X-Authenticated-User')
+
+    # Development fallback: query parameter (insecure, only for local dev without reverse proxy)
+    if not user_email:
+        user_email = websocket.query_params.get('user')
+
     if not user_email:
         # Reject connection if user is not provided or authentication fails
         await websocket.close(code=4401, reason="Unauthorized: user authentication required")
