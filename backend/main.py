@@ -226,7 +226,7 @@ async def websocket_endpoint(websocket: WebSocket):
             if message_type == "chat":
                 # Handle chat message with streaming updates
                 try:
-                    response = await chat_service.handle_chat_message(
+                    await chat_service.handle_chat_message(
                         session_id=session_id,
                         content=data.get("content", ""),
                         model=data.get("model", ""),

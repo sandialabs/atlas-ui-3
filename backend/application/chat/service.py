@@ -219,9 +219,7 @@ class ChatService:
                                 # Prepend as system message override
                                 messages = [{"role": "system", "content": prompt_text}] + messages
                                 logger.info(
-                                    "Applied MCP system prompt override from %s:%s (len=%d)",
-                                    server,
-                                    prompt_name,
+                                    "Applied MCP system prompt override (len=%d)",
                                     len(prompt_text),
                                 )
                                 break  # apply only one
@@ -378,7 +376,7 @@ class ChatService:
                 update_callback=update_callback
             )
 
-            logger.info(f"Attached file {filename} ({s3_key}) to session {session_id}")
+            logger.info(f"Attached file ({s3_key}) to session {session_id}")
 
             return {
                 "type": "file_attach",

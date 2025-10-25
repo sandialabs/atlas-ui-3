@@ -11,7 +11,6 @@ import {
   Search,
   SortAsc,
   SortDesc,
-  Filter,
   Loader
 } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
