@@ -1,4 +1,4 @@
-# Chat UI
+# Atlas  UI 3
 
 A modern LLM chat interface with MCP (Model Context Protocol) integration.
 

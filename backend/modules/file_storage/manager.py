@@ -164,7 +164,7 @@ class FileManager:
                 'source': source_type,
                 'source_tool': source_tool,
                 'extension': filename.split('.')[-1] if '.' in filename else '',
-                'last_modified': file_metadata.get("last_modified"),
+                'last_modified': file_metadata.get("last_modified").isoformat() if file_metadata.get("last_modified") else None,
                 'content_type': file_metadata.get("content_type", "application/octet-stream"),
                 'can_display_in_canvas': self.should_display_in_canvas(filename)
             }
