@@ -34,7 +34,9 @@ jobs:
         tags: |
           type=ref,event=branch
           type=ref,event=pr
-          type=sha,prefix={{branch}}-
+          # Add SHA tags safely for both branches and PRs without generating an invalid leading '-'
+          type=sha,enable={{is_branch}},prefix={{branch}}-
+          type=sha,enable={{is_pr}},prefix=pr-
           type=raw,value=latest,enable={{is_default_branch}}
     
     - name: Build test Docker image
