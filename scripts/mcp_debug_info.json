@@ -1,0 +1,631 @@
+{
+  "timestamp": 23612.113000144,
+  "config": {
+    "servers_config": {
+      "thinking": {
+        "description": "Structured thinking and problem analysis tool",
+        "author": "Chat UI Team",
+        "short_description": "Structured problem analysis",
+        "help_email": "support@chatui.example.com",
+        "groups": [
+          "users"
+        ],
+        "is_exclusive": false,
+        "enabled": true,
+        "command": [
+          "python",
+          "mcp/thinking/main.py"
+        ],
+        "cwd": "backend",
+        "url": null,
+        "type": "stdio",
+        "transport": null
+      },
+      "calculator": {
+        "description": "Basic mathematical calculations",
+        "author": "Chat UI Team",
+        "short_description": "Perform basic math operations",
+        "help_email": "support@chatui.example.com",
+        "groups": [
+          "users"
+        ],
+        "is_exclusive": false,
+        "enabled": true,
+        "command": [
+          "python",
+          "mcp/calculator/main.py"
+        ],
+        "cwd": "backend",
+        "url": null,
+        "type": "stdio",
+        "transport": null
+      },
+      "prompts": {
+        "description": "Specialized system prompts for AI behavior modification",
+        "author": "Chat UI Team",
+        "short_description": "AI behavior prompts",
+        "help_email": "support@chatui.example.com",
+        "groups": [
+          "users"
+        ],
+        "is_exclusive": false,
+        "enabled": true,
+        "command": [
+          "python",
+          "mcp/prompts/main.py"
+        ],
+        "cwd": "backend",
+        "url": null,
+        "type": "stdio",
+        "transport": null
+      },
+      "ui-demo": {
+        "description": "Demo server showcasing custom UI modification capabilities",
+        "author": "Chat UI Team",
+        "short_description": "UI customization demo",
+        "help_email": "support@chatui.example.com",
+        "groups": [
+          "users"
+        ],
+        "is_exclusive": false,
+        "enabled": true,
+        "command": [
+          "python",
+          "mcp/ui-demo/main.py"
+        ],
+        "cwd": "backend",
+        "url": null,
+        "type": "stdio",
+        "transport": null
+      },
+      "order_database": {
+        "description": "Customer order database with retrieval and status update functionality",
+        "author": "Chat UI Team",
+        "short_description": "Customer order management",
+        "help_email": "support@chatui.example.com",
+        "groups": [
+          "users"
+        ],
+        "is_exclusive": false,
+        "enabled": true,
+        "command": [
+          "python",
+          "mcp/order_database/main.py"
+        ],
+        "cwd": "backend",
+        "url": null,
+        "type": "stdio",
+        "transport": null
+      }
+    },
+    "config_path": "config/overrides/mcp.json"
+  },
+  "servers": {
+    "thinking": {
+      "config": {
+        "description": "Structured thinking and problem analysis tool",
+        "author": "Chat UI Team",
+        "short_description": "Structured problem analysis",
+        "help_email": "support@chatui.example.com",
+        "groups": [
+          "users"
+        ],
+        "is_exclusive": false,
+        "enabled": true,
+        "command": [
+          "python",
+          "mcp/thinking/main.py"
+        ],
+        "cwd": "backend",
+        "url": null,
+        "type": "stdio",
+        "transport": null
+      },
+      "initialized": true,
+      "tools": [
+        {
+          "name": "thinking",
+          "description": "Simple thinking tool that returns a list of thoughts.\n\nArgs:\n    list_of_thoughts: A list of thoughts, ideas, or problem descriptions\n    \nReturns:\n    Dictionary with the list of thoughts",
+          "inputSchema": {
+            "properties": {
+              "list_of_thoughts": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "List Of Thoughts",
+                "type": "array"
+              }
+            },
+            "required": [
+              "list_of_thoughts"
+            ],
+            "type": "object"
+          },
+          "type": "Tool"
+        }
+      ],
+      "prompts": [],
+      "tool_count": 1,
+      "prompt_count": 0,
+      "errors": []
+    },
+    "calculator": {
+      "config": {
+        "description": "Basic mathematical calculations",
+        "author": "Chat UI Team",
+        "short_description": "Perform basic math operations",
+        "help_email": "support@chatui.example.com",
+        "groups": [
+          "users"
+        ],
+        "is_exclusive": false,
+        "enabled": true,
+        "command": [
+          "python",
+          "mcp/calculator/main.py"
+        ],
+        "cwd": "backend",
+        "url": null,
+        "type": "stdio",
+        "transport": null
+      },
+      "initialized": true,
+      "tools": [
+        {
+          "name": "evaluate",
+          "description": "Safely evaluate a mathematical expression.\n\nReturns MCP contract shape:\n{\n  \"results\": { ... },\n  \"meta_data\": { ... }\n}",
+          "inputSchema": {
+            "properties": {
+              "expression": {
+                "title": "Expression",
+                "type": "string"
+              }
+            },
+            "required": [
+              "expression"
+            ],
+            "type": "object"
+          },
+          "type": "Tool"
+        }
+      ],
+      "prompts": [],
+      "tool_count": 1,
+      "prompt_count": 0,
+      "errors": []
+    },
+    "prompts": {
+      "config": {
+        "description": "Specialized system prompts for AI behavior modification",
+        "author": "Chat UI Team",
+        "short_description": "AI behavior prompts",
+        "help_email": "support@chatui.example.com",
+        "groups": [
+          "users"
+        ],
+        "is_exclusive": false,
+        "enabled": true,
+        "command": [
+          "python",
+          "mcp/prompts/main.py"
+        ],
+        "cwd": "backend",
+        "url": null,
+        "type": "stdio",
+        "transport": null
+      },
+      "initialized": true,
+      "tools": [
+        {
+          "name": "list_available_prompts",
+          "description": "List all available system prompts that can be applied to modify AI behavior.\n\nReturns:\n    Dictionary containing available prompts and their descriptions",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "type": "Tool"
+        }
+      ],
+      "prompts": [
+        {
+          "name": "financial_tech_wizard",
+          "description": "Think like a financial tech wizard - expert in fintech, trading algorithms, and financial markets.",
+          "arguments": [],
+          "type": "Prompt"
+        },
+        {
+          "name": "expert_dog_trainer",
+          "description": "You are an expert dog trainer with years of experience in canine behavior and training.",
+          "arguments": [],
+          "type": "Prompt"
+        },
+        {
+          "name": "creative_writer",
+          "description": "You are a creative writing expert focused on storytelling, character development, and narrative craft.",
+          "arguments": [],
+          "type": "Prompt"
+        },
+        {
+          "name": "ask_about_topic",
+          "description": "Generates a user message asking for an explanation of a topic.",
+          "arguments": [
+            "name='topic' description=None required=True"
+          ],
+          "type": "Prompt"
+        },
+        {
+          "name": "generate_code_request",
+          "description": "Generates a user message requesting code generation.",
+          "arguments": [
+            "name='language' description=None required=True",
+            "name='task_description' description=None required=True"
+          ],
+          "type": "Prompt"
+        }
+      ],
+      "tool_count": 1,
+      "prompt_count": 5,
+      "errors": []
+    },
+    "ui-demo": {
+      "config": {
+        "description": "Demo server showcasing custom UI modification capabilities",
+        "author": "Chat UI Team",
+        "short_description": "UI customization demo",
+        "help_email": "support@chatui.example.com",
+        "groups": [
+          "users"
+        ],
+        "is_exclusive": false,
+        "enabled": true,
+        "command": [
+          "python",
+          "mcp/ui-demo/main.py"
+        ],
+        "cwd": "backend",
+        "url": null,
+        "type": "stdio",
+        "transport": null
+      },
+      "initialized": true,
+      "tools": [
+        {
+          "name": "create_button_demo",
+          "description": "Create a demo with custom HTML buttons that showcase UI modification capabilities.\n\nReturns:\n    Dictionary with both regular content and custom HTML for UI injection",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "type": "Tool"
+        },
+        {
+          "name": "create_data_visualization",
+          "description": "Create a simple data visualization using HTML and CSS.\n\nReturns:\n    Dictionary with custom HTML containing a bar chart visualization",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "type": "Tool"
+        },
+        {
+          "name": "create_form_demo",
+          "description": "Create a demo form to show interactive UI capabilities.\n\nReturns:\n    Dictionary with custom HTML containing an interactive form",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "type": "Tool"
+        },
+        {
+          "name": "get_image",
+          "description": "Return the badmesh.png image from the ui-demo directory.\n\nReturns:\n    Dictionary with the image data encoded in base64",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "type": "Tool"
+        }
+      ],
+      "prompts": [],
+      "tool_count": 4,
+      "prompt_count": 0,
+      "errors": []
+    },
+    "order_database": {
+      "config": {
+        "description": "Customer order database with retrieval and status update functionality",
+        "author": "Chat UI Team",
+        "short_description": "Customer order management",
+        "help_email": "support@chatui.example.com",
+        "groups": [
+          "users"
+        ],
+        "is_exclusive": false,
+        "enabled": true,
+        "command": [
+          "python",
+          "mcp/order_database/main.py"
+        ],
+        "cwd": "backend",
+        "url": null,
+        "type": "stdio",
+        "transport": null
+      },
+      "initialized": true,
+      "tools": [
+        {
+          "name": "get_order",
+          "description": "Retrieve a customer order by order number.\n\nArgs:\n    order_number: The order number to retrieve\n    \nReturns:\n    Dictionary with order details or error message",
+          "inputSchema": {
+            "properties": {
+              "order_number": {
+                "title": "Order Number",
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number"
+            ],
+            "type": "object"
+          },
+          "type": "Tool"
+        },
+        {
+          "name": "update_order_status",
+          "description": "Update the status of a customer order.\n\nArgs:\n    order_number: The order number to update\n    new_status: The new status (submitted, items-packaged, items-shipped, delivered)\n    \nReturns:\n    Dictionary with success status or error message",
+          "inputSchema": {
+            "properties": {
+              "order_number": {
+                "title": "Order Number",
+                "type": "string"
+              },
+              "new_status": {
+                "title": "New Status",
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "new_status"
+            ],
+            "type": "object"
+          },
+          "type": "Tool"
+        },
+        {
+          "name": "list_all_orders",
+          "description": "List all customer orders with their basic information.\n\nReturns:\n    Dictionary with list of all orders",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "type": "Tool"
+        }
+      ],
+      "prompts": [],
+      "tool_count": 3,
+      "prompt_count": 0,
+      "errors": []
+    }
+  },
+  "summary": {
+    "total_servers_configured": 5,
+    "total_servers_initialized": 5,
+    "total_tools_discovered": 10,
+    "total_prompts_discovered": 5,
+    "failed_servers": [],
+    "successful_servers": [
+      "thinking",
+      "calculator",
+      "prompts",
+      "ui-demo",
+      "order_database"
+    ]
+  },
+  "tool_schemas": [
+    {
+      "type": "function",
+      "function": {
+        "name": "thinking_thinking",
+        "description": "Simple thinking tool that returns a list of thoughts.\n\nArgs:\n    list_of_thoughts: A list of thoughts, ideas, or problem descriptions\n    \nReturns:\n    Dictionary with the list of thoughts",
+        "parameters": {
+          "properties": {
+            "list_of_thoughts": {
+              "items": {
+                "type": "string"
+              },
+              "title": "List Of Thoughts",
+              "type": "array"
+            }
+          },
+          "required": [
+            "list_of_thoughts"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator_evaluate",
+        "description": "Safely evaluate a mathematical expression.\n\nReturns MCP contract shape:\n{\n  \"results\": { ... },\n  \"meta_data\": { ... }\n}",
+        "parameters": {
+          "properties": {
+            "expression": {
+              "title": "Expression",
+              "type": "string"
+            }
+          },
+          "required": [
+            "expression"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "prompts_list_available_prompts",
+        "description": "List all available system prompts that can be applied to modify AI behavior.\n\nReturns:\n    Dictionary containing available prompts and their descriptions",
+        "parameters": {
+          "properties": {},
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ui-demo_create_button_demo",
+        "description": "Create a demo with custom HTML buttons that showcase UI modification capabilities.\n\nReturns:\n    Dictionary with both regular content and custom HTML for UI injection",
+        "parameters": {
+          "properties": {},
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ui-demo_create_data_visualization",
+        "description": "Create a simple data visualization using HTML and CSS.\n\nReturns:\n    Dictionary with custom HTML containing a bar chart visualization",
+        "parameters": {
+          "properties": {},
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ui-demo_create_form_demo",
+        "description": "Create a demo form to show interactive UI capabilities.\n\nReturns:\n    Dictionary with custom HTML containing an interactive form",
+        "parameters": {
+          "properties": {},
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ui-demo_get_image",
+        "description": "Return the badmesh.png image from the ui-demo directory.\n\nReturns:\n    Dictionary with the image data encoded in base64",
+        "parameters": {
+          "properties": {},
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "order_database_get_order",
+        "description": "Retrieve a customer order by order number.\n\nArgs:\n    order_number: The order number to retrieve\n    \nReturns:\n    Dictionary with order details or error message",
+        "parameters": {
+          "properties": {
+            "order_number": {
+              "title": "Order Number",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_number"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "order_database_update_order_status",
+        "description": "Update the status of a customer order.\n\nArgs:\n    order_number: The order number to update\n    new_status: The new status (submitted, items-packaged, items-shipped, delivered)\n    \nReturns:\n    Dictionary with success status or error message",
+        "parameters": {
+          "properties": {
+            "order_number": {
+              "title": "Order Number",
+              "type": "string"
+            },
+            "new_status": {
+              "title": "New Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "order_number",
+            "new_status"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "order_database_list_all_orders",
+        "description": "List all customer orders with their basic information.\n\nReturns:\n    Dictionary with list of all orders",
+        "parameters": {
+          "properties": {},
+          "type": "object"
+        }
+      }
+    }
+  ],
+  "tool_mapping": {
+    "thinking_thinking": {
+      "server": "thinking",
+      "tool_name": "thinking"
+    },
+    "calculator_evaluate": {
+      "server": "calculator",
+      "tool_name": "evaluate"
+    },
+    "prompts_list_available_prompts": {
+      "server": "prompts",
+      "tool_name": "list_available_prompts"
+    },
+    "ui-demo_create_button_demo": {
+      "server": "ui-demo",
+      "tool_name": "create_button_demo"
+    },
+    "ui-demo_create_data_visualization": {
+      "server": "ui-demo",
+      "tool_name": "create_data_visualization"
+    },
+    "ui-demo_create_form_demo": {
+      "server": "ui-demo",
+      "tool_name": "create_form_demo"
+    },
+    "ui-demo_get_image": {
+      "server": "ui-demo",
+      "tool_name": "get_image"
+    },
+    "order_database_get_order": {
+      "server": "order_database",
+      "tool_name": "get_order"
+    },
+    "order_database_update_order_status": {
+      "server": "order_database",
+      "tool_name": "update_order_status"
+    },
+    "order_database_list_all_orders": {
+      "server": "order_database",
+      "tool_name": "list_all_orders"
+    }
+  },
+  "available_tools_list": [
+    "thinking_thinking",
+    "calculator_evaluate",
+    "prompts_list_available_prompts",
+    "ui-demo_create_button_demo",
+    "ui-demo_create_data_visualization",
+    "ui-demo_create_form_demo",
+    "ui-demo_get_image",
+    "order_database_get_order",
+    "order_database_update_order_status",
+    "order_database_list_all_orders"
+  ]
+}

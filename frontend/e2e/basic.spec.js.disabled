@@ -1,0 +1,77 @@
+import { test, expect } from '@playwright/test';
+
+test.describe('Chat UI Application', () => {
+  test('should load the home page', async ({ page }) => {
+    await page.goto('/');
+    
+    // Check if the page loads and contains expected elements
+    await expect(page).toHaveTitle(/Chat UI/);
+    
+    // Look for main chat interface elements
+    const chatContainer = page.locator('[data-testid="chat-container"]').or(
+      page.locator('.chat-container')
+    ).or(
+      page.locator('#app')
+    );
+    
+    await expect(chatContainer).toBeVisible();
+  });
+
+  test('should display header with application title', async ({ page }) => {
+    await page.goto('/');
+    
+    // Look for header or title
+    const header = page.locator('header').or(
+      page.locator('[data-testid="header"]')
+    ).or(
+      page.locator('h1')
+    );
+    
+    await expect(header).toBeVisible();
+  });
+
+  test('should have input area for messages', async ({ page }) => {
+    await page.goto('/');
+    
+    // Look for message input
+    const messageInput = page.locator('input[type="text"]').or(
+      page.locator('textarea')
+    ).or(
+      page.locator('[placeholder*="message"]')
+    ).or(
+      page.locator('[data-testid="message-input"]')
+    );
+    
+    await expect(messageInput).toBeVisible();
+  });
+
+  test('should be able to type in message input', async ({ page }) => {
+    await page.goto('/');
+    
+    // Find and interact with message input
+    const messageInput = page.locator('input[type="text"]').or(
+      page.locator('textarea')
+    ).or(
+      page.locator('[placeholder*="message"]')
+    ).or(
+      page.locator('[data-testid="message-input"]')
+    );
+    
+    await messageInput.first().fill('Hello, this is a test message');
+    await expect(messageInput.first()).toHaveValue('Hello, this is a test message');
+  });
+
+  test('should have send button or similar action', async ({ page }) => {
+    await page.goto('/');
+    
+    // Look for send button
+    const sendButton = page.locator('button').filter({ hasText: /send|submit/i }).or(
+      page.locator('[data-testid="send-button"]')
+    ).or(
+      page.locator('button[type="submit"]')
+    );
+    
+    // Should find at least one send-like button
+    await expect(sendButton.first()).toBeVisible();
+  });
+});

@@ -1,0 +1,23 @@
+{
+  "app_name": "Chat UI",
+  "user": "Developer",
+  "models": ["gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet"],
+  "tools": [
+    {
+      "server": "canvas",
+      "tools": ["canvas"],
+      "description": "Create and display visual content",
+      "tool_count": 1,
+      "is_exclusive": false
+    },
+    {
+      "server": "math",
+      "tools": ["add", "subtract", "multiply", "divide"],
+      "description": "Basic mathematical operations",
+      "tool_count": 4,
+      "is_exclusive": false
+    }
+  ],
+  "data_sources": ["documents", "knowledge_base"],
+  "agent_mode_available": true
+}

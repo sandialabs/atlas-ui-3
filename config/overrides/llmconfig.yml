@@ -1,0 +1,36 @@
+models:
+  openrouter-llama-3-370B:
+    model_url: "https://openrouter.ai/api/v1/chat/completions"
+    model_name: "meta-llama/llama-3-70b-instruct"
+    api_key: "${OPENROUTER_API_KEY}"
+    description: "OpenRouter aggregated Llama 3 70B model"
+    extra_headers:
+      HTTP-Referer: "${OPENROUTER_SITE_URL}"
+      X-Title: "${OPENROUTER_SITE_NAME}"
+      
+  openrouter-gpt-oss:
+    model_url: "https://openrouter.ai/api/v1/chat/completions"
+    model_name: "openai/gpt-oss-20b"
+    api_key: "${OPENROUTER_API_KEY}"
+    description: "OpenRouter aggregated GPT-4o model"
+    extra_headers:
+      HTTP-Referer: "${OPENROUTER_SITE_URL}"
+      X-Title: "${OPENROUTER_SITE_NAME}"
+
+
+  openrouter-qween3-coder:
+    model_url: "https://openrouter.ai/api/v1/chat/completions"
+    model_name: "qwen/qwen3-coder"
+    api_key: "${OPENROUTER_API_KEY}"
+    description: "OpenRouter aggregated Qwen3 Coder model"
+    extra_headers:
+      HTTP-Referer: "${OPENROUTER_SITE_URL}"
+      X-Title: "${OPENROUTER_SITE_NAME}"
+  gpt-4.1:
+    model_url: "https://api.openai.com/v1/chat/completions"
+    model_name: "gpt-4.1"
+    api_key: "${OPENAI_API_KEY}"
+  gpt-4.1-nano:
+    model_url: "https://api.openai.com/v1/chat/completions"
+    model_name: "gpt-4.1-nano"
+    api_key: "${OPENAI_API_KEY}"

@@ -1,0 +1,99 @@
+# GitHub Dependabot configuration for automated dependency updates
+version: 2
+updates:
+  # Python dependencies (root)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "security-team"
+    assignees:
+      - "security-team"
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    # Group minor and patch updates
+    groups:
+      python-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Node.js dependencies (frontend)
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "security-team"
+    assignees:
+      - "security-team"
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "javascript"
+    # Group minor and patch updates
+    groups:
+      nodejs-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    # Ignore specific packages if needed
+    ignore:
+      # Example: ignore major updates for breaking changes
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Docker dependencies
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+    reviewers:
+      - "security-team"
+    assignees:
+      - "security-team"
+    commit-message:
+      prefix: "security(docker)"
+    labels:
+      - "security"
+      - "dependencies"
+      - "docker"
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+    reviewers:
+      - "security-team"
+    assignees:
+      - "security-team"
+    commit-message:
+      prefix: "security(actions)"
+    labels:
+      - "security"
+      - "dependencies"
+      - "github-actions"

@@ -1,0 +1,80 @@
+*.pptx
+*.jsonl
+
+# Environment variables
+.env
+.claude
+
+.pytest_cache
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / runtime artifacts
+*.log
+backend/logs/
+runtime/logs/
+runtime/feedback/
+runtime/uploads/
+# !runtime/logs/.gitkeep
+# !runtime/feedback/.gitkeep
+# !runtime/uploads/.gitkeep
+
+# Legacy config dirs (now migrated to config/)
+backend/configfilesadmin/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Docker
+.dockerignore
+
+# E2E Test Screenshots (local testing only)
+test_e2e/screenshots/
+
+# E2E Test Results (local testing only)
+test_e2e/test-results/
+test_e2e/playwright-report/
+
+# Test Results (any location)
+test-results/
+**/test-results/
+
+# S3 Mock Storage
+mocks/s3-mock/s3-mock-storage/

@@ -1,0 +1,32 @@
+<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            padding: 28px 32px; 
+            border-radius: 14px; 
+            color: white; 
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 32px auto;">
+    <h2 style="margin-top: 0;">🎨 Custom UI Demo</h2>
+    <p>This content was injected by an MCP server using the custom_html field!</p>
+    <div style="display: flex; gap: 10px; margin-top: 15px;">
+        <button onclick="alert('Hello from MCP!')" 
+                style="background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
+            Click Me!
+        </button>
+        <button onclick="document.getElementById('demo-text').style.color = 'yellow'" 
+                style="background: #ff9800; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
+            Change Text Color
+        </button>
+    </div>
+    <p id="demo-text" style="margin-top: 15px; font-size: 16px;">
+        This text can be modified by the button above!
+    </p>
+    <div style="margin-top: 20px; padding: 10px; background: rgba(255,255,255,0.2); border-radius: 5px;">
+        <strong>Capabilities Demonstrated:</strong>
+        <ul style="margin: 10px 0; padding-left: 20px;">
+            <li>Custom HTML injection</li>
+            <li>Interactive JavaScript buttons</li>
+            <li>Dynamic styling</li>
+            <li>Safe HTML sanitization</li>
+        </ul>
+    </div>
+</div>

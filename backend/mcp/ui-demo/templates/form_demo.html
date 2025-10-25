@@ -1,0 +1,28 @@
+<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            padding: 28px 32px; 
+            border-radius: 14px; 
+            color: white; 
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 32px auto;">
+    <h3 style="color: #63b3ed; margin-top: 0; text-align: center;">📋 Interactive Form Demo</h3>
+    <form onsubmit="event.preventDefault(); alert('Form submitted! Data: ' + JSON.stringify({name: this.name.value, email: this.email.value, message: this.message.value}));" style="display: flex; flex-direction: column; gap: 15px;">
+        <div>
+            <label style="display: block; color: #a0aec0; margin-bottom: 5px;">Name:</label>
+            <input type="text" name="name" style="width: 100%; padding: 8px 12px; border: 1px solid #4a5568; border-radius: 6px; background: #2d3748; color: white; box-sizing: border-box;" placeholder="Enter your name" />
+        </div>
+        <div>
+            <label style="display: block; color: #a0aec0; margin-bottom: 5px;">Email:</label>
+            <input type="email" name="email" style="width: 100%; padding: 8px 12px; border: 1px solid #4a5568; border-radius: 6px; background: #2d3748; color: white; box-sizing: border-box;" placeholder="Enter your email" />
+        </div>
+        <div>
+            <label style="display: block; color: #a0aec0; margin-bottom: 5px;">Message:</label>
+            <textarea name="message" rows="4" style="width: 100%; padding: 8px 12px; border: 1px solid #4a5568; border-radius: 6px; background: #2d3748; color: white; resize: vertical; box-sizing: border-box;" placeholder="Enter your message"></textarea>
+        </div>
+        <button type="submit" style="background: linear-gradient(45deg, #667eea, #764ba2); color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">Submit Form</button>
+    </form>
+    <div style="margin-top: 20px; padding: 15px; background: rgba(72, 187, 120, 0.1); border-radius: 6px; border-left: 4px solid #48bb78;">
+        <strong style="color: #68d391;">Note:</strong> 
+        <span style="color: #a0aec0;">This form demonstrates how MCP servers can create interactive UI elements. Form submission shows an alert with the entered data.</span>
+    </div>
+</div>

@@ -1,0 +1,12 @@
+{
+  "corporate_cars": {
+    "command": ["python", "mcp/corporate_cars/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Fleet RAG server: discover resources and retrieve locations/meta-data for corporate cars in use by employees.",
+    "author": "Chat UI Team",
+    "short_description": "Corporate cars location & metadata",
+    "help_email": "support@chatui.example.com"
+  }
+}

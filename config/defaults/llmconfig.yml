@@ -1,0 +1,16 @@
+models:
+  gpt-4.1:
+    model_url: "https://api.openai.com/v1/chat/completions"
+    model_name: "gpt-4.1"
+    api_key: "${OPENAI_API_KEY}"
+  gpt-4.1-nano:
+    model_url: "https://api.openai.com/v1/chat/completions"
+    model_name: "gpt-4.1-nano"
+    api_key: "${OPENAI_API_KEY}"
+  openrouter-gpt-4o:
+    model_url: "https://openrouter.ai/api/v1/chat/completions"
+    model_name: "openai/gpt-oss-120b"
+    api_key: "${OPENROUTER_API_KEY}"
+    description: "OpenRouter openai oss-120b"
+    extra_headers:
+      X-Title: "chat-11"

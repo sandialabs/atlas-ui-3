@@ -1,0 +1,103 @@
+stages:
+  - test
+  - build
+  - test-container
+
+variables:
+  REGISTRY: $CI_REGISTRY
+  IMAGE_NAME: $CI_PROJECT_PATH
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+
+# Use Fedora latest for all jobs (GitLab supports custom runners)
+default:
+  image: fedora:latest
+  before_script:
+    - dnf update -y && dnf install -y git curl
+
+test:
+  stage: test
+  image: fedora:latest
+  before_script:
+    - dnf update -y && dnf install -y python3 python3-pip nodejs npm curl
+  script:
+    # Install Python dependencies
+    - pip3 install -r requirements.txt
+    
+    # Install frontend dependencies
+    - cd frontend && npm ci
+    
+    # Run backend tests
+    - cd ../backend && python3 -m pytest tests/ -v
+    
+    # Run frontend tests
+    - cd ../frontend && npm test -- --run
+    
+    # Install Playwright browsers and run e2e tests
+    - npx playwright install --with-deps chromium
+    - npm run test:e2e
+  only:
+    - main
+    - develop
+    - merge_requests
+
+build-and-push:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  needs: ["test"]
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    # Build and push Docker image
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME
+    
+    # Tag as latest for main branch
+    - |
+      if [ "$CI_COMMIT_REF_NAME" = "main" ]; then
+        docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE:latest
+        docker push $CI_REGISTRY_IMAGE:latest
+      fi
+  only:
+    - main
+    - develop
+    - merge_requests
+
+test-container:
+  stage: test-container
+  image: docker:latest
+  services:
+    - docker:dind
+  needs: ["build-and-push"]
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    # Pull the built image
+    - IMAGE_TAG="$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+    - echo "Testing container: $IMAGE_TAG"
+    - docker pull "$IMAGE_TAG"
+    
+    # Run backend tests in container
+    - docker run --rm --workdir /app/backend "$IMAGE_TAG" python3 -m pytest tests/ -v
+    
+    # Run frontend tests in container
+    - docker run --rm --workdir /app/frontend --entrypoint "" "$IMAGE_TAG" sh -c "npm ci && npm test -- --run"
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# Optional: Deploy stage for main branch
+deploy:
+  stage: deploy
+  image: fedora:latest
+  script:
+    - echo "Deploy to production would go here"
+    - echo "Image: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+  only:
+    - main
+  when: manual

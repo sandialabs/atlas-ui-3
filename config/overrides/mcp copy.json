@@ -1,0 +1,55 @@
+{
+
+
+  "thinking": {
+    "command": ["python", "mcp/thinking/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Structured thinking and problem analysis tool",
+    "author": "Chat UI Team",
+    "short_description": "Structured problem analysis",
+    "help_email": "support@chatui.example.com"
+  },
+  "pdfbasic": {
+    "command": ["python", "mcp/pdfbasic/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "PDF analysis tool",
+    "author": "Chat UI Team",
+    "short_description": "Analyze PDF documents",
+    "help_email": "support@chatui.example.com"
+  },
+  "ui-demo": {
+    "command": ["python", "mcp/ui-demo/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Demo server showcasing custom UI modification capabilities",
+    "author": "Chat UI Team",
+    "short_description": "UI customization demo",
+    "help_email": "support@chatui.example.com"
+  }, 
+  "code-executor": {
+    "command": ["python", "mcp/code-executor/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Secure code execution environment",
+    "author": "Chat UI Team",
+    "short_description": "Execute code securely",
+    "help_email": "support@chatui.example.com"
+  },
+  "prompts": {
+    "command": ["python", "mcp/prompts/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Specialized system prompts for AI behavior modification",
+    "author": "Chat UI Team",
+    "short_description": "AI behavior prompts",
+    "help_email": "support@chatui.example.com"
+  }
+ 
+}

@@ -1,0 +1,30 @@
+[bandit]
+# Bandit configuration for Python security scanning
+
+# Test IDs to skip (if needed)
+skips = B101,B601
+
+# Test IDs to include (if you want to be specific)
+# tests = B201,B301
+
+# Severity level threshold
+exclude_dirs = [
+    "*/tests/*",
+    "*/test/*",
+    "*/node_modules/*",
+    "*/.venv/*",
+    "*/venv/*",
+    "*/__pycache__/*"
+]
+
+# Files to exclude
+exclude = "*.py.bak,*.pyc"
+
+# Include confidence levels
+confidence = "high,medium"
+
+# Severity levels to report
+severity = "high,medium"
+
+# Output format
+format = "json"

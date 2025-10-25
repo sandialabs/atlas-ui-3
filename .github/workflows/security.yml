@@ -1,0 +1,312 @@
+name: Security Checks
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run security checks daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    # Python dependency scanning with Safety
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety bandit semgrep
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Python Safety Check
+      run: |
+        safety check --json --output safety-report.json || true
+        if [ -f safety-report.json ]; then
+          echo "Safety vulnerabilities found. Check the report:"
+          cat safety-report.json
+        fi
+
+    # Node.js dependency scanning with npm audit
+    - name: Install Node.js dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: Node.js Audit
+      run: |
+        cd frontend
+        npm audit --audit-level moderate --json > npm-audit-report.json || true
+        if [ -s npm-audit-report.json ]; then
+          echo "NPM vulnerabilities found. Check the report:"
+          cat npm-audit-report.json
+        fi
+
+    # Advanced dependency scanning with Snyk (requires SNYK_TOKEN)
+    # - name: Run Snyk to check for vulnerabilities
+    #   uses: snyk/actions/setup@master
+    # 
+    # - name: Snyk Python scan
+    #   run: |
+    #     snyk test --file=requirements.txt --json > snyk-python-report.json || true
+    #   env:
+    #     SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    #   continue-on-error: true
+
+    # - name: Snyk Node.js scan  
+    #   run: |
+    #     cd frontend
+    #     snyk test --json > snyk-node-report.json || true
+    #   env:
+    #     SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    #   continue-on-error: true
+
+    # Upload dependency scan artifacts
+    - name: Upload dependency scan reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: dependency-scan-reports
+        path: |
+          safety-report.json
+          frontend/npm-audit-report.json
+
+  sast-scan:
+    name: Static Application Security Testing
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    # Bandit for Python SAST
+    - name: Install Bandit
+      run: pip install bandit[toml]
+
+    - name: Run Bandit Python SAST
+      run: |
+        bandit -r . -f json -o bandit-report.json || true
+        if [ -f bandit-report.json ]; then
+          echo "Bandit found security issues:"
+          cat bandit-report.json
+        fi
+
+    # Semgrep for multi-language SAST (requires SEMGREP_APP_TOKEN)
+    # - name: Run Semgrep
+    #   uses: returntocorp/semgrep-action@v1
+    #   with:
+    #     config: >-
+    #       p/security-audit
+    #       p/secrets
+    #       p/python
+    #       p/javascript
+    #       p/typescript
+    #       p/react
+    #     generateSarif: "1"
+    #   env:
+    #     SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+    # CodeQL Analysis
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v2
+      with:
+        languages: javascript, python
+        queries: security-extended,security-and-quality
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v2
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+      with:
+        category: "/language:javascript,python"
+
+    # Upload SAST artifacts
+    - name: Upload SAST reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: sast-reports
+        path: |
+          bandit-report.json
+
+  secrets-scan:
+    name: Secrets Scanning
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0  # Full history for better secret detection
+
+    # TruffleHog for secrets scanning
+    - name: TruffleHog OSS
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+
+    # GitLeaks for additional secret detection (requires GITLEAKS_LICENSE)
+    # - name: Run GitLeaks
+    #   uses: gitleaks/gitleaks-action@v2
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    #     GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Build Docker image for scanning
+      run: |
+        docker build -t security-scan:latest .
+
+    # Trivy for container vulnerability scanning
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'security-scan:latest'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    # Docker Scout for additional container scanning
+    - name: Docker Scout scan
+      uses: docker/scout-action@v1
+      if: always()
+      with:
+        command: cves
+        image: security-scan:latest
+        only-severities: critical,high
+        format: sarif
+        output: scout-results.sarif
+
+    - name: Upload Scout scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'scout-results.sarif'
+
+    # Upload container scan artifacts
+    - name: Upload container scan reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: container-scan-reports
+        path: |
+          trivy-results.sarif
+          scout-results.sarif
+
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, sast-scan, secrets-scan, container-scan]
+    if: always()
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+
+    - name: Generate Security Summary
+      run: |
+        echo "# Security Scan Summary" > security-summary.md
+        echo "" >> security-summary.md
+        echo "## Scan Results" >> security-summary.md
+        echo "" >> security-summary.md
+        
+        # Check for dependency vulnerabilities
+        if [ -f dependency-scan-reports/safety-report.json ]; then
+          echo "### Python Dependencies (Safety)" >> security-summary.md
+          if [ -s dependency-scan-reports/safety-report.json ]; then
+            echo "⚠️ Vulnerabilities found in Python dependencies" >> security-summary.md
+          else
+            echo "✅ No vulnerabilities found in Python dependencies" >> security-summary.md
+          fi
+          echo "" >> security-summary.md
+        fi
+        
+        if [ -f dependency-scan-reports/npm-audit-report.json ]; then
+          echo "### Node.js Dependencies (npm audit)" >> security-summary.md
+          if [ -s dependency-scan-reports/npm-audit-report.json ]; then
+            echo "⚠️ Vulnerabilities found in Node.js dependencies" >> security-summary.md
+          else
+            echo "✅ No vulnerabilities found in Node.js dependencies" >> security-summary.md
+          fi
+          echo "" >> security-summary.md
+        fi
+        
+        # Check SAST results
+        if [ -f sast-reports/bandit-report.json ]; then
+          echo "### Python SAST (Bandit)" >> security-summary.md
+          if [ -s sast-reports/bandit-report.json ]; then
+            echo "⚠️ Security issues found in Python code" >> security-summary.md
+          else
+            echo "✅ No security issues found in Python code" >> security-summary.md
+          fi
+          echo "" >> security-summary.md
+        fi
+        
+        echo "## Recommendations" >> security-summary.md
+        echo "- Review all SARIF files uploaded to GitHub Security tab" >> security-summary.md
+        echo "- Address high and critical severity vulnerabilities immediately" >> security-summary.md
+        echo "- Run \`npm audit fix\` and \`pip-audit\` locally to fix dependencies" >> security-summary.md
+        echo "- Consider implementing additional security controls" >> security-summary.md
+        
+        cat security-summary.md
+
+    - name: Upload Security Summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-summary
+        path: security-summary.md
+
+    # Comment on PR with security summary
+    - name: Comment PR with Security Summary
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const summary = fs.readFileSync('security-summary.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## 🔒 Security Scan Results\n\n${summary}`
+          });

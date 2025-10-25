@@ -1,0 +1,56 @@
+# Semgrep configuration for SAST scanning
+rules:
+  # Custom rules for this project
+  - id: hardcoded-secret
+    patterns:
+      - pattern: |
+          password = "..."
+      - pattern: |
+          api_key = "..."
+      - pattern: |
+          secret = "..."
+    message: "Potential hardcoded secret found"
+    languages: [python, javascript, typescript]
+    severity: ERROR
+
+  - id: sql-injection
+    patterns:
+      - pattern: |
+          cursor.execute("... " + $VAR + " ...")
+      - pattern: |
+          cursor.execute(f"... {$VAR} ...")
+    message: "Potential SQL injection vulnerability"
+    languages: [python]
+    severity: ERROR
+
+  - id: xss-vulnerability
+    patterns:
+      - pattern: |
+          dangerouslySetInnerHTML={{__html: $VAR}}
+      - pattern: |
+          innerHTML = $VAR
+    message: "Potential XSS vulnerability"
+    languages: [javascript, typescript]
+    severity: WARNING
+
+  - id: command-injection
+    patterns:
+      - pattern: |
+          os.system($VAR)
+      - pattern: |
+          subprocess.call($VAR, shell=True)
+      - pattern: |
+          exec($VAR)
+    message: "Potential command injection vulnerability"
+    languages: [python]
+    severity: ERROR
+
+  - id: insecure-random
+    patterns:
+      - pattern: |
+          random.random()
+      - pattern: |
+          Math.random()
+    message: "Using insecure random number generator for security purposes"
+    languages: [python, javascript, typescript]
+    severity: WARNING

@@ -1,0 +1,31 @@
+{
+  "mcp-http-mock": {
+    "url": "http://127.0.0.1:8005/mcp",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Database simulation MCP server providing SQL-like query capabilities over HTTP/SSE transport",
+    "author": "Chat UI Team",
+    "short_description": "Database simulation server",
+    "help_email": "support@chatui.example.com"
+  },
+  "k8s-service-example": {
+    "url": "my-mcp-service:8080/mcp",
+    "transport": "http",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Example K8s service MCP server without protocol prefix - uses explicit transport",
+    "author": "Chat UI Team",
+    "short_description": "K8s service example",
+    "help_email": "support@chatui.example.com"
+  },
+  "sse-service-example": {
+    "url": "sse-service.default.svc.cluster.local:8080/sse",
+    "transport": "sse",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Example SSE MCP server with explicit transport type",
+    "author": "Chat UI Team",
+    "short_description": "SSE service example",
+    "help_email": "support@chatui.example.com"
+  }
+}
