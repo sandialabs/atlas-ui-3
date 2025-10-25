@@ -38,7 +38,7 @@ jobs:
           type=raw,value=latest,enable={{is_default_branch}}
     
     - name: Build test Docker image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         file: ./Dockerfile-test
@@ -54,7 +54,7 @@ jobs:
         docker run --rm --workdir /app test-image:latest bash /app/test/run_tests.sh all
 
     - name: Build production Docker image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         load: true
@@ -64,7 +64,7 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
 
     - name: Push production Docker image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         push: true
