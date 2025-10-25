@@ -85,7 +85,7 @@ jobs:
 
     # Upload dependency scan artifacts
     - name: Upload dependency scan reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: always()
       with:
         name: dependency-scan-reports
@@ -149,7 +149,7 @@ jobs:
 
     # Upload SAST artifacts
     - name: Upload SAST reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: always()
       with:
         name: sast-reports
@@ -225,7 +225,7 @@ jobs:
 
     # Upload container scan artifacts
     - name: Upload container scan reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: always()
       with:
         name: container-scan-reports
@@ -290,7 +290,7 @@ jobs:
         cat security-summary.md
 
     - name: Upload Security Summary
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: security-summary
         path: security-summary.md
