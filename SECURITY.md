@@ -11,7 +11,7 @@ Please do not report security vulnerabilities through public GitHub issues, disc
 
 ### 2. Report privately
 
-Send an email to: agarlan@sandia.vo
+Send an email to: agarlan@sandia.gov
 
 Include the following information:
 - Description of the vulnerability
@@ -36,4 +36,5 @@ Include the following information:
 ## Acknowledgments
 
 We appreciate the security research community and will acknowledge researchers who report vulnerabilities responsibly.
+
 
