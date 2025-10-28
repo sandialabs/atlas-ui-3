@@ -5,7 +5,8 @@ const SettingsPanel = ({ isOpen, onClose }) => {
   // Default settings
   const defaultSettings = {
     llmTemperature: 0.7,
-    maxIterations: 10
+    maxIterations: 10,
+    agentLoopStrategy: 'think-act'
   }
 
   // State for settings
@@ -145,6 +146,34 @@ const SettingsPanel = ({ isOpen, onClose }) => {
               <p className="text-sm text-gray-400">
                 Maximum number of iterations an agent can perform when solving complex tasks. 
                 Higher values allow for more thorough problem solving but may take longer.
+              </p>
+            </div>
+          </div>
+
+          {/* Agent Loop Strategy Setting */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-white font-medium">Agent Loop Strategy</label>
+              <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
+                {settings.agentLoopStrategy === 'react' ? 'ReAct' : 'Think-Act'}
+              </span>
+            </div>
+            <div className="space-y-2">
+              <select
+                value={settings.agentLoopStrategy}
+                onChange={(e) => handleSettingChange('agentLoopStrategy', e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              >
+                <option value="think-act">Think-Act (Recommended)</option>
+                <option value="react">ReAct</option>
+              </select>
+              <p className="text-sm text-gray-400">
+                <strong className="text-gray-300">Think-Act:</strong> Concise, unified reasoning approach.
+                Faster iterations with fewer LLM calls. Better for most workflows and quick tasks.
+              </p>
+              <p className="text-sm text-gray-400">
+                <strong className="text-gray-300">ReAct:</strong> Structured reasoning with Reason-Act-Observe phases.
+                Better for complex tasks requiring multiple tools and detailed planning. Slower but more thorough.
               </p>
             </div>
           </div>

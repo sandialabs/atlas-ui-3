@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 
 const DEFAULT_SETTINGS = {
   llmTemperature: 0.7,
-  maxIterations: 10
+  maxIterations: 10,
+  agentLoopStrategy: 'think-act'
 }
 
 export function useSettings() {
