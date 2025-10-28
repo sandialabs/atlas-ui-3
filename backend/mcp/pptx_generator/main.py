@@ -176,9 +176,9 @@ def _add_image_to_slide(slide_obj, image_bytes: bytes, left: Inches = Inches(1),
 @mcp.tool
 def json_to_pptx(
     input_data: Annotated[str, "JSON string containing slide data in this format: {\"slides\": [{\"title\": \"Slide 1\", \"content\": \"- Item 1\\n- Item 2\\n- Item 3\"}, {\"title\": \"Slide 2\", \"content\": \"- Item A\\n- Item B\"}]}"],
-    output_filename: Annotated[str, "Base name for output files (without extension)"] = "presentation",
-    image_filename: Annotated[str, "Optional image filename to integrate into the presentation"] = "",
-    image_data_base64: Annotated[str, "Framework may supply Base64 image content as fallback"] = ""
+    output_filename: Annotated[Optional[str], "Base name for output files (without extension)"] = "presentation",
+    image_filename: Annotated[Optional[str], "Optional image filename to integrate into the presentation"] = "",
+    image_data_base64: Annotated[Optional[str], "Framework may supply Base64 image content as fallback"] = ""
 ) -> Dict[str, Any]:
     """
     Create professional PowerPoint presentations from structured JSON data with advanced formatting and multimedia support.
@@ -264,8 +264,10 @@ def json_to_pptx(
     """
     print("Starting json_to_pptx execution...")
     try:
-        # Sanitize the output filename
-        output_filename = _sanitize_filename(output_filename)
+        # Handle None values and sanitize the output filename
+        image_filename = image_filename or ""
+        image_data_base64 = image_data_base64 or ""
+        output_filename = _sanitize_filename(output_filename or "presentation")
 
         import json
         data = json.loads(input_data)
@@ -503,9 +505,9 @@ def json_to_pptx(
 @mcp.tool
 def markdown_to_pptx(
     markdown_content: Annotated[str, "Markdown content with headers (# or ##) as slide titles and content below each header"],
-    output_filename: Annotated[str, "Base name for output files (without extension)"] = "presentation",
-    image_filename: Annotated[str, "Optional image filename to integrate into the presentation"] = "",
-    image_data_base64: Annotated[str, "Framework may supply Base64 image content as fallback"] = ""
+    output_filename: Annotated[Optional[str], "Base name for output files (without extension)"] = "presentation",
+    image_filename: Annotated[Optional[str], "Optional image filename to integrate into the presentation"] = "",
+    image_data_base64: Annotated[Optional[str], "Framework may supply Base64 image content as fallback"] = ""
 ) -> Dict[str, Any]:
     """
     Converts markdown content to PowerPoint presentation with support for bullet point lists and optional image integration
@@ -524,8 +526,10 @@ def markdown_to_pptx(
     if VERBOSE:
         logger.info("Starting markdown_to_pptx execution...")
     try:
-        # Sanitize the output filename
-        output_filename = _sanitize_filename(output_filename)
+        # Handle None values and sanitize the output filename
+        image_filename = image_filename or ""
+        image_data_base64 = image_data_base64 or ""
+        output_filename = _sanitize_filename(output_filename or "presentation")
 
         # Parse markdown into slides
         slides = _parse_markdown_slides(markdown_content)
