@@ -14,7 +14,9 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 
 # Style note
 
-No Emojis should ever be added in this repo. If you find one, then remove it. 
+No Emojis should ever be added in this repo. If you find one, then remove it.
+
+**File Naming**: Do not use generic names like `main.py`, `cli.py`, `utils.py`, or `helpers.py`. Use descriptive names that reflect the file's purpose (e.g., `chat_service.py`, `mcp_tool_manager.py`, `websocket_handler.py`). Exception: top-level entry points like `backend/main.py` are acceptable. 
 
 # Tests
 
@@ -166,9 +168,10 @@ backend/
 
 1. **Protocol-Based Dependency Injection**: Uses Python `Protocol` (structural subtyping) instead of ABC inheritance for loose coupling
 
-2. **Agent Loop Strategy Pattern**: Two implementations selectable via `APP_AGENT_LOOP_STRATEGY`:
-   - `ReActAgentLoop`: Reasoning-Act (faster, better for tools)
-   - `ThinkActAgentLoop`: Extended thinking (slower, complex reasoning)
+2. **Agent Loop Strategy Pattern**: Three implementations selectable via `APP_AGENT_LOOP_STRATEGY`:
+   - `react`: Reason-Act-Observe cycle (structured reasoning)
+   - `think-act`: Extended thinking (slower, complex reasoning)
+   - `act`: Pure action loop (fastest, minimal overhead)
 
 3. **MCP Transport Auto-Detection**: Automatically detects stdio, HTTP, or SSE based on config
 
@@ -232,9 +235,10 @@ MCP servers defined in `config/defaults/mcp.json`. The backend:
 4. Supports group-based access control
 
 ### Agent Modes
-Two agent loop strategies implement different reasoning patterns:
-- **ReAct** (`backend/application/chat/agent/react_agent_loop.py`): Fast iteration, good for tool-heavy tasks
-- **Think-Act** (`backend/application/chat/agent/think_act_agent_loop.py`): Deep reasoning, slower but more thoughtful
+Three agent loop strategies implement different reasoning patterns:
+- **ReAct** (`backend/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
+- **Think-Act** (`backend/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
+- **Act** (`backend/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
 
 ### File Storage
 S3-compatible storage via `backend/modules/file_storage/s3_client.py`:

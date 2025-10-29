@@ -10,9 +10,9 @@ models:
       
   openrouter-gpt-oss:
     model_url: "https://openrouter.ai/api/v1/chat/completions"
-    model_name: "openai/gpt-oss-20b"
+    model_name: "openai/gpt-oss-120b"
     api_key: "${OPENROUTER_API_KEY}"
-    description: "OpenRouter aggregated GPT-4o model"
+    description: "OpenRouter aggregated openai gpt-oss 120B model"
     extra_headers:
       HTTP-Referer: "${OPENROUTER_SITE_URL}"
       X-Title: "${OPENROUTER_SITE_NAME}"

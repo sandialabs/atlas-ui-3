@@ -22,7 +22,7 @@ export function createWebSocketHandler(deps) {
       const kind = data.update_type || data.type
       switch (kind) {
         case 'agent_start':
-          addMessage({ role: 'system', content: `Agent Mode Started (max steps: ${data.max_steps ?? '?'})`, type: 'agent_status', timestamp: new Date().toISOString(), agent_mode: true })
+          addMessage({ role: 'system', content: `Agent Mode Started (strategy: ${data.strategy ?? 'unknown'}, max steps: ${data.max_steps ?? '?'})`, type: 'agent_status', timestamp: new Date().toISOString(), agent_mode: true })
           break
         case 'agent_turn_start': {
           const step = data.step || data.turn || 1

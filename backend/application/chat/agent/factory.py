@@ -11,6 +11,7 @@ from modules.prompts.prompt_provider import PromptProvider
 from .protocols import AgentLoopProtocol
 from .react_loop import ReActAgentLoop
 from .think_act_loop import ThinkActAgentLoop
+from .act_loop import ActAgentLoop
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class AgentLoopFactory:
             "think-act": ThinkActAgentLoop,
             "think_act": ThinkActAgentLoop,
             "thinkact": ThinkActAgentLoop,
+            "act": ActAgentLoop,
         }
 
         # Cache of instantiated loops for performance
@@ -114,6 +116,8 @@ class AgentLoopFactory:
                 unique_strategies.add("react")
             elif strategy in ("think-act", "think_act", "thinkact"):
                 unique_strategies.add("think-act")
+            elif strategy in ("act",):
+                unique_strategies.add("act")
         return sorted(unique_strategies)
 
     def register_strategy(self, name: str, loop_class: type[AgentLoopProtocol]) -> None:

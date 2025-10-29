@@ -191,12 +191,8 @@ class LiteLLMCaller:
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature)
         
-        # Handle tool_choice parameter - some providers don't support "required"
+        # Handle tool_choice parameter - try "required" first, fallback to "auto" if unsupported
         final_tool_choice = tool_choice
-        if tool_choice == "required":
-            # Try with "required" first, fallback to "auto" if unsupported
-            final_tool_choice = "auto"
-            logger.info(f"Using tool_choice='auto' instead of 'required' for better compatibility")
 
         try:
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)

@@ -689,7 +689,7 @@ class ChatService:
             p = evt.payload or {}
             # UI notifications (guard on connection)
             if et == "agent_start" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_start", connection=self.connection, max_steps=p.get("max_steps"))
+                await notification_utils.notify_agent_update(update_type="agent_start", connection=self.connection, max_steps=p.get("max_steps"), strategy=p.get("strategy"))
             elif et == "agent_turn_start" and self.connection:
                 await notification_utils.notify_agent_update(update_type="agent_turn_start", connection=self.connection, step=p.get("step"))
             elif et == "agent_reason" and self.connection:

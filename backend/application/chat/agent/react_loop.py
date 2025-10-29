@@ -100,7 +100,7 @@ class ReActAgentLoop(AgentLoopProtocol):
         event_handler: AgentEventHandler,
     ) -> AgentResult:
         # Agent start
-        await event_handler(AgentEvent(type="agent_start", payload={"max_steps": max_steps}))
+        await event_handler(AgentEvent(type="agent_start", payload={"max_steps": max_steps, "strategy": "react"}))
 
         steps = 0
         final_response: Optional[str] = None
@@ -213,11 +213,11 @@ class ReActAgentLoop(AgentLoopProtocol):
             if tools_schema:
                 if data_sources and context.user_email:
                     llm_response = await self.llm.call_with_rag_and_tools(
-                        model, messages, data_sources, tools_schema, context.user_email, "auto", temperature=temperature
+                        model, messages, data_sources, tools_schema, context.user_email, "required", temperature=temperature
                     )
                 else:
                     llm_response = await self.llm.call_with_tools(
-                        model, messages, tools_schema, "auto", temperature=temperature
+                        model, messages, tools_schema, "required", temperature=temperature
                     )
 
                 if llm_response.has_tool_calls():

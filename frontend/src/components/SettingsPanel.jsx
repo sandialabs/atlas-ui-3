@@ -155,7 +155,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             <div className="flex items-center justify-between">
               <label className="text-white font-medium">Agent Loop Strategy</label>
               <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
-                {settings.agentLoopStrategy === 'react' ? 'ReAct' : 'Think-Act'}
+                {settings.agentLoopStrategy === 'react' ? 'ReAct' : settings.agentLoopStrategy === 'act' ? 'Act' : 'Think-Act'}
               </span>
             </div>
             <div className="space-y-2">
@@ -166,6 +166,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
               >
                 <option value="think-act">Think-Act (Recommended)</option>
                 <option value="react">ReAct</option>
+                <option value="act">Act</option>
               </select>
               <p className="text-sm text-gray-400">
                 <strong className="text-gray-300">Think-Act:</strong> Concise, unified reasoning approach.
@@ -174,6 +175,10 @@ const SettingsPanel = ({ isOpen, onClose }) => {
               <p className="text-sm text-gray-400">
                 <strong className="text-gray-300">ReAct:</strong> Structured reasoning with Reason-Act-Observe phases.
                 Better for complex tasks requiring multiple tools and detailed planning. Slower but more thorough.
+              </p>
+              <p className="text-sm text-gray-400">
+                <strong className="text-gray-300">Act:</strong> Pure action loop without explicit reasoning steps.
+                Fastest strategy with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool.
               </p>
             </div>
           </div>

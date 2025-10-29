@@ -45,7 +45,7 @@ class ThinkActAgentLoop(AgentLoopProtocol):
         temperature: float,
         event_handler: AgentEventHandler,
     ) -> AgentResult:
-        await event_handler(AgentEvent(type="agent_start", payload={"max_steps": max_steps}))
+        await event_handler(AgentEvent(type="agent_start", payload={"max_steps": max_steps, "strategy": "think-act"}))
 
         steps = 0
         final_answer: Optional[str] = None
@@ -96,65 +96,67 @@ class ThinkActAgentLoop(AgentLoopProtocol):
         async def emit_think(text: str, step: int) -> None:
             await event_handler(AgentEvent(type="agent_reason", payload={"message": text, "step": step}))
 
-        # First think
+        # First think - ALWAYS happens before entering the loop
         steps += 1
         await event_handler(AgentEvent(type="agent_turn_start", payload={"step": steps}))
         first_think = await self.llm.call_with_tools(model, messages, think_tools_schema, "required", temperature=temperature)
         think_args = parse_args(first_think)
         await emit_think(first_think.content or "", steps)
+
+        # Check if we can finish immediately after first think
         if think_args.get("finish"):
             final_answer = think_args.get("final_answer") or first_think.content
-        else:
-            # Action loop
-            while steps < max_steps and final_answer is None:
-                # Act: single tool selection and execution
-                tools_schema: List[Dict[str, Any]] = []
-                if selected_tools and self.tool_manager:
-                    tools_schema = await error_utils.safe_get_tools_schema(self.tool_manager, selected_tools)
 
-                if tools_schema:
-                    if data_sources and context.user_email:
-                        llm_response = await self.llm.call_with_rag_and_tools(
-                            model, messages, data_sources, tools_schema, context.user_email, "auto", temperature=temperature
-                        )
-                    else:
-                        llm_response = await self.llm.call_with_tools(
-                            model, messages, tools_schema, "auto", temperature=temperature
-                        )
+        # Action loop - entered after first think
+        while steps < max_steps and final_answer is None:
+            # Act: single tool selection and execution
+            tools_schema: List[Dict[str, Any]] = []
+            if selected_tools and self.tool_manager:
+                tools_schema = await error_utils.safe_get_tools_schema(self.tool_manager, selected_tools)
 
-                    if llm_response.has_tool_calls():
-                        first_call = (llm_response.tool_calls or [None])[0]
-                        if first_call is None:
-                            final_answer = llm_response.content or ""
-                            break
-                        messages.append({"role": "assistant", "content": llm_response.content, "tool_calls": [first_call]})
-                        result = await tool_utils.execute_single_tool(
-                            tool_call=first_call,
-                            session_context={
-                                "session_id": context.session_id,
-                                "user_email": context.user_email,
-                                "files": context.files,
-                            },
-                            tool_manager=self.tool_manager,
-                            update_callback=(self.connection.send_json if self.connection else None),
-                        )
-                        messages.append({"role": "tool", "content": result.content, "tool_call_id": result.tool_call_id})
-                        # Notify service to ingest artifacts
-                        await event_handler(AgentEvent(type="agent_tool_results", payload={"results": [result]}))
-                    else:
-                        if llm_response.content:
-                            final_answer = llm_response.content
-                            break
+            if tools_schema:
+                if data_sources and context.user_email:
+                    llm_response = await self.llm.call_with_rag_and_tools(
+                        model, messages, data_sources, tools_schema, context.user_email, "required", temperature=temperature
+                    )
+                else:
+                    llm_response = await self.llm.call_with_tools(
+                        model, messages, tools_schema, "required", temperature=temperature
+                    )
 
-                # Think after action
-                steps += 1
-                await event_handler(AgentEvent(type="agent_turn_start", payload={"step": steps}))
-                think_resp = await self.llm.call_with_tools(model, messages, think_tools_schema, "required", temperature=temperature)
-                think_args = parse_args(think_resp)
-                await emit_think(think_resp.content or "", steps)
-                if think_args.get("finish"):
-                    final_answer = think_args.get("final_answer") or think_resp.content
-                    break
+                if llm_response.has_tool_calls():
+                    first_call = (llm_response.tool_calls or [None])[0]
+                    if first_call is None:
+                        final_answer = llm_response.content or ""
+                        break
+                    messages.append({"role": "assistant", "content": llm_response.content, "tool_calls": [first_call]})
+                    result = await tool_utils.execute_single_tool(
+                        tool_call=first_call,
+                        session_context={
+                            "session_id": context.session_id,
+                            "user_email": context.user_email,
+                            "files": context.files,
+                        },
+                        tool_manager=self.tool_manager,
+                        update_callback=(self.connection.send_json if self.connection else None),
+                    )
+                    messages.append({"role": "tool", "content": result.content, "tool_call_id": result.tool_call_id})
+                    # Notify service to ingest artifacts
+                    await event_handler(AgentEvent(type="agent_tool_results", payload={"results": [result]}))
+                else:
+                    if llm_response.content:
+                        final_answer = llm_response.content
+                        break
+
+            # Think after action
+            steps += 1
+            await event_handler(AgentEvent(type="agent_turn_start", payload={"step": steps}))
+            think_resp = await self.llm.call_with_tools(model, messages, think_tools_schema, "required", temperature=temperature)
+            think_args = parse_args(think_resp)
+            await emit_think(think_resp.content or "", steps)
+            if think_args.get("finish"):
+                final_answer = think_args.get("final_answer") or think_resp.content
+                break
 
         if not final_answer:
             final_answer = await self.llm.call_plain(model, messages, temperature=temperature)
