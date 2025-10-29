@@ -207,6 +207,11 @@ class LiteLLMCaller:
             )
             
             message = response.choices[0].message
+
+            if tool_choice == "required" and not getattr(message, 'tool_calls', None):
+                logger.error(f"LLM failed to return tool calls when tool_choice was 'required'. Full response: {response}")
+                raise ValueError("LLM failed to return tool calls when tool_choice was 'required'.")
+
             return LLMResponse(
                 content=getattr(message, 'content', None) or "",
                 tool_calls=getattr(message, 'tool_calls', None),

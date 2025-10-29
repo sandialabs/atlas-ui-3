@@ -777,6 +777,7 @@ class MCPToolManager:
         context: Optional[Dict[str, Any]] = None
     ) -> ToolResult:
         """Execute a tool call."""
+        logger.info(f"Step 7: Entering ToolManager.execute_tool for tool {tool_call.name}")
         # Handle canvas pseudo-tool
         if tool_call.name == "canvas_canvas":
             # Canvas tool just returns the content - it's handled by frontend

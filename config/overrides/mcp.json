@@ -21,6 +21,16 @@
     "author": "Chat UI Team",
     "short_description": "PowerPoint presentation generator",
     "help_email": "support@chatui.example.com"
+  }, 
+  "pdfbasic": {
+    "command": ["python", "mcp/pdfbasic/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Extract and analyze text content from PDF documents, search within PDFs, and summarize content",
+    "author": "Chat UI Team",
+    "short_description": "PDF text extraction and analysis",
+    "help_email": "support@chatui.example.com"
   }
 
 }

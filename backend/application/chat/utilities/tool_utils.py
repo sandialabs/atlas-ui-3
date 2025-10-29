@@ -35,6 +35,7 @@ async def execute_tools_workflow(
     
     Pure function that coordinates tool execution without maintaining state.
     """
+    logger.info("Step 4: Entering execute_tools_workflow")
     # Add assistant message with tool calls
     messages.append({
         "role": "assistant",
@@ -115,6 +116,7 @@ async def execute_single_tool(
     
     Pure function that doesn't maintain state - all context passed as parameters.
     """
+    logger.info("Step 5: Entering execute_single_tool")
     from . import notification_utils
     
     try:
@@ -233,6 +235,7 @@ def prepare_tool_arguments(tool_call, session_context: Dict[str, Any], tool_mana
     
     Pure function that transforms arguments based on context and tool schema.
     """
+    logger.info("Step 6: Entering prepare_tool_arguments")
     # Parse raw arguments
     raw_args = getattr(tool_call.function, "arguments", {})
     if isinstance(raw_args, dict):
@@ -286,6 +289,7 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
             ref = files_ctx.get(fname)
             if ref and ref.get("key"):
                 url = to_url(ref["key"])
+                logger.info(f"Step 6.1: Rewriting filename to URL: {url}")
                 parsed_args.setdefault("original_filename", fname)
                 parsed_args["filename"] = url
                 parsed_args.setdefault("file_url", url)
@@ -304,6 +308,7 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
                 else:
                     urls.append(fname)
             if urls:
+                logger.info(f"Step 6.1: Rewriting filenames to URLs: {urls}")
                 parsed_args.setdefault("original_file_names", originals)
                 parsed_args["file_names"] = urls
                 parsed_args.setdefault("file_urls", urls)
