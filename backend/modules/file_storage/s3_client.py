@@ -20,6 +20,14 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_for_logging(value: str) -> str:
+    """Sanitize user-controlled values for safe logging to prevent log injection attacks."""
+    if isinstance(value, str):
+        # Escape or remove control characters that could enable log injection
+        return value.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+    return str(value)
+
+
 class S3StorageClient:
     """Client for interacting with S3-compatible storage (MinIO/AWS S3)."""
 

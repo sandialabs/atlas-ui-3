@@ -24,7 +24,7 @@ from interfaces.transport import ChatConnectionProtocol
 
 # Import utilities
 from .utilities import tool_utils, file_utils, notification_utils, error_utils
-from .agent import AgentLoopProtocol, ReActAgentLoop, ThinkActAgentLoop
+from .agent import AgentLoopFactory
 from .agent.protocols import AgentContext, AgentEvent
 from core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
 from core.auth_utils import create_authorization_manager
@@ -48,17 +48,18 @@ class ChatService:
         connection: Optional[ChatConnectionProtocol] = None,
         config_manager: Optional[ConfigManager] = None,
         file_manager: Optional[Any] = None,
-    agent_loop: Optional[AgentLoopProtocol] = None,
+        agent_loop_factory: Optional[AgentLoopFactory] = None,
     ):
         """
         Initialize chat service with dependencies.
-        
+
         Args:
             llm: LLM protocol implementation
             tool_manager: Optional tool manager
             connection: Optional connection for sending updates
             config_manager: Configuration manager
             file_manager: File manager for S3 operations
+            agent_loop_factory: Factory for creating agent loops (optional)
         """
         self.llm = llm
         self.tool_manager = tool_manager
@@ -69,31 +70,28 @@ class ChatService:
             PromptProvider(self.config_manager) if self.config_manager else None
         )
         self.file_manager = file_manager
-        # Agent loop DI (default to ReActAgentLoop). Allow override via config/env.
-        if agent_loop is not None:
-            self.agent_loop = agent_loop
+
+        # Agent loop factory - create if not provided
+        if agent_loop_factory is not None:
+            self.agent_loop_factory = agent_loop_factory
         else:
-            strategy = None
-            try:
-                if self.config_manager:
-                    strategy = self.config_manager.app_settings.agent_loop_strategy
-            except Exception:
-                strategy = None
-            strategy = (strategy or "react").lower()
-            if strategy in ("think-act", "think_act", "thinkact"):
-                self.agent_loop = ThinkActAgentLoop(
-                    llm=self.llm,
-                    tool_manager=self.tool_manager,
-                    prompt_provider=self.prompt_provider,
-                    connection=self.connection,
-                )
-            else:
-                self.agent_loop = ReActAgentLoop(
-                    llm=self.llm,
-                    tool_manager=self.tool_manager,
-                    prompt_provider=self.prompt_provider,
-                    connection=self.connection,
-                )
+            self.agent_loop_factory = AgentLoopFactory(
+                llm=self.llm,
+                tool_manager=self.tool_manager,
+                prompt_provider=self.prompt_provider,
+                connection=self.connection,
+            )
+
+        # Get default strategy from config
+        self.default_agent_strategy = "think-act"
+        try:
+            if self.config_manager:
+                config_strategy = self.config_manager.app_settings.agent_loop_strategy
+                if config_strategy:
+                    self.default_agent_strategy = config_strategy.lower()
+        except Exception:
+            # Ignore config errors - fall back to default strategy
+            pass
 
     async def create_session(
         self,
@@ -243,6 +241,7 @@ class ChatService:
                     max_steps=kwargs.get("agent_max_steps", 30),
                     update_callback=update_callback,
                     temperature=temperature,
+                    agent_loop_strategy=kwargs.get("agent_loop_strategy"),
                 )
             elif selected_tools and not only_rag:
                 # Enforce MCP tool ACLs: filter tools to authorized servers only
@@ -663,12 +662,20 @@ class ChatService:
         max_steps: int,
         update_callback: Optional[UpdateCallback] = None,
         temperature: float = 0.7,
+        agent_loop_strategy: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Handle agent mode using the injected AgentLoopProtocol with event streaming.
+        """Handle agent mode using the factory-created AgentLoopProtocol with event streaming.
 
         Translates AgentEvents to UI notifications and persists artifacts; appends final
         assistant message to history and returns a chat response.
+
+        Args:
+            agent_loop_strategy: Strategy name (react, think-act). Falls back to config default.
         """
+        # Get agent loop from factory based on strategy
+        strategy = agent_loop_strategy or self.default_agent_strategy
+        agent_loop = self.agent_loop_factory.create(strategy)
+
         # Build agent context
         agent_context = AgentContext(
             session_id=session.id,
@@ -683,7 +690,7 @@ class ChatService:
             p = evt.payload or {}
             # UI notifications (guard on connection)
             if et == "agent_start" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_start", connection=self.connection, max_steps=p.get("max_steps"))
+                await notification_utils.notify_agent_update(update_type="agent_start", connection=self.connection, max_steps=p.get("max_steps"), strategy=p.get("strategy"))
             elif et == "agent_turn_start" and self.connection:
                 await notification_utils.notify_agent_update(update_type="agent_turn_start", connection=self.connection, step=p.get("step"))
             elif et == "agent_reason" and self.connection:
@@ -713,7 +720,7 @@ class ChatService:
                 await notification_utils.notify_agent_update(update_type="agent_error", connection=self.connection, message=p.get("message"))
 
         # Run the loop
-        result = await self.agent_loop.run(
+        result = await agent_loop.run(
             model=model,
             messages=messages,
             context=agent_context,

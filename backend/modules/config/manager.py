@@ -103,7 +103,7 @@ class AppSettings(BaseSettings):
     )  # Accept both old and new env var names
     agent_max_steps: int = 10
     agent_loop_strategy: str = Field(
-        default="react",
+        default="think-act",
         description="Agent loop strategy selector (react, think-act)",
         validation_alias=AliasChoices("AGENT_LOOP_STRATEGY"),
     )

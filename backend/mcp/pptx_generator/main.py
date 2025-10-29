@@ -65,6 +65,15 @@ if main_log_path.exists():
 
 mcp = FastMCP("pptx_generator")
 
+def _sanitize_filename(filename: str, max_length: int = 50) -> str:
+    """Sanitize filename by removing bad characters and truncating."""
+    # Remove bad characters (anything not alphanumeric, underscore, or dash)
+    cleaned_filename = re.sub(r'[^\w\-]', '', filename)
+    # Remove newlines and extra spaces
+    cleaned_filename = re.sub(r'\s+', '', cleaned_filename)
+    # Truncate to max length
+    return cleaned_filename[:max_length] if cleaned_filename else "presentation"
+
 def _is_backend_download_path(s: str) -> bool:
     """Detect backend-relative download paths like /api/files/download/...."""
     return isinstance(s, str) and s.startswith("/api/files/download/")
@@ -166,8 +175,9 @@ def _add_image_to_slide(slide_obj, image_bytes: bytes, left: Inches = Inches(1),
 @mcp.tool
 def json_to_pptx(
     input_data: Annotated[str, "JSON string containing slide data in this format: {\"slides\": [{\"title\": \"Slide 1\", \"content\": \"- Item 1\\n- Item 2\\n- Item 3\"}, {\"title\": \"Slide 2\", \"content\": \"- Item A\\n- Item B\"}]}"],
-    image_filename: Annotated[str, "Optional image filename to integrate into the presentation"] = "",
-    image_data_base64: Annotated[str, "Framework may supply Base64 image content as fallback"] = ""
+    output_filename: Annotated[Optional[str], "Base name for output files (without extension)"] = "presentation",
+    image_filename: Annotated[Optional[str], "Optional image filename to integrate into the presentation"] = "",
+    image_data_base64: Annotated[Optional[str], "Framework may supply Base64 image content as fallback"] = ""
 ) -> Dict[str, Any]:
     """
     Create professional PowerPoint presentations from structured JSON data with advanced formatting and multimedia support.
@@ -239,6 +249,7 @@ def json_to_pptx(
 
     Args:
         input_data: JSON string with slide definitions (title and content pairs with bullet points)
+        output_filename: Base name for output files (without extension, default: "presentation")
         image_filename: Optional image file to embed in presentation (supports various formats)
         image_data_base64: Alternative Base64-encoded image content (automatically provided by framework)
 
@@ -252,6 +263,11 @@ def json_to_pptx(
     """
     print("Starting json_to_pptx execution...")
     try:
+        # Handle None values and sanitize the output filename
+        image_filename = image_filename or ""
+        image_data_base64 = image_data_base64 or ""
+        output_filename = _sanitize_filename(output_filename or "presentation")
+
         import json
         data = json.loads(input_data)
         
@@ -330,13 +346,13 @@ def json_to_pptx(
         # Write outputs to a temporary directory and clean up after encoding
         with tempfile.TemporaryDirectory() as tmpdir:
             # Save presentation
-            pptx_output_path = os.path.join(tmpdir, "output_presentation.pptx")
+            pptx_output_path = os.path.join(tmpdir, f"output_{output_filename}.pptx")
             prs.save(pptx_output_path)
             if VERBOSE:
                 logger.info(f"Saved PowerPoint presentation to {pptx_output_path}")
 
             # Create HTML file instead of PDF
-            html_output_path = os.path.join(tmpdir, "output_presentation.html")
+            html_output_path = os.path.join(tmpdir, f"output_{output_filename}.html")
             if VERBOSE:
                 logger.info(f"Starting HTML creation to {html_output_path}")
 
@@ -440,7 +456,7 @@ def json_to_pptx(
             # Prepare artifacts
             artifacts = [
                 {
-                    "name": "presentation.pptx",
+                    "name": f"{output_filename}.pptx",
                     "b64": pptx_b64,
                     "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 }
@@ -449,7 +465,7 @@ def json_to_pptx(
             # Add HTML if creation was successful
             if html_b64:
                 artifacts.append({
-                    "name": "presentation.html",
+                    "name": f"{output_filename}.html",
                     "b64": html_b64,
                     "mime": "text/html",
                 })
@@ -469,14 +485,14 @@ def json_to_pptx(
                 "artifacts": artifacts,
                 "display": {
                     "open_canvas": True,
-                    "primary_file": "presentation.pptx",
+                    "primary_file": f"{output_filename}.pptx",
                     "mode": "replace",
                     "viewer_hint": "powerpoint",
                 },
                 "meta_data": {
                     "generated_slides": len(slides),
-                    "output_files": [f"presentation.pptx", "presentation.html"] if html_b64 else ["presentation.pptx"],
-                    "output_file_paths": ["temp:output_presentation.pptx", "temp:output_presentation.html"] if html_b64 else ["temp:output_presentation.pptx"],
+                    "output_files": [f"{output_filename}.pptx", f"{output_filename}.html"] if html_b64 else [f"{output_filename}.pptx"],
+                    "output_file_paths": [f"temp:output_{output_filename}.pptx", f"temp:output_{output_filename}.html"] if html_b64 else [f"temp:output_{output_filename}.pptx"],
                 },
             }
     except Exception as e:
@@ -488,17 +504,19 @@ def json_to_pptx(
 @mcp.tool
 def markdown_to_pptx(
     markdown_content: Annotated[str, "Markdown content with headers (# or ##) as slide titles and content below each header"],
-    image_filename: Annotated[str, "Optional image filename to integrate into the presentation"] = "",
-    image_data_base64: Annotated[str, "Framework may supply Base64 image content as fallback"] = ""
+    output_filename: Annotated[Optional[str], "Base name for output files (without extension)"] = "presentation",
+    image_filename: Annotated[Optional[str], "Optional image filename to integrate into the presentation"] = "",
+    image_data_base64: Annotated[Optional[str], "Framework may supply Base64 image content as fallback"] = ""
 ) -> Dict[str, Any]:
     """
     Converts markdown content to PowerPoint presentation with support for bullet point lists and optional image integration
-    
+
     Args:
         markdown_content: Markdown content where headers (# or ##) become slide titles and content below becomes slide content
+        output_filename: Base name for output files (without extension, default: "presentation")
         image_filename: Optional image filename to integrate into the presentation
         image_data_base64: Framework may supply Base64 image content as fallback
-    
+
     Returns:
         Dictionary with 'results' and 'artifacts' keys:
         - 'results': Success message or error message
@@ -507,6 +525,11 @@ def markdown_to_pptx(
     if VERBOSE:
         logger.info("Starting markdown_to_pptx execution...")
     try:
+        # Handle None values and sanitize the output filename
+        image_filename = image_filename or ""
+        image_data_base64 = image_data_base64 or ""
+        output_filename = _sanitize_filename(output_filename or "presentation")
+
         # Parse markdown into slides
         slides = _parse_markdown_slides(markdown_content)
         if VERBOSE:
@@ -588,13 +611,13 @@ def markdown_to_pptx(
         # Write outputs to a temporary directory and clean up after encoding
         with tempfile.TemporaryDirectory() as tmpdir:
             # Save presentation
-            pptx_output_path = os.path.join(tmpdir, "output_presentation.pptx")
+            pptx_output_path = os.path.join(tmpdir, f"output_{output_filename}.pptx")
             prs.save(pptx_output_path)
             if VERBOSE:
                 logger.info(f"Saved PowerPoint presentation to {pptx_output_path}")
 
             # Create HTML file instead of PDF
-            html_output_path = os.path.join(tmpdir, "output_presentation.html")
+            html_output_path = os.path.join(tmpdir, f"output_{output_filename}.html")
             if VERBOSE:
                 logger.info(f"Starting HTML creation to {html_output_path}")
 
@@ -711,7 +734,7 @@ def markdown_to_pptx(
             # Prepare artifacts
             artifacts = [
                 {
-                    "name": "presentation.pptx",
+                    "name": f"{output_filename}.pptx",
                     "b64": pptx_b64,
                     "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 }
@@ -720,7 +743,7 @@ def markdown_to_pptx(
             # Add HTML if creation was successful
             if html_b64:
                 artifacts.append({
-                    "name": "presentation.html",
+                    "name": f"{output_filename}.html",
                     "b64": html_b64,
                     "mime": "text/html",
                 })
@@ -740,14 +763,14 @@ def markdown_to_pptx(
                 "artifacts": artifacts,
                 "display": {
                     "open_canvas": True,
-                    "primary_file": "presentation.pptx",
+                    "primary_file": f"{output_filename}.pptx",
                     "mode": "replace",
                     "viewer_hint": "powerpoint",
                 },
                 "meta_data": {
                     "generated_slides": len(slides),
-                    "output_files": [f"presentation.pptx", "presentation.html"] if html_b64 else ["presentation.pptx"],
-                    "output_file_paths": ["temp:output_presentation.pptx", "temp:output_presentation.html"] if html_b64 else ["temp:output_presentation.pptx"],
+                    "output_files": [f"{output_filename}.pptx", f"{output_filename}.html"] if html_b64 else [f"{output_filename}.pptx"],
+                    "output_file_paths": [f"temp:output_{output_filename}.pptx", f"temp:output_{output_filename}.html"] if html_b64 else [f"temp:output_{output_filename}.pptx"],
                 },
             }
     except Exception as e:
