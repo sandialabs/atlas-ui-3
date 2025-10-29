@@ -210,6 +210,8 @@ class ReActAgentLoop(AgentLoopProtocol):
                 tools_schema = await error_utils.safe_get_tools_schema(self.tool_manager, selected_tools)
 
             tool_results: List[ToolResult] = []
+            # Use "required" to force tool calling during Act phase
+            # The LiteLLM caller has fallback logic to "auto" if "required" is not supported
             if tools_schema:
                 if data_sources and context.user_email:
                     llm_response = await self.llm.call_with_rag_and_tools(

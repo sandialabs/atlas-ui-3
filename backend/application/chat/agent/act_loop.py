@@ -102,7 +102,8 @@ class ActAgentLoop(AgentLoopProtocol):
                 user_tools = await error_utils.safe_get_tools_schema(self.tool_manager, selected_tools)
                 tools_schema.extend(user_tools)
 
-            # Call LLM with tools
+            # Call LLM with tools - using "required" to force tool calling during Act phase
+            # The LiteLLM caller has fallback logic to "auto" if "required" is not supported
             if data_sources and context.user_email:
                 llm_response = await self.llm.call_with_rag_and_tools(
                     model, messages, data_sources, tools_schema, context.user_email, "required", temperature=temperature

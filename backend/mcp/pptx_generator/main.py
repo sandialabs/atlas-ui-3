@@ -67,13 +67,12 @@ mcp = FastMCP("pptx_generator")
 
 def _sanitize_filename(filename: str, max_length: int = 50) -> str:
     """Sanitize filename by removing bad characters and truncating."""
-    import re
     # Remove bad characters (anything not alphanumeric, underscore, or dash)
-    sanitized = re.sub(r'[^\w\-]', '', filename)
+    cleaned_filename = re.sub(r'[^\w\-]', '', filename)
     # Remove newlines and extra spaces
-    sanitized = re.sub(r'\s+', '', sanitized)
+    cleaned_filename = re.sub(r'\s+', '', cleaned_filename)
     # Truncate to max length
-    return sanitized[:max_length] if sanitized else "presentation"
+    return cleaned_filename[:max_length] if cleaned_filename else "presentation"
 
 def _is_backend_download_path(s: str) -> bool:
     """Detect backend-relative download paths like /api/files/download/...."""

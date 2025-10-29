@@ -24,7 +24,7 @@ from interfaces.transport import ChatConnectionProtocol
 
 # Import utilities
 from .utilities import tool_utils, file_utils, notification_utils, error_utils
-from .agent import AgentLoopProtocol, AgentLoopFactory
+from .agent import AgentLoopFactory
 from .agent.protocols import AgentContext, AgentEvent
 from core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
 from core.auth_utils import create_authorization_manager
@@ -90,6 +90,7 @@ class ChatService:
                 if config_strategy:
                     self.default_agent_strategy = config_strategy.lower()
         except Exception:
+            # Ignore config errors - fall back to default strategy
             pass
 
     async def create_session(

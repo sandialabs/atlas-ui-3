@@ -1,7 +1,7 @@
 """Factory for creating agent loop instances based on strategy."""
 
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from interfaces.llm import LLMProtocol
 from interfaces.tools import ToolManagerProtocol
@@ -62,13 +62,13 @@ class AgentLoopFactory:
         Create an agent loop instance for the given strategy.
 
         Args:
-            strategy: Strategy name (react, think-act, etc.)
+            strategy: Strategy name (react, think-act, act, etc.)
 
         Returns:
             AgentLoopProtocol instance
 
-        Raises:
-            ValueError: If strategy is not recognized
+        Note:
+            If the strategy is not recognized, falls back to 'react' with a warning.
         """
         strategy_normalized = strategy.lower().strip()
 
