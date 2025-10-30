@@ -9,10 +9,6 @@ updates:
       day: "monday"
       time: "09:00"
     open-pull-requests-limit: 10
-    reviewers:
-      - "security-team"
-    assignees:
-      - "security-team"
     commit-message:
       prefix: "security(deps)"
       include: "scope"
@@ -37,10 +33,6 @@ updates:
       day: "monday"
       time: "09:00"
     open-pull-requests-limit: 10
-    reviewers:
-      - "security-team"
-    assignees:
-      - "security-team"
     commit-message:
       prefix: "security(deps)"
       include: "scope"
@@ -69,10 +61,6 @@ updates:
       interval: "weekly"
       day: "tuesday"
       time: "09:00"
-    reviewers:
-      - "security-team"
-    assignees:
-      - "security-team"
     commit-message:
       prefix: "security(docker)"
     labels:
@@ -87,10 +75,6 @@ updates:
       interval: "weekly"
       day: "wednesday"
       time: "09:00"
-    reviewers:
-      - "security-team"
-    assignees:
-      - "security-team"
     commit-message:
       prefix: "security(actions)"
     labels:
