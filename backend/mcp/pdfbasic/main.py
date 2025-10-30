@@ -66,7 +66,7 @@ def _analyze_pdf_content(instructions: str, filename: str, original_filename: Op
                 url = filename
 
             logger.info(f"Step 9: Downloading file from URL: {url}")
-            response = requests.get(url)
+            response = requests.get(url, timeout=30)
             response.raise_for_status()
             pdf_stream = io.BytesIO(response.content)
         else:

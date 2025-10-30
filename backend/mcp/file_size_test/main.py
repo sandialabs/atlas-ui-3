@@ -74,7 +74,7 @@ def process_file_demo(
             else:
                 url = filename
             logger.info(f"Downloading file for processing: {url}")
-            response = requests.get(url)
+            response = requests.get(url, timeout=30)
             response.raise_for_status()
             file_bytes = response.content
             original_filename = filename.split('/')[-1] or "processed_file.txt"
@@ -144,9 +144,7 @@ def process_file_demo(
         return result
 
     except Exception as e:
-        logger.error(f"Exception in process_file_demo: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"Exception in process_file_demo: {str(e)}")
         error_result = {
             "results": {
                 "operation": "process_file_demo",
@@ -223,7 +221,7 @@ def get_file_size(
 
             logger.debug(f"About to download from URL: {url}")
             logger.info(f"Downloading file from URL: {url}")
-            response = requests.get(url)
+            response = requests.get(url, timeout=30)
             logger.debug(f"HTTP response status: {response.status_code}")
             response.raise_for_status()
             file_bytes = response.content
@@ -257,12 +255,7 @@ def get_file_size(
         return result
 
     except Exception as e:
-        logger.error(f"Exception occurred while processing file: {str(e)}")
-        logger.error(f"Exception type: {type(e).__name__}")
-        logger.error(f"Filename that caused error: {filename}")
-        import traceback
-        logger.error("Full traceback:")
-        traceback.print_exc()
+        logger.exception(f"Exception occurred while processing file: {str(e)} (type: {type(e).__name__}, filename: {filename})")
         error_result = {
             "results": {
                 "operation": "get_file_size",
