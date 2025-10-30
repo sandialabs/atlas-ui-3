@@ -6,6 +6,7 @@ Provides PDF text analysis and report generation through the MCP protocol.
 
 import base64
 import io
+import os
 import re
 import requests
 import logging
@@ -59,7 +60,6 @@ def _analyze_pdf_content(instructions: str, filename: str, original_filename: Op
             if filename.startswith("/"):
                 # Construct absolute URL from relative path
                 # Default to localhost:8000 for local development
-                import os
                 backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
                 url = f"{backend_url}{filename}"
             else:
@@ -131,7 +131,7 @@ def analyze_pdf(
     """
     Extract and analyze text content from PDF documents with comprehensive word frequency analysis.
 
-    This  PDF processing tool provides detailed text analytics for PDF documents:
+    This PDF processing tool provides detailed text analytics for PDF documents:
     
     **PDF Text Extraction:**
     - Extracts text from all pages in PDF documents
