@@ -96,4 +96,5 @@ ENV PYTHONPATH=/app \
     RUNTIME_FEEDBACK_DIR=/app/runtime/feedback
 
 # Start the application
-CMD ["python3", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+WORKDIR /app/backend
+CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
