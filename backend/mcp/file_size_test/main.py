@@ -5,7 +5,6 @@ Simple tool for testing file transfer by returning file size.
 """
 
 import base64
-import io
 import os
 import logging
 from typing import Any, Dict, Annotated
@@ -56,8 +55,8 @@ def process_file_demo(
     Returns:
         Dictionary with results, artifacts, and display hints per v2 contract
     """
-    print(f"DEBUG: process_file_demo called with filename: {filename}")
-    print(f"DEBUG: username: {username}")
+    logger.debug(f"process_file_demo called with filename: {filename}")
+    logger.debug(f"username: {username}")
     try:
         # Get the file content (reuse logic from get_file_size)
         is_url = (
@@ -66,7 +65,7 @@ def process_file_demo(
             filename.startswith("/api/") or
             filename.startswith("/")
         )
-        print(f"DEBUG: is_url determined as: {is_url}")
+        logger.debug(f"is_url determined as: {is_url}")
 
         if is_url:
             if filename.startswith("/"):
@@ -75,7 +74,7 @@ def process_file_demo(
             else:
                 url = filename
             logger.info(f"Downloading file for processing: {url}")
-            response = requests.get(url)
+            response = requests.get(url, timeout=30)
             response.raise_for_status()
             file_bytes = response.content
             original_filename = filename.split('/')[-1] or "processed_file.txt"
@@ -85,7 +84,7 @@ def process_file_demo(
             file_bytes = base64.b64decode(filename)
             original_filename = "processed_file.txt"
 
-        print(f"DEBUG: Original file size: {len(file_bytes)} bytes")
+        logger.debug(f"Original file size: {len(file_bytes)} bytes")
 
         # Process the file (demo: convert text to uppercase)
         try:
@@ -141,13 +140,11 @@ def process_file_demo(
             ],
             "display": display_hints
         }
-        print(f"DEBUG: About to return processed file result: {result['results']}")
+        logger.debug(f"About to return processed file result: {result['results']}")
         return result
 
     except Exception as e:
-        print(f"DEBUG: Exception in process_file_demo: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"Exception in process_file_demo: {str(e)}")
         error_result = {
             "results": {
                 "operation": "process_file_demo",
@@ -200,8 +197,8 @@ def get_file_size(
         - size_human: Human-readable size (e.g., "1.5 MB")
         Or error message if file cannot be accessed
     """
-    print(f"DEBUG: get_file_size called with filename: {filename}")
-    print(f"DEBUG: filename type: {type(filename)}, length: {len(filename) if filename else 0}")
+    logger.debug(f"get_file_size called with filename: {filename}")
+    logger.debug(f"filename type: {type(filename)}, length: {len(filename) if filename else 0}")
     try:
         # Check if filename is a URL (absolute or relative)
         is_url = (
@@ -210,36 +207,36 @@ def get_file_size(
             filename.startswith("/api/") or
             filename.startswith("/")
         )
-        print(f"DEBUG: is_url determined as: {is_url}")
+        logger.debug(f"is_url determined as: {is_url}")
 
         if is_url:
             # Convert relative URLs to absolute URLs
             if filename.startswith("/"):
                 backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
                 url = f"{backend_url}{filename}"
-                print(f"DEBUG: Constructing URL from relative path: {filename} -> {url}")
+                logger.debug(f"Constructing URL from relative path: {filename} -> {url}")
             else:
                 url = filename
-                print(f"DEBUG: Using absolute URL: {url}")
+                logger.debug(f"Using absolute URL: {url}")
 
-            print(f"DEBUG: About to download from URL: {url}")
+            logger.debug(f"About to download from URL: {url}")
             logger.info(f"Downloading file from URL: {url}")
-            response = requests.get(url)
-            print(f"DEBUG: HTTP response status: {response.status_code}")
+            response = requests.get(url, timeout=30)
+            logger.debug(f"HTTP response status: {response.status_code}")
             response.raise_for_status()
             file_bytes = response.content
-            print(f"DEBUG: Successfully downloaded file content, length: {len(file_bytes)} bytes")
+            logger.debug(f"Successfully downloaded file content, length: {len(file_bytes)} bytes")
         else:
             # Assume it's base64-encoded data
-            print(f"DEBUG: Treating input as base64 data, attempting to decode")
+            logger.debug(f"Treating input as base64 data, attempting to decode")
             logger.info("Decoding base64 file data")
             file_bytes = base64.b64decode(filename)
-            print(f"DEBUG: Successfully decoded base64 data, length: {len(file_bytes)} bytes")
+            logger.debug(f"Successfully decoded base64 data, length: {len(file_bytes)} bytes")
 
         # Calculate file size
         size_bytes = len(file_bytes)
         size_human = _format_size(size_bytes)
-        print(f"DEBUG: Calculated file size: {size_bytes} bytes ({size_human})")
+        logger.debug(f"Calculated file size: {size_bytes} bytes ({size_human})")
 
         result = {
             "results": {
@@ -254,16 +251,11 @@ def get_file_size(
                 "transfer_method": "url" if is_url else "base64"
             }
         }
-        print(f"DEBUG: About to return success result: {result}")
+        logger.debug(f"About to return success result: {result}")
         return result
 
     except Exception as e:
-        print(f"DEBUG: Exception occurred while processing file: {str(e)}")
-        print(f"DEBUG: Exception type: {type(e).__name__}")
-        print(f"DEBUG: Filename that caused error: {filename}")
-        import traceback
-        print("DEBUG: Full traceback:")
-        traceback.print_exc()
+        logger.exception(f"Exception occurred while processing file: {str(e)} (type: {type(e).__name__}, filename: {filename})")
         error_result = {
             "results": {
                 "operation": "get_file_size",
@@ -275,7 +267,7 @@ def get_file_size(
                 "error_type": type(e).__name__
             }
         }
-        print(f"DEBUG: About to return error result: {error_result}")
+        logger.debug(f"About to return error result: {error_result}")
         return error_result
 
 
