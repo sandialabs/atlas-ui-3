@@ -5,7 +5,6 @@ Simple tool for testing file transfer by returning file size.
 """
 
 import base64
-import io
 import os
 import logging
 from typing import Any, Dict, Annotated
