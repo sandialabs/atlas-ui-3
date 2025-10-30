@@ -6,9 +6,12 @@ Provides PDF text analysis and report generation through the MCP protocol.
 
 import base64
 import io
+import os
 import re
+import requests
+import logging
 from collections import Counter
-from typing import Any, Dict, Annotated
+from typing import Any, Dict, Annotated, Optional
 
 # This tool requires the PyPDF2 and reportlab libraries.
 # Install them using: pip install PyPDF2 reportlab
@@ -19,31 +22,58 @@ from reportlab.lib.units import inch
 
 from fastmcp import FastMCP
 
+logger = logging.getLogger(__name__)
+
 mcp = FastMCP("PDF_Analyzer")
 
 
-def _analyze_pdf_content(instructions: str, filename: str, file_data_base64: str) -> Dict[str, Any]:
+def _analyze_pdf_content(instructions: str, filename: str, original_filename: Optional[str] = None) -> Dict[str, Any]:
     """
     Core PDF analysis logic that can be reused by multiple tools.
     
     Args:
         instructions: Instructions for the tool, not used in this implementation.
         filename: The name of the file, which must have a '.pdf' extension.
-        file_data_base64: The Base64-encoded string of the PDF file content.
+        original_filename: The original name of the file.
 
     Returns:
         A dictionary containing the analysis results or an error message.
     """
     try:
         # print the instructions.
-        print(f"Instructions: {instructions}")
+        logger.info(f"Instructions: {instructions}")
         # 1. Validate that the filename is for a PDF
-        if not filename.lower().endswith('.pdf'):
+        if not (filename.lower().endswith('.pdf') or (original_filename and original_filename.lower().endswith('.pdf'))):
             return {"results": {"error": "Invalid file type. This tool only accepts PDF files."}}
 
         # 2. Decode the Base64 data and read the PDF content
-        decoded_bytes = base64.b64decode(file_data_base64)
-        pdf_stream = io.BytesIO(decoded_bytes)
+        # Check if filename is a URL (absolute or relative)
+        is_url = (
+            filename.startswith("http://") or
+            filename.startswith("https://") or
+            filename.startswith("/api/") or
+            filename.startswith("/")
+        )
+
+        if is_url:
+            # Convert relative URLs to absolute URLs
+            if filename.startswith("/"):
+                # Construct absolute URL from relative path
+                # Default to localhost:8000 for local development
+                backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+                url = f"{backend_url}{filename}"
+            else:
+                url = filename
+
+            logger.info(f"Step 9: Downloading file from URL: {url}")
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            pdf_stream = io.BytesIO(response.content)
+        else:
+            # Assume it's base64-encoded data
+            decoded_bytes = base64.b64decode(filename)
+            pdf_stream = io.BytesIO(decoded_bytes)
+        
         reader = PdfReader(pdf_stream)
 
         full_text = ""
@@ -56,7 +86,7 @@ def _analyze_pdf_content(instructions: str, filename: str, file_data_base64: str
             return {
                 "results": {
                     "operation": "pdf_analysis",
-                    "filename": filename,
+                    "filename": original_filename or filename,
                     "status": "Success",
                     "message": "PDF contained no extractable text.",
                     "total_word_count": 0,
@@ -78,7 +108,7 @@ def _analyze_pdf_content(instructions: str, filename: str, file_data_base64: str
         return {
             "results": {
                 "operation": "pdf_analysis",
-                "filename": filename,
+                "filename": original_filename or filename,
                 "total_word_count": total_word_count,
                 "top_100_words": top_100_words_dict
             }
@@ -96,12 +126,12 @@ def _analyze_pdf_content(instructions: str, filename: str, file_data_base64: str
 def analyze_pdf(
     instructions: Annotated[str, "Instructions for the tool, not used in this implementation"],
     filename: Annotated[str, "The name of the file, which must have a '.pdf' extension"],
-    file_data_base64: Annotated[str, "LLM agent can leave blank. Do NOT fill. This will be filled by the framework."] = ""
+    original_filename: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Extract and analyze text content from PDF documents with comprehensive word frequency analysis.
 
-    This powerful PDF processing tool provides detailed text analytics for PDF documents:
+    This PDF processing tool provides detailed text analytics for PDF documents:
     
     **PDF Text Extraction:**
     - Extracts text from all pages in PDF documents
@@ -153,7 +183,7 @@ def analyze_pdf(
     Args:
         instructions: Processing instructions or requirements (currently not used)
         filename: PDF file name (must end with .pdf extension)
-        file_data_base64: Base64-encoded PDF content (automatically provided by framework)
+        original_filename: The original name of the file.
 
     Returns:
         Dictionary containing:
@@ -163,14 +193,15 @@ def analyze_pdf(
         - top_100_words: Dictionary of most frequent words with counts
         Or error message if PDF cannot be processed or contains no extractable text
     """
-    return _analyze_pdf_content(instructions, filename, file_data_base64)
+    logger.info("Step 8: Entering analyze_pdf tool")
+    return _analyze_pdf_content(instructions, filename, original_filename)
 
 
 @mcp.tool
 def generate_report_about_pdf(
     instructions: Annotated[str, "Instructions for the tool, not used in this implementation"],
     filename: Annotated[str, "The name of the file, which must have a '.pdf' extension"],
-    file_data_base64: Annotated[str, "LLM agent can leave blank. Do NOT fill. This will be filled by the framework."] = ""
+    original_filename: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Create comprehensive PDF analysis reports with professional formatting and detailed word frequency insights.
@@ -227,7 +258,7 @@ def generate_report_about_pdf(
     Args:
         instructions: Report generation instructions or requirements (currently not used)
         filename: Source PDF file name (must end with .pdf extension)
-        file_data_base64: Base64-encoded PDF content (automatically provided by framework)
+        original_filename: The original name of the file.
 
     Returns:
         Dictionary containing:
@@ -237,113 +268,123 @@ def generate_report_about_pdf(
         - meta_data: Source file information and analysis statistics
         Or error message if PDF cannot be processed or report generation fails
     """
+    logger.info("Step 8: Entering generate_report_about_pdf tool")
     # --- 1. Perform the same analysis as the first function ---
-    analysis_result = _analyze_pdf_content(instructions, filename, file_data_base64)
-    if "error" in analysis_result:
-        return analysis_result # Return the error if analysis failed
+    analysis_result = _analyze_pdf_content(instructions, filename, original_filename)
+    if "error" in analysis_result.get("results", {}):
+        return analysis_result
 
-    # --- 2. Generate a PDF report from the analysis results ---
+    # --- 2. Generate the PDF report ---
     try:
-        buffer = io.BytesIO()
-        # Create a canvas to draw on, using the buffer as the "file"
-        p = canvas.Canvas(buffer, pagesize=letter)
+        results_data = analysis_result["results"]
+
+        # Create PDF report in memory
+        pdf_buffer = io.BytesIO()
+        c = canvas.Canvas(pdf_buffer, pagesize=letter)
         width, height = letter
 
-        # Set up starting coordinates
-        x = inch
-        y = height - inch
+        # Title
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(1 * inch, height - 1 * inch, "PDF Analysis Report")
 
-        # Write title
-        p.setFont("Helvetica-Bold", 16)
-        p.drawString(x, y, f"Analysis Report for: {analysis_result['filename']}")
-        y -= 0.5 * inch
+        # Document info
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(1 * inch, height - 1.5 * inch, "Document:")
+        c.setFont("Helvetica", 10)
+        c.drawString(1.5 * inch, height - 1.5 * inch, results_data.get("filename", "Unknown"))
 
-        # Write summary
-        p.setFont("Helvetica", 12)
-        p.drawString(x, y, f"Total Word Count: {analysis_result['total_word_count']}")
-        y -= 0.3 * inch
+        # Total word count
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(1 * inch, height - 2 * inch, "Total Words:")
+        c.setFont("Helvetica", 10)
+        c.drawString(1.5 * inch, height - 2 * inch, str(results_data.get("total_word_count", 0)))
 
-        # Write header for top words
-        p.setFont("Helvetica-Bold", 12)
-        p.drawString(x, y, "Top 100 Most Frequent Words:")
-        y -= 0.25 * inch
+        # Top 100 words header
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(1 * inch, height - 2.5 * inch, "Top 100 Most Frequent Words:")
 
-        # Write the list of top words
-        p.setFont("Helvetica", 10)
-        col1_x, col2_x, col3_x, col4_x = x, x + 1.75*inch, x + 3.5*inch, x + 5.25*inch
-        current_x = col1_x
-        
-        # Simple column layout
-        count = 0
-        for word, freq in analysis_result['top_100_words'].items():
-            if y < inch: # New page if we run out of space
-                p.showPage()
-                p.setFont("Helvetica", 10)
-                y = height - inch
+        # Display top words in columns
+        c.setFont("Helvetica", 9)
+        y_position = height - 3 * inch
+        x_col1 = 1 * inch
+        x_col2 = 3.5 * inch
+        x_col3 = 6 * inch
 
-            p.drawString(current_x, y, f"{word}: {freq}")
-            
-            # Move to the next column
-            if count % 4 == 0: current_x = col2_x
-            elif count % 4 == 1: current_x = col3_x
-            elif count % 4 == 2: current_x = col4_x
-            else: # Move to the next row
-                current_x = col1_x
-                y -= 0.2 * inch
-            count += 1
-            
-        # Finalize the PDF
-        p.save()
-        
-        # --- 3. Encode the generated PDF for return ---
-        report_bytes = buffer.getvalue()
-        buffer.close()
-        report_base64 = base64.b64encode(report_bytes).decode('utf-8')
+        top_100_words = results_data.get("top_100_words", {})
+        words_list = list(top_100_words.items())
 
-        # Create a new filename for the report
-        report_filename = f"analysis_report_{filename.replace('.pdf', '.txt')}.pdf"
+        for idx, (word, count) in enumerate(words_list):
+            # Determine column position
+            col = idx % 3
+            if col == 0:
+                x_pos = x_col1
+            elif col == 1:
+                x_pos = x_col2
+            else:
+                x_pos = x_col3
 
-        # --- 4. Return v2 MCP format with artifacts and display ---
+            # Move to next row after every 3 words
+            if col == 0 and idx > 0:
+                y_position -= 0.2 * inch
+
+            # Check if we need a new page
+            if y_position < 1 * inch:
+                c.showPage()
+                c.setFont("Helvetica", 9)
+                y_position = height - 1 * inch
+
+            # Draw word and count
+            text = f"{word}: {count}"
+            c.drawString(x_pos, y_position, text)
+
+        c.save()
+
+        # Get PDF bytes and encode to base64
+        pdf_bytes = pdf_buffer.getvalue()
+        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+
+        # --- 3. Return the structured response (v2 MCP compliant) ---
+        report_name = f"analysis_report_{results_data.get('filename', 'document').replace('.pdf', '')}.pdf"
+
         return {
             "results": {
-                "operation": "pdf_analysis_report",
-                "original_filename": filename,
-                "message": f"Successfully generated analysis report for {filename}."
+                "operation": "pdf_report_generation",
+                "status": "Success",
+                "message": f"Generated analysis report for {results_data.get('filename', 'document')}",
+                "total_word_count": results_data.get("total_word_count", 0),
+                "words_analyzed": len(top_100_words)
             },
             "artifacts": [
                 {
-                    "name": report_filename,
-                    "b64": report_base64,
+                    "name": report_name,
+                    "b64": pdf_base64,
                     "mime": "application/pdf",
-                    "size": len(report_bytes),
-                    "description": f"Analysis report for {filename} with word frequency data",
-                    "viewer": "pdf"
+                    "size": len(pdf_bytes),
+                    "description": "PDF analysis report with word frequency statistics"
                 }
             ],
             "display": {
                 "open_canvas": True,
-                "primary_file": report_filename,
+                "primary_file": report_name,
                 "mode": "replace",
                 "viewer_hint": "pdf"
             },
             "meta_data": {
-                "original_file": filename,
-                "word_count": analysis_result["results"]["total_word_count"],
-                "report_type": "pdf_analysis",
-                "top_words_count": len(analysis_result["results"]["top_100_words"])
+                "source_file": results_data.get("filename", "Unknown"),
+                "total_words": results_data.get("total_word_count", 0)
             }
         }
 
     except Exception as e:
-        # print traceback for debugging
         import traceback
         traceback.print_exc()
-        return {"results": {"error": f"Failed to generate PDF report: {str(e)}"}}
+        return {
+            "results": {
+                "error": f"Report generation failed: {str(e)}"
+            }
+        }
+
 
 
 if __name__ == "__main__":
-    # This will start the server and listen for MCP requests.
-    # To use it, you would run this script and then connect to it
-    # with a FastMCP client.
-    print("Starting PDF Analyzer MCP server with report generation...")
     mcp.run()

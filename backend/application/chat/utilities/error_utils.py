@@ -85,7 +85,7 @@ async def safe_call_llm_with_tools(
             llm_response = await llm_caller.call_with_tools(
                 model, messages, tools_schema, tool_choice, temperature=temperature
             )
-            logger.info(f"LLM response received with tools only, has_tool_calls: {llm_response.has_tool_calls()}")
+            logger.info(f"LLM response received with tools only, llm_response: {llm_response}")
         return llm_response
     except Exception as e:
         logger.error(f"Error calling LLM with tools: {e}", exc_info=True)
