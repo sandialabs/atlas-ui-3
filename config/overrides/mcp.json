@@ -31,6 +31,16 @@
     "author": "Chat UI Team",
     "short_description": "PDF text extraction and analysis",
     "help_email": "support@chatui.example.com"
+  },
+  "file_size_test": {
+    "command": ["python", "mcp/file_size_test/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Simple test tool that accepts a file transfer and returns the file size in bytes",
+    "author": "Chat UI Team",
+    "short_description": "File transfer test tool",
+    "help_email": "support@chatui.example.com"
   }
 
 }

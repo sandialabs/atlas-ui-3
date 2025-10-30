@@ -341,7 +341,7 @@ class ChatService:
 
         try:
             # Get file metadata
-            file_result = await self.file_manager.get_file(user_email, s3_key)
+            file_result = await self.file_manager.s3_client.get_file(user_email, s3_key)
             if not file_result:
                 return {
                     "type": "file_attach",
@@ -359,24 +359,25 @@ class ChatService:
                     "error": "Invalid file metadata"
                 }
 
-            # Add file to session context
-            session.context = await file_utils.handle_session_files(
-                session_context=session.context,
-                user_email=user_email,
-                files_map={
-                    filename: {
-                        "key": s3_key,
-                        "content_type": file_result.get("content_type"),
-                        "size": file_result.get("size"),
-                        "filename": filename
-                    }
-                },
-                file_manager=self.file_manager,
-                update_callback=update_callback
-            )
+            # Add file reference directly to session context (file already exists in S3)
+            session.context.setdefault("files", {})[filename] = {
+                "key": s3_key,
+                "content_type": file_result.get("content_type"),
+                "size": file_result.get("size"),
+                "source": "user",
+                "last_modified": file_result.get("last_modified"),
+            }
 
             sanitized_s3_key = s3_key.replace('\r', '').replace('\n', '')
             logger.info(f"Attached file ({sanitized_s3_key}) to session {session_id}")
+
+            # Emit files_update to notify UI
+            if update_callback:
+                await file_utils.emit_files_update_from_context(
+                    session_context=session.context,
+                    file_manager=self.file_manager,
+                    update_callback=update_callback
+                )
 
             return {
                 "type": "file_attach",

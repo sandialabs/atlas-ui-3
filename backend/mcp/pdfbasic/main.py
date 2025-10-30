@@ -131,7 +131,7 @@ def analyze_pdf(
     """
     Extract and analyze text content from PDF documents with comprehensive word frequency analysis.
 
-    This powerful PDF processing tool provides detailed text analytics for PDF documents:
+    This  PDF processing tool provides detailed text analytics for PDF documents:
     
     **PDF Text Extraction:**
     - Extracts text from all pages in PDF documents
@@ -273,6 +273,116 @@ def generate_report_about_pdf(
     analysis_result = _analyze_pdf_content(instructions, filename, original_filename)
     if "error" in analysis_result.get("results", {}):
         return analysis_result
+
+    # --- 2. Generate the PDF report ---
+    try:
+        results_data = analysis_result["results"]
+
+        # Create PDF report in memory
+        pdf_buffer = io.BytesIO()
+        c = canvas.Canvas(pdf_buffer, pagesize=letter)
+        width, height = letter
+
+        # Title
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(1 * inch, height - 1 * inch, "PDF Analysis Report")
+
+        # Document info
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(1 * inch, height - 1.5 * inch, "Document:")
+        c.setFont("Helvetica", 10)
+        c.drawString(1.5 * inch, height - 1.5 * inch, results_data.get("filename", "Unknown"))
+
+        # Total word count
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(1 * inch, height - 2 * inch, "Total Words:")
+        c.setFont("Helvetica", 10)
+        c.drawString(1.5 * inch, height - 2 * inch, str(results_data.get("total_word_count", 0)))
+
+        # Top 100 words header
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(1 * inch, height - 2.5 * inch, "Top 100 Most Frequent Words:")
+
+        # Display top words in columns
+        c.setFont("Helvetica", 9)
+        y_position = height - 3 * inch
+        x_col1 = 1 * inch
+        x_col2 = 3.5 * inch
+        x_col3 = 6 * inch
+
+        top_100_words = results_data.get("top_100_words", {})
+        words_list = list(top_100_words.items())
+
+        for idx, (word, count) in enumerate(words_list):
+            # Determine column position
+            col = idx % 3
+            if col == 0:
+                x_pos = x_col1
+            elif col == 1:
+                x_pos = x_col2
+            else:
+                x_pos = x_col3
+
+            # Move to next row after every 3 words
+            if col == 0 and idx > 0:
+                y_position -= 0.2 * inch
+
+            # Check if we need a new page
+            if y_position < 1 * inch:
+                c.showPage()
+                c.setFont("Helvetica", 9)
+                y_position = height - 1 * inch
+
+            # Draw word and count
+            text = f"{word}: {count}"
+            c.drawString(x_pos, y_position, text)
+
+        c.save()
+
+        # Get PDF bytes and encode to base64
+        pdf_bytes = pdf_buffer.getvalue()
+        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+
+        # --- 3. Return the structured response (v2 MCP compliant) ---
+        report_name = f"analysis_report_{results_data.get('filename', 'document').replace('.pdf', '')}.pdf"
+
+        return {
+            "results": {
+                "operation": "pdf_report_generation",
+                "status": "Success",
+                "message": f"Generated analysis report for {results_data.get('filename', 'document')}",
+                "total_word_count": results_data.get("total_word_count", 0),
+                "words_analyzed": len(top_100_words)
+            },
+            "artifacts": [
+                {
+                    "name": report_name,
+                    "b64": pdf_base64,
+                    "mime": "application/pdf",
+                    "size": len(pdf_bytes),
+                    "description": "PDF analysis report with word frequency statistics"
+                }
+            ],
+            "display": {
+                "open_canvas": True,
+                "primary_file": report_name,
+                "mode": "replace",
+                "viewer_hint": "pdf"
+            },
+            "meta_data": {
+                "source_file": results_data.get("filename", "Unknown"),
+                "total_words": results_data.get("total_word_count", 0)
+            }
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "results": {
+                "error": f"Report generation failed: {str(e)}"
+            }
+        }
 
 
 
