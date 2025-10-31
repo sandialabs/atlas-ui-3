@@ -36,6 +36,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 claims = verify_file_token(token)
                 if claims:
                     # Valid capability token - extract user from token and allow request
+                    # Note: We only validate token authenticity here (authentication).
+                    # The route handler validates that token's file key matches the requested
+                    # file (authorization). This separation of concerns keeps middleware focused
+                    # on authentication while route handlers handle resource-specific authorization.
                     user_email = claims.get('u')
                     if user_email:
                         logger.info(f"Authenticated via capability token for user: {user_email}")
