@@ -61,6 +61,7 @@ class MCPServerConfig(BaseModel):
     url: Optional[str] = None            # URL for HTTP servers
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
+    compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
 
 
 class MCPConfig(BaseModel):

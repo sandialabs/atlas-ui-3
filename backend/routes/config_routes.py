@@ -102,7 +102,8 @@ async def get_config(current_user: str = Depends(get_current_user)):
                     'is_exclusive': False,
                     'author': 'Chat UI Team',
                     'short_description': 'Visual content display',
-                    'help_email': 'support@chatui.example.com'
+                    'help_email': 'support@chatui.example.com',
+                    'compliance_level': 'Public'
                 })
             elif server_name in mcp_manager.available_tools:
                 server_tools = mcp_manager.available_tools[server_name]['tools']
@@ -118,7 +119,8 @@ async def get_config(current_user: str = Depends(get_current_user)):
                         'is_exclusive': server_config.get('is_exclusive', False),
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', server_config.get('description', f'{server_name} tools')),
-                        'help_email': server_config.get('help_email', '')
+                        'help_email': server_config.get('help_email', ''),
+                        'compliance_level': server_config.get('compliance_level')
                     })
             
             # Collect prompts from this server if available
@@ -133,7 +135,8 @@ async def get_config(current_user: str = Depends(get_current_user)):
                         'description': f'{server_name} custom prompts',
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', f'{server_name} custom prompts'),
-                        'help_email': server_config.get('help_email', '')
+                        'help_email': server_config.get('help_email', ''),
+                        'compliance_level': server_config.get('compliance_level')
                     })
     
     # Read help page configuration (supports new config directory layout + legacy paths)
