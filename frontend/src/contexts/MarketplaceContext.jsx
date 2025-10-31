@@ -130,6 +130,23 @@ export const MarketplaceProvider = ({ children }) => {
   const getFilteredPrompts = () => {
     return prompts.filter(prompt => selectedServers.has(prompt.server))
   }
+  
+  const getComplianceFilteredTools = (complianceLevel) => {
+    if (!complianceLevel) return getFilteredTools()
+    return getFilteredTools().filter(tool => {
+      // If no compliance_level specified, include in all filters (backward compatible)
+      if (!tool.compliance_level) return true
+      return tool.compliance_level === complianceLevel
+    })
+  }
+  
+  const getComplianceFilteredPrompts = (complianceLevel) => {
+    if (!complianceLevel) return getFilteredPrompts()
+    return getFilteredPrompts().filter(prompt => {
+      if (!prompt.compliance_level) return true
+      return prompt.compliance_level === complianceLevel
+    })
+  }
 
   const value = {
     selectedServers,
@@ -138,7 +155,9 @@ export const MarketplaceProvider = ({ children }) => {
     selectAllServers,
     deselectAllServers,
     getFilteredTools,
-    getFilteredPrompts
+    getFilteredPrompts,
+    getComplianceFilteredTools,
+    getComplianceFilteredPrompts
   }
 
   return (

@@ -9,7 +9,7 @@ from interfaces.tools import ToolManagerProtocol
 from modules.prompts.prompt_provider import PromptProvider
 
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
-from ..utilities import file_utils, notification_utils, error_utils, tool_utils
+from ..utilities import file_utils, error_utils, tool_utils
 from domain.messages.models import ToolResult
 
 

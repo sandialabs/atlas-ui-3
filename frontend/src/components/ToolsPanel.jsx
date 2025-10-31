@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, ChevronDown, ChevronUp, Shield } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -19,13 +19,27 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   removePrompts,
     toolChoiceRequired, 
     setToolChoiceRequired,
-    clearToolsAndPrompts
+    clearToolsAndPrompts,
+    complianceLevelFilter,
+    setComplianceLevelFilter,
+    tools: allTools,
+    prompts: allPrompts
   } = useChat()
-  const { getFilteredTools, getFilteredPrompts } = useMarketplace()
+  const { getComplianceFilteredTools, getComplianceFilteredPrompts } = useMarketplace()
   
-  // Use filtered tools and prompts instead of all tools
-  const tools = getFilteredTools()
-  const prompts = getFilteredPrompts()
+  // Use compliance-filtered tools and prompts
+  const tools = getComplianceFilteredTools(complianceLevelFilter)
+  const prompts = getComplianceFilteredPrompts(complianceLevelFilter)
+  
+  // Extract unique compliance levels from all available tools and prompts
+  const availableComplianceLevels = new Set()
+  allTools.forEach(tool => {
+    if (tool.compliance_level) availableComplianceLevels.add(tool.compliance_level)
+  })
+  allPrompts.forEach(prompt => {
+    if (prompt.compliance_level) availableComplianceLevels.add(prompt.compliance_level)
+  })
+  const complianceLevels = Array.from(availableComplianceLevels).sort()
   
   const navigateToMarketplace = () => {
     clearToolsAndPrompts()
@@ -42,6 +56,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         server: toolServer.server,
         description: toolServer.description,
         is_exclusive: toolServer.is_exclusive,
+        compliance_level: toolServer.compliance_level,
         tools: toolServer.tools || [],
         tool_count: toolServer.tool_count || 0,
         prompts: [],
@@ -368,6 +383,29 @@ const ToolsPanel = ({ isOpen, onClose }) => {
               </button>
             )}
           </div>
+
+          {/* Compliance Level Filter */}
+          {complianceLevels.length > 0 && (
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-700 rounded-lg">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <Shield className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-white text-sm font-medium">Compliance Level</h3>
+                  <p className="text-xs text-gray-400">Filter tools and sources by security level</p>
+                </div>
+              </div>
+              <select
+                value={complianceLevelFilter || ''}
+                onChange={(e) => setComplianceLevelFilter(e.target.value || null)}
+                className="px-3 py-1.5 bg-gray-600 border border-gray-500 rounded-lg text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 flex-shrink-0 ml-2"
+              >
+                <option value="">All Levels</option>
+                {complianceLevels.map(level => (
+                  <option key={level} value={level}>{level}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Tools List */}
@@ -435,6 +473,12 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                               {server.is_exclusive && (
                                 <span className="px-1.5 py-0.5 bg-orange-600 text-xs rounded text-white flex-shrink-0">
                                   Exclusive
+                                </span>
+                              )}
+                              {server.compliance_level && (
+                                <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1 flex-shrink-0">
+                                  <Shield className="w-3 h-3" />
+                                  {server.compliance_level}
                                 </span>
                               )}
                             </div>

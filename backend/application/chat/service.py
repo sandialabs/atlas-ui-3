@@ -6,13 +6,10 @@ import asyncio
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 from uuid import UUID
 
-from domain.errors import SessionError, ValidationError
 from domain.messages.models import (
-    ConversationHistory,
     Message,
     MessageRole,
     MessageType,
-    ToolCall,
     ToolResult
 )
 from domain.sessions.models import Session
@@ -26,7 +23,6 @@ from interfaces.transport import ChatConnectionProtocol
 from .utilities import tool_utils, file_utils, notification_utils, error_utils
 from .agent import AgentLoopFactory
 from .agent.protocols import AgentContext, AgentEvent
-from core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
 from core.auth_utils import create_authorization_manager
 
 logger = logging.getLogger(__name__)

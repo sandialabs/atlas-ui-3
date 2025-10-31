@@ -223,6 +223,8 @@ export const ChatProvider = ({ children }) => {
 		toolChoiceRequired: selections.toolChoiceRequired,
 		setToolChoiceRequired: selections.setToolChoiceRequired,
 		clearToolsAndPrompts: selections.clearToolsAndPrompts,
+		complianceLevelFilter: selections.complianceLevelFilter,
+		setComplianceLevelFilter: selections.setComplianceLevelFilter,
 		agentModeEnabled: agent.agentModeEnabled,
 		setAgentModeEnabled: agent.setAgentModeEnabled,
 		agentMaxSteps: agent.agentMaxSteps,

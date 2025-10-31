@@ -228,7 +228,7 @@ def get_file_size(
             logger.debug(f"Successfully downloaded file content, length: {len(file_bytes)} bytes")
         else:
             # Assume it's base64-encoded data
-            logger.debug(f"Treating input as base64 data, attempting to decode")
+            logger.debug("Treating input as base64 data, attempting to decode")
             logger.info("Decoding base64 file data")
             file_bytes = base64.b64decode(filename)
             logger.debug(f"Successfully decoded base64 data, length: {len(file_bytes)} bytes")

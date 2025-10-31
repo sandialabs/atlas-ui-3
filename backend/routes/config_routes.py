@@ -1,7 +1,6 @@
 """Configuration API routes."""
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 
@@ -193,12 +192,11 @@ async def get_config(current_user: str = Depends(get_current_user)):
         "tools": tools_info,  # Only authorized servers are included
         "prompts": prompts_info,  # Available prompts from authorized servers
         "data_sources": rag_data_sources,  # RAG data sources for the user
-    "rag_servers": rag_servers,  # Optional richer structure for RAG UI
+        "rag_servers": rag_servers,  # Optional richer structure for RAG UI
         "user": current_user,
     "is_in_admin_group": is_user_in_group(current_user, app_settings.admin_group),
         "active_sessions": 0,  # TODO: Implement session counting in ChatService
         "authorized_servers": authorized_servers,  # Optional: expose for debugging
-            "rag_servers": rag_servers,  # Optional richer structure for RAG UI
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
         "help_config": help_config,  # Help page configuration from help-config.json

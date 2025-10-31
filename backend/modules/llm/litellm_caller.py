@@ -11,15 +11,12 @@ LiteLLM provides unified access to multiple LLM providers with automatic
 fallbacks, cost tracking, and provider-specific optimizations.
 """
 
-import asyncio
-import json
 import logging
 import os
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
 
 import litellm
-from litellm import completion, acompletion
+from litellm import acompletion
 from .models import LLMResponse
 
 logger = logging.getLogger(__name__)
