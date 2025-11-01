@@ -106,17 +106,17 @@ npm run test:ui       # Interactive UI
 
 ### Linting
 
+**IMPORTANT: Run linting before every commit to catch style issues early.**
+
 **Python:**
 ```bash
-source .venv/bin/activate
-uv pip install ruff
-ruff check backend/  # ~1 second
+# This command auto-installs ruff if not present, then runs the check
+ruff check backend/ || (uv pip install ruff && ruff check backend/)
 ```
 
 **Frontend:**
 ```bash
-cd frontend
-npm run lint  # ~1 second
+cd frontend && npm run lint
 ```
 
 ### Docker
@@ -271,9 +271,11 @@ Request → SecurityHeaders → RateLimit → Auth → Route
 ## Validation Workflow
 
 Before committing:
-1. **Build**: Frontend and backend build successfully
+1. **Lint**: Address style issues before running tests
+   - Python: `ruff check backend/ || (uv pip install ruff && ruff check backend/)`
+   - Frontend: `cd frontend && npm run lint`
 2. **Test**: `./test/run_tests.sh all`
-3. **Lint**: Both Python (`ruff check backend/`) and frontend (`npm run lint`)
+3. **Build**: Frontend and backend build successfully
 4. **Manual**: Test in browser at http://localhost:8000
 5. **Exercise**: Test specific modified functionality
 
