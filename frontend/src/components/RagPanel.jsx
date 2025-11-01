@@ -11,8 +11,11 @@ const RagPanel = ({ isOpen, onClose }) => {
     complianceLevelFilter,
     setComplianceLevelFilter,
     tools,
-    prompts
+    prompts,
+    features
   } = useChat()
+
+  const complianceEnabled = features?.compliance_levels
 
   // Extract unique compliance levels from all available tools, prompts, and data sources
   const availableComplianceLevels = new Set()
@@ -66,7 +69,7 @@ const RagPanel = ({ isOpen, onClose }) => {
           </label>
 
           {/* Compliance Level Filter */}
-          {complianceLevels.length > 0 && (
+          {complianceEnabled && complianceLevels.length > 0 && (
             <div className="flex items-center justify-between px-3 py-2 bg-gray-700 rounded-lg">
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <Shield className="w-4 h-4 text-blue-400 flex-shrink-0" />

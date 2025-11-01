@@ -23,13 +23,15 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     complianceLevelFilter,
     setComplianceLevelFilter,
     tools: allTools,
-    prompts: allPrompts
+    prompts: allPrompts,
+    features
   } = useChat()
-  const { getComplianceFilteredTools, getComplianceFilteredPrompts } = useMarketplace()
+  const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts } = useMarketplace()
   
-  // Use compliance-filtered tools and prompts
-  const tools = getComplianceFilteredTools(complianceLevelFilter)
-  const prompts = getComplianceFilteredPrompts(complianceLevelFilter)
+  // Use compliance-filtered tools and prompts if feature is enabled, otherwise use marketplace filtered
+  const complianceEnabled = features?.compliance_levels
+  const tools = complianceEnabled ? getComplianceFilteredTools(complianceLevelFilter) : getFilteredTools()
+  const prompts = complianceEnabled ? getComplianceFilteredPrompts(complianceLevelFilter) : getFilteredPrompts()
   
   // Extract unique compliance levels from all available tools and prompts
   const availableComplianceLevels = new Set()
@@ -385,7 +387,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
           </div>
 
           {/* Compliance Level Filter */}
-          {complianceLevels.length > 0 && (
+          {complianceEnabled && complianceLevels.length > 0 && (
             <div className="flex items-center justify-between px-4 py-2 bg-gray-700 rounded-lg">
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <Shield className="w-4 h-4 text-blue-400 flex-shrink-0" />
@@ -475,7 +477,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                   Exclusive
                                 </span>
                               )}
-                              {server.compliance_level && (
+                              {complianceEnabled && server.compliance_level && (
                                 <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1 flex-shrink-0">
                                   <Shield className="w-3 h-3" />
                                   {server.compliance_level}

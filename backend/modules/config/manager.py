@@ -146,6 +146,12 @@ class AppSettings(BaseSettings):
         description="Enable RAG via MCP aggregator (discovery phase)",
         validation_alias=AliasChoices("FEATURE_RAG_MCP_ENABLED", "RAG_MCP_ENABLED"),
     )
+    # Compliance level filtering feature gate
+    feature_compliance_levels_enabled: bool = Field(
+        False,
+        description="Enable compliance level filtering for MCP servers and data sources",
+        validation_alias=AliasChoices("FEATURE_COMPLIANCE_LEVELS_ENABLED"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""

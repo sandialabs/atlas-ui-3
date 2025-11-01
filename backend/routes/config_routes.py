@@ -206,7 +206,8 @@ async def get_config(current_user: str = Depends(get_current_user)):
             "tools": app_settings.feature_tools_enabled,
             "marketplace": app_settings.feature_marketplace_enabled,
             "files_panel": app_settings.feature_files_panel_enabled,
-            "chat_history": app_settings.feature_chat_history_enabled
+            "chat_history": app_settings.feature_chat_history_enabled,
+            "compliance_levels": app_settings.feature_compliance_levels_enabled
         }
     }
 

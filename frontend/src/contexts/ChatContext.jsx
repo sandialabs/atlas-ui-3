@@ -105,6 +105,7 @@ export const ChatProvider = ({ children }) => {
 			agent_max_steps: settings.maxIterations || agent.agentMaxSteps,
 			temperature: settings.llmTemperature || 0.7,
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
+			compliance_level_filter: selections.complianceLevelFilter,
 		})
 	}, [addMessage, currentModel, selectedTools, selectedPrompts, selectedDataSources, config, selections.toolChoiceRequired, selections, agent, files, isWelcomeVisible, sendMessage, settings])
 

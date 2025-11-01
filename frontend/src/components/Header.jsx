@@ -179,7 +179,7 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
         </div>
 
         {/* Compliance Level Indicator */}
-        {complianceLevelFilter && (
+        {features?.compliance_levels && complianceLevelFilter && (
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium border border-blue-500">
             <Shield className="w-4 h-4" />
             <span>{complianceLevelFilter}</span>
