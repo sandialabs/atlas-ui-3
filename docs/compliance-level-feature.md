@@ -1,7 +1,7 @@
 # Compliance Level Feature
 
 ## Overview
-This feature allows MCP servers and RAG data sources to declare a compliance level (e.g., SOC2, HIPAA, Public). Users can then filter their session to only connect to and use sources matching a specific compliance level. This helps minimize the risk of mixing data from secure and insecure environments.
+This feature allows MCP servers, RAG data sources, and LLM endpoints to declare a compliance level (e.g., SOC2, HIPAA, Public, External, Internal). Users can then filter their session to only connect to and use sources matching a specific compliance level. This helps minimize the risk of mixing data from secure and insecure environments.
 
 The feature includes a **rollout control flag** (`FEATURE_COMPLIANCE_LEVELS_ENABLED`) to enable gradual deployment and backend transmission of the compliance filter for future compliance-dependent logic.
 
@@ -26,13 +26,21 @@ FEATURE_COMPLIANCE_LEVELS_ENABLED=true
 
 ### Backend Changes
 
-#### 1. Configuration Model (`backend/modules/config/manager.py`)
+#### 1. Configuration Models (`backend/modules/config/manager.py`)
 Added `compliance_level` field to `MCPServerConfig`:
 
 ```python
 class MCPServerConfig(BaseModel):
     # ... existing fields ...
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
+```
+
+Added `compliance_level` field to `ModelConfig` for LLM endpoints:
+
+```python
+class ModelConfig(BaseModel):
+    # ... existing fields ...
+    compliance_level: Optional[str] = None  # Compliance/security level (e.g., "External", "Internal", "Public")
 ```
 
 Added feature flag to `AppSettings`:
@@ -82,10 +90,21 @@ Updated MCP server configurations to include compliance levels:
 }
 ```
 
+**config/defaults/llmconfig.yml** and **config/overrides/llmconfig.yml** (LLM endpoints):
+```yaml
+models:
+  gpt-4.1:
+    model_url: "https://api.openai.com/v1/chat/completions"
+    model_name: "gpt-4.1"
+    api_key: "${OPENAI_API_KEY}"
+    compliance_level: "External"
+```
+
 #### 3. API Responses (`backend/routes/config_routes.py`)
 The `/api/config` endpoint now includes:
 - `compliance_level` in **tools** array (for MCP tool servers)
 - `compliance_level` in **prompts** array (for MCP prompt servers)
+- `compliance_level` in **models** array (for LLM endpoints)
 - `compliance_levels` in **features** object (feature flag status)
 
 **RAG MCP Service** (`backend/domain/rag_mcp_service.py`):
@@ -95,6 +114,18 @@ The `/api/config` endpoint now includes:
 Example API response:
 ```json
 {
+  "models": [
+    {
+      "name": "gpt-4.1",
+      "description": null,
+      "compliance_level": "External"
+    },
+    {
+      "name": "internal-llm",
+      "description": "Internal LLM for sensitive data",
+      "compliance_level": "Internal"
+    }
+  ],
   "tools": [
     {
       "server": "calculator",
@@ -196,6 +227,8 @@ const getComplianceFilteredTools = (complianceLevel) => {
 - Includes quick clear button (×) to remove the filter
 - Ensures users always know their current compliance setting
 - Hidden when `FEATURE_COMPLIANCE_LEVELS_ENABLED=false`
+- **Model dropdown**: Filters LLM endpoints by compliance level
+- **Model badges**: Display compliance level badge on each model option
 
 **ToolsPanel (`frontend/src/components/ToolsPanel.jsx`)**:
 - **Filter dropdown**: Allows users to select a compliance level (All Levels, Public, SOC2, etc.)
@@ -260,11 +293,20 @@ UI Example (when feature enabled):
      }
    }
    ```
-3. Supported values are arbitrary strings, but common examples include:
-   - `"Public"` - Publicly available, no special compliance
-   - `"SOC2"` - SOC 2 Type II compliant
-   - `"HIPAA"` - HIPAA compliant
-   - `"FedRAMP"` - FedRAMP authorized
+
+4. For LLM endpoints in `llmconfig.yml`:
+   ```yaml
+   models:
+     gpt-4.1:
+       model_url: "https://api.openai.com/v1/chat/completions"
+       model_name: "gpt-4.1"
+       api_key: "${OPENAI_API_KEY}"
+       compliance_level: "External"
+   ```
+
+5. Supported values are arbitrary strings, but common examples include:
+   - **For MCP/RAG**: `"Public"`, `"SOC2"`, `"HIPAA"`, `"FedRAMP"`
+   - **For LLM endpoints**: `"External"`, `"Internal"`, `"Public"`
    - Or any custom compliance level
 
 ### For End Users
@@ -272,25 +314,30 @@ UI Example (when feature enabled):
 **Setting Compliance Level:**
 1. Open the Tools panel OR RAG panel in the chat interface
 2. Look for the "Compliance Level" dropdown in the controls section
-3. Select a compliance level (e.g., "SOC2")
+3. Select a compliance level (e.g., "SOC2", "External", "Internal")
 4. The selected level will appear in the header as a blue badge with a Shield icon
-5. Only tools and data sources matching that compliance level will be available
+5. Only matching tools, data sources, and LLM models will be available
 
 **Viewing Active Compliance Level:**
 - The header always shows the active compliance level (if one is selected)
 - Click the "×" in the header badge to quickly clear the compliance filter
 
+**How It Affects Different Components:**
+- **LLM Models**: Model dropdown only shows models matching the compliance level (with badges)
+- **MCP Tools**: Tools panel only shows servers matching the compliance level
+- **RAG Sources**: Data sources panel only shows sources matching the compliance level
+
 **Important Safety Features:**
 - When switching compliance levels, any selected tools/prompts that don't match are **automatically cleared**
 - This prevents accidentally running non-compliant tools from previous sessions
-- The filter applies across both Tools and RAG Data Sources panels
+- The filter applies across Tools, RAG Data Sources, and LLM model selection
 
 **Example Workflow:**
-1. User selects "SOC2" compliance level from Tools panel
-2. Header shows: `[🔒 SOC2 ×]`
-3. Only SOC2-compliant tools and data sources are visible
-4. Previously selected "Public" tools are automatically unselected
-5. User can work safely knowing all interactions are SOC2-compliant
+1. User selects "External" compliance level from Tools panel
+2. Header shows: `[🔒 External ×]`
+3. Only External-compliant LLMs, tools, and data sources are visible
+4. Previously selected "Internal" LLM model is automatically unselected
+5. User can work safely knowing all interactions use external-compliant resources
 
 ## Benefits
 
