@@ -87,7 +87,7 @@ The allowlist model prevents dangerous resource combinations:
 
 Administrators have full control over which combinations are safe for their environment by editing the `allowed_with` arrays.
 
-Resources without a compliance_level are accessible by all levels (backward compatibility).
+Resources without a compliance_level are **hidden** when a compliance filter is active (strict filtering mode). This prevents untagged Public resources from appearing in SOC2 or HIPAA sessions.
 
 ## Feature Flag
 
@@ -327,40 +327,64 @@ sendMessage({
 ```
 
 #### 3. Marketplace Context (`frontend/src/contexts/MarketplaceContext.jsx`)
-Added filtering functions for compliance levels:
+Added filtering functions with strict compliance checking:
 ```javascript
+// Strict filtering: when compliance level is selected, resources without compliance_level are hidden
+const isComplianceAccessible = (userLevel, resourceLevel) => {
+  // If user level is not set, all resources are accessible
+  if (!userLevel) return true
+  
+  // STRICT MODE: If user has selected a compliance level but resource has none, deny access
+  if (!resourceLevel) return false
+  
+  // Find user's compliance level object
+  const userLevelObj = complianceLevels.find(l => l.name === userLevel)
+  
+  // If we don't have level info, deny access (strict)
+  if (!userLevelObj) return false
+  
+  // Check if resource level is in the user's allowed_with list
+  return userLevelObj.allowed_with && userLevelObj.allowed_with.includes(resourceLevel)
+}
+
 const getComplianceFilteredTools = (complianceLevel) => {
   if (!complianceLevel) return getFilteredTools()
   return getFilteredTools().filter(tool => {
-    if (!tool.compliance_level) return true  // Backward compatible
-    return tool.compliance_level === complianceLevel
+    // STRICT MODE: Only show resources with matching compliance levels
+    return isComplianceAccessible(complianceLevel, tool.compliance_level)
   })
 }
 ```
+
+**Strict Filtering Mode:**
+- When a compliance level is selected, **only** resources with matching compliance levels are shown
+- Resources without `compliance_level` are **hidden** when a filter is active
+- Prevents untagged Public resources from appearing in SOC2 or HIPAA sessions
+- Example: User selects "SOC2" → sees only SOC2 resources (not Public, not untagged MCPs)
 
 #### 4. UI Components
 
 **All UI components are conditional on the `features.compliance_levels` flag:**
 
-**Header (`frontend/src/components/Header.jsx`)**:
-- **Compliance level indicator**: Always visible when feature enabled and compliance level selected
-- Shows compliance level with Shield icon in a blue badge
-- Includes quick clear button (×) to remove the filter
-- Ensures users always know their current compliance setting
+**Header (`frontend/src/components/Header.jsx`)** - Single source of compliance level selection:
+- **Compliance level dropdown**: Centralized dropdown for selecting compliance level for the entire session
+- Displays in header with Shield icon
+- All tools, RAG sources, and LLM endpoints automatically filter based on selected level
+- Dropdown shows available compliance levels (Public, External, Internal, SOC2, HIPAA, FedRAMP)
+- "All Levels" option to disable filtering
 - Hidden when `FEATURE_COMPLIANCE_LEVELS_ENABLED=false`
 - **Model dropdown**: Filters LLM endpoints by compliance level
 - **Model badges**: Display compliance level badge on each model option
 
 **ToolsPanel (`frontend/src/components/ToolsPanel.jsx`)**:
-- **Filter dropdown**: Allows users to select a compliance level (All Levels, Public, SOC2, etc.)
 - **Server badges**: Display compliance level badge on each server entry
+- Tools automatically filtered by compliance level selected in Header
 - Uses Shield icon from lucide-react
-- Both dropdown and badges hidden when feature disabled
+- Badges hidden when feature disabled
 
 **RagPanel (`frontend/src/components/RagPanel.jsx`)**:
-- **Filter dropdown**: Same compliance level filtering as ToolsPanel
-- Synced with global compliance level state
-- Helps prevent mixing data from different compliance environments
+- Data sources automatically filtered by compliance level selected in Header
+- Prevents mixing data from different compliance environments
 - Hidden when feature disabled
 
 #### 5. Auto-Cleanup Logic (`frontend/src/contexts/ChatContext.jsx`)
@@ -382,22 +406,21 @@ const setComplianceLevelFilterWithCleanup = useCallback((newLevel) => {
 
 UI Example (when feature enabled):
 ```
-┌─ Header ──────────────────────────────┐
-│  [New Chat]  [🔒 SOC2 ×]  [⚙️]  [?]   │
-└───────────────────────────────────────┘
+┌─ Header ──────────────────────────────────────────────┐
+│  [New Chat]  [🔒 Compliance: SOC2 ▼]  [⚙️]  [?]      │
+└───────────────────────────────────────────────────────┘
 
-┌─ Tools & Integrations ────────────────┐
-│  Compliance Level: [SOC2 ▼]           │
-├───────────────────────────────────────┤
-│  📋 Calculator         [🔒 Public]    │
-│  📋 PDF Analyzer       [🔒 SOC2]      │
-└───────────────────────────────────────┘
+┌─ Tools & Integrations ────────────────────┐
+│  [Add from Marketplace]  [Clear All]      │
+├───────────────────────────────────────────┤
+│  📋 Calculator         [🔒 Public]        │  ← Hidden in SOC2 session
+│  📋 PDF Analyzer       [🔒 SOC2]          │  ← Shown in SOC2 session
+└───────────────────────────────────────────┘
 
-┌─ Data Sources ────────────────────────┐
-│  Compliance Level: [SOC2 ▼]           │
-│  ☐ Only RAG                           │
-├───────────────────────────────────────┤
-│  📊 Corporate Cars     [🔒 SOC2]      │
+┌─ Data Sources ────────────────────────────┐
+│  ☐ Only RAG                               │
+├───────────────────────────────────────────┤
+│  📊 Corporate Cars     [🔒 SOC2]          │  ← Shown in SOC2 session
 └───────────────────────────────────────┘
 ```
 
