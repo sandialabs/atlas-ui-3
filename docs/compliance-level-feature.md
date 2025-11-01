@@ -3,6 +3,25 @@
 ## Overview
 This feature allows MCP servers and RAG data sources to declare a compliance level (e.g., SOC2, HIPAA, Public). Users can then filter their session to only connect to and use sources matching a specific compliance level. This helps minimize the risk of mixing data from secure and insecure environments.
 
+The feature includes a **rollout control flag** (`FEATURE_COMPLIANCE_LEVELS_ENABLED`) to enable gradual deployment and backend transmission of the compliance filter for future compliance-dependent logic.
+
+## Feature Flag
+
+**Environment Variable:** `FEATURE_COMPLIANCE_LEVELS_ENABLED`
+
+**Default:** `false` (disabled)
+
+**Purpose:** 
+- Enable/disable compliance level filtering across the entire application
+- Allows for controlled rollout to specific environments
+- When disabled, all compliance UI elements are hidden and filtering is bypassed
+
+**To Enable:**
+```bash
+# .env file
+FEATURE_COMPLIANCE_LEVELS_ENABLED=true
+```
+
 ## Implementation
 
 ### Backend Changes
@@ -14,6 +33,17 @@ Added `compliance_level` field to `MCPServerConfig`:
 class MCPServerConfig(BaseModel):
     # ... existing fields ...
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
+```
+
+Added feature flag to `AppSettings`:
+```python
+class AppSettings(BaseSettings):
+    # ... existing fields ...
+    feature_compliance_levels_enabled: bool = Field(
+        False,
+        description="Enable compliance level filtering for MCP servers and data sources",
+        validation_alias=AliasChoices("FEATURE_COMPLIANCE_LEVELS_ENABLED"),
+    )
 ```
 
 #### 2. Configuration Files
@@ -53,9 +83,10 @@ Updated MCP server configurations to include compliance levels:
 ```
 
 #### 3. API Responses (`backend/routes/config_routes.py`)
-The `/api/config` endpoint now includes `compliance_level` in:
-- **tools** array (for MCP tool servers)
-- **prompts** array (for MCP prompt servers)
+The `/api/config` endpoint now includes:
+- `compliance_level` in **tools** array (for MCP tool servers)
+- `compliance_level` in **prompts** array (for MCP prompt servers)
+- `compliance_levels` in **features** object (feature flag status)
 
 **RAG MCP Service** (`backend/domain/rag_mcp_service.py`):
 - Added `complianceLevel` to RAG server discovery responses
@@ -88,9 +119,32 @@ Example API response:
         }
       ]
     }
-  ]
+  ],
+  "features": {
+    "compliance_levels": true
+  }
 }
 ```
+
+#### 4. Backend Message Handling
+The compliance level filter is transmitted to the backend with every chat message:
+
+```javascript
+// Frontend sends to backend
+{
+  type: 'chat',
+  content: '...',
+  compliance_level_filter: 'SOC2',  // Current compliance filter
+  selected_tools: [...],
+  // ... other fields
+}
+```
+
+This enables future backend features:
+- **Compliance-based logging**: Different audit requirements per compliance level
+- **LLM endpoint selection**: Route to compliance-appropriate LLM endpoints
+- **Rate limiting**: Different rate limits per compliance tier
+- **Data retention policies**: Compliance-specific data handling
 
 ### Frontend Changes
 
@@ -104,12 +158,20 @@ const [complianceLevelFilter, setComplianceLevelFilter] = usePersistentState(
 ```
 
 #### 2. Context (`frontend/src/contexts/ChatContext.jsx`)
-Exposed compliance level filter through ChatContext:
+Exposed compliance level filter through ChatContext and sends to backend:
 ```javascript
+// Exposed in context
 {
   complianceLevelFilter,
   setComplianceLevelFilter
 }
+
+// Sent to backend in chat messages
+sendMessage({
+  type: 'chat',
+  compliance_level_filter: selections.complianceLevelFilter,
+  // ... other fields
+})
 ```
 
 #### 3. Marketplace Context (`frontend/src/contexts/MarketplaceContext.jsx`)
@@ -126,21 +188,26 @@ const getComplianceFilteredTools = (complianceLevel) => {
 
 #### 4. UI Components
 
+**All UI components are conditional on the `features.compliance_levels` flag:**
+
 **Header (`frontend/src/components/Header.jsx`)**:
-- **Compliance level indicator**: Always visible when a compliance level is selected
+- **Compliance level indicator**: Always visible when feature enabled and compliance level selected
 - Shows compliance level with Shield icon in a blue badge
 - Includes quick clear button (×) to remove the filter
 - Ensures users always know their current compliance setting
+- Hidden when `FEATURE_COMPLIANCE_LEVELS_ENABLED=false`
 
 **ToolsPanel (`frontend/src/components/ToolsPanel.jsx`)**:
 - **Filter dropdown**: Allows users to select a compliance level (All Levels, Public, SOC2, etc.)
 - **Server badges**: Display compliance level badge on each server entry
 - Uses Shield icon from lucide-react
+- Both dropdown and badges hidden when feature disabled
 
 **RagPanel (`frontend/src/components/RagPanel.jsx`)**:
 - **Filter dropdown**: Same compliance level filtering as ToolsPanel
 - Synced with global compliance level state
 - Helps prevent mixing data from different compliance environments
+- Hidden when feature disabled
 
 #### 5. Auto-Cleanup Logic (`frontend/src/contexts/ChatContext.jsx`)
 
@@ -159,7 +226,7 @@ const setComplianceLevelFilterWithCleanup = useCallback((newLevel) => {
 }, [selections, selectedTools, selectedPrompts, config.tools, config.prompts])
 ```
 
-UI Example:
+UI Example (when feature enabled):
 ```
 ┌─ Header ──────────────────────────────┐
 │  [New Chat]  [🔒 SOC2 ×]  [⚙️]  [?]   │
