@@ -262,7 +262,6 @@ class ChatService:
                 tool_choice_required=tool_choice_required,
                 agent_mode=agent_mode,
                 temperature=temperature,
-                files=kwargs.get("files"),
                 update_callback=update_callback,
                 **kwargs
             )
