@@ -41,7 +41,12 @@ export default function LogViewer() {
         return r.json();
       })
       .then(data => {
-        setEntries(data.entries || []);
+        const newEntries = data.entries || [];
+        // Reset to page 0 if auto-scroll is enabled and new entries were added
+        if (autoScrollEnabled && newEntries.length > entries.length) {
+          setPage(0);
+        }
+        setEntries(newEntries);
         setError(null);
         // After updating entries, scroll to bottom if auto-scroll is enabled and user hasn't scrolled up
         requestAnimationFrame(() => {
@@ -52,7 +57,7 @@ export default function LogViewer() {
       })
       .catch(err => setError(err))
       .finally(() => setLoading(false));
-  }, [levelFilter, moduleFilter, autoScrollEnabled]); // Dependencies for fetchLogs
+  }, [levelFilter, moduleFilter, autoScrollEnabled, entries.length]); // Dependencies for fetchLogs
 
   // Function to clear all logs
   const clearLogs = useCallback(() => {
