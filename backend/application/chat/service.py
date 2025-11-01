@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional, Callable, Awaitable
 from uuid import UUID
 
 from domain.errors import SessionError, ValidationError
-from domain.chat.dtos import ChatRequest, ChatResponse
 from domain.messages.models import (
     ConversationHistory,
     Message,
@@ -36,7 +35,6 @@ from core.auth_utils import create_authorization_manager
 from .policies.tool_authorization import ToolAuthorizationService
 from .preprocessors.prompt_override_service import PromptOverrideService
 from .preprocessors.message_builder import MessageBuilder, build_session_context
-from .events.agent_event_relay import AgentEventRelay
 from .modes.plain import PlainModeRunner
 from .modes.rag import RagModeRunner
 from .modes.tools import ToolsModeRunner

@@ -118,12 +118,12 @@ class ToolsModeRunner:
             tool_manager=self.tool_manager,
             llm_caller=self.llm,
             prompt_provider=self.prompt_provider,
-            update_callback=update_callback or (await self._get_send_json()),
+            update_callback=update_callback or self._get_send_json(),
         )
 
         # Process artifacts if handler provided
         if self.artifact_processor:
-            await self.artifact_processor(session, tool_results, update_callback or (await self._get_send_json()))
+            await self.artifact_processor(session, tool_results, update_callback or self._get_send_json())
 
         # Add final assistant message to history
         assistant_message = Message(
@@ -145,7 +145,7 @@ class ToolsModeRunner:
 
         return notification_utils.create_chat_response(final_response)
     
-    async def _get_send_json(self) -> Optional[UpdateCallback]:
+    def _get_send_json(self) -> Optional[UpdateCallback]:
         """Get send_json callback from event publisher if available."""
         if hasattr(self.event_publisher, 'send_json'):
             return self.event_publisher.send_json

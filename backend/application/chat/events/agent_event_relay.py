@@ -1,7 +1,7 @@
 """Agent event relay - maps AgentEvents to EventPublisher calls."""
 
 import logging
-from typing import Optional, Callable, Awaitable, Any, Dict
+from typing import Optional, Callable, Awaitable, Any
 
 from ..agent.protocols import AgentEvent
 from interfaces.events import EventPublisher

@@ -1,7 +1,7 @@
 """Message builder - constructs messages with history and files manifest."""
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 from domain.sessions.models import Session
 from ..utilities import file_utils

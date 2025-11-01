@@ -4,14 +4,12 @@ import logging
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 
-from domain.sessions.models import Session
-from domain.chat.dtos import ChatRequest, ChatResponse
+from domain.errors import SessionNotFoundError
 from domain.messages.models import Message, MessageRole
 from interfaces.llm import LLMProtocol
 from interfaces.tools import ToolManagerProtocol
 from interfaces.events import EventPublisher
 from interfaces.sessions import SessionRepository
-from modules.config import ConfigManager
 from modules.prompts.prompt_provider import PromptProvider
 
 from .policies.tool_authorization import ToolAuthorizationService
@@ -134,7 +132,7 @@ class ChatOrchestrator:
         # Get session from repository
         session = await self.session_repository.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            raise SessionNotFoundError(f"Session {session_id} not found")
         
         # Add user message to history
         user_message = Message(

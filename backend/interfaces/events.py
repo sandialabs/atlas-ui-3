@@ -21,16 +21,16 @@ class EventPublisher(Protocol):
     ) -> None:
         """
         Publish a chat response message.
-        
+
         Args:
             message: Response text from assistant
             has_pending_tools: Whether tools are still executing
         """
-        ...
+        pass
 
     async def publish_response_complete(self) -> None:
         """Signal that the response is complete."""
-        ...
+        pass
 
     async def publish_agent_update(
         self,
@@ -39,12 +39,12 @@ class EventPublisher(Protocol):
     ) -> None:
         """
         Publish an agent-specific update.
-        
+
         Args:
             update_type: Type of agent update (agent_start, agent_turn_start, etc.)
             **kwargs: Additional data specific to the update type
         """
-        ...
+        pass
 
     async def publish_tool_start(
         self,
@@ -53,12 +53,12 @@ class EventPublisher(Protocol):
     ) -> None:
         """
         Publish notification that a tool is starting.
-        
+
         Args:
             tool_name: Name of the tool being executed
             **kwargs: Additional tool execution metadata
         """
-        ...
+        pass
 
     async def publish_tool_complete(
         self,
@@ -68,13 +68,13 @@ class EventPublisher(Protocol):
     ) -> None:
         """
         Publish notification that a tool has completed.
-        
+
         Args:
             tool_name: Name of the tool that completed
             result: Tool execution result
             **kwargs: Additional tool execution metadata
         """
-        ...
+        pass
 
     async def publish_files_update(
         self,
@@ -82,11 +82,11 @@ class EventPublisher(Protocol):
     ) -> None:
         """
         Publish update about session files.
-        
+
         Args:
             files: Dictionary of file information
         """
-        ...
+        pass
 
     async def publish_canvas_content(
         self,
@@ -96,19 +96,19 @@ class EventPublisher(Protocol):
     ) -> None:
         """
         Publish content for canvas display.
-        
+
         Args:
             content: Content to display in canvas
             content_type: MIME type of content
             **kwargs: Additional canvas metadata
         """
-        ...
+        pass
 
     async def send_json(self, data: Dict[str, Any]) -> None:
         """
         Send raw JSON message.
-        
+
         Args:
             data: Dictionary to send as JSON
         """
-        ...
+        pass

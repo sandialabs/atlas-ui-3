@@ -5,8 +5,7 @@ from typing import Dict, Any, List, Optional, Callable, Awaitable
 
 from domain.sessions.models import Session
 from domain.messages.models import Message, MessageRole, ToolResult
-from interfaces.llm import LLMProtocol
-from interfaces.tools import ToolManagerProtocol
+
 from interfaces.events import EventPublisher
 from ..agent import AgentLoopFactory
 from ..agent.protocols import AgentContext

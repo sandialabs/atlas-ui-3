@@ -1,7 +1,7 @@
 """Tool authorization policy - filters tools based on user access control."""
 
 import logging
-from typing import List, Optional, Callable, Any
+from typing import List, Optional, Any
 
 from core.auth_utils import create_authorization_manager
 
