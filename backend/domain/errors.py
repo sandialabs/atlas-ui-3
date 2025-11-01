@@ -49,3 +49,28 @@ class LLMError(DomainError):
 class ToolError(DomainError):
     """Tool execution error."""
     pass
+
+
+class ToolAuthorizationError(AuthorizationError):
+    """Raised when user is not authorized to use a specific tool."""
+    pass
+
+
+class DataSourcePermissionError(AuthorizationError):
+    """Raised when user lacks permission to access a data source."""
+    pass
+
+
+class LLMConfigurationError(ConfigurationError):
+    """Raised when LLM configuration is invalid or incomplete."""
+    pass
+
+
+class SessionNotFoundError(SessionError):
+    """Raised when a session cannot be found."""
+    pass
+
+
+class PromptOverrideError(DomainError):
+    """Raised when MCP prompt override fails."""
+    pass

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Callable, Awaitable
 from uuid import UUID
 
 from domain.errors import SessionError, ValidationError
+from domain.chat.dtos import ChatRequest, ChatResponse
 from domain.messages.models import (
     ConversationHistory,
     Message,
@@ -17,6 +18,8 @@ from domain.messages.models import (
 )
 from domain.sessions.models import Session
 from interfaces.llm import LLMProtocol, LLMResponse
+from interfaces.events import EventPublisher
+from interfaces.sessions import SessionRepository
 from modules.config import ConfigManager
 from modules.prompts.prompt_provider import PromptProvider
 from interfaces.tools import ToolManagerProtocol
@@ -28,6 +31,14 @@ from .agent import AgentLoopFactory
 from .agent.protocols import AgentContext, AgentEvent
 from core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
 from core.auth_utils import create_authorization_manager
+
+# Import new refactored modules
+from .policies.tool_authorization import ToolAuthorizationService
+from .preprocessors.prompt_override_service import PromptOverrideService
+from .preprocessors.message_builder import MessageBuilder, build_session_context
+from .events.agent_event_relay import AgentEventRelay
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +60,8 @@ class ChatService:
         config_manager: Optional[ConfigManager] = None,
         file_manager: Optional[Any] = None,
         agent_loop_factory: Optional[AgentLoopFactory] = None,
+        event_publisher: Optional[EventPublisher] = None,
+        session_repository: Optional[SessionRepository] = None,
     ):
         """
         Initialize chat service with dependencies.
@@ -60,16 +73,44 @@ class ChatService:
             config_manager: Configuration manager
             file_manager: File manager for S3 operations
             agent_loop_factory: Factory for creating agent loops (optional)
+            event_publisher: Event publisher for UI updates (optional, will create default)
+            session_repository: Session storage repository (optional, will create default)
         """
         self.llm = llm
         self.tool_manager = tool_manager
         self.connection = connection
-        self.sessions: Dict[UUID, Session] = {}
         self.config_manager = config_manager
         self.prompt_provider: Optional[PromptProvider] = (
             PromptProvider(self.config_manager) if self.config_manager else None
         )
         self.file_manager = file_manager
+
+        # Initialize or use provided event publisher
+        if event_publisher is not None:
+            self.event_publisher = event_publisher
+        else:
+            # Create default WebSocket publisher
+            from infrastructure.events.websocket_publisher import WebSocketEventPublisher
+            self.event_publisher = WebSocketEventPublisher(connection=self.connection)
+        
+        # Initialize or use provided session repository
+        if session_repository is not None:
+            self.session_repository = session_repository
+        else:
+            # Create default in-memory repository
+            from infrastructure.sessions.in_memory_repository import InMemorySessionRepository
+            self.session_repository = InMemorySessionRepository()
+        
+        # Legacy sessions dict - deprecated, use session_repository instead
+        # Kept temporarily for backward compatibility
+        self.sessions: Dict[UUID, Session] = {}
+
+        # Initialize refactored services
+        self.tool_authorization = ToolAuthorizationService(tool_manager=self.tool_manager)
+        self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
+        self.message_builder = MessageBuilder()
+
+
 
         # Agent loop factory - create if not provided
         if agent_loop_factory is not None:
@@ -153,22 +194,6 @@ class ChatService:
         session.history.add_message(user_message)
         session.update_timestamp()
 
-        # # Prompt-injection risk check on user input (observe + log medium/high)
-        # try:
-        #     pi = calculate_prompt_injection_risk(content or "", mode="general")
-        #     if pi.get("risk_level") in ("medium", "high"):
-        #         log_high_risk_event(
-        #             source="user_input",
-        #             user=user_email,
-        #             content=content or "",
-        #             score=int(pi.get("score", 0)),
-        #             risk_level=str(pi.get("risk_level")),
-        #             triggers=list(pi.get("triggers", [])),
-        #             extra={"session_id": str(session_id)},
-        #         )
-        # except Exception:
-        #     logger.debug("Prompt risk check failed (user input)", exc_info=True)
-        
         # Handle user file ingestion using utilities
         session.context = await file_utils.handle_session_files(
             session_context=session.context,
@@ -179,55 +204,17 @@ class ChatService:
         )
 
         try:
-            # Get conversation history and add files manifest
-            messages = session.history.get_messages_for_llm()
+            # Build messages with history and files manifest
+            messages = await self.message_builder.build_messages(
+                session=session,
+                include_files_manifest=True
+            )
 
-            # Inject MCP-provided system prompt override if any selected prompt is present.
-            # We only apply the first valid prompt found in the provided list and prepend it
-            # as the first message with role "system".
-            try:
-                if selected_prompts and self.tool_manager:
-                    # Iterate in order; when found, fetch prompt content and inject
-                    for key in selected_prompts:
-                        if not isinstance(key, str) or "_" not in key:
-                            continue
-                        server, prompt_name = key.split("_", 1)
-                        # Retrieve prompt from MCP
-                        try:
-                            prompt_obj = await self.tool_manager.get_prompt(server, prompt_name)
-                            # Attempt to extract text content from FastMCP PromptMessage
-                            prompt_text = None
-                            if isinstance(prompt_obj, str):
-                                prompt_text = prompt_obj
-                            else:
-                                # FastMCP PromptMessage-like: may have 'content' list with text entries
-                                # Try common shapes safely.
-                                if hasattr(prompt_obj, "content"):
-                                    content_field = getattr(prompt_obj, "content")
-                                    # content could be list of objects with 'text'
-                                    if isinstance(content_field, list) and content_field:
-                                        first = content_field[0]
-                                        if hasattr(first, "text") and isinstance(first.text, str):
-                                            prompt_text = first.text
-                                # Fallback: string dump
-                            if not prompt_text:
-                                prompt_text = str(prompt_obj)
-
-                            if prompt_text:
-                                # Prepend as system message override
-                                messages = [{"role": "system", "content": prompt_text}] + messages
-                                logger.info(
-                                    "Applied MCP system prompt override (len=%d)",
-                                    len(prompt_text),
-                                )
-                                break  # apply only one
-                        except Exception:
-                            logger.debug("Failed retrieving MCP prompt %s", key, exc_info=True)
-            except Exception:
-                logger.debug("Prompt override injection skipped due to non-fatal error", exc_info=True)
-            files_manifest = file_utils.build_files_manifest(session.context)
-            if files_manifest:
-                messages.append(files_manifest)
+            # Apply MCP prompt override if selected prompts are provided
+            messages = await self.prompt_override.apply_prompt_override(
+                messages=messages,
+                selected_prompts=selected_prompts
+            )
             
             # Route to appropriate execution mode
             if agent_mode:
@@ -244,44 +231,11 @@ class ChatService:
                     agent_loop_strategy=kwargs.get("agent_loop_strategy"),
                 )
             elif selected_tools and not only_rag:
-                # Enforce MCP tool ACLs: filter tools to authorized servers only
-                if self.tool_manager:
-                    try:
-                        user = user_email or ""
-                        # Prefer tool_manager's own authorization method if available
-                        if hasattr(self.tool_manager, "get_authorized_servers"):
-                            authorized_servers = self.tool_manager.get_authorized_servers(user, None)  # type: ignore[attr-defined]
-                        else:
-                            auth_mgr = create_authorization_manager()
-                            servers_config = getattr(self.tool_manager, "servers_config", {})
-                            authorized_servers = auth_mgr.filter_authorized_servers(
-                                user,
-                                servers_config,
-                                getattr(self.tool_manager, "get_server_groups", lambda s: []),
-                            )
-                        # logger.info(f"DEBUG ACL: user={user}, authorized_servers={authorized_servers}, selected_tools_before_filter={selected_tools}")
-                        # Filter tools by server prefix
-                        filtered_tools: List[str] = []
-                        for t in selected_tools or []:
-                            if t == "canvas_canvas":
-                                filtered_tools.append(t)
-                                # logger.info(f"DEBUG ACL: tool={t} -> ALLOWED (canvas special case)")
-                                continue
-                            if isinstance(t, str) and "_" in t:
-                                # Match against authorized servers by checking if tool name starts with server_
-                                # This handles server names that contain underscores (e.g., "pptx_generator")
-                                matched_server = None
-                                for auth_server in authorized_servers:
-                                    if t.startswith(f"{auth_server}_"):
-                                        matched_server = auth_server
-                                        break
-                                # logger.info(f"DEBUG ACL: tool={t} -> matched_server={matched_server}, authorized={matched_server is not None}")
-                                if matched_server:
-                                    filtered_tools.append(t)
-                        # logger.info(f"DEBUG ACL: filtered_tools={filtered_tools}")
-                        selected_tools = filtered_tools
-                    except Exception:
-                        logger.debug("Tool ACL filtering failed; proceeding with original selection", exc_info=True)
+                # Filter tools based on user authorization
+                selected_tools = await self.tool_authorization.filter_authorized_tools(
+                    selected_tools=selected_tools,
+                    user_email=user_email
+                )
                 response = await self._handle_tools_mode_with_utilities(
                     session, model, messages, selected_tools, selected_data_sources,
                     user_email, tool_choice_required, update_callback, temperature=temperature
@@ -474,7 +428,7 @@ class ChatService:
             return notification_utils.create_chat_response(content)
 
         # Execute tool workflow
-        session_context = self._build_session_context(session)
+        session_context = build_session_context(session)
         final_response, tool_results = await tool_utils.execute_tools_workflow(
             llm_response=llm_response,
             messages=messages,
@@ -514,96 +468,6 @@ class ChatService:
             await notification_utils.notify_response_complete(self.connection.send_json)
 
         return notification_utils.create_chat_response(final_response)
-
-    # async def _handle_tools_mode_with_utilities(
-    #     self,
-    #     session: Session,
-    #     model: str,
-    #     messages: List[Dict[str, Any]],
-    #     selected_tools: List[str],
-    #     selected_data_sources: Optional[List[str]] = None,
-    #     user_email: Optional[str] = None,
-    #     tool_choice_required: bool = False,
-    #     update_callback: Optional[UpdateCallback] = None,
-    # ) -> Dict[str, Any]:
-    #     """Handle tools mode using stateless utilities with streaming updates.
-
-    #     - Retrieves tool schemas
-    #     - Calls LLM with tools (and optional RAG)
-    #     - Executes tool calls with UI streaming
-    #     - Optionally synthesizes final answer
-    #     - Updates session context with produced artifacts
-    #     """
-    #     # Resolve schema for selected tools
-    #     tools_schema = await error_utils.safe_get_tools_schema(self.tool_manager, selected_tools)
-
-    #     # Call LLM with tools (and RAG if provided)
-    #     llm_response = await error_utils.safe_call_llm_with_tools(
-    #         llm_caller=self.llm,
-    #         model=model,
-    #         messages=messages,
-    #         tools_schema=tools_schema,
-    #         data_sources=selected_data_sources,
-    #         user_email=user_email,
-    #         tool_choice=("required" if tool_choice_required else "auto"),
-    #     )
-
-    #     # If no tool calls, treat as plain response
-    #     if not llm_response or not llm_response.has_tool_calls():
-    #         content = llm_response.content if llm_response else ""
-    #         assistant_message = Message(role=MessageRole.ASSISTANT, content=content)
-    #         session.history.add_message(assistant_message)
-    #         # Emit response to UI
-    #         if self.connection:
-    #             await notification_utils.notify_chat_response(
-    #                 message=content,
-    #                 has_pending_tools=False,
-    #                 update_callback=self.connection.send_json,
-    #             )
-    #             await notification_utils.notify_response_complete(self.connection.send_json)
-    #         return notification_utils.create_chat_response(content)
-
-    #     # Execute tool workflow with streaming
-    #     session_context = self._build_session_context(session)
-    #     final_response, tool_results = await tool_utils.execute_tools_workflow(
-    #         llm_response=llm_response,
-    #         messages=messages,
-    #         model=model,
-    #         session_context=session_context,
-    #         tool_manager=self.tool_manager,
-    #         llm_caller=self.llm,
-    #         prompt_provider=self.prompt_provider,
-    #         update_callback=update_callback or (self.connection.send_json if self.connection else None),
-    #     )
-
-    #     # Ingest artifacts and update session context
-    #     await self._update_session_from_tool_results(
-    #         session,
-    #         tool_results,
-    #         update_callback or (self.connection.send_json if self.connection else None),
-    #     )
-
-    #     # Add assistant message to history with metadata
-    #     assistant_message = Message(
-    #         role=MessageRole.ASSISTANT,
-    #         content=final_response,
-    #         metadata={
-    #             "tools": selected_tools,
-    #             **({"data_sources": selected_data_sources} if selected_data_sources else {}),
-    #         },
-    #     )
-    #     session.history.add_message(assistant_message)
-
-    #     # Emit final response
-    #     if self.connection:
-    #         await notification_utils.notify_chat_response(
-    #             message=final_response,
-    #             has_pending_tools=False,
-    #             update_callback=self.connection.send_json,
-    #         )
-    #         await notification_utils.notify_response_complete(self.connection.send_json)
-
-    #     return notification_utils.create_chat_response(final_response)
 
     async def _handle_rag_mode(
         self,
@@ -685,40 +549,19 @@ class ChatService:
             history=session.history,
         )
 
-        # Event handler: map AgentEvents to existing notification_utils APIs
-        async def handle_event(evt: AgentEvent) -> None:
-            et = evt.type
-            p = evt.payload or {}
-            # UI notifications (guard on connection)
-            if et == "agent_start" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_start", connection=self.connection, max_steps=p.get("max_steps"), strategy=p.get("strategy"))
-            elif et == "agent_turn_start" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_turn_start", connection=self.connection, step=p.get("step"))
-            elif et == "agent_reason" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_reason", connection=self.connection, message=p.get("message"), step=p.get("step"))
-            elif et == "agent_request_input" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_request_input", connection=self.connection, question=p.get("question"), step=p.get("step"))
-            elif et == "agent_tool_start" and self.connection:
-                await notification_utils.notify_agent_update(update_type="tool_start", connection=self.connection, tool=p.get("tool"))
-            elif et == "agent_tool_complete" and self.connection:
-                await notification_utils.notify_agent_update(update_type="tool_complete", connection=self.connection, tool=p.get("tool"), result=p.get("result"))
+        # Artifact processor for handling tool results
+        async def process_artifacts(results):
+            await self._update_session_from_tool_results(
+                session,
+                results,
+                (self.connection.send_json if self.connection else None),
+            )
 
-            # Artifact ingestion should run regardless of connection
-            if et == "agent_tool_results":
-                # Ingest artifacts produced by tools and emit file/canvas updates
-                results = p.get("results") or []
-                if results:
-                    await self._update_session_from_tool_results(
-                        session,
-                        results,
-                        (self.connection.send_json if self.connection else None),
-                    )
-            elif et == "agent_observe" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_observe", connection=self.connection, message=p.get("message"), step=p.get("step"))
-            elif et == "agent_completion" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_completion", connection=self.connection, steps=p.get("steps"))
-            elif et == "agent_error" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_error", connection=self.connection, message=p.get("message"))
+        # Create event relay to map AgentEvents to UI updates
+        event_relay = AgentEventRelay(
+            event_publisher=self.event_publisher,
+            artifact_processor=process_artifacts,
+        )
 
         # Run the loop
         result = await agent_loop.run(
@@ -729,7 +572,7 @@ class ChatService:
             data_sources=selected_data_sources,
             max_steps=max_steps,
             temperature=temperature,
-            event_handler=handle_event,
+            event_handler=event_relay.handle_event,
         )
 
         # Append final message
@@ -818,7 +661,7 @@ class ChatService:
         final_response: Optional[str] = None
         last_observation: Optional[str] = None
         user_question = _latest_user_question(messages)
-        files_manifest_obj = file_utils.build_files_manifest(self._build_session_context(session))
+        files_manifest_obj = file_utils.build_files_manifest(build_session_context(session))
         files_manifest_text = files_manifest_obj.get("content") if files_manifest_obj else None
 
         while steps < max_steps:
@@ -947,9 +790,9 @@ class ChatService:
             tool_results: List[ToolResult] = []
             if tools_schema:
                 # Request LLM to make tool calls using current conversation
-                if data_sources and session.user_email:
+                if selected_data_sources and session.user_email:
                     llm_response = await self.llm.call_with_rag_and_tools(
-                        model, messages, data_sources, tools_schema, session.user_email, "auto", temperature=temperature
+                        model, messages, selected_data_sources, tools_schema, session.user_email, "auto", temperature=temperature
                     )
                 else:
                     llm_response = await self.llm.call_with_tools(
@@ -957,7 +800,7 @@ class ChatService:
                     )
 
                 if llm_response.has_tool_calls():
-                    session_context = self._build_session_context(session)
+                    session_context = build_session_context(session)
                     # Enforce single-tool execution per act step
                     first_call = (llm_response.tool_calls or [None])[0]
                     if first_call is None:
@@ -1152,15 +995,6 @@ class ChatService:
                 "error": str(e)
             }
     
-    def _build_session_context(self, session: Session) -> Dict[str, Any]:
-        """Build session context for utilities."""
-        return {
-            "session_id": session.id,
-            "user_email": session.user_email,
-            "files": session.context.get("files", {}),
-            **session.context
-        }
-
     async def _update_session_from_tool_results(
         self,
         session: Session,
@@ -1176,7 +1010,7 @@ class ChatService:
             return
 
         # Build a working session context including user email
-        session_context: Dict[str, Any] = self._build_session_context(session)
+        session_context: Dict[str, Any] = build_session_context(session)
 
         try:
             for result in tool_results:
