@@ -4,7 +4,7 @@ import logging
 from typing import Optional, Callable, Awaitable, Any, Dict
 
 from ..agent.protocols import AgentEvent
-from .publisher import EventPublisher
+from interfaces.events import EventPublisher
 
 logger = logging.getLogger(__name__)
 

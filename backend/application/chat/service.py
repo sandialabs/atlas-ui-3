@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Callable, Awaitable
 from uuid import UUID
 
 from domain.errors import SessionError, ValidationError
+from domain.chat.dtos import ChatRequest, ChatResponse
 from domain.messages.models import (
     ConversationHistory,
     Message,
@@ -17,6 +18,8 @@ from domain.messages.models import (
 )
 from domain.sessions.models import Session
 from interfaces.llm import LLMProtocol, LLMResponse
+from interfaces.events import EventPublisher
+from interfaces.sessions import SessionRepository
 from modules.config import ConfigManager
 from modules.prompts.prompt_provider import PromptProvider
 from interfaces.tools import ToolManagerProtocol
@@ -57,6 +60,8 @@ class ChatService:
         config_manager: Optional[ConfigManager] = None,
         file_manager: Optional[Any] = None,
         agent_loop_factory: Optional[AgentLoopFactory] = None,
+        event_publisher: Optional[EventPublisher] = None,
+        session_repository: Optional[SessionRepository] = None,
     ):
         """
         Initialize chat service with dependencies.
@@ -68,25 +73,43 @@ class ChatService:
             config_manager: Configuration manager
             file_manager: File manager for S3 operations
             agent_loop_factory: Factory for creating agent loops (optional)
+            event_publisher: Event publisher for UI updates (optional, will create default)
+            session_repository: Session storage repository (optional, will create default)
         """
         self.llm = llm
         self.tool_manager = tool_manager
         self.connection = connection
-        self.sessions: Dict[UUID, Session] = {}
         self.config_manager = config_manager
         self.prompt_provider: Optional[PromptProvider] = (
             PromptProvider(self.config_manager) if self.config_manager else None
         )
         self.file_manager = file_manager
 
+        # Initialize or use provided event publisher
+        if event_publisher is not None:
+            self.event_publisher = event_publisher
+        else:
+            # Create default WebSocket publisher
+            from infrastructure.events.websocket_publisher import WebSocketEventPublisher
+            self.event_publisher = WebSocketEventPublisher(connection=self.connection)
+        
+        # Initialize or use provided session repository
+        if session_repository is not None:
+            self.session_repository = session_repository
+        else:
+            # Create default in-memory repository
+            from infrastructure.sessions.in_memory_repository import InMemorySessionRepository
+            self.session_repository = InMemorySessionRepository()
+        
+        # Legacy sessions dict - deprecated, use session_repository instead
+        # Kept temporarily for backward compatibility
+        self.sessions: Dict[UUID, Session] = {}
+
         # Initialize refactored services
         self.tool_authorization = ToolAuthorizationService(tool_manager=self.tool_manager)
         self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
         self.message_builder = MessageBuilder()
-        
-        # Import here to avoid circular dependency
-        from infrastructure.events.websocket_publisher import WebSocketEventPublisher
-        self.event_publisher = WebSocketEventPublisher(connection=self.connection)
+
 
 
         # Agent loop factory - create if not provided
