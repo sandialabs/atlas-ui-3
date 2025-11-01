@@ -1,44 +1,44 @@
 {
-  "version": "1.0",
-  "description": "Defines compliance level types and their hierarchical relationships",
+  "version": "2.0",
+  "description": "Defines compliance level types and their allowed combinations",
   "levels": [
     {
       "name": "Public",
-      "level": 0,
       "description": "Publicly accessible data, no restrictions",
-      "aliases": []
+      "aliases": [],
+      "allowed_with": ["Public"]
     },
     {
       "name": "External",
-      "level": 1,
       "description": "External services with basic enterprise security",
-      "aliases": []
+      "aliases": [],
+      "allowed_with": ["External"]
     },
     {
       "name": "Internal",
-      "level": 2,
       "description": "Internal systems, can handle company IP information",
-      "aliases": []
+      "aliases": [],
+      "allowed_with": ["Internal"]
     },
     {
       "name": "SOC2",
-      "level": 3,
       "description": "SOC 2 Type II compliant systems",
-      "aliases": ["SOC-2", "SOC 2"]
+      "aliases": ["SOC-2", "SOC 2"],
+      "allowed_with": ["SOC2"]
     },
     {
       "name": "HIPAA",
-      "level": 4,
       "description": "HIPAA compliant systems for healthcare data",
-      "aliases": ["HIPAA-Compliant"]
+      "aliases": ["HIPAA-Compliant"],
+      "allowed_with": ["HIPAA", "SOC2"]
     },
     {
       "name": "FedRAMP",
-      "level": 5,
       "description": "FedRAMP authorized systems for government data",
-      "aliases": ["FedRAMP-Moderate", "FedRAMP-High"]
+      "aliases": ["FedRAMP-Moderate", "FedRAMP-High"],
+      "allowed_with": ["FedRAMP", "SOC2"]
     }
   ],
-  "hierarchy_mode": "inclusive",
-  "hierarchy_description": "Higher levels can access lower levels. E.g., SOC2 (level 3) can use External (level 1) and Public (level 0) resources."
+  "mode": "explicit_allowlist",
+  "mode_description": "Each compliance level explicitly defines which other levels can be used in the same session. For example, HIPAA can use HIPAA and SOC2 resources, but not Public or External to prevent data leakage."
 }

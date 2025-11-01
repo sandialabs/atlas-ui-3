@@ -2,7 +2,7 @@
 Compliance level management and validation.
 
 Loads compliance level definitions from compliance-levels.json and provides
-validation and hierarchy checking.
+validation and allowlist checking.
 """
 
 import json
@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 class ComplianceLevel:
     """Represents a single compliance level definition."""
     name: str
-    level: int
     description: str
     aliases: List[str]
+    allowed_with: List[str]  # List of compliance levels that can be used together
 
 
 class ComplianceLevelManager:
@@ -33,7 +33,7 @@ class ComplianceLevelManager:
             config_path: Path to compliance-levels.json. If None, uses default location.
         """
         self.levels: Dict[str, ComplianceLevel] = {}
-        self.hierarchy_mode: str = "inclusive"
+        self.mode: str = "explicit_allowlist"
         self._name_to_canonical: Dict[str, str] = {}  # Maps aliases to canonical names
         
         if config_path is None:
@@ -64,14 +64,14 @@ class ComplianceLevelManager:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
             
-            self.hierarchy_mode = config.get('hierarchy_mode', 'inclusive')
+            self.mode = config.get('mode', 'explicit_allowlist')
             
             for level_data in config.get('levels', []):
                 level = ComplianceLevel(
                     name=level_data['name'],
-                    level=level_data['level'],
                     description=level_data.get('description', ''),
-                    aliases=level_data.get('aliases', [])
+                    aliases=level_data.get('aliases', []),
+                    allowed_with=level_data.get('allowed_with', [level_data['name']])
                 )
                 self.levels[level.name] = level
                 
@@ -139,9 +139,9 @@ class ComplianceLevelManager:
     def is_accessible(self, user_level: Optional[str], resource_level: Optional[str]) -> bool:
         """Check if a resource at resource_level is accessible given user_level.
         
-        In inclusive hierarchy mode:
-        - Higher levels can access lower levels
-        - Same level can access same level
+        In explicit allowlist mode:
+        - Each level defines which other levels can be used together
+        - For example, HIPAA might allow HIPAA and SOC2, but not Public
         - None (unset) is accessible by all and can access all
         
         Args:
@@ -163,19 +163,14 @@ class ComplianceLevelManager:
         if not user_canonical or not resource_canonical:
             return True
         
-        # Get level objects
+        # Get level object for user
         user_level_obj = self.levels.get(user_canonical)
-        resource_level_obj = self.levels.get(resource_canonical)
         
-        if not user_level_obj or not resource_level_obj:
+        if not user_level_obj:
             return True
         
-        # In inclusive mode, higher or equal levels can access lower levels
-        if self.hierarchy_mode == "inclusive":
-            return user_level_obj.level >= resource_level_obj.level
-        
-        # Exact match mode
-        return user_canonical == resource_canonical
+        # Check if resource_level is in the user's allowed_with list
+        return resource_canonical in user_level_obj.allowed_with
     
     def get_accessible_levels(self, user_level: Optional[str]) -> Set[str]:
         """Get all compliance levels accessible to a user.
@@ -196,28 +191,16 @@ class ComplianceLevelManager:
         
         user_level_obj = self.levels[user_canonical]
         
-        if self.hierarchy_mode == "inclusive":
-            # Return all levels at or below user's level
-            return {
-                name for name, level_obj in self.levels.items()
-                if level_obj.level <= user_level_obj.level
-            }
-        else:
-            # Exact match mode - only user's level
-            return {user_canonical}
+        # Return the allowed_with list for this level
+        return set(user_level_obj.allowed_with)
     
     def get_all_levels(self) -> List[str]:
         """Get all defined compliance level names (canonical).
         
         Returns:
-            List of compliance level names sorted by level (lowest to highest)
+            List of compliance level names in definition order
         """
-        return [
-            name for name, _ in sorted(
-                self.levels.items(),
-                key=lambda x: x[1].level
-            )
-        ]
+        return list(self.levels.keys())
 
 
 # Global instance

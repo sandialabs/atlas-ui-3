@@ -7,7 +7,7 @@ export const MarketplaceProvider = ({ children }) => {
   const { tools, prompts, features } = useChat()
   const [selectedServers, setSelectedServers] = useState(new Set())
   const [complianceLevels, setComplianceLevels] = useState([])
-  const [hierarchyMode, setHierarchyMode] = useState('inclusive')
+  const [complianceMode, setComplianceMode] = useState('explicit_allowlist')
   const initializedRef = useRef(false)
   const knownServersRef = useRef(new Set())
 
@@ -19,7 +19,7 @@ export const MarketplaceProvider = ({ children }) => {
       .then(res => res.json())
       .then(data => {
         setComplianceLevels(data.levels || [])
-        setHierarchyMode(data.hierarchy_mode || 'inclusive')
+        setComplianceMode(data.mode || 'explicit_allowlist')
       })
       .catch(err => console.error('Failed to load compliance levels:', err))
   }, [features])
@@ -146,25 +146,19 @@ export const MarketplaceProvider = ({ children }) => {
     return prompts.filter(prompt => selectedServers.has(prompt.server))
   }
   
-  // Check if a resource is accessible given the user's compliance level and hierarchy
+  // Check if a resource is accessible given the user's compliance level using allowlist
   const isComplianceAccessible = (userLevel, resourceLevel) => {
     // If either is not set, resource is accessible (backward compatibility)
     if (!userLevel || !resourceLevel) return true
     
-    // Find level objects
+    // Find user's compliance level object
     const userLevelObj = complianceLevels.find(l => l.name === userLevel)
-    const resourceLevelObj = complianceLevels.find(l => l.name === resourceLevel)
     
     // If we don't have level info, be permissive
-    if (!userLevelObj || !resourceLevelObj) return true
+    if (!userLevelObj) return true
     
-    // In inclusive mode, higher or equal levels can access lower levels
-    if (hierarchyMode === 'inclusive') {
-      return userLevelObj.level >= resourceLevelObj.level
-    }
-    
-    // Exact match mode
-    return userLevel === resourceLevel
+    // Check if resource level is in the user's allowed_with list
+    return userLevelObj.allowed_with && userLevelObj.allowed_with.includes(resourceLevel)
   }
   
   const getComplianceFilteredTools = (complianceLevel) => {
@@ -195,7 +189,7 @@ export const MarketplaceProvider = ({ children }) => {
     getComplianceFilteredTools,
     getComplianceFilteredPrompts,
     complianceLevels,
-    hierarchyMode,
+    complianceMode,
     isComplianceAccessible
   }
 

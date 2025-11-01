@@ -225,7 +225,7 @@ async def get_config(current_user: str = Depends(get_current_user)):
 
 @router.get("/compliance-levels")
 async def get_compliance_levels(current_user: str = Depends(get_current_user)):
-    """Get compliance level definitions and hierarchy."""
+    """Get compliance level definitions and allowlist."""
     try:
         from core.compliance import get_compliance_manager
         compliance_mgr = get_compliance_manager()
@@ -235,24 +235,21 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
         for name, level_obj in compliance_mgr.levels.items():
             levels.append({
                 "name": name,
-                "level": level_obj.level,
                 "description": level_obj.description,
-                "aliases": level_obj.aliases
+                "aliases": level_obj.aliases,
+                "allowed_with": level_obj.allowed_with
             })
-        
-        # Sort by level
-        levels.sort(key=lambda x: x['level'])
         
         return {
             "levels": levels,
-            "hierarchy_mode": compliance_mgr.hierarchy_mode,
+            "mode": compliance_mgr.mode,
             "all_level_names": compliance_mgr.get_all_levels()
         }
     except Exception as e:
         logger.error(f"Error getting compliance levels: {e}", exc_info=True)
         return {
             "levels": [],
-            "hierarchy_mode": "inclusive",
+            "mode": "explicit_allowlist",
             "all_level_names": []
         }
 
