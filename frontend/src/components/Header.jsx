@@ -19,7 +19,9 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
     messages,
     clearChat,
     features,
-    isInAdminGroup
+    isInAdminGroup,
+    complianceLevelFilter,
+    setComplianceLevelFilter
   } = useChat()
   const { connectionStatus, isConnected } = useWS()
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -175,6 +177,21 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
             </div>
           )}
         </div>
+
+        {/* Compliance Level Indicator */}
+        {complianceLevelFilter && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium border border-blue-500">
+            <Shield className="w-4 h-4" />
+            <span>{complianceLevelFilter}</span>
+            <button
+              onClick={() => setComplianceLevelFilter(null)}
+              className="ml-1 hover:bg-blue-700 rounded px-1"
+              title="Clear compliance filter"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* Agent Mode Toggle Button */}
         {agentModeAvailable && (

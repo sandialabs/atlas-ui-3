@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X, Shield } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 
 const RagPanel = ({ isOpen, onClose }) => {
@@ -7,8 +7,23 @@ const RagPanel = ({ isOpen, onClose }) => {
     selectedDataSources, 
     toggleDataSource, 
     onlyRag, 
-    setOnlyRag 
+    setOnlyRag,
+    complianceLevelFilter,
+    setComplianceLevelFilter,
+    tools,
+    prompts
   } = useChat()
+
+  // Extract unique compliance levels from all available tools, prompts, and data sources
+  const availableComplianceLevels = new Set()
+  tools.forEach(tool => {
+    if (tool.compliance_level) availableComplianceLevels.add(tool.compliance_level)
+  })
+  prompts.forEach(prompt => {
+    if (prompt.compliance_level) availableComplianceLevels.add(prompt.compliance_level)
+  })
+  // TODO: When rag_servers data is available in context, extract compliance levels from data sources too
+  const complianceLevels = Array.from(availableComplianceLevels).sort()
 
   return (
     <>
@@ -39,7 +54,7 @@ const RagPanel = ({ isOpen, onClose }) => {
         </div>
 
         {/* RAG Controls */}
-        <div className="p-4 border-b border-gray-700">
+        <div className="p-4 border-b border-gray-700 space-y-3">
           <label className="flex items-center gap-3 cursor-pointer">
             <input
               type="checkbox"
@@ -49,6 +64,28 @@ const RagPanel = ({ isOpen, onClose }) => {
             />
             <span className="text-sm text-gray-200 font-medium">Only RAG</span>
           </label>
+
+          {/* Compliance Level Filter */}
+          {complianceLevels.length > 0 && (
+            <div className="flex items-center justify-between px-3 py-2 bg-gray-700 rounded-lg">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <Shield className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-white text-sm font-medium">Compliance Level</h3>
+                </div>
+              </div>
+              <select
+                value={complianceLevelFilter || ''}
+                onChange={(e) => setComplianceLevelFilter(e.target.value || null)}
+                className="px-2 py-1 bg-gray-600 border border-gray-500 rounded text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 flex-shrink-0 ml-2"
+              >
+                <option value="">All Levels</option>
+                {complianceLevels.map(level => (
+                  <option key={level} value={level}>{level}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Data Sources List */}
