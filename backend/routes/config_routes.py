@@ -185,10 +185,21 @@ async def get_config(current_user: str = Depends(get_current_user)):
         f"User {current_user} has access to {len(authorized_servers)} servers: {authorized_servers}\n"
         f"Returning {len(tools_info)} server tool groups to frontend for user {current_user}"
     )
+    # Build models list with compliance levels
+    models_list = []
+    for model_name, model_config in llm_config.models.items():
+        model_info = {
+            "name": model_name,
+            "description": model_config.description,
+        }
+        # Include compliance_level if feature is enabled
+        if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
+            model_info["compliance_level"] = model_config.compliance_level
+        models_list.append(model_info)
     
     return {
         "app_name": app_settings.app_name,
-        "models": list(llm_config.models.keys()),
+        "models": models_list,
         "tools": tools_info,  # Only authorized servers are included
         "prompts": prompts_info,  # Available prompts from authorized servers
         "data_sources": rag_data_sources,  # RAG data sources for the user

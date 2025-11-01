@@ -31,6 +31,8 @@ class ModelConfig(BaseModel):
     temperature: Optional[float] = 0.7
     # Optional extra HTTP headers (e.g. for providers like OpenRouter)
     extra_headers: Optional[Dict[str, str]] = None
+    # Compliance/security level (e.g., "External", "Internal", "Public")
+    compliance_level: Optional[str] = None
 
 
 class LLMConfig(BaseModel):

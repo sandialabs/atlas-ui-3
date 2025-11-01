@@ -110,19 +110,42 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
           </button>
           
           {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1 w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50">
+            <div className="absolute right-0 top-full mt-1 w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
               {models.length === 0 ? (
                 <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
               ) : (
-                models.map(model => (
-                  <button
-                    key={model}
-                    onClick={() => handleModelSelect(model)}
-                    className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg"
-                  >
-                    {model}
-                  </button>
-                ))
+                (() => {
+                  // Filter models by compliance level if feature is enabled
+                  const complianceEnabled = features?.compliance_levels
+                  const filteredModels = complianceEnabled && complianceLevelFilter
+                    ? models.filter(m => {
+                        const model = typeof m === 'string' ? { name: m } : m
+                        // Include models without compliance_level (backward compatible)
+                        if (!model.compliance_level) return true
+                        return model.compliance_level === complianceLevelFilter
+                      })
+                    : models
+                  
+                  return filteredModels.map(m => {
+                    const model = typeof m === 'string' ? { name: m } : m
+                    const modelName = model.name || m
+                    return (
+                      <button
+                        key={modelName}
+                        onClick={() => handleModelSelect(modelName)}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg flex items-center justify-between gap-2"
+                      >
+                        <span className="truncate">{modelName}</span>
+                        {complianceEnabled && model.compliance_level && (
+                          <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1 flex-shrink-0">
+                            <Shield className="w-3 h-3" />
+                            {model.compliance_level}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })
+                })()
               )}
             </div>
           )}
