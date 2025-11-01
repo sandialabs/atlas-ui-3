@@ -43,8 +43,18 @@
     "description": "Simple test tool that accepts a file transfer and returns the file size in bytes",
     "author": "Chat UI Team",
     "short_description": "File transfer test tool",
-    "help_email": "support@chatui.example.com",
-    "compliance_level": "Public"
+    "help_email": "support@chatui.example.com"
+  }, 
+   "prompts": {
+    "command": ["python", "mcp/prompts/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Specialized system prompts for AI behavior modification",
+    "author": "Chat UI Team",
+    "short_description": "AI behavior prompts",
+    "help_email": "support@chatui.example.com", 
+      "compliance_level": "Public"
   }
 
 }
