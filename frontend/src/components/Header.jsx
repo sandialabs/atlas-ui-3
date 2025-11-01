@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
+import { useMarketplace } from '../contexts/MarketplaceContext'
 import { Menu, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings } from 'lucide-react'
 
 const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
@@ -23,6 +24,7 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
     complianceLevelFilter,
     setComplianceLevelFilter
   } = useChat()
+  const { isComplianceAccessible } = useMarketplace()
   const { connectionStatus, isConnected } = useWS()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
@@ -122,7 +124,8 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
                         const model = typeof m === 'string' ? { name: m } : m
                         // Include models without compliance_level (backward compatible)
                         if (!model.compliance_level) return true
-                        return model.compliance_level === complianceLevelFilter
+                        // Use hierarchical filtering
+                        return isComplianceAccessible(complianceLevelFilter, model.compliance_level)
                       })
                     : models
                   

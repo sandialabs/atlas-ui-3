@@ -4,10 +4,25 @@ import { useChat } from './ChatContext'
 const MarketplaceContext = createContext()
 
 export const MarketplaceProvider = ({ children }) => {
-  const { tools, prompts } = useChat()
+  const { tools, prompts, features } = useChat()
   const [selectedServers, setSelectedServers] = useState(new Set())
+  const [complianceLevels, setComplianceLevels] = useState([])
+  const [hierarchyMode, setHierarchyMode] = useState('inclusive')
   const initializedRef = useRef(false)
   const knownServersRef = useRef(new Set())
+
+  // Load compliance levels from API
+  useEffect(() => {
+    if (!features?.compliance_levels) return
+    
+    fetch('/api/compliance-levels')
+      .then(res => res.json())
+      .then(data => {
+        setComplianceLevels(data.levels || [])
+        setHierarchyMode(data.hierarchy_mode || 'inclusive')
+      })
+      .catch(err => console.error('Failed to load compliance levels:', err))
+  }, [features])
 
   // Load selected servers from localStorage once on mount
   useEffect(() => {
@@ -131,12 +146,33 @@ export const MarketplaceProvider = ({ children }) => {
     return prompts.filter(prompt => selectedServers.has(prompt.server))
   }
   
+  // Check if a resource is accessible given the user's compliance level and hierarchy
+  const isComplianceAccessible = (userLevel, resourceLevel) => {
+    // If either is not set, resource is accessible (backward compatibility)
+    if (!userLevel || !resourceLevel) return true
+    
+    // Find level objects
+    const userLevelObj = complianceLevels.find(l => l.name === userLevel)
+    const resourceLevelObj = complianceLevels.find(l => l.name === resourceLevel)
+    
+    // If we don't have level info, be permissive
+    if (!userLevelObj || !resourceLevelObj) return true
+    
+    // In inclusive mode, higher or equal levels can access lower levels
+    if (hierarchyMode === 'inclusive') {
+      return userLevelObj.level >= resourceLevelObj.level
+    }
+    
+    // Exact match mode
+    return userLevel === resourceLevel
+  }
+  
   const getComplianceFilteredTools = (complianceLevel) => {
     if (!complianceLevel) return getFilteredTools()
     return getFilteredTools().filter(tool => {
       // If no compliance_level specified, include in all filters (backward compatible)
       if (!tool.compliance_level) return true
-      return tool.compliance_level === complianceLevel
+      return isComplianceAccessible(complianceLevel, tool.compliance_level)
     })
   }
   
@@ -144,7 +180,7 @@ export const MarketplaceProvider = ({ children }) => {
     if (!complianceLevel) return getFilteredPrompts()
     return getFilteredPrompts().filter(prompt => {
       if (!prompt.compliance_level) return true
-      return prompt.compliance_level === complianceLevel
+      return isComplianceAccessible(complianceLevel, prompt.compliance_level)
     })
   }
 
@@ -157,7 +193,10 @@ export const MarketplaceProvider = ({ children }) => {
     getFilteredTools,
     getFilteredPrompts,
     getComplianceFilteredTools,
-    getComplianceFilteredPrompts
+    getComplianceFilteredPrompts,
+    complianceLevels,
+    hierarchyMode,
+    isComplianceAccessible
   }
 
   return (

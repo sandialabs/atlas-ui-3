@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "description": "Defines compliance level types and their hierarchical relationships",
+  "levels": [
+    {
+      "name": "Public",
+      "level": 0,
+      "description": "Publicly accessible data, no restrictions",
+      "aliases": []
+    },
+    {
+      "name": "External",
+      "level": 1,
+      "description": "External services with basic enterprise security",
+      "aliases": []
+    },
+    {
+      "name": "Internal",
+      "level": 2,
+      "description": "Internal systems, can handle company IP information",
+      "aliases": []
+    },
+    {
+      "name": "SOC2",
+      "level": 3,
+      "description": "SOC 2 Type II compliant systems",
+      "aliases": ["SOC-2", "SOC 2"]
+    },
+    {
+      "name": "HIPAA",
+      "level": 4,
+      "description": "HIPAA compliant systems for healthcare data",
+      "aliases": ["HIPAA-Compliant"]
+    },
+    {
+      "name": "FedRAMP",
+      "level": 5,
+      "description": "FedRAMP authorized systems for government data",
+      "aliases": ["FedRAMP-Moderate", "FedRAMP-High"]
+    }
+  ],
+  "hierarchy_mode": "inclusive",
+  "hierarchy_description": "Higher levels can access lower levels. E.g., SOC2 (level 3) can use External (level 1) and Public (level 0) resources."
+}

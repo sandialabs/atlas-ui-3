@@ -223,6 +223,40 @@ async def get_config(current_user: str = Depends(get_current_user)):
     }
 
 
+@router.get("/compliance-levels")
+async def get_compliance_levels(current_user: str = Depends(get_current_user)):
+    """Get compliance level definitions and hierarchy."""
+    try:
+        from core.compliance import get_compliance_manager
+        compliance_mgr = get_compliance_manager()
+        
+        # Return level definitions for frontend use
+        levels = []
+        for name, level_obj in compliance_mgr.levels.items():
+            levels.append({
+                "name": name,
+                "level": level_obj.level,
+                "description": level_obj.description,
+                "aliases": level_obj.aliases
+            })
+        
+        # Sort by level
+        levels.sort(key=lambda x: x['level'])
+        
+        return {
+            "levels": levels,
+            "hierarchy_mode": compliance_mgr.hierarchy_mode,
+            "all_level_names": compliance_mgr.get_all_levels()
+        }
+    except Exception as e:
+        logger.error(f"Error getting compliance levels: {e}", exc_info=True)
+        return {
+            "levels": [],
+            "hierarchy_mode": "inclusive",
+            "all_level_names": []
+        }
+
+
 # @router.get("/sessions")
 # async def get_session_info(current_user: str = Depends(get_current_user)):
 #     """Get session information for the current user."""
