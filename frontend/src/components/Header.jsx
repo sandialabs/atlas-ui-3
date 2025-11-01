@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
+import { useMarketplace } from '../contexts/MarketplaceContext'
 import { Menu, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings } from 'lucide-react'
 
 const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
@@ -19,8 +20,11 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
     messages,
     clearChat,
     features,
-    isInAdminGroup
+    isInAdminGroup,
+    complianceLevelFilter,
+    setComplianceLevelFilter
   } = useChat()
+  const { isComplianceAccessible } = useMarketplace()
   const { connectionStatus, isConnected } = useWS()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
@@ -108,19 +112,43 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
           </button>
           
           {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1 w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50">
+            <div className="absolute right-0 top-full mt-1 w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
               {models.length === 0 ? (
                 <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
               ) : (
-                models.map(model => (
-                  <button
-                    key={model}
-                    onClick={() => handleModelSelect(model)}
-                    className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg"
-                  >
-                    {model}
-                  </button>
-                ))
+                (() => {
+                  // Filter models by compliance level if feature is enabled
+                  const complianceEnabled = features?.compliance_levels
+                  const filteredModels = complianceEnabled && complianceLevelFilter
+                    ? models.filter(m => {
+                        const model = typeof m === 'string' ? { name: m } : m
+                        // Include models without compliance_level (backward compatible)
+                        if (!model.compliance_level) return true
+                        // Use hierarchical filtering
+                        return isComplianceAccessible(complianceLevelFilter, model.compliance_level)
+                      })
+                    : models
+                  
+                  return filteredModels.map(m => {
+                    const model = typeof m === 'string' ? { name: m } : m
+                    const modelName = model.name || m
+                    return (
+                      <button
+                        key={modelName}
+                        onClick={() => handleModelSelect(modelName)}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg flex items-center justify-between gap-2"
+                      >
+                        <span className="truncate">{modelName}</span>
+                        {complianceEnabled && model.compliance_level && (
+                          <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1 flex-shrink-0">
+                            <Shield className="w-3 h-3" />
+                            {model.compliance_level}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })
+                })()
               )}
             </div>
           )}
@@ -175,6 +203,21 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
             </div>
           )}
         </div>
+
+        {/* Compliance Level Indicator */}
+        {features?.compliance_levels && complianceLevelFilter && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium border border-blue-500">
+            <Shield className="w-4 h-4" />
+            <span>{complianceLevelFilter}</span>
+            <button
+              onClick={() => setComplianceLevelFilter(null)}
+              className="ml-1 hover:bg-blue-700 rounded px-1"
+              title="Clear compliance filter"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* Agent Mode Toggle Button */}
         {agentModeAvailable && (

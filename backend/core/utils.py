@@ -3,7 +3,7 @@ Minimal utilities for basic chat functionality.
 """
 
 import logging
-from fastapi import Depends, Request
+from fastapi import Request
 
 logger = logging.getLogger(__name__)
 

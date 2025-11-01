@@ -1,8 +1,7 @@
 """RAG Client for integrating with RAG mock endpoint."""
 
 import logging
-import os
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from fastapi import HTTPException
 from pydantic import BaseModel
 

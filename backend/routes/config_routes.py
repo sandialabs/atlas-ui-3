@@ -1,7 +1,6 @@
 """Configuration API routes."""
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 
@@ -102,7 +101,8 @@ async def get_config(current_user: str = Depends(get_current_user)):
                     'is_exclusive': False,
                     'author': 'Chat UI Team',
                     'short_description': 'Visual content display',
-                    'help_email': 'support@chatui.example.com'
+                    'help_email': 'support@chatui.example.com',
+                    'compliance_level': 'Public'
                 })
             elif server_name in mcp_manager.available_tools:
                 server_tools = mcp_manager.available_tools[server_name]['tools']
@@ -118,7 +118,8 @@ async def get_config(current_user: str = Depends(get_current_user)):
                         'is_exclusive': server_config.get('is_exclusive', False),
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', server_config.get('description', f'{server_name} tools')),
-                        'help_email': server_config.get('help_email', '')
+                        'help_email': server_config.get('help_email', ''),
+                        'compliance_level': server_config.get('compliance_level')
                     })
             
             # Collect prompts from this server if available
@@ -133,7 +134,8 @@ async def get_config(current_user: str = Depends(get_current_user)):
                         'description': f'{server_name} custom prompts',
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', f'{server_name} custom prompts'),
-                        'help_email': server_config.get('help_email', '')
+                        'help_email': server_config.get('help_email', ''),
+                        'compliance_level': server_config.get('compliance_level')
                     })
     
     # Read help page configuration (supports new config directory layout + legacy paths)
@@ -183,19 +185,29 @@ async def get_config(current_user: str = Depends(get_current_user)):
         f"User {current_user} has access to {len(authorized_servers)} servers: {authorized_servers}\n"
         f"Returning {len(tools_info)} server tool groups to frontend for user {current_user}"
     )
+    # Build models list with compliance levels
+    models_list = []
+    for model_name, model_config in llm_config.models.items():
+        model_info = {
+            "name": model_name,
+            "description": model_config.description,
+        }
+        # Include compliance_level if feature is enabled
+        if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
+            model_info["compliance_level"] = model_config.compliance_level
+        models_list.append(model_info)
     
     return {
         "app_name": app_settings.app_name,
-        "models": list(llm_config.models.keys()),
+        "models": models_list,
         "tools": tools_info,  # Only authorized servers are included
         "prompts": prompts_info,  # Available prompts from authorized servers
         "data_sources": rag_data_sources,  # RAG data sources for the user
-    "rag_servers": rag_servers,  # Optional richer structure for RAG UI
+        "rag_servers": rag_servers,  # Optional richer structure for RAG UI
         "user": current_user,
     "is_in_admin_group": is_user_in_group(current_user, app_settings.admin_group),
         "active_sessions": 0,  # TODO: Implement session counting in ChatService
         "authorized_servers": authorized_servers,  # Optional: expose for debugging
-            "rag_servers": rag_servers,  # Optional richer structure for RAG UI
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
         "help_config": help_config,  # Help page configuration from help-config.json
@@ -205,9 +217,44 @@ async def get_config(current_user: str = Depends(get_current_user)):
             "tools": app_settings.feature_tools_enabled,
             "marketplace": app_settings.feature_marketplace_enabled,
             "files_panel": app_settings.feature_files_panel_enabled,
-            "chat_history": app_settings.feature_chat_history_enabled
+            "chat_history": app_settings.feature_chat_history_enabled,
+            "compliance_levels": app_settings.feature_compliance_levels_enabled
         }
     }
+
+
+@router.get("/compliance-levels")
+async def get_compliance_levels(current_user: str = Depends(get_current_user)):
+    """Get compliance level definitions and hierarchy."""
+    try:
+        from core.compliance import get_compliance_manager
+        compliance_mgr = get_compliance_manager()
+        
+        # Return level definitions for frontend use
+        levels = []
+        for name, level_obj in compliance_mgr.levels.items():
+            levels.append({
+                "name": name,
+                "level": level_obj.level,
+                "description": level_obj.description,
+                "aliases": level_obj.aliases
+            })
+        
+        # Sort by level
+        levels.sort(key=lambda x: x['level'])
+        
+        return {
+            "levels": levels,
+            "hierarchy_mode": compliance_mgr.hierarchy_mode,
+            "all_level_names": compliance_mgr.get_all_levels()
+        }
+    except Exception as e:
+        logger.error(f"Error getting compliance levels: {e}", exc_info=True)
+        return {
+            "levels": [],
+            "hierarchy_mode": "inclusive",
+            "all_level_names": []
+        }
 
 
 # @router.get("/sessions")

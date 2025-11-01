@@ -10,6 +10,7 @@ export function useSelections() {
   const [promptsRaw, setPromptsRaw] = usePersistentState('chatui-selected-prompts', [])
   const [dataSourcesRaw, setDataSourcesRaw] = usePersistentState('chatui-selected-data-sources', [])
   const [toolChoiceRequired, setToolChoiceRequired] = usePersistentState('chatui-tool-choice-required', false)
+  const [complianceLevelFilter, setComplianceLevelFilter] = usePersistentState('chatui-compliance-level-filter', null)
 
   const selectedTools = useMemo(() => toSet(toolsRaw), [toolsRaw])
   const selectedPrompts = useMemo(() => toSet(promptsRaw), [promptsRaw])
@@ -82,6 +83,8 @@ export function useSelections() {
   removePrompts,
     toolChoiceRequired,
     setToolChoiceRequired,
-    clearToolsAndPrompts
+    clearToolsAndPrompts,
+    complianceLevelFilter,
+    setComplianceLevelFilter
   }
 }

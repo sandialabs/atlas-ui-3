@@ -6,7 +6,6 @@ This server shows how MCP servers can return responses with custom_html
 fields to modify the UI.
 """
 
-import json
 import os
 from typing import Dict, Any
 from fastmcp import FastMCP

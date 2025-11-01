@@ -179,17 +179,21 @@ class RAGMCPService:
                         # New: include per-resource groups when provided
                         "groups": list(r.get("groups", [])) if isinstance(r.get("groups"), list) else None,
                         "selected": bool(r.get("defaultSelected", False)),
+                        # Include compliance_level from resource or inherit from server
+                        "complianceLevel": r.get("complianceLevel") if r.get("complianceLevel") else None,
                     })
 
-                # Optional config-driven icon/name
+                # Optional config-driven icon/name and compliance level
                 cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
                 display_name = cfg.get("displayName") or server
                 icon = (cfg.get("ui") or {}).get("icon") if isinstance(cfg.get("ui"), dict) else None
+                compliance_level = cfg.get("compliance_level")
 
                 rag_servers.append({
                     "server": server,
                     "displayName": display_name,
                     "icon": icon,
+                    "complianceLevel": compliance_level,
                     "sources": ui_sources,
                 })
         except Exception as e:

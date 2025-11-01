@@ -10,11 +10,9 @@ This CLI allows you to:
 
 import argparse
 import base64
-import json
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 from .s3_client import S3StorageClient
 from .manager import FileManager
@@ -56,7 +54,7 @@ async def upload_file(args) -> None:
             source_type=args.source_type
         )
         
-        print(f"✅ File uploaded successfully!")
+        print("✅ File uploaded successfully!")
         print(f"   S3 Key: {result['key']}")
         print(f"   Size: {result.get('size', 'unknown')} bytes")
         print(f"   Content Type: {result.get('content_type', 'unknown')}")
@@ -157,7 +155,7 @@ async def download_file(args) -> None:
         with open(output_path, 'wb') as f:
             f.write(content)
         
-        print(f"✅ File downloaded successfully!")
+        print("✅ File downloaded successfully!")
         print(f"   Saved to: {output_path}")
         print(f"   Size: {len(content)} bytes")
         
@@ -210,14 +208,14 @@ async def get_stats(args) -> None:
         s3_client = S3StorageClient()
         stats = await s3_client.get_user_stats(args.user_email)
         
-        print(f"\n📈 File Statistics:\n")
+        print("\n📈 File Statistics:\n")
         print(f"   📁 Total Files: {stats.get('total_files', 0)}")
         print(f"   💾 Total Size: {stats.get('total_size_bytes', 0)} bytes")
         print(f"   📤 User Files: {stats.get('user_files', 0)}")
         print(f"   🔧 Tool Files: {stats.get('tool_files', 0)}")
         
         if 'file_types' in stats:
-            print(f"\n📊 By File Type:")
+            print("\n📊 By File Type:")
             for file_type, count in stats['file_types'].items():
                 print(f"   {file_type}: {count}")
         

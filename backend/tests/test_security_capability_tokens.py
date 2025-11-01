@@ -1,4 +1,3 @@
-import time
 import base64
 from starlette.testclient import TestClient
 

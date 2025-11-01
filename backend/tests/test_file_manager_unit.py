@@ -1,4 +1,3 @@
-import pytest
 
 from modules.file_storage.manager import FileManager
 

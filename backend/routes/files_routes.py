@@ -8,7 +8,7 @@ list, delete, and user statistics. Integrates with S3 storage backend.
 import logging
 from typing import List, Dict, Any, Optional
 import re
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi import Query
 import base64
 from pydantic import BaseModel, Field

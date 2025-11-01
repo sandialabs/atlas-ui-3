@@ -8,13 +8,10 @@ This CLI allows you to:
 """
 
 import argparse
-import json
 import logging
 import sys
-from typing import List, Dict
 
 from .litellm_caller import LiteLLMCaller
-from .models import LLMResponse
 
 # Set up logging for CLI
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -231,15 +228,15 @@ def validate_model(args) -> None:
         import os
         api_key = os.path.expandvars(model_config.api_key)
         if api_key and not api_key.startswith("${"):
-            print(f"   ✅ API Key: Configured")
+            print("   ✅ API Key: Configured")
         else:
-            print(f"   ❌ API Key: Missing or not resolved")
+            print("   ❌ API Key: Missing or not resolved")
         
         # Check extra headers
         if model_config.extra_headers:
             print(f"   ✅ Extra Headers: {list(model_config.extra_headers.keys())}")
         else:
-            print(f"   ℹ️  Extra Headers: None")
+            print("   ℹ️  Extra Headers: None")
         
         print(f"\n🎉 Model '{args.model}' configuration looks valid!")
         

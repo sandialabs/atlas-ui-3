@@ -2,7 +2,6 @@
 
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
-from domain.messages.models import ToolCall
 
 
 class LLMResponse:

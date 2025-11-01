@@ -10,7 +10,7 @@ import os
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Annotated, Optional
+from typing import Any, Dict, Annotated, Optional
 
 import requests
 from fastmcp import FastMCP
