@@ -124,19 +124,59 @@ const getComplianceFilteredTools = (complianceLevel) => {
 }
 ```
 
-#### 4. UI Components (`frontend/src/components/ToolsPanel.jsx`)
-Added compliance level filter dropdown and badges:
+#### 4. UI Components
+
+**Header (`frontend/src/components/Header.jsx`)**:
+- **Compliance level indicator**: Always visible when a compliance level is selected
+- Shows compliance level with Shield icon in a blue badge
+- Includes quick clear button (×) to remove the filter
+- Ensures users always know their current compliance setting
+
+**ToolsPanel (`frontend/src/components/ToolsPanel.jsx`)**:
 - **Filter dropdown**: Allows users to select a compliance level (All Levels, Public, SOC2, etc.)
 - **Server badges**: Display compliance level badge on each server entry
 - Uses Shield icon from lucide-react
 
+**RagPanel (`frontend/src/components/RagPanel.jsx`)**:
+- **Filter dropdown**: Same compliance level filtering as ToolsPanel
+- Synced with global compliance level state
+- Helps prevent mixing data from different compliance environments
+
+#### 5. Auto-Cleanup Logic (`frontend/src/contexts/ChatContext.jsx`)
+
+Added `setComplianceLevelFilterWithCleanup` wrapper that:
+- Automatically clears selected tools that don't match the new compliance level
+- Automatically clears selected prompts that don't match the new compliance level
+- Prevents users from accidentally using non-compliant tools stored in browser localStorage
+
+```javascript
+const setComplianceLevelFilterWithCleanup = useCallback((newLevel) => {
+  if (newLevel && newLevel !== selections.complianceLevelFilter) {
+    // Clear incompatible tools and prompts
+    // ... cleanup logic
+  }
+  selections.setComplianceLevelFilter(newLevel)
+}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts])
+```
+
 UI Example:
 ```
+┌─ Header ──────────────────────────────┐
+│  [New Chat]  [🔒 SOC2 ×]  [⚙️]  [?]   │
+└───────────────────────────────────────┘
+
 ┌─ Tools & Integrations ────────────────┐
 │  Compliance Level: [SOC2 ▼]           │
 ├───────────────────────────────────────┤
 │  📋 Calculator         [🔒 Public]    │
 │  📋 PDF Analyzer       [🔒 SOC2]      │
+└───────────────────────────────────────┘
+
+┌─ Data Sources ────────────────────────┐
+│  Compliance Level: [SOC2 ▼]           │
+│  ☐ Only RAG                           │
+├───────────────────────────────────────┤
+│  📊 Corporate Cars     [🔒 SOC2]      │
 └───────────────────────────────────────┘
 ```
 
@@ -161,18 +201,38 @@ UI Example:
    - Or any custom compliance level
 
 ### For End Users
-1. Open the Tools panel in the chat interface
+
+**Setting Compliance Level:**
+1. Open the Tools panel OR RAG panel in the chat interface
 2. Look for the "Compliance Level" dropdown in the controls section
 3. Select a compliance level (e.g., "SOC2")
-4. Only tools and data sources matching that compliance level will be shown
-5. Select "All Levels" to see all available tools regardless of compliance level
+4. The selected level will appear in the header as a blue badge with a Shield icon
+5. Only tools and data sources matching that compliance level will be available
+
+**Viewing Active Compliance Level:**
+- The header always shows the active compliance level (if one is selected)
+- Click the "×" in the header badge to quickly clear the compliance filter
+
+**Important Safety Features:**
+- When switching compliance levels, any selected tools/prompts that don't match are **automatically cleared**
+- This prevents accidentally running non-compliant tools from previous sessions
+- The filter applies across both Tools and RAG Data Sources panels
+
+**Example Workflow:**
+1. User selects "SOC2" compliance level from Tools panel
+2. Header shows: `[🔒 SOC2 ×]`
+3. Only SOC2-compliant tools and data sources are visible
+4. Previously selected "Public" tools are automatically unselected
+5. User can work safely knowing all interactions are SOC2-compliant
 
 ## Benefits
 
 1. **Data Segregation**: Prevents accidental mixing of data from different security environments
 2. **Compliance Enforcement**: Helps ensure users only interact with appropriately certified systems
-3. **Transparency**: Users can see the compliance level of each tool/data source
+3. **Transparency**: Users can see the compliance level of each tool/data source at a glance
 4. **Flexibility**: Supports custom compliance levels beyond standard certifications
+5. **Safety**: Auto-cleanup prevents accidental use of non-compliant tools from browser storage
+6. **Visibility**: Always-visible header indicator shows current compliance setting
 
 ## Backward Compatibility
 
