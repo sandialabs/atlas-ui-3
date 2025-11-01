@@ -163,6 +163,28 @@ class ChatService:
             artifact_processor=self._update_session_from_tool_results,
             default_strategy=self.default_agent_strategy,
         )
+        
+        # Initialize orchestrator
+        self.orchestrator = None  # Will be initialized lazily to avoid circular dependency
+
+    def _get_orchestrator(self):
+        """Lazy initialization of orchestrator."""
+        if self.orchestrator is None:
+            from .orchestrator import ChatOrchestrator
+            self.orchestrator = ChatOrchestrator(
+                llm=self.llm,
+                event_publisher=self.event_publisher,
+                session_repository=self.session_repository,
+                tool_manager=self.tool_manager,
+                prompt_provider=self.prompt_provider,
+                file_manager=self.file_manager,
+                artifact_processor=self._update_session_from_tool_results,
+                plain_mode=self.plain_mode,
+                rag_mode=self.rag_mode,
+                tools_mode=self.tools_mode,
+                agent_mode=self.agent_mode,
+            )
+        return self.orchestrator
 
     async def create_session(
         self,
@@ -171,7 +193,11 @@ class ChatService:
     ) -> Session:
         """Create a new chat session."""
         session = Session(id=session_id, user_email=user_email)
+        
+        # Store in both legacy dict and new repository
         self.sessions[session_id] = session
+        await self.session_repository.create(session)
+        
         logger.info(f"Created session {session_id} for user {user_email}")
         return session
     
@@ -181,7 +207,7 @@ class ChatService:
         content: str,
         model: str,
         selected_tools: Optional[List[str]] = None,
-    selected_prompts: Optional[List[str]] = None,
+        selected_prompts: Optional[List[str]] = None,
         selected_data_sources: Optional[List[str]] = None,
         only_rag: bool = False,
         tool_choice_required: bool = False,
@@ -192,7 +218,7 @@ class ChatService:
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Handle incoming chat message using utilities for clean separation.
+        Handle incoming chat message - thin façade delegating to orchestrator.
         
         Returns:
             Response dictionary to send to client
@@ -213,91 +239,33 @@ class ChatService:
         # Get or create session
         session = self.sessions.get(session_id)
         if not session:
-            session = await self.create_session(session_id, user_email)
-        
-        # Add user message to history
-        user_message = Message(
-            role=MessageRole.USER,
-            content=content,
-            metadata={"model": model}
-        )
-        session.history.add_message(user_message)
-        session.update_timestamp()
-
-        # Handle user file ingestion using utilities
-        session.context = await file_utils.handle_session_files(
-            session_context=session.context,
-            user_email=user_email,
-            files_map=kwargs.get("files"),
-            file_manager=self.file_manager,
-            update_callback=update_callback
-        )
-
-        try:
-            # Build messages with history and files manifest
-            messages = await self.message_builder.build_messages(
-                session=session,
-                include_files_manifest=True
-            )
-
-            # Apply MCP prompt override if selected prompts are provided
-            messages = await self.prompt_override.apply_prompt_override(
-                messages=messages,
-                selected_prompts=selected_prompts
-            )
-            
-            # Route to appropriate execution mode
-            if agent_mode:
-                # Use agent mode runner
-                response = await self.agent_mode.run(
-                    session=session,
-                    model=model,
-                    messages=messages,
-                    selected_tools=selected_tools,
-                    selected_data_sources=selected_data_sources,
-                    max_steps=kwargs.get("agent_max_steps", 30),
-                    temperature=temperature,
-                    agent_loop_strategy=kwargs.get("agent_loop_strategy"),
-                )
-            elif selected_tools and not only_rag:
-                # Filter tools based on user authorization
-                selected_tools = await self.tool_authorization.filter_authorized_tools(
-                    selected_tools=selected_tools,
-                    user_email=user_email
-                )
-                # Use tools mode runner
-                response = await self.tools_mode.run(
-                    session=session,
-                    model=model,
-                    messages=messages,
-                    selected_tools=selected_tools,
-                    selected_data_sources=selected_data_sources,
-                    user_email=user_email,
-                    tool_choice_required=tool_choice_required,
-                    update_callback=update_callback,
-                    temperature=temperature,
-                )
-            elif selected_data_sources:
-                # Use RAG mode runner
-                response = await self.rag_mode.run(
-                    session=session,
-                    model=model,
-                    messages=messages,
-                    data_sources=selected_data_sources,
-                    user_email=user_email,
-                    temperature=temperature,
-                )
+            # Try session repository
+            session = await self.session_repository.get(session_id)
+            if not session:
+                session = await self.create_session(session_id, user_email)
             else:
-                # Use plain mode runner
-                response = await self.plain_mode.run(
-                    session=session,
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                )
-            
-            return response
-            
+                # Sync to legacy dict
+                self.sessions[session_id] = session
+        
+        try:
+            # Delegate to orchestrator
+            orchestrator = self._get_orchestrator()
+            return await orchestrator.execute(
+                session_id=session_id,
+                content=content,
+                model=model,
+                user_email=user_email,
+                selected_tools=selected_tools,
+                selected_prompts=selected_prompts,
+                selected_data_sources=selected_data_sources,
+                only_rag=only_rag,
+                tool_choice_required=tool_choice_required,
+                agent_mode=agent_mode,
+                temperature=temperature,
+                files=kwargs.get("files"),
+                update_callback=update_callback,
+                **kwargs
+            )
         except Exception as e:
             return error_utils.handle_chat_message_error(e, "chat message handling")
             
