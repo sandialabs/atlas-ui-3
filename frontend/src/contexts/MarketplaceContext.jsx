@@ -148,14 +148,17 @@ export const MarketplaceProvider = ({ children }) => {
   
   // Check if a resource is accessible given the user's compliance level using allowlist
   const isComplianceAccessible = (userLevel, resourceLevel) => {
-    // If either is not set, resource is accessible (backward compatibility)
-    if (!userLevel || !resourceLevel) return true
+    // If user level is not set, all resources are accessible
+    if (!userLevel) return true
+    
+    // STRICT MODE: If user has selected a compliance level but resource has none, deny access
+    if (!resourceLevel) return false
     
     // Find user's compliance level object
     const userLevelObj = complianceLevels.find(l => l.name === userLevel)
     
-    // If we don't have level info, be permissive
-    if (!userLevelObj) return true
+    // If we don't have level info, deny access (strict)
+    if (!userLevelObj) return false
     
     // Check if resource level is in the user's allowed_with list
     return userLevelObj.allowed_with && userLevelObj.allowed_with.includes(resourceLevel)
@@ -164,8 +167,7 @@ export const MarketplaceProvider = ({ children }) => {
   const getComplianceFilteredTools = (complianceLevel) => {
     if (!complianceLevel) return getFilteredTools()
     return getFilteredTools().filter(tool => {
-      // If no compliance_level specified, include in all filters (backward compatible)
-      if (!tool.compliance_level) return true
+      // STRICT MODE: When compliance filter is active, only show resources with matching compliance levels
       return isComplianceAccessible(complianceLevel, tool.compliance_level)
     })
   }
@@ -173,7 +175,7 @@ export const MarketplaceProvider = ({ children }) => {
   const getComplianceFilteredPrompts = (complianceLevel) => {
     if (!complianceLevel) return getFilteredPrompts()
     return getFilteredPrompts().filter(prompt => {
-      if (!prompt.compliance_level) return true
+      // STRICT MODE: When compliance filter is active, only show resources with matching compliance levels
       return isComplianceAccessible(complianceLevel, prompt.compliance_level)
     })
   }

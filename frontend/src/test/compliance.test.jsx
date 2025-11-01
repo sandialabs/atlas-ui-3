@@ -17,12 +17,16 @@ describe('Compliance Level Filtering', () => {
       ]
     };
 
-    // Helper function to simulate isComplianceAccessible
+    // Helper function to simulate isComplianceAccessible with STRICT MODE
     const isAccessible = (userLevel, resourceLevel, levels) => {
-      if (!userLevel || !resourceLevel) return true;
+      // If user level is not set, all resources are accessible
+      if (!userLevel) return true;
+      
+      // STRICT MODE: If user has selected a compliance level but resource has none, deny access
+      if (!resourceLevel) return false;
 
       const userLevelObj = levels.levels.find(l => l.name === userLevel);
-      if (!userLevelObj) return true;
+      if (!userLevelObj) return false;
 
       return userLevelObj.allowed_with.includes(resourceLevel);
     };
@@ -53,20 +57,20 @@ describe('Compliance Level Filtering', () => {
       expect(isAccessible('HIPAA', 'Public', complianceLevels)).toBe(false);
     });
 
-    it('should allow None (unset) to be permissive', () => {
-      // None user can access any resource
+    it('should enforce strict filtering when compliance level is selected', () => {
+      // When user selects a compliance level, resources without compliance_level should NOT show
+      // This prevents untagged Public resources from appearing in HIPAA sessions
+      expect(isAccessible('HIPAA', null, complianceLevels)).toBe(false);
+      expect(isAccessible('SOC2', null, complianceLevels)).toBe(false);
+      expect(isAccessible('Public', null, complianceLevels)).toBe(false);
+      
+      // But when no compliance level is selected, all resources are accessible
       expect(isAccessible(null, 'HIPAA', complianceLevels)).toBe(true);
       expect(isAccessible(null, 'Public', complianceLevels)).toBe(true);
-
-      // Any user can access None resource
-      expect(isAccessible('HIPAA', null, complianceLevels)).toBe(true);
-      expect(isAccessible('Public', null, complianceLevels)).toBe(true);
-
-      // None to None
       expect(isAccessible(null, null, complianceLevels)).toBe(true);
     });
 
-    it('should filter tools by compliance level allowlist', () => {
+    it('should filter tools by compliance level allowlist with strict mode', () => {
       const tools = [
         { name: 'public-tool', compliance_level: 'Public' },
         { name: 'internal-tool', compliance_level: 'Internal' },
@@ -75,19 +79,19 @@ describe('Compliance Level Filtering', () => {
         { name: 'no-compliance-tool', compliance_level: null }
       ];
 
-      // Filter tools for HIPAA user
+      // Filter tools for HIPAA user - STRICT MODE (no untagged resources)
       const hipaaTools = tools.filter(tool =>
         isAccessible('HIPAA', tool.compliance_level, complianceLevels)
       );
 
       expect(hipaaTools.map(t => t.name)).toContain('hipaa-tool');
       expect(hipaaTools.map(t => t.name)).toContain('soc2-tool');
-      expect(hipaaTools.map(t => t.name)).toContain('no-compliance-tool');
+      expect(hipaaTools.map(t => t.name)).not.toContain('no-compliance-tool'); // STRICT MODE
       expect(hipaaTools.map(t => t.name)).not.toContain('public-tool');
       expect(hipaaTools.map(t => t.name)).not.toContain('internal-tool');
     });
 
-    it('should filter tools for Public user (only Public + unset)', () => {
+    it('should filter tools for Public user with strict mode (only Public)', () => {
       const tools = [
         { name: 'public-tool', compliance_level: 'Public' },
         { name: 'internal-tool', compliance_level: 'Internal' },
@@ -100,7 +104,7 @@ describe('Compliance Level Filtering', () => {
       );
 
       expect(publicTools.map(t => t.name)).toContain('public-tool');
-      expect(publicTools.map(t => t.name)).toContain('no-compliance-tool');
+      expect(publicTools.map(t => t.name)).not.toContain('no-compliance-tool'); // STRICT MODE
       expect(publicTools.map(t => t.name)).not.toContain('internal-tool');
       expect(publicTools.map(t => t.name)).not.toContain('hipaa-tool');
     });

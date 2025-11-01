@@ -24,10 +24,13 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
     complianceLevelFilter,
     setComplianceLevelFilter
   } = useChat()
-  const { isComplianceAccessible } = useMarketplace()
+  const { isComplianceAccessible, complianceLevels } = useMarketplace()
   const { connectionStatus, isConnected } = useWS()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
+  
+  // Extract unique compliance levels from all available tools and prompts
+  const availableComplianceLevels = complianceLevels.map(l => l.name)
 
   const handleModelSelect = (model) => {
     setCurrentModel(model)
@@ -122,9 +125,7 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
                   const filteredModels = complianceEnabled && complianceLevelFilter
                     ? models.filter(m => {
                         const model = typeof m === 'string' ? { name: m } : m
-                        // Include models without compliance_level (backward compatible)
-                        if (!model.compliance_level) return true
-                        // Use hierarchical filtering
+                        // STRICT MODE: When compliance filter is active, only show models with matching compliance levels
                         return isComplianceAccessible(complianceLevelFilter, model.compliance_level)
                       })
                     : models
@@ -204,18 +205,21 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
           )}
         </div>
 
-        {/* Compliance Level Indicator */}
-        {features?.compliance_levels && complianceLevelFilter && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium border border-blue-500">
-            <Shield className="w-4 h-4" />
-            <span>{complianceLevelFilter}</span>
-            <button
-              onClick={() => setComplianceLevelFilter(null)}
-              className="ml-1 hover:bg-blue-700 rounded px-1"
-              title="Clear compliance filter"
+        {/* Compliance Level Dropdown */}
+        {features?.compliance_levels && availableComplianceLevels.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-700 border border-gray-600">
+            <Shield className="w-4 h-4 text-blue-400" />
+            <select
+              value={complianceLevelFilter || ''}
+              onChange={(e) => setComplianceLevelFilter(e.target.value || null)}
+              className="bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              title="Select compliance level for this session"
             >
-              ×
-            </button>
+              <option value="">All Levels</option>
+              {availableComplianceLevels.map(level => (
+                <option key={level} value={level}>{level}</option>
+              ))}
+            </select>
           </div>
         )}
 
