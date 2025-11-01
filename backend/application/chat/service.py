@@ -33,6 +33,8 @@ from core.auth_utils import create_authorization_manager
 from .policies.tool_authorization import ToolAuthorizationService
 from .preprocessors.prompt_override_service import PromptOverrideService
 from .preprocessors.message_builder import MessageBuilder
+from .events.agent_event_relay import AgentEventRelay
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,11 @@ class ChatService:
         self.tool_authorization = ToolAuthorizationService(tool_manager=self.tool_manager)
         self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
         self.message_builder = MessageBuilder()
+        
+        # Import here to avoid circular dependency
+        from infrastructure.events.websocket_publisher import WebSocketEventPublisher
+        self.event_publisher = WebSocketEventPublisher(connection=self.connection)
+
 
         # Agent loop factory - create if not provided
         if agent_loop_factory is not None:
@@ -518,40 +525,19 @@ class ChatService:
             history=session.history,
         )
 
-        # Event handler: map AgentEvents to existing notification_utils APIs
-        async def handle_event(evt: AgentEvent) -> None:
-            et = evt.type
-            p = evt.payload or {}
-            # UI notifications (guard on connection)
-            if et == "agent_start" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_start", connection=self.connection, max_steps=p.get("max_steps"), strategy=p.get("strategy"))
-            elif et == "agent_turn_start" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_turn_start", connection=self.connection, step=p.get("step"))
-            elif et == "agent_reason" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_reason", connection=self.connection, message=p.get("message"), step=p.get("step"))
-            elif et == "agent_request_input" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_request_input", connection=self.connection, question=p.get("question"), step=p.get("step"))
-            elif et == "agent_tool_start" and self.connection:
-                await notification_utils.notify_agent_update(update_type="tool_start", connection=self.connection, tool=p.get("tool"))
-            elif et == "agent_tool_complete" and self.connection:
-                await notification_utils.notify_agent_update(update_type="tool_complete", connection=self.connection, tool=p.get("tool"), result=p.get("result"))
+        # Artifact processor for handling tool results
+        async def process_artifacts(results):
+            await self._update_session_from_tool_results(
+                session,
+                results,
+                (self.connection.send_json if self.connection else None),
+            )
 
-            # Artifact ingestion should run regardless of connection
-            if et == "agent_tool_results":
-                # Ingest artifacts produced by tools and emit file/canvas updates
-                results = p.get("results") or []
-                if results:
-                    await self._update_session_from_tool_results(
-                        session,
-                        results,
-                        (self.connection.send_json if self.connection else None),
-                    )
-            elif et == "agent_observe" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_observe", connection=self.connection, message=p.get("message"), step=p.get("step"))
-            elif et == "agent_completion" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_completion", connection=self.connection, steps=p.get("steps"))
-            elif et == "agent_error" and self.connection:
-                await notification_utils.notify_agent_update(update_type="agent_error", connection=self.connection, message=p.get("message"))
+        # Create event relay to map AgentEvents to UI updates
+        event_relay = AgentEventRelay(
+            event_publisher=self.event_publisher,
+            artifact_processor=process_artifacts,
+        )
 
         # Run the loop
         result = await agent_loop.run(
@@ -562,7 +548,7 @@ class ChatService:
             data_sources=selected_data_sources,
             max_steps=max_steps,
             temperature=temperature,
-            event_handler=handle_event,
+            event_handler=event_relay.handle_event,
         )
 
         # Append final message
