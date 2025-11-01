@@ -32,8 +32,9 @@ from core.auth_utils import create_authorization_manager
 # Import new refactored modules
 from .policies.tool_authorization import ToolAuthorizationService
 from .preprocessors.prompt_override_service import PromptOverrideService
-from .preprocessors.message_builder import MessageBuilder
+from .preprocessors.message_builder import MessageBuilder, build_session_context
 from .events.agent_event_relay import AgentEventRelay
+
 
 
 logger = logging.getLogger(__name__)
@@ -404,7 +405,7 @@ class ChatService:
             return notification_utils.create_chat_response(content)
 
         # Execute tool workflow
-        session_context = self._build_session_context(session)
+        session_context = build_session_context(session)
         final_response, tool_results = await tool_utils.execute_tools_workflow(
             llm_response=llm_response,
             messages=messages,
@@ -637,7 +638,7 @@ class ChatService:
         final_response: Optional[str] = None
         last_observation: Optional[str] = None
         user_question = _latest_user_question(messages)
-        files_manifest_obj = file_utils.build_files_manifest(self._build_session_context(session))
+        files_manifest_obj = file_utils.build_files_manifest(build_session_context(session))
         files_manifest_text = files_manifest_obj.get("content") if files_manifest_obj else None
 
         while steps < max_steps:
@@ -776,7 +777,7 @@ class ChatService:
                     )
 
                 if llm_response.has_tool_calls():
-                    session_context = self._build_session_context(session)
+                    session_context = build_session_context(session)
                     # Enforce single-tool execution per act step
                     first_call = (llm_response.tool_calls or [None])[0]
                     if first_call is None:
@@ -971,15 +972,6 @@ class ChatService:
                 "error": str(e)
             }
     
-    def _build_session_context(self, session: Session) -> Dict[str, Any]:
-        """Build session context for utilities."""
-        return {
-            "session_id": session.id,
-            "user_email": session.user_email,
-            "files": session.context.get("files", {}),
-            **session.context
-        }
-
     async def _update_session_from_tool_results(
         self,
         session: Session,
@@ -995,7 +987,7 @@ class ChatService:
             return
 
         # Build a working session context including user email
-        session_context: Dict[str, Any] = self._build_session_context(session)
+        session_context: Dict[str, Any] = build_session_context(session)
 
         try:
             for result in tool_results:

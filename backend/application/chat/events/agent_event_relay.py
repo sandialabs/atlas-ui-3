@@ -8,6 +8,9 @@ from .publisher import EventPublisher
 
 logger = logging.getLogger(__name__)
 
+# Constants
+UNKNOWN_TOOL_NAME = "unknown"
+
 
 class AgentEventRelay:
     """
@@ -72,12 +75,12 @@ class AgentEventRelay:
         
         elif et == "agent_tool_start":
             await self.event_publisher.publish_tool_start(
-                tool_name=p.get("tool", "unknown"),
+                tool_name=p.get("tool", UNKNOWN_TOOL_NAME),
             )
         
         elif et == "agent_tool_complete":
             await self.event_publisher.publish_tool_complete(
-                tool_name=p.get("tool", "unknown"),
+                tool_name=p.get("tool", UNKNOWN_TOOL_NAME),
                 result=p.get("result"),
             )
         
