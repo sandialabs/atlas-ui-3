@@ -3,7 +3,72 @@
 ## Overview
 This feature allows MCP servers, RAG data sources, and LLM endpoints to declare a compliance level (e.g., SOC2, HIPAA, Public, External, Internal). Users can then filter their session to only connect to and use sources matching a specific compliance level. This helps minimize the risk of mixing data from secure and insecure environments.
 
-The feature includes a **rollout control flag** (`FEATURE_COMPLIANCE_LEVELS_ENABLED`) to enable gradual deployment and backend transmission of the compliance filter for future compliance-dependent logic.
+The feature includes:
+- **Standardized compliance levels** defined in `compliance-levels.json`
+- **Hierarchical access control** where higher levels can access lower level resources
+- **Validation and normalization** of compliance level names with warnings for invalid values
+- **Rollout control flag** (`FEATURE_COMPLIANCE_LEVELS_ENABLED`) for gradual deployment
+
+## Compliance Level Definitions
+
+Compliance levels are defined in `config/defaults/compliance-levels.json` (can be overridden in `config/overrides/compliance-levels.json`):
+
+```json
+{
+  "version": "1.0",
+  "levels": [
+    {
+      "name": "Public",
+      "level": 0,
+      "description": "Publicly accessible data, no restrictions",
+      "aliases": []
+    },
+    {
+      "name": "External",
+      "level": 1,
+      "description": "External services with basic enterprise security",
+      "aliases": []
+    },
+    {
+      "name": "Internal",
+      "level": 2,
+      "description": "Internal systems, can handle company IP information",
+      "aliases": []
+    },
+    {
+      "name": "SOC2",
+      "level": 3,
+      "description": "SOC 2 Type II compliant systems",
+      "aliases": ["SOC-2", "SOC 2"]
+    },
+    {
+      "name": "HIPAA",
+      "level": 4,
+      "description": "HIPAA compliant systems for healthcare data",
+      "aliases": ["HIPAA-Compliant"]
+    },
+    {
+      "name": "FedRAMP",
+      "level": 5,
+      "description": "FedRAMP authorized systems for government data",
+      "aliases": ["FedRAMP-Moderate", "FedRAMP-High"]
+    }
+  ],
+  "hierarchy_mode": "inclusive"
+}
+```
+
+### Hierarchical Access
+
+In **inclusive mode** (default), higher compliance levels can access resources at their level and all lower levels:
+- **FedRAMP (5)** can use: Public, External, Internal, SOC2, HIPAA, FedRAMP
+- **HIPAA (4)** can use: Public, External, Internal, SOC2, HIPAA
+- **SOC2 (3)** can use: Public, External, Internal, SOC2
+- **Internal (2)** can use: Public, External, Internal
+- **External (1)** can use: Public, External
+- **Public (0)** can use: Public only
+
+Resources without a compliance_level are accessible by all levels (backward compatibility).
 
 ## Feature Flag
 
@@ -26,7 +91,32 @@ FEATURE_COMPLIANCE_LEVELS_ENABLED=true
 
 ### Backend Changes
 
-#### 1. Configuration Models (`backend/modules/config/manager.py`)
+#### 1. Compliance Level Manager (`backend/core/compliance.py`)
+New module that manages compliance level definitions:
+- Loads compliance levels from `compliance-levels.json`
+- Validates compliance level names against defined options
+- Normalizes aliases to canonical names (e.g., "SOC 2" → "SOC2")
+- Implements hierarchical access checking
+- Logs warnings for invalid compliance levels
+
+Key methods:
+```python
+compliance_mgr = get_compliance_manager()
+
+# Validate and normalize a compliance level
+canonical = compliance_mgr.validate_compliance_level("SOC 2", context="for LLM model 'gpt-4'")
+# Returns: "SOC2" (canonical name)
+
+# Check if a resource is accessible
+is_ok = compliance_mgr.is_accessible("SOC2", "Internal")  
+# Returns: True (SOC2 level 3 can access Internal level 2)
+
+# Get all accessible levels for a user
+levels = compliance_mgr.get_accessible_levels("SOC2")
+# Returns: {"Public", "External", "Internal", "SOC2"}
+```
+
+#### 2. Configuration Models (`backend/modules/config/manager.py`)
 Added `compliance_level` field to `MCPServerConfig`:
 
 ```python
@@ -43,6 +133,18 @@ class ModelConfig(BaseModel):
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "External", "Internal", "Public")
 ```
 
+**Validation on Config Load:**
+When configurations are loaded, compliance levels are automatically validated:
+- Invalid levels trigger warning logs
+- Aliases are normalized to canonical names
+- Invalid levels are set to `None` to prevent errors
+
+Example warning log:
+```
+WARNING: Invalid compliance level 'SOCII' for MCP server 'pdfbasic'. 
+Valid levels: Public, External, Internal, SOC2, HIPAA, FedRAMP. Setting to None.
+```
+
 Added feature flag to `AppSettings`:
 ```python
 class AppSettings(BaseSettings):
@@ -54,7 +156,7 @@ class AppSettings(BaseSettings):
     )
 ```
 
-#### 2. Configuration Files
+#### 3. Configuration Files
 Updated MCP server configurations to include compliance levels:
 
 **config/defaults/mcp.json** and **config/overrides/mcp.json**:
