@@ -5,7 +5,7 @@ This feature allows MCP servers, RAG data sources, and LLM endpoints to declare 
 
 The feature includes:
 - **Standardized compliance levels** defined in `compliance-levels.json`
-- **Hierarchical access control** where higher levels can access lower level resources
+- **Explicit allowlist model** where each level defines which other levels can be used together
 - **Validation and normalization** of compliance level names with warnings for invalid values
 - **Rollout control flag** (`FEATURE_COMPLIANCE_LEVELS_ENABLED`) for gradual deployment
 
@@ -15,58 +15,77 @@ Compliance levels are defined in `config/defaults/compliance-levels.json` (can b
 
 ```json
 {
-  "version": "1.0",
+  "version": "2.0",
+  "description": "Defines compliance level types and their allowed combinations",
   "levels": [
     {
       "name": "Public",
-      "level": 0,
       "description": "Publicly accessible data, no restrictions",
-      "aliases": []
+      "aliases": [],
+      "allowed_with": ["Public"]
     },
     {
       "name": "External",
-      "level": 1,
       "description": "External services with basic enterprise security",
-      "aliases": []
+      "aliases": [],
+      "allowed_with": ["External"]
     },
     {
       "name": "Internal",
-      "level": 2,
       "description": "Internal systems, can handle company IP information",
-      "aliases": []
+      "aliases": [],
+      "allowed_with": ["Internal"]
     },
     {
       "name": "SOC2",
-      "level": 3,
       "description": "SOC 2 Type II compliant systems",
-      "aliases": ["SOC-2", "SOC 2"]
+      "aliases": ["SOC-2", "SOC 2"],
+      "allowed_with": ["SOC2"]
     },
     {
       "name": "HIPAA",
-      "level": 4,
       "description": "HIPAA compliant systems for healthcare data",
-      "aliases": ["HIPAA-Compliant"]
+      "aliases": ["HIPAA-Compliant"],
+      "allowed_with": ["HIPAA", "SOC2"]
     },
     {
       "name": "FedRAMP",
-      "level": 5,
       "description": "FedRAMP authorized systems for government data",
-      "aliases": ["FedRAMP-Moderate", "FedRAMP-High"]
+      "aliases": ["FedRAMP-Moderate", "FedRAMP-High"],
+      "allowed_with": ["FedRAMP", "SOC2"]
     }
   ],
-  "hierarchy_mode": "inclusive"
+  "mode": "explicit_allowlist",
+  "mode_description": "Each compliance level explicitly defines which other levels can be used in the same session."
 }
 ```
 
-### Hierarchical Access
+### Explicit Allowlist Model
 
-In **inclusive mode** (default), higher compliance levels can access resources at their level and all lower levels:
-- **FedRAMP (5)** can use: Public, External, Internal, SOC2, HIPAA, FedRAMP
-- **HIPAA (4)** can use: Public, External, Internal, SOC2, HIPAA
-- **SOC2 (3)** can use: Public, External, Internal, SOC2
-- **Internal (2)** can use: Public, External, Internal
-- **External (1)** can use: Public, External
-- **Public (0)** can use: Public only
+Each compliance level has an `allowed_with` array that explicitly defines which compliance levels can be used together in the same session:
+
+- **Public** sessions can use: Public resources only
+- **External** sessions can use: External resources only
+- **Internal** sessions can use: Internal resources only
+- **SOC2** sessions can use: SOC2 resources only
+- **HIPAA** sessions can use: HIPAA and SOC2 resources
+- **FedRAMP** sessions can use: FedRAMP and SOC2 resources
+
+### Why Explicit Allowlist?
+
+The allowlist model prevents dangerous resource combinations:
+
+**Problem with hierarchical model:**
+- If HIPAA (high security) could access Public (low security) resources
+- A HIPAA session could use public internet search tools
+- Search queries containing patient PII could leak to public services
+
+**Solution with allowlist:**
+- HIPAA explicitly allows only HIPAA and SOC2
+- Public internet search tools are excluded
+- Prevents accidental PII leakage
+
+Administrators have full control over which combinations are safe for their environment by editing the `allowed_with` arrays.
 
 Resources without a compliance_level are accessible by all levels (backward compatibility).
 
