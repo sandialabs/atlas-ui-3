@@ -240,7 +240,7 @@ class ChatService:
             # Try session repository
             session = await self.session_repository.get(session_id)
             if not session:
-                session = await self.create_session(session_id, user_email)
+                await self.create_session(session_id, user_email)
             else:
                 # Sync to legacy dict
                 self.sessions[session_id] = session
@@ -274,10 +274,10 @@ class ChatService:
         """Handle session reset request from frontend."""
         # End the current session
         self.end_session(session_id)
-        
+
         # Create a new session
-        new_session = await self.create_session(session_id, user_email)
-        
+        await self.create_session(session_id, user_email)
+
         logger.info(f"Reset session {session_id} for user {user_email}")
         
         return {
