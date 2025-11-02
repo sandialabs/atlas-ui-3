@@ -257,10 +257,10 @@ def main():
         test_delete_object()
 
         print("\n" + "=" * 40)
-        print("✅ All tests passed!")
+        print("All tests passed!")
 
     except Exception as e:
-        print(f"\n❌ Test failed: {e}")
+        print(f"\nERROR: Test failed: {e}")
         raise
     finally:
         # Always cleanup

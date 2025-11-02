@@ -29,16 +29,16 @@ fi
 
 # Only start MinIO if not using mock S3
 if [ "$USE_MOCK_S3" = "true" ]; then
-    echo "✅ Using Mock S3 (no Docker required)"
+    echo "Using Mock S3 (no Docker required)"
 else
     # Check if MinIO is running
     if ! docker ps | grep -q atlas-minio; then
-        echo "⚠️  MinIO is not running. Starting MinIO with docker-compose..."
+        echo "MinIO is not running. Starting MinIO with docker-compose..."
         docker-compose up -d minio minio-init
-        echo "✅ MinIO started successfully"
+        echo "MinIO started successfully"
         sleep 3
     else
-        echo "✅ MinIO is already running"
+        echo "MinIO is already running"
     fi
 fi
 

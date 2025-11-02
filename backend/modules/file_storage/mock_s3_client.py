@@ -79,7 +79,7 @@ class MockS3StorageClient:
 
     def _calculate_etag(self, content_bytes: bytes) -> str:
         """Calculate ETag for file content."""
-        return hashlib.md5(content_bytes).hexdigest()
+        return hashlib.md5(content_bytes, usedforsecurity=False).hexdigest()
 
     async def upload_file(
         self,
@@ -203,7 +203,8 @@ class MockS3StorageClient:
                         if key_elem is not None and value_elem is not None:
                             tags[key_elem.text] = value_elem.text
                 except ET.ParseError:
-                    pass
+                    # Failed to parse tags XML; tags will be left empty. This is non-fatal as tags are optional.
+                    logger.warning(f"Failed to parse tags XML for file {sanitize_for_logging(file_key)}", exc_info=True)
 
             # Extract filename from metadata headers
             filename = response.headers.get("x-amz-meta-original_filename", file_key.split('/')[-1])

@@ -15,22 +15,33 @@ def ensure_bucket(root: Path, bucket: str) -> Path:
 
 
 def object_paths(bucket_root: Path, key: str) -> Tuple[Path, Path]:
-    # Sanitize key to prevent traversal
+    # Sanitize key to prevent traversal and reject dangerous keys
     key = key.lstrip("/")
+    if os.path.isabs(key):
+        raise ValueError("Absolute paths are not allowed in S3 keys")
     safe_parts = []
     for part in key.split("/"):
-        if part in ("..", ""):
-            continue
+        if part in ("..", ".", ""):
+            raise ValueError(f"Invalid path component in S3 key: {part!r}")
+        # On Windows, reject drive letters (e.g., C:)
+        if os.name == "nt" and len(part) == 2 and part[1] == ":" and part[0].isalpha():
+            raise ValueError(f"Drive letter not allowed in S3 key: {part!r}")
         safe_parts.append(part)
     safe_key = "/".join(safe_parts)
-    obj_path = bucket_root / safe_key
-    meta_path = bucket_root / f"{safe_key}.meta.json"
+    obj_path = (bucket_root / safe_key).resolve()
+    meta_path = (bucket_root / f"{safe_key}.meta.json").resolve()
+    # Ensure the resolved paths are within the bucket root
+    bucket_root_resolved = bucket_root.resolve()
+    if not str(obj_path).startswith(str(bucket_root_resolved)):
+        raise ValueError("Path traversal detected in S3 key")
+    if not str(meta_path).startswith(str(bucket_root_resolved)):
+        raise ValueError("Path traversal detected in S3 key (meta)")
     obj_path.parent.mkdir(parents=True, exist_ok=True)
     return obj_path, meta_path
 
 
 def calc_etag(data: bytes) -> str:
-    return hashlib.md5(data).hexdigest()
+    return hashlib.md5(data, usedforsecurity=False).hexdigest()
 
 
 def httpdate(ts: float) -> str:
