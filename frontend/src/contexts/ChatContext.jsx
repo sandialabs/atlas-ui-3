@@ -229,6 +229,16 @@ export const ChatProvider = ({ children }) => {
 		selections.setComplianceLevelFilter(newLevel)
 	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts])
 
+	// Flatten ragServers into a single list of data source objects for easier consumption
+	const ragSources = config.ragServers.flatMap(server => 
+		server.sources.map(source => ({
+			...source,
+			serverName: server.server,
+			serverDisplayName: server.displayName,
+			serverComplianceLevel: server.complianceLevel,
+		}))
+	)
+
 	const value = {
 		appName: config.appName,
 		user: config.user,
@@ -236,6 +246,8 @@ export const ChatProvider = ({ children }) => {
 		tools: config.tools,
 		prompts: config.prompts,
 		dataSources: config.dataSources,
+		ragServers: config.ragServers, // Expose rich server structure
+		ragSources, // Expose flattened list of sources
 		features: config.features,
 		setFeatures: config.setFeatures,
 		currentModel: config.currentModel,

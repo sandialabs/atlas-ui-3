@@ -8,6 +8,14 @@ A modern LLM chat interface with MCP (Model Context Protocol) integration.
 
 This App is still under development. Not all features work well. 
 
+## Read this first (for contributors)
+
+For the most current, concise guidance on how to work in this repository, read:
+- CLAUDE.md — architecture, workflows, and conventions verified against code
+- .github/copilot-instructions.md — a compact “AI agent guide” for getting productive fast
+
+These two docs are kept up-to-date more frequently than long-form docs. Start there before exploring the wider docs or codebase.
+
 ## Features
 
 - **Multi-LLM Support**: OpenAI GPT, Anthropic Claude, Google Gemini

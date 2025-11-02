@@ -6,7 +6,8 @@ const DEFAULT_FEATURES = {
   tools: false,
   marketplace: false,
   files_panel: false,
-  chat_history: false
+  chat_history: false,
+  compliance_levels: false
 }
 
 export function useChatConfig() {
@@ -16,6 +17,7 @@ export function useChatConfig() {
   const [tools, setTools] = useState([])
   const [prompts, setPrompts] = useState([])
   const [dataSources, setDataSources] = useState([])
+  const [ragServers, setRagServers] = useState([]) // New state for rich RAG server data
   const [features, setFeatures] = useState(DEFAULT_FEATURES)
   // Load saved model from localStorage
   const [currentModel, setCurrentModel] = useState(() => {
@@ -44,6 +46,7 @@ export function useChatConfig() {
         setTools(uniqueTools)
         setPrompts(cfg.prompts || [])
         setDataSources(cfg.data_sources || [])
+        setRagServers(cfg.rag_servers || []) // Capture rich RAG server data
         setUser(cfg.user || 'Unknown')
   setFeatures({ ...DEFAULT_FEATURES, ...(cfg.features || {}) })
   // Agent mode availability flag from backend
@@ -89,6 +92,7 @@ export function useChatConfig() {
     tools,
     prompts,
     dataSources,
+    ragServers, // Expose new state
     features,
     setFeatures,
     currentModel,

@@ -78,7 +78,29 @@ async def get_config(
             )
         else:
             rag_client = app_factory.get_rag_client()
-            rag_data_sources = await rag_client.discover_data_sources(current_user)
+            # rag_client.discover_data_sources now returns List[DataSource] objects
+            data_source_objects = await rag_client.discover_data_sources(current_user)
+            # Convert to list of names (strings) for the 'data_sources' field (backward compatibility)
+            rag_data_sources = [ds.name for ds in data_source_objects]
+            # Populate rag_servers with the mock data in the expected format for the UI
+            rag_servers = [
+                {
+                    "server": "rag_mock",
+                    "displayName": "RAG Mock Data",
+                    "icon": "database",
+                    "complianceLevel": "Public", # Default compliance for the mock server itself
+                    "sources": [
+                        {
+                            "id": ds.name,
+                            "name": ds.name,
+                            "authRequired": True,
+                            "selected": False,
+                            "complianceLevel": ds.compliance_level,
+                        }
+                        for ds in data_source_objects
+                    ],
+                }
+            ]
     except Exception as e:
         logger.warning(f"Error resolving RAG data sources: {e}")
     

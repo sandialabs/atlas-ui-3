@@ -7,6 +7,12 @@ from pydantic import BaseModel
 
 from core.http_client import create_rag_client
 
+
+class DataSource(BaseModel):
+    """Represents a RAG data source with compliance information."""
+    name: str
+    compliance_level: str
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,7 +87,7 @@ class RAGClient:
             # Fall back to HTTP mode
             self.mock_mode = False
         
-    async def discover_data_sources(self, user_name: str) -> List[str]:
+    async def discover_data_sources(self, user_name: str) -> List[DataSource]:
         """Discover data sources accessible by a user."""
         use_test_client = bool(self.mock_mode and self.test_client)
         logger.info(
@@ -92,27 +98,32 @@ class RAGClient:
             self.test_client is not None,
         )
 
+        accessible_sources_data = []
         if use_test_client:
             try:
                 response = self.test_client.get(f"/v1/discover/datasources/{user_name}")
                 response.raise_for_status()
                 data = response.json()
-                return data.get("accessible_data_sources", [])
+                accessible_sources_data = data.get("accessible_data_sources", [])
             except Exception as exc:
                 logger.error(f"TestClient error while discovering data sources for {user_name}: {exc}", exc_info=True)
                 return []
         
         # HTTP mode using unified client
-        try:
-            data = await self.http_client.get(f"/v1/discover/datasources/{user_name}")
-            return data.get("accessible_data_sources", [])
-        except HTTPException as exc:
-            logger.warning(f"HTTP error discovering data sources for {user_name}: {exc.detail}")
-            # Return empty list for graceful degradation instead of raising
-            return []
-        except Exception as exc:
-            logger.error(f"Unexpected error while discovering data sources for {user_name}: {exc}", exc_info=True)
-            return []
+        else:
+            try:
+                data = await self.http_client.get(f"/v1/discover/datasources/{user_name}")
+                accessible_sources_data = data.get("accessible_data_sources", [])
+            except HTTPException as exc:
+                logger.warning(f"HTTP error discovering data sources for {user_name}: {exc.detail}")
+                # Return empty list for graceful degradation instead of raising
+                return []
+            except Exception as exc:
+                logger.error(f"Unexpected error while discovering data sources for {user_name}: {exc}", exc_info=True)
+                return []
+        
+        # Parse the list of dictionaries into a list of DataSource objects
+        return [DataSource(**source_data) for source_data in accessible_sources_data]
     
     async def query_rag(self, user_name: str, data_source: str, messages: List[Dict]) -> RAGResponse:
         """Query RAG endpoint for a response with metadata."""

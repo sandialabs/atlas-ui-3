@@ -222,7 +222,8 @@ class RAGMCPService:
                         continue
 
                     # --- Compliance Filtering (Step 3) ---
-                    resource_compliance_level = r.get("complianceLevel")
+                    # Check for both camelCase (MCP standard) and snake_case (RAG mock standard)
+                    resource_compliance_level = r.get("complianceLevel") or r.get("compliance_level")
                     if compliance_mgr and not compliance_mgr.is_accessible(
                         user_level=user_compliance_level, resource_level=resource_compliance_level
                     ):
@@ -485,10 +486,12 @@ class RAGMCPService:
         if not isinstance(payload, dict):
             return []
         results = payload.get("results") if isinstance(payload.get("results"), dict) else payload
-        # Support both {results: {resources: [...]}} and {resources: [...]}
+        # Support both {results: {resources: [...]}} and {results: [...]}
+        # Also support the RAG mock format: {accessible_data_sources: [...]}
         resources = (
             (results.get("resources") if isinstance(results, dict) else None)
             or payload.get("resources")
+            or payload.get("accessible_data_sources") # Added support for RAG mock format
             or []
         )
         if isinstance(resources, list):
