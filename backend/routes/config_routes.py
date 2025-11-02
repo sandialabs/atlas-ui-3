@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Depends
 
 from core.auth import is_user_in_group
-from core.utils import get_current_user
+from core.utils import get_current_user, sanitize_for_logging
 from infrastructure.app_factory import app_factory
 
 logger = logging.getLogger(__name__)
@@ -182,8 +182,8 @@ async def get_config(current_user: str = Depends(get_current_user)):
     
 # Log what the user can see for debugging
     logger.info(
-        f"User {current_user} has access to {len(authorized_servers)} servers: {authorized_servers}\n"
-        f"Returning {len(tools_info)} server tool groups to frontend for user {current_user}"
+        f"User {sanitize_for_logging(current_user)} has access to {len(authorized_servers)} servers: {authorized_servers}\n"
+        f"Returning {len(tools_info)} server tool groups to frontend for user {sanitize_for_logging(current_user)}"
     )
     # Build models list with compliance levels
     models_list = []

@@ -9,6 +9,7 @@ from typing import Dict, List, Any, Optional
 from fastmcp import Client
 from modules.config import config_manager
 from core.auth_utils import create_authorization_manager
+from core.utils import sanitize_for_logging
 from domain.messages.models import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -523,7 +524,7 @@ class MCPToolManager:
                 if progress_handler is not None:
                     kwargs["progress_handler"] = progress_handler
                 result = await client.call_tool(tool_name, arguments, **kwargs)
-                logger.info(f"Successfully called {tool_name} on {server_name}")
+                logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
                 return result
         except Exception as e:
             logger.error(f"Error calling {tool_name} on {server_name}: {e}")

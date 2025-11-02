@@ -1,21 +1,17 @@
-import { X, Shield } from 'lucide-react'
+import { X } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 
 const RagPanel = ({ isOpen, onClose }) => {
-  const { 
-    dataSources, 
-    selectedDataSources, 
-    toggleDataSource, 
-    onlyRag, 
+  const {
+    dataSources,
+    selectedDataSources,
+    toggleDataSource,
+    onlyRag,
     setOnlyRag,
-    complianceLevelFilter,
-    setComplianceLevelFilter,
     tools,
     prompts,
     features
   } = useChat()
-
-  const complianceEnabled = features?.compliance_levels
 
   // Extract unique compliance levels from all available tools, prompts, and data sources
   const availableComplianceLevels = new Set()
@@ -26,7 +22,6 @@ const RagPanel = ({ isOpen, onClose }) => {
     if (prompt.compliance_level) availableComplianceLevels.add(prompt.compliance_level)
   })
   // TODO: When rag_servers data is available in context, extract compliance levels from data sources too
-  const complianceLevels = Array.from(availableComplianceLevels).sort()
 
   return (
     <>

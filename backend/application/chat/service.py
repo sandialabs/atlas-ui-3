@@ -26,6 +26,7 @@ from .utilities import tool_utils, file_utils, notification_utils, error_utils
 from .agent import AgentLoopFactory
 from .agent.protocols import AgentContext, AgentEvent
 from core.auth_utils import create_authorization_manager
+from core.utils import sanitize_for_logging
 
 # Import new refactored modules
 from .policies.tool_authorization import ToolAuthorizationService
@@ -192,7 +193,7 @@ class ChatService:
         self.sessions[session_id] = session
         await self.session_repository.create(session)
         
-        logger.info(f"Created session {session_id} for user {user_email}")
+        logger.info(f"Created session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
         return session
     
     async def handle_chat_message(
@@ -274,7 +275,7 @@ class ChatService:
         # Create a new session
         await self.create_session(session_id, user_email)
 
-        logger.info(f"Reset session {session_id} for user {user_email}")
+        logger.info(f"Reset session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
         
         return {
             "type": "session_reset",
@@ -446,4 +447,4 @@ class ChatService:
         """End a session."""
         if session_id in self.sessions:
             self.sessions[session_id].active = False
-            logger.info(f"Ended session {session_id}")
+            logger.info(f"Ended session {sanitize_for_logging(str(session_id))}")

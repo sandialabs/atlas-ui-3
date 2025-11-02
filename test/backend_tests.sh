@@ -8,14 +8,18 @@ echo "================================="
 if [ -z "$PROJECT_ROOT" ]; then
     if [ -d "/app" ]; then
         PROJECT_ROOT="/app"
-    else
+    elif [ -d "../backend" ]; then
+        # Running from test/ directory
         PROJECT_ROOT="$(pwd)/.."
+    else
+        # Running from project root
+        PROJECT_ROOT="$(pwd)"
     fi
 fi
 
 # Set up Python environment and paths
 BACKEND_DIR="$PROJECT_ROOT/backend"
-export PYTHONPATH="$BACKEND_DIR"
+export PYTHONPATH="$PROJECT_ROOT"
 
 echo "Backend directory: $BACKEND_DIR"
 echo "PYTHONPATH: $PYTHONPATH"

@@ -4,7 +4,7 @@ import json
 import pytest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from backend.core.compliance import ComplianceLevelManager, ComplianceLevel
+from backend.core.compliance import ComplianceLevelManager
 
 
 @pytest.fixture

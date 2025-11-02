@@ -1,6 +1,5 @@
 """Test compliance level functionality for MCP servers and data sources."""
 
-import pytest
 from modules.config.manager import MCPServerConfig, MCPConfig
 
 

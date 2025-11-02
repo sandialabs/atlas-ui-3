@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 from core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
+from core.utils import sanitize_for_logging
 
 
 class RAGMCPService:
@@ -56,7 +57,7 @@ class RAGMCPService:
             )
 
             if not authorized_servers:
-                logger.info("No authorized MCP servers for user %s", username)
+                logger.info("No authorized MCP servers for user %s", sanitize_for_logging(username))
                 return []
 
             # Filter to servers that advertise the discovery tool
@@ -68,7 +69,7 @@ class RAGMCPService:
                     servers_with_discovery.append(server)
 
             if not servers_with_discovery:
-                logger.info("No servers implement rag_discover_resources for user %s", username)
+                logger.info("No servers implement rag_discover_resources for user %s", sanitize_for_logging(username))
                 return []
 
             # Fan out discovery calls
@@ -92,8 +93,8 @@ class RAGMCPService:
                 except Exception as e:
                     logger.warning(
                         "Discovery failed on server %s for user %s: %s",
-                        server,
-                        username,
+                        sanitize_for_logging(server),
+                        sanitize_for_logging(username),
                         e,
                     )
 

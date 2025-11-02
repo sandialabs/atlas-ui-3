@@ -21,7 +21,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     setToolChoiceRequired,
     clearToolsAndPrompts,
     complianceLevelFilter,
-    setComplianceLevelFilter,
     tools: allTools,
     prompts: allPrompts,
     features
@@ -41,8 +40,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   allPrompts.forEach(prompt => {
     if (prompt.compliance_level) availableComplianceLevels.add(prompt.compliance_level)
   })
-  const complianceLevels = Array.from(availableComplianceLevels).sort()
-  
+
   const navigateToMarketplace = () => {
     clearToolsAndPrompts()
     navigate('/marketplace')

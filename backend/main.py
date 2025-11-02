@@ -21,6 +21,7 @@ from core.middleware import AuthMiddleware
 from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
 from core.otel_config import setup_opentelemetry
+from core.utils import sanitize_for_logging
 
 # Import from infrastructure
 from infrastructure.app_factory import app_factory
@@ -216,7 +217,7 @@ async def websocket_endpoint(websocket: WebSocket):
     connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
     chat_service = app_factory.create_chat_service(connection_adapter)
     
-    logger.info(f"WebSocket connection established for session {session_id}")
+    logger.info(f"WebSocket connection established for session {sanitize_for_logging(str(session_id))}")
     
     try:
         while True:
