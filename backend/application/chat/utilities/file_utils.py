@@ -319,7 +319,7 @@ async def ingest_v2_artifacts(
             mime_type = artifact.get("mime")
             
             if not name or not b64_content:
-                logger.warning(f"Skipping artifact with missing name or content")
+                logger.warning("Skipping artifact with missing name or content")
                 continue
                 
             files_to_upload.append({

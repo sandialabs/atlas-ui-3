@@ -14,7 +14,9 @@ from typing import Any, Dict, List, Optional
 
 
 logger = logging.getLogger(__name__)
+from core.compliance import get_compliance_manager
 from core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
+from core.utils import sanitize_for_logging
 
 
 class RAGMCPService:
@@ -25,7 +27,7 @@ class RAGMCPService:
         self.config_manager = config_manager
         self.auth_check_func = auth_check_func
 
-    async def discover_data_sources(self, username: str) -> List[str]:
+    async def discover_data_sources(self, username: str, user_compliance_level: Optional[str] = None) -> List[str]:
         """Discover data sources across authorized MCP RAG servers.
 
         Phase 1 returns a flat list of strings for backward compatibility.
@@ -56,8 +58,32 @@ class RAGMCPService:
             )
 
             if not authorized_servers:
-                logger.info("No authorized MCP servers for user %s", username)
+                logger.info("No authorized MCP servers for user %s", sanitize_for_logging(username))
                 return []
+
+            # --- Compliance Filtering (Step 2) ---
+            if user_compliance_level:
+                compliance_mgr = get_compliance_manager()
+                filtered_servers = []
+                for server in authorized_servers:
+                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
+                    server_compliance_level = cfg.get("compliance_level")
+                    if compliance_mgr.is_accessible(
+                        user_level=user_compliance_level, resource_level=server_compliance_level
+                    ):
+                        filtered_servers.append(server)
+                    else:
+                        logger.info(
+                            "Skipping RAG server %s due to compliance level mismatch (user: %s, server: %s)",
+                            sanitize_for_logging(server),
+                            sanitize_for_logging(user_compliance_level),
+                            sanitize_for_logging(server_compliance_level),
+                        )
+                authorized_servers = filtered_servers
+                if not authorized_servers:
+                    logger.info("No authorized MCP servers remain after compliance filtering for user %s", sanitize_for_logging(username))
+                    return []
+            # -------------------------------------
 
             # Filter to servers that advertise the discovery tool
             servers_with_discovery: List[str] = []
@@ -68,7 +94,7 @@ class RAGMCPService:
                     servers_with_discovery.append(server)
 
             if not servers_with_discovery:
-                logger.info("No servers implement rag_discover_resources for user %s", username)
+                logger.info("No servers implement rag_discover_resources for user %s", sanitize_for_logging(username))
                 return []
 
             # Fan out discovery calls
@@ -92,8 +118,8 @@ class RAGMCPService:
                 except Exception as e:
                     logger.warning(
                         "Discovery failed on server %s for user %s: %s",
-                        server,
-                        username,
+                        sanitize_for_logging(server),
+                        sanitize_for_logging(username),
                         e,
                     )
 
@@ -110,7 +136,7 @@ class RAGMCPService:
             logger.error("Error during RAG MCP discovery: %s", e, exc_info=True)
             return []
 
-    async def discover_servers(self, username: str) -> List[Dict[str, Any]]:
+    async def discover_servers(self, username: str, user_compliance_level: Optional[str] = None) -> List[Dict[str, Any]]:
         """Return richer per-server discovery structure for UI (rag_servers).
 
         Shape:
@@ -143,9 +169,32 @@ class RAGMCPService:
 
         rag_servers: List[Dict[str, Any]] = []
         try:
+            compliance_mgr = get_compliance_manager() if user_compliance_level else None
+
             authorized_servers: List[str] = self.mcp_manager.get_authorized_servers(
                 username, self.auth_check_func
             )
+
+            # --- Compliance Filtering (Step 2) ---
+            if compliance_mgr:
+                filtered_servers = []
+                for server in authorized_servers:
+                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
+                    server_compliance_level = cfg.get("compliance_level")
+                    if compliance_mgr.is_accessible(
+                        user_level=user_compliance_level, resource_level=server_compliance_level
+                    ):
+                        filtered_servers.append(server)
+                    else:
+                        logger.info(
+                            "Skipping RAG server %s due to compliance level mismatch (user: %s, server: %s)",
+                            sanitize_for_logging(server),
+                            sanitize_for_logging(user_compliance_level),
+                            sanitize_for_logging(server_compliance_level),
+                        )
+                authorized_servers = filtered_servers
+            # -------------------------------------
+
             for server in authorized_servers:
                 server_data = self.mcp_manager.available_tools.get(server)
                 tools = (server_data or {}).get("tools", [])
@@ -171,6 +220,23 @@ class RAGMCPService:
                     rid = r.get("id") or r.get("name")
                     if not isinstance(rid, str):
                         continue
+
+                    # --- Compliance Filtering (Step 3) ---
+                    # Check for both camelCase (MCP standard) and snake_case (RAG mock standard)
+                    resource_compliance_level = r.get("complianceLevel") or r.get("compliance_level")
+                    if compliance_mgr and not compliance_mgr.is_accessible(
+                        user_level=user_compliance_level, resource_level=resource_compliance_level
+                    ):
+                        logger.info(
+                            "Skipping RAG resource %s:%s due to compliance level mismatch (user: %s, resource: %s)",
+                            sanitize_for_logging(server),
+                            sanitize_for_logging(rid),
+                            sanitize_for_logging(user_compliance_level),
+                            sanitize_for_logging(resource_compliance_level),
+                        )
+                        continue
+                    # -------------------------------------
+
                     ui_sources.append({
                         "id": rid,
                         "name": r.get("name") or rid,
@@ -179,17 +245,21 @@ class RAGMCPService:
                         # New: include per-resource groups when provided
                         "groups": list(r.get("groups", [])) if isinstance(r.get("groups"), list) else None,
                         "selected": bool(r.get("defaultSelected", False)),
+                        # Include compliance_level from resource or inherit from server
+                        "complianceLevel": resource_compliance_level if resource_compliance_level else None,
                     })
 
-                # Optional config-driven icon/name
+                # Optional config-driven icon/name and compliance level
                 cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
                 display_name = cfg.get("displayName") or server
                 icon = (cfg.get("ui") or {}).get("icon") if isinstance(cfg.get("ui"), dict) else None
+                compliance_level = cfg.get("compliance_level")
 
                 rag_servers.append({
                     "server": server,
                     "displayName": display_name,
                     "icon": icon,
+                    "complianceLevel": compliance_level,
                     "sources": ui_sources,
                 })
         except Exception as e:
@@ -416,10 +486,12 @@ class RAGMCPService:
         if not isinstance(payload, dict):
             return []
         results = payload.get("results") if isinstance(payload.get("results"), dict) else payload
-        # Support both {results: {resources: [...]}} and {resources: [...]}
+        # Support both {results: {resources: [...]}} and {results: [...]}
+        # Also support the RAG mock format: {accessible_data_sources: [...]}
         resources = (
             (results.get("resources") if isinstance(results, dict) else None)
             or payload.get("resources")
+            or payload.get("accessible_data_sources") # Added support for RAG mock format
             or []
         )
         if isinstance(resources, list):

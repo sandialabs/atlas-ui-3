@@ -1,4 +1,3 @@
-import asyncio
 import pytest
 
 from modules.mcp_tools.client import MCPToolManager

@@ -9,7 +9,8 @@
     "description": "Evaluate mathematical expressions, perform calculations with basic arithmetic, trigonometry, and logarithms",
     "author": "Chat UI Team",
     "short_description": "Mathematical calculator",
-    "help_email": "support@chatui.example.com"
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Public"
   },
 
   "pptx_generator": {
@@ -20,7 +21,8 @@
     "description": "Create professional PowerPoint presentations from JSON data or Markdown content with automatic slide generation, bullet point formatting, and multimedia support",
     "author": "Chat UI Team",
     "short_description": "PowerPoint presentation generator",
-    "help_email": "support@chatui.example.com"
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "SOC2"
   }, 
   "pdfbasic": {
     "command": ["python", "mcp/pdfbasic/main.py"],
@@ -30,7 +32,8 @@
     "description": "Extract and analyze text content from PDF documents, search within PDFs, and summarize content",
     "author": "Chat UI Team",
     "short_description": "PDF text extraction and analysis",
-    "help_email": "support@chatui.example.com"
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "SOC2"
   },
   "file_size_test": {
     "command": ["python", "mcp/file_size_test/main.py"],
@@ -50,7 +53,8 @@
     "description": "Specialized system prompts for AI behavior modification",
     "author": "Chat UI Team",
     "short_description": "AI behavior prompts",
-    "help_email": "support@chatui.example.com"
+    "help_email": "support@chatui.example.com", 
+      "compliance_level": "Public"
   }
 
 }

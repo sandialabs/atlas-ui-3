@@ -38,6 +38,15 @@ DATA_SOURCES_PERMISSIONS_DB = {
     "public_company_handbook": [], # Accessible by everyone
 }
 
+# Mock database storing the compliance level for each data source.
+DATA_SOURCES_COMPLIANCE_DB = {
+    "q3_sales_forecast": "Internal",
+    "production_db_schema": "SOC2",
+    "kubernetes_cluster_logs": "SOC2",
+    "marketing_campaign_plan_q4": "Public",
+    "public_company_handbook": "Public",
+}
+
 # Mock RAG (Retrieval-Augmented Generation) data content.
 # This is the actual data that gets "retrieved" based on the data_source.
 RAG_DATA_DB = {
@@ -142,9 +151,16 @@ class ChatCompletionResponse(BaseModel):
     choices: List[ChatCompletionChoice]
     rag_metadata: Optional[RAGMetadata] = Field(None, description="Metadata about the RAG processing")
 
+class ComplianceDeclaration(BaseModel):
+    compliance_level: str = Field(..., description="The compliance level to assign to the data source.")
+
+class DataSource(BaseModel):
+    name: str = Field(..., description="The name of the data source.")
+    compliance_level: str = Field(..., description="The compliance level of the data source.")
+
 class DataSourceDiscoveryResponse(BaseModel):
     user_name: str
-    accessible_data_sources: List[str] = Field(..., description="A list of data source names the user can access.")
+    accessible_data_sources: List[DataSource] = Field(..., description="A list of data source objects the user can access.")
 
 
 # ------------------------------------------------------------------------------
@@ -226,6 +242,24 @@ RAG_METADATA_DB = {
 # 6. API Endpoints
 # ------------------------------------------------------------------------------
 
+@app.post(
+    "/v1/datasources/{data_source_name}/compliance",
+    summary="Declare the compliance level for a data source"
+)
+async def declare_compliance(
+    data_source_name: str = Path(..., description="The name of the data source."),
+    declaration: ComplianceDeclaration = Body(...)
+):
+    """
+    Simulates setting the compliance level for a data source.
+    """
+    if data_source_name not in DATA_SOURCES_PERMISSIONS_DB:
+        raise HTTPException(status_code=404, detail=f"Data source '{data_source_name}' not found.")
+
+    DATA_SOURCES_COMPLIANCE_DB[data_source_name] = declaration.compliance_level
+    return {"message": f"Compliance level for '{data_source_name}' set to '{declaration.compliance_level}'"}
+
+
 @app.get(
     "/v1/discover/datasources/{user_name}",
     response_model=DataSourceDiscoveryResponse,
@@ -246,14 +280,17 @@ async def discover_data_sources(
     accessible_sources = []
     # Iterate over every data source and its required groups
     for source, required_groups in DATA_SOURCES_PERMISSIONS_DB.items():
+        # Determine compliance level, defaulting to 'Unknown' if not set
+        compliance_level = DATA_SOURCES_COMPLIANCE_DB.get(source, "Unknown")
+
         # If the data source is public, anyone can access it.
         if not required_groups:
-            accessible_sources.append(source)
+            accessible_sources.append(DataSource(name=source, compliance_level=compliance_level))
             continue
 
         # Check if the user is in any of the required groups for this data source.
         if any(is_user_in_group(user_name, group) for group in required_groups):
-            accessible_sources.append(source)
+            accessible_sources.append(DataSource(name=source, compliance_level=compliance_level))
 
     return DataSourceDiscoveryResponse(
         user_name=user_name,
@@ -327,4 +364,3 @@ if __name__ == "__main__":
     # 2. Run the server: uvicorn main:app --reload
     # 3. Open your browser to http://127.0.0.1:8000/docs to see the interactive API documentation.
     uvicorn.run(app, host="0.0.0.0", port=8001)
-

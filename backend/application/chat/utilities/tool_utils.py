@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 
-from domain.messages.models import ToolCall, ToolResult, Message, MessageRole
+from domain.messages.models import ToolCall, ToolResult
 from interfaces.llm import LLMResponse
 from core.capabilities import create_download_url
 from .notification_utils import _sanitize_filename_value  # reuse same filename sanitizer for UI args
