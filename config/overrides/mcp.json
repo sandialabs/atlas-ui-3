@@ -53,8 +53,15 @@
     "description": "Specialized system prompts for AI behavior modification",
     "author": "Chat UI Team",
     "short_description": "AI behavior prompts",
-    "help_email": "support@chatui.example.com", 
+    "help_email": "support@chatui.example.com",
       "compliance_level": "Public"
+  },
+  "progress_demo": {
+    "transport": "stdio",
+    "command": ["python", "main.py"],
+    "cwd": "backend/mcp/progress_demo",
+    "groups": ["mcp_basic"],
+    "compliance_level": "Public"
   }
 
 }
