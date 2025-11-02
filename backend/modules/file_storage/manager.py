@@ -156,6 +156,18 @@ class FileManager:
             source_type = tags.get("source", "uploaded")
             source_tool = tags.get("source_tool", None)
             
+            # Handle last_modified: could be datetime object or ISO string
+            last_modified = file_metadata.get("last_modified")
+            if last_modified:
+                if isinstance(last_modified, str):
+                    last_modified_str = last_modified
+                elif hasattr(last_modified, 'isoformat'):
+                    last_modified_str = last_modified.isoformat()
+                else:
+                    last_modified_str = None
+            else:
+                last_modified_str = None
+            
             file_info = {
                 'filename': filename,
                 's3_key': file_metadata.get("key", ""),
@@ -164,7 +176,7 @@ class FileManager:
                 'source': source_type,
                 'source_tool': source_tool,
                 'extension': filename.split('.')[-1] if '.' in filename else '',
-                'last_modified': file_metadata.get("last_modified").isoformat() if file_metadata.get("last_modified") else None,
+                'last_modified': last_modified_str,
                 'content_type': file_metadata.get("content_type", "application/octet-stream"),
                 'can_display_in_canvas': self.should_display_in_canvas(filename)
             }
