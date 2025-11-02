@@ -41,22 +41,27 @@ class MessageBuilder:
     ) -> List[Dict[str, Any]]:
         """
         Build messages array from session history and context.
-        
+
         Args:
             session: Current chat session
             include_files_manifest: Whether to append files manifest
-            
+
         Returns:
             List of messages ready for LLM call
         """
         # Get conversation history from session
         messages = session.history.get_messages_for_llm()
-        
+
         # Optionally add files manifest
         if include_files_manifest:
             session_context = build_session_context(session)
+            files_in_context = session_context.get("files", {})
+            logger.debug(f"Session has {len(files_in_context)} files: {list(files_in_context.keys())}")
             files_manifest = file_utils.build_files_manifest(session_context)
             if files_manifest:
+                logger.debug(f"Adding files manifest to messages: {files_manifest['content'][:100]}")
                 messages.append(files_manifest)
-        
+            else:
+                logger.warning("No files manifest generated despite include_files_manifest=True")
+
         return messages

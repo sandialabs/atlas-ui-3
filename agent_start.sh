@@ -20,14 +20,26 @@ done
 # Configuration
 USE_NEW_FRONTEND=${USE_NEW_FRONTEND:-true}
 
-# Check if MinIO is running
-if ! docker ps | grep -q atlas-minio; then
-    echo "⚠️  MinIO is not running. Starting MinIO with docker-compose..."
-    docker-compose up -d minio minio-init
-    echo "✅ MinIO started successfully"
-    sleep 3
+# Read USE_MOCK_S3 from .env file
+if [ -f .env ]; then
+    USE_MOCK_S3=$(grep -E "^USE_MOCK_S3=" .env | cut -d '=' -f2)
 else
-    echo "✅ MinIO is already running"
+    USE_MOCK_S3="true"  # Default to mock if no .env
+fi
+
+# Only start MinIO if not using mock S3
+if [ "$USE_MOCK_S3" = "true" ]; then
+    echo "Using Mock S3 (no Docker required)"
+else
+    # Check if MinIO is running
+    if ! docker ps | grep -q atlas-minio; then
+        echo "MinIO is not running. Starting MinIO with docker-compose..."
+        docker-compose up -d minio minio-init
+        echo "MinIO started successfully"
+        sleep 3
+    else
+        echo "MinIO is already running"
+    fi
 fi
 
 # Kill any running uvicorn processes (skip if only rebuilding frontend)
