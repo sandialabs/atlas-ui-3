@@ -105,6 +105,7 @@ export const ChatProvider = ({ children }) => {
 			agent_max_steps: settings.maxIterations || agent.agentMaxSteps,
 			temperature: settings.llmTemperature || 0.7,
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
+			compliance_level_filter: selections.complianceLevelFilter,
 		})
 	}, [addMessage, currentModel, selectedTools, selectedPrompts, selectedDataSources, config, selections.toolChoiceRequired, selections, agent, files, isWelcomeVisible, sendMessage, settings])
 
@@ -193,6 +194,51 @@ export const ChatProvider = ({ children }) => {
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
 
+	// Wrapper for setComplianceLevelFilter that clears incompatible selections
+	const setComplianceLevelFilterWithCleanup = useCallback((newLevel) => {
+		// If changing to a new compliance level (not clearing or setting to same)
+		if (newLevel && newLevel !== selections.complianceLevelFilter) {
+			// Clear tools that don't match the new compliance level
+			const toolsToRemove = []
+			selectedTools.forEach(toolKey => {
+				const serverName = toolKey.split('_')[0]
+				const server = config.tools.find(t => t.server === serverName)
+				if (server && server.compliance_level && server.compliance_level !== newLevel) {
+					toolsToRemove.push(toolKey)
+				}
+			})
+			if (toolsToRemove.length > 0) {
+				selections.removeTools(toolsToRemove)
+			}
+
+			// Clear prompts that don't match the new compliance level
+			const promptsToRemove = []
+			selectedPrompts.forEach(promptKey => {
+				const serverName = promptKey.split('_')[0]
+				const server = config.prompts.find(p => p.server === serverName)
+				if (server && server.compliance_level && server.compliance_level !== newLevel) {
+					promptsToRemove.push(promptKey)
+				}
+			})
+			if (promptsToRemove.length > 0) {
+				selections.removePrompts(promptsToRemove)
+			}
+		}
+		
+		// Set the new compliance level
+		selections.setComplianceLevelFilter(newLevel)
+	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts])
+
+	// Flatten ragServers into a single list of data source objects for easier consumption
+	const ragSources = config.ragServers.flatMap(server => 
+		server.sources.map(source => ({
+			...source,
+			serverName: server.server,
+			serverDisplayName: server.displayName,
+			serverComplianceLevel: server.complianceLevel,
+		}))
+	)
+
 	const value = {
 		appName: config.appName,
 		user: config.user,
@@ -200,6 +246,8 @@ export const ChatProvider = ({ children }) => {
 		tools: config.tools,
 		prompts: config.prompts,
 		dataSources: config.dataSources,
+		ragServers: config.ragServers, // Expose rich server structure
+		ragSources, // Expose flattened list of sources
 		features: config.features,
 		setFeatures: config.setFeatures,
 		currentModel: config.currentModel,
@@ -223,6 +271,8 @@ export const ChatProvider = ({ children }) => {
 		toolChoiceRequired: selections.toolChoiceRequired,
 		setToolChoiceRequired: selections.setToolChoiceRequired,
 		clearToolsAndPrompts: selections.clearToolsAndPrompts,
+		complianceLevelFilter: selections.complianceLevelFilter,
+		setComplianceLevelFilter: setComplianceLevelFilterWithCleanup,
 		agentModeEnabled: agent.agentModeEnabled,
 		setAgentModeEnabled: agent.setAgentModeEnabled,
 		agentMaxSteps: agent.agentMaxSteps,

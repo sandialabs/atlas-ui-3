@@ -74,7 +74,7 @@ def execute_code_safely(script_path: Path, timeout: int = 30) -> Dict[str, Any]:
                 "error_type": "SubprocessError"
             }
     
-    except subprocess.TimeoutExpired as e:
+    except subprocess.TimeoutExpired:
         error_msg = f"Code execution timed out after {timeout} seconds"
         logger.error(error_msg)
         logger.error(f"Traceback: {traceback.format_exc()}")

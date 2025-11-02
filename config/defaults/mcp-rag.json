@@ -7,6 +7,7 @@
     "description": "Fleet RAG server: discover resources and retrieve locations/meta-data for corporate cars in use by employees.",
     "author": "Chat UI Team",
     "short_description": "Corporate cars location & metadata",
-    "help_email": "support@chatui.example.com"
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "SOC2"
   }
 }

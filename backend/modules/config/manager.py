@@ -12,7 +12,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, AliasChoices
@@ -31,6 +31,8 @@ class ModelConfig(BaseModel):
     temperature: Optional[float] = 0.7
     # Optional extra HTTP headers (e.g. for providers like OpenRouter)
     extra_headers: Optional[Dict[str, str]] = None
+    # Compliance/security level (e.g., "External", "Internal", "Public")
+    compliance_level: Optional[str] = None
 
 
 class LLMConfig(BaseModel):
@@ -61,6 +63,7 @@ class MCPServerConfig(BaseModel):
     url: Optional[str] = None            # URL for HTTP servers
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
+    compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
 
 
 class MCPConfig(BaseModel):
@@ -144,6 +147,12 @@ class AppSettings(BaseSettings):
         False,
         description="Enable RAG via MCP aggregator (discovery phase)",
         validation_alias=AliasChoices("FEATURE_RAG_MCP_ENABLED", "RAG_MCP_ENABLED"),
+    )
+    # Compliance level filtering feature gate
+    feature_compliance_levels_enabled: bool = Field(
+        False,
+        description="Enable compliance level filtering for MCP servers and data sources",
+        validation_alias=AliasChoices("FEATURE_COMPLIANCE_LEVELS_ENABLED"),
     )
 
     # Capability tokens (for headless access to downloads/iframes)
@@ -322,6 +331,8 @@ class ConfigManager:
                 
                 if data:
                     self._llm_config = LLMConfig(**data)
+                    # Validate compliance levels
+                    self._validate_llm_compliance_levels()
                     logger.info(f"Loaded {len(self._llm_config.models)} models from LLM config")
                 else:
                     self._llm_config = LLMConfig(models={})
@@ -332,6 +343,25 @@ class ConfigManager:
                 self._llm_config = LLMConfig(models={})
         
         return self._llm_config
+    
+    def _validate_llm_compliance_levels(self):
+        """Validate compliance levels for all LLM models."""
+        try:
+            # Standardize on running from backend/ directory (agent_start.sh)
+            # Use non-prefixed imports so they resolve when cwd=backend
+            from core.compliance import get_compliance_manager
+            compliance_mgr = get_compliance_manager()
+            
+            for model_name, model_config in self._llm_config.models.items():
+                if model_config.compliance_level:
+                    validated = compliance_mgr.validate_compliance_level(
+                        model_config.compliance_level,
+                        context=f"for LLM model '{model_name}'"
+                    )
+                    # Update to canonical name or None if invalid
+                    model_config.compliance_level = validated
+        except Exception as e:
+            logger.warning(f"Could not validate LLM compliance levels: {e}")
     
     @property
     def mcp_config(self) -> MCPConfig:
@@ -347,6 +377,8 @@ class ConfigManager:
                     # Convert flat structure to nested structure for Pydantic
                     servers_data = {"servers": data}
                     self._mcp_config = MCPConfig(**servers_data)
+                    # Validate compliance levels
+                    self._validate_mcp_compliance_levels(self._mcp_config, "MCP")
                     logger.info(f"Loaded MCP config with {len(self._mcp_config.servers)} servers: {list(self._mcp_config.servers.keys())}")
                 else:
                     self._mcp_config = MCPConfig()
@@ -370,17 +402,36 @@ class ConfigManager:
                 if data:
                     servers_data = {"servers": data}
                     self._rag_mcp_config = MCPConfig(**servers_data)
-                    logger.info(
-                        f"Loaded RAG MCP config with {len(self._rag_mcp_config.servers)} servers: {list(self._rag_mcp_config.servers.keys())}"
-                    )
+                    # Validate compliance levels
+                    self._validate_mcp_compliance_levels(self._rag_mcp_config, "RAG MCP")
+                    logger.info(f"Loaded RAG MCP config with {len(self._rag_mcp_config.servers)} servers: {list(self._rag_mcp_config.servers.keys())}")
                 else:
                     self._rag_mcp_config = MCPConfig()
                     logger.info("Created empty RAG MCP config (no configuration file found)")
+
             except Exception as e:
                 logger.error(f"Failed to parse RAG MCP configuration: {e}", exc_info=True)
                 self._rag_mcp_config = MCPConfig()
 
         return self._rag_mcp_config
+    
+    def _validate_mcp_compliance_levels(self, config: MCPConfig, config_type: str):
+        """Validate compliance levels for all MCP servers."""
+        try:
+            # Standardize on running from backend/ directory (agent_start.sh)
+            from core.compliance import get_compliance_manager
+            compliance_mgr = get_compliance_manager()
+            
+            for server_name, server_config in config.servers.items():
+                if server_config.compliance_level:
+                    validated = compliance_mgr.validate_compliance_level(
+                        server_config.compliance_level,
+                        context=f"for {config_type} server '{server_name}'"
+                    )
+                    # Update to canonical name or None if invalid
+                    server_config.compliance_level = validated
+        except Exception as e:
+            logger.warning(f"Could not validate {config_type} compliance levels: {e}")
     
     def reload_configs(self) -> None:
         """Reload all configurations from files."""

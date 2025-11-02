@@ -6,7 +6,7 @@ Provides specialized system prompts that can be applied to modify the AI's behav
 
 from typing import Dict, Any
 from fastmcp import FastMCP
-from fastmcp.prompts.prompt import Message, PromptMessage, TextContent
+from fastmcp.prompts.prompt import PromptMessage, TextContent
 
 # Initialize the MCP server
 mcp = FastMCP("Prompts")

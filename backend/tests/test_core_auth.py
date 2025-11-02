@@ -1,4 +1,3 @@
-import pytest
 
 from modules.config.manager import config_manager
 

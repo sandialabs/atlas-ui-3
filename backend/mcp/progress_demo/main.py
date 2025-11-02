@@ -8,7 +8,6 @@ progress handling in the app.
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
 
 from fastmcp import FastMCP, Context
 

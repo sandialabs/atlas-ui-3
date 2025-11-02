@@ -4,7 +4,6 @@ from typing import Any, Dict, Optional
 
 from fastapi import WebSocket
 
-from interfaces.transport import ChatConnectionProtocol
 
 
 class WebSocketConnectionAdapter:

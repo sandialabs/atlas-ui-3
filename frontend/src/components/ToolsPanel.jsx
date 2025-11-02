@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, ChevronDown, ChevronUp, Shield } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -19,14 +19,28 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   removePrompts,
     toolChoiceRequired, 
     setToolChoiceRequired,
-    clearToolsAndPrompts
+    clearToolsAndPrompts,
+    complianceLevelFilter,
+    tools: allTools,
+    prompts: allPrompts,
+    features
   } = useChat()
-  const { getFilteredTools, getFilteredPrompts } = useMarketplace()
+  const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts } = useMarketplace()
   
-  // Use filtered tools and prompts instead of all tools
-  const tools = getFilteredTools()
-  const prompts = getFilteredPrompts()
+  // Use compliance-filtered tools and prompts if feature is enabled, otherwise use marketplace filtered
+  const complianceEnabled = features?.compliance_levels
+  const tools = complianceEnabled ? getComplianceFilteredTools(complianceLevelFilter) : getFilteredTools()
+  const prompts = complianceEnabled ? getComplianceFilteredPrompts(complianceLevelFilter) : getFilteredPrompts()
   
+  // Extract unique compliance levels from all available tools and prompts
+  const availableComplianceLevels = new Set()
+  allTools.forEach(tool => {
+    if (tool.compliance_level) availableComplianceLevels.add(tool.compliance_level)
+  })
+  allPrompts.forEach(prompt => {
+    if (prompt.compliance_level) availableComplianceLevels.add(prompt.compliance_level)
+  })
+
   const navigateToMarketplace = () => {
     clearToolsAndPrompts()
     navigate('/marketplace')
@@ -42,6 +56,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         server: toolServer.server,
         description: toolServer.description,
         is_exclusive: toolServer.is_exclusive,
+        compliance_level: toolServer.compliance_level,
         tools: toolServer.tools || [],
         tool_count: toolServer.tool_count || 0,
         prompts: [],
@@ -435,6 +450,12 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                               {server.is_exclusive && (
                                 <span className="px-1.5 py-0.5 bg-orange-600 text-xs rounded text-white flex-shrink-0">
                                   Exclusive
+                                </span>
+                              )}
+                              {complianceEnabled && server.compliance_level && (
+                                <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1 flex-shrink-0">
+                                  <Shield className="w-3 h-3" />
+                                  {server.compliance_level}
                                 </span>
                               )}
                             </div>

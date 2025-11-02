@@ -6,7 +6,8 @@ const DEFAULT_FEATURES = {
   tools: false,
   marketplace: false,
   files_panel: false,
-  chat_history: false
+  chat_history: false,
+  compliance_levels: false
 }
 
 export function useChatConfig() {
@@ -16,6 +17,7 @@ export function useChatConfig() {
   const [tools, setTools] = useState([])
   const [prompts, setPrompts] = useState([])
   const [dataSources, setDataSources] = useState([])
+  const [ragServers, setRagServers] = useState([]) // New state for rich RAG server data
   const [features, setFeatures] = useState(DEFAULT_FEATURES)
   // Load saved model from localStorage
   const [currentModel, setCurrentModel] = useState(() => {
@@ -44,6 +46,7 @@ export function useChatConfig() {
         setTools(uniqueTools)
         setPrompts(cfg.prompts || [])
         setDataSources(cfg.data_sources || [])
+        setRagServers(cfg.rag_servers || []) // Capture rich RAG server data
         setUser(cfg.user || 'Unknown')
   setFeatures({ ...DEFAULT_FEATURES, ...(cfg.features || {}) })
   // Agent mode availability flag from backend
@@ -52,20 +55,23 @@ export function useChatConfig() {
         setIsInAdminGroup(!!cfg.is_in_admin_group)
         // Set default model if none saved and models available
         if (!currentModel && cfg.models?.length) {
-          const defaultModel = cfg.models[0]
+          const defaultModel = cfg.models[0].name || cfg.models[0]
           setCurrentModel(defaultModel)
           localStorage.setItem('chatui-current-model', defaultModel)
         }
         // Validate saved model is still available
-        else if (currentModel && cfg.models?.length && !cfg.models.includes(currentModel)) {
-          const defaultModel = cfg.models[0]
-          setCurrentModel(defaultModel)
-          localStorage.setItem('chatui-current-model', defaultModel)
+        else if (currentModel && cfg.models?.length) {
+          const modelNames = cfg.models.map(m => m.name || m)
+          if (!modelNames.includes(currentModel)) {
+            const defaultModel = cfg.models[0].name || cfg.models[0]
+            setCurrentModel(defaultModel)
+            localStorage.setItem('chatui-current-model', defaultModel)
+          }
         }
       } catch (e) {
         // Fallback demo data
         setAppName('Chat UI (Demo)')
-        setModels(['gpt-4o', 'gpt-4o-mini'])
+        setModels([{name: 'gpt-4o'}, {name: 'gpt-4o-mini'}])
         setTools([{ server: 'canvas', tools: ['canvas'], description: 'Create and display visual content', tool_count: 1, is_exclusive: false }])
         setDataSources(['demo_documents'])
         setUser('Demo User')
@@ -86,6 +92,7 @@ export function useChatConfig() {
     tools,
     prompts,
     dataSources,
+    ragServers, // Expose new state
     features,
     setFeatures,
     currentModel,
