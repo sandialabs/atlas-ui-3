@@ -109,10 +109,14 @@ def list_objects(bucket_root: Path, prefix: str = "", max_keys: int = 100) -> Li
             obj_path = base / rel_path
             size = obj_path.stat().st_size
             meta = load_meta(bucket_root, key) or {}
+            etag = meta.get("etag")
+            if not etag:
+                with open(obj_path, "rb") as f:
+                    etag = calc_etag(f.read())
             items.append({
                 "Key": key,
                 "Size": size,
-                "ETag": meta.get("etag") or calc_etag(open(obj_path, "rb").read()),
+                "ETag": etag,
                 "LastModified": iso8601(obj_path.stat().st_mtime),
             })
             if len(items) >= max_keys:

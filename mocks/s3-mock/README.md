@@ -37,7 +37,7 @@ A minimal FastAPI server that mimics S3's REST API for development and testing p
 
 ### Prerequisites
 ```bash
-pip install fastapi uvicorn
+uv pip install fastapi uvicorn
 ```
 
 ### Start the server

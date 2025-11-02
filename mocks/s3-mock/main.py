@@ -1,7 +1,7 @@
 import os
 import urllib.parse
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
@@ -58,6 +58,26 @@ def add_metadata_headers(response: Response, metadata: Dict[str, str]):
 @app.put("/{bucket}/{key:path}")
 async def put_object(bucket: str, key: str, request: Request):
     """PUT Object endpoint."""
+    # Check if this is a tagging request with XML body
+    if request.query_params.get("tagging") and request.headers.get("content-type") == "application/xml":
+        bucket_root = get_bucket_root(bucket)
+
+        # Check if object exists
+        if load_meta(bucket_root, key) is None:
+            error_xml = create_error_xml("NoSuchKey", "The specified key does not exist.", f"/{bucket}/{key}")
+            raise HTTPException(status_code=404, detail=error_xml)
+
+        try:
+            body = await request.body()
+            xml_content = body.decode("utf-8")
+            tags = parse_tagging_xml(xml_content)
+            set_tags(bucket_root, key, tags)
+            return Response(status_code=200)
+        except ValueError:
+            error_xml = create_error_xml("MalformedXML", "The XML you provided was not well-formed or did not validate against the published schema.", f"/{bucket}/{key}?tagging")
+            raise HTTPException(status_code=400, detail=error_xml)
+
+    # Regular object PUT
     try:
         bucket_root = get_bucket_root(bucket)
         body = await request.body()
@@ -180,26 +200,6 @@ async def list_objects_v2(bucket: str, request: Request):
     return Response(content=xml_response, media_type="application/xml")
 
 
-@app.put("/{bucket}/{key:path}")
-async def put_object_tagging(bucket: str, key: str, request: Request):
-    """PUT Object Tagging endpoint."""
-    bucket_root = get_bucket_root(bucket)
-
-    # Check if object exists
-    if load_meta(bucket_root, key) is None:
-        error_xml = create_error_xml("NoSuchKey", "The specified key does not exist.", f"/{bucket}/{key}")
-        raise HTTPException(status_code=404, detail=error_xml)
-
-    try:
-        body = await request.body()
-        xml_content = body.decode("utf-8")
-        tags = parse_tagging_xml(xml_content)
-        set_tags(bucket_root, key, tags)
-        return Response(status_code=200)
-    except ValueError:
-        error_xml = create_error_xml("MalformedXML", "The XML you provided was not well-formed or did not validate against the published schema.", f"/{bucket}/{key}?tagging")
-        raise HTTPException(status_code=400, detail=error_xml)
-
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -210,5 +210,5 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "9002"))
+    port = int(os.getenv("PORT", "9001"))
     uvicorn.run(app, host="0.0.0.0", port=port)

@@ -56,12 +56,12 @@ class MessageBuilder:
         if include_files_manifest:
             session_context = build_session_context(session)
             files_in_context = session_context.get("files", {})
-            logger.info(f"DEBUG: Session has {len(files_in_context)} files: {list(files_in_context.keys())}")
+            logger.debug(f"Session has {len(files_in_context)} files: {list(files_in_context.keys())}")
             files_manifest = file_utils.build_files_manifest(session_context)
             if files_manifest:
-                logger.info(f"DEBUG: Adding files manifest to messages: {files_manifest['content'][:100]}")
+                logger.debug(f"Adding files manifest to messages: {files_manifest['content'][:100]}")
                 messages.append(files_manifest)
             else:
-                logger.warning("DEBUG: No files manifest generated despite include_files_manifest=True")
+                logger.warning("No files manifest generated despite include_files_manifest=True")
 
         return messages

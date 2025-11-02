@@ -202,7 +202,7 @@ class MockS3StorageClient:
                         value_elem = tag_elem.find("Value")
                         if key_elem is not None and value_elem is not None:
                             tags[key_elem.text] = value_elem.text
-                except:
+                except ET.ParseError:
                     pass
 
             # Extract filename from metadata headers

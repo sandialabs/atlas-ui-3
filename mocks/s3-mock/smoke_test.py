@@ -4,10 +4,6 @@ Smoke test for S3 Mock Server using FastAPI TestClient.
 Tests all supported S3 operations to ensure compatibility.
 """
 
-import hashlib
-import time
-import os
-from pathlib import Path
 from fastapi.testclient import TestClient
 from main import get_app
 
@@ -26,7 +22,6 @@ def test_put_get_object():
     client = create_test_client()
     key = "test-file.txt"
     test_data = b"Hello, S3 Mock!"
-    metadata = {"author": "test", "version": "1.0"}
     tags = "environment=test&type=smoke"
 
     # PUT object
