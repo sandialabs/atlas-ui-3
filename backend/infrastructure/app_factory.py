@@ -7,6 +7,7 @@ from application.chat.service import ChatService
 from interfaces.transport import ChatConnectionProtocol
 from modules.config import ConfigManager
 from modules.file_storage import S3StorageClient, FileManager
+from modules.file_storage.mock_s3_client import MockS3StorageClient
 from modules.llm.litellm_caller import LiteLLMCaller
 from modules.mcp_tools import MCPToolManager
 from modules.rag import RAGClient
@@ -37,7 +38,12 @@ class AppFactory:
         )
 
         # File storage & manager
-        self.file_storage = S3StorageClient()
+        if self.config_manager.app_settings.use_mock_s3:
+            logger.info("Using MockS3StorageClient (in-process, no Docker required)")
+            self.file_storage = MockS3StorageClient()
+        else:
+            logger.info("Using S3StorageClient (MinIO/AWS S3)")
+            self.file_storage = S3StorageClient()
         self.file_manager = FileManager(self.file_storage)
 
         logger.info("AppFactory initialized")

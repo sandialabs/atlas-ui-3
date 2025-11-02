@@ -127,6 +127,7 @@ class AppSettings(BaseSettings):
     test_user: str = "test@test.com"  # Test user for development
     
     # S3/MinIO storage settings
+    use_mock_s3: bool = False  # Use in-process S3 mock (no Docker required)
     s3_endpoint: str = "http://localhost:9000"
     s3_bucket_name: str = "atlas-files"
     s3_access_key: str = "minioadmin"

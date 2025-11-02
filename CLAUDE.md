@@ -61,11 +61,15 @@ mkdir -p logs
 ```bash
 bash agent_start.sh
 ```
-This script handles: killing old processes, clearing logs, building frontend, starting mock S3, and starting backend.
+This script handles: killing old processes, clearing logs, building frontend, starting S3 storage (MinIO or Mock based on `USE_MOCK_S3` in `.env`), and starting backend.
 
 **Options:**
 - `bash agent_start.sh -f` - Only rebuild frontend
 - `bash agent_start.sh -b` - Only restart backend
+
+**Note:** The script automatically reads `USE_MOCK_S3` from `.env`:
+- If `true`: Uses in-process Mock S3 (no Docker)
+- If `false`: Starts MinIO via docker-compose
 
 ### Manual Development Workflow
 
@@ -82,11 +86,24 @@ cd backend
 python main.py  # NEVER use uvicorn --reload (causes problems)
 ```
 
-**Mock S3 (Optional):**
-```bash
-cd mocks/s3-mock
-python main.py  # Runs on http://127.0.0.1:8003
-```
+**S3 Storage (Mock vs MinIO):**
+
+The project supports two S3 storage backends:
+
+1. **Mock S3 (Default, Recommended for Development)**
+   - Set `USE_MOCK_S3=true` in `.env`
+   - Uses in-process FastAPI TestClient (no Docker required)
+   - Files stored in `minio-data/chatui/` on disk
+   - No external server needed - integrated directly into backend
+   - Faster startup, simpler development workflow
+
+2. **MinIO (Production-like)**
+   - Set `USE_MOCK_S3=false` in `.env`
+   - Requires Docker: `docker-compose up -d minio minio-init`
+   - Full S3 compatibility with all features
+   - Use for testing production-like scenarios
+
+The mock automatically activates when the backend starts if `USE_MOCK_S3=true`.
 
 ### Testing
 
@@ -246,9 +263,11 @@ Three agent loop strategies implement different reasoning patterns:
 - **Act** (`backend/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
 
 ### File Storage
-S3-compatible storage via `backend/modules/file_storage/s3_client.py`:
-- Production: Real S3 or S3-compatible service
-- Development: Mock S3 (`mocks/s3-mock/`)
+S3-compatible storage via `backend/modules/file_storage/`:
+- Production/MinIO: `s3_client.py` - boto3-based client for real S3/MinIO
+- Development: `mock_s3_client.py` - TestClient-based in-process mock (no Docker)
+- Controlled by `USE_MOCK_S3` env var (default: true)
+- Both implementations share the same interface
 
 ### Security Middleware Stack
 ```
