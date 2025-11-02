@@ -38,7 +38,7 @@ class ComplianceLevelManager:
         
         if config_path is None:
             # Try to find config in standard locations
-            backend_root = Path(__file__).parent.parent.parent
+            backend_root = Path(__file__).parent.parent
             project_root = backend_root.parent
             
             search_paths = [

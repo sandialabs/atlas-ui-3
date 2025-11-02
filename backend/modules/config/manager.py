@@ -347,7 +347,9 @@ class ConfigManager:
     def _validate_llm_compliance_levels(self):
         """Validate compliance levels for all LLM models."""
         try:
-            from backend.core.compliance import get_compliance_manager
+            # Standardize on running from backend/ directory (agent_start.sh)
+            # Use non-prefixed imports so they resolve when cwd=backend
+            from core.compliance import get_compliance_manager
             compliance_mgr = get_compliance_manager()
             
             for model_name, model_config in self._llm_config.models.items():
@@ -416,7 +418,8 @@ class ConfigManager:
     def _validate_mcp_compliance_levels(self, config: MCPConfig, config_type: str):
         """Validate compliance levels for all MCP servers."""
         try:
-            from backend.core.compliance import get_compliance_manager
+            # Standardize on running from backend/ directory (agent_start.sh)
+            from core.compliance import get_compliance_manager
             compliance_mgr = get_compliance_manager()
             
             for server_name, server_config in config.servers.items():

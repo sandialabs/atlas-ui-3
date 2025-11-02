@@ -1,6 +1,7 @@
 """Configuration API routes."""
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 
@@ -52,7 +53,10 @@ async def get_banners(current_user: str = Depends(get_current_user)):
 
 
 @router.get("/config")
-async def get_config(current_user: str = Depends(get_current_user)):
+async def get_config(
+    current_user: str = Depends(get_current_user),
+    compliance_level: Optional[str] = None,
+):
     """Get available models, tools, and data sources for the user.
     Only returns MCP servers and tools that the user is authorized to access.
     """
@@ -66,8 +70,12 @@ async def get_config(current_user: str = Depends(get_current_user)):
     try:
         if app_settings.feature_rag_mcp_enabled:
             rag_mcp = app_factory.get_rag_mcp_service()
-            rag_data_sources = await rag_mcp.discover_data_sources(current_user)
-            rag_servers = await rag_mcp.discover_servers(current_user)
+            rag_data_sources = await rag_mcp.discover_data_sources(
+                current_user, user_compliance_level=compliance_level
+            )
+            rag_servers = await rag_mcp.discover_servers(
+                current_user, user_compliance_level=compliance_level
+            )
         else:
             rag_client = app_factory.get_rag_client()
             rag_data_sources = await rag_client.discover_data_sources(current_user)

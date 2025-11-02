@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 
 logger = logging.getLogger(__name__)
+from core.compliance import get_compliance_manager
 from core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
 from core.utils import sanitize_for_logging
 
@@ -26,7 +27,7 @@ class RAGMCPService:
         self.config_manager = config_manager
         self.auth_check_func = auth_check_func
 
-    async def discover_data_sources(self, username: str) -> List[str]:
+    async def discover_data_sources(self, username: str, user_compliance_level: Optional[str] = None) -> List[str]:
         """Discover data sources across authorized MCP RAG servers.
 
         Phase 1 returns a flat list of strings for backward compatibility.
@@ -59,6 +60,30 @@ class RAGMCPService:
             if not authorized_servers:
                 logger.info("No authorized MCP servers for user %s", sanitize_for_logging(username))
                 return []
+
+            # --- Compliance Filtering (Step 2) ---
+            if user_compliance_level:
+                compliance_mgr = get_compliance_manager()
+                filtered_servers = []
+                for server in authorized_servers:
+                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
+                    server_compliance_level = cfg.get("compliance_level")
+                    if compliance_mgr.is_accessible(
+                        user_level=user_compliance_level, resource_level=server_compliance_level
+                    ):
+                        filtered_servers.append(server)
+                    else:
+                        logger.info(
+                            "Skipping RAG server %s due to compliance level mismatch (user: %s, server: %s)",
+                            sanitize_for_logging(server),
+                            sanitize_for_logging(user_compliance_level),
+                            sanitize_for_logging(server_compliance_level),
+                        )
+                authorized_servers = filtered_servers
+                if not authorized_servers:
+                    logger.info("No authorized MCP servers remain after compliance filtering for user %s", sanitize_for_logging(username))
+                    return []
+            # -------------------------------------
 
             # Filter to servers that advertise the discovery tool
             servers_with_discovery: List[str] = []
@@ -111,7 +136,7 @@ class RAGMCPService:
             logger.error("Error during RAG MCP discovery: %s", e, exc_info=True)
             return []
 
-    async def discover_servers(self, username: str) -> List[Dict[str, Any]]:
+    async def discover_servers(self, username: str, user_compliance_level: Optional[str] = None) -> List[Dict[str, Any]]:
         """Return richer per-server discovery structure for UI (rag_servers).
 
         Shape:
@@ -144,9 +169,32 @@ class RAGMCPService:
 
         rag_servers: List[Dict[str, Any]] = []
         try:
+            compliance_mgr = get_compliance_manager() if user_compliance_level else None
+
             authorized_servers: List[str] = self.mcp_manager.get_authorized_servers(
                 username, self.auth_check_func
             )
+
+            # --- Compliance Filtering (Step 2) ---
+            if compliance_mgr:
+                filtered_servers = []
+                for server in authorized_servers:
+                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
+                    server_compliance_level = cfg.get("compliance_level")
+                    if compliance_mgr.is_accessible(
+                        user_level=user_compliance_level, resource_level=server_compliance_level
+                    ):
+                        filtered_servers.append(server)
+                    else:
+                        logger.info(
+                            "Skipping RAG server %s due to compliance level mismatch (user: %s, server: %s)",
+                            sanitize_for_logging(server),
+                            sanitize_for_logging(user_compliance_level),
+                            sanitize_for_logging(server_compliance_level),
+                        )
+                authorized_servers = filtered_servers
+            # -------------------------------------
+
             for server in authorized_servers:
                 server_data = self.mcp_manager.available_tools.get(server)
                 tools = (server_data or {}).get("tools", [])
@@ -172,6 +220,22 @@ class RAGMCPService:
                     rid = r.get("id") or r.get("name")
                     if not isinstance(rid, str):
                         continue
+
+                    # --- Compliance Filtering (Step 3) ---
+                    resource_compliance_level = r.get("complianceLevel")
+                    if compliance_mgr and not compliance_mgr.is_accessible(
+                        user_level=user_compliance_level, resource_level=resource_compliance_level
+                    ):
+                        logger.info(
+                            "Skipping RAG resource %s:%s due to compliance level mismatch (user: %s, resource: %s)",
+                            sanitize_for_logging(server),
+                            sanitize_for_logging(rid),
+                            sanitize_for_logging(user_compliance_level),
+                            sanitize_for_logging(resource_compliance_level),
+                        )
+                        continue
+                    # -------------------------------------
+
                     ui_sources.append({
                         "id": rid,
                         "name": r.get("name") or rid,
@@ -181,7 +245,7 @@ class RAGMCPService:
                         "groups": list(r.get("groups", [])) if isinstance(r.get("groups"), list) else None,
                         "selected": bool(r.get("defaultSelected", False)),
                         # Include compliance_level from resource or inherit from server
-                        "complianceLevel": r.get("complianceLevel") if r.get("complianceLevel") else None,
+                        "complianceLevel": resource_compliance_level if resource_compliance_level else None,
                     })
 
                 # Optional config-driven icon/name and compliance level
