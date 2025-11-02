@@ -2,6 +2,25 @@
 
 A minimal FastAPI server that mimics S3's REST API for development and testing purposes. Compatible with botocore/boto3 expectations.
 
+## CRITICAL WARNING: DEVELOPMENT ONLY
+
+**THIS MOCK SERVER MUST NEVER BE USED IN PRODUCTION ENVIRONMENTS.**
+
+This implementation is intended ONLY for local development and testing. It has critical security limitations that make it completely unsuitable for production use:
+
+- **No authentication or authorization** - Accepts all requests regardless of credentials
+- **No signature verification** - Does not validate S3v4 signatures (security bypass)
+- **No encryption** - Data stored in plain text on disk
+- **No access control** - No bucket policies, IAM, or ACLs
+- **No audit logging** - No CloudTrail equivalent for compliance
+- **No data durability guarantees** - Simple filesystem storage without redundancy
+- **Minimal error handling** - May expose internal paths or system information
+
+For production deployments, use:
+- **AWS S3** - For AWS-hosted applications
+- **MinIO** - For self-hosted S3-compatible storage with proper security
+- Other production-grade S3-compatible services
+
 ## Features
 
 - **Path-style addressing**: `http://localhost:9001/{bucket}/{key}`

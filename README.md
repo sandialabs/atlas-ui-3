@@ -51,10 +51,7 @@ cp .env.example .env  # Edit with your API keys
 # Build frontend
 cd frontend && npm install && npm run build
 
-# there is a mock s3 that you might want to enable. Switching to minio sooon.
-cd mocks/s3-mocks && python main.py
-
-# Start backend  
+# Start backend
 cd ../backend && python main.py
 
 # OR the quickest way to start is to use the agent_start.sh
@@ -79,6 +76,7 @@ bash agent_start.sh
 - **Use `npm run build`** instead of `npm run dev` for frontend development
 - **File limit**: Maximum 400 lines per file for maintainability
 - **Container Environment**: Use Fedora latest for Docker containers (GitHub Actions uses Ubuntu runners)
+- **Mock S3**: The included S3 mock (`mocks/s3-mock/`) is for development/testing only and must NEVER be used in production due to lack of authentication, encryption, and other critical security features.
 
 ## License
 
