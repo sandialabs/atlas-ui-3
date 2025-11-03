@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["config"])
 
+# Canvas tool description constant
+CANVAS_TOOL_DESCRIPTION = (
+    "Display final rendered content in a visual canvas panel. "
+    "Use this for: 1) Complete code (not code discussions), "
+    "2) Final reports/documents (not report discussions), "
+    "3) Data visualizations, 4) Any polished content that should be "
+    "viewed separately from the conversation."
+)
+
 
 @router.get("/banners")
 async def get_banners(current_user: str = Depends(get_current_user)):
@@ -128,7 +137,7 @@ async def get_config(
                     'tools': ['canvas'],
                     'tools_detailed': [{
                         'name': 'canvas',
-                        'description': 'Display final rendered content in a visual canvas panel. Use this for: 1) Complete code (not code discussions), 2) Final reports/documents (not report discussions), 3) Data visualizations, 4) Any polished content that should be viewed separately from the conversation.',
+                        'description': CANVAS_TOOL_DESCRIPTION,
                         'inputSchema': {
                             'type': 'object',
                             'properties': {

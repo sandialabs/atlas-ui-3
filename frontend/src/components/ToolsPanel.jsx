@@ -4,6 +4,9 @@ import { useState, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 
+// Default type for schema properties without explicit type
+const DEFAULT_PARAM_TYPE = 'any'
+
 const ToolsPanel = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedServers, setExpandedServers] = useState(new Set())
@@ -308,7 +311,13 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     setExpandedTools(newExpanded)
   }
 
-  // Helper to render input schema parameters
+  /**
+   * Renders the input schema parameters for a tool.
+   * @param {Object} schema - The JSON schema object containing properties and required fields
+   * @param {Object} schema.properties - Object mapping parameter names to their definitions
+   * @param {Array<string>} [schema.required] - Array of required parameter names
+   * @returns {JSX.Element} Formatted display of input parameters with types and descriptions
+   */
   const renderInputSchema = (schema) => {
     if (!schema || !schema.properties) {
       return <p className="text-xs text-gray-400 italic">No input parameters</p>
@@ -325,7 +334,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
             {required.includes(paramName) && (
               <span className="text-red-400 ml-1">*</span>
             )}
-            <span className="text-gray-400 ml-2">({paramDef.type || 'any'})</span>
+            <span className="text-gray-400 ml-2">({paramDef.type || DEFAULT_PARAM_TYPE})</span>
             {paramDef.description && (
               <p className="text-gray-400 ml-4 mt-0.5">{paramDef.description}</p>
             )}
