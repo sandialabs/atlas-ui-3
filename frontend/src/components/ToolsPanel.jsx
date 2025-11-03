@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, ChevronDown, ChevronUp, Shield, Info } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -9,7 +9,6 @@ const DEFAULT_PARAM_TYPE = 'any'
 
 const ToolsPanel = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('')
-  const [expandedServers, setExpandedServers] = useState(new Set())
   const [expandedTools, setExpandedTools] = useState(new Set())
   const navigate = useNavigate()
   const { 
@@ -174,23 +173,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     return allToolsSelected && promptSatisfied
   }
 
-  const ensureSinglePrompt = (promptKey) => {
-    // Deselect all other prompts
-    Array.from(selectedPrompts).forEach(existing => {
-      if (existing !== promptKey) togglePrompt(existing)
-    })
-    if (!selectedPrompts.has(promptKey)) togglePrompt(promptKey)
-  }
-
-  const handlePromptCheckbox = (promptKey) => {
-    if (selectedPrompts.has(promptKey)) {
-      // Deselect current prompt
-      togglePrompt(promptKey)
-    } else {
-      ensureSinglePrompt(promptKey)
-    }
-  }
-
   // Backward compat helper retained but now references "all selected" semantics
   const isServerSelected = (serverName) => isServerAllSelected(serverName)
 
@@ -290,16 +272,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     if (promptsToRemove.length) removePrompts(promptsToRemove)
   }
 
-
-  const toggleServerExpansion = (serverName) => {
-    const newExpanded = new Set(expandedServers)
-    if (newExpanded.has(serverName)) {
-      newExpanded.delete(serverName)
-    } else {
-      newExpanded.add(serverName)
-    }
-    setExpandedServers(newExpanded)
-  }
 
   const toggleToolExpansion = (toolKey) => {
     const newExpanded = new Set(expandedTools)
@@ -478,9 +450,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
               ) : (
                 <div className="px-4 pb-4 space-y-3">
                   {filteredServers.map(server => {
-                    const isExpanded = expandedServers.has(server.server)
-                    const hasIndividualItems = server.tools.length > 0 || server.prompts.length > 0
-                    
                     return (
                       <div key={server.server} className="bg-gray-700 rounded-lg overflow-hidden">
                         {/* Main Server Row */}
@@ -638,98 +607,8 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                 {isServerAllSelected(server.server) ? 'All On' : 'Enable All'}
                               </button>
                             </div>
-
-                            {/* Expand Button */}
-                            {hasIndividualItems && (
-                              <button
-                                onClick={() => toggleServerExpansion(server.server)}
-                                className="p-1 rounded bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors"
-                                title="Manage individual tools"
-                              >
-                                {isExpanded ? (
-                                  <ChevronUp className="w-3 h-3" />
-                                ) : (
-                                  <ChevronDown className="w-3 h-3" />
-                                )}
-                              </button>
-                            )}
                           </div>
                         </div>
-                        
-                        {/* Expanded Individual Tools Section */}
-                        {isExpanded && hasIndividualItems && (
-                          <div className="px-4 pb-4 border-t border-gray-600 bg-gray-800">
-                            <div className="pt-4 space-y-3">
-                              <p className="text-sm text-gray-400 mb-3">
-                                Select individual tools and prompts:
-                              </p>
-                              
-                              {/* Tools */}
-                              {server.tools.length > 0 && (
-                                <div>
-                                  <h4 className="text-sm font-medium text-gray-300 mb-2">Tools</h4>
-                                  <div className="space-y-2">
-                                    {server.tools.map(tool => {
-                                      const toolKey = `${server.server}_${tool}`
-                                      const isSelected = selectedTools.has(toolKey)
-                                      
-                                      return (
-                                        <label
-                                          key={toolKey}
-                                          className="flex items-center gap-3 p-2 rounded bg-gray-600 hover:bg-gray-500 cursor-pointer transition-colors"
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            checked={isSelected}
-                                            onChange={() => toggleTool(toolKey)}
-                                            className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
-                                          />
-                                          <span className="text-sm text-gray-200">{tool}</span>
-                                        </label>
-                                      )
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-                              
-                              {/* Prompts */}
-                              {server.prompts.length > 0 && (
-                                <div>
-                                  <h4 className="text-sm font-medium text-purple-300 mb-2">Prompts</h4>
-                                  <div className="space-y-2">
-                                    {server.prompts.map(prompt => {
-                                      const promptKey = `${server.server}_${prompt.name}`
-                                      const isSelected = selectedPrompts.has(promptKey)
-                                      
-                                      return (
-                                        <label
-                                          key={promptKey}
-                                          className="flex items-center gap-3 p-2 rounded bg-purple-900 hover:bg-purple-800 cursor-pointer transition-colors"
-                                          title={prompt.description}
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            checked={isSelected}
-                                            onChange={() => handlePromptCheckbox(promptKey)}
-                                            className="w-4 h-4 text-purple-600 bg-gray-700 border-gray-600 rounded focus:ring-purple-500 focus:ring-2"
-                                          />
-                                          <div className="flex-1 min-w-0">
-                                            <span className="text-sm text-gray-200 block truncate">{prompt.name}</span>
-                                            {prompt.description && (
-                                              <span className="text-xs text-gray-400 block truncate mt-1">
-                                                {prompt.description}
-                                              </span>
-                                            )}
-                                          </div>
-                                        </label>
-                                      )
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
                       </div>
                     )
                   })}
