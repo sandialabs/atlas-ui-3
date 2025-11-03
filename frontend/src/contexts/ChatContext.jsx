@@ -9,6 +9,13 @@ import { useFiles } from '../hooks/chat/useFiles'
 import { useSettings } from '../hooks/useSettings'
 import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
 
+// Generate cryptographically secure random string
+const generateSecureRandomString = (length = 9) => {
+  const array = new Uint8Array(length)
+  crypto.getRandomValues(array)
+  return Array.from(array, byte => byte.toString(36)).join('').slice(0, length)
+}
+
 const ChatContext = createContext(null)
 
 export const useChat = () => {
@@ -283,7 +290,7 @@ export const ChatProvider = ({ children }) => {
 			}
 
 			// Create a temporary session ID for frontend tracking
-			const tempSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+			const tempSessionId = `session_${Date.now()}_${generateSecureRandomString()}`
 			setSessionId(tempSessionId)
 
 			// Send reset_session to create a new session on backend
@@ -297,7 +304,7 @@ export const ChatProvider = ({ children }) => {
 
 	// addSystemEvent: adds a system event message to the chat timeline
 	const addSystemEvent = useCallback((subtype, text, meta = {}) => {
-		const eventId = `system_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+		const eventId = `system_${Date.now()}_${generateSecureRandomString()}`
 		addMessage({
 			role: 'system',
 			type: 'system',

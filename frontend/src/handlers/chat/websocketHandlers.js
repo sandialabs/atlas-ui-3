@@ -16,7 +16,6 @@ export function createWebSocketHandler(deps) {
     getFileType,
     triggerFileDownload,
     addAttachment,
-    addPendingFileEvent,
     resolvePendingFileEvent
   } = deps
 

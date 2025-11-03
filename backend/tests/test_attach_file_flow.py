@@ -1,6 +1,5 @@
 import base64
 import uuid
-import asyncio
 import pytest
 
 from application.chat.service import ChatService
