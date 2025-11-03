@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { X, Filter, ChevronDown, ChevronUp, ToggleLeft, ToggleRight } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Filter, ChevronDown, ChevronUp, ToggleLeft, ToggleRight } from 'lucide-react';
 
 const DEFAULT_POLL_INTERVAL = 60000; // 60s refresh
 
@@ -42,11 +42,14 @@ export default function LogViewer() {
       })
       .then(data => {
         const newEntries = data.entries || [];
-        // Reset to page 0 if auto-scroll is enabled and new entries were added
-        if (autoScrollEnabled && newEntries.length > entries.length) {
-          setPage(0);
-        }
-        setEntries(newEntries);
+        // Use functional state update to access previous entries without dependency
+        setEntries(prevEntries => {
+          // Reset to page 0 if auto-scroll is enabled and new entries were added
+          if (autoScrollEnabled && newEntries.length > prevEntries.length) {
+            setPage(0);
+          }
+          return newEntries;
+        });
         setError(null);
         // After updating entries, scroll to bottom if auto-scroll is enabled and user hasn't scrolled up
         requestAnimationFrame(() => {
@@ -57,7 +60,7 @@ export default function LogViewer() {
       })
       .catch(err => setError(err))
       .finally(() => setLoading(false));
-  }, [levelFilter, moduleFilter, autoScrollEnabled, entries.length]); // Dependencies for fetchLogs
+  }, [levelFilter, moduleFilter, autoScrollEnabled]); // Removed entries.length to prevent infinite loop
 
   // Function to clear all logs
   const clearLogs = useCallback(() => {
@@ -212,16 +215,16 @@ export default function LogViewer() {
       <div className="bg-gray-100 dark:bg-gray-800 rounded-lg">
         {/* Header with collapse and toggle all */}
         <div className="flex items-center justify-between p-4 pb-3">
-          <button 
+          <button
             onClick={() => setQuickFiltersCollapsed(!quickFiltersCollapsed)}
             className="flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg px-2 py-1 transition-colors"
           >
-            <Filter className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Quick Filters</h3>
+            <Filter className="w-4 h-4 text-gray-600 dark:text-gray-200" />
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100">Quick Filters</h3>
             {quickFiltersCollapsed ? (
-              <ChevronDown className="w-4 h-4 text-gray-500" />
+              <ChevronDown className="w-4 h-4 text-gray-500 dark:text-gray-300" />
             ) : (
-              <ChevronUp className="w-4 h-4 text-gray-500" />
+              <ChevronUp className="w-4 h-4 text-gray-500 dark:text-gray-300" />
             )}
           </button>
           
@@ -245,23 +248,23 @@ export default function LogViewer() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* HTTP/API Noise */}
           <div className="space-y-2">
-            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">🚫 HTTP/API Noise</h4>
+            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">HTTP/API Noise</h4>
             <div className="space-y-1.5">
-              <label className="flex items-center gap-2 text-xs font-medium select-none cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="accent-cyan-600" 
-                  checked={hideConfigRoutes} 
-                  onChange={e => { setPage(0); setHideConfigRoutes(e.target.checked); }} 
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-cyan-600"
+                  checked={hideConfigRoutes}
+                  onChange={e => { setPage(0); setHideConfigRoutes(e.target.checked); }}
                 />
                 Config routes (get_config)
               </label>
-              <label className="flex items-center gap-2 text-xs font-medium select-none cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="accent-cyan-600" 
-                  checked={hideWebsocketEndpoint} 
-                  onChange={e => { setPage(0); setHideWebsocketEndpoint(e.target.checked); }} 
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-cyan-600"
+                  checked={hideWebsocketEndpoint}
+                  onChange={e => { setPage(0); setHideWebsocketEndpoint(e.target.checked); }}
                 />
                 WebSocket connections
               </label>
@@ -270,23 +273,23 @@ export default function LogViewer() {
 
           {/* Network Requests */}
           <div className="space-y-2">
-            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">🌐 Network Requests</h4>
+            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">Network Requests</h4>
             <div className="space-y-1.5">
-              <label className="flex items-center gap-2 text-xs font-medium select-none cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="accent-cyan-600" 
-                  checked={hideHttpClientCalls} 
-                  onChange={e => { setPage(0); setHideHttpClientCalls(e.target.checked); }} 
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-cyan-600"
+                  checked={hideHttpClientCalls}
+                  onChange={e => { setPage(0); setHideHttpClientCalls(e.target.checked); }}
                 />
                 HTTP client calls
               </label>
-              <label className="flex items-center gap-2 text-xs font-medium select-none cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="accent-cyan-600" 
-                  checked={hideDiscoverDataSources} 
-                  onChange={e => { setPage(0); setHideDiscoverDataSources(e.target.checked); }} 
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-cyan-600"
+                  checked={hideDiscoverDataSources}
+                  onChange={e => { setPage(0); setHideDiscoverDataSources(e.target.checked); }}
                 />
                 RAG data source discovery
               </label>
@@ -295,23 +298,23 @@ export default function LogViewer() {
 
           {/* Admin Interface */}
           <div className="space-y-2">
-            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">🔧 Admin Interface</h4>
+            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">Admin Interface</h4>
             <div className="space-y-1.5">
-              <label className="flex items-center gap-2 text-xs font-medium select-none cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="accent-cyan-600" 
-                  checked={hideViewerRequests} 
-                  onChange={e => { setPage(0); setHideViewerRequests(e.target.checked); }} 
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-cyan-600"
+                  checked={hideViewerRequests}
+                  onChange={e => { setPage(0); setHideViewerRequests(e.target.checked); }}
                 />
                 Log viewer requests
               </label>
-              <label className="flex items-center gap-2 text-xs font-medium select-none cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="accent-cyan-600" 
-                  checked={hideMiddleware} 
-                  onChange={e => { setPage(0); setHideMiddleware(e.target.checked); }} 
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-cyan-600"
+                  checked={hideMiddleware}
+                  onChange={e => { setPage(0); setHideMiddleware(e.target.checked); }}
                 />
                 Middleware calls
               </label>
@@ -325,35 +328,35 @@ export default function LogViewer() {
       {/* Settings and Auto-scroll */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-2 text-xs font-medium select-none cursor-pointer">
+          <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-200 select-none cursor-pointer">
             <input type="checkbox" className="accent-cyan-600" checked={autoScrollEnabled} onChange={e => setAutoScrollEnabled(e.target.checked)} />
             Auto-scroll
           </label>
         </div>
         <div className="flex items-center gap-2">
-          <label className="block text-xs font-semibold">Update Frequency (s)</label>
+          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-200">Update Frequency (s)</label>
           <input
             type="number"
             value={pollIntervalInput}
             onChange={handlePollIntervalChange}
             min="1"
-            className="bg-gray-200 dark:bg-gray-700 p-1 rounded text-sm w-16 text-center"
+            className="bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 p-1 rounded text-sm w-16 text-center"
           />
         </div>
       </div>
       <div className="flex items-center gap-3 text-xs">
         <div className="flex items-center gap-2">
-          <button onClick={() => changePage(-1)} disabled={page===0} className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded disabled:opacity-40">Prev</button>
-          <span>Page {page+1} / {totalPages}</span>
-          <button onClick={() => changePage(1)} disabled={page>=totalPages-1} className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded disabled:opacity-40">Next</button>
+          <button onClick={() => changePage(-1)} disabled={page===0} className="px-2 py-1 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded disabled:opacity-50 hover:bg-gray-300 dark:hover:bg-gray-600">Prev</button>
+          <span className="text-gray-700 dark:text-gray-200">Page {page+1} / {totalPages}</span>
+          <button onClick={() => changePage(1)} disabled={page>=totalPages-1} className="px-2 py-1 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded disabled:opacity-50 hover:bg-gray-300 dark:hover:bg-gray-600">Next</button>
         </div>
         <div>
-          <label className="mr-2">Page Size</label>
-          <select value={pageSize} onChange={e => {setPageSize(parseInt(e.target.value,10)); setPage(0);}} className="bg-gray-200 dark:bg-gray-700 p-1 rounded">
+          <label className="mr-2 text-gray-700 dark:text-gray-200">Page Size</label>
+          <select value={pageSize} onChange={e => {setPageSize(parseInt(e.target.value,10)); setPage(0);}} className="bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 p-1 rounded">
             {[50,100,250,500].map(s => <option key={s}>{s}</option>)}
           </select>
         </div>
-  <span className="text-gray-500">Total entries: {entries.length}{filtered.length !== entries.length && ` (showing ${filtered.length})`}</span>
+  <span className="text-gray-600 dark:text-gray-300">Total entries: {entries.length}{filtered.length !== entries.length && ` (showing ${filtered.length})`}</span>
       </div>
       <div ref={tableContainerRef} className="flex-1 overflow-auto border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" onScroll={handleScroll}> {/* Added onScroll handler */}
         <table className="w-full text-sm">
