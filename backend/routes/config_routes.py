@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["config"])
 
+# Canvas tool description constant
+CANVAS_TOOL_DESCRIPTION = (
+    "Display final rendered content in a visual canvas panel. "
+    "Use this for: 1) Complete code (not code discussions), "
+    "2) Final reports/documents (not report discussions), "
+    "3) Data visualizations, 4) Any polished content that should be "
+    "viewed separately from the conversation."
+)
+
 
 @router.get("/banners")
 async def get_banners(current_user: str = Depends(get_current_user)):
@@ -126,6 +135,20 @@ async def get_config(
                 tools_info.append({
                     'server': 'canvas',
                     'tools': ['canvas'],
+                    'tools_detailed': [{
+                        'name': 'canvas',
+                        'description': CANVAS_TOOL_DESCRIPTION,
+                        'inputSchema': {
+                            'type': 'object',
+                            'properties': {
+                                'content': {
+                                    'type': 'string',
+                                    'description': 'The content to display in the canvas. Can be markdown, code, or plain text.'
+                                }
+                            },
+                            'required': ['content']
+                        }
+                    }],
                     'tool_count': 1,
                     'description': 'Canvas for showing final rendered content: complete code, reports, and polished documents. Use this to finalize your work. Most code and reports will be shown here.',
                     'is_exclusive': False,
@@ -140,9 +163,20 @@ async def get_config(
                 
                 # Only include servers that have tools and user has access to
                 if server_tools:  # Only show servers with actual tools
+                    # Build detailed tool information including descriptions and input schemas
+                    tools_detailed = []
+                    for tool in server_tools:
+                        tool_detail = {
+                            'name': tool.name,
+                            'description': tool.description or '',
+                            'inputSchema': getattr(tool, 'inputSchema', {}) or {}
+                        }
+                        tools_detailed.append(tool_detail)
+                    
                     tools_info.append({
                         'server': server_name,
                         'tools': [tool.name for tool in server_tools],
+                        'tools_detailed': tools_detailed,
                         'tool_count': len(server_tools),
                         'description': server_config.get('description', f'{server_name} tools'),
                         'is_exclusive': server_config.get('is_exclusive', False),
