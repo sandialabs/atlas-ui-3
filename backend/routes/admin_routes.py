@@ -598,6 +598,58 @@ async def download_logs(admin_user: str = Depends(require_admin)):
         raise HTTPException(status_code=500, detail="Error preparing log download")
 
 
+# --- System Status (minimal) ---
+
+@admin_router.get("/system-status")
+async def get_system_status(admin_user: str = Depends(require_admin)):
+    """Minimal system status endpoint for the Admin UI.
+
+    Returns basic configuration and logging status; avoids heavy checks.
+    """
+    try:
+        # Configuration status: overrides directory and file count
+        overrides_root = Path(os.getenv("APP_CONFIG_OVERRIDES", "config/overrides"))
+        overrides_root.mkdir(parents=True, exist_ok=True)
+        config_files = list(overrides_root.glob("*"))
+        config_status = "healthy" if config_files else "warning"
+
+        # Logging status
+        log_dir = _log_base_dir()
+        log_file = log_dir / "app.jsonl"
+        log_exists = log_file.exists()
+        logging_status = "healthy" if log_exists else "warning"
+
+        components = [
+            {
+                "component": "Configuration",
+                "status": config_status,
+                "details": {
+                    "overrides_dir": str(overrides_root),
+                    "files_count": len(config_files),
+                },
+            },
+            {
+                "component": "Logging",
+                "status": logging_status,
+                "details": {
+                    "log_file": str(log_file),
+                    "exists": log_exists,
+                    "size_bytes": log_file.stat().st_size if log_exists else 0,
+                },
+            },
+        ]
+
+        overall = "healthy" if all(c["status"] == "healthy" for c in components) else "warning"
+        return {
+            "overall_status": overall,
+            "components": components,
+            "checked_by": admin_user,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error getting system status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # # --- System Status ---
 
 # @admin_router.get("/system-status")

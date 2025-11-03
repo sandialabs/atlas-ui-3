@@ -142,7 +142,8 @@ app.include_router(admin_router)
 app.include_router(files_router)
 
 # Serve frontend build (Vite)
-static_dir = Path(__file__).parent.parent / "frontend" / "dist"
+project_root = Path(__file__).resolve().parents[1]
+static_dir = project_root / "frontend" / "dist"
 if static_dir.exists():
     # Serve the SPA entry
     @app.get("/")
@@ -153,6 +154,16 @@ if static_dir.exists():
     assets_dir = static_dir / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    # Serve webfonts from Vite build (placed via frontend/public/fonts)
+    fonts_dir = static_dir / "fonts"
+    if fonts_dir.exists():
+        app.mount("/fonts", StaticFiles(directory=fonts_dir), name="fonts")
+    else:
+        # Fallback to unbuilt public fonts if dist/fonts is missing
+        public_fonts = project_root / "frontend" / "public" / "fonts"
+        if public_fonts.exists():
+            app.mount("/fonts", StaticFiles(directory=public_fonts), name="fonts")
 
     # Common top-level static files in the Vite build
     @app.get("/favicon.ico")
