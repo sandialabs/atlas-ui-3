@@ -50,7 +50,7 @@ hljs.registerLanguage('sh', bash)
 const processFileReferences = (content) => {
   return content.replace(
     /@file\s+([^\s]+)/g,
-    '<span class="inline-flex items-center px-2 py-1 rounded-md bg-green-900/30 border border-green-500/30 text-green-400 text-sm font-medium">📎 @file $1</span>'
+    '<span class="inline-flex items-center px-2 py-1 rounded-md bg-green-900/30 border border-green-500/30 text-green-400 text-sm font-medium">@file $1</span>'
   )
 }
 
@@ -768,6 +768,31 @@ const renderContent = () => {
     }
 
     if (isUser || isSystem) {
+      // Handle file attachment system events
+      if (message.type === 'system' && message.subtype) {
+        switch (message.subtype) {
+          case 'file-attaching':
+            return (
+              <div className="text-blue-300 italic">
+                {message.text}
+              </div>
+            )
+          case 'file-attached':
+            return (
+              <div className="text-green-300">
+                {message.text}
+              </div>
+            )
+          case 'file-attach-error':
+            return (
+              <div className="text-red-300">
+                {message.text}
+              </div>
+            )
+          default:
+            return <div className="text-gray-200">{message.content}</div>
+        }
+      }
       return <div className="text-gray-200">{message.content}</div>
     }
 

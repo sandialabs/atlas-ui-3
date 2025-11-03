@@ -9,6 +9,13 @@ import { useFiles } from '../hooks/chat/useFiles'
 import { useSettings } from '../hooks/useSettings'
 import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
 
+// Generate cryptographically secure random string
+const generateSecureRandomString = (length = 9) => {
+  const array = new Uint8Array(length)
+  crypto.getRandomValues(array)
+  return Array.from(array, byte => byte.toString(36)).join('').slice(0, length)
+}
+
 const ChatContext = createContext(null)
 
 export const useChat = () => {
@@ -29,6 +36,38 @@ export const ChatProvider = ({ children }) => {
 
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
 	const [isThinking, setIsThinking] = useState(false)
+	const [sessionId, setSessionId] = useState(null)
+	const [attachments, setAttachments] = useState(new Set())
+	const [pendingFileEvents, setPendingFileEvents] = useState(new Map())
+
+	// Method to add a file to attachments
+	const addAttachment = useCallback((fileId) => {
+		setAttachments(prev => new Set([...prev, fileId]))
+	}, [])
+
+	// Methods to manage pending file events
+	const addPendingFileEvent = useCallback((fileKey, eventId) => {
+		setPendingFileEvents(prev => new Map(prev.set(fileKey, eventId)))
+	}, [])
+
+	const resolvePendingFileEvent = useCallback((fileKey, newSubtype, newText) => {
+		setPendingFileEvents(prev => {
+			const eventId = prev.get(fileKey)
+			if (eventId) {
+				// Update the message in-place
+				mapMessages(messages => messages.map(msg =>
+					msg.id === eventId
+						? { ...msg, subtype: newSubtype, text: newText }
+						: msg
+				))
+				// Remove from pending
+				const next = new Map(prev)
+				next.delete(fileKey)
+				return next
+			}
+			return prev
+		})
+	}, [mapMessages])
 
 		const { sendMessage, addMessageHandler } = useWS()
 	const { currentModel } = config
@@ -59,10 +98,13 @@ export const ChatProvider = ({ children }) => {
 			setCustomUIContent: files.setCustomUIContent,
 			setSessionFiles: files.setSessionFiles,
 			getFileType: files.getFileType,
-				triggerFileDownload
+				triggerFileDownload,
+			addAttachment,
+			addPendingFileEvent,
+			resolvePendingFileEvent
 		})
 		return addMessageHandler(handler)
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent])
 
 	const selectAllServerTools = useCallback((server) => {
 		const group = config.tools.find(t => t.server === server); if (!group) return
@@ -230,7 +272,7 @@ export const ChatProvider = ({ children }) => {
 	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts])
 
 	// Flatten ragServers into a single list of data source objects for easier consumption
-	const ragSources = config.ragServers.flatMap(server => 
+	const ragSources = config.ragServers.flatMap(server =>
 		server.sources.map(source => ({
 			...source,
 			serverName: server.server,
@@ -238,6 +280,42 @@ export const ChatProvider = ({ children }) => {
 			serverComplianceLevel: server.complianceLevel,
 		}))
 	)
+
+	// ensureSession: ensures a session exists, returns sessionId once ready
+	const ensureSession = useCallback(() => {
+		return new Promise((resolve) => {
+			if (sessionId) {
+				resolve(sessionId)
+				return
+			}
+
+			// Create a temporary session ID for frontend tracking
+			const tempSessionId = `session_${Date.now()}_${generateSecureRandomString()}`
+			setSessionId(tempSessionId)
+
+			// Send reset_session to create a new session on backend
+			sendMessage({ type: 'reset_session', user: config.user })
+
+			// For now, resolve immediately since backend handles session creation
+			// In a more robust implementation, we'd wait for session confirmation
+			resolve(tempSessionId)
+		})
+	}, [sessionId, sendMessage, config.user])
+
+	// addSystemEvent: adds a system event message to the chat timeline
+	const addSystemEvent = useCallback((subtype, text, meta = {}) => {
+		const eventId = `system_${Date.now()}_${generateSecureRandomString()}`
+		addMessage({
+			role: 'system',
+			type: 'system',
+			subtype,
+			text,
+			meta,
+			timestamp: new Date().toISOString(),
+			id: eventId
+		})
+		return eventId
+	}, [addMessage])
 
 	const value = {
 		appName: config.appName,
@@ -305,6 +383,13 @@ export const ChatProvider = ({ children }) => {
 		taggedFiles: files.taggedFiles,
 		toggleFileTag: files.toggleFileTag,
 		clearTaggedFiles: files.clearTaggedFiles,
+		sessionId,
+		attachments,
+		addAttachment,
+		addPendingFileEvent,
+		resolvePendingFileEvent,
+		ensureSession,
+		addSystemEvent,
 		settings,
 	}
 
