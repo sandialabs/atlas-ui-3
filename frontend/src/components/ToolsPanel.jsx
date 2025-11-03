@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, ChevronDown, ChevronUp, Shield } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, ChevronDown, ChevronUp, Shield, Info } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -7,6 +7,7 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 const ToolsPanel = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedServers, setExpandedServers] = useState(new Set())
+  const [expandedTools, setExpandedTools] = useState(new Set())
   const navigate = useNavigate()
   const { 
     selectedTools, 
@@ -58,6 +59,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         is_exclusive: toolServer.is_exclusive,
         compliance_level: toolServer.compliance_level,
         tools: toolServer.tools || [],
+        tools_detailed: toolServer.tools_detailed || [],
         tool_count: toolServer.tool_count || 0,
         prompts: [],
         prompt_count: 0
@@ -73,6 +75,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         description: promptServer.description,
         is_exclusive: false,
         tools: [],
+        tools_detailed: [],
         tool_count: 0,
         prompts: promptServer.prompts || [],
         prompt_count: promptServer.prompt_count || 0
@@ -295,6 +298,43 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     setExpandedServers(newExpanded)
   }
 
+  const toggleToolExpansion = (toolKey) => {
+    const newExpanded = new Set(expandedTools)
+    if (newExpanded.has(toolKey)) {
+      newExpanded.delete(toolKey)
+    } else {
+      newExpanded.add(toolKey)
+    }
+    setExpandedTools(newExpanded)
+  }
+
+  // Helper to render input schema parameters
+  const renderInputSchema = (schema) => {
+    if (!schema || !schema.properties) {
+      return <p className="text-xs text-gray-400 italic">No input parameters</p>
+    }
+    
+    const properties = schema.properties
+    const required = schema.required || []
+    
+    return (
+      <div className="space-y-1">
+        {Object.entries(properties).map(([paramName, paramDef]) => (
+          <div key={paramName} className="text-xs">
+            <span className="font-mono text-blue-300">{paramName}</span>
+            {required.includes(paramName) && (
+              <span className="text-red-400 ml-1">*</span>
+            )}
+            <span className="text-gray-400 ml-2">({paramDef.type || 'any'})</span>
+            {paramDef.description && (
+              <p className="text-gray-400 ml-4 mt-0.5">{paramDef.description}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   // (Legacy isServerSelected removed; new implementation above.)
 
   if (!isOpen) return null
@@ -468,20 +508,50 @@ const ToolsPanel = ({ isOpen, onClose }) => {
           {server.tools.map(tool => {
                                     const toolKey = `${server.server}_${tool}`
                                     const isSelected = selectedTools.has(toolKey)
+                                    const isToolExpanded = expandedTools.has(toolKey)
+                                    // Find detailed tool info
+                                    const toolDetail = server.tools_detailed?.find(t => t.name === tool)
+                                    
                                     return (
-                                      <button
-                                        key={tool}
-                                        onClick={() => {
+                                      <div key={tool} className="flex flex-col gap-1 w-full">
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            onClick={() => {
             // Toggle ONLY this specific tool
             toggleTool(toolKey)
-                                        }}
-                                        className={`px-2 py-0.5 text-xs rounded text-white transition-colors hover:opacity-80 ${
-                                          isSelected ? 'bg-blue-600' : 'bg-gray-600 hover:bg-blue-600'
-                                        }`}
-                                        title={`Click to ${isSelected ? 'disable' : 'enable'} ${tool}`}
-                                      >
-                                        {tool}
-                                      </button>
+                                            }}
+                                            className={`px-2 py-0.5 text-xs rounded text-white transition-colors hover:opacity-80 ${
+                                              isSelected ? 'bg-blue-600' : 'bg-gray-600 hover:bg-blue-600'
+                                            }`}
+                                            title={`Click to ${isSelected ? 'disable' : 'enable'} ${tool}`}
+                                          >
+                                            {tool}
+                                          </button>
+                                          {toolDetail && (
+                                            <button
+                                              onClick={() => toggleToolExpansion(toolKey)}
+                                              className="p-0.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors"
+                                              title="Show tool details"
+                                            >
+                                              <Info className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                        </div>
+                                        {isToolExpanded && toolDetail && (
+                                          <div className="bg-gray-800 rounded p-2 text-xs space-y-2 border border-gray-600">
+                                            {toolDetail.description && (
+                                              <div>
+                                                <p className="font-semibold text-gray-300 mb-1">Description:</p>
+                                                <p className="text-gray-400">{toolDetail.description}</p>
+                                              </div>
+                                            )}
+                                            <div>
+                                              <p className="font-semibold text-gray-300 mb-1">Input Arguments:</p>
+                                              {renderInputSchema(toolDetail.inputSchema)}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
                                     )
                                   })}
                                 </div>
