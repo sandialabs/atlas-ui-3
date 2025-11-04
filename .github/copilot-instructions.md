@@ -2,6 +2,12 @@
 
 Concise rules for getting productive fast in this repo. Prefer these over exploration; fall back to code/docs only if something is missing.
 
+## Documentation structure
+- User docs: docs/user-docs/ (quick-start, overview, integration)
+- Developer docs: docs/dev-docs/ (developer-setup, CLAUDE.md for comprehensive architecture, backend, frontend, configuration, etc.)
+- Planning/historical: docs/archive/ (feature plans, progress notes, design decisions)
+- For comprehensive architecture reference, always consult docs/dev-docs/CLAUDE.md first.
+
 ## Do this first
 - Use uv (not pip/conda). One-time: install uv. Then:
    ```bash

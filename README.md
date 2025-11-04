@@ -8,13 +8,23 @@ A modern LLM chat interface with MCP (Model Context Protocol) integration.
 
 This App is still under development. Not all features work well. 
 
-## Read this first (for contributors)
+## Documentation
 
-For the most current, concise guidance on how to work in this repository, read:
-- CLAUDE.md — architecture, workflows, and conventions verified against code
-- .github/copilot-instructions.md — a compact “AI agent guide” for getting productive fast
+Clear, organized documentation to help you get started and contribute:
 
-These two docs are kept up-to-date more frequently than long-form docs. Start there before exploring the wider docs or codebase.
+### 👥 For Users
+- **[Quick Start Guide](docs/user-docs/quick-start.md)** - Get up and running in minutes
+- **[Overview](docs/user-docs/overview.md)** - Understand what Atlas UI 3 is and what it can do
+- **[User Documentation Hub](docs/user-docs/README.md)** - Complete user documentation index
+
+### 🛠️ For Developers & Contributors
+- **[Developer Setup](docs/dev-docs/developer-setup.md)** - Complete development environment setup
+- **[CLAUDE.md](docs/dev-docs/CLAUDE.md)** - **START HERE** - Architecture, workflows, and conventions (most current reference)
+- **[.github/copilot-instructions.md](.github/copilot-instructions.md)** - Compact AI agent guide for getting productive fast
+- **[Developer Documentation Hub](docs/dev-docs/README.md)** - Complete developer documentation index
+
+### 📋 Planning & History
+- **[Archive](docs/archive/README.md)** - Historical planning documents and design decisions
 
 ## Features
 
