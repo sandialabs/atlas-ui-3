@@ -90,7 +90,7 @@ class OpenTelemetryConfig:
             from modules.config import config_manager
             if config_manager.app_settings.app_log_dir:
                 return Path(config_manager.app_settings.app_log_dir)
-        except Exception:
+        except Exception:            
             pass
         # Fallback: project_root/logs
         project_root = Path(__file__).resolve().parents[2]
