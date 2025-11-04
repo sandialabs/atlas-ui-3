@@ -70,11 +70,11 @@ Open http://localhost:8000 in your browser
 - **`llmconfig.yml`** - LLM model configurations
 - **`mcp.json`** - MCP server configurations
 
-See [Configuration Guide](configuration.md) for detailed setup.
+See [Configuration Guide](../dev-docs/configuration.md) for detailed setup.
 
 ## Next Steps
 
-- [Developer Setup](developer-setup.md) - Full development environment
-- [Backend Guide](backend.md) - Backend architecture and development
-- [Frontend Guide](frontend.md) - Frontend development
-- [MCP Development](mcp-development.md) - Creating MCP servers
+- [Developer Setup](../dev-docs/developer-setup.md) - Full development environment
+- [Backend Guide](../dev-docs/backend.md) - Backend architecture and development
+- [Frontend Guide](../dev-docs/frontend.md) - Frontend development
+- [MCP Development](../dev-docs/mcp-development.md) - Creating MCP servers
