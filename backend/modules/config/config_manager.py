@@ -191,6 +191,24 @@ class AppSettings(BaseSettings):
     help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
     
+    # Config directory paths
+    app_config_overrides: str = Field(default="config/overrides", validation_alias="APP_CONFIG_OVERRIDES")
+    app_config_defaults: str = Field(default="config/defaults", validation_alias="APP_CONFIG_DEFAULTS")
+    
+    # Logging directory
+    app_log_dir: Optional[str] = Field(default=None, validation_alias="APP_LOG_DIR")
+    
+    # Environment mode
+    environment: str = Field(default="production", validation_alias="ENVIRONMENT")
+    
+    # Prompt injection risk thresholds
+    pi_threshold_low: int = Field(default=30, validation_alias="PI_THRESHOLD_LOW")
+    pi_threshold_medium: int = Field(default=50, validation_alias="PI_THRESHOLD_MEDIUM")
+    pi_threshold_high: int = Field(default=80, validation_alias="PI_THRESHOLD_HIGH")
+    
+    # Runtime directories
+    runtime_feedback_dir: str = Field(default="runtime/feedback", validation_alias="RUNTIME_FEEDBACK_DIR")
+    
     model_config = {
         "env_file": "../.env", 
         "env_file_encoding": "utf-8", 
@@ -216,15 +234,16 @@ class ConfigManager:
         The backend process often runs with CWD=backend/, so relative paths like
         "config/overrides" incorrectly resolve to backend/config/overrides (which doesn't exist).
 
-        Environment variables can override these directories:
-            APP_CONFIG_OVERRIDES, APP_CONFIG_DEFAULTS (can be absolute or relative to project root)
+        Configuration settings can override these directories:
+            app_config_overrides, app_config_defaults (can be absolute or relative to project root)
 
         Legacy fallbacks (backend/configfilesadmin, backend/configfiles) are preserved.
         """
         project_root = self._backend_root.parent  # /workspaces/atlas-ui-3-11
 
-        overrides_env = os.getenv("APP_CONFIG_OVERRIDES", "config/overrides")
-        defaults_env = os.getenv("APP_CONFIG_DEFAULTS", "config/defaults")
+        # Use app_settings for config paths
+        overrides_env = self.app_settings.app_config_overrides
+        defaults_env = self.app_settings.app_config_defaults
 
         overrides_root = Path(overrides_env)
         defaults_root = Path(defaults_env)

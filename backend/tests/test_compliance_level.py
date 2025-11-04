@@ -1,6 +1,6 @@
 """Test compliance level functionality for MCP servers and data sources."""
 
-from modules.config.manager import MCPServerConfig, MCPConfig
+from backend.modules.config.config_manager import MCPServerConfig, MCPConfig
 
 
 def test_mcp_server_config_with_compliance_level():

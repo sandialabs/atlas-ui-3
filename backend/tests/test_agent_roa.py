@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from application.chat.service import ChatService  # type: ignore
 from interfaces.llm import LLMProtocol  # type: ignore
 from interfaces.transport import ChatConnectionProtocol  # type: ignore
-from modules.config.manager import ConfigManager  # type: ignore
+from modules.config.config_manager import ConfigManager  # type: ignore
 
 
 class FakeLLM(LLMProtocol):

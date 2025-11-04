@@ -4,11 +4,51 @@ Comprehensive guide to configuring the Chat UI application.
 
 ## Configuration Architecture
 
-The project uses a **modern Pydantic-based configuration system** that provides:
+The project uses a **centralized Pydantic-based configuration system** (`ConfigManager`) that provides:
 - **Type-safe** configuration with automatic validation
-- **Centralized** management of all settings  
+- **Centralized** management - all configuration goes through `ConfigManager` 
+- **No random env vars** - environment variables are loaded only through `AppSettings`
 - **Environment integration** with .env file loading
 - **Single source of truth** for all configuration
+- **Easy to understand** - all settings defined in `backend/modules/config/manager.py`
+
+### How It Works
+
+1. **AppSettings** (Pydantic BaseSettings) - Loads all environment variables with type validation
+2. **ConfigManager** - Centralized manager that provides access to:
+   - Application settings (`app_settings`)
+   - LLM configuration (`llm_config`)
+   - MCP server configuration (`mcp_config`)
+   - RAG MCP configuration (`rag_mcp_config`)
+3. **Global Access** - Import `config_manager` from `modules.config` anywhere in the backend
+
+### Usage Example
+
+```python
+from modules.config import config_manager
+
+# Access application settings
+app_settings = config_manager.app_settings
+port = app_settings.port
+debug_mode = app_settings.debug_mode
+
+# Access LLM configuration
+llm_config = config_manager.llm_config
+models = llm_config.models
+
+# Access MCP configuration
+mcp_config = config_manager.mcp_config
+servers = mcp_config.servers
+```
+
+### Configuration Paths
+
+Configuration files are searched in this order:
+1. `APP_CONFIG_OVERRIDES` (default: `config/overrides/`)
+2. `APP_CONFIG_DEFAULTS` (default: `config/defaults/`)
+3. Legacy locations: `backend/configfilesadmin/`, `backend/configfiles/`
+
+**Important**: All direct `os.getenv()` calls have been replaced with `config_manager.app_settings` for consistency.
 
 ## Configuration Files
 
@@ -25,22 +65,41 @@ cp .env.example .env
 DEBUG_MODE=true              # Skip authentication in development  
 PORT=8000                   # Server port
 APP_NAME="Chat UI"          # Application name
+ENVIRONMENT=development     # Environment mode (development/production)
+
+# Configuration Paths
+APP_CONFIG_OVERRIDES=config/overrides  # Path to config overrides
+APP_CONFIG_DEFAULTS=config/defaults    # Path to config defaults
+APP_LOG_DIR=/path/to/logs              # Optional: Custom log directory
 
 # RAG Settings
 MOCK_RAG=true               # Use mock RAG service for testing
 RAG_MOCK_URL=http://localhost:8001  # RAG service URL
 
 # Agent Settings
-AGENT_MODE_AVAILABLE=false  # Enable agent mode UI
+FEATURE_AGENT_MODE_AVAILABLE=true  # Enable agent mode UI
 AGENT_MAX_STEPS=10          # Maximum agent reasoning steps
+AGENT_LOOP_STRATEGY=think-act  # Agent loop strategy
 
 # LLM Health Check Settings
 LLM_HEALTH_CHECK_INTERVAL=5  # Health check interval in minutes (0 = disabled)
+
+# Prompt Injection Risk Thresholds
+PI_THRESHOLD_LOW=30         # Low risk threshold
+PI_THRESHOLD_MEDIUM=50      # Medium risk threshold  
+PI_THRESHOLD_HIGH=80        # High risk threshold
+
+# Runtime Directories
+RUNTIME_FEEDBACK_DIR=runtime/feedback  # Feedback storage directory
 
 # API Keys (used by LLM config)
 OPENAI_API_KEY=your_key     # OpenAI API key
 ANTHROPIC_API_KEY=your_key  # Anthropic API key
 GOOGLE_API_KEY=your_key     # Google API key
+
+# Security
+CAPABILITY_TOKEN_SECRET=your_secret  # Secret for capability tokens
+CAPABILITY_TOKEN_TTL_SECONDS=3600    # Token TTL in seconds
 
 # Banner Settings (optional)
 BANNER_ENABLED=false        # Enable system banners

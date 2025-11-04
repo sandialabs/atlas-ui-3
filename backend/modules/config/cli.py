@@ -12,7 +12,7 @@ import json
 import logging
 import sys
 
-from .manager import ConfigManager
+from .config_manager import ConfigManager
 
 # Set up logging for CLI
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')

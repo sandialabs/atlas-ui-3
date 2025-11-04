@@ -53,8 +53,18 @@ def require_admin(current_user: str = Depends(get_current_user)) -> str:
 
 def setup_config_overrides() -> None:
     """Ensure editable overrides directory exists; seed from defaults / legacy if empty."""
-    overrides_root = Path(os.getenv("APP_CONFIG_OVERRIDES", "config/overrides"))
-    defaults_root = Path(os.getenv("APP_CONFIG_DEFAULTS", "config/defaults"))
+    app_settings = config_manager.app_settings
+    overrides_root = Path(app_settings.app_config_overrides)
+    defaults_root = Path(app_settings.app_config_defaults)
+    
+    # If relative paths, resolve from project root
+    if not overrides_root.is_absolute():
+        project_root = Path(__file__).parent.parent.parent
+        overrides_root = project_root / overrides_root
+    if not defaults_root.is_absolute():
+        project_root = Path(__file__).parent.parent.parent
+        defaults_root = project_root / defaults_root
+    
     overrides_root.mkdir(parents=True, exist_ok=True)
     defaults_root.mkdir(parents=True, exist_ok=True)
 
@@ -99,8 +109,7 @@ def get_admin_config_path(filename: str) -> Path:
         custom_filename = filename
     
     # Use same logic as config manager to resolve relative paths from project root
-    overrides_env = os.getenv("APP_CONFIG_OVERRIDES", "config/overrides")
-    base = Path(overrides_env)
+    base = Path(app_settings.app_config_overrides)
     
     # If relative path, resolve from project root (parent of backend directory)
     if not base.is_absolute():
@@ -154,9 +163,9 @@ def _project_root() -> Path:
 
 
 def _log_base_dir() -> Path:
-    env_path = os.getenv("APP_LOG_DIR")
-    if env_path:
-        return Path(env_path)
+    app_settings = config_manager.app_settings
+    if app_settings.app_log_dir:
+        return Path(app_settings.app_log_dir)
     return _project_root() / "logs"
 
 
@@ -608,7 +617,11 @@ async def get_system_status(admin_user: str = Depends(require_admin)):
     """
     try:
         # Configuration status: overrides directory and file count
-        overrides_root = Path(os.getenv("APP_CONFIG_OVERRIDES", "config/overrides"))
+        app_settings = config_manager.app_settings
+        overrides_root = Path(app_settings.app_config_overrides)
+        if not overrides_root.is_absolute():
+            project_root = _project_root()
+            overrides_root = project_root / overrides_root
         overrides_root.mkdir(parents=True, exist_ok=True)
         config_files = list(overrides_root.glob("*"))
         config_status = "healthy" if config_files else "warning"
