@@ -395,6 +395,7 @@ export const ChatProvider = ({ children }) => {
 		settings,
 		approvalRequest,
 		sendApprovalResponse: sendMessage,
+		clearApprovalRequest: () => setApprovalRequest(null),
 	}
 
 	return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

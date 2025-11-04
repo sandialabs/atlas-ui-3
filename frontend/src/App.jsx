@@ -27,7 +27,17 @@ function ChatInterface() {
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false)
   const [canvasPanelWidth, setCanvasPanelWidth] = useState(0)
   const [filesPanelOpen, setFilesPanelOpen] = useState(false)
-  const { canvasContent, customUIContent, canvasFiles, features, approvalRequest, sendApprovalResponse } = useChat()
+  const { canvasContent, customUIContent, canvasFiles, features, approvalRequest, sendApprovalResponse, clearApprovalRequest } = useChat()
+
+  // Handler for approval responses
+  const handleApprovalResponse = (response) => {
+    sendApprovalResponse({
+      type: 'tool_approval_response',
+      ...response
+    })
+    // Clear the approval request to close the dialog
+    clearApprovalRequest()
+  }
 
   // Auto-open tools panel when returning from marketplace
   useEffect(() => {
@@ -160,12 +170,7 @@ function ChatInterface() {
       {approvalRequest && (
         <ToolApprovalDialog
           request={approvalRequest}
-          onResponse={(response) => {
-            sendApprovalResponse({
-              type: 'tool_approval_response',
-              ...response
-            })
-          }}
+          onResponse={handleApprovalResponse}
         />
       )}
     </div>
