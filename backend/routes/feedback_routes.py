@@ -46,8 +46,10 @@ class FeedbackResponse(BaseModel):
 
 def get_feedback_directory() -> Path:
     """Get the feedback storage directory."""
-    base = Path(os.getenv("RUNTIME_FEEDBACK_DIR", "runtime/feedback"))
+    from modules.config import config_manager
+    base = Path(config_manager.app_settings.runtime_feedback_dir)
     base.mkdir(parents=True, exist_ok=True)
+    return base
     return base
 
 

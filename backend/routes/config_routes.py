@@ -36,11 +36,9 @@ async def get_banners(current_user: str = Depends(get_current_user)):
     # Read messages from messages.txt file
     try:
         from pathlib import Path
-        import os
         
-        # Use same logic as admin routes to find messages file
-        overrides_env = os.getenv("APP_CONFIG_OVERRIDES", "config/overrides")
-        base = Path(overrides_env)
+        # Use app settings for config path
+        base = Path(app_settings.app_config_overrides)
         
         # If relative path, resolve from project root
         if not base.is_absolute():

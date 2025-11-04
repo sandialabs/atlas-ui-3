@@ -23,8 +23,18 @@ class MCPToolManager:
     
     def __init__(self, config_path: Optional[str] = None):
         if config_path is None:
-            overrides_root = os.getenv("APP_CONFIG_OVERRIDES", "config/overrides")
-            candidate = Path(overrides_root) / "mcp.json"
+            # Use config manager to get config path
+            app_settings = config_manager.app_settings
+            overrides_root = Path(app_settings.app_config_overrides)
+            
+            # If relative, resolve from project root
+            if not overrides_root.is_absolute():
+                # This file is in backend/modules/mcp_tools/client.py
+                backend_root = Path(__file__).parent.parent.parent
+                project_root = backend_root.parent
+                overrides_root = project_root / overrides_root
+            
+            candidate = overrides_root / "mcp.json"
             if not candidate.exists():
                 # Legacy fallback
                 candidate = Path("backend/configfilesadmin/mcp.json")

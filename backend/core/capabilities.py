@@ -32,14 +32,9 @@ def _get_secret() -> bytes:
     """Get the capability token secret as bytes.
 
     Order of precedence:
-    - ENV: CAPABILITY_TOKEN_SECRET
-    - App settings (config)
+    - App settings (config manager)
     - Fallback development secret (unsafe for production)
     """
-    env_secret = os.getenv("CAPABILITY_TOKEN_SECRET")
-    if env_secret:
-        return env_secret.encode("utf-8")
-
     try:
         settings = config_manager.app_settings
         if getattr(settings, "capability_token_secret", None):
