@@ -52,7 +52,6 @@ class ToolsModeRunner:
         self.prompt_provider = prompt_provider
         self.artifact_processor = artifact_processor
         self.config_manager = config_manager
-        self.artifact_processor = artifact_processor
     
     async def run(
         self,
