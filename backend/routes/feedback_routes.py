@@ -50,7 +50,6 @@ def get_feedback_directory() -> Path:
     base = Path(config_manager.app_settings.runtime_feedback_dir)
     base.mkdir(parents=True, exist_ok=True)
     return base
-    return base
 
 
 def require_admin_for_feedback(current_user: str = Depends(get_current_user)) -> str:
