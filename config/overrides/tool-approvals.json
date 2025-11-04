@@ -1,0 +1,13 @@
+{
+  "require_approval_by_default": false,
+  "tools": {
+    "code-executor_run_python": {
+      "require_approval": true,
+      "allow_edit": true
+    },
+    "code-executor_run_bash": {
+      "require_approval": true,
+      "allow_edit": true
+    }
+  }
+}

@@ -283,6 +283,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 await websocket.send_json(response)
 
+            elif message_type == "tool_approval_response":
+                # Handle tool approval response
+                from application.chat.approval_manager import get_approval_manager
+                approval_manager = get_approval_manager()
+                approval_manager.handle_approval_response(
+                    tool_call_id=data.get("tool_call_id"),
+                    approved=data.get("approved", False),
+                    arguments=data.get("arguments"),
+                    reason=data.get("reason")
+                )
+                # No response needed - the approval will unblock the waiting tool execution
+
             else:
                 logger.warning(f"Unknown message type: {message_type}")
                 await websocket.send_json({

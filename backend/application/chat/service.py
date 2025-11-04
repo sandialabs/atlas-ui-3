@@ -125,6 +125,7 @@ class ChatService:
             event_publisher=self.event_publisher,
             prompt_provider=self.prompt_provider,
             artifact_processor=self._update_session_from_tool_results,
+            config_manager=self.config_manager,
         )
 
 
@@ -138,6 +139,7 @@ class ChatService:
                 tool_manager=self.tool_manager,
                 prompt_provider=self.prompt_provider,
                 connection=self.connection,
+                config_manager=self.config_manager,
             )
 
         # Get default strategy from config

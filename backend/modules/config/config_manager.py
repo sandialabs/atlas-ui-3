@@ -80,6 +80,27 @@ class MCPConfig(BaseModel):
         return v
 
 
+class ToolApprovalConfig(BaseModel):
+    """Configuration for a single tool's approval settings."""
+    require_approval: bool = False
+    allow_edit: bool = True
+
+
+class ToolApprovalsConfig(BaseModel):
+    """Configuration for tool approvals."""
+    require_approval_by_default: bool = False
+    tools: Dict[str, ToolApprovalConfig] = Field(default_factory=dict)
+    
+    @field_validator('tools', mode='before')
+    @classmethod
+    def validate_tools(cls, v):
+        """Convert dict values to ToolApprovalConfig objects."""
+        if isinstance(v, dict):
+            return {name: ToolApprovalConfig(**config) if isinstance(config, dict) else config 
+                   for name, config in v.items()}
+        return v
+
+
 class AppSettings(BaseSettings):
     """Main application settings loaded from environment variables."""
     
@@ -190,6 +211,7 @@ class AppSettings(BaseSettings):
     llm_config_file: str = Field(default="llmconfig.yml", validation_alias="LLM_CONFIG_FILE")
     help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
+    tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
     
     # Config directory paths
     app_config_overrides: str = Field(default="config/overrides", validation_alias="APP_CONFIG_OVERRIDES")
@@ -226,6 +248,7 @@ class ConfigManager:
         self._llm_config: Optional[LLMConfig] = None
         self._mcp_config: Optional[MCPConfig] = None
         self._rag_mcp_config: Optional[MCPConfig] = None
+        self._tool_approvals_config: Optional[ToolApprovalsConfig] = None
     
     def _search_paths(self, file_name: str) -> List[Path]:
         """Generate common search paths for a configuration file.
@@ -435,6 +458,29 @@ class ConfigManager:
 
         return self._rag_mcp_config
     
+    @property
+    def tool_approvals_config(self) -> ToolApprovalsConfig:
+        """Get tool approvals configuration (cached)."""
+        if self._tool_approvals_config is None:
+            try:
+                # Use config filename from app settings
+                approvals_filename = self.app_settings.tool_approvals_config_file
+                file_paths = self._search_paths(approvals_filename)
+                data = self._load_file_with_error_handling(file_paths, "JSON")
+                
+                if data:
+                    self._tool_approvals_config = ToolApprovalsConfig(**data)
+                    logger.info(f"Loaded tool approvals config with {len(self._tool_approvals_config.tools)} tool-specific settings")
+                else:
+                    self._tool_approvals_config = ToolApprovalsConfig()
+                    logger.info("Created empty tool approvals config (no configuration file found)")
+                    
+            except Exception as e:
+                logger.error(f"Failed to parse tool approvals configuration: {e}", exc_info=True)
+                self._tool_approvals_config = ToolApprovalsConfig()
+        
+        return self._tool_approvals_config
+    
     def _validate_mcp_compliance_levels(self, config: MCPConfig, config_type: str):
         """Validate compliance levels for all MCP servers."""
         try:
@@ -459,6 +505,7 @@ class ConfigManager:
         self._llm_config = None
         self._mcp_config = None
         self._rag_mcp_config = None
+        self._tool_approvals_config = None
         logger.info("Configuration cache cleared, will reload on next access")
     
     def validate_config(self) -> Dict[str, bool]:

@@ -33,6 +33,7 @@ class ToolsModeRunner:
         event_publisher: EventPublisher,
         prompt_provider: Optional[PromptProvider] = None,
         artifact_processor: Optional[Callable[[Session, List[ToolResult], Optional[UpdateCallback]], Awaitable[None]]] = None,
+        config_manager=None,
     ):
         """
         Initialize tools mode runner.
@@ -43,11 +44,14 @@ class ToolsModeRunner:
             event_publisher: Event publisher for UI updates
             prompt_provider: Optional prompt provider
             artifact_processor: Optional callback for processing tool artifacts
+            config_manager: Optional config manager for approval settings
         """
         self.llm = llm
         self.tool_manager = tool_manager
         self.event_publisher = event_publisher
         self.prompt_provider = prompt_provider
+        self.artifact_processor = artifact_processor
+        self.config_manager = config_manager
         self.artifact_processor = artifact_processor
     
     async def run(
@@ -119,6 +123,7 @@ class ToolsModeRunner:
             llm_caller=self.llm,
             prompt_provider=self.prompt_provider,
             update_callback=update_callback or self._get_send_json(),
+            config_manager=self.config_manager,
         )
 
         # Process artifacts if handler provided

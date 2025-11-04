@@ -39,6 +39,7 @@ export const ChatProvider = ({ children }) => {
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
 	const [pendingFileEvents, setPendingFileEvents] = useState(new Map())
+	const [approvalRequest, setApprovalRequest] = useState(null)
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {
@@ -101,7 +102,8 @@ export const ChatProvider = ({ children }) => {
 				triggerFileDownload,
 			addAttachment,
 			addPendingFileEvent,
-			resolvePendingFileEvent
+			resolvePendingFileEvent,
+			setApprovalRequest
 		})
 		return addMessageHandler(handler)
 	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent])
@@ -391,6 +393,8 @@ export const ChatProvider = ({ children }) => {
 		ensureSession,
 		addSystemEvent,
 		settings,
+		approvalRequest,
+		sendApprovalResponse: sendMessage,
 	}
 
 	return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>
