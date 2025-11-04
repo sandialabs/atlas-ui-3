@@ -106,7 +106,7 @@ export const ChatProvider = ({ children }) => {
 			setApprovalRequest
 		})
 		return addMessageHandler(handler)
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setApprovalRequest])
 
 	const selectAllServerTools = useCallback((server) => {
 		const group = config.tools.find(t => t.server === server); if (!group) return

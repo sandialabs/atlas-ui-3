@@ -83,17 +83,20 @@ export default function ToolApprovalDialog({ request, onResponse }) {
                     <textarea
                       value={typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
                       onChange={(e) => {
-                        try {
-                          // Try to parse as JSON if it looks like JSON
-                          if (e.target.value.trim().startsWith('{') || e.target.value.trim().startsWith('[')) {
-                            handleArgumentChange(key, JSON.parse(e.target.value))
-                          } else {
-                            handleArgumentChange(key, e.target.value)
+                        const newValue = e.target.value
+                        // Try to parse as JSON if it's a complete JSON structure
+                        if ((newValue.trim().startsWith('{') && newValue.trim().endsWith('}')) ||
+                            (newValue.trim().startsWith('[') && newValue.trim().endsWith(']'))) {
+                          try {
+                            const parsed = JSON.parse(newValue)
+                            handleArgumentChange(key, parsed)
+                            return
+                          } catch {
+                            // Not valid JSON yet, use string value
                           }
-                        } catch {
-                          // If JSON parsing fails, use string value
-                          handleArgumentChange(key, e.target.value)
                         }
+                        // Use string value for non-JSON or incomplete JSON
+                        handleArgumentChange(key, newValue)
                       }}
                       className="w-full bg-gray-800 text-gray-200 border border-gray-600 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                       rows={typeof value === 'object' ? Math.min(10, JSON.stringify(value, null, 2).split('\n').length) : 3}
@@ -104,7 +107,7 @@ export default function ToolApprovalDialog({ request, onResponse }) {
             )}
           </div>
 
-          {!editedArgs || Object.keys(editedArgs).length === 0 ? (
+          {Object.keys(editedArgs).length === 0 ? (
             <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 mb-6">
               <p className="text-gray-400 text-sm">No arguments provided</p>
             </div>

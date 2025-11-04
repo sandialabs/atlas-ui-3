@@ -86,11 +86,14 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool]:
     
     Args:
         tool_name: Name of the tool to check
-        config_manager: ConfigManager instance
+        config_manager: ConfigManager instance (can be None)
     
     Returns:
         Tuple of (requires_approval, allow_edit)
     """
+    if config_manager is None:
+        return (False, True)
+    
     try:
         approvals_config = config_manager.tool_approvals_config
         
