@@ -183,6 +183,34 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             </div>
           </div>
 
+          {/* Auto-Approve Tools Setting */}
+          <div className="bg-gray-700 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-white font-medium">Auto-Approve Tool Calls</label>
+              <button
+                onClick={() => handleSettingChange('autoApproveTools', !settings.autoApproveTools)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  settings.autoApproveTools ? 'bg-green-600' : 'bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    settings.autoApproveTools ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="text-sm text-gray-400">
+              When enabled, tools that don't require admin approval will execute automatically without prompting.
+              Tools that require admin approval will still prompt for confirmation.
+            </p>
+            {!settings.autoApproveTools && (
+              <p className="text-sm text-yellow-400 mt-2">
+                <strong>⚠ Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
+              </p>
+            )}
+          </div>
+
           {/* Future Settings Placeholder */}
           <div className="pt-4 border-t border-gray-700">
             <h3 className="text-lg font-medium text-gray-300 mb-3">Coming Soon</h3>

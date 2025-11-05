@@ -80,7 +80,7 @@ async def execute_tools_workflow(
     return final_response, tool_results
 
 
-def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool]:
+def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]:
     """
     Check if a tool requires approval before execution.
     
@@ -89,10 +89,13 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool]:
         config_manager: ConfigManager instance (can be None)
     
     Returns:
-        Tuple of (requires_approval, allow_edit)
+        Tuple of (requires_approval, allow_edit, admin_required)
+        - requires_approval: Whether approval is needed
+        - allow_edit: Whether arguments can be edited
+        - admin_required: Whether this is admin-mandated (True) or user-level (False)
     """
     if config_manager is None:
-        return (False, True)
+        return (True, True, False)  # Default to requiring user-level approval
     
     try:
         approvals_config = config_manager.tool_approvals_config
@@ -100,14 +103,19 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool]:
         # Check if there's a specific configuration for this tool
         if tool_name in approvals_config.tools:
             tool_config = approvals_config.tools[tool_name]
-            return (tool_config.require_approval, tool_config.allow_edit)
+            # Admin has explicitly configured this tool
+            return (tool_config.require_approval, tool_config.allow_edit, True)
         
-        # Fall back to default setting
-        return (approvals_config.require_approval_by_default, True)
+        # No specific config - use default, but this is admin-level if default is True
+        default_required = approvals_config.require_approval_by_default
+        if default_required:
+            return (True, True, True)  # Admin requires by default
+        else:
+            return (True, True, False)  # No admin requirement, so user-level approval
     
     except Exception as e:
         logger.warning(f"Error checking approval requirements for {tool_name}: {e}")
-        return (False, True)  # Default to no approval required
+        return (True, True, False)  # Default to user-level approval on error
 
 
 def tool_accepts_username(tool_name: str, tool_manager) -> bool:
@@ -167,12 +175,18 @@ async def execute_single_tool(
         # Check if this tool requires approval
         needs_approval = False
         allow_edit = True
+        admin_required = False
         if config_manager:
-            needs_approval, allow_edit = requires_approval(tool_call.function.name, config_manager)
+            needs_approval, allow_edit, admin_required = requires_approval(tool_call.function.name, config_manager)
+        else:
+            # No config manager means user-level approval by default
+            needs_approval = True
+            allow_edit = True
+            admin_required = False
         
         # If approval is required, request it from the user
         if needs_approval:
-            logger.info(f"Tool {tool_call.function.name} requires approval")
+            logger.info(f"Tool {tool_call.function.name} requires approval (admin_required={admin_required})")
             
             # Send approval request to frontend
             if update_callback:
@@ -181,7 +195,8 @@ async def execute_single_tool(
                     "tool_call_id": tool_call.id,
                     "tool_name": tool_call.function.name,
                     "arguments": display_args,
-                    "allow_edit": allow_edit
+                    "allow_edit": allow_edit,
+                    "admin_required": admin_required
                 })
             
             # Wait for approval response

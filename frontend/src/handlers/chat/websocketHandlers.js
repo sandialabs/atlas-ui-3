@@ -16,8 +16,7 @@ export function createWebSocketHandler(deps) {
     getFileType,
     triggerFileDownload,
     addAttachment,
-    resolvePendingFileEvent,
-    setApprovalRequest
+    resolvePendingFileEvent
   } = deps
 
   const handleAgentUpdate = (data) => {
@@ -311,15 +310,19 @@ export function createWebSocketHandler(deps) {
           }
           break
         case 'tool_approval_request':
-          // Handle tool approval request
-          if (typeof setApprovalRequest === 'function') {
-            setApprovalRequest({
-              tool_call_id: data.tool_call_id,
-              tool_name: data.tool_name,
-              arguments: data.arguments || {},
-              allow_edit: data.allow_edit !== false
-            })
-          }
+          // Handle tool approval request - add as a message in the chat
+          addMessage({
+            role: 'system',
+            content: `Tool Approval Required: ${data.tool_name}`,
+            type: 'tool_approval_request',
+            tool_call_id: data.tool_call_id,
+            tool_name: data.tool_name,
+            arguments: data.arguments || {},
+            allow_edit: data.allow_edit !== false,
+            admin_required: data.admin_required || false,
+            status: 'pending',
+            timestamp: new Date().toISOString()
+          })
           break
         case 'intermediate_update':
           handleIntermediateUpdate(data)

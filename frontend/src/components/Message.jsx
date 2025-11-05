@@ -496,6 +496,190 @@ const downloadReturnedFile = (filename, base64Data) => {
   }
 }
 
+// Tool Approval Message Component
+const ToolApprovalMessage = ({ message }) => {
+  const { sendApprovalResponse, settings } = useChat()
+  const [isEditing, setIsEditing] = useState(false)
+  const [editedArgs, setEditedArgs] = useState(message.arguments)
+  const [reason, setReason] = useState('')
+  const [isExpanded, setIsExpanded] = useState(true)
+
+  // Auto-approve if user has the setting enabled and this is not an admin-required approval
+  useEffect(() => {
+    if (settings?.autoApproveTools && !message.admin_required && message.status === 'pending') {
+      // Auto-approve after a brief delay to show the message
+      const timer = setTimeout(() => {
+        sendApprovalResponse({
+          type: 'tool_approval_response',
+          tool_call_id: message.tool_call_id,
+          approved: true,
+          arguments: message.arguments,
+        })
+      }, 100)
+      return () => clearTimeout(timer)
+    }
+  }, [settings?.autoApproveTools, message.admin_required, message.status, message.tool_call_id, message.arguments, sendApprovalResponse])
+
+  const handleApprove = () => {
+    sendApprovalResponse({
+      type: 'tool_approval_response',
+      tool_call_id: message.tool_call_id,
+      approved: true,
+      arguments: isEditing ? editedArgs : message.arguments,
+    })
+  }
+
+  const handleReject = () => {
+    sendApprovalResponse({
+      type: 'tool_approval_response',
+      tool_call_id: message.tool_call_id,
+      approved: false,
+      reason: reason || 'User rejected the tool call',
+    })
+  }
+
+  const handleArgumentChange = (key, value) => {
+    setEditedArgs(prev => ({
+      ...prev,
+      [key]: value
+    }))
+  }
+
+  // Don't show if already responded
+  if (message.status === 'approved' || message.status === 'rejected') {
+    return (
+      <div className="text-gray-200">
+        <div className="flex items-center gap-2 mb-3">
+          <span className={`px-2 py-1 rounded text-xs font-medium ${
+            message.status === 'approved' ? 'bg-green-600' : 'bg-red-600'
+          }`}>
+            {message.status === 'approved' ? 'APPROVED' : 'REJECTED'}
+          </span>
+          <span className="font-medium">{message.tool_name}</span>
+        </div>
+        {message.status === 'rejected' && message.rejection_reason && (
+          <div className="text-sm text-gray-400">Reason: {message.rejection_reason}</div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="text-gray-200">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-600">
+          APPROVAL REQUIRED
+        </span>
+        <span className="font-medium">{message.tool_name}</span>
+        {settings?.autoApproveTools && !message.admin_required && (
+          <span className="px-2 py-1 rounded text-xs font-medium bg-blue-600 animate-pulse">
+            AUTO-APPROVING...
+          </span>
+        )}
+      </div>
+
+      {/* Arguments Section */}
+      <div className="mb-4">
+        <div className="border-l-4 border-yellow-500 pl-4">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="w-full text-left text-sm font-semibold text-yellow-400 mb-2 flex items-center gap-2 hover:text-yellow-300 transition-colors"
+          >
+            <span className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
+              ▶
+            </span>
+            Tool Arguments {!isExpanded ? `(${Object.keys(message.arguments).length} params)` : ''}
+          </button>
+          
+          {isExpanded && (
+            <>
+              {message.allow_edit && (
+                <div className="mb-2 flex items-center gap-2">
+                  <button
+                    onClick={() => setIsEditing(!isEditing)}
+                    className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                  >
+                    {isEditing ? 'View Mode' : 'Edit Arguments'}
+                  </button>
+                </div>
+              )}
+
+              {!isEditing ? (
+                <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-96 overflow-y-auto">
+                  <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(message.arguments, null, 2)}
+                  </pre>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+                  {Object.entries(editedArgs).map(([key, value]) => (
+                    <div key={key} className="bg-gray-900 border border-gray-700 rounded-lg p-3">
+                      <label className="block text-sm font-medium text-gray-300 mb-1">
+                        {key}
+                      </label>
+                      <textarea
+                        value={typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                        onChange={(e) => {
+                          const newValue = e.target.value
+                          // Try to parse as JSON if it's a complete JSON structure
+                          if ((newValue.trim().startsWith('{') && newValue.trim().endsWith('}')) ||
+                              (newValue.trim().startsWith('[') && newValue.trim().endsWith(']'))) {
+                            try {
+                              const parsed = JSON.parse(newValue)
+                              handleArgumentChange(key, parsed)
+                              return
+                            } catch {
+                              // Not valid JSON yet, use string value
+                            }
+                          }
+                          // Use string value for non-JSON or incomplete JSON
+                          handleArgumentChange(key, newValue)
+                        }}
+                        className="w-full bg-gray-800 text-gray-200 border border-gray-600 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        rows={Math.max(3, Math.min(20, (typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)).split('\n').length))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Rejection Reason */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-300 mb-2">
+          Rejection Reason (optional)
+        </label>
+        <input
+          type="text"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Enter reason for rejecting..."
+          className="w-full bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex gap-3">
+        <button
+          onClick={handleReject}
+          className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+        >
+          Reject
+        </button>
+        <button
+          onClick={handleApprove}
+          className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+        >
+          Approve {isEditing ? '(with edits)' : ''}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const Message = ({ message }) => {
   const { appName, downloadFile } = useChat()
   
@@ -552,6 +736,11 @@ const Message = ({ message }) => {
   const authorName = isUser ? 'You' : isSystem ? 'System' : appName
   
 const renderContent = () => {
+    // Handle tool approval request messages
+    if (message.type === 'tool_approval_request') {
+      return <ToolApprovalMessage message={message} />
+    }
+
     // Handle tool call messages (both regular and agent mode use same UI)
     if (message.type === 'tool_call') {
       return (
