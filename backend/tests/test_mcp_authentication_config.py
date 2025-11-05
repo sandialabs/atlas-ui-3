@@ -252,3 +252,31 @@ class TestMCPEnvVarExpansion:
         # Fields should remain None
         assert mcp_config.servers["test"].api_key is None
         assert mcp_config.servers["test"].extra_headers is None
+
+    def test_empty_env_var_expansion(self):
+        """Empty environment variables should be handled correctly."""
+        # Set environment variable to empty string
+        os.environ["EMPTY_VAR"] = ""
+        
+        try:
+            server_config = MCPServerConfig(
+                url="https://example.com",
+                groups=["users"],
+                api_key="${EMPTY_VAR}",
+                extra_headers={
+                    "X-Empty": "${EMPTY_VAR}",
+                },
+            )
+            
+            mcp_config = MCPConfig(servers={"test": server_config})
+            
+            # Create config manager and expand vars
+            cm = ConfigManager()
+            cm._expand_mcp_env_vars(mcp_config)
+            
+            # Empty string should be preserved (valid value)
+            assert mcp_config.servers["test"].api_key == ""
+            assert mcp_config.servers["test"].extra_headers["X-Empty"] == ""
+        finally:
+            # Clean up
+            del os.environ["EMPTY_VAR"]

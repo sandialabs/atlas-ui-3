@@ -451,11 +451,12 @@ class ConfigManager:
             # Expand api_key if present
             if server_config.api_key:
                 expanded = os.path.expandvars(server_config.api_key)
-                # Only update if expansion occurred and result is valid
-                if expanded and not expanded.startswith("${"):
+                # Check if expansion occurred (no unexpanded ${} remaining)
+                if not expanded.startswith("${"):
                     server_config.api_key = expanded
                     logger.debug(f"Expanded api_key for MCP server '{server_name}'")
-                elif expanded.startswith("${"):
+                else:
+                    # Undefined environment variable - log warning
                     logger.warning(
                         f"MCP server '{server_name}' api_key references undefined environment variable: {server_config.api_key}"
                     )
@@ -466,17 +467,15 @@ class ConfigManager:
                 for header_name, header_value in server_config.extra_headers.items():
                     if isinstance(header_value, str):
                         expanded_value = os.path.expandvars(header_value)
-                        # Only update if expansion occurred and result is valid
-                        if expanded_value and not expanded_value.startswith("${"):
+                        # Check if expansion occurred (no unexpanded ${} remaining)
+                        if not expanded_value.startswith("${"):
                             expanded_headers[header_name] = expanded_value
-                        elif expanded_value.startswith("${"):
+                        else:
+                            # Undefined environment variable - log warning and keep original
                             logger.warning(
                                 f"MCP server '{server_name}' header '{header_name}' references undefined environment variable: {header_value}"
                             )
-                            # Keep original value if env var is not defined
                             expanded_headers[header_name] = header_value
-                        else:
-                            expanded_headers[header_name] = expanded_value
                     else:
                         expanded_headers[header_name] = header_value
                 
