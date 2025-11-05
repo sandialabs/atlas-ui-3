@@ -1,5 +1,5 @@
 {
-  "require_approval_by_default": false,
+  "require_approval_by_default": true,
   "tools": {
     "code-executor_run_python": {
       "require_approval": true,

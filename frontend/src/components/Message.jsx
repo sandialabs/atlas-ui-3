@@ -521,21 +521,42 @@ const ToolApprovalMessage = ({ message }) => {
   }, [settings?.autoApproveTools, message.admin_required, message.status, message.tool_call_id, message.arguments, sendApprovalResponse])
 
   const handleApprove = () => {
-    sendApprovalResponse({
+    console.log('[ToolApproval] Approve button clicked', {
+      tool_call_id: message.tool_call_id,
+      tool_name: message.tool_name,
+      isEditing,
+      arguments: isEditing ? editedArgs : message.arguments
+    })
+    
+    const response = {
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: true,
       arguments: isEditing ? editedArgs : message.arguments,
-    })
+    }
+    
+    console.log('[ToolApproval] Sending approval response:', response)
+    sendApprovalResponse(response)
+    console.log('[ToolApproval] Approval response sent')
   }
 
   const handleReject = () => {
-    sendApprovalResponse({
+    console.log('[ToolApproval] Reject button clicked', {
+      tool_call_id: message.tool_call_id,
+      tool_name: message.tool_name,
+      reason
+    })
+    
+    const response = {
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: false,
       reason: reason || 'User rejected the tool call',
-    })
+    }
+    
+    console.log('[ToolApproval] Sending rejection response:', response)
+    sendApprovalResponse(response)
+    console.log('[ToolApproval] Rejection response sent')
   }
 
   const handleArgumentChange = (key, value) => {
@@ -662,16 +683,16 @@ const ToolApprovalMessage = ({ message }) => {
       </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-3">
+      <div className="flex gap-2">
         <button
           onClick={handleReject}
-          className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+          className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors"
         >
           Reject
         </button>
         <button
           onClick={handleApprove}
-          className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
         >
           Approve {isEditing ? '(with edits)' : ''}
         </button>

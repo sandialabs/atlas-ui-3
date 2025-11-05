@@ -1,4 +1,4 @@
 {
-  "require_approval_by_default": false,
+  "require_approval_by_default": true,
   "tools": {}
 }

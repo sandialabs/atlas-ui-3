@@ -107,11 +107,16 @@ class ToolApprovalManager:
         Returns:
             True if request was found and handled, False otherwise
         """
+        logger.info(f"handle_approval_response called: tool_call_id={tool_call_id}, approved={approved}")
+        logger.info(f"Pending requests: {list(self._pending_requests.keys())}")
+        
         request = self._pending_requests.get(tool_call_id)
         if request is None:
             logger.warning(f"Received approval response for unknown tool call: {tool_call_id}")
+            logger.warning(f"Available pending requests: {list(self._pending_requests.keys())}")
             return False
         
+        logger.info(f"Found pending request for {tool_call_id}, setting response")
         request.set_response(approved, arguments, reason)
         # Keep the request in the dict for a bit to avoid race conditions
         # It will be cleaned up later

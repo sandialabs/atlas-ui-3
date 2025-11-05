@@ -285,14 +285,25 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif message_type == "tool_approval_response":
                 # Handle tool approval response
+                logger.info(f"Received tool approval response: {sanitize_for_logging(str(data))}")
                 from application.chat.approval_manager import get_approval_manager
                 approval_manager = get_approval_manager()
-                approval_manager.handle_approval_response(
-                    tool_call_id=data.get("tool_call_id"),
-                    approved=data.get("approved", False),
-                    arguments=data.get("arguments"),
-                    reason=data.get("reason")
+                
+                tool_call_id = data.get("tool_call_id")
+                approved = data.get("approved", False)
+                arguments = data.get("arguments")
+                reason = data.get("reason")
+                
+                logger.info(f"Processing approval: tool_call_id={tool_call_id}, approved={approved}")
+                
+                result = approval_manager.handle_approval_response(
+                    tool_call_id=tool_call_id,
+                    approved=approved,
+                    arguments=arguments,
+                    reason=reason
                 )
+                
+                logger.info(f"Approval response handled: result={result}")
                 # No response needed - the approval will unblock the waiting tool execution
 
             else:
