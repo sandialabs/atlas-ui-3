@@ -2,7 +2,7 @@
 
 import os
 import pytest
-from modules.config.config_manager import (
+from backend.modules.config.config_manager import (
     ConfigManager,
     MCPConfig,
     MCPServerConfig,

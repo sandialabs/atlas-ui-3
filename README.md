@@ -20,6 +20,7 @@ These two docs are kept up-to-date more frequently than long-form docs. Start th
 
 - **Multi-LLM Support**: OpenAI GPT, Anthropic Claude, Google Gemini
 - **MCP Integration**: Connect to multiple MCP servers for tools and data sources  
+- **MCP Authentication**: Secure HTTP/SSE MCP servers with API keys and custom headers (see [docs/mcp-authentication.md](docs/mcp-authentication.md))
 - **Real-time Communication**: WebSocket-based chat interface
 - **Custom UI**: MCP servers can modify the UI with custom HTML
 - **Authorization**: Group-based access control for MCP servers
