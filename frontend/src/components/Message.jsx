@@ -535,7 +535,7 @@ const ToolApprovalMessage = ({ message }) => {
       arguments: isEditing ? editedArgs : message.arguments,
     }
     
-    console.log('[ToolApproval] Sending approval response:', response)
+    console.log('[ToolApproval] Sending approval response:', JSON.stringify(response, null, 2))
     sendApprovalResponse(response)
     console.log('[ToolApproval] Approval response sent')
   }
@@ -554,7 +554,7 @@ const ToolApprovalMessage = ({ message }) => {
       reason: reason || 'User rejected the tool call',
     }
     
-    console.log('[ToolApproval] Sending rejection response:', response)
+    console.log('[ToolApproval] Sending rejection response:', JSON.stringify(response, null, 2))
     sendApprovalResponse(response)
     console.log('[ToolApproval] Rejection response sent')
   }

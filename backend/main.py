@@ -223,6 +223,9 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_json()
             message_type = data.get("type")
             
+            # Debug: Log ALL incoming messages
+            logger.info(f"WS RECEIVED message_type={message_type}, data keys={list(data.keys())}")
+            
             if message_type == "chat":
                 # Handle chat message with streaming updates
                 try:
