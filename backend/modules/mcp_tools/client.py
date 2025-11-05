@@ -134,8 +134,14 @@ class MCPToolManager:
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
                     from fastmcp.client.transports import SSETransport
                     # Pass headers to SSE transport if available
+                    # Note: FastMCP SSETransport accepts headers parameter for authentication
                     if headers:
-                        transport = SSETransport(url, headers=headers)
+                        try:
+                            transport = SSETransport(url, headers=headers)
+                        except TypeError:
+                            # Fallback if headers parameter not supported in this version
+                            logger.warning(f"SSETransport does not support headers parameter for {server_name}, authentication may not work")
+                            transport = SSETransport(url)
                     else:
                         transport = SSETransport(url)
                     client = Client(transport)
@@ -143,8 +149,14 @@ class MCPToolManager:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
                     # Pass headers to HTTP client if available
+                    # Note: FastMCP Client accepts headers parameter for authentication
                     if headers:
-                        client = Client(url, headers=headers)
+                        try:
+                            client = Client(url, headers=headers)
+                        except TypeError:
+                            # Fallback if headers parameter not supported in this version
+                            logger.warning(f"Client does not support headers parameter for {server_name}, authentication may not work")
+                            client = Client(url)
                     else:
                         client = Client(url)
                 

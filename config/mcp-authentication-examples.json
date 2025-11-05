@@ -1,0 +1,53 @@
+{
+  "_comment": "Example MCP server configurations with authentication. Copy these to mcp.json and configure for your environment.",
+  
+  "example-http-with-api-key": {
+    "url": "https://mcp-api.example.com",
+    "transport": "http",
+    "groups": ["users"],
+    "api_key": "${MCP_API_KEY}",
+    "description": "Example HTTP MCP server with API key authentication (sent as Authorization: Bearer header)",
+    "author": "Example Team",
+    "short_description": "Authenticated HTTP MCP server",
+    "compliance_level": "External"
+  },
+  
+  "example-sse-with-custom-headers": {
+    "url": "https://mcp-sse.example.com/sse",
+    "transport": "sse",
+    "groups": ["users"],
+    "extra_headers": {
+      "X-API-Key": "${MCP_SECRET_KEY}",
+      "X-Client-ID": "atlas-ui-3"
+    },
+    "description": "Example SSE MCP server with custom authentication headers",
+    "author": "Example Team",
+    "short_description": "Authenticated SSE MCP server",
+    "compliance_level": "External"
+  },
+  
+  "example-combined-auth": {
+    "url": "https://secure-mcp.example.com",
+    "transport": "http",
+    "groups": ["admin"],
+    "api_key": "${MCP_BEARER_TOKEN}",
+    "extra_headers": {
+      "X-Tenant-ID": "${TENANT_ID}",
+      "X-Environment": "production"
+    },
+    "description": "Example server using both Bearer token and custom headers for authentication",
+    "author": "Example Team",
+    "short_description": "Multi-factor authenticated MCP server",
+    "compliance_level": "SOC2"
+  },
+  
+  "example-http-no-auth": {
+    "url": "https://public-mcp.example.com",
+    "transport": "http",
+    "groups": ["users"],
+    "description": "Example public HTTP MCP server with no authentication required",
+    "author": "Example Team",
+    "short_description": "Public HTTP MCP server",
+    "compliance_level": "Public"
+  }
+}
