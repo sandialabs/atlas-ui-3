@@ -184,10 +184,14 @@ async def execute_single_tool(
             allow_edit = True
             admin_required = False
         
+        # Track if arguments were edited (for LLM context)
+        arguments_were_edited = False
+        original_filtered_args = dict(filtered_args) if isinstance(filtered_args, dict) else filtered_args
+
         # If approval is required, request it from the user
         if needs_approval:
             logger.info(f"Tool {tool_call.function.name} requires approval (admin_required={admin_required})")
-            
+
             # Send approval request to frontend
             if update_callback:
                 await update_callback({
@@ -198,7 +202,7 @@ async def execute_single_tool(
                     "allow_edit": allow_edit,
                     "admin_required": admin_required
                 })
-            
+
             # Wait for approval response
             approval_manager = get_approval_manager()
             request = approval_manager.create_approval_request(
@@ -207,11 +211,11 @@ async def execute_single_tool(
                 filtered_args,
                 allow_edit
             )
-            
+
             try:
                 response = await request.wait_for_response(timeout=300.0)
                 approval_manager.cleanup_request(tool_call.id)
-                
+
                 if not response["approved"]:
                     # Tool was rejected
                     reason = response.get("reason", "User rejected the tool call")
@@ -222,11 +226,15 @@ async def execute_single_tool(
                         success=False,
                         error=reason
                     )
-                
+
                 # Use potentially edited arguments
                 if allow_edit and response.get("arguments"):
-                    filtered_args = response["arguments"]
-                    logger.info(f"Using edited arguments for tool {tool_call.function.name}")
+                    edited_args = response["arguments"]
+                    # Check if arguments actually changed
+                    if edited_args != original_filtered_args:
+                        arguments_were_edited = True
+                        filtered_args = edited_args
+                        logger.info(f"User edited arguments for tool {tool_call.function.name}")
                 
             except asyncio.TimeoutError:
                 approval_manager.cleanup_request(tool_call.id)
@@ -257,6 +265,20 @@ async def execute_single_tool(
                 "update_callback": update_callback,
             }
         )
+
+        # If arguments were edited, prepend a note to the result for LLM context
+        if arguments_were_edited:
+            edit_note = (
+                f"[IMPORTANT: The user manually edited the tool arguments before execution. "
+                f"Disregard your original arguments. The ACTUAL arguments executed were: {json.dumps(filtered_args)}. "
+                f"Your response must reflect these edited arguments as the user's true intent. "
+                # f"Do NOT reference the original arguments: {json.dumps(original_filtered_args)}]\n\n"
+            )
+            if isinstance(result.content, str):
+                result.content = edit_note + result.content
+            else:
+                # If content is not a string, convert and prepend
+                result.content = edit_note + str(result.content)
 
         # Send tool complete notification
         await notification_utils.notify_tool_complete(tool_call, result, parsed_args, update_callback)

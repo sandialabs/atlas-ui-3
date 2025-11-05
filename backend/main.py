@@ -3,6 +3,7 @@ Basic chat backend implementing the modular architecture.
 Focuses on essential chat functionality only.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -217,47 +218,53 @@ async def websocket_endpoint(websocket: WebSocket):
     chat_service = app_factory.create_chat_service(connection_adapter)
     
     logger.info(f"WebSocket connection established for session {sanitize_for_logging(str(session_id))}")
-    
+
+    # Track active chat task so we can handle approval responses while chat is processing
+    active_chat_task = None
+
     try:
         while True:
             data = await websocket.receive_json()
             message_type = data.get("type")
-            
+
             # Debug: Log ALL incoming messages
             logger.info(f"WS RECEIVED message_type={message_type}, data keys={list(data.keys())}")
-            
+
             if message_type == "chat":
-                # Handle chat message with streaming updates
-                try:
-                    await chat_service.handle_chat_message(
-                        session_id=session_id,
-                        content=data.get("content", ""),
-                        model=data.get("model", ""),
-                        selected_tools=data.get("selected_tools"),
-                        selected_prompts=data.get("selected_prompts"),
-                        selected_data_sources=data.get("selected_data_sources"),
-                        only_rag=data.get("only_rag", False),
-                        tool_choice_required=data.get("tool_choice_required", False),
-                        user_email=data.get("user"),
-                        agent_mode=data.get("agent_mode", False),
-                        agent_max_steps=data.get("agent_max_steps", 10),
-                        temperature=data.get("temperature", 0.7),
-                        agent_loop_strategy=data.get("agent_loop_strategy"),
-                        update_callback=lambda message: websocket_update_callback(websocket, message),
-                        files=data.get("files")
-                    )
-                    # Final response is already sent via callbacks, but we keep this for backward compatibility
-                except ValidationError as e:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": str(e)
-                    })
-                except Exception as e:
-                    logger.error(f"Error in chat handler: {e}", exc_info=True)
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "An unexpected error occurred"
-                    })
+                # Handle chat message in background so we can still receive approval responses
+                async def handle_chat():
+                    try:
+                        await chat_service.handle_chat_message(
+                            session_id=session_id,
+                            content=data.get("content", ""),
+                            model=data.get("model", ""),
+                            selected_tools=data.get("selected_tools"),
+                            selected_prompts=data.get("selected_prompts"),
+                            selected_data_sources=data.get("selected_data_sources"),
+                            only_rag=data.get("only_rag", False),
+                            tool_choice_required=data.get("tool_choice_required", False),
+                            user_email=data.get("user"),
+                            agent_mode=data.get("agent_mode", False),
+                            agent_max_steps=data.get("agent_max_steps", 10),
+                            temperature=data.get("temperature", 0.7),
+                            agent_loop_strategy=data.get("agent_loop_strategy"),
+                            update_callback=lambda message: websocket_update_callback(websocket, message),
+                            files=data.get("files")
+                        )
+                    except ValidationError as e:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e)
+                        })
+                    except Exception as e:
+                        logger.error(f"Error in chat handler: {e}", exc_info=True)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "An unexpected error occurred"
+                        })
+
+                # Start chat handling in background
+                active_chat_task = asyncio.create_task(handle_chat())
                 
             elif message_type == "download_file":
                 # Handle file download

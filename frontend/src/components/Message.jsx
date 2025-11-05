@@ -593,8 +593,8 @@ const ToolApprovalMessage = ({ message }) => {
         </span>
         <span className="font-medium">{message.tool_name}</span>
         {settings?.autoApproveTools && !message.admin_required && (
-          <span className="px-2 py-1 rounded text-xs font-medium bg-blue-600 animate-pulse">
-            AUTO-APPROVING...
+          <span className="px-2 py-1 rounded text-xs font-medium bg-blue-600">
+            AUTO-APPROVED
           </span>
         )}
       </div>
