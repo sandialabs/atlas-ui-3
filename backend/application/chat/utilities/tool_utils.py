@@ -186,7 +186,7 @@ async def execute_single_tool(
         
         # Track if arguments were edited (for LLM context)
         arguments_were_edited = False
-        original_filtered_args = dict(filtered_args) if isinstance(filtered_args, dict) else filtered_args
+        original_display_args = dict(display_args) if isinstance(display_args, dict) else display_args
 
         # If approval is required, request it from the user
         if needs_approval:
@@ -230,11 +230,16 @@ async def execute_single_tool(
                 # Use potentially edited arguments
                 if allow_edit and response.get("arguments"):
                     edited_args = response["arguments"]
-                    # Check if arguments actually changed
-                    if edited_args != original_filtered_args:
+                    # Check if arguments actually changed by comparing with what we sent (display_args)
+                    # Use json comparison to avoid false positives from dict ordering
+                    import json
+                    if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
                         arguments_were_edited = True
                         filtered_args = edited_args
                         logger.info(f"User edited arguments for tool {tool_call.function.name}")
+                    else:
+                        # No actual changes, but response included arguments - keep original filtered_args
+                        logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
                 
             except asyncio.TimeoutError:
                 approval_manager.cleanup_request(tool_call.id)

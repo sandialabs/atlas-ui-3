@@ -64,6 +64,8 @@ class MCPServerConfig(BaseModel):
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
+    require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
+    allow_edit: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) allowing argument editing
 
 
 class MCPConfig(BaseModel):
@@ -136,7 +138,10 @@ class AppSettings(BaseSettings):
     def agent_mode_available(self) -> bool:
         """Maintain backward compatibility for code still referencing agent_mode_available."""
         return self.feature_agent_mode_available
-    
+
+    # Tool approval settings
+    require_tool_approval_by_default: bool = False
+
     # LLM Health Check settings
     llm_health_check_interval: int = 5  # minutes
     
@@ -460,25 +465,45 @@ class ConfigManager:
     
     @property
     def tool_approvals_config(self) -> ToolApprovalsConfig:
-        """Get tool approvals configuration (cached)."""
+        """Get tool approvals configuration built from mcp.json and env variables (cached)."""
         if self._tool_approvals_config is None:
             try:
-                # Use config filename from app settings
-                approvals_filename = self.app_settings.tool_approvals_config_file
-                file_paths = self._search_paths(approvals_filename)
-                data = self._load_file_with_error_handling(file_paths, "JSON")
-                
-                if data:
-                    self._tool_approvals_config = ToolApprovalsConfig(**data)
-                    logger.info(f"Loaded tool approvals config with {len(self._tool_approvals_config.tools)} tool-specific settings")
-                else:
-                    self._tool_approvals_config = ToolApprovalsConfig()
-                    logger.info("Created empty tool approvals config (no configuration file found)")
-                    
+                # Get default from environment
+                default_require_approval = self.app_settings.require_tool_approval_by_default
+
+                # Build tool-specific configs from MCP servers
+                tools_config: Dict[str, ToolApprovalConfig] = {}
+
+                for server_name, server_config in self.mcp_config.servers.items():
+                    require_approval_list = server_config.require_approval
+                    allow_edit_list = server_config.allow_edit
+
+                    # Combine both lists to get all tools that need config
+                    all_tools = set(require_approval_list) | set(allow_edit_list)
+
+                    for tool_name in all_tools:
+                        # Build full tool name with server prefix
+                        full_tool_name = f"{server_name}_{tool_name}"
+
+                        # Determine settings
+                        requires_approval = tool_name in require_approval_list
+                        allows_edit = tool_name in allow_edit_list
+
+                        tools_config[full_tool_name] = ToolApprovalConfig(
+                            require_approval=requires_approval,
+                            allow_edit=allows_edit
+                        )
+
+                self._tool_approvals_config = ToolApprovalsConfig(
+                    require_approval_by_default=default_require_approval,
+                    tools=tools_config
+                )
+                logger.info(f"Built tool approvals config from mcp.json with {len(tools_config)} tool-specific settings (default: {default_require_approval})")
+
             except Exception as e:
-                logger.error(f"Failed to parse tool approvals configuration: {e}", exc_info=True)
+                logger.error(f"Failed to build tool approvals configuration: {e}", exc_info=True)
                 self._tool_approvals_config = ToolApprovalsConfig()
-        
+
         return self._tool_approvals_config
     
     def _validate_mcp_compliance_levels(self, config: MCPConfig, config_type: str):
