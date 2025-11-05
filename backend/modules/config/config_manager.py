@@ -64,6 +64,8 @@ class MCPServerConfig(BaseModel):
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
+    api_key: Optional[str] = None        # API key for authentication (supports ${ENV_VAR} expansion)
+    extra_headers: Optional[Dict[str, str]] = None  # Additional HTTP headers for authentication/authorization
 
 
 class MCPConfig(BaseModel):
@@ -397,6 +399,8 @@ class ConfigManager:
                     # Convert flat structure to nested structure for Pydantic
                     servers_data = {"servers": data}
                     self._mcp_config = MCPConfig(**servers_data)
+                    # Expand environment variables in MCP config
+                    self._expand_mcp_env_vars(self._mcp_config)
                     # Validate compliance levels
                     self._validate_mcp_compliance_levels(self._mcp_config, "MCP")
                     logger.info(f"Loaded MCP config with {len(self._mcp_config.servers)} servers: {list(self._mcp_config.servers.keys())}")
@@ -422,6 +426,8 @@ class ConfigManager:
                 if data:
                     servers_data = {"servers": data}
                     self._rag_mcp_config = MCPConfig(**servers_data)
+                    # Expand environment variables in RAG MCP config
+                    self._expand_mcp_env_vars(self._rag_mcp_config)
                     # Validate compliance levels
                     self._validate_mcp_compliance_levels(self._rag_mcp_config, "RAG MCP")
                     logger.info(f"Loaded RAG MCP config with {len(self._rag_mcp_config.servers)} servers: {list(self._rag_mcp_config.servers.keys())}")
@@ -434,6 +440,48 @@ class ConfigManager:
                 self._rag_mcp_config = MCPConfig()
 
         return self._rag_mcp_config
+    
+    def _expand_mcp_env_vars(self, config: MCPConfig):
+        """Expand environment variables in MCP server configuration fields.
+        
+        Supports ${ENV_VAR} syntax in api_key and extra_headers values.
+        Similar to how LLM config handles environment variable expansion.
+        """
+        for server_name, server_config in config.servers.items():
+            # Expand api_key if present
+            if server_config.api_key:
+                expanded = os.path.expandvars(server_config.api_key)
+                # Only update if expansion occurred and result is valid
+                if expanded and not expanded.startswith("${"):
+                    server_config.api_key = expanded
+                    logger.debug(f"Expanded api_key for MCP server '{server_name}'")
+                elif expanded.startswith("${"):
+                    logger.warning(
+                        f"MCP server '{server_name}' api_key references undefined environment variable: {server_config.api_key}"
+                    )
+            
+            # Expand extra_headers values if present
+            if server_config.extra_headers:
+                expanded_headers = {}
+                for header_name, header_value in server_config.extra_headers.items():
+                    if isinstance(header_value, str):
+                        expanded_value = os.path.expandvars(header_value)
+                        # Only update if expansion occurred and result is valid
+                        if expanded_value and not expanded_value.startswith("${"):
+                            expanded_headers[header_name] = expanded_value
+                        elif expanded_value.startswith("${"):
+                            logger.warning(
+                                f"MCP server '{server_name}' header '{header_name}' references undefined environment variable: {header_value}"
+                            )
+                            # Keep original value if env var is not defined
+                            expanded_headers[header_name] = header_value
+                        else:
+                            expanded_headers[header_name] = expanded_value
+                    else:
+                        expanded_headers[header_name] = header_value
+                
+                server_config.extra_headers = expanded_headers
+                logger.debug(f"Expanded extra_headers for MCP server '{server_name}'")
     
     def _validate_mcp_compliance_levels(self, config: MCPConfig, config_type: str):
         """Validate compliance levels for all MCP servers."""

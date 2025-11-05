@@ -113,16 +113,40 @@ class MCPToolManager:
                     url = f"http://{url}"
                     logger.debug(f"Added http:// protocol to URL: {url}")
                 
+                # Build headers for authentication
+                headers = {}
+                
+                # Add API key as Authorization header if present
+                api_key = config.get("api_key")
+                if api_key:
+                    # Use Bearer token format by default
+                    headers["Authorization"] = f"Bearer {api_key}"
+                    logger.debug(f"Added Authorization header for {server_name}")
+                
+                # Add extra headers if present
+                extra_headers = config.get("extra_headers")
+                if extra_headers and isinstance(extra_headers, dict):
+                    headers.update(extra_headers)
+                    logger.debug(f"Added {len(extra_headers)} extra headers for {server_name}: {list(extra_headers.keys())}")
+                
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
                     from fastmcp.client.transports import SSETransport
-                    transport = SSETransport(url)
+                    # Pass headers to SSE transport if available
+                    if headers:
+                        transport = SSETransport(url, headers=headers)
+                    else:
+                        transport = SSETransport(url)
                     client = Client(transport)
                 else:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
-                    client = Client(url)
+                    # Pass headers to HTTP client if available
+                    if headers:
+                        client = Client(url, headers=headers)
+                    else:
+                        client = Client(url)
                 
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
                 return client
