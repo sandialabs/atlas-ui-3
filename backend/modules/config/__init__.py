@@ -7,7 +7,7 @@ This module provides centralized configuration management with:
 - CLI tools for validation and inspection
 """
 
-from .manager import (
+from .config_manager import (
     ConfigManager,
     AppSettings,
     LLMConfig,

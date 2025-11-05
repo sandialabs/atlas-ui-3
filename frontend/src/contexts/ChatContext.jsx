@@ -9,6 +9,13 @@ import { useFiles } from '../hooks/chat/useFiles'
 import { useSettings } from '../hooks/useSettings'
 import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
 
+// Generate cryptographically secure random string
+const generateSecureRandomString = (length = 9) => {
+  const array = new Uint8Array(length)
+  crypto.getRandomValues(array)
+  return Array.from(array, byte => byte.toString(36)).join('').slice(0, length)
+}
+
 const ChatContext = createContext(null)
 
 export const useChat = () => {
@@ -29,6 +36,38 @@ export const ChatProvider = ({ children }) => {
 
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
 	const [isThinking, setIsThinking] = useState(false)
+	const [sessionId, setSessionId] = useState(null)
+	const [attachments, setAttachments] = useState(new Set())
+	const [pendingFileEvents, setPendingFileEvents] = useState(new Map())
+
+	// Method to add a file to attachments
+	const addAttachment = useCallback((fileId) => {
+		setAttachments(prev => new Set([...prev, fileId]))
+	}, [])
+
+	// Methods to manage pending file events
+	const addPendingFileEvent = useCallback((fileKey, eventId) => {
+		setPendingFileEvents(prev => new Map(prev.set(fileKey, eventId)))
+	}, [])
+
+	const resolvePendingFileEvent = useCallback((fileKey, newSubtype, newText) => {
+		setPendingFileEvents(prev => {
+			const eventId = prev.get(fileKey)
+			if (eventId) {
+				// Update the message in-place
+				mapMessages(messages => messages.map(msg =>
+					msg.id === eventId
+						? { ...msg, subtype: newSubtype, text: newText }
+						: msg
+				))
+				// Remove from pending
+				const next = new Map(prev)
+				next.delete(fileKey)
+				return next
+			}
+			return prev
+		})
+	}, [mapMessages])
 
 		const { sendMessage, addMessageHandler } = useWS()
 	const { currentModel } = config
@@ -59,10 +98,13 @@ export const ChatProvider = ({ children }) => {
 			setCustomUIContent: files.setCustomUIContent,
 			setSessionFiles: files.setSessionFiles,
 			getFileType: files.getFileType,
-				triggerFileDownload
+				triggerFileDownload,
+			addAttachment,
+			addPendingFileEvent,
+			resolvePendingFileEvent
 		})
 		return addMessageHandler(handler)
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent])
 
 	const selectAllServerTools = useCallback((server) => {
 		const group = config.tools.find(t => t.server === server); if (!group) return
@@ -105,6 +147,7 @@ export const ChatProvider = ({ children }) => {
 			agent_max_steps: settings.maxIterations || agent.agentMaxSteps,
 			temperature: settings.llmTemperature || 0.7,
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
+			compliance_level_filter: selections.complianceLevelFilter,
 		})
 	}, [addMessage, currentModel, selectedTools, selectedPrompts, selectedDataSources, config, selections.toolChoiceRequired, selections, agent, files, isWelcomeVisible, sendMessage, settings])
 
@@ -193,6 +236,87 @@ export const ChatProvider = ({ children }) => {
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
 
+	// Wrapper for setComplianceLevelFilter that clears incompatible selections
+	const setComplianceLevelFilterWithCleanup = useCallback((newLevel) => {
+		// If changing to a new compliance level (not clearing or setting to same)
+		if (newLevel && newLevel !== selections.complianceLevelFilter) {
+			// Clear tools that don't match the new compliance level
+			const toolsToRemove = []
+			selectedTools.forEach(toolKey => {
+				const serverName = toolKey.split('_')[0]
+				const server = config.tools.find(t => t.server === serverName)
+				if (server && server.compliance_level && server.compliance_level !== newLevel) {
+					toolsToRemove.push(toolKey)
+				}
+			})
+			if (toolsToRemove.length > 0) {
+				selections.removeTools(toolsToRemove)
+			}
+
+			// Clear prompts that don't match the new compliance level
+			const promptsToRemove = []
+			selectedPrompts.forEach(promptKey => {
+				const serverName = promptKey.split('_')[0]
+				const server = config.prompts.find(p => p.server === serverName)
+				if (server && server.compliance_level && server.compliance_level !== newLevel) {
+					promptsToRemove.push(promptKey)
+				}
+			})
+			if (promptsToRemove.length > 0) {
+				selections.removePrompts(promptsToRemove)
+			}
+		}
+		
+		// Set the new compliance level
+		selections.setComplianceLevelFilter(newLevel)
+	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts])
+
+	// Flatten ragServers into a single list of data source objects for easier consumption
+	const ragSources = config.ragServers.flatMap(server =>
+		server.sources.map(source => ({
+			...source,
+			serverName: server.server,
+			serverDisplayName: server.displayName,
+			serverComplianceLevel: server.complianceLevel,
+		}))
+	)
+
+	// ensureSession: ensures a session exists, returns sessionId once ready
+	const ensureSession = useCallback(() => {
+		return new Promise((resolve) => {
+			if (sessionId) {
+				resolve(sessionId)
+				return
+			}
+
+			// Create a temporary session ID for frontend tracking
+			const tempSessionId = `session_${Date.now()}_${generateSecureRandomString()}`
+			setSessionId(tempSessionId)
+
+			// Send reset_session to create a new session on backend
+			sendMessage({ type: 'reset_session', user: config.user })
+
+			// For now, resolve immediately since backend handles session creation
+			// In a more robust implementation, we'd wait for session confirmation
+			resolve(tempSessionId)
+		})
+	}, [sessionId, sendMessage, config.user])
+
+	// addSystemEvent: adds a system event message to the chat timeline
+	const addSystemEvent = useCallback((subtype, text, meta = {}) => {
+		const eventId = `system_${Date.now()}_${generateSecureRandomString()}`
+		addMessage({
+			role: 'system',
+			type: 'system',
+			subtype,
+			text,
+			meta,
+			timestamp: new Date().toISOString(),
+			id: eventId
+		})
+		return eventId
+	}, [addMessage])
+
 	const value = {
 		appName: config.appName,
 		user: config.user,
@@ -200,6 +324,8 @@ export const ChatProvider = ({ children }) => {
 		tools: config.tools,
 		prompts: config.prompts,
 		dataSources: config.dataSources,
+		ragServers: config.ragServers, // Expose rich server structure
+		ragSources, // Expose flattened list of sources
 		features: config.features,
 		setFeatures: config.setFeatures,
 		currentModel: config.currentModel,
@@ -223,6 +349,8 @@ export const ChatProvider = ({ children }) => {
 		toolChoiceRequired: selections.toolChoiceRequired,
 		setToolChoiceRequired: selections.setToolChoiceRequired,
 		clearToolsAndPrompts: selections.clearToolsAndPrompts,
+		complianceLevelFilter: selections.complianceLevelFilter,
+		setComplianceLevelFilter: setComplianceLevelFilterWithCleanup,
 		agentModeEnabled: agent.agentModeEnabled,
 		setAgentModeEnabled: agent.setAgentModeEnabled,
 		agentMaxSteps: agent.agentMaxSteps,
@@ -255,6 +383,13 @@ export const ChatProvider = ({ children }) => {
 		taggedFiles: files.taggedFiles,
 		toggleFileTag: files.toggleFileTag,
 		clearTaggedFiles: files.clearTaggedFiles,
+		sessionId,
+		attachments,
+		addAttachment,
+		addPendingFileEvent,
+		resolvePendingFileEvent,
+		ensureSession,
+		addSystemEvent,
 		settings,
 	}
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -53,8 +53,18 @@ def require_admin(current_user: str = Depends(get_current_user)) -> str:
 
 def setup_config_overrides() -> None:
     """Ensure editable overrides directory exists; seed from defaults / legacy if empty."""
-    overrides_root = Path(os.getenv("APP_CONFIG_OVERRIDES", "config/overrides"))
-    defaults_root = Path(os.getenv("APP_CONFIG_DEFAULTS", "config/defaults"))
+    app_settings = config_manager.app_settings
+    overrides_root = Path(app_settings.app_config_overrides)
+    defaults_root = Path(app_settings.app_config_defaults)
+    
+    # If relative paths, resolve from project root
+    if not overrides_root.is_absolute():
+        project_root = Path(__file__).parent.parent.parent
+        overrides_root = project_root / overrides_root
+    if not defaults_root.is_absolute():
+        project_root = Path(__file__).parent.parent.parent
+        defaults_root = project_root / defaults_root
+    
     overrides_root.mkdir(parents=True, exist_ok=True)
     defaults_root.mkdir(parents=True, exist_ok=True)
 
@@ -99,8 +109,7 @@ def get_admin_config_path(filename: str) -> Path:
         custom_filename = filename
     
     # Use same logic as config manager to resolve relative paths from project root
-    overrides_env = os.getenv("APP_CONFIG_OVERRIDES", "config/overrides")
-    base = Path(overrides_env)
+    base = Path(app_settings.app_config_overrides)
     
     # If relative path, resolve from project root (parent of backend directory)
     if not base.is_absolute():
@@ -154,9 +163,9 @@ def _project_root() -> Path:
 
 
 def _log_base_dir() -> Path:
-    env_path = os.getenv("APP_LOG_DIR")
-    if env_path:
-        return Path(env_path)
+    app_settings = config_manager.app_settings
+    if app_settings.app_log_dir:
+        return Path(app_settings.app_log_dir)
     return _project_root() / "logs"
 
 
@@ -598,140 +607,57 @@ async def download_logs(admin_user: str = Depends(require_admin)):
         raise HTTPException(status_code=500, detail="Error preparing log download")
 
 
-# # --- System Status ---
+# --- System Status (minimal) ---
 
-# @admin_router.get("/system-status")
-# async def get_system_status(admin_user: str = Depends(require_admin)):
-#     """Get overall system status including MCP servers and LLM health."""
-#     try:
-#         status_info = []
-        
-#         # Check if configfilesadmin exists and has files
-#         admin_config_dir = Path("configfilesadmin")
-#         config_status = "healthy" if admin_config_dir.exists() and any(admin_config_dir.iterdir()) else "warning"
-#         status_info.append(SystemStatus(
-#             component="Configuration",
-#             status=config_status,
-#             details={
-#                 "admin_config_dir": str(admin_config_dir),
-#                 "files_count": len(list(admin_config_dir.glob("*"))) if admin_config_dir.exists() else 0
-#             }
-#         ))
-        
-#         # Check log file
-#         from otel_config import get_otel_config
-#         otel_cfg = get_otel_config()
-#         log_file = otel_cfg.get_log_file_path() if otel_cfg else Path("logs/app.jsonl")
-#         log_status = "healthy" if log_file.exists() else "warning"
-#         status_info.append(SystemStatus(
-#             component="Logging",
-#             status=log_status,
-#             details={
-#                 "log_file": str(log_file),
-#                 "exists": log_file.exists(),
-#                 "size_bytes": log_file.stat().st_size if log_file.exists() else 0
-#             }
-#         ))
-        
-#         # Check MCP server health
-#         mcp_health = get_mcp_health_status()
-#         mcp_status = mcp_health.get("overall_status", "unknown")
-#         status_info.append(SystemStatus(
-#             component="MCP Servers",
-#             status=mcp_status,
-#             details={
-#                 "healthy_count": mcp_health.get("healthy_count", 0),
-#                 "total_count": mcp_health.get("total_count", 0),
-#                 "last_check": mcp_health.get("last_check"),
-#                 "check_interval": mcp_health.get("check_interval", 300)
-#             }
-#         ))
-        
-#         return {
-#             "overall_status": "healthy" if all(s.status == "healthy" for s in status_info) else "warning",
-#             "components": [s.model_dump() for s in status_info],
-#             "checked_by": admin_user,
-#             "timestamp": log_file.stat().st_mtime if log_file.exists() else None
-#         }
-#     except Exception as e:
-#         logger.error(f"Error getting system status: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
+@admin_router.get("/system-status")
+async def get_system_status(admin_user: str = Depends(require_admin)):
+    """Minimal system status endpoint for the Admin UI.
 
+    Returns basic configuration and logging status; avoids heavy checks.
+    """
+    try:
+        # Configuration status: overrides directory and file count
+        app_settings = config_manager.app_settings
+        overrides_root = Path(app_settings.app_config_overrides)
+        if not overrides_root.is_absolute():
+            project_root = _project_root()
+            overrides_root = project_root / overrides_root
+        overrides_root.mkdir(parents=True, exist_ok=True)
+        config_files = list(overrides_root.glob("*"))
+        config_status = "healthy" if config_files else "warning"
 
-# # --- Health Check Trigger ---
+        # Logging status
+        log_dir = _log_base_dir()
+        log_file = log_dir / "app.jsonl"
+        log_exists = log_file.exists()
+        logging_status = "healthy" if log_exists else "warning"
 
-# @admin_router.get("/mcp-health")
-# async def get_mcp_health(admin_user: str = Depends(require_admin)):
-#     """Get detailed MCP server health information."""
-#     try:
-#         health_summary = get_mcp_health_status()
-#         return {
-#             "health_summary": health_summary,
-#             "checked_by": admin_user
-#         }
-#     except Exception as e:
-#         logger.error(f"Error getting MCP health: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
+        components = [
+            {
+                "component": "Configuration",
+                "status": config_status,
+                "details": {
+                    "overrides_dir": str(overrides_root),
+                    "files_count": len(config_files),
+                },
+            },
+            {
+                "component": "Logging",
+                "status": logging_status,
+                "details": {
+                    "log_file": str(log_file),
+                    "exists": log_exists,
+                    "size_bytes": log_file.stat().st_size if log_exists else 0,
+                },
+            },
+        ]
 
-
-# @admin_router.post("/trigger-health-check")
-# async def trigger_health_check(admin_user: str = Depends(require_admin)):
-#     """Manually trigger MCP server health checks."""
-#     try:
-#         # Try to get the MCP manager from main application state
-#         mcp_manager = None
-#         try:
-#             from main import mcp_manager as main_mcp_manager
-#             mcp_manager = main_mcp_manager
-#         except ImportError:
-#             # In test environment, mcp_manager might not be available
-#             logger.warning("MCP manager not available for health check")
-        
-#         # Trigger health check
-#         health_results = await trigger_mcp_health_check(mcp_manager)
-        
-#         # Get summary
-#         health_summary = get_mcp_health_status()
-        
-#         logger.info(f"Health check triggered by {admin_user}")
-#         return {
-#             "message": "MCP server health check completed",
-#             "triggered_by": admin_user,
-#             "summary": health_summary,
-#             "details": health_results
-#         }
-#     except Exception as e:
-#         logger.error(f"Error triggering health check: {e}")
-#         raise HTTPException(status_code=500, detail=f"Error triggering health check: {str(e)}")
-
-
-# @admin_router.post("/reload-config")
-# async def reload_configuration(admin_user: str = Depends(require_admin)):
-#     """Reload configuration from configfilesadmin files."""
-#     try:
-#         # Reload configuration from files
-#         config_manager.reload_configs()
-        
-#         # Validate the reloaded configurations
-#         validation_status = config_manager.validate_config()
-        
-#         # Get the updated configurations for verification
-#         llm_models = list(config_manager.llm_config.models.keys())
-#         mcp_servers = list(config_manager.mcp_config.servers.keys())
-        
-#         logger.info(f"Configuration reloaded by {admin_user}")
-#         logger.info(f"Reloaded LLM models: {llm_models}")
-#         logger.info(f"Reloaded MCP servers: {mcp_servers}")
-        
-#         return {
-#             "message": "Configuration reloaded successfully",
-#             "reloaded_by": admin_user,
-#             "validation_status": validation_status,
-#             "llm_models_count": len(llm_models),
-#             "mcp_servers_count": len(mcp_servers),
-#             "llm_models": llm_models,
-#             "mcp_servers": mcp_servers
-#         }
-#     except Exception as e:
-#         logger.error(f"Error reloading config: {e}")
-#         raise HTTPException(status_code=500, detail=f"Error reloading configuration: {str(e)}")
+        overall = "healthy" if all(c["status"] == "healthy" for c in components) else "warning"
+        return {
+            "overall_status": overall,
+            "components": components,
+            "checked_by": admin_user,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error getting system status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

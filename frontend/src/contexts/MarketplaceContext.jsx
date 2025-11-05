@@ -4,10 +4,25 @@ import { useChat } from './ChatContext'
 const MarketplaceContext = createContext()
 
 export const MarketplaceProvider = ({ children }) => {
-  const { tools, prompts } = useChat()
+  const { tools, prompts, features } = useChat()
   const [selectedServers, setSelectedServers] = useState(new Set())
+  const [complianceLevels, setComplianceLevels] = useState([])
+  const [complianceMode, setComplianceMode] = useState('explicit_allowlist')
   const initializedRef = useRef(false)
   const knownServersRef = useRef(new Set())
+
+  // Load compliance levels from API
+  useEffect(() => {
+    if (!features?.compliance_levels) return
+    
+    fetch('/api/compliance-levels')
+      .then(res => res.json())
+      .then(data => {
+        setComplianceLevels(data.levels || [])
+        setComplianceMode(data.mode || 'explicit_allowlist')
+      })
+      .catch(err => console.error('Failed to load compliance levels:', err))
+  }, [features])
 
   // Load selected servers from localStorage once on mount
   useEffect(() => {
@@ -130,6 +145,40 @@ export const MarketplaceProvider = ({ children }) => {
   const getFilteredPrompts = () => {
     return prompts.filter(prompt => selectedServers.has(prompt.server))
   }
+  
+  // Check if a resource is accessible given the user's compliance level using allowlist
+  const isComplianceAccessible = (userLevel, resourceLevel) => {
+    // If user level is not set, all resources are accessible
+    if (!userLevel) return true
+    
+    // STRICT MODE: If user has selected a compliance level but resource has none, deny access
+    if (!resourceLevel) return false
+    
+    // Find user's compliance level object
+    const userLevelObj = complianceLevels.find(l => l.name === userLevel)
+    
+    // If we don't have level info, deny access (strict)
+    if (!userLevelObj) return false
+    
+    // Check if resource level is in the user's allowed_with list
+    return userLevelObj.allowed_with && userLevelObj.allowed_with.includes(resourceLevel)
+  }
+  
+  const getComplianceFilteredTools = (complianceLevel) => {
+    if (!complianceLevel) return getFilteredTools()
+    return getFilteredTools().filter(tool => {
+      // STRICT MODE: When compliance filter is active, only show resources with matching compliance levels
+      return isComplianceAccessible(complianceLevel, tool.compliance_level)
+    })
+  }
+  
+  const getComplianceFilteredPrompts = (complianceLevel) => {
+    if (!complianceLevel) return getFilteredPrompts()
+    return getFilteredPrompts().filter(prompt => {
+      // STRICT MODE: When compliance filter is active, only show resources with matching compliance levels
+      return isComplianceAccessible(complianceLevel, prompt.compliance_level)
+    })
+  }
 
   const value = {
     selectedServers,
@@ -138,7 +187,12 @@ export const MarketplaceProvider = ({ children }) => {
     selectAllServers,
     deselectAllServers,
     getFilteredTools,
-    getFilteredPrompts
+    getFilteredPrompts,
+    getComplianceFilteredTools,
+    getComplianceFilteredPrompts,
+    complianceLevels,
+    complianceMode,
+    isComplianceAccessible
   }
 
   return (

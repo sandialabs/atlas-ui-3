@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 
 from core.auth import is_user_in_group
-from core.utils import get_current_user
+from core.utils import get_current_user, sanitize_for_logging
 from infrastructure.app_factory import app_factory
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,8 @@ class FeedbackResponse(BaseModel):
 
 def get_feedback_directory() -> Path:
     """Get the feedback storage directory."""
-    base = Path(os.getenv("RUNTIME_FEEDBACK_DIR", "runtime/feedback"))
+    from modules.config import config_manager
+    base = Path(config_manager.app_settings.runtime_feedback_dir)
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -104,7 +105,7 @@ async def submit_feedback(
         with open(feedback_file, 'w', encoding='utf-8') as f:
             json.dump(feedback_data, f, indent=2, ensure_ascii=False)
         
-        logger.info(f"Feedback submitted by {current_user}: rating={feedback.rating}, file={filename}")
+        logger.info(f"Feedback submitted by {sanitize_for_logging(current_user)}: rating={feedback.rating}, file={sanitize_for_logging(filename)}")
         
         return {
             "message": "Feedback submitted successfully",
@@ -265,7 +266,7 @@ async def delete_feedback(
         
         # Delete the file
         feedback_file.unlink()
-        logger.info(f"Feedback {feedback_id} deleted by {admin_user}")
+        logger.info(f"Feedback {sanitize_for_logging(feedback_id)} deleted by {sanitize_for_logging(admin_user)}")
         
         return {
             "message": "Feedback deleted successfully",

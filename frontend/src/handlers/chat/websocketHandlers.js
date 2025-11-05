@@ -14,7 +14,9 @@ export function createWebSocketHandler(deps) {
     setCustomUIContent,
     setSessionFiles,
     getFileType,
-    triggerFileDownload
+    triggerFileDownload,
+    addAttachment,
+    resolvePendingFileEvent
   } = deps
 
   const handleAgentUpdate = (data) => {
@@ -138,7 +140,12 @@ export function createWebSocketHandler(deps) {
             setSessionFiles(() => {
               if (updateData.files && updateData.files.length > 0) {
                 const viewableFiles = updateData.files.filter(f => ['png','jpg','jpeg','gif','svg','pdf','html'].includes(f.filename.toLowerCase().split('.').pop()))
-                if (viewableFiles.length > 0) {
+                // Only auto-open canvas for tool-generated files or when explicitly requested
+                // Skip auto-open for library attachments (source === 'user')
+                const shouldAutoOpenCanvas = viewableFiles.length > 0 &&
+                  !updateData.files.every(f => f.source === 'user')
+
+                if (shouldAutoOpenCanvas) {
                   const cFiles = viewableFiles.map(f => ({ ...f, type: getFileType(f.filename) }))
                   setCanvasFiles(cFiles)
                   setCurrentCanvasFileIndex(0)
@@ -260,6 +267,46 @@ export function createWebSocketHandler(deps) {
           } else if (data.error) {
             console.error('File download error:', data.error)
             // Could show a toast notification here
+          }
+          break
+        case 'file_attach':
+          // Handle file attachment response
+          if (data.success) {
+            // File was successfully attached - add to attachments state
+            if (typeof addAttachment === 'function' && data.s3_key) {
+              addAttachment(data.s3_key)
+            }
+
+            // Try to update pending event in-place, fallback to adding new message
+            if (typeof resolvePendingFileEvent === 'function' && data.s3_key) {
+              resolvePendingFileEvent(data.s3_key, 'file-attached', `Added '${data.filename || 'file'}' to this session.`)
+            } else {
+              addMessage({
+                role: 'system',
+                type: 'system',
+                subtype: 'file-attached',
+                text: `Added '${data.filename || 'file'}' to this session.`,
+                meta: { fileId: data.s3_key, fileName: data.filename, source: 'library' },
+                timestamp: new Date().toISOString(),
+                id: `file_attach_${Date.now()}`
+              })
+            }
+          } else {
+            // File attachment failed
+            // Try to update pending event in-place, fallback to adding new message
+            if (typeof resolvePendingFileEvent === 'function' && data.s3_key) {
+              resolvePendingFileEvent(data.s3_key, 'file-attach-error', `Failed to add file to session: ${data.error || 'Unknown error'}`)
+            } else {
+              addMessage({
+                role: 'system',
+                type: 'system',
+                subtype: 'file-attach-error',
+                text: `Failed to add file to session: ${data.error || 'Unknown error'}`,
+                meta: { fileId: data.s3_key, source: 'library' },
+                timestamp: new Date().toISOString(),
+                id: `file_attach_error_${Date.now()}`
+              })
+            }
           }
           break
         case 'intermediate_update':

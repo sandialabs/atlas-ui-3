@@ -16,7 +16,12 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 
 No Emojis should ever be added in this repo. If you find one, then remove it.
 
-**File Naming**: Do not use generic names like `main.py`, `cli.py`, `utils.py`, or `helpers.py`. Use descriptive names that reflect the file's purpose (e.g., `chat_service.py`, `mcp_tool_manager.py`, `websocket_handler.py`). Exception: top-level entry points like `backend/main.py` are acceptable. 
+**File Naming**: Do not use generic names like `main.py`, `cli.py`, `utils.py`, or `helpers.py`. Use descriptive names that reflect the file's purpose (e.g., `chat_service.py`, `mcp_tool_manager.py`, `websocket_handler.py`). Exception: top-level entry points like `backend/main.py` are acceptable.
+
+**Documentation Date-Time Stamping**: When creating markdown (.md) files, always include date-time stamps either in the filename or as a header in key sections to help track if docs are stale. Format: `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. Examples:
+- Filename: `feature-plan-2025-11-02.md`
+- Section header: `## Implementation Plan (2025-11-02)`
+- Status update: `Last updated: 2025-11-02 14:30`
 
 # Tests
 
@@ -56,11 +61,15 @@ mkdir -p logs
 ```bash
 bash agent_start.sh
 ```
-This script handles: killing old processes, clearing logs, building frontend, starting mock S3, and starting backend.
+This script handles: killing old processes, clearing logs, building frontend, starting S3 storage (MinIO or Mock based on `USE_MOCK_S3` in `.env`), and starting backend.
 
 **Options:**
 - `bash agent_start.sh -f` - Only rebuild frontend
 - `bash agent_start.sh -b` - Only restart backend
+
+**Note:** The script automatically reads `USE_MOCK_S3` from `.env`:
+- If `true`: Uses in-process Mock S3 (no Docker)
+- If `false`: Starts MinIO via docker-compose
 
 ### Manual Development Workflow
 
@@ -77,11 +86,24 @@ cd backend
 python main.py  # NEVER use uvicorn --reload (causes problems)
 ```
 
-**Mock S3 (Optional):**
-```bash
-cd mocks/s3-mock
-python main.py  # Runs on http://127.0.0.1:8003
-```
+**S3 Storage (Mock vs MinIO):**
+
+The project supports two S3 storage backends:
+
+1. **Mock S3 (Default, Recommended for Development)**
+   - Set `USE_MOCK_S3=true` in `.env`
+   - Uses in-process FastAPI TestClient (no Docker required)
+   - Files stored in `minio-data/chatui/` on disk
+   - No external server needed - integrated directly into backend
+   - Faster startup, simpler development workflow
+
+2. **MinIO (Production-like)**
+   - Set `USE_MOCK_S3=false` in `.env`
+   - Requires Docker: `docker-compose up -d minio minio-init`
+   - Full S3 compatibility with all features
+   - Use for testing production-like scenarios
+
+The mock automatically activates when the backend starts if `USE_MOCK_S3=true`.
 
 ### Testing
 
@@ -106,17 +128,17 @@ npm run test:ui       # Interactive UI
 
 ### Linting
 
+**IMPORTANT: Run linting before every commit to catch style issues early.**
+
 **Python:**
 ```bash
-source .venv/bin/activate
-uv pip install ruff
-ruff check backend/  # ~1 second
+# This command auto-installs ruff if not present, then runs the check
+ruff check backend/ || (uv pip install ruff && ruff check backend/)
 ```
 
 **Frontend:**
 ```bash
-cd frontend
-npm run lint  # ~1 second
+cd frontend && npm run lint
 ```
 
 ### Docker
@@ -241,9 +263,11 @@ Three agent loop strategies implement different reasoning patterns:
 - **Act** (`backend/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
 
 ### File Storage
-S3-compatible storage via `backend/modules/file_storage/s3_client.py`:
-- Production: Real S3 or S3-compatible service
-- Development: Mock S3 (`mocks/s3-mock/`)
+S3-compatible storage via `backend/modules/file_storage/`:
+- Production/MinIO: `s3_client.py` - boto3-based client for real S3/MinIO
+- Development: `mock_s3_client.py` - TestClient-based in-process mock (no Docker)
+- Controlled by `USE_MOCK_S3` env var (default: true)
+- Both implementations share the same interface
 
 ### Security Middleware Stack
 ```
@@ -271,9 +295,11 @@ Request → SecurityHeaders → RateLimit → Auth → Route
 ## Validation Workflow
 
 Before committing:
-1. **Build**: Frontend and backend build successfully
+1. **Lint**: Address style issues before running tests
+   - Python: `ruff check backend/ || (uv pip install ruff && ruff check backend/)`
+   - Frontend: `cd frontend && npm run lint`
 2. **Test**: `./test/run_tests.sh all`
-3. **Lint**: Both Python (`ruff check backend/`) and frontend (`npm run lint`)
+3. **Build**: Frontend and backend build successfully
 4. **Manual**: Test in browser at http://localhost:8000
 5. **Exercise**: Test specific modified functionality
 

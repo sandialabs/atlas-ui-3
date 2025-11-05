@@ -15,7 +15,7 @@ def is_user_in_group(user_id: str, group_id: str) -> bool:
         True if user is authorized for the group
     """
     # Check if this is debug mode and test user should have admin access
-    from modules.config.manager import config_manager
+    from modules.config.config_manager import config_manager
     app_settings = config_manager.app_settings
     
     if (app_settings.debug_mode and 

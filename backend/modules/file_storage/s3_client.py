@@ -16,16 +16,10 @@ import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
+from core.utils import sanitize_for_logging
+
 
 logger = logging.getLogger(__name__)
-
-
-def _sanitize_for_logging(value: str) -> str:
-    """Sanitize user-controlled values for safe logging to prevent log injection attacks."""
-    if isinstance(value, str):
-        # Escape or remove control characters that could enable log injection
-        return value.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
-    return str(value)
 
 
 class S3StorageClient:
@@ -164,7 +158,7 @@ class S3StorageClient:
                 "user_email": user_email
             }
 
-            logger.info(f"File uploaded successfully: {s3_key} for user {user_email}")
+            logger.info(f"File uploaded successfully: {sanitize_for_logging(s3_key)} for user {sanitize_for_logging(user_email)}")
             return result
 
         except ClientError as e:
@@ -189,7 +183,7 @@ class S3StorageClient:
         try:
             # Verify user has access to this file (check if key starts with user's prefix)
             if not file_key.startswith(f"users/{user_email}/"):
-                logger.warning(f"Access denied: {user_email} attempted to access {file_key}")
+                logger.warning(f"Access denied: {sanitize_for_logging(user_email)} attempted to access {sanitize_for_logging(file_key)}")
                 raise Exception("Access denied to file")
 
             # Get object from S3
@@ -227,12 +221,12 @@ class S3StorageClient:
                 "tags": tags
             }
 
-            logger.info(f"File retrieved successfully: {file_key} for user {user_email}")
+            logger.info(f"File retrieved successfully: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
             return result
 
         except ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.warning(f"File not found: {file_key} for user {user_email}")
+                logger.warning(f"File not found: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
                 return None
             else:
                 error_msg = f"S3 get failed: {e.response['Error']['Message']}"
@@ -312,7 +306,7 @@ class S3StorageClient:
             # Sort by last modified, newest first
             files.sort(key=lambda f: f['last_modified'], reverse=True)
 
-            logger.info(f"Listed {len(files)} files for user {user_email}")
+            logger.info(f"Listed {len(files)} files for user {sanitize_for_logging(user_email)}")
             return files
 
         except ClientError as e:
@@ -337,7 +331,7 @@ class S3StorageClient:
         try:
             # Verify user has access to this file
             if not file_key.startswith(f"users/{user_email}/"):
-                logger.warning(f"Access denied for deletion: {user_email} attempted to delete {file_key}")
+                logger.warning(f"Access denied for deletion: {sanitize_for_logging(user_email)} attempted to delete {sanitize_for_logging(file_key)}")
                 raise Exception("Access denied to delete file")
 
             # Delete object from S3
@@ -346,12 +340,12 @@ class S3StorageClient:
                 Key=file_key
             )
 
-            logger.info(f"File deleted successfully: {file_key} for user {user_email}")
+            logger.info(f"File deleted successfully: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
             return True
 
         except ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.warning(f"File not found for deletion: {file_key} for user {user_email}")
+                logger.warning(f"File not found for deletion: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
                 return False
             else:
                 error_msg = f"S3 delete failed: {e.response['Error']['Message']}"
@@ -394,7 +388,7 @@ class S3StorageClient:
                 "generated_count": generated_count
             }
 
-            logger.info(f"Got file stats for user {user_email}: {result}")
+            logger.info(f"Got file stats for user {sanitize_for_logging(user_email)}: {result}")
             return result
 
         except Exception as e:

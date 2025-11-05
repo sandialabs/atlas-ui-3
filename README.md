@@ -8,6 +8,14 @@ A modern LLM chat interface with MCP (Model Context Protocol) integration.
 
 This App is still under development. Not all features work well. 
 
+## Read this first (for contributors)
+
+For the most current, concise guidance on how to work in this repository, read:
+- CLAUDE.md — architecture, workflows, and conventions verified against code
+- .github/copilot-instructions.md — a compact “AI agent guide” for getting productive fast
+
+These two docs are kept up-to-date more frequently than long-form docs. Start there before exploring the wider docs or codebase.
+
 ## Features
 
 - **Multi-LLM Support**: OpenAI GPT, Anthropic Claude, Google Gemini
@@ -43,10 +51,7 @@ cp .env.example .env  # Edit with your API keys
 # Build frontend
 cd frontend && npm install && npm run build
 
-# there is a mock s3 that you might want to enable. Switching to minio sooon.
-cd mocks/s3-mocks && python main.py
-
-# Start backend  
+# Start backend
 cd ../backend && python main.py
 
 # OR the quickest way to start is to use the agent_start.sh
@@ -71,6 +76,7 @@ bash agent_start.sh
 - **Use `npm run build`** instead of `npm run dev` for frontend development
 - **File limit**: Maximum 400 lines per file for maintainability
 - **Container Environment**: Use Fedora latest for Docker containers (GitHub Actions uses Ubuntu runners)
+- **Mock S3**: The included S3 mock (`mocks/s3-mock/`) is for development/testing only and must NEVER be used in production due to lack of authentication, encryption, and other critical security features.
 
 ## License
 

@@ -9,6 +9,7 @@ from typing import Dict, List, Any, Optional
 from fastmcp import Client
 from modules.config import config_manager
 from core.auth_utils import create_authorization_manager
+from core.utils import sanitize_for_logging
 from domain.messages.models import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -22,8 +23,18 @@ class MCPToolManager:
     
     def __init__(self, config_path: Optional[str] = None):
         if config_path is None:
-            overrides_root = os.getenv("APP_CONFIG_OVERRIDES", "config/overrides")
-            candidate = Path(overrides_root) / "mcp.json"
+            # Use config manager to get config path
+            app_settings = config_manager.app_settings
+            overrides_root = Path(app_settings.app_config_overrides)
+            
+            # If relative, resolve from project root
+            if not overrides_root.is_absolute():
+                # This file is in backend/modules/mcp_tools/client.py
+                backend_root = Path(__file__).parent.parent.parent
+                project_root = backend_root.parent
+                overrides_root = project_root / overrides_root
+            
+            candidate = overrides_root / "mcp.json"
             if not candidate.exists():
                 # Legacy fallback
                 candidate = Path("backend/configfilesadmin/mcp.json")
@@ -178,17 +189,17 @@ class MCPToolManager:
                     logger.error(f"🔍 DEBUG: Connection failed for HTTP/SSE server '{server_name}'")
                     logger.error(f"    → URL: {config.get('url', 'Not specified')}")
                     logger.error(f"    → Transport: {transport_type}")
-                    logger.error(f"    → Check if server is running and accessible")
+                    logger.error("    → Check if server is running and accessible")
                 else:
                     logger.error(f"🔍 DEBUG: STDIO connection failed for server '{server_name}'")
                     logger.error(f"    → Command: {config.get('command', 'Not specified')}")
                     logger.error(f"    → CWD: {config.get('cwd', 'Not specified')}")
-                    logger.error(f"    → Check if command exists and is executable")
+                    logger.error("    → Check if command exists and is executable")
                     
             elif "timeout" in str(e).lower():
                 logger.error(f"🔍 DEBUG: Timeout connecting to server '{server_name}'")
-                logger.error(f"    → Server may be slow to start or overloaded")
-                logger.error(f"    → Consider increasing timeout or checking server health")
+                logger.error("    → Server may be slow to start or overloaded")
+                logger.error("    → Consider increasing timeout or checking server health")
                 
             elif "permission" in str(e).lower() or "access" in str(e).lower():
                 logger.error(f"🔍 DEBUG: Permission error for server '{server_name}'")
@@ -199,13 +210,13 @@ class MCPToolManager:
                     
             elif "module" in str(e).lower() or "import" in str(e).lower():
                 logger.error(f"🔍 DEBUG: Import/module error for server '{server_name}'")
-                logger.error(f"    → Check if required dependencies are installed")
-                logger.error(f"    → Check Python path and virtual environment")
+                logger.error("    → Check if required dependencies are installed")
+                logger.error("    → Check Python path and virtual environment")
                 
             elif "json" in str(e).lower() or "decode" in str(e).lower():
                 logger.error(f"🔍 DEBUG: JSON/protocol error for server '{server_name}'")
-                logger.error(f"    → Server may not be MCP-compatible")
-                logger.error(f"    → Check server output format")
+                logger.error("    → Server may not be MCP-compatible")
+                logger.error("    → Check server output format")
                 
             else:
                 # Generic debugging info
@@ -243,10 +254,10 @@ class MCPToolManager:
             else:
                 logger.warning(f"⚠ Failed to initialize client for {server_name}")
         
-        logger.info(f"=== CLIENT INITIALIZATION COMPLETE ===")
+        logger.info("=== CLIENT INITIALIZATION COMPLETE ===")
         logger.info(f"Successfully initialized {len(self.clients)} clients: {list(self.clients.keys())}")
         logger.info(f"Failed to initialize: {set(self.servers_config.keys()) - set(self.clients.keys())}")
-        logger.info(f"=== END CLIENT INITIALIZATION SUMMARY ===")
+        logger.info("=== END CLIENT INITIALIZATION SUMMARY ===")
     
     async def _discover_tools_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover tools for a single server. Returns server tools data."""
@@ -282,16 +293,16 @@ class MCPToolManager:
             # Targeted debugging for tool discovery errors
             if "connection" in str(e).lower() or "refused" in str(e).lower():
                 logger.error(f"🔍 DEBUG: Connection lost during tool discovery for '{server_name}'")
-                logger.error(f"    → Server may have crashed or disconnected")
-                logger.error(f"    → Check server logs for startup errors")
+                logger.error("    → Server may have crashed or disconnected")
+                logger.error("    → Check server logs for startup errors")
             elif "timeout" in str(e).lower():
                 logger.error(f"🔍 DEBUG: Timeout during tool discovery for '{server_name}'")
-                logger.error(f"    → Server is slow to respond to list_tools() request")
-                logger.error(f"    → Server may be overloaded or hanging")
+                logger.error("    → Server is slow to respond to list_tools() request")
+                logger.error("    → Server may be overloaded or hanging")
             elif "json" in str(e).lower() or "decode" in str(e).lower():
                 logger.error(f"🔍 DEBUG: Protocol error during tool discovery for '{server_name}'")
-                logger.error(f"    → Server returned invalid MCP response")
-                logger.error(f"    → Check if server implements MCP protocol correctly")
+                logger.error("    → Server returned invalid MCP response")
+                logger.error("    → Check if server implements MCP protocol correctly")
             else:
                 logger.error(f"🔍 DEBUG: Generic tool discovery error for '{server_name}'")
                 logger.error(f"    → Client object: {client}")
@@ -336,13 +347,13 @@ class MCPToolManager:
             else:
                 self.available_tools[server_name] = result
         
-        logger.info(f"=== TOOL DISCOVERY COMPLETE ===")
-        logger.info(f"Final available_tools summary:")
+        logger.info("=== TOOL DISCOVERY COMPLETE ===")
+        logger.info("Final available_tools summary:")
         for server_name, server_data in self.available_tools.items():
             tool_count = len(server_data['tools'])
             tool_names = [tool.name for tool in server_data['tools']]
             logger.info(f"  {server_name}: {tool_count} tools {tool_names}")
-        logger.info(f"=== END TOOL DISCOVERY SUMMARY ===")
+        logger.info("=== END TOOL DISCOVERY SUMMARY ===")
     
     async def _discover_prompts_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover prompts for a single server. Returns server prompts data."""
@@ -377,13 +388,13 @@ class MCPToolManager:
             # Targeted debugging for prompt discovery errors
             if "connection" in str(e).lower() or "refused" in str(e).lower():
                 logger.error(f"🔍 DEBUG: Connection lost during prompt discovery for '{server_name}'")
-                logger.error(f"    → Server may have crashed or disconnected")
+                logger.error("    → Server may have crashed or disconnected")
             elif "timeout" in str(e).lower():
                 logger.error(f"🔍 DEBUG: Timeout during prompt discovery for '{server_name}'")
-                logger.error(f"    → Server is slow to respond to list_prompts() request")
+                logger.error("    → Server is slow to respond to list_prompts() request")
             elif "json" in str(e).lower() or "decode" in str(e).lower():
                 logger.error(f"🔍 DEBUG: Protocol error during prompt discovery for '{server_name}'")
-                logger.error(f"    → Server returned invalid MCP response for prompts")
+                logger.error("    → Server returned invalid MCP response for prompts")
             else:
                 logger.error(f"🔍 DEBUG: Generic prompt discovery error for '{server_name}'")
                 
@@ -423,14 +434,14 @@ class MCPToolManager:
             else:
                 self.available_prompts[server_name] = result
         
-        logger.info(f"=== PROMPT DISCOVERY COMPLETE ===")
+        logger.info("=== PROMPT DISCOVERY COMPLETE ===")
         total_prompts = sum(len(server_data['prompts']) for server_data in self.available_prompts.values())
         logger.info(f"Total prompts discovered: {total_prompts}")
         for server_name, server_data in self.available_prompts.items():
             prompt_count = len(server_data['prompts'])
             prompt_names = [prompt.name for prompt in server_data['prompts']]
             logger.info(f"  {server_name}: {prompt_count} prompts {prompt_names}")
-        logger.info(f"=== END PROMPT DISCOVERY SUMMARY ===")
+        logger.info("=== END PROMPT DISCOVERY SUMMARY ===")
     
     def get_server_groups(self, server_name: str) -> List[str]:
         """Get required groups for a server."""
@@ -523,7 +534,7 @@ class MCPToolManager:
                 if progress_handler is not None:
                     kwargs["progress_handler"] = progress_handler
                 result = await client.call_tool(tool_name, arguments, **kwargs)
-                logger.info(f"Successfully called {tool_name} on {server_name}")
+                logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
                 return result
         except Exception as e:
             logger.error(f"Error calling {tool_name} on {server_name}: {e}")

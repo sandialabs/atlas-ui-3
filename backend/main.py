@@ -21,6 +21,7 @@ from core.middleware import AuthMiddleware
 from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
 from core.otel_config import setup_opentelemetry
+from core.utils import sanitize_for_logging
 
 # Import from infrastructure
 from infrastructure.app_factory import app_factory
@@ -48,22 +49,10 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
         mtype = message.get("type")
         if mtype == "intermediate_update":
             utype = message.get("update_type") or message.get("data", {}).get("update_type")
-            if utype == "canvas_files":
-                files = (message.get("data") or {}).get("files") or []
-                # logger.info(
-                #     "WS SEND: intermediate_update canvas_files count=%d files=%s display=%s",
-                #     len(files),
-                #     [f.get("filename") for f in files if isinstance(f, dict)],
-                #     (message.get("data") or {}).get("display"),
-                # )
-            elif utype == "files_update":
-                files = (message.get("data") or {}).get("files") or []
-            #     logger.info(
-            #         "WS SEND: intermediate_update files_update total=%d",
-            #         len(files),
-            #     )
-            # else:
-            #     logger.info("WS SEND: intermediate_update update_type=%s", utype)
+            # Handle specific update types (canvas_files, files_update)
+            # Logging disabled for these message types - see git history if needed
+            if utype in ("canvas_files", "files_update"):
+                pass
         elif mtype == "canvas_content":
             content = message.get("content")
             clen = len(content) if isinstance(content, str) else "obj"
@@ -141,7 +130,8 @@ app.include_router(admin_router)
 app.include_router(files_router)
 
 # Serve frontend build (Vite)
-static_dir = Path(__file__).parent.parent / "frontend" / "dist"
+project_root = Path(__file__).resolve().parents[1]
+static_dir = project_root / "frontend" / "dist"
 if static_dir.exists():
     # Serve the SPA entry
     @app.get("/")
@@ -152,6 +142,16 @@ if static_dir.exists():
     assets_dir = static_dir / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    # Serve webfonts from Vite build (placed via frontend/public/fonts)
+    fonts_dir = static_dir / "fonts"
+    if fonts_dir.exists():
+        app.mount("/fonts", StaticFiles(directory=fonts_dir), name="fonts")
+    else:
+        # Fallback to unbuilt public fonts if dist/fonts is missing
+        public_fonts = project_root / "frontend" / "public" / "fonts"
+        if public_fonts.exists():
+            app.mount("/fonts", StaticFiles(directory=public_fonts), name="fonts")
 
     # Common top-level static files in the Vite build
     @app.get("/favicon.ico")
@@ -216,7 +216,7 @@ async def websocket_endpoint(websocket: WebSocket):
     connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
     chat_service = app_factory.create_chat_service(connection_adapter)
     
-    logger.info(f"WebSocket connection established for session {session_id}")
+    logger.info(f"WebSocket connection established for session {sanitize_for_logging(str(session_id))}")
     
     try:
         while True:

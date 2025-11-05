@@ -319,7 +319,7 @@ async def ingest_v2_artifacts(
             mime_type = artifact.get("mime")
             
             if not name or not b64_content:
-                logger.warning(f"Skipping artifact with missing name or content")
+                logger.warning("Skipping artifact with missing name or content")
                 continue
                 
             files_to_upload.append({
@@ -455,5 +455,6 @@ def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, 
             f"{file_list}\n\n"
             "(You can ask to open or analyze any of these by name. "
             "Large contents are not fully in this prompt unless user or tools provided excerpts.)"
+            "The user may refer to these files in their requests as session files or attachments."
         )
     }

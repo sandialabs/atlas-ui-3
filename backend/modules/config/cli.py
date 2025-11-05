@@ -11,9 +11,8 @@ import argparse
 import json
 import logging
 import sys
-from typing import Any, Dict
 
-from .manager import ConfigManager
+from .config_manager import ConfigManager
 
 # Set up logging for CLI
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -87,7 +86,7 @@ def list_servers(args) -> None:
         if server.groups:
             print(f"   Groups: {', '.join(server.groups)}")
         if server.is_exclusive:
-            print(f"   Exclusive: ⚠️  Yes")
+            print("   Exclusive: ⚠️  Yes")
         print()
 
 

@@ -74,13 +74,8 @@ class OpenTelemetryConfig:
         self.service_version = service_version
         self.is_development = self._is_development()
         self.log_level = self._get_log_level()
-        # Resolve logs directory robustly: explicit env override else project_root/logs
-        if os.getenv("APP_LOG_DIR"):
-            self.logs_dir = Path(os.getenv("APP_LOG_DIR"))
-        else:
-            # This file: backend/core/otel_config.py -> project root is 2 levels up
-            project_root = Path(__file__).resolve().parents[2]
-            self.logs_dir = project_root / "logs"
+        # Resolve logs directory robustly: use config manager
+        self.logs_dir = self._get_logs_dir()
         self.log_file = self.logs_dir / "app.jsonl"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self._setup_telemetry()
@@ -89,18 +84,39 @@ class OpenTelemetryConfig:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+    def _get_logs_dir(self) -> Path:
+        """Get logs directory from config manager or default to project_root/logs."""
+        try:
+            from modules.config import config_manager
+            if config_manager.app_settings.app_log_dir:
+                return Path(config_manager.app_settings.app_log_dir)
+        except Exception:            
+            pass
+        # Fallback: project_root/logs
+        project_root = Path(__file__).resolve().parents[2]
+        return project_root / "logs"
+    
     def _is_development(self) -> bool:
-        return (
-            os.getenv("DEBUG_MODE", "false").lower() == "true"
-            or os.getenv("ENVIRONMENT", "production").lower() in {"dev", "development"}
-        )
+        try:
+            from modules.config import config_manager
+            settings = config_manager.app_settings
+            return (
+                settings.debug_mode
+                or settings.environment.lower() in {"dev", "development"}
+            )
+        except Exception:
+            # Fallback to environment variables if config not available
+            return (
+                os.getenv("DEBUG_MODE", "false").lower() == "true"
+                or os.getenv("ENVIRONMENT", "production").lower() in {"dev", "development"}
+            )
 
     def _get_log_level(self) -> int:
         try:
-            from config import config_manager  # type: ignore  # local import to avoid circular
-
-            level_name = getattr(config_manager.app_settings, "log_level", "INFO").upper()
-        except Exception:  # noqa: BLE001
+            from modules.config import config_manager
+            level_name = config_manager.app_settings.log_level.upper()
+        except Exception:
+            # Fallback to environment variable if config not available
             level_name = os.getenv("LOG_LEVEL", "INFO").upper()
         level = getattr(logging, level_name, None)
         return level if isinstance(level, int) else logging.INFO

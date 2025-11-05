@@ -1,6 +1,5 @@
-import pytest
 
-from modules.config.manager import config_manager
+from backend.modules.config.config_manager import config_manager
 
 
 def test_is_user_in_group_debug_admin(monkeypatch):

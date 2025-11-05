@@ -1,6 +1,5 @@
-from pathlib import Path
 
-from modules.config.manager import ConfigManager
+from modules.config.config_manager import ConfigManager
 
 
 def test_search_paths_prefer_project_config_dirs():

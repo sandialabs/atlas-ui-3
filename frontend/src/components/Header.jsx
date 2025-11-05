@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
+import { useMarketplace } from '../contexts/MarketplaceContext'
 import { Menu, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings } from 'lucide-react'
 
 const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
@@ -19,11 +20,17 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
     messages,
     clearChat,
     features,
-    isInAdminGroup
+    isInAdminGroup,
+    complianceLevelFilter,
+    setComplianceLevelFilter
   } = useChat()
+  const { isComplianceAccessible, complianceLevels } = useMarketplace()
   const { connectionStatus, isConnected } = useWS()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
+  
+  // Extract unique compliance levels from all available tools and prompts
+  const availableComplianceLevels = complianceLevels.map(l => l.name)
 
   const handleModelSelect = (model) => {
     setCurrentModel(model)
@@ -108,19 +115,41 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
           </button>
           
           {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1 w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50">
+            <div className="absolute right-0 top-full mt-1 w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
               {models.length === 0 ? (
                 <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
               ) : (
-                models.map(model => (
-                  <button
-                    key={model}
-                    onClick={() => handleModelSelect(model)}
-                    className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg"
-                  >
-                    {model}
-                  </button>
-                ))
+                (() => {
+                  // Filter models by compliance level if feature is enabled
+                  const complianceEnabled = features?.compliance_levels
+                  const filteredModels = complianceEnabled && complianceLevelFilter
+                    ? models.filter(m => {
+                        const model = typeof m === 'string' ? { name: m } : m
+                        // STRICT MODE: When compliance filter is active, only show models with matching compliance levels
+                        return isComplianceAccessible(complianceLevelFilter, model.compliance_level)
+                      })
+                    : models
+                  
+                  return filteredModels.map(m => {
+                    const model = typeof m === 'string' ? { name: m } : m
+                    const modelName = model.name || m
+                    return (
+                      <button
+                        key={modelName}
+                        onClick={() => handleModelSelect(modelName)}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg flex items-center justify-between gap-2"
+                      >
+                        <span className="truncate">{modelName}</span>
+                        {complianceEnabled && model.compliance_level && (
+                          <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1 flex-shrink-0">
+                            <Shield className="w-3 h-3" />
+                            {model.compliance_level}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })
+                })()
               )}
             </div>
           )}
@@ -175,6 +204,24 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
             </div>
           )}
         </div>
+
+        {/* Compliance Level Dropdown */}
+        {features?.compliance_levels && availableComplianceLevels.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-700 border border-gray-600">
+            <Shield className="w-4 h-4 text-blue-400" />
+            <select
+              value={complianceLevelFilter || ''}
+              onChange={(e) => setComplianceLevelFilter(e.target.value || null)}
+              className="bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              title="Select compliance level for this session"
+            >
+              <option value="">All Levels</option>
+              {availableComplianceLevels.map(level => (
+                <option key={level} value={level}>{level}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Agent Mode Toggle Button */}
         {agentModeAvailable && (

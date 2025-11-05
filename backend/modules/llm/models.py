@@ -2,7 +2,7 @@
 Data models for LLM responses and related structures.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 

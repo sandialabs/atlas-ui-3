@@ -17,7 +17,7 @@ import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 
 const AllFilesView = () => {
-  const { token, user: userEmail } = useChat()
+  const { token, user: userEmail, ensureSession, addSystemEvent, addPendingFileEvent, attachments } = useChat()
   const { sendMessage } = useWS()
   const [allFiles, setAllFiles] = useState([])
   const [filteredFiles, setFilteredFiles] = useState([])
@@ -211,17 +211,36 @@ const AllFilesView = () => {
     }
   }
 
-  const handleLoadToSession = async (file) => {
+  const handleAddToSession = async (file) => {
     try {
+      // Check if file is already attached
+      if (attachments.has(file.key)) {
+        addSystemEvent('file-attached', `'${file.filename}' is already in this session.`)
+        return
+      }
+
+      // Ensure session exists
+      await ensureSession()
+
+      // Add "attaching" system event and track it as pending
+      const eventId = addSystemEvent('file-attaching', `Adding '${file.filename}' to this session...`, {
+        fileId: file.key,
+        fileName: file.filename,
+        source: 'library'
+      })
+
+      // Track this as a pending file event
+      addPendingFileEvent(file.key, eventId)
+
+      // Send attach_file message (WebSocket handler will resolve the pending event)
       sendMessage({
         type: 'attach_file',
         s3_key: file.key,
         user: userEmail
       })
-      showNotification(`File "${file.filename}" loaded to current session`, 'success')
     } catch (error) {
-      console.error('Error loading file to session:', error)
-      showNotification('Failed to load file to session', 'error')
+      console.error('Error adding file to session:', error)
+      addSystemEvent('file-attach-error', `Failed to add '${file.filename}' to session: ${error.message}`)
     }
   }
 
@@ -380,9 +399,9 @@ const AllFilesView = () => {
                 {/* Action Buttons */}
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
-                    onClick={() => handleLoadToSession(file)}
+                    onClick={() => handleAddToSession(file)}
                     className="p-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors"
-                    title="Load to current session"
+                    title="Add to session"
                   >
                     <ArrowUpToLine className="w-4 h-4" />
                   </button>

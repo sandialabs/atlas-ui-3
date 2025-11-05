@@ -1,180 +1,71 @@
-# Chat UI Development Instructions
+# AI Agent Guide: Atlas UI 3
 
-**ALWAYS follow these instructions first and fallback to additional search and context gathering only if the information in these instructions is incomplete or found to be in error.**
+Concise rules for getting productive fast in this repo. Prefer these over exploration; fall back to code/docs only if something is missing.
 
-## Working Effectively
-
-### Prerequisites and Setup
-- **CRITICAL**: Install `uv` Python package manager - this project requires `uv`, NOT pip or conda:
-  ```bash
-  # Install uv (required)
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  # OR as fallback: pip install uv
-  uv --version  # Verify installation
-  ```
-- **Node.js 18+** and npm for frontend development
-- **Python 3.12+** for backend
-
-### Initial Environment Setup
-```bash
-# Create Python virtual environment (takes ~1 second)
-uv venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-
-# Install Python dependencies (takes ~2-3 minutes)
-uv pip install -r requirements.txt
-
-# Setup environment configuration
-cp .env.example .env
-# Edit .env and set DEBUG_MODE=true for development
-
-# Create required directories
-mkdir -p logs
-```
-
-### Build Process
-```bash
-# Install frontend dependencies (takes ~15 seconds)
-cd frontend
-npm install
-
-# Build frontend (takes ~5 seconds)
-# CRITICAL: Use npm run build, NOT npm run dev (WebSocket issues)
-npm run build
-
-# Verify build output exists
-ls -la dist/  # Should contain index.html and assets/
-```
-
-### Running the Application
-```bash
-# Start backend (Terminal 1)
-cd backend
-python main.py
-# Server starts on http://localhost:8000
-# NEVER use uvicorn --reload (causes problems)
-
-# Frontend is already built and served by backend
-# Open http://localhost:8000 to access application
-```
-
-## Testing
-
-### Run All Tests (NEVER CANCEL - takes up to 2 minutes total)
-```bash
-# Backend tests (takes ~5 seconds) - NEVER CANCEL, set timeout 60+ seconds
-./test/run_tests.sh backend
-
-# Frontend tests (takes ~6 seconds) - NEVER CANCEL, set timeout 60+ seconds  
-./test/run_tests.sh frontend
-
-# E2E tests (may fail if auth not configured, takes ~70 seconds) - NEVER CANCEL, set timeout 120+ seconds
-./test/run_tests.sh e2e
-
-# All tests together - NEVER CANCEL, set timeout 180+ seconds
-./test/run_tests.sh all
-```
-
-### Code Quality and Linting
-```bash
-# Python linting (install ruff first if not available)
-source .venv/bin/activate
-uv pip install ruff
-ruff check backend/  # Takes ~1 second
-
-# Frontend linting (takes ~1 second)
-cd frontend
-npm run lint
-```
-
-## Validation Scenarios
-
-### Manual Application Testing
-After making changes, ALWAYS validate by running through these scenarios:
-
-1. **Basic Application Load**:
+## Do this first
+- Use uv (not pip/conda). One-time: install uv. Then:
    ```bash
-   # Test homepage loads
-   curl -s http://localhost:8000/ | grep "Chat UI"
-   
-   # Test API responds
-   curl -s http://localhost:8000/api/config | jq .app_name
+   uv venv && source .venv/bin/activate
+   uv pip install -r requirements.txt
+   bash agent_start.sh   # builds frontend, starts backend, seeds/mocks
+   ```
+- Manual quick run (alternative):
+   ```bash
+   (frontend) cd frontend && npm install && npm run build
+   (backend)  cd backend && python main.py  # don’t use uvicorn --reload
    ```
 
-2. **Chat Interface Testing**:
-   - Open http://localhost:8000 in browser
-   - Verify page loads without console errors
-   - Test sending a simple message: "Hello, how are you?"
-   - Verify WebSocket connection works (real-time response)
-   - Test settings panel opens without errors
-
-3. **MCP Tools Testing** (if enabled):
-   - Open settings panel
-   - Verify MCP servers are discovered
-   - Test a simple tool like calculator: "What's 2+2?"
-
-## Important Development Notes
-
-### Critical Restrictions
-- **NEVER use `uvicorn --reload`** - it causes development problems
-- **NEVER use `npm run dev`** - it has WebSocket connection issues  
-- **ALWAYS use `npm run build`** for frontend development
-- **ALWAYS use `uv`** for Python package management, not pip
-- **NEVER CANCEL builds or tests** - they may take time but must complete
-
-### Key File Locations
-- **Backend**: `/backend/` - FastAPI application with WebSocket support
-- **Frontend**: `/frontend/` - React + Vite application  
-- **Build Output**: `/frontend/dist/` - served by backend
-- **Configuration**: `.env` file (copy from `.env.example`)
-- **Tests**: `/test/` directory with individual test scripts
-- **Documentation**: `/docs/` directory
-
-### Project Architecture
-- **Backend**: FastAPI serving both API and static frontend files
-- **Frontend**: React 19 with Vite, Tailwind CSS, builds to `dist/`
-- **Communication**: WebSocket for real-time chat, REST API for configuration
-- **MCP Integration**: Model Context Protocol for extensible tool support
-- **Authentication**: Configurable, set `DEBUG_MODE=true` to skip for development
-
-### Common Issues and Solutions
-
-1. **"uv not found"**: Install uv package manager (most common issue)
-2. **WebSocket connection fails**: Use `npm run build` instead of `npm run dev`
-3. **Backend won't start**: Check `.env` file exists and `APP_LOG_DIR` path is valid
-4. **Frontend not loading**: Ensure `npm run build` completed successfully
-5. **Tests failing**: Ensure all dependencies installed and environment configured
-
-### Performance Expectations
-- **Python venv creation**: ~1 second
-- **Python dependencies**: ~2-3 minutes  
-- **Frontend dependencies**: ~15 seconds
-- **Frontend build**: ~5 seconds
-- **Backend tests**: ~5 seconds
-- **Frontend tests**: ~6 seconds
-- **E2E tests**: ~70 seconds (may fail without proper auth config)
-- **Python linting**: ~1 second
-- **Frontend linting**: ~1 second
-
-### Container Development
-The project supports containerized development:
-```bash
-# Build test container (may take 5-10 minutes first time)
-docker build -f Dockerfile-test -t atlas-ui-3-test .
-
-# Run tests in container - NEVER CANCEL, set timeout 300+ seconds
-docker run --rm atlas-ui-3-test bash /app/test/run_tests.sh all
+## Architecture (big picture)
+```
+backend/ FastAPI app + WebSocket
+   main.py → /ws, serves frontend/dist, includes /api/* routes
+   infrastructure/app_factory.py → wires LLM (LiteLLM), MCP, RAG, files, config
+   application/chat/service.py → ChatService orchestrator and streaming
+   modules/mcp_tools/ → FastMCP client, tool/prompt discovery, auth filtering
+   modules/config/manager.py → Pydantic configs + layered search
+   domain/rag_mcp_service.py → RAG over MCP discovery/search/synthesis
+   core/compliance.py → compliance-levels load/validate/allowlist
+frontend/ React 19 + Vite + Tailwind; state via contexts (Chat/WS/Marketplace)
 ```
 
-**Note**: Docker builds may fail in some environments due to SSL certificate issues with package repositories. If Docker builds fail, use the local development approach instead.
+## Configuration & feature flags
+- Layering (in priority): env vars → config/overrides → config/defaults → legacy backend/configfiles*. Env vars APP_CONFIG_OVERRIDES/DEFAULTS control search roots.
+- Files: llmconfig.yml, mcp.json, mcp-rag.json, help-config.json; environment in .env (copy .env.example).
+- Feature flags (AppSettings): FEATURE_TOOLS_ENABLED, FEATURE_RAG_MCP_ENABLED, FEATURE_COMPLIANCE_LEVELS_ENABLED, FEATURE_AGENT_MODE_AVAILABLE.
 
-## Validation Workflow
+## MCP + RAG conventions
+- MCP servers live in mcp.json (tools/prompts) and mcp-rag.json (RAG-only inventory). Fields: groups, is_exclusive, transport|type, url|command/cwd, compliance_level.
+- Transport detection order: explicit transport → command (stdio) → URL protocol (http/sse) → type fallback.
+- Tool names exposed to LLM are fully-qualified: server_toolName. “canvas_canvas” is a pseudo-tool always available.
+- RAG over MCP tools expected: rag_discover_resources, rag_get_raw_results, optional rag_get_synthesized_results. RAG resources and servers may include complianceLevel.
 
-Before committing changes:
-1. **Build**: Ensure both frontend and backend build successfully
-2. **Test**: Run test suite - `./test/run_tests.sh all` 
-3. **Lint**: Run both Python and frontend linting
-4. **Manual**: Test key application scenarios in browser
-5. **Exercise**: Test specific functionality you modified
+## Compliance levels (explicit allowlist)
+- Definitions in config/(overrides|defaults)/compliance-levels.json. core/compliance.py loads, normalizes aliases, and enforces allowed_with.
+- Validated on load for LLM models, MCP servers, and RAG MCP servers. When FEATURE_COMPLIANCE_LEVELS_ENABLED=true:
+   - /api/config includes model and server compliance_level
+   - domain/rag_mcp_service filters servers and per-resource „complianceLevel“ using ComplianceLevelManager.is_accessible(user, resource)
 
-**ALWAYS** set appropriate timeouts for long-running operations and NEVER cancel builds or tests prematurely.
+## Key APIs/contracts
+- WebSocket: /ws. Messages: chat, download_file, reset_session, attach_file. Backend streams token_stream, tool_use, canvas_content, intermediate_update.
+- REST: /api/config (models/tools/prompts/data_sources/rag_servers/features), /api/compliance-levels, /admin/* for configs/logs (admin group required).
+
+## Developer workflows
+- Tests (don’t cancel):
+   ```bash
+   ./test/run_tests.sh backend | frontend | e2e | all
+   ```
+- Lint: uv pip install ruff && ruff check backend/; frontend: npm run lint.
+- Logs: project_root/logs/app.jsonl (override with APP_LOG_DIR). Use /admin/logs/*.
+
+## Repo conventions (important)
+- Use uv; do not use npm run dev; do not use uvicorn --reload.
+- File naming: avoid generic names (utils.py, helpers.py). Prefer descriptive names; backend/main.py is the entry-point exception.
+- No emojis in code or docs. Prefer files ≤ ~400 lines when practical.
+- Auth assumption: in prod, reverse proxy injects X-Authenticated-User; dev falls back to test user.
+
+## Extend by example
+- Add a tool server: edit config/overrides/mcp.json (set groups, transport, url/command, compliance_level). Restart or call discovery on startup.
+- Add a RAG provider: edit config/overrides/mcp-rag.json; ensure it exposes rag_* tools; UI consumes /api/config.rag_servers.
+- Change agent loop: set AGENT_LOOP_STRATEGY to react | think-act | act; ChatService uses app_settings.agent_loop_strategy.
+
+Common pitfalls: “uv not found” → install uv; frontend not loading → npm run build; missing tools → check MCP transport/URL and server logs; empty lists → check auth groups and compliance filtering.

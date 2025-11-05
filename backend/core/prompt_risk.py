@@ -10,7 +10,6 @@ import base64
 import json
 import logging
 import math
-import os
 import re
 from collections import Counter
 from datetime import datetime
@@ -20,12 +19,23 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-# Default thresholds; can be overridden by env vars
-THRESHOLDS = {
-    "low": int(os.getenv("PI_THRESHOLD_LOW", "30")),
-    "medium": int(os.getenv("PI_THRESHOLD_MEDIUM", "50")),
-    "high": int(os.getenv("PI_THRESHOLD_HIGH", "80")),
-}
+def _get_thresholds() -> Dict[str, int]:
+    """Get prompt injection risk thresholds from config manager."""
+    try:
+        from modules.config import config_manager
+        settings = config_manager.app_settings
+        return {
+            "low": settings.pi_threshold_low,
+            "medium": settings.pi_threshold_medium,
+            "high": settings.pi_threshold_high,
+        }
+    except Exception:
+        # Fallback to defaults if config not available
+        return {
+            "low": 30,
+            "medium": 50,
+            "high": 80,
+        }
 
 
 def calculate_prompt_injection_risk(message: str, *, mode: str = "general") -> Dict[str, object]:
@@ -113,12 +123,13 @@ def calculate_prompt_injection_risk(message: str, *, mode: str = "general") -> D
             score -= 10
         score = max(0, score)
 
-    # Risk buckets
-    if score >= THRESHOLDS["high"]:
+    # Risk buckets - get thresholds from config
+    thresholds = _get_thresholds()
+    if score >= thresholds["high"]:
         level = "high"
-    elif score >= THRESHOLDS["medium"]:
+    elif score >= thresholds["medium"]:
         level = "medium"
-    elif score >= THRESHOLDS["low"]:
+    elif score >= thresholds["low"]:
         level = "low"
     else:
         level = "minimal"
