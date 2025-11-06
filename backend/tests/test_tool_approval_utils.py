@@ -47,7 +47,8 @@ class TestRequiresApproval:
         needs_approval, allow_edit, admin_required = requires_approval("dangerous_tool", config_manager)
 
         assert needs_approval is True
-        assert allow_edit is False
+        # UI is always editable when approval is required
+        assert allow_edit is True
         assert admin_required is True
 
     def test_requires_approval_default_true(self):
@@ -109,17 +110,28 @@ class TestRequiresApproval:
         assert allow_edit is True
         assert admin_required is True
 
-        # Tool B
+        # Tool B (allow_edit False in config is ignored for UI gating)
         needs_approval, allow_edit, admin_required = requires_approval("tool_b", config_manager)
         assert needs_approval is True
-        assert allow_edit is False
-        assert admin_required is True
-
-        # Tool C
-        needs_approval, allow_edit, admin_required = requires_approval("tool_c", config_manager)
-        assert needs_approval is False
         assert allow_edit is True
         assert admin_required is True
+
+        # Tool C: with Option B, entries with require_approval=False are not
+        # considered explicit; fall back to default (which is False here),
+        # resulting in user-level approval required by design.
+        config_manager2 = Mock()
+        config_manager2.tool_approvals_config = MockApprovalsConfig(
+            require_by_default=False,
+            tools={
+                "tool_a": MockToolConfig(require_approval=True, allow_edit=True),
+                "tool_b": MockToolConfig(require_approval=True, allow_edit=False),
+                # tool_c omitted to simulate Option B config building
+            }
+        )
+        needs_approval, allow_edit, admin_required = requires_approval("tool_c", config_manager2)
+        assert needs_approval is True
+        assert allow_edit is True
+        assert admin_required is False
 
 
 class TestToolAcceptsUsername:

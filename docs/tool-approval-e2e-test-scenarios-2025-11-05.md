@@ -20,7 +20,8 @@ Before testing, ensure:
 **Objective:** Verify basic approval flow works end-to-end
 
 **Steps:**
-1. Send message: "use hte tool, what is 9879*tan(0.12354)"
+1. Send message: "
+use hte tool, what is 9879*tan(0.12354)
 2. Wait for approval request modal to appear
 3. Review the tool name (calculator_evaluate) and arguments
 4. Click "Approve" button

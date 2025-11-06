@@ -98,24 +98,34 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
         return (True, True, False)  # Default to requiring user-level approval
     
     try:
+        # Global override: force approval for all tools (admin-enforced)
+        app_settings = getattr(config_manager, "app_settings", None)
+        force_flag = False
+        if app_settings is not None:
+            raw_force = getattr(app_settings, "force_tool_approval_globally", False)
+            force_flag = (isinstance(raw_force, bool) and raw_force is True)
+        if force_flag:
+            return (True, True, True)
+
         approvals_config = config_manager.tool_approvals_config
-        
-        # Check if there's a specific configuration for this tool
+
+        # Per-tool explicit requirement (admin-enforced)
         if tool_name in approvals_config.tools:
             tool_config = approvals_config.tools[tool_name]
-            # Admin has explicitly configured this tool
-            return (tool_config.require_approval, tool_config.allow_edit, True)
-        
-        # No specific config - use default, but this is admin-level if default is True
-        default_required = approvals_config.require_approval_by_default
-        if default_required:
-            return (True, True, True)  # Admin requires by default
+            # Only treat as admin-required if explicitly required
+            if getattr(tool_config, "require_approval", False):
+                return (True, True, True)
+            # Explicit false falls through to default behavior
+
+        # Default requirement: admin-enforced if default=True; otherwise user-level
+        if approvals_config.require_approval_by_default:
+            return (True, True, True)
         else:
-            return (True, True, False)  # No admin requirement, so user-level approval
+            return (True, True, False)
     
     except Exception as e:
         logger.warning(f"Error checking approval requirements for {tool_name}: {e}")
-        return (True, True, False)  # Default to user-level approval on error
+    return (True, True, False)  # Default to user-level approval on error
 
 
 def tool_accepts_username(tool_name: str, tool_manager) -> bool:
@@ -231,8 +241,8 @@ async def execute_single_tool(
                 if allow_edit and response.get("arguments"):
                     edited_args = response["arguments"]
                     # Check if arguments actually changed by comparing with what we sent (display_args)
-                # Use json comparison to avoid false positives from dict ordering
-                if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
+                    # Use json comparison to avoid false positives from dict ordering
+                    if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
                         arguments_were_edited = True
                         filtered_args = edited_args
                         logger.info(f"User edited arguments for tool {tool_call.function.name}")

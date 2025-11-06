@@ -141,6 +141,8 @@ class AppSettings(BaseSettings):
 
     # Tool approval settings
     require_tool_approval_by_default: bool = False
+    # When true, all tools require approval (admin-enforced), overriding per-tool and default settings
+    force_tool_approval_globally: bool = Field(default=False, validation_alias="FORCE_TOOL_APPROVAL_GLOBALLY")
 
     # LLM Health Check settings
     llm_health_check_interval: int = 5  # minutes
@@ -471,27 +473,19 @@ class ConfigManager:
                 # Get default from environment
                 default_require_approval = self.app_settings.require_tool_approval_by_default
 
-                # Build tool-specific configs from MCP servers
+                # Build tool-specific configs from MCP servers (Option B):
+                # Only include entries explicitly listed under require_approval.
                 tools_config: Dict[str, ToolApprovalConfig] = {}
 
                 for server_name, server_config in self.mcp_config.servers.items():
-                    require_approval_list = server_config.require_approval
-                    allow_edit_list = server_config.allow_edit
+                    require_approval_list = server_config.require_approval or []
 
-                    # Combine both lists to get all tools that need config
-                    all_tools = set(require_approval_list) | set(allow_edit_list)
-
-                    for tool_name in all_tools:
-                        # Build full tool name with server prefix
+                    for tool_name in require_approval_list:
                         full_tool_name = f"{server_name}_{tool_name}"
-
-                        # Determine settings
-                        requires_approval = tool_name in require_approval_list
-                        allows_edit = tool_name in allow_edit_list
-
+                        # Mark as explicitly requiring approval; allow_edit is moot for requirement
                         tools_config[full_tool_name] = ToolApprovalConfig(
-                            require_approval=requires_approval,
-                            allow_edit=allows_edit
+                            require_approval=True,
+                            allow_edit=True  # UI always allows edits; keep True for compatibility
                         )
 
                 self._tool_approvals_config = ToolApprovalsConfig(

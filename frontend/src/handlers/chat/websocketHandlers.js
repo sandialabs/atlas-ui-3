@@ -310,7 +310,8 @@ export function createWebSocketHandler(deps) {
           }
           break
         case 'tool_approval_request':
-          // Handle tool approval request - add as a message in the chat
+            // Handle tool approval request - stop thinking and add as a message in the chat
+            try { setIsThinking(false) } catch (e) { /* no-op */ }
           addMessage({
             role: 'system',
             content: `Tool Approval Required: ${data.tool_name}`,

@@ -631,16 +631,14 @@ const ToolApprovalMessage = ({ message }) => {
           
           {isExpanded && (
             <>
-              {message.allow_edit && (
-                <div className="mb-2 flex items-center gap-2">
-                  <button
-                    onClick={() => setIsEditing(!isEditing)}
-                    className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-                  >
-                    {isEditing ? 'View Mode' : 'Edit Arguments'}
-                  </button>
-                </div>
-              )}
+              <div className="mb-2 flex items-center gap-2">
+                <button
+                  onClick={() => setIsEditing(!isEditing)}
+                  className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                >
+                  {isEditing ? 'View Mode' : 'Edit Arguments'}
+                </button>
+              </div>
 
               {!isEditing ? (
                 <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-96 overflow-y-auto">
