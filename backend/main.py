@@ -303,8 +303,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 approved = data.get("approved", False)
                 arguments = data.get("arguments")
                 reason = data.get("reason")
-                
-                logger.info(f"Processing approval: tool_call_id={tool_call_id}, approved={approved}")
+
+                logger.info(f"Processing approval: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={approved}")
                 
                 result = approval_manager.handle_approval_response(
                     tool_call_id=tool_call_id,
@@ -317,10 +317,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 # No response needed - the approval will unblock the waiting tool execution
 
             else:
-                logger.warning(f"Unknown message type: {message_type}")
+                logger.warning(f"Unknown message type: {sanitize_for_logging(message_type)}")
                 await websocket.send_json({
                     "type": "error",
-                    "message": f"Unknown message type: {message_type}"
+                    "message": f"Unknown message type: {sanitize_for_logging(message_type)}"
                 })
                 
     except WebSocketDisconnect:

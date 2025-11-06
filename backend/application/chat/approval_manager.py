@@ -10,6 +10,8 @@ import logging
 from typing import Dict, Any, Optional
 from uuid import UUID
 
+from core.utils import sanitize_for_logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,7 +87,7 @@ class ToolApprovalManager:
         """
         request = ToolApprovalRequest(tool_call_id, tool_name, arguments, allow_edit)
         self._pending_requests[tool_call_id] = request
-        logger.info(f"Created approval request for tool {tool_name} (call_id: {tool_call_id})")
+        logger.info(f"Created approval request for tool {sanitize_for_logging(tool_name)} (call_id: {sanitize_for_logging(tool_call_id)})")
         return request
     
     def handle_approval_response(
@@ -107,20 +109,20 @@ class ToolApprovalManager:
         Returns:
             True if request was found and handled, False otherwise
         """
-        logger.info(f"handle_approval_response called: tool_call_id={tool_call_id}, approved={approved}")
+        logger.info(f"handle_approval_response called: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={approved}")
         logger.info(f"Pending requests: {list(self._pending_requests.keys())}")
         
         request = self._pending_requests.get(tool_call_id)
         if request is None:
-            logger.warning(f"Received approval response for unknown tool call: {tool_call_id}")
+            logger.warning(f"Received approval response for unknown tool call: {sanitize_for_logging(tool_call_id)}")
             logger.warning(f"Available pending requests: {list(self._pending_requests.keys())}")
             return False
         
-        logger.info(f"Found pending request for {tool_call_id}, setting response")
+        logger.info(f"Found pending request for {sanitize_for_logging(tool_call_id)}, setting response")
         request.set_response(approved, arguments, reason)
         # Keep the request in the dict for a bit to avoid race conditions
         # It will be cleaned up later
-        logger.info(f"Approval response handled for tool {request.tool_name}: approved={approved}")
+        logger.info(f"Approval response handled for tool {sanitize_for_logging(request.tool_name)}: approved={approved}")
         return True
     
     def cleanup_request(self, tool_call_id: str):
