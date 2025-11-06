@@ -219,9 +219,6 @@ async def websocket_endpoint(websocket: WebSocket):
     
     logger.info(f"WebSocket connection established for session {sanitize_for_logging(str(session_id))}")
 
-    # Track active chat task so we can handle approval responses while chat is processing
-    active_chat_task = None
-
     try:
         while True:
             data = await websocket.receive_json()
@@ -264,7 +261,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
 
                 # Start chat handling in background
-                active_chat_task = asyncio.create_task(handle_chat())
+                asyncio.create_task(handle_chat())
                 
             elif message_type == "download_file":
                 # Handle file download

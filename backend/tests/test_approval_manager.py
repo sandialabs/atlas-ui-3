@@ -94,19 +94,19 @@ class TestToolApprovalManager:
     def test_handle_approval_response(self):
         """Test handling an approval response."""
         manager = ToolApprovalManager()
-        request = manager.create_approval_request(
+        manager.create_approval_request(
             tool_call_id="test_123",
             tool_name="test_tool",
             arguments={"arg1": "value1"}
         )
-        
+
         # Handle approval response
         result = manager.handle_approval_response(
             tool_call_id="test_123",
             approved=True,
             arguments={"arg1": "edited_value"}
         )
-        
+
         assert result is True
         # Request should still be in pending (cleaned up manually later)
         assert "test_123" in manager.get_pending_requests()

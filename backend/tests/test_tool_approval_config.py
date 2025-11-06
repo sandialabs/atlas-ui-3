@@ -1,10 +1,5 @@
 """Tests for tool approval configuration loading and management."""
 
-import pytest
-import json
-import tempfile
-from pathlib import Path
-from unittest.mock import Mock, patch
 from modules.config.config_manager import ConfigManager
 
 

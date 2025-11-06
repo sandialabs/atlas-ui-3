@@ -1,7 +1,6 @@
 """Tests for tool approval utilities in tool_utils.py"""
 
-import pytest
-from unittest.mock import Mock, MagicMock, AsyncMock, patch
+from unittest.mock import Mock
 from application.chat.utilities.tool_utils import (
     requires_approval,
     tool_accepts_username,
