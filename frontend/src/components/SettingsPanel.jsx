@@ -1,5 +1,6 @@
 import { X, RotateCcw } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { useChat } from '../contexts/ChatContext'
 
 const SettingsPanel = ({ isOpen, onClose }) => {
   // Default settings
@@ -12,6 +13,9 @@ const SettingsPanel = ({ isOpen, onClose }) => {
   // State for settings
   const [settings, setSettings] = useState(defaultSettings)
   const [hasChanges, setHasChanges] = useState(false)
+
+  // Also get live settings from ChatContext for always-in-sync fields
+  const { settings: ctxSettings, updateSettings: updateCtxSettings } = useChat()
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -183,19 +187,19 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             </div>
           </div>
 
-          {/* Auto-Approve Tools Setting */}
+          {/* Auto-Approve Tools Setting (always in sync via context) */}
           <div className="bg-gray-700 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
               <label className="text-white font-medium">Auto-Approve Tool Calls</label>
               <button
-                onClick={() => handleSettingChange('autoApproveTools', !settings.autoApproveTools)}
+                onClick={() => updateCtxSettings({ autoApproveTools: !ctxSettings?.autoApproveTools })}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  settings.autoApproveTools ? 'bg-green-600' : 'bg-gray-600'
+                  ctxSettings?.autoApproveTools ? 'bg-green-600' : 'bg-gray-600'
                 }`}
               >
                 <span
                   className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    settings.autoApproveTools ? 'translate-x-6' : 'translate-x-1'
+                    ctxSettings?.autoApproveTools ? 'translate-x-6' : 'translate-x-1'
                   }`}
                 />
               </button>
@@ -204,7 +208,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
               When enabled, tools that don't require admin approval will execute automatically without prompting.
               Tools that require admin approval will still prompt for confirmation.
             </p>
-            {!settings.autoApproveTools && (
+            {!ctxSettings?.autoApproveTools && (
               <p className="text-sm text-yellow-400 mt-2">
                 <strong>⚠ Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
               </p>

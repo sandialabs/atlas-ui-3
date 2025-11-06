@@ -498,7 +498,7 @@ const downloadReturnedFile = (filename, base64Data) => {
 
 // Tool Approval Message Component
 const ToolApprovalMessage = ({ message }) => {
-  const { sendApprovalResponse, settings } = useChat()
+  const { sendApprovalResponse, settings, updateSettings } = useChat()
   const [isEditing, setIsEditing] = useState(false)
   const [editedArgs, setEditedArgs] = useState(message.arguments)
   const [reason, setReason] = useState('')
@@ -588,14 +588,31 @@ const ToolApprovalMessage = ({ message }) => {
   return (
     <div className="text-gray-200">
       <div className="flex items-center gap-2 mb-3">
-        <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-600">
-          APPROVAL REQUIRED
+        <span className={`px-2 py-1 rounded text-xs font-medium ${
+          settings?.autoApproveTools && !message.admin_required ? 'bg-blue-600' : 'bg-yellow-600'
+        }`}>
+          {settings?.autoApproveTools && !message.admin_required ? 'AUTO-APPROVED' : 'APPROVAL REQUIRED'}
         </span>
         <span className="font-medium">{message.tool_name}</span>
-        {settings?.autoApproveTools && !message.admin_required && (
-          <span className="px-2 py-1 rounded text-xs font-medium bg-blue-600">
-            AUTO-APPROVED
-          </span>
+        {!message.admin_required && (
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                updateSettings?.({ autoApproveTools: !settings?.autoApproveTools })
+              } catch (e) {
+                console.error('Failed to toggle auto-approve from inline control', e)
+              }
+            }}
+            className={`ml-2 px-2 py-0.5 rounded text-xs font-medium border transition-colors cursor-pointer ${
+              settings?.autoApproveTools
+                ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
+                : 'bg-gray-700 text-gray-100 border-gray-600 hover:bg-gray-600'
+            }`}
+            title="Click to toggle auto-approve for non-admin tool calls. Admin-required calls will still prompt."
+          >
+            {settings?.autoApproveTools ? 'Auto-approve ON' : 'Auto-approve OFF'}
+          </button>
         )}
       </div>
 
@@ -669,27 +686,29 @@ const ToolApprovalMessage = ({ message }) => {
       </div>
 
       {/* Action Buttons and Rejection Reason - Compact Layout */}
-      <div className="flex gap-2 items-center">
-        <button
-          onClick={handleApprove}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap"
-        >
-          Approve {isEditing ? '(with edits)' : ''}
-        </button>
-        <button
-          onClick={handleReject}
-          className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap"
-        >
-          Reject
-        </button>
-        <input
-          type="text"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="Rejection reason (optional)..."
-          className="flex-1 bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-      </div>
+          {!(settings?.autoApproveTools && !message.admin_required) && (
+            <div className="flex gap-2 items-center">
+              <button
+                onClick={handleApprove}
+                className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap"
+              >
+                Approve {isEditing ? '(with edits)' : ''}
+              </button>
+              <button
+                onClick={handleReject}
+                className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap"
+              >
+                Reject
+              </button>
+              <input
+                type="text"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Rejection reason (optional)..."
+                className="flex-1 bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          )}
     </div>
   )
 }
@@ -748,6 +767,8 @@ const Message = ({ message }) => {
   const avatarBg = isUser ? 'bg-green-600' : isSystem ? 'bg-yellow-600' : 'bg-blue-600'
   const avatarText = isUser ? 'Y' : isSystem ? 'S' : 'A'
   const authorName = isUser ? 'You' : isSystem ? 'System' : appName
+
+  // Note: Tool auto-approval handled inside ToolApprovalMessage; we keep message visible so inline toggle remains accessible.
   
 const renderContent = () => {
     // Handle tool approval request messages
@@ -773,35 +794,43 @@ const renderContent = () => {
           </div>
 
           {/* Progress Section (shows when in progress or progress data available) */}
-          {(
-            message.status === 'in_progress' ||
-            typeof message.progress === 'number' ||
-            (message.progressRaw && (typeof message.progressRaw.progress === 'number' || typeof message.progressRaw.total === 'number'))
-          ) && (
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm text-gray-300">Progress</span>
-                {typeof message.progress === 'number' && (
-                  <span className="text-xs text-gray-400">{Math.max(0, Math.min(100, Math.round(message.progress)))}%</span>
-                )}
-              </div>
-              <div className="w-full bg-gray-700 rounded h-2 overflow-hidden">
-                {typeof message.progress === 'number' ? (
-                  <div
-                    className="bg-blue-500 h-2"
-                    style={{ width: `${Math.max(0, Math.min(100, message.progress))}%` }}
-                  />
-                ) : (
-                  <div className="bg-blue-500 h-2 animate-pulse" style={{ width: '33%' }} />
-                )}
-              </div>
-              {message.progressMessage && (
-                <div className="text-xs text-gray-400 mt-1">{message.progressMessage}</div>
-              )}
-            </div>
-          )}
+          {(() => {
+            const hasProgressData = (
+              message.status === 'in_progress' ||
+              typeof message.progress === 'number' ||
+              (message.progressRaw && (typeof message.progressRaw.progress === 'number' || typeof message.progressRaw.total === 'number'))
+            )
+            if (!hasProgressData) return null
 
-          {/* Arguments Section */}
+            let percent = null
+            let label = ''
+            const raw = message.progressRaw || {}
+
+            if (typeof raw.progress === 'number' && typeof raw.total === 'number' && raw.total > 0) {
+              percent = Math.round(Math.min(100, Math.max(0, (raw.progress / raw.total) * 100)))
+              label = `${raw.progress}/${raw.total}`
+            } else if (typeof message.progress === 'number') {
+              const p = message.progress <= 1 ? Math.round(message.progress * 100) : Math.round(message.progress)
+              percent = Math.min(100, Math.max(0, p))
+              label = `${percent}%`
+            }
+
+            if (percent === null) return null
+
+            return (
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm text-gray-300">Progress</span>
+                  <span className="text-xs text-gray-400">{label}</span>
+                </div>
+                <div className="w-full bg-gray-700 rounded h-2 overflow-hidden">
+                  <div className="bg-blue-600 h-2" style={{ width: `${percent}%` }} />
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Input Arguments Section */}
           {message.arguments && Object.keys(message.arguments).length > 0 && (
             <div className="mb-4">
               <div className="border-l-4 border-blue-500 pl-4">
