@@ -32,7 +32,7 @@ export const ChatProvider = ({ children }) => {
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
 	const { messages, addMessage, mapMessages, resetMessages } = useMessages()
-	const { settings } = useSettings()
+	const { settings, updateSettings } = useSettings()
 
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
 	const [isThinking, setIsThinking] = useState(false)
@@ -391,6 +391,8 @@ export const ChatProvider = ({ children }) => {
 		ensureSession,
 		addSystemEvent,
 		settings,
+		updateSettings,
+		sendApprovalResponse: sendMessage,
 	}
 
 	return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

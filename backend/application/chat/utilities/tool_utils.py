@@ -5,6 +5,7 @@ This module provides stateless utility functions for handling tool execution,
 argument processing, and synthesis decisions without maintaining any state.
 """
 
+import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional, Callable, Awaitable
@@ -13,6 +14,7 @@ from domain.messages.models import ToolCall, ToolResult
 from interfaces.llm import LLMResponse
 from core.capabilities import create_download_url
 from .notification_utils import _sanitize_filename_value  # reuse same filename sanitizer for UI args
+from ..approval_manager import get_approval_manager
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,8 @@ async def execute_tools_workflow(
     tool_manager,
     llm_caller,
     prompt_provider,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    config_manager=None
 ) -> tuple[str, List[ToolResult]]:
     """
     Execute the complete tools workflow: calls -> results -> synthesis.
@@ -50,7 +53,8 @@ async def execute_tools_workflow(
             tool_call=tool_call,
             session_context=session_context,
             tool_manager=tool_manager,
-            update_callback=update_callback
+            update_callback=update_callback,
+            config_manager=config_manager
         )
         tool_results.append(result)
 
@@ -74,6 +78,54 @@ async def execute_tools_workflow(
     )
 
     return final_response, tool_results
+
+
+def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]:
+    """
+    Check if a tool requires approval before execution.
+    
+    Args:
+        tool_name: Name of the tool to check
+        config_manager: ConfigManager instance (can be None)
+    
+    Returns:
+        Tuple of (requires_approval, allow_edit, admin_required)
+        - requires_approval: Whether approval is needed
+        - allow_edit: Whether arguments can be edited
+        - admin_required: Whether this is admin-mandated (True) or user-level (False)
+    """
+    if config_manager is None:
+        return (True, True, False)  # Default to requiring user-level approval
+    
+    try:
+        # Global override: force approval for all tools (admin-enforced)
+        app_settings = getattr(config_manager, "app_settings", None)
+        force_flag = False
+        if app_settings is not None:
+            raw_force = getattr(app_settings, "force_tool_approval_globally", False)
+            force_flag = (isinstance(raw_force, bool) and raw_force is True)
+        if force_flag:
+            return (True, True, True)
+
+        approvals_config = config_manager.tool_approvals_config
+
+        # Per-tool explicit requirement (admin-enforced)
+        if tool_name in approvals_config.tools:
+            tool_config = approvals_config.tools[tool_name]
+            # Only treat as admin-required if explicitly required
+            if getattr(tool_config, "require_approval", False):
+                return (True, True, True)
+            # Explicit false falls through to default behavior
+
+        # Default requirement: admin-enforced if default=True; otherwise user-level
+        if approvals_config.require_approval_by_default:
+            return (True, True, True)
+        else:
+            return (True, True, False)
+    
+    except Exception as e:
+        logger.warning(f"Error checking approval requirements for {tool_name}: {e}")
+    return (True, True, False)  # Default to user-level approval on error
 
 
 def tool_accepts_username(tool_name: str, tool_manager) -> bool:
@@ -109,7 +161,8 @@ async def execute_single_tool(
     tool_call,
     session_context: Dict[str, Any],
     tool_manager,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    config_manager=None
 ) -> ToolResult:
     """
     Execute a single tool with argument preparation and error handling.
@@ -128,6 +181,84 @@ async def execute_single_tool(
 
         # Sanitize arguments for UI (hide tokens in URLs, etc.)
         display_args = _sanitize_args_for_ui(dict(filtered_args))
+
+        # Check if this tool requires approval
+        needs_approval = False
+        allow_edit = True
+        admin_required = False
+        if config_manager:
+            needs_approval, allow_edit, admin_required = requires_approval(tool_call.function.name, config_manager)
+        else:
+            # No config manager means user-level approval by default
+            needs_approval = True
+            allow_edit = True
+            admin_required = False
+        
+        # Track if arguments were edited (for LLM context)
+        arguments_were_edited = False
+        original_display_args = dict(display_args) if isinstance(display_args, dict) else display_args
+
+        # If approval is required, request it from the user
+        if needs_approval:
+            logger.info(f"Tool {tool_call.function.name} requires approval (admin_required={admin_required})")
+
+            # Send approval request to frontend
+            if update_callback:
+                await update_callback({
+                    "type": "tool_approval_request",
+                    "tool_call_id": tool_call.id,
+                    "tool_name": tool_call.function.name,
+                    "arguments": display_args,
+                    "allow_edit": allow_edit,
+                    "admin_required": admin_required
+                })
+
+            # Wait for approval response
+            approval_manager = get_approval_manager()
+            request = approval_manager.create_approval_request(
+                tool_call.id,
+                tool_call.function.name,
+                filtered_args,
+                allow_edit
+            )
+
+            try:
+                response = await request.wait_for_response(timeout=300.0)
+                approval_manager.cleanup_request(tool_call.id)
+
+                if not response["approved"]:
+                    # Tool was rejected
+                    reason = response.get("reason", "User rejected the tool call")
+                    logger.info(f"Tool {tool_call.function.name} rejected by user: {reason}")
+                    return ToolResult(
+                        tool_call_id=tool_call.id,
+                        content=f"Tool execution rejected by user: {reason}",
+                        success=False,
+                        error=reason
+                    )
+
+                # Use potentially edited arguments
+                if allow_edit and response.get("arguments"):
+                    edited_args = response["arguments"]
+                    # Check if arguments actually changed by comparing with what we sent (display_args)
+                    # Use json comparison to avoid false positives from dict ordering
+                    if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
+                        arguments_were_edited = True
+                        filtered_args = edited_args
+                        logger.info(f"User edited arguments for tool {tool_call.function.name}")
+                    else:
+                        # No actual changes, but response included arguments - keep original filtered_args
+                        logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
+                
+            except asyncio.TimeoutError:
+                approval_manager.cleanup_request(tool_call.id)
+                logger.warning(f"Approval timeout for tool {tool_call.function.name}")
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content="Tool execution timed out waiting for user approval",
+                    success=False,
+                    error="Approval timeout"
+                )
 
         # Send tool start notification with sanitized args
         await notification_utils.notify_tool_start(tool_call, display_args, update_callback)
@@ -148,6 +279,20 @@ async def execute_single_tool(
                 "update_callback": update_callback,
             }
         )
+
+        # If arguments were edited, prepend a note to the result for LLM context
+        if arguments_were_edited:
+            edit_note = (
+                f"[IMPORTANT: The user manually edited the tool arguments before execution. "
+                f"Disregard your original arguments. The ACTUAL arguments executed were: {json.dumps(filtered_args)}. "
+                f"Your response must reflect these edited arguments as the user's true intent. "
+                # f"Do NOT reference the original arguments: {json.dumps(original_filtered_args)}]\n\n"
+            )
+            if isinstance(result.content, str):
+                result.content = edit_note + result.content
+            else:
+                # If content is not a string, convert and prepend
+                result.content = edit_note + str(result.content)
 
         # Send tool complete notification
         await notification_utils.notify_tool_complete(tool_call, result, parsed_args, update_callback)

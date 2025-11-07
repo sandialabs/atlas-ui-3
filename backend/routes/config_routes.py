@@ -259,6 +259,28 @@ async def get_config(
             model_info["compliance_level"] = model_config.compliance_level
         models_list.append(model_info)
     
+    # Build tool approval settings - only include tools from authorized servers
+    tool_approvals_config = config_manager.tool_approvals_config
+    filtered_tool_approvals = {}
+
+    # Get all tool names from authorized servers
+    authorized_tool_names = set()
+    for tool_group in tools_info:
+        server_name = tool_group.get('server')
+        if server_name in authorized_servers:
+            # tools is a list of strings (tool names), not dicts
+            for tool_name in tool_group.get('tools', []):
+                if isinstance(tool_name, str):
+                    authorized_tool_names.add(tool_name)
+
+    # Only include approval settings for tools the user has access to
+    for tool_name, approval_config in tool_approvals_config.tools.items():
+        if tool_name in authorized_tool_names:
+            filtered_tool_approvals[tool_name] = {
+                "require_approval": approval_config.require_approval,
+                "allow_edit": approval_config.allow_edit
+            }
+
     return {
         "app_name": app_settings.app_name,
         "models": models_list,
@@ -273,6 +295,10 @@ async def get_config(
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
         "help_config": help_config,  # Help page configuration from help-config.json
+        "tool_approvals": {
+            "require_approval_by_default": tool_approvals_config.require_approval_by_default,
+            "tools": filtered_tool_approvals
+        },
         "features": {
             "workspaces": app_settings.feature_workspaces_enabled,
             "rag": app_settings.feature_rag_enabled,

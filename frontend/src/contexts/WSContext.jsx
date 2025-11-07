@@ -85,10 +85,15 @@ export const WSProvider = ({ children }) => {
   }
 
   const sendMessage = (message) => {
+    console.log('[WSContext] sendMessage called with:', JSON.stringify(message, null, 2))
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(message))
+      console.log('[WSContext] WebSocket is open, sending message')
+      const messageStr = JSON.stringify(message)
+      console.log('[WSContext] Message as JSON string:', messageStr)
+      wsRef.current.send(messageStr)
+      console.log('[WSContext] Message sent successfully')
     } else {
-      console.error('WebSocket is not connected')
+      console.error('[WSContext] WebSocket is not connected, readyState:', wsRef.current?.readyState)
     }
   }
 
