@@ -52,7 +52,11 @@ class TestRequiresApproval:
         assert admin_required is True
 
     def test_requires_approval_default_true(self):
-        """Test requires_approval with default set to require approval."""
+        """Test requires_approval with default set to require approval.
+
+        REQUIRE_TOOL_APPROVAL_BY_DEFAULT=true should be user-level (admin_required=False)
+        so users can toggle auto-approve via the inline UI.
+        """
         config_manager = Mock()
         config_manager.tool_approvals_config = MockApprovalsConfig(
             require_by_default=True,
@@ -63,7 +67,7 @@ class TestRequiresApproval:
 
         assert needs_approval is True
         assert allow_edit is True
-        assert admin_required is True
+        assert admin_required is False  # User CAN toggle auto-approve
 
     def test_requires_approval_default_false(self):
         """Test requires_approval with default set to not require approval."""

@@ -83,16 +83,23 @@ async def execute_tools_workflow(
 def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]:
     """
     Check if a tool requires approval before execution.
-    
+
     Args:
         tool_name: Name of the tool to check
         config_manager: ConfigManager instance (can be None)
-    
+
     Returns:
         Tuple of (requires_approval, allow_edit, admin_required)
-        - requires_approval: Whether approval is needed
-        - allow_edit: Whether arguments can be edited
+        - requires_approval: Whether approval is needed (always True)
+        - allow_edit: Whether arguments can be edited (always True)
         - admin_required: Whether this is admin-mandated (True) or user-level (False)
+
+    Admin-required (True) means user CANNOT toggle auto-approve:
+        - FORCE_TOOL_APPROVAL_GLOBALLY=true
+        - Per-tool require_approval=true in mcp.json
+
+    User-level (False) means user CAN toggle auto-approve via inline UI:
+        - All other cases (including REQUIRE_TOOL_APPROVAL_BY_DEFAULT)
     """
     if config_manager is None:
         return (True, True, False)  # Default to requiring user-level approval
@@ -117,11 +124,9 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
                 return (True, True, True)
             # Explicit false falls through to default behavior
 
-        # Default requirement: admin-enforced if default=True; otherwise user-level
-        if approvals_config.require_approval_by_default:
-            return (True, True, True)
-        else:
-            return (True, True, False)
+        # Default requirement: user-level regardless of default setting
+        # Users can always toggle auto-approve via inline UI unless admin explicitly requires it
+        return (True, True, False)
     
     except Exception as e:
         logger.warning(f"Error checking approval requirements for {tool_name}: {e}")
