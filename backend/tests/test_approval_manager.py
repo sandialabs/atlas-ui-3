@@ -178,8 +178,6 @@ class TestToolApprovalManager:
         # Cleanup
         manager.cleanup_request("test_123")
         assert "test_123" not in manager.get_pending_requests()
-        
-        await approval_task
 
     @pytest.mark.asyncio
     async def test_multiple_concurrent_approvals(self):
@@ -226,8 +224,6 @@ class TestToolApprovalManager:
         assert response2["approved"] is True
         assert response3["approved"] is True
 
-        await approval_task
-
     @pytest.mark.asyncio
     async def test_approval_with_no_arguments_change(self):
         """Test approval where arguments are returned but not changed."""
@@ -255,8 +251,6 @@ class TestToolApprovalManager:
 
         assert response["approved"] is True
         assert response["arguments"] == original_args
-
-        await approval_task
 
     @pytest.mark.asyncio
     async def test_double_response_handling(self):
@@ -302,8 +296,6 @@ class TestToolApprovalManager:
 
         assert response["approved"] is False
         assert response.get("reason") is None or response.get("reason") == ""
-
-        await approval_task
 
     @pytest.mark.asyncio
     async def test_allow_edit_false(self):
@@ -400,8 +392,6 @@ class TestToolApprovalManager:
         assert response["approved"] is True
         assert response["arguments"]["nested"]["level1"]["level2"][1] == "modified_item"
         assert len(response["arguments"]["numbers"]) == 6
-
-        await approval_task
 
     @pytest.mark.asyncio
     async def test_sequential_approvals(self):

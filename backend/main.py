@@ -225,7 +225,7 @@ async def websocket_endpoint(websocket: WebSocket):
             message_type = data.get("type")
 
             # Debug: Log ALL incoming messages
-            logger.info(f"WS RECEIVED message_type={message_type}, data keys={list(data.keys())}")
+            logger.info(f"WS RECEIVED message_type={sanitize_for_logging(message_type)}, data keys={[sanitize_for_logging(key) for key in data.keys()]}")
 
             if message_type == "chat":
                 # Handle chat message in background so we can still receive approval responses
@@ -310,7 +310,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     reason=reason
                 )
                 
-                logger.info(f"Approval response handled: result={result}")
+                logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
 
             else:

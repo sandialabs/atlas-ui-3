@@ -8,7 +8,6 @@ approve, reject, or edit tool arguments before execution.
 import asyncio
 import logging
 from typing import Dict, Any, Optional
-from uuid import UUID
 
 from core.utils import sanitize_for_logging
 
@@ -110,7 +109,7 @@ class ToolApprovalManager:
             True if request was found and handled, False otherwise
         """
         logger.info(f"handle_approval_response called: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={approved}")
-        logger.info(f"Pending requests: {list(self._pending_requests.keys())}")
+        logger.info(f"Pending requests: {[sanitize_for_logging(key) for key in self._pending_requests.keys()]}")
         
         request = self._pending_requests.get(tool_call_id)
         if request is None:
