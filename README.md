@@ -2,7 +2,7 @@
 
 A modern LLM chat interface with MCP (Model Context Protocol) integration.
 
-![Screenshot](docs/readme_img/screenshot-10-24-2025.png)
+![Screenshot](docs/readme_img/screenshot-11-6-2025image.png)
 
 # Note
 
