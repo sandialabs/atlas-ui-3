@@ -1,37 +1,63 @@
 """Authentication and authorization module."""
 
+import logging
 from typing import Optional
 
+import httpx
+from modules.config.config_manager import config_manager
 
-def is_user_in_group(user_id: str, group_id: str) -> bool:
+logger = logging.getLogger(__name__)
+
+
+async def is_user_in_group(user_id: str, group_id: str) -> bool:
     """
-    Mock authorization function to check if user is in a group.
-    
+    Check if a user is in a specified group.
+
+    This function first checks for a configured external authorization endpoint.
+    If available, it makes an HTTP request to check group membership.
+    If not configured, it falls back to a mock implementation for local development.
+
     Args:
-        user_id: User email/identifier
-        group_id: Group identifier
-        
+        user_id: User email/identifier.
+        group_id: Group identifier.
+
     Returns:
-        True if user is authorized for the group
+        True if the user is in the group, False otherwise.
     """
-    # Check if this is debug mode and test user should have admin access
-    from modules.config.config_manager import config_manager
     app_settings = config_manager.app_settings
-    
-    if (app_settings.debug_mode and 
-        user_id == app_settings.test_user and 
-        group_id == app_settings.admin_group):
-        return True
-    
-    # Mock implementation - in production this would query actual auth system
-    mock_groups = {
-        "test@test.com": ["users", "mcp_basic", "admin"],
-        "user@example.com": ["users", "mcp_basic"],
-        "admin@example.com": ["admin", "users", "mcp_basic", "mcp_advanced"]
-    }
-    
-    user_groups = mock_groups.get(user_id, [])
-    return group_id in user_groups
+    auth_url = app_settings.auth_group_check_url
+    api_key = app_settings.auth_group_check_api_key
+
+    if auth_url and api_key:
+        # Use the external HTTP endpoint for authorization
+        try:
+            async with httpx.AsyncClient() as client:
+                headers = {"Authorization": f"Bearer {api_key}"}
+                payload = {"user_id": user_id, "group_id": group_id}
+                response = await client.post(auth_url, json=payload, headers=headers, timeout=5.0)
+                response.raise_for_status()
+                # Assuming the endpoint returns a simple JSON like {"is_member": true}
+                return response.json().get("is_member", False)
+        except httpx.RequestError as e:
+            logger.error(f"HTTP request to auth endpoint failed: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"Error during external auth check: {e}", exc_info=True)
+            return False
+    else:
+        # Fallback to mock implementation if no external endpoint is configured
+        if (app_settings.debug_mode and
+                user_id == app_settings.test_user and
+                group_id == app_settings.admin_group):
+            return True
+
+        mock_groups = {
+            "test@test.com": ["users", "mcp_basic", "admin"],
+            "user@example.com": ["users", "mcp_basic"],
+            "admin@example.com": ["admin", "users", "mcp_basic", "mcp_advanced"]
+        }
+        user_groups = mock_groups.get(user_id, [])
+        return group_id in user_groups
 
 
 def get_user_from_header(x_email_header: Optional[str]) -> Optional[str]:

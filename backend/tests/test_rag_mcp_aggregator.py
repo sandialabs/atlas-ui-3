@@ -97,7 +97,7 @@ def patch_mcp(monkeypatch):
     async def fake_discover_prompts(self):
         self.available_prompts = {}
 
-    def fake_get_authorized_servers(self, user_email, auth_check_func):
+    async def fake_get_authorized_servers(self, user_email, auth_check_func):
         # Simple ACL: allow both for @company.com; only docsRag otherwise
         return ["docsRag", "notionRag"] if user_email.endswith("@company.com") else ["docsRag"]
 

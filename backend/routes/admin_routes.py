@@ -41,9 +41,9 @@ class SystemStatus(BaseModel):  # noqa: F841 (kept for future use)
     details: Optional[Dict[str, Any]] = None
 
 
-def require_admin(current_user: str = Depends(get_current_user)) -> str:
+async def require_admin(current_user: str = Depends(get_current_user)) -> str:
     admin_group = config_manager.app_settings.admin_group
-    if not is_user_in_group(current_user, admin_group):
+    if not await is_user_in_group(current_user, admin_group):
         raise HTTPException(
             status_code=403,
             detail=f"Admin access required. User must be in '{admin_group}' group.",

@@ -576,18 +576,24 @@ class MCPToolManager:
         
         return available_prompts
     
-    def get_authorized_servers(self, user_email: str, auth_check_func) -> List[str]:
+    async def get_authorized_servers(self, user_email: str, auth_check_func) -> List[str]:
         """Get list of servers the user is authorized to use."""
-        try:
-            auth_manager = create_authorization_manager(auth_check_func)
-            return auth_manager.filter_authorized_servers(
-                user_email, 
-                self.servers_config, 
-                self.get_server_groups
-            )
-        except Exception as e:
-            logger.error(f"Error getting authorized servers for {user_email}: {e}", exc_info=True)
-            return []
+        authorized_servers = []
+        for server_name, server_config in self.servers_config.items():
+            if not server_config.get("enabled", True):
+                continue
+
+            required_groups = server_config.get("groups", [])
+            if not required_groups:
+                authorized_servers.append(server_name)
+                continue
+
+            # Check if user is in any of the required groups
+            # We need to await each call and collect results before using any()
+            group_checks = [await auth_check_func(user_email, group) for group in required_groups]
+            if any(group_checks):
+                authorized_servers.append(server_name)
+        return authorized_servers
     
     def get_available_tools(self) -> List[str]:
         """Get list of available tool names."""

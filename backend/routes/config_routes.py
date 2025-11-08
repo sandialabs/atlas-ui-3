@@ -121,7 +121,7 @@ async def get_config(
         mcp_manager = app_factory.get_mcp_manager()
         
         # Get authorized servers for the user - this filters out unauthorized servers completely
-        authorized_servers = mcp_manager.get_authorized_servers(current_user, is_user_in_group)
+        authorized_servers = await mcp_manager.get_authorized_servers(current_user, is_user_in_group)
         
         # Add canvas pseudo-tool to authorized servers (available to all users)
         authorized_servers.append("canvas")
@@ -289,7 +289,7 @@ async def get_config(
         "data_sources": rag_data_sources,  # RAG data sources for the user
         "rag_servers": rag_servers,  # Optional richer structure for RAG UI
         "user": current_user,
-    "is_in_admin_group": is_user_in_group(current_user, app_settings.admin_group),
+    "is_in_admin_group": await is_user_in_group(current_user, app_settings.admin_group),
         "active_sessions": 0,  # TODO: Implement session counting in ChatService
         "authorized_servers": authorized_servers,  # Optional: expose for debugging
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown

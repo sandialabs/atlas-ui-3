@@ -23,7 +23,7 @@ class FakeMCP:
             "misc": {"tools": [FakeTool("other")], "config": {}},
         }
 
-    def get_authorized_servers(self, user: str, _auth) -> List[str]:
+    async def get_authorized_servers(self, user: str, _auth) -> List[str]:
         # User bob can see all, alice cannot see misc
         if user.startswith("alice"):
             return ["docsRag", "searchRag"]

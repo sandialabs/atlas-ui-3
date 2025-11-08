@@ -65,7 +65,7 @@ class MCPServerConfig(BaseModel):
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
     require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
-    allow_edit: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) allowing argument editing
+    allow_edit: List[str] = Field(default_factory=list)  # LEGACY. List of tool names (without server prefix) allowing argument editing
 
 
 class MCPConfig(BaseModel):
@@ -153,6 +153,8 @@ class AppSettings(BaseSettings):
     # Admin settings
     admin_group: str = "admin"
     test_user: str = "test@test.com"  # Test user for development
+    auth_group_check_url: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_URL")
+    auth_group_check_api_key: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_API_KEY")
     
     # S3/MinIO storage settings
     use_mock_s3: bool = False  # Use in-process S3 mock (no Docker required)
@@ -231,6 +233,7 @@ class AppSettings(BaseSettings):
     environment: str = Field(default="production", validation_alias="ENVIRONMENT")
     
     # Prompt injection risk thresholds
+    # NOT USED RIGHT NOW. 
     pi_threshold_low: int = Field(default=30, validation_alias="PI_THRESHOLD_LOW")
     pi_threshold_medium: int = Field(default=50, validation_alias="PI_THRESHOLD_MEDIUM")
     pi_threshold_high: int = Field(default=80, validation_alias="PI_THRESHOLD_HIGH")
