@@ -223,13 +223,13 @@ class ChatService:
         # Log input arguments with content trimmed
         content_preview = content[:100] + "..." if len(content) > 100 else content
         sanitized_kwargs = error_utils.sanitize_kwargs_for_logging(kwargs)
-        
+
         logger.info(
             f"handle_chat_message called - session_id: {session_id}, "
-            f"content: '{content_preview}', model: {model}, "
+            f"content: '{sanitize_for_logging(content_preview)}', model: {model}, "
             f"selected_tools: {selected_tools}, selected_prompts: {selected_prompts}, selected_data_sources: {selected_data_sources}, "
             f"only_rag: {only_rag}, tool_choice_required: {tool_choice_required}, "
-            f"user_email: {user_email}, agent_mode: {agent_mode}, "
+            f"user_email: {sanitize_for_logging(user_email)}, agent_mode: {agent_mode}, "
             f"kwargs: {sanitized_kwargs}"
         )
 

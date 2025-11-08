@@ -96,7 +96,7 @@ class MCPToolManager:
 
     async def _initialize_single_client(self, server_name: str, config: Dict[str, Any]) -> Optional[Client]:
         """Initialize a single MCP client. Returns None if initialization fails."""
-        logger.info(f"=== Initializing client for server '{server_name}' ===\n\nServer config: {config}")
+        logger.info(f"=== Initializing client for server '{sanitize_for_logging(server_name)}' ===\n\nServer config: {sanitize_for_logging(str(config))}")
         try:
             transport_type = self._determine_transport_type(config)
             logger.info(f"Determined transport type: {transport_type}")
