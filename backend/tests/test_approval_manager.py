@@ -167,8 +167,8 @@ class TestToolApprovalManager:
             )
         
         # Start approval task
-        approval_task = asyncio.create_task(approve_after_delay())
-        
+        asyncio.create_task(approve_after_delay())
+
         # Wait for response
         response = await request.wait_for_response(timeout=1.0)
         
@@ -212,7 +212,7 @@ class TestToolApprovalManager:
             await asyncio.sleep(0.05)
             manager.handle_approval_response("test_3", approved=True)
 
-        approval_task = asyncio.create_task(approve_requests())
+        asyncio.create_task(approve_requests())
 
         # Wait for all responses
         response1 = await request1.wait_for_response(timeout=1.0)
@@ -246,7 +246,7 @@ class TestToolApprovalManager:
                 arguments={"code": "print('hello')"}  # Same as original
             )
 
-        approval_task = asyncio.create_task(approve())
+        asyncio.create_task(approve())
         response = await request.wait_for_response(timeout=1.0)
 
         assert response["approved"] is True
@@ -291,7 +291,7 @@ class TestToolApprovalManager:
                 # No reason provided
             )
 
-        approval_task = asyncio.create_task(reject())
+        _ = asyncio.create_task(reject())
         response = await request.wait_for_response(timeout=1.0)
 
         assert response["approved"] is False
@@ -386,7 +386,7 @@ class TestToolApprovalManager:
                 arguments=edited_args
             )
 
-        approval_task = asyncio.create_task(approve())
+        asyncio.create_task(approve())
         response = await request.wait_for_response(timeout=1.0)
 
         assert response["approved"] is True
