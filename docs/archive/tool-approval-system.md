@@ -18,8 +18,7 @@ The tool approval system allows administrators to configure which tools require 
 
 Tool approval settings are managed in JSON configuration files:
 
-- **Defaults**: `config/defaults/tool-approvals.json`
-- **Overrides**: `config/overrides/tool-approvals.json`
+
 
 ### Configuration Format
 

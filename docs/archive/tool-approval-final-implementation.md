@@ -140,7 +140,7 @@ useEffect(() => {
 
 ### Example 1: Admin Requires Specific Tools
 
-**Backend config** (`config/overrides/tool-approvals.json`):
+
 ```json
 {
   "require_approval_by_default": false,
