@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 import litellm
 from litellm import acompletion
 from .models import LLMResponse
+from core.execution_context import log_llm_call, log_llm_response
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,16 @@ class LiteLLMCaller:
         
         try:
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
-            logger.info(f"Plain LLM call: {len(messages)} messages, {total_chars} chars")
+            
+            # Log LLM call with execution context
+            log_llm_call(
+                logger,
+                model=model_name,
+                message_count=len(messages),
+                has_tools=False,
+                has_rag=False,
+                total_chars=total_chars
+            )
             
             response = await acompletion(
                 model=litellm_model,
@@ -113,7 +123,16 @@ class LiteLLMCaller:
             )
             
             content = response.choices[0].message.content or ""
-            logger.info(f"LLM response preview: '{content[:200]}{'...' if len(content) > 200 else ''}'")
+            
+            # Log LLM response with execution context
+            log_llm_response(
+                logger,
+                model=model_name,
+                content_length=len(content),
+                tool_calls_count=0,
+                tokens_used=response.usage.total_tokens if hasattr(response, 'usage') and response.usage else None
+            )
+            
             return content
             
         except Exception as exc:

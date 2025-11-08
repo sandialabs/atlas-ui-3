@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Callable, Awaitable
 from domain.messages.models import ToolCall, ToolResult
 from interfaces.llm import LLMResponse
 from core.capabilities import create_download_url
+from core.execution_context import log_tool_execution, ExecutionPhase
 from .notification_utils import _sanitize_filename_value  # reuse same filename sanitizer for UI args
 from ..approval_manager import get_approval_manager
 
@@ -268,6 +269,14 @@ async def execute_single_tool(
         # Send tool start notification with sanitized args
         await notification_utils.notify_tool_start(tool_call, display_args, update_callback)
 
+        # Log tool execution start
+        log_tool_execution(
+            logger,
+            tool_call.function.name,
+            status="started",
+            args_count=len(filtered_args)
+        )
+
         # Create tool call object and execute with filtered args only
         tool_call_obj = ToolCall(
             id=tool_call.id,
@@ -283,6 +292,20 @@ async def execute_single_tool(
                 # pass update callback so MCP client can emit progress
                 "update_callback": update_callback,
             }
+        )
+
+        # Log tool execution completion
+        result_summary = f"Success: {result.success}"
+        if hasattr(result, 'content') and result.content:
+            content_preview = str(result.content)[:100]
+            result_summary += f", content_len={len(str(result.content))}"
+        
+        log_tool_execution(
+            logger,
+            tool_call.function.name,
+            status="completed",
+            result_summary=result_summary,
+            success=result.success
         )
 
         # If arguments were edited, prepend a note to the result for LLM context
@@ -305,17 +328,26 @@ async def execute_single_tool(
         return result
 
     except Exception as e:
-        logger.error(f"Error executing tool {tool_call.function.name}: {e}")
+        error_msg = str(e)
+        logger.error(f"Error executing tool {tool_call.function.name}: {error_msg}")
+        
+        # Log tool execution error
+        log_tool_execution(
+            logger,
+            tool_call.function.name,
+            status="failed",
+            error=error_msg
+        )
         
         # Send tool error notification
-        await notification_utils.notify_tool_error(tool_call, str(e), update_callback)
+        await notification_utils.notify_tool_error(tool_call, error_msg, update_callback)
         
         # Return error result instead of raising
         return ToolResult(
             tool_call_id=tool_call.id,
-            content=f"Tool execution failed: {str(e)}",
+            content=f"Tool execution failed: {error_msg}",
             success=False,
-            error=str(e)
+            error=error_msg
         )
 
 
