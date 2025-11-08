@@ -108,7 +108,7 @@ class ToolApprovalManager:
         Returns:
             True if request was found and handled, False otherwise
         """
-        logger.info(f"handle_approval_response called: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={approved}")
+        logger.info(f"handle_approval_response called: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={sanitize_for_logging(approved)}")
         logger.info(f"Pending requests: {[sanitize_for_logging(key) for key in self._pending_requests.keys()]}")
         
         request = self._pending_requests.get(tool_call_id)
