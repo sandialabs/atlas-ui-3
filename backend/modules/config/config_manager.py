@@ -64,6 +64,8 @@ class MCPServerConfig(BaseModel):
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
+    require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
+    allow_edit: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) allowing argument editing
 
 
 class MCPConfig(BaseModel):
@@ -76,6 +78,27 @@ class MCPConfig(BaseModel):
         """Convert dict values to MCPServerConfig objects."""
         if isinstance(v, dict):
             return {name: MCPServerConfig(**config) if isinstance(config, dict) else config 
+                   for name, config in v.items()}
+        return v
+
+
+class ToolApprovalConfig(BaseModel):
+    """Configuration for a single tool's approval settings."""
+    require_approval: bool = False
+    allow_edit: bool = True
+
+
+class ToolApprovalsConfig(BaseModel):
+    """Configuration for tool approvals."""
+    require_approval_by_default: bool = False
+    tools: Dict[str, ToolApprovalConfig] = Field(default_factory=dict)
+    
+    @field_validator('tools', mode='before')
+    @classmethod
+    def validate_tools(cls, v):
+        """Convert dict values to ToolApprovalConfig objects."""
+        if isinstance(v, dict):
+            return {name: ToolApprovalConfig(**config) if isinstance(config, dict) else config 
                    for name, config in v.items()}
         return v
 
@@ -115,7 +138,12 @@ class AppSettings(BaseSettings):
     def agent_mode_available(self) -> bool:
         """Maintain backward compatibility for code still referencing agent_mode_available."""
         return self.feature_agent_mode_available
-    
+
+    # Tool approval settings
+    require_tool_approval_by_default: bool = False
+    # When true, all tools require approval (admin-enforced), overriding per-tool and default settings
+    force_tool_approval_globally: bool = Field(default=False, validation_alias="FORCE_TOOL_APPROVAL_GLOBALLY")
+
     # LLM Health Check settings
     llm_health_check_interval: int = 5  # minutes
     
@@ -190,6 +218,7 @@ class AppSettings(BaseSettings):
     llm_config_file: str = Field(default="llmconfig.yml", validation_alias="LLM_CONFIG_FILE")
     help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
+    tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
     
     # Config directory paths
     app_config_overrides: str = Field(default="config/overrides", validation_alias="APP_CONFIG_OVERRIDES")
@@ -226,6 +255,7 @@ class ConfigManager:
         self._llm_config: Optional[LLMConfig] = None
         self._mcp_config: Optional[MCPConfig] = None
         self._rag_mcp_config: Optional[MCPConfig] = None
+        self._tool_approvals_config: Optional[ToolApprovalsConfig] = None
     
     def _search_paths(self, file_name: str) -> List[Path]:
         """Generate common search paths for a configuration file.
@@ -435,6 +465,41 @@ class ConfigManager:
 
         return self._rag_mcp_config
     
+    @property
+    def tool_approvals_config(self) -> ToolApprovalsConfig:
+        """Get tool approvals configuration built from mcp.json and env variables (cached)."""
+        if self._tool_approvals_config is None:
+            try:
+                # Get default from environment
+                default_require_approval = self.app_settings.require_tool_approval_by_default
+
+                # Build tool-specific configs from MCP servers (Option B):
+                # Only include entries explicitly listed under require_approval.
+                tools_config: Dict[str, ToolApprovalConfig] = {}
+
+                for server_name, server_config in self.mcp_config.servers.items():
+                    require_approval_list = server_config.require_approval or []
+
+                    for tool_name in require_approval_list:
+                        full_tool_name = f"{server_name}_{tool_name}"
+                        # Mark as explicitly requiring approval; allow_edit is moot for requirement
+                        tools_config[full_tool_name] = ToolApprovalConfig(
+                            require_approval=True,
+                            allow_edit=True  # UI always allows edits; keep True for compatibility
+                        )
+
+                self._tool_approvals_config = ToolApprovalsConfig(
+                    require_approval_by_default=default_require_approval,
+                    tools=tools_config
+                )
+                logger.info(f"Built tool approvals config from mcp.json with {len(tools_config)} tool-specific settings (default: {default_require_approval})")
+
+            except Exception as e:
+                logger.error(f"Failed to build tool approvals configuration: {e}", exc_info=True)
+                self._tool_approvals_config = ToolApprovalsConfig()
+
+        return self._tool_approvals_config
+    
     def _validate_mcp_compliance_levels(self, config: MCPConfig, config_type: str):
         """Validate compliance levels for all MCP servers."""
         try:
@@ -459,6 +524,7 @@ class ConfigManager:
         self._llm_config = None
         self._mcp_config = None
         self._rag_mcp_config = None
+        self._tool_approvals_config = None
         logger.info("Configuration cache cleared, will reload on next access")
     
     def validate_config(self) -> Dict[str, bool]:

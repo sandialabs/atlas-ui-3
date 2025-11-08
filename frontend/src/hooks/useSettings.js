@@ -3,7 +3,8 @@ import { useState, useEffect } from 'react'
 const DEFAULT_SETTINGS = {
   llmTemperature: 0.7,
   maxIterations: 10,
-  agentLoopStrategy: 'think-act'
+  agentLoopStrategy: 'think-act',
+  autoApproveTools: false  // User-level auto-approval for non-admin-required tools
 }
 
 export function useSettings() {

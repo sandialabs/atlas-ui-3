@@ -3,6 +3,7 @@ Basic chat backend implementing the modular architecture.
 Focuses on essential chat functionality only.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -217,44 +218,54 @@ async def websocket_endpoint(websocket: WebSocket):
     chat_service = app_factory.create_chat_service(connection_adapter)
     
     logger.info(f"WebSocket connection established for session {sanitize_for_logging(str(session_id))}")
-    
+
     try:
         while True:
             data = await websocket.receive_json()
             message_type = data.get("type")
-            
+
+            # Debug: Log ALL incoming messages
+            logger.info(
+                "WS RECEIVED message_type=[%s], data keys=%s",
+                sanitize_for_logging(message_type),
+                [f"[{sanitize_for_logging(key)}]" for key in data.keys()]
+            )
+
             if message_type == "chat":
-                # Handle chat message with streaming updates
-                try:
-                    await chat_service.handle_chat_message(
-                        session_id=session_id,
-                        content=data.get("content", ""),
-                        model=data.get("model", ""),
-                        selected_tools=data.get("selected_tools"),
-                        selected_prompts=data.get("selected_prompts"),
-                        selected_data_sources=data.get("selected_data_sources"),
-                        only_rag=data.get("only_rag", False),
-                        tool_choice_required=data.get("tool_choice_required", False),
-                        user_email=data.get("user"),
-                        agent_mode=data.get("agent_mode", False),
-                        agent_max_steps=data.get("agent_max_steps", 10),
-                        temperature=data.get("temperature", 0.7),
-                        agent_loop_strategy=data.get("agent_loop_strategy"),
-                        update_callback=lambda message: websocket_update_callback(websocket, message),
-                        files=data.get("files")
-                    )
-                    # Final response is already sent via callbacks, but we keep this for backward compatibility
-                except ValidationError as e:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": str(e)
-                    })
-                except Exception as e:
-                    logger.error(f"Error in chat handler: {e}", exc_info=True)
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "An unexpected error occurred"
-                    })
+                # Handle chat message in background so we can still receive approval responses
+                async def handle_chat():
+                    try:
+                        await chat_service.handle_chat_message(
+                            session_id=session_id,
+                            content=data.get("content", ""),
+                            model=data.get("model", ""),
+                            selected_tools=data.get("selected_tools"),
+                            selected_prompts=data.get("selected_prompts"),
+                            selected_data_sources=data.get("selected_data_sources"),
+                            only_rag=data.get("only_rag", False),
+                            tool_choice_required=data.get("tool_choice_required", False),
+                            user_email=data.get("user"),
+                            agent_mode=data.get("agent_mode", False),
+                            agent_max_steps=data.get("agent_max_steps", 10),
+                            temperature=data.get("temperature", 0.7),
+                            agent_loop_strategy=data.get("agent_loop_strategy"),
+                            update_callback=lambda message: websocket_update_callback(websocket, message),
+                            files=data.get("files")
+                        )
+                    except ValidationError as e:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e)
+                        })
+                    except Exception as e:
+                        logger.error(f"Error in chat handler: {e}", exc_info=True)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "An unexpected error occurred"
+                        })
+
+                # Start chat handling in background
+                asyncio.create_task(handle_chat())
                 
             elif message_type == "download_file":
                 # Handle file download
@@ -283,11 +294,34 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 await websocket.send_json(response)
 
+            elif message_type == "tool_approval_response":
+                # Handle tool approval response
+                logger.info(f"Received tool approval response: {sanitize_for_logging(str(data))}")
+                from application.chat.approval_manager import get_approval_manager
+                approval_manager = get_approval_manager()
+                
+                tool_call_id = data.get("tool_call_id")
+                approved = data.get("approved", False)
+                arguments = data.get("arguments")
+                reason = data.get("reason")
+
+                logger.info(f"Processing approval: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={approved}")
+                
+                result = approval_manager.handle_approval_response(
+                    tool_call_id=tool_call_id,
+                    approved=approved,
+                    arguments=arguments,
+                    reason=reason
+                )
+                
+                logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
+                # No response needed - the approval will unblock the waiting tool execution
+
             else:
-                logger.warning(f"Unknown message type: {message_type}")
+                logger.warning(f"Unknown message type: {sanitize_for_logging(message_type)}")
                 await websocket.send_json({
                     "type": "error",
-                    "message": f"Unknown message type: {message_type}"
+                    "message": f"Unknown message type: {sanitize_for_logging(message_type)}"
                 })
                 
     except WebSocketDisconnect:

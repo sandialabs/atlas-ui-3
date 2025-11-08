@@ -10,7 +10,9 @@
     "author": "Chat UI Team",
     "short_description": "Mathematical calculator",
     "help_email": "support@chatui.example.com",
-    "compliance_level": "Public"
+    "compliance_level": "Public",
+    "require_approval": [],
+    "allow_edit": ["evaluate"]
   },
 
   "pptx_generator": {
@@ -33,7 +35,9 @@
     "author": "Chat UI Team",
     "short_description": "PDF text extraction and analysis",
     "help_email": "support@chatui.example.com",
-    "compliance_level": "SOC2"
+    "compliance_level": "SOC2",
+    "require_approval": ["generate_report_about_pdf", "word_frequency_pdf"],
+    "allow_edit": ["generate_report_about_pdf", "word_frequency_pdf"]
   },
   "file_size_test": {
     "command": ["python", "mcp/file_size_test/main.py"],
