@@ -26,16 +26,40 @@ This MCP server provides database simulation capabilities over HTTP/SSE transpor
 
 ### Starting the Server
 
+#### Using the run.sh script (recommended)
+
 ```bash
-# Default HTTP mode
-python main.py
+# Use default tokens
+./run.sh
 
-# STDIO mode
-python main.py --stdio
+# Use custom tokens
+MCP_MOCK_TOKEN_1="my-custom-token-1" MCP_MOCK_TOKEN_2="my-custom-token-2" ./run.sh
 
-# SSE mode  
-python main.py --sse
+# Run with specific transport
+./run.sh --stdio    # STDIO transport
+./run.sh --sse      # SSE transport
+./run.sh            # HTTP transport (default)
 ```
+
+#### Direct Python execution
+
+```bash
+# Set environment variables
+export MCP_MOCK_TOKEN_1="test-api-key-123"
+export MCP_MOCK_TOKEN_2="another-test-key-456"
+
+# Run the server
+python main.py              # HTTP transport (default)
+python main.py --stdio      # STDIO transport
+python main.py --sse        # SSE transport
+```
+
+### Authentication
+
+The server uses Bearer token authentication. Configure your MCP client with one of these tokens:
+
+- `MCP_MOCK_TOKEN_1` (default: "test-api-key-123") - Full access (read/write)
+- `MCP_MOCK_TOKEN_2` (default: "another-test-key-456") - Read-only access
 
 ### Server Endpoints
 
@@ -50,6 +74,7 @@ Add this configuration to your `mcp.json` file:
 {
   "mcp-http-mock": {
     "url": "http://127.0.0.1:8005/mcp",
+    "auth_token": "test-api-key-123",
     "groups": ["users"],
     "is_exclusive": false,
     "description": "Database simulation MCP server providing SQL-like query capabilities over HTTP/SSE transport",
@@ -59,6 +84,16 @@ Add this configuration to your `mcp.json` file:
   }
 }
 ```
+
+## Security Warning
+
+⚠️ **This server uses `StaticTokenVerifier` which is designed ONLY for development and testing.** Never use this in production environments. Use proper JWT/OAuth providers instead.
+
+## Configuration
+
+Tokens can be configured via environment variables:
+- `MCP_MOCK_TOKEN_1`: First authentication token (default: "test-api-key-123")
+- `MCP_MOCK_TOKEN_2`: Second authentication token (default: "another-test-key-456")
 
 ## Sample Data
 

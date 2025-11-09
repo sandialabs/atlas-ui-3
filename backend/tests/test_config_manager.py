@@ -4,7 +4,6 @@ Tests the centralized configuration management system without
 modifying the actual environment or configuration files.
 """
 
-import os
 import pytest
 from pathlib import Path
 from backend.modules.config.config_manager import (

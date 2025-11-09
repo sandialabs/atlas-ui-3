@@ -44,7 +44,7 @@ def resolve_env_var(value: Optional[str]) -> Optional[str]:
         return None
 
     # Pattern: ${VAR_NAME}
-    # Uses match() not search() to prevent partial substitution like "prefix-${VAR}"
+    # Uses match() not search() to ensure pattern matches from the beginning of the string
     pattern = r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}'
     match = re.match(pattern, value)
 

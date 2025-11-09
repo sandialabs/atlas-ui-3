@@ -7,6 +7,7 @@ It provides tools for querying simulated tables and retrieving data.
 """
 
 import json
+import os
 import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
@@ -40,13 +41,16 @@ SIMULATED_DATABASE = {
 }
 
 # Define test API keys
+# WARNING: StaticTokenVerifier is for DEVELOPMENT/TESTING ONLY.
+# Never use in production - use proper JWT/OAuth providers instead.
+# Tokens are read from environment variables for better configuration management
 verifier = StaticTokenVerifier(
     tokens={
-        "test-api-key-123": {
+        os.getenv("MCP_MOCK_TOKEN_1", "test-api-key-123"): {
             "user_id": "test_user",
             "scopes": ["read", "write"]
         },
-        "another-test-key-456": {
+        os.getenv("MCP_MOCK_TOKEN_2", "another-test-key-456"): {
             "user_id": "another_user",
             "scopes": ["read"]
         }

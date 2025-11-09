@@ -1,8 +1,6 @@
-import os
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from backend.modules.mcp_tools.client import MCPToolManager
-from backend.modules.config.config_manager import resolve_env_var
 
 
 class TestMCPClientAuthentication:

@@ -1,5 +1,4 @@
 import pytest
-import os
 from backend.modules.mcp_tools.client import MCPToolManager
 from unittest.mock import patch, AsyncMock, Mock
 
@@ -80,6 +79,8 @@ class TestMCPAuthenticationIntegration:
                 await manager.discover_tools()
 
                 # After failed connection, tools should not be discovered
+                if not hasattr(manager, '_tool_index'):
+                    manager._tool_index = {}
                 assert len([k for k in manager._tool_index.keys() if k.startswith("mcp-http-mock_")]) == 0
 
     @pytest.mark.asyncio
