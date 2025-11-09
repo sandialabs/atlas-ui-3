@@ -1,117 +1,205 @@
 #!/bin/bash
 
-# Parse command line arguments
+# Store the project root directory
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_ROOT"
+
+# Global variables
+MCP_PID=""
 ONLY_FRONTEND=false
 ONLY_BACKEND=false
-while getopts "fb" opt; do
-  case $opt in
-    f)
-      ONLY_FRONTEND=true
-      ;;
-    b)
-      ONLY_BACKEND=true
-      ;;
-  esac
-done
+START_MCP_MOCK=false
 
-# clear the log by setting to ""
-# backend/logs/app.jsonl
+# =============================================================================
+# CLEANUP FUNCTIONS
+# =============================================================================
 
-# Configuration
-USE_NEW_FRONTEND=${USE_NEW_FRONTEND:-true}
-
-# Read USE_MOCK_S3 from .env file
-if [ -f .env ]; then
-    USE_MOCK_S3=$(grep -E "^USE_MOCK_S3=" .env | cut -d '=' -f2)
-else
-    USE_MOCK_S3="true"  # Default to mock if no .env
-fi
-
-# Only start MinIO if not using mock S3
-if [ "$USE_MOCK_S3" = "true" ]; then
-    echo "Using Mock S3 (no Docker required)"
-else
-    # Check if MinIO is running
-    if ! docker ps | grep -q atlas-minio; then
-        echo "MinIO is not running. Starting MinIO with docker-compose..."
-        docker-compose up -d minio minio-init
-        echo "MinIO started successfully"
-        sleep 3
-    else
-        echo "MinIO is already running"
+cleanup_mcp() {
+    if [ ! -z "$MCP_PID" ] && kill -0 $MCP_PID 2>/dev/null; then
+        echo "Stopping MCP mock server (PID: $MCP_PID)..."
+        kill $MCP_PID
+        wait $MCP_PID 2>/dev/null
+        echo "MCP mock server stopped."
     fi
-fi
+}
 
-# Kill any running uvicorn processes (skip if only rebuilding frontend)
-if [ "$ONLY_FRONTEND" = false ] && [ "$ONLY_BACKEND" = false ]; then
-    echo "Killing any running uvicorn processes... and python processes"
-    pkill -f uvicorn
-    # also kill python
+cleanup_processes() {
+    echo "Killing any running uvicorn processes for main backend... and python processes"
+    pkill -f "uvicorn main:app"
     pkill -f python
-    # wait a few seconds for processes to terminate
     sleep 2
     clear
+}
+
+cleanup_logs() {
     echo "Clearing log for fresh start"
-    mkdir -p ./logs
-    echo "NEW LOG" > ./logs/app.jsonl
-fi
+    mkdir -p "$PROJECT_ROOT/logs"
+    echo "NEW LOG" > "$PROJECT_ROOT/logs/app.jsonl"
+}
 
-# cd /workspaces/atlas-ui-3-11
-. .venv/bin/activate
+# =============================================================================
+# INFRASTRUCTURE FUNCTIONS
+# =============================================================================
 
-echo "Setting MCP_EXTERNAL_API_TOKEN for testing purposes."
-# Set test API key for mock MCP server (override with your own if needed)
-if [ -z "$MCP_EXTERNAL_API_TOKEN" ]; then
-    export MCP_EXTERNAL_API_TOKEN="test-api-key-123"
-fi
-
-# Build frontend if not backend only
-if [ "$ONLY_BACKEND" = false ]; then
-    if [ "$USE_NEW_FRONTEND" = true ]; then
-        echo "Using new frontend in frontend"
-        cd frontend
-        npm install
-        # Set VITE_APP_NAME for build (required for index.html template replacement)
-        export VITE_APP_NAME="Chat UI"
-        npm run build
-        cd ../backend
-    else
-        echo "Using old frontend in frontend"
-        cd frontend
-        # Set VITE_APP_NAME for build (required for index.html template replacement)
-        export VITE_APP_NAME="Chat UI"
-        npm run build
-        cd ../backend
+setup_minio() {
+    local use_mock_s3="${USE_MOCK_S3:-true}"
+    
+    # Read USE_MOCK_S3 from .env file if it exists
+    if [ -f "$PROJECT_ROOT/.env" ]; then
+        use_mock_s3=$(grep -E "^USE_MOCK_S3=" "$PROJECT_ROOT/.env" | cut -d '=' -f2)
     fi
-fi
+    
+    if [ "$use_mock_s3" = "true" ]; then
+        echo "Using Mock S3 (no Docker required)"
+    else
+        if ! docker ps | grep -q atlas-minio; then
+            echo "MinIO is not running. Starting MinIO with docker-compose..."
+            cd "$PROJECT_ROOT"
+            docker-compose up -d minio minio-init
+            echo "MinIO started successfully"
+            sleep 3
+        else
+            echo "MinIO is already running"
+        fi
+    fi
+    cd "$PROJECT_ROOT"
+}
 
-# If only frontend flag is set, exit here
-if [ "$ONLY_FRONTEND" = true ]; then
-    echo "Frontend rebuilt successfully. Exiting as requested."
-    exit 0
-fi
+setup_environment() {
+    cd "$PROJECT_ROOT"
+    . .venv/bin/activate
+    
+    echo "Setting MCP_EXTERNAL_API_TOKEN for testing purposes."
+    if [ -z "$MCP_EXTERNAL_API_TOKEN" ]; then
+        export MCP_EXTERNAL_API_TOKEN="test-api-key-123"
+    fi
+    cd "$PROJECT_ROOT"
+}
 
-# If only backend flag is set, start backend services and exit
-if [ "$ONLY_BACKEND" = true ]; then
-    echo "Killing any running uvicorn processes... and python processes"
-    pkill -f uvicorn
-    # also kill python
-    pkill -f python
-    # wait a few seconds for processes to terminate
-    sleep 2
-    clear
-    echo "Clearing log for fresh start"
-    mkdir -p ./logs
-    echo "NEW LOG" > ./logs/app.jsonl
+# =============================================================================
+# MCP MOCK SERVER FUNCTIONS
+# =============================================================================
 
-    cd backend
-    uvicorn main:app --host 0.0.0.0 --port 8000 &
-    echo "Backend server started. Exiting as requested."
-    exit 0
-fi
+start_mcp_mock() {
+    if [ "$START_MCP_MOCK" = true ]; then
+        echo "Starting MCP mock server..."
+        cd "$PROJECT_ROOT/mocks/mcp-http-mock"
+        ./run.sh &
+        MCP_PID=$!
+        echo "MCP mock server started with PID: $MCP_PID"
+        cd "$PROJECT_ROOT"
+    fi
+}
 
-uvicorn main:app --port 8000 &
-echo "Server started"
+# =============================================================================
+# FRONTEND BUILD FUNCTIONS
+# =============================================================================
+
+build_frontend() {
+    local use_new_frontend="${USE_NEW_FRONTEND:-true}"
+    
+    echo "Building frontend..."
+    cd "$PROJECT_ROOT/frontend"
+    npm install
+    export VITE_APP_NAME="Chat UI"
+    npm run build
+    cd "$PROJECT_ROOT"
+}
+
+# =============================================================================
+# BACKEND SERVER FUNCTIONS
+# =============================================================================
+
+start_backend() {
+    local port="${1:-8000}"
+    local host="${2:-127.0.0.1}"
+    
+    cd "$PROJECT_ROOT/backend"
+    uvicorn main:app --host "$host" --port "$port" &
+    echo "Backend server started on $host:$port"
+    cd "$PROJECT_ROOT"
+}
+
+# =============================================================================
+# MAIN EXECUTION FLOW
+# =============================================================================
+
+parse_arguments() {
+    while getopts "fbm" opt; do
+        case $opt in
+            f)
+                ONLY_FRONTEND=true
+                ;;
+            b)
+                ONLY_BACKEND=true
+                ;;
+            m)
+                START_MCP_MOCK=true
+                ;;
+            \?)
+                echo "Usage: $0 [-f] [-b] [-m]"
+                echo "  -f    Only rebuild frontend"
+                echo "  -b    Only start backend"
+                echo "  -m    Start MCP mock server"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+main() {
+    # Set trap to cleanup MCP on script exit
+    trap cleanup_mcp EXIT
+    
+    # Parse command line arguments
+    parse_arguments "$@"
+    
+    # Setup infrastructure
+    setup_minio
+    setup_environment
+    
+    # Handle frontend-only mode
+    if [ "$ONLY_FRONTEND" = true ]; then
+        build_frontend
+        echo "Frontend rebuilt successfully. Exiting as requested."
+        exit 0
+    fi
+    
+    # Handle backend-only mode
+    if [ "$ONLY_BACKEND" = true ]; then
+        cleanup_processes
+        cleanup_logs
+        start_mcp_mock
+        start_backend 8000 "0.0.0.0"
+        echo "Backend server started."
+        echo "Press Ctrl+C to stop all services."
+        # Keep script running to prevent cleanup
+        wait
+        exit 0
+    fi
+    
+    # Full startup mode (default)
+    cleanup_processes
+    cleanup_logs
+    build_frontend
+    start_mcp_mock
+    start_backend 8000 "127.0.0.1"
+    
+    # Display MCP info if started
+    if [ "$START_MCP_MOCK" = true ]; then
+        echo "MCP mock server is running with PID: $MCP_PID"
+        echo "To stop the MCP mock server manually, run: kill $MCP_PID"
+    fi
+    
+    echo "All services started. Press Ctrl+C to stop."
+    cd "$PROJECT_ROOT"
+    
+    # Keep script running to prevent cleanup
+    wait
+}
+
+# Run main function with all arguments
+main "$@"
 
 
 # # print every 3 seconds saying it is running. do 10 times. print second since start

@@ -86,6 +86,21 @@ For convenience, you can use the `agent_start.sh` script, which automates the pr
 bash agent_start.sh
 ```
 
+#### Starting with MCP Mock Server
+
+If you want to test MCP functionality during development, you can start the MCP mock server alongside the main application:
+
+```bash
+# Start both the main application and MCP mock server
+bash agent_start.sh -m
+
+# Other options
+bash agent_start.sh -f    # Only rebuild frontend
+bash agent_start.sh -b    # Only start backend
+```
+
+The MCP mock server will be available at `http://127.0.0.1:8005/mcp` and provides simulated database tools for testing.
+
 After running the script, the application will be available at `http://localhost:8000`.
 
 ### Manual Setup

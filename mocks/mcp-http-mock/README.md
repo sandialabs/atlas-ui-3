@@ -24,34 +24,17 @@ This MCP server provides database simulation capabilities over HTTP/SSE transpor
 
 ## Usage
 
-### Starting the Server
+### Starting with the main application
 
-#### Using the run.sh script (recommended)
-
-```bash
-# Use default tokens
-./run.sh
-
-# Use custom tokens
-MCP_MOCK_TOKEN_1="my-custom-token-1" MCP_MOCK_TOKEN_2="my-custom-token-2" ./run.sh
-
-# Run with specific transport
-./run.sh --stdio    # STDIO transport
-./run.sh --sse      # SSE transport
-./run.sh            # HTTP transport (default)
-```
-
-#### Direct Python execution
+The MCP mock server can also be started automatically with the main application:
 
 ```bash
-# Set environment variables
-export MCP_MOCK_TOKEN_1="test-api-key-123"
-export MCP_MOCK_TOKEN_2="another-test-key-456"
+# Start both the main application and MCP mock server
+./agent_start.sh -m
 
-# Run the server
-python main.py              # HTTP transport (default)
-python main.py --stdio      # STDIO transport
-python main.py --sse        # SSE transport
+# Other flags can be combined
+./agent_start.sh -m -f  # Start MCP mock + only rebuild frontend
+./agent_start.sh -m -b  # Start MCP mock + only start backend
 ```
 
 ### Authentication
