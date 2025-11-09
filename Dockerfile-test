@@ -53,6 +53,7 @@ COPY docs/ ./docs/
 COPY scripts/ ./scripts/
 COPY test/ ./test/
 COPY test_e2e/ ./test_e2e/
+COPY mocks/ ./mocks/
 
 # Fix line endings for the entire app directory and set permissions BEFORE any npm/npx commands
 RUN find /app -type f \( -name "*.js" -o -name "*.json" -o -name "*.sh" -o -name "*.md" -o -name "*.txt" -o -name "*.py" \) -exec dos2unix {} \;
