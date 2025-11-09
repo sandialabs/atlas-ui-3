@@ -24,18 +24,25 @@ This MCP server provides database simulation capabilities over HTTP/SSE transpor
 
 ## Usage
 
-### Starting the Server
+### Starting with the main application
+
+The MCP mock server can also be started automatically with the main application:
 
 ```bash
-# Default HTTP mode
-python main.py
+# Start both the main application and MCP mock server
+./agent_start.sh -m
 
-# STDIO mode
-python main.py --stdio
-
-# SSE mode  
-python main.py --sse
+# Other flags can be combined
+./agent_start.sh -m -f  # Start MCP mock + only rebuild frontend
+./agent_start.sh -m -b  # Start MCP mock + only start backend
 ```
+
+### Authentication
+
+The server uses Bearer token authentication. Configure your MCP client with one of these tokens:
+
+- `MCP_MOCK_TOKEN_1` (default: "test-api-key-123") - Full access (read/write)
+- `MCP_MOCK_TOKEN_2` (default: "another-test-key-456") - Read-only access
 
 ### Server Endpoints
 
@@ -50,6 +57,7 @@ Add this configuration to your `mcp.json` file:
 {
   "mcp-http-mock": {
     "url": "http://127.0.0.1:8005/mcp",
+    "auth_token": "test-api-key-123",
     "groups": ["users"],
     "is_exclusive": false,
     "description": "Database simulation MCP server providing SQL-like query capabilities over HTTP/SSE transport",
@@ -59,6 +67,16 @@ Add this configuration to your `mcp.json` file:
   }
 }
 ```
+
+## Security Warning
+
+⚠️ **This server uses `StaticTokenVerifier` which is designed ONLY for development and testing.** Never use this in production environments. Use proper JWT/OAuth providers instead.
+
+## Configuration
+
+Tokens can be configured via environment variables:
+- `MCP_MOCK_TOKEN_1`: First authentication token (default: "test-api-key-123")
+- `MCP_MOCK_TOKEN_2`: Second authentication token (default: "another-test-key-456")
 
 ## Sample Data
 

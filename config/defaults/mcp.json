@@ -67,6 +67,13 @@
     "short_description": "AI behavior prompts",
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
+  },
+  "external-api-example": {
+    "url": "http://127.0.0.1:8005/mcp",
+    "transport": "http",
+    "groups": ["users"],
+    "description": "Mock HTTP MCP server for testing authentication",
+    "auth_token": "${MCP_EXTERNAL_API_TOKEN}"
   }
  
 }

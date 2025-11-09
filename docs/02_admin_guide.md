@@ -161,6 +161,7 @@ Here is an example of a server configuration that uses all available options.
 *   **`cwd`**: (string) The working directory from which to run the `command`.
 *   **`url`**: (string) For servers using `http` or `sse` transport, this is the URL of the server's endpoint.
 *   **`transport`**: (string) The communication protocol to use. Can be `stdio`, `http`, or `sse`. This takes priority over auto-detection.
+*   **`auth_token`**: (string) For HTTP/SSE servers, the bearer token used for authentication. Use environment variable substitution (e.g., `"${MCP_SERVER_TOKEN}"`) to avoid storing secrets in config files. Stdio servers ignore this field.
 *   **`compliance_level`**: (string) The security compliance level of this server (e.g., "Public", "Internal", "SOC2"). This is used for data segregation.
 *   **`require_approval`**: (list of strings) A list of tool names (without the server prefix) that will always require user approval before execution.
 *   **`allow_edit`**: (list of strings) A list of tool names for which the user is allowed to edit the arguments before approving. (Note: This is a legacy field and may be deprecated; the UI may allow editing for all approval requests).
@@ -171,6 +172,43 @@ The system can connect to different types of MCP servers:
 *   **Standard I/O (`stdio`)**: Servers that are started as a subprocess and communicate over `stdin` and `stdout`.
 *   **HTTP (`http`)**: Servers that expose a standard HTTP endpoint.
 *   **Server-Sent Events (`sse`)**: Servers that stream responses over an HTTP connection.
+
+### MCP Server Authentication
+
+For MCP servers that require authentication, you can configure bearer token authentication using the `auth_token` field.
+
+#### Environment Variable Substitution
+
+**Security Best Practice**: Never store API keys or tokens directly in configuration files. Instead, use environment variable substitution:
+
+```json
+{
+  "my-external-api": {
+    "url": "https://api.example.com/mcp",
+    "transport": "http",
+    "auth_token": "${MCP_EXTERNAL_API_TOKEN}",
+    "groups": ["users"]
+  }
+}
+```
+
+Then set the environment variable:
+```bash
+export MCP_EXTERNAL_API_TOKEN="your-secret-api-key"
+```
+
+#### How It Works
+
+1. **HTTP/SSE Servers**: The `auth_token` value is passed as a Bearer token in the `Authorization` header when connecting to the MCP server.
+2. **Stdio Servers**: The `auth_token` field is ignored since stdio servers don't use HTTP authentication.
+3. **Environment Variables**: If the token contains `${VAR_NAME}` pattern, it's replaced with the value of the environment variable `VAR_NAME`.
+4. **Error Handling**: If a required environment variable is missing, the server initialization will fail gracefully with a clear error message.
+
+#### Security Considerations
+
+- **Recommended**: Use environment variables for all production tokens
+- **Alternative**: For development/testing, you can use direct string values (not recommended for production)
+- **Never**: Commit tokens to `config/defaults/mcp.json` or any version-controlled files
 
 ### Access Control with Groups
 

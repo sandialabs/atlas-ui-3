@@ -10,6 +10,7 @@ from fastmcp import Client
 from modules.config import config_manager
 from core.auth_utils import create_authorization_manager
 from core.utils import sanitize_for_logging
+from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -112,17 +113,22 @@ class MCPToolManager:
                 if not url.startswith(("http://", "https://")):
                     url = f"http://{url}"
                     logger.debug(f"Added http:// protocol to URL: {url}")
+
+                raw_token = config.get("auth_token")
+                try:
+                    token = resolve_env_var(raw_token)  # Resolve ${ENV_VAR} if present
+                except ValueError as e:
+                    logger.error(f"Failed to resolve auth_token for {server_name}: {e}")
+                    return None  # Skip this server
                 
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
-                    from fastmcp.client.transports import SSETransport
-                    transport = SSETransport(url)
-                    client = Client(transport)
+                    client = Client(url, auth=token)
                 else:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
-                    client = Client(url)
+                    client = Client(url, auth=token)
                 
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
                 return client
@@ -354,6 +360,22 @@ class MCPToolManager:
             tool_names = [tool.name for tool in server_data['tools']]
             logger.info(f"  {server_name}: {tool_count} tools {tool_names}")
         logger.info("=== END TOOL DISCOVERY SUMMARY ===")
+
+        # Build tool index for quick lookups
+        self._tool_index = {}
+        for server_name, server_data in self.available_tools.items():
+            if server_name == "canvas":
+                self._tool_index["canvas_canvas"] = {
+                    'server': 'canvas',
+                    'tool': None  # pseudo tool
+                }
+            else:
+                for tool in server_data.get('tools', []):
+                    full_name = f"{server_name}_{tool.name}"
+                    self._tool_index[full_name] = {
+                        'server': server_name,
+                        'tool': tool
+                    }
     
     async def _discover_prompts_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover prompts for a single server. Returns server prompts data."""
