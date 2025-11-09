@@ -127,6 +127,7 @@ After creating your server, you must register it in `config/overrides/mcp.json`.
 *   **`cwd`**: The working directory from which to run the command.
 *   **`groups`**: A list of user groups that can access this server's tools.
 *   **`description`**: A description of the server shown in the UI.
+*   **`auth_token`**: (optional) For HTTP/SSE servers, the bearer token for authentication. Use environment variable substitution like `"${MCP_TOKEN}"` for security.
 
 ### 4. Argument Injection
 

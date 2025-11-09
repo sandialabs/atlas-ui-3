@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from fastmcp import FastMCP
+from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 # Simulated database data
 SIMULATED_DATABASE = {
@@ -38,14 +39,30 @@ SIMULATED_DATABASE = {
     ]
 }
 
+# Define test API keys
+verifier = StaticTokenVerifier(
+    tokens={
+        "test-api-key-123": {
+            "user_id": "test_user",
+            "scopes": ["read", "write"]
+        },
+        "another-test-key-456": {
+            "user_id": "another_user",
+            "scopes": ["read"]
+        }
+    }
+)
+
 # Initialize FastMCP server
 mcp = FastMCP(
-    name="Database Simulator",
+    name="Authenticated Database Simulator",
     instructions="""
     This server simulates a database with select statement capabilities.
     Use the available tools to query users, orders, and products tables.
     You can filter, sort, and limit results as needed.
-    """
+    This server requires Bearer Token authentication.
+    """,
+    auth=verifier
 )
 
 @dataclass

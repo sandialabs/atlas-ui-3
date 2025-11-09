@@ -59,6 +59,12 @@ fi
 # cd /workspaces/atlas-ui-3-11
 . .venv/bin/activate
 
+echo "Setting MCP_EXTERNAL_API_TOKEN for testing purposes."
+# Set test API key for mock MCP server (override with your own if needed)
+if [ -z "$MCP_EXTERNAL_API_TOKEN" ]; then
+    export MCP_EXTERNAL_API_TOKEN="test-api-key-123"
+fi
+
 # Build frontend if not backend only
 if [ "$ONLY_BACKEND" = false ]; then
     if [ "$USE_NEW_FRONTEND" = true ]; then

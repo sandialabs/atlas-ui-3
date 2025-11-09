@@ -284,19 +284,328 @@ To test this feature, you will need an MCP server that is configured to require 
 
 ### Unit Testing
 
-Add tests to `backend/tests/modules/config/test_config_manager.py`:
+#### 1. Test Environment Variable Resolution
 
-1.  **Test `resolve_env_var` function**:
-    - ✅ Returns None for None input
-    - ✅ Returns literal string unchanged
-    - ✅ Resolves `${VAR_NAME}` when env var exists
-    - ✅ Raises ValueError when env var doesn't exist
-    - ✅ Handles edge cases (empty string, whitespace)
+**File:** `backend/tests/modules/config/test_config_manager.py`
 
-2.  **Test MCP client initialization** (`backend/tests/modules/mcp_tools/test_client.py`):
-    - Mock `fastmcp.Client`
-    - Assert `auth` parameter is passed correctly
-    - Test both env var and literal string tokens
+Create comprehensive tests for the `resolve_env_var()` function:
+
+```python
+import os
+import pytest
+from backend.modules.config.config_manager import resolve_env_var
+
+
+class TestResolveEnvVar:
+    """Test environment variable substitution in config values."""
+
+    def test_resolve_env_var_with_none(self):
+        """Should return None when input is None."""
+        assert resolve_env_var(None) is None
+
+    def test_resolve_env_var_with_literal_string(self):
+        """Should return literal string unchanged."""
+        assert resolve_env_var("my-literal-token") == "my-literal-token"
+
+    def test_resolve_env_var_with_existing_env_var(self, monkeypatch):
+        """Should resolve ${VAR_NAME} when env var exists."""
+        monkeypatch.setenv("TEST_TOKEN", "secret-123")
+        assert resolve_env_var("${TEST_TOKEN}") == "secret-123"
+
+    def test_resolve_env_var_with_missing_env_var(self):
+        """Should raise ValueError when env var doesn't exist."""
+        with pytest.raises(ValueError, match="Environment variable 'MISSING_VAR' is not set"):
+            resolve_env_var("${MISSING_VAR}")
+
+    def test_resolve_env_var_with_empty_string(self):
+        """Should return empty string unchanged."""
+        assert resolve_env_var("") == ""
+
+    def test_resolve_env_var_with_empty_env_var(self, monkeypatch):
+        """Should allow empty env var values."""
+        monkeypatch.setenv("EMPTY_VAR", "")
+        assert resolve_env_var("${EMPTY_VAR}") == ""
+
+    def test_resolve_env_var_with_partial_pattern(self):
+        """Should not match partial patterns like 'prefix-${VAR}'."""
+        # Only exact ${VAR} pattern is supported, not embedded in strings
+        assert resolve_env_var("prefix-${VAR}") == "prefix-${VAR}"
+
+    def test_resolve_env_var_with_invalid_pattern(self):
+        """Should return strings with invalid patterns unchanged."""
+        assert resolve_env_var("${123_INVALID}") == "${123_INVALID}"
+        assert resolve_env_var("${INVALID-NAME}") == "${INVALID-NAME}"
+        assert resolve_env_var("$VAR") == "$VAR"
+        assert resolve_env_var("{VAR}") == "{VAR}"
+
+    def test_resolve_env_var_case_sensitive(self, monkeypatch):
+        """Environment variable names should be case-sensitive."""
+        monkeypatch.setenv("MY_VAR", "value1")
+        monkeypatch.setenv("my_var", "value2")
+        assert resolve_env_var("${MY_VAR}") == "value1"
+        assert resolve_env_var("${my_var}") == "value2"
+
+    def test_resolve_env_var_with_special_chars(self, monkeypatch):
+        """Should handle env vars with special characters in values."""
+        monkeypatch.setenv("SPECIAL_TOKEN", "abc!@#$%^&*()_+-=[]{}|;:,.<>?")
+        assert resolve_env_var("${SPECIAL_TOKEN}") == "abc!@#$%^&*()_+-=[]{}|;:,.<>?"
+```
+
+#### 2. Test MCP Configuration Model
+
+**File:** `backend/tests/modules/config/test_config_manager.py`
+
+Add tests to ensure `MCPServerConfig` correctly handles the `auth_token` field:
+
+```python
+from backend.modules.config.config_manager import MCPServerConfig
+
+
+class TestMCPServerConfig:
+    """Test MCPServerConfig with auth_token field."""
+
+    def test_auth_token_is_optional(self):
+        """auth_token field should be optional."""
+        config = MCPServerConfig(
+            description="Test server",
+            command=["python", "server.py"]
+        )
+        assert config.auth_token is None
+
+    def test_auth_token_accepts_string(self):
+        """auth_token should accept string values."""
+        config = MCPServerConfig(
+            description="Test server",
+            command=["python", "server.py"],
+            auth_token="my-token-123"
+        )
+        assert config.auth_token == "my-token-123"
+
+    def test_auth_token_accepts_env_var_pattern(self):
+        """auth_token should accept environment variable patterns."""
+        config = MCPServerConfig(
+            description="Test server",
+            url="http://localhost:8000",
+            auth_token="${MY_TOKEN}"
+        )
+        assert config.auth_token == "${MY_TOKEN}"
+
+    def test_auth_token_accepts_none(self):
+        """auth_token should explicitly accept None."""
+        config = MCPServerConfig(
+            description="Test server",
+            command=["python", "server.py"],
+            auth_token=None
+        )
+        assert config.auth_token is None
+```
+
+#### 3. Test MCP Client Initialization
+
+**File:** `backend/tests/modules/mcp_tools/test_client.py`
+
+Add tests to verify auth token is passed correctly to FastMCP client:
+
+```python
+import os
+import pytest
+from unittest.mock import Mock, patch, AsyncMock
+from backend.modules.mcp_tools.client import MCPToolManager
+
+
+class TestMCPClientAuthentication:
+    """Test MCP client initialization with authentication."""
+
+    @pytest.mark.asyncio
+    @patch('backend.modules.mcp_tools.client.Client')
+    async def test_http_client_with_env_var_token(self, mock_client_class, monkeypatch):
+        """Should resolve env var and pass token to HTTP client."""
+        monkeypatch.setenv("MCP_AUTH_TOKEN", "secret-token-123")
+
+        mock_client = AsyncMock()
+        mock_client_class.return_value = mock_client
+
+        server_config = {
+            "url": "http://localhost:8000/mcp",
+            "transport": "http",
+            "auth_token": "${MCP_AUTH_TOKEN}"
+        }
+
+        # Initialize client (implementation details may vary)
+        # This test verifies the client is created with auth parameter
+        mock_client_class.assert_called_with(
+            "http://localhost:8000/mcp",
+            auth="secret-token-123"
+        )
+
+    @pytest.mark.asyncio
+    @patch('backend.modules.mcp_tools.client.Client')
+    async def test_http_client_with_literal_token(self, mock_client_class):
+        """Should pass literal token string to HTTP client."""
+        mock_client = AsyncMock()
+        mock_client_class.return_value = mock_client
+
+        server_config = {
+            "url": "http://localhost:8000/mcp",
+            "transport": "http",
+            "auth_token": "direct-token-456"
+        }
+
+        # Verify client is created with direct token
+        mock_client_class.assert_called_with(
+            "http://localhost:8000/mcp",
+            auth="direct-token-456"
+        )
+
+    @pytest.mark.asyncio
+    @patch('backend.modules.mcp_tools.client.Client')
+    async def test_http_client_without_token(self, mock_client_class):
+        """Should pass None when no auth_token specified."""
+        mock_client = AsyncMock()
+        mock_client_class.return_value = mock_client
+
+        server_config = {
+            "url": "http://localhost:8000/mcp",
+            "transport": "http"
+        }
+
+        # Verify client is created with auth=None
+        mock_client_class.assert_called_with(
+            "http://localhost:8000/mcp",
+            auth=None
+        )
+
+    @pytest.mark.asyncio
+    @patch('backend.modules.mcp_tools.client.Client')
+    async def test_sse_client_with_token(self, mock_client_class):
+        """Should pass auth token to SSE client."""
+        mock_client = AsyncMock()
+        mock_client_class.return_value = mock_client
+
+        server_config = {
+            "url": "http://localhost:8000/sse",
+            "transport": "sse",
+            "auth_token": "sse-token-789"
+        }
+
+        # Verify SSE client is created with auth parameter
+        # Note: auth goes to Client constructor, not transport
+        mock_client_class.assert_called_with(
+            "http://localhost:8000/sse",
+            auth="sse-token-789"
+        )
+
+    @pytest.mark.asyncio
+    async def test_missing_env_var_raises_error(self):
+        """Should raise clear error when env var is missing."""
+        server_config = {
+            "url": "http://localhost:8000/mcp",
+            "transport": "http",
+            "auth_token": "${MISSING_TOKEN_VAR}"
+        }
+
+        with pytest.raises(ValueError, match="Environment variable 'MISSING_TOKEN_VAR' is not set"):
+            # Attempt to initialize client with missing env var
+            # Implementation will call resolve_env_var() which should raise
+            pass
+
+    @pytest.mark.asyncio
+    @patch('backend.modules.mcp_tools.client.StdioServerParameters')
+    async def test_stdio_client_ignores_token(self, mock_stdio_params):
+        """stdio clients should ignore auth_token (no auth mechanism)."""
+        # Stdio transport doesn't support HTTP auth headers
+        server_config = {
+            "command": ["python", "server.py"],
+            "auth_token": "ignored-token"
+        }
+
+        # Verify that stdio client initialization doesn't try to use auth_token
+        # (implementation-specific - may just log a warning or silently ignore)
+        pass
+```
+
+#### 4. Integration Test
+
+**File:** `backend/tests/integration/test_mcp_auth_integration.py`
+
+Create an end-to-end test with the mock MCP server:
+
+```python
+import pytest
+import os
+from backend.modules.mcp_tools.client import MCPToolManager
+
+
+@pytest.mark.integration
+class TestMCPAuthenticationIntegration:
+    """Integration tests for MCP authentication."""
+
+    @pytest.mark.asyncio
+    async def test_authenticated_connection_success(self, monkeypatch):
+        """Should successfully connect to authenticated MCP server."""
+        monkeypatch.setenv("MCP_TEST_TOKEN", "test-api-key-123")
+
+        # Configure test server with auth requirement
+        config = {
+            "mcp-http-mock": {
+                "url": "http://localhost:8001/mcp",
+                "transport": "http",
+                "auth_token": "${MCP_TEST_TOKEN}"
+            }
+        }
+
+        # Initialize tool manager and verify connection
+        # (implementation details depend on your setup)
+        assert True  # Replace with actual connection test
+
+    @pytest.mark.asyncio
+    async def test_authenticated_connection_failure_invalid_token(self):
+        """Should fail to connect with invalid token."""
+        config = {
+            "mcp-http-mock": {
+                "url": "http://localhost:8001/mcp",
+                "transport": "http",
+                "auth_token": "invalid-token"
+            }
+        }
+
+        # Verify connection fails with authentication error
+        with pytest.raises(Exception, match="authentication|unauthorized|403|401"):
+            # Attempt connection with invalid token
+            pass
+
+    @pytest.mark.asyncio
+    async def test_authenticated_tool_execution(self, monkeypatch):
+        """Should successfully execute tool after authentication."""
+        monkeypatch.setenv("MCP_TEST_TOKEN", "test-api-key-123")
+
+        # Connect and execute a tool on authenticated server
+        # Verify tool execution succeeds
+        assert True  # Replace with actual tool execution test
+```
+
+#### Running Tests
+
+**Execute all unit tests:**
+```bash
+# Run all tests
+./test/run_tests.sh all
+
+# Run specific test file
+pytest backend/tests/modules/config/test_config_manager.py -v
+
+# Run specific test class
+pytest backend/tests/modules/config/test_config_manager.py::TestResolveEnvVar -v
+
+# Run with coverage
+pytest backend/tests/ --cov=backend.modules.config --cov-report=html
+```
+
+**Test Coverage Requirements:**
+- `resolve_env_var()` function: 100% coverage
+- `MCPServerConfig` model: 100% coverage for auth_token field
+- Client initialization: 90%+ coverage for auth-related code paths
+- Integration tests: All success and failure scenarios
 
 ## Update Documentation
 
@@ -410,6 +719,20 @@ async with Client(
 ```
 
 For the custom header approach, you'd need to implement a custom token verifier on the server side to extract the key from the `X-API-Key` header instead of the `Authorization` header.
+
+## Additional Improvements
+
+### Tool Index Optimization
+
+As part of this implementation, the tool lookup mechanism was improved to use an index-based approach instead of string parsing. This fixes issues with tool names containing underscores.
+
+**Problem Fixed:**
+- Previous implementation derived server names by splitting on underscores, which failed when tool names contained underscores (e.g., `ui-demo_create_form_demo` would incorrectly parse server as `ui-demo_create_form`)
+
+**Solution:**
+- Added `_tool_index` dictionary for O(1) lookups of fully-qualified tool names
+- Eliminates fragile string parsing logic
+- Improves performance and reliability of tool execution
 
 ## Update Mock Server
 

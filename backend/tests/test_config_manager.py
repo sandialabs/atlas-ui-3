@@ -4,6 +4,7 @@ Tests the centralized configuration management system without
 modifying the actual environment or configuration files.
 """
 
+import os
 import pytest
 from pathlib import Path
 from backend.modules.config.config_manager import (
@@ -11,6 +12,8 @@ from backend.modules.config.config_manager import (
     AppSettings,
     LLMConfig,
     MCPConfig,
+    resolve_env_var,
+    MCPServerConfig,
 )
 
 
@@ -187,3 +190,97 @@ class TestConfigManagerCustomRoot:
         # Should still be able to load configs
         assert cm.app_settings is not None
         assert cm.llm_config is not None
+
+
+class TestResolveEnvVar:
+    """Test environment variable substitution in config values."""
+
+    def test_resolve_env_var_with_none(self):
+        """Should return None when input is None."""
+        assert resolve_env_var(None) is None
+
+    def test_resolve_env_var_with_literal_string(self):
+        """Should return literal string unchanged."""
+        assert resolve_env_var("my-literal-token") == "my-literal-token"
+
+    def test_resolve_env_var_with_existing_env_var(self, monkeypatch):
+        """Should resolve ${VAR_NAME} when env var exists."""
+        monkeypatch.setenv("TEST_TOKEN", "secret-123")
+        assert resolve_env_var("${TEST_TOKEN}") == "secret-123"
+
+    def test_resolve_env_var_with_missing_env_var(self):
+        """Should raise ValueError when env var doesn't exist."""
+        with pytest.raises(ValueError, match="Environment variable 'MISSING_VAR' is not set"):
+            resolve_env_var("${MISSING_VAR}")
+
+    def test_resolve_env_var_with_empty_string(self):
+        """Should return empty string unchanged."""
+        assert resolve_env_var("") == ""
+
+    def test_resolve_env_var_with_empty_env_var(self, monkeypatch):
+        """Should allow empty env var values."""
+        monkeypatch.setenv("EMPTY_VAR", "")
+        assert resolve_env_var("${EMPTY_VAR}") == ""
+
+    def test_resolve_env_var_with_partial_pattern(self):
+        """Should not match partial patterns like 'prefix-${VAR}'."""
+        # Only exact ${VAR} pattern is supported, not embedded in strings
+        assert resolve_env_var("prefix-${VAR}") == "prefix-${VAR}"
+
+    def test_resolve_env_var_with_invalid_pattern(self):
+        """Should return strings with invalid patterns unchanged."""
+        assert resolve_env_var("${123_INVALID}") == "${123_INVALID}"
+        assert resolve_env_var("${INVALID-NAME}") == "${INVALID-NAME}"
+        assert resolve_env_var("$VAR") == "$VAR"
+        assert resolve_env_var("{VAR}") == "{VAR}"
+
+    def test_resolve_env_var_case_sensitive(self, monkeypatch):
+        """Environment variable names should be case-sensitive."""
+        monkeypatch.setenv("MY_VAR", "value1")
+        monkeypatch.setenv("my_var", "value2")
+        assert resolve_env_var("${MY_VAR}") == "value1"
+        assert resolve_env_var("${my_var}") == "value2"
+
+    def test_resolve_env_var_with_special_chars(self, monkeypatch):
+        """Should handle env vars with special characters in values."""
+        monkeypatch.setenv("SPECIAL_TOKEN", "abc!@#$%^&*()_+-=[]{}|;:,.<>?")
+        assert resolve_env_var("${SPECIAL_TOKEN}") == "abc!@#$%^&*()_+-=[]{}|;:,.<>?"
+
+class TestMCPServerConfig:
+    """Test MCPServerConfig with auth_token field."""
+
+    def test_auth_token_is_optional(self):
+        """auth_token field should be optional."""
+        config = MCPServerConfig(
+            description="Test server",
+            command=["python", "server.py"]
+        )
+        assert config.auth_token is None
+
+    def test_auth_token_accepts_string(self):
+        """auth_token should accept string values."""
+        config = MCPServerConfig(
+            description="Test server",
+            command=["python", "server.py"],
+            auth_token="my-token-123"
+        )
+        assert config.auth_token == "my-token-123"
+
+    def test_auth_token_accepts_env_var_pattern(self):
+        """auth_token should accept environment variable patterns."""
+        config = MCPServerConfig(
+            description="Test server",
+            url="http://localhost:8000",
+            auth_token="${MY_TOKEN}"
+        )
+        assert config.auth_token == "${MY_TOKEN}"
+
+    def test_auth_token_accepts_none(self):
+        """auth_token should explicitly accept None."""
+        config = MCPServerConfig(
+            description="Test server",
+            command=["python", "server.py"],
+            auth_token=None
+        )
+        assert config.auth_token is None
+

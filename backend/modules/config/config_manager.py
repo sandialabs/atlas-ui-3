@@ -11,6 +11,7 @@ This module provides a unified configuration system that:
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,47 @@ from pydantic import BaseModel, Field, field_validator, AliasChoices
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_env_var(value: Optional[str]) -> Optional[str]:
+    """
+    Resolve environment variables in config values.
+
+    Supports patterns like:
+    - "${ENV_VAR_NAME}" -> replaced with os.environ.get("ENV_VAR_NAME")
+    - "literal-string" -> returned as-is
+    - None -> returned as-is
+
+    Args:
+        value: Config value that may contain env var pattern
+
+    Returns:
+        Resolved value with env vars substituted, or None if value is None
+
+    Raises:
+        ValueError: If env var pattern is found but variable is not set
+    """
+    if value is None:
+        return None
+
+    # Pattern: ${VAR_NAME}
+    # Uses match() not search() to prevent partial substitution like "prefix-${VAR}"
+    pattern = r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}'
+    match = re.match(pattern, value)
+
+    if match:
+        env_var_name = match.group(1)
+        env_value = os.environ.get(env_var_name)
+
+        if env_value is None:
+            raise ValueError(
+                f"Environment variable '{env_var_name}' is not set but required in config"
+            )
+
+        return env_value
+
+    # Return literal string if no pattern found
+    return value
 
 
 class ModelConfig(BaseModel):
@@ -63,6 +105,7 @@ class MCPServerConfig(BaseModel):
     url: Optional[str] = None            # URL for HTTP servers
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
+    auth_token: Optional[str] = None     # Bearer token for MCP server authentication
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
     require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
     allow_edit: List[str] = Field(default_factory=list)  # LEGACY. List of tool names (without server prefix) allowing argument editing
