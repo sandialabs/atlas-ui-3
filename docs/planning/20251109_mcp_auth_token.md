@@ -12,11 +12,98 @@ This document outlines the plan to add support for bearer token authentication w
 
 Some MCP servers are protected and require authentication. The `fastmcp` library, which is used to connect to these servers, supports passing an authentication token. We need to update our application to allow specifying this token in the `mcp.json` configuration file and use it when establishing a connection.
 
-This change will involve modifying the configuration model, updating the client initialization logic, and providing an example in the default configuration.
+This change will involve:
+1. Adding environment variable substitution for secure token management
+2. Modifying the configuration model to support `auth_token` field
+3. Updating the client initialization logic to pass tokens to FastMCP
+4. Providing examples in the default configuration
+
+## Key Design Decision: Environment Variable Substitution
+
+**Security-first approach**: Instead of storing tokens directly in config files, this implementation supports environment variable substitution using the pattern `"auth_token": "${ENV_VAR_NAME}"`.
+
+**Benefits:**
+- ✅ No secrets in config files (even in git-ignored overrides)
+- ✅ Standard practice for production deployments
+- ✅ Works seamlessly with Docker, Kubernetes, CI/CD
+- ✅ Easy to rotate tokens without changing configs
+- ✅ Still supports direct strings for development/testing
+
+**Example Usage:**
+```bash
+# Set environment variable
+export MCP_SERVER_TOKEN="secret-api-key-123"
+
+# In config/defaults/mcp.json or config/overrides/mcp.json
+{
+  "my-server": {
+    "url": "https://api.example.com/mcp",
+    "auth_token": "${MCP_SERVER_TOKEN}"
+  }
+}
+```
 
 ## Implementation Steps
 
-### 1. Modify the MCP Configuration Model
+### 1. Add Environment Variable Substitution Utility
+
+Before modifying the configuration model, we need a utility function to resolve environment variables from config values.
+
+*   **File to create/modify:** `backend/modules/config/config_manager.py`
+*   **Function to add:** `resolve_env_var`
+
+Add this helper function to support environment variable substitution:
+
+```python
+import os
+import re
+
+def resolve_env_var(value: Optional[str]) -> Optional[str]:
+    """
+    Resolve environment variables in config values.
+
+    Supports patterns like:
+    - "${ENV_VAR_NAME}" -> replaced with os.environ.get("ENV_VAR_NAME")
+    - "literal-string" -> returned as-is
+    - None -> returned as-is
+
+    Args:
+        value: Config value that may contain env var pattern
+
+    Returns:
+        Resolved value with env vars substituted, or None if value is None
+
+    Raises:
+        ValueError: If env var pattern is found but variable is not set
+    """
+    if value is None:
+        return None
+
+    # Pattern: ${VAR_NAME}
+    pattern = r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}'
+    match = re.match(pattern, value)
+
+    if match:
+        env_var_name = match.group(1)
+        env_value = os.environ.get(env_var_name)
+
+        if env_value is None:
+            raise ValueError(
+                f"Environment variable '{env_var_name}' is not set but required in config"
+            )
+
+        return env_value
+
+    # Return literal string if no pattern found
+    return value
+```
+
+**Design Notes:**
+- Only supports exact pattern `${VAR_NAME}` (not partial substitution like `"prefix-${VAR}-suffix"`)
+- Raises clear error if env var is referenced but not set (fail-fast)
+- Returns literal string if no pattern detected (backward compatible)
+
+### 2. Modify the MCP Configuration Model
 
 We need to add a field to our MCP server configuration model to hold the authentication token.
 
@@ -52,14 +139,17 @@ class MCPServerConfig(BaseModel):
     allow_edit: List[str] = Field(default_factory=list)
 ```
 
-### 2. Update the MCP Client Initialization
+### 3. Update the MCP Client Initialization
 
-Now we need to use the `auth_token` when creating the `fastmcp.Client`.
+Now we need to use the `auth_token` when creating the `fastmcp.Client`, with environment variable resolution.
 
 *   **File to modify:** `backend/modules/mcp_tools/client.py`
 *   **Function to modify:** `_initialize_single_client`
 
-In this function, when preparing to create a `Client` for an `http` or `sse` transport, we will check for the `auth_token` in the server's configuration. If it exists, we will pass it to the `auth` parameter of the `Client` or `Transport` constructor.
+In this function, when preparing to create a `Client` for an `http` or `sse` transport, we will:
+1. Get the `auth_token` from the server's configuration
+2. Resolve any environment variable pattern using `resolve_env_var()`
+3. Pass the resolved token to the `auth` parameter
 
 **For HTTP transport:**
 
@@ -72,9 +162,12 @@ client = Client(url)
 
 **After:**
 ```python
+from backend.modules.config.config_manager import resolve_env_var
+
 # Use HTTP transport (StreamableHttp)
 logger.debug(f"Creating HTTP client for {server_name} at {url}")
-token = config.get("auth_token")
+raw_token = config.get("auth_token")
+token = resolve_env_var(raw_token)  # Resolve ${ENV_VAR} if present
 client = Client(url, auth=token)
 ```
 
@@ -91,24 +184,25 @@ client = Client(transport)
 
 **After:**
 ```python
+from backend.modules.config.config_manager import resolve_env_var
+
 # Use explicit SSE transport
 logger.debug(f"Creating SSE client for {server_name} at {url}")
 from fastmcp.client.transports import SSETransport
-token = config.get("auth_token")
-# The `auth` parameter might need to be passed to the transport directly
-# depending on the `fastmcp` version. Assuming it's supported on the transport.
-transport = SSETransport(url, auth=token)
-client = Client(transport)
+raw_token = config.get("auth_token")
+token = resolve_env_var(raw_token)  # Resolve ${ENV_VAR} if present
+client = Client(url, auth=token)  # Pass auth to Client constructor
 ```
-*Note: A quick look at the `fastmcp` documentation or source would be needed to confirm if `SSETransport` accepts the `auth` parameter. If not, the `auth` parameter should be passed to the `Client` constructor instead: `client = Client(transport, auth=token)`.*
 
-### 3. Update the Default Configuration
+**Note:** Per FastMCP documentation, the `auth` parameter is passed to the `Client` constructor, not the transport.
 
-To make it easy for other developers to use this feature, we will add an example to the default `mcp.json` configuration file.
+### 4. Update the Default Configuration
+
+To make it easy for other developers to use this feature, we will add examples to the default `mcp.json` configuration file.
 
 *   **File to modify:** `config/defaults/mcp.json`
 
-Add the `auth_token` field to one of the existing server configurations. We'll use the `ui-demo` server as an example.
+Add the `auth_token` field to server configurations with examples showing both environment variable and null patterns.
 
 **Before:**
 ```json
@@ -122,7 +216,7 @@ Add the `auth_token` field to one of the existing server configurations. We'll u
     "short_description": "UI customization demo",
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
-  }, 
+  },
 ```
 
 **After:**
@@ -138,42 +232,111 @@ Add the `auth_token` field to one of the existing server configurations. We'll u
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public",
     "auth_token": null
-  }, 
+  },
+  "external-api-example": {
+    "url": "https://api.example.com/mcp",
+    "transport": "http",
+    "groups": ["users"],
+    "description": "Example external MCP server requiring authentication",
+    "auth_token": "${MCP_EXTERNAL_API_TOKEN}"
+  }
 ```
-*Note: We are setting it to `null` to show the field is available. A developer can replace `null` with an actual token string in `config/overrides/mcp.json`.*
+
+**Note:**
+- Stdio servers (like `ui-demo`) can use `null` since they don't need authentication
+- HTTP/SSE servers show the `${ENV_VAR_NAME}` pattern for environment variable substitution
+- In production, set the environment variable: `export MCP_EXTERNAL_API_TOKEN="your-secret-token"`
+- Alternatively, use `config/overrides/mcp.json` with direct string values (not recommended for secrets)
+
+**Security Note:** The recommended approach is to use environment variables with the `"auth_token": "${VAR_NAME}"` pattern. This ensures tokens are never stored in config files or committed to version control.
 
 ## Testing
 
 To test this feature, you will need an MCP server that is configured to require a bearer token.
 
-1.  Set up a local MCP server that inspects the `Authorization` header and rejects requests without a valid token.
-2.  In `config/overrides/mcp.json`, configure this server and provide a valid `auth_token`.
-3.  Run the Atlas UI backend and verify that it can successfully connect to the MCP server and list its tools.
-4.  Remove the `auth_token` or provide an invalid one and verify that the connection fails.
-5.  Add unit tests to `backend/tests/` to cover the new logic in `_initialize_single_client`. You can mock the `fastmcp.Client` and assert that it's called with the correct `auth` parameter.
+### Manual Testing
+
+1.  **Set up authenticated MCP server**: Use the updated `mocks/mcp-http-mock` (see "Update Mock Server" section)
+2.  **Test environment variable substitution**:
+    ```bash
+    export MCP_TEST_TOKEN="test-api-key-123"
+    ```
+3.  **Configure in `config/overrides/mcp.json`**:
+    ```json
+    {
+      "mcp-http-mock": {
+        "url": "http://localhost:8001/mcp",
+        "transport": "http",
+        "auth_token": "${MCP_TEST_TOKEN}"
+      }
+    }
+    ```
+4.  **Run backend** and verify successful connection:
+    ```bash
+    cd backend
+    python main.py
+    # Check logs for "Successfully connected to mcp-http-mock"
+    ```
+5.  **Test failure cases**:
+    - Unset env var: `unset MCP_TEST_TOKEN` - should see clear error about missing env var
+    - Invalid token: `export MCP_TEST_TOKEN="wrong-token"` - should fail authentication
+    - Direct string: `"auth_token": "test-api-key-123"` - should work (for comparison)
+
+### Unit Testing
+
+Add tests to `backend/tests/modules/config/test_config_manager.py`:
+
+1.  **Test `resolve_env_var` function**:
+    - ✅ Returns None for None input
+    - ✅ Returns literal string unchanged
+    - ✅ Resolves `${VAR_NAME}` when env var exists
+    - ✅ Raises ValueError when env var doesn't exist
+    - ✅ Handles edge cases (empty string, whitespace)
+
+2.  **Test MCP client initialization** (`backend/tests/modules/mcp_tools/test_client.py`):
+    - Mock `fastmcp.Client`
+    - Assert `auth` parameter is passed correctly
+    - Test both env var and literal string tokens
 
 ## Update Documentation
 
 To ensure users and developers are aware of this new feature, the following documents must be updated:
 
 1.  **Admin Guide (`docs/02_admin_guide.md`)**:
-    *   Add a section explaining how to configure a bearer token for an MCP server.
-    *   Provide an example of the `auth_token` field in the `mcp.json` configuration.
+    *   Add a section explaining how to configure bearer token authentication for MCP servers
+    *   Show environment variable pattern: `"auth_token": "${MCP_SERVER_TOKEN}"`
+    *   Explain how to set environment variables before starting the backend
+    *   Include security best practices:
+        - **Recommended**: Use environment variables for production (tokens never touch filesystem)
+        - **Alternative**: Use `config/overrides/mcp.json` with direct strings (for development only)
+        - **Never**: Commit tokens to `config/defaults/mcp.json` or any version-controlled files
 
 2.  **Developer Guide (`docs/03_developer_guide.md`)**:
-    *   Update the section on MCP server configuration to include the new `auth_token` field in the `MCPServerConfig` model.
-    *   Briefly explain that this token is used for bearer authentication with HTTP/SSE-based MCP servers.
+    *   Update MCP server configuration section to include `auth_token` field in `MCPServerConfig`
+    *   Document the `resolve_env_var()` function and its behavior
+    *   Explain that tokens are used for bearer authentication with HTTP/SSE-based MCP servers
+    *   Note that stdio servers ignore the `auth_token` field
+
+3.  **Environment Variables Reference** (if exists, or add to Admin Guide):
+    *   Document MCP-related environment variables that can be used
+    *   Example: `MCP_EXTERNAL_API_TOKEN` - Token for external MCP server authentication
 
 ## API Key Authentication Example
 
-Here's a minimal code example for API key authentication between a FastMCP client and server:
+Here's a minimal code example for API key authentication between a FastMCP client and server.
+
+**Official Documentation:**
+- Server-side: https://gofastmcp.com/servers/auth/token-verification (Static Token Verification)
+- Client-side: https://gofastmcp.com/clients/auth/bearer.md
+
+**Important:** `StaticTokenVerifier` stores tokens as plain text and is designed exclusively for development and testing. It should **NEVER be used in production environments**.
 
 ### Server Side
 
 ```python
 # server.py
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.bearer import StaticTokenVerifier
+from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 # Create a token verifier with your API keys
 verifier = StaticTokenVerifier(
@@ -253,7 +416,7 @@ For the custom header approach, you'd need to implement a custom token verifier 
 To facilitate testing of the new authentication mechanism, the `mocks/mcp-http-mock` should be updated to require bearer token authentication using the `StaticTokenVerifier` approach shown above.
 
 1.  **Modify `mocks/mcp-http-mock/main.py` (or equivalent file):**
-    *   Import `FastMCP` and `StaticTokenVerifier` from `fastmcp.server.auth.providers.bearer`.
+    *   Import `FastMCP` and `StaticTokenVerifier` from `fastmcp.server.auth.providers.jwt`.
     *   Instantiate `StaticTokenVerifier` with a dictionary of valid API keys and their claims.
     *   Pass the verifier to the `FastMCP` constructor using the `auth` parameter.
 
@@ -261,7 +424,7 @@ To facilitate testing of the new authentication mechanism, the `mocks/mcp-http-m
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.bearer import StaticTokenVerifier
+from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 # Define test API keys
 verifier = StaticTokenVerifier(
