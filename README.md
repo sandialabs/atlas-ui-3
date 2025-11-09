@@ -1,5 +1,12 @@
 # Atlas UI 3
 
+[![CI/CD Pipeline](https://github.com/sandialabs/atlas-ui-3/actions/workflows/ci.yml/badge.svg)](https://github.com/sandialabs/atlas-ui-3/actions/workflows/ci.yml)
+[![Security Checks](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml/badge.svg)](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml)
+[![Docker Image](https://ghcr-badge.egpl.dev/sandialabs/atlas-ui-3/latest_tag?trim=major&label=latest)](https://github.com/sandialabs/atlas-ui-3/pkgs/container/atlas-ui-3)
+![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
+![React 19](https://img.shields.io/badge/react-19.2-blue.svg)
+![License MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+
 A modern LLM chat interface with MCP (Model Context Protocol) integration.
 
 ![Screenshot](docs/readme_img/screenshot-11-6-2025image.png)
@@ -36,5 +43,7 @@ If you are an AI agent working on this repository, please refer to the following
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
+Copyright 2025 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
+
+MIT License
 
