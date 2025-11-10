@@ -1,0 +1,22 @@
+{
+  "thinking": {
+    "command": ["python", "mcp/thinking/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Structured thinking and problem analysis tool",
+    "author": "Chat UI Team",
+    "short_description": "Structured problem analysis",
+    "help_email": "support@chatui.example.com"
+  },
+  "prompts": {
+    "command": ["python", "mcp/prompts/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "is_exclusive": false,
+    "description": "Specialized system prompts for AI behavior modification",
+    "author": "Chat UI Team",
+    "short_description": "AI behavior prompts",
+    "help_email": "support@chatui.example.com"
+  }
+}
