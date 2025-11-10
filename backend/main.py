@@ -204,12 +204,28 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     await websocket.accept()
 
-    # Basic auth: derive user from query parameters or use test user
-    user_email = websocket.query_params.get('user')
+    # Extract user email using the same authentication flow as HTTP requests
+    # Priority: 1) X-User-Email header (production), 2) query param (dev), 3) test user (dev fallback)
+    config_manager = app_factory.get_config_manager()
+    user_email = None
+    
+    # Check X-User-Email header first (consistent with AuthMiddleware)
+    x_email_header = websocket.headers.get('X-User-Email')
+    if x_email_header:
+        from core.auth import get_user_from_header
+        user_email = get_user_from_header(x_email_header)
+        logger.info(f"WebSocket authenticated via X-User-Email header: {sanitize_for_logging(user_email)}")
+    
+    # Fallback to query parameter for backward compatibility (development/testing)
     if not user_email:
-        # Fallback to test user or require auth
-        config_manager = app_factory.get_config_manager()
+        user_email = websocket.query_params.get('user')
+        if user_email:
+            logger.info(f"WebSocket authenticated via query parameter: {sanitize_for_logging(user_email)}")
+    
+    # Final fallback to test user (development mode only)
+    if not user_email:
         user_email = config_manager.app_settings.test_user or 'test@test.com'
+        logger.info(f"WebSocket using fallback test user: {sanitize_for_logging(user_email)}")
 
     session_id = uuid4()
 
