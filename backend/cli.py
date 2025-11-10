@@ -53,16 +53,23 @@ async def lifespan(app: typer.Typer):
     logger.info("Initializing CLI and backend services...")
     mcp_manager = app_factory.get_mcp_manager()
     try:
-        await mcp_manager.initialize_clients()
-        await mcp_manager.discover_tools()
-        await mcp_manager.discover_prompts()
+        # Add timeout for MCP initialization to prevent hanging in test environments
+        await asyncio.wait_for(mcp_manager.initialize_clients(), timeout=10.0)
+        await asyncio.wait_for(mcp_manager.discover_tools(), timeout=10.0)
+        await asyncio.wait_for(mcp_manager.discover_prompts(), timeout=10.0)
         logger.info("MCP tools manager initialization complete.")
+    except asyncio.TimeoutError:
+        logger.warning("MCP initialization timed out - continuing without MCP tools")
     except Exception as e:
         logger.error(f"Error during MCP initialization: {e}", exc_info=True)
+        logger.warning("Continuing without MCP tools")
     yield
     logger.info("Shutting down CLI and backend services...")
-    await mcp_manager.cleanup()
-    logger.info("Shutdown complete.")
+    try:
+        await asyncio.wait_for(mcp_manager.cleanup(), timeout=5.0)
+        logger.info("Shutdown complete.")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 
 app = typer.Typer()
@@ -89,29 +96,35 @@ async def main(
             cli_state["config"] = yaml.safe_load(f)
 
 @app.command()
-async def list_models():
+def list_models():
     """Lists all available LLM models."""
-    console.print("[bold green]Available LLM Models:[/bold green]")
-    config_manager = app_factory.get_config_manager()
-    table = Table("ID", "Model Name", "Provider", "Compliance Level")
-    for model_id, model_config in config_manager.llm_config.models.items():
-        table.add_row(
-            model_id,
-            model_config.model_name,
-            "N/A", # Provider not directly available in ModelConfig
-            model_config.compliance_level if model_config.compliance_level else "N/A"
-        )
-    console.print(table)
+    async def _list_models():
+        console.print("[bold green]Available LLM Models:[/bold green]")
+        config_manager = app_factory.get_config_manager()
+        table = Table("ID", "Model Name", "Provider", "Compliance Level")
+        for model_id, model_config in config_manager.llm_config.models.items():
+            table.add_row(
+                model_id,
+                model_config.model_name,
+                "N/A", # Provider not directly available in ModelConfig
+                model_config.compliance_level if model_config.compliance_level else "N/A"
+            )
+        console.print(table)
+
+    asyncio.run(_list_models())
 
 @app.command()
-async def list_tools():
+def list_tools():
     """Lists all available MCP tools."""
-    console.print("[bold green]Available Tools (MCPs):[/bold green]")
-    mcp_manager = app_factory.get_mcp_manager()
-    table = Table("ID", "Name", "Description")
-    for tool_id, tool in mcp_manager.tools.items():
-        table.add_row(tool_id, tool.name, tool.description)
-    console.print(table)
+    async def _list_tools():
+        console.print("[bold green]Available Tools (MCPs):[/bold green]")
+        mcp_manager = app_factory.get_mcp_manager()
+        table = Table("ID", "Name", "Description")
+        for tool_id, tool in mcp_manager.tools.items():
+            table.add_row(tool_id, tool.name, tool.description)
+        console.print(table)
+
+    asyncio.run(_list_tools())
 
 @app.command()
 def chat(
