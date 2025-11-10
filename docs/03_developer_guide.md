@@ -187,3 +187,60 @@ if __name__ == "__main__":
 ```
 
 This architecture ensures that your tool does not need to handle any S3 credentials, making the system more secure and easier to develop for.
+
+---
+
+### Headless CLI
+
+The application includes a headless CLI for scripting, testing, and interacting with the backend without a UI.
+
+**Running the CLI**
+
+Use the `--help` flag to see all available commands and options.
+
+```bash
+python backend/cli.py --help
+```
+
+**Discovering Resources**
+
+You can list available models and tools that the backend is configured with.
+
+```bash
+# List available LLM models
+python backend/cli.py list-models
+
+# List available tools (MCPs)
+python backend/cli.py list-tools
+```
+
+**Using a Configuration File**
+
+To avoid passing many options to the `chat` command, you can use a YAML configuration file.
+
+**Example `cli-config.yaml`:**
+```yaml
+chat:
+  model: claude-3-sonnet-20240229
+  user_email: my-user@example.com
+  agent_mode: true
+  selected_tools:
+    - "mcp/calculator"
+    - "mcp/duckduckgo"
+```
+
+**Chat Command**
+
+The `chat` command runs a single-turn conversation.
+
+**Usage:**
+```bash
+# Using a config file
+python backend/cli.py --config cli-config.yaml chat "What is 2+2 and what is the weather in Paris?"
+
+# Overriding a config setting with a CLI flag
+python backend/cli.py --config cli-config.yaml chat --model gpt-4 "Tell me a joke."
+
+# Without a config file
+python backend/cli.py chat --model gpt-4 --tool "mcp/calculator" "What is 5*5?"
+```

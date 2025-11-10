@@ -33,3 +33,4 @@ opentelemetry-exporter-otlp
 opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-httpx
 python-pptx
+typer[all]
