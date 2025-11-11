@@ -34,7 +34,7 @@ frontend/ React 19 + Vite + Tailwind; state via contexts (Chat/WS/Marketplace)
 - Feature flags (AppSettings): FEATURE_TOOLS_ENABLED, FEATURE_RAG_MCP_ENABLED, FEATURE_COMPLIANCE_LEVELS_ENABLED, FEATURE_AGENT_MODE_AVAILABLE.
 
 ## MCP + RAG conventions
-- MCP servers live in mcp.json (tools/prompts) and mcp-rag.json (RAG-only inventory). Fields: groups, is_exclusive, transport|type, url|command/cwd, compliance_level.
+- MCP servers live in mcp.json (tools/prompts) and mcp-rag.json (RAG-only inventory). Fields: groups, transport|type, url|command/cwd, compliance_level.
 - Transport detection order: explicit transport → command (stdio) → URL protocol (http/sse) → type fallback.
 - Tool names exposed to LLM are fully-qualified: server_toolName. “canvas_canvas” is a pseudo-tool always available.
 - RAG over MCP tools expected: rag_discover_resources, rag_get_raw_results, optional rag_get_synthesized_results. RAG resources and servers may include complianceLevel.

@@ -48,7 +48,6 @@ def mock_mcp_manager(monkeypatch):
             ],
             "config": {
                 "description": "Test server",
-                "is_exclusive": False,
                 "author": "Test Author"
             }
         }
