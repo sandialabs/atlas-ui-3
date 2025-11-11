@@ -72,7 +72,7 @@ export function useChatConfig() {
         // Fallback demo data
         setAppName('Chat UI (Demo)')
         setModels([{name: 'gpt-4o'}, {name: 'gpt-4o-mini'}])
-        setTools([{ server: 'canvas', tools: ['canvas'], description: 'Create and display visual content', tool_count: 1, is_exclusive: false }])
+        setTools([{ server: 'canvas', tools: ['canvas'], description: 'Create and display visual content', tool_count: 1 }])
         setDataSources(['demo_documents'])
         setUser('Demo User')
         // Set demo model if no saved model
