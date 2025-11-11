@@ -23,6 +23,7 @@ from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
 from core.otel_config import setup_opentelemetry
 from core.utils import sanitize_for_logging
+from core.auth import get_user_from_header
 
 # Import from infrastructure
 from infrastructure.app_factory import app_factory
@@ -186,8 +187,8 @@ async def websocket_endpoint(websocket: WebSocket):
     2. Reverse proxy intercepts WebSocket handshake (HTTP Upgrade request)
     3. Reverse proxy delegates to authentication service
     4. Auth service validates JWT/session from cookies or headers
-    5. If valid: Auth service returns X-Authenticated-User header
-    6. Reverse proxy forwards connection to this app with X-Authenticated-User header
+    5. If valid: Auth service returns X-User-Email header
+    6. Reverse proxy forwards connection to this app with X-User-Email header
     7. This app trusts the header (already validated by auth service)
 
     SECURITY REQUIREMENTS:
@@ -195,9 +196,11 @@ async def websocket_endpoint(websocket: WebSocket):
     - Direct public access to this app bypasses authentication
     - Use network isolation to prevent direct access
     - The /login endpoint lives in the separate auth service
+    - Reverse proxy MUST strip client-provided X-User-Email headers before adding its own
+      (otherwise attackers can inject headers: X-User-Email: admin@company.com)
 
     DEVELOPMENT vs PRODUCTION:
-    - Production: Extracts user from X-Authenticated-User header (set by reverse proxy)
+    - Production: Extracts user from X-User-Email header (set by reverse proxy)
     - Development: Falls back to 'user' query parameter (INSECURE, local only)
 
     See docs/security_architecture.md for complete architecture details.
@@ -212,7 +215,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # Check X-User-Email header first (consistent with AuthMiddleware)
     x_email_header = websocket.headers.get('X-User-Email')
     if x_email_header:
-        from core.auth import get_user_from_header
+        
         user_email = get_user_from_header(x_email_header)
         logger.info(f"WebSocket authenticated via X-User-Email header: {sanitize_for_logging(user_email)}")
     

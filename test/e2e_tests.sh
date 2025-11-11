@@ -65,6 +65,7 @@ if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
     echo "ℹ️  Existing service PID: ${EXISTING_PID:-unknown}"
 else
     echo "Starting uvicorn server..."
+    source "../.venv/bin/activate"
     uvicorn main:app --host 0.0.0.0 --port 8000 &
     BACKEND_PID=$!
     
