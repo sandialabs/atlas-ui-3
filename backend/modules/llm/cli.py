@@ -227,7 +227,7 @@ def validate_model(args) -> None:
         
         # Check API key
         try:
-            api_key = resolve_env_var(model_config.api_key)
+            resolve_env_var(model_config.api_key)
             print("   ✅ API Key: Configured")
         except ValueError as e:
             print(f"   ❌ API Key: {e}")

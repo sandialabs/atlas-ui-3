@@ -1,7 +1,7 @@
 """Integration tests for LLM environment variable expansion."""
 
 import pytest
-from backend.modules.config.config_manager import LLMConfig, ModelConfig, resolve_env_var
+from backend.modules.config.config_manager import LLMConfig, ModelConfig
 from backend.modules.llm.litellm_caller import LiteLLMCaller
 
 
@@ -27,7 +27,7 @@ class TestLLMEnvExpansionIntegration:
         caller = LiteLLMCaller(llm_config, debug_mode=True)
         
         # Get model kwargs - this should resolve the env var
-        model_kwargs = caller._get_model_kwargs("test-model")
+        _ = caller._get_model_kwargs("test-model")
         
         # Verify that the environment variable was set (LiteLLMCaller sets env vars for provider detection)
         import os
@@ -70,7 +70,7 @@ class TestLLMEnvExpansionIntegration:
         caller = LiteLLMCaller(llm_config, debug_mode=True)
         
         # Get model kwargs - this should work without errors
-        model_kwargs = caller._get_model_kwargs("test-model")
+        _ = caller._get_model_kwargs("test-model")
         
         # Verify that the environment variable was set
         import os
