@@ -12,6 +12,7 @@ import logging
 import sys
 
 from .litellm_caller import LiteLLMCaller
+from modules.config.config_manager import resolve_env_var
 
 # Set up logging for CLI
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -225,16 +226,21 @@ def validate_model(args) -> None:
         print(f"   ✅ Temperature: {model_config.temperature}")
         
         # Check API key
-        import os
-        api_key = os.path.expandvars(model_config.api_key)
-        if api_key and not api_key.startswith("${"):
+        try:
+            api_key = resolve_env_var(model_config.api_key)
             print("   ✅ API Key: Configured")
-        else:
-            print("   ❌ API Key: Missing or not resolved")
+        except ValueError as e:
+            print(f"   ❌ API Key: {e}")
         
         # Check extra headers
         if model_config.extra_headers:
             print(f"   ✅ Extra Headers: {list(model_config.extra_headers.keys())}")
+            # Validate extra headers can be resolved
+            for header_key, header_value in model_config.extra_headers.items():
+                try:
+                    resolve_env_var(header_value)
+                except ValueError as e:
+                    print(f"   ❌ Extra Header '{header_key}': {e}")
         else:
             print("   ℹ️  Extra Headers: None")
         
