@@ -9,7 +9,6 @@ This test simulates the exact scenario from the issue:
 
 import pytest
 import base64
-import uuid
 from unittest.mock import MagicMock, AsyncMock, patch
 from fastapi.testclient import TestClient
 
@@ -84,8 +83,7 @@ def test_issue_scenario_fixed_with_correct_user(mock_components):
     
     # Simulate the production scenario: reverse proxy sets X-User-Email header
     actual_user = "agarlan@sandia.gov"
-    file_key = f"users/{actual_user}/generated/1234567890_mypdf.pdf"
-    
+
     # Connect with X-User-Email header (as set by reverse proxy)
     with client.websocket_connect("/ws", headers={"X-User-Email": actual_user}):
         # Verify the connection was created with the correct user

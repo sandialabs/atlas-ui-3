@@ -215,15 +215,15 @@ async def websocket_endpoint(websocket: WebSocket):
     # Check X-User-Email header first (consistent with AuthMiddleware)
     x_email_header = websocket.headers.get('X-User-Email')
     if x_email_header:
-        
+
         user_email = get_user_from_header(x_email_header)
-        logger.info(f"WebSocket authenticated via X-User-Email header: {sanitize_for_logging(user_email)}")
+        logger.info("WebSocket authenticated via X-User-Email header: %s", sanitize_for_logging(user_email))
     
     # Fallback to query parameter for backward compatibility (development/testing)
     if not user_email:
         user_email = websocket.query_params.get('user')
         if user_email:
-            logger.info(f"WebSocket authenticated via query parameter: {sanitize_for_logging(user_email)}")
+            logger.info("WebSocket authenticated via query parameter: %s", sanitize_for_logging(user_email))
     
     # Final fallback to test user (development mode only)
     if not user_email:
