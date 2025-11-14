@@ -1,7 +1,17 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Filter, ChevronDown, ChevronUp, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Filter, ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Activity, Zap, Wrench, File, Database, Server } from 'lucide-react';
 
 const DEFAULT_POLL_INTERVAL = 60000; // 60s refresh
+
+// Category icons and colors
+const CATEGORY_INFO = {
+  CHAT: { icon: Activity, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
+  LLM: { icon: Zap, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
+  TOOL: { icon: Wrench, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
+  FILE: { icon: File, color: 'text-green-500', bgColor: 'bg-green-500/10' },
+  RAG: { icon: Database, color: 'text-cyan-500', bgColor: 'bg-cyan-500/10' },
+  SYSTEM: { icon: Server, color: 'text-gray-500', bgColor: 'bg-gray-500/10' }
+};
 
 export default function LogViewer() {
   const [entries, setEntries] = useState([]);
@@ -11,20 +21,23 @@ export default function LogViewer() {
   const [error, setError] = useState(null);
   const [levelFilter, setLevelFilter] = useState('');
   const [moduleFilter, setModuleFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState(''); // New: Filter by execution category
+  const [viewMode, setViewMode] = useState('flat'); // 'flat' or 'grouped'
   const [hideViewerRequests, setHideViewerRequests] = useState(true);
-  const [hideMiddleware, setHideMiddleware] = useState(false); // State for hiding middleware logs
-  const [hideConfigRoutes, setHideConfigRoutes] = useState(false); // State for hiding config_routes get_config calls
-  const [hideWebsocketEndpoint, setHideWebsocketEndpoint] = useState(false); // State for hiding websocket_endpoint calls
-  const [hideHttpClientCalls, setHideHttpClientCalls] = useState(false); // State for hiding _send_single_request calls
-  const [hideDiscoverDataSources, setHideDiscoverDataSources] = useState(false); // State for hiding discover_data_sources calls
-  const [quickFiltersCollapsed, setQuickFiltersCollapsed] = useState(false); // State for collapsing Quick Filters
-  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true); // State for auto-scroll
-  const [pollIntervalInput, setPollIntervalInput] = useState(String(DEFAULT_POLL_INTERVAL / 1000)); // Input for poll interval in seconds
-  const [pollInterval, setPollInterval] = useState(DEFAULT_POLL_INTERVAL); // Actual poll interval in ms
+  const [hideMiddleware, setHideMiddleware] = useState(false);
+  const [hideConfigRoutes, setHideConfigRoutes] = useState(false);
+  const [hideWebsocketEndpoint, setHideWebsocketEndpoint] = useState(false);
+  const [hideHttpClientCalls, setHideHttpClientCalls] = useState(false);
+  const [hideDiscoverDataSources, setHideDiscoverDataSources] = useState(false);
+  const [quickFiltersCollapsed, setQuickFiltersCollapsed] = useState(false);
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+  const [pollIntervalInput, setPollIntervalInput] = useState(String(DEFAULT_POLL_INTERVAL / 1000));
+  const [pollInterval, setPollInterval] = useState(DEFAULT_POLL_INTERVAL);
+  const [collapsedConversations, setCollapsedConversations] = useState(new Set());
 
   const tableContainerRef = useRef(null);
-  const isScrolledToBottom = useRef(true); // Track if user has scrolled up
-  const intervalIdRef = useRef(null); // Ref to store interval ID
+  const isScrolledToBottom = useRef(true);
+  const intervalIdRef = useRef(null);
 
   const fetchLogs = useCallback(() => {
     setLoading(true);
@@ -138,11 +151,53 @@ export default function LogViewer() {
     setHideDiscoverDataSources(newState);
   };
 
+  // Helper: Extract execution context from log entry
+  const getExecutionContext = (entry) => {
+    const extras = entry.extras || {};
+    return {
+      category: extras.extra_log_category || 'SYSTEM',
+      phase: extras.extra_execution_phase || '',
+      conversationId: extras.extra_conversation_id || entry.extras?.extra_conversation_id,
+      requestId: extras.extra_request_id || entry.extras?.extra_request_id,
+    };
+  };
+
+  // Helper: Group logs by conversation
+  const groupByConversation = (logs) => {
+    const groups = {};
+    logs.forEach(entry => {
+      const ctx = getExecutionContext(entry);
+      const convId = ctx.conversationId || 'unknown';
+      if (!groups[convId]) {
+        groups[convId] = [];
+      }
+      groups[convId].push(entry);
+    });
+    return groups;
+  };
+
+  // Helper: Toggle conversation collapse
+  const toggleConversation = (convId) => {
+    const newCollapsed = new Set(collapsedConversations);
+    if (newCollapsed.has(convId)) {
+      newCollapsed.delete(convId);
+    } else {
+      newCollapsed.add(convId);
+    }
+    setCollapsedConversations(newCollapsed);
+  };
+
   const levels = Array.from(new Set(entries.map(e => e.level))).sort();
   const modules = Array.from(new Set(entries.map(e => e.module))).sort();
+  const categories = Array.from(new Set(entries.map(e => getExecutionContext(e).category))).sort();
 
   // Apply all filtering logic
   const filtered = entries.filter(e => {
+    // Category filter
+    if (categoryFilter && getExecutionContext(e).category !== categoryFilter) {
+      return false;
+    }
+
     // Hide log viewer requests
     if (hideViewerRequests && (
       (e.message && e.message.includes('GET /admin/logs/viewer')) ||
@@ -189,10 +244,32 @@ export default function LogViewer() {
   return (
     <div className="p-4 space-y-4 h-full flex flex-col">
       {/* First row: Filters and Action Buttons */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-end">
+      <div className="flex flex-col gap-4 md:flex-row md:items-end flex-wrap">
         <div>
-          <label className="block text-xs font-semibold mb-1">Level</label>
-          <select value={levelFilter} onChange={e => setLevelFilter(e.target.value)} className="bg-gray-200 dark:bg-gray-700 p-2 rounded text-sm">
+          <label className="block text-xs font-semibold mb-1 text-gray-700 dark:text-gray-200">View Mode</label>
+          <select 
+            value={viewMode} 
+            onChange={e => setViewMode(e.target.value)} 
+            className="bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 p-2 rounded text-sm"
+          >
+            <option value="flat">Flat List</option>
+            <option value="grouped">Execution Path</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold mb-1 text-gray-700 dark:text-gray-200">Category</label>
+          <select 
+            value={categoryFilter} 
+            onChange={e => setCategoryFilter(e.target.value)} 
+            className="bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 p-2 rounded text-sm"
+          >
+            <option value="">All</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold mb-1 text-gray-700 dark:text-gray-200">Level</label>
+          <select value={levelFilter} onChange={e => setLevelFilter(e.target.value)} className="bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 p-2 rounded text-sm">
             <option value="">All</option>
             {levels.map(l => <option key={l}>{l}</option>)}
           </select>
@@ -358,36 +435,119 @@ export default function LogViewer() {
         </div>
   <span className="text-gray-600 dark:text-gray-300">Total entries: {entries.length}{filtered.length !== entries.length && ` (showing ${filtered.length})`}</span>
       </div>
-      <div ref={tableContainerRef} className="flex-1 overflow-auto border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" onScroll={handleScroll}> {/* Added onScroll handler */}
-        <table className="w-full text-sm">
+      <div ref={tableContainerRef} className="flex-1 overflow-auto border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" onScroll={handleScroll}>
+        {viewMode === 'grouped' ? (
+          // Grouped by conversation view
+          <div className="p-2 space-y-3">
+            {Object.entries(groupByConversation(filtered.slice().reverse())).map(([convId, logs]) => {
+              const isCollapsed = collapsedConversations.has(convId);
+              const displayId = convId.slice(0, 8);
+              return (
+                <div key={convId} className="border border-gray-300 dark:border-gray-700 rounded-lg">
+                  <div 
+                    className="flex items-center gap-2 p-3 bg-gray-100 dark:bg-gray-800 cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-750"
+                    onClick={() => toggleConversation(convId)}
+                  >
+                    {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                    <Activity className="w-4 h-4 text-blue-500" />
+                    <span className="font-semibold">Conversation {displayId}</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">({logs.length} events)</span>
+                  </div>
+                  {!isCollapsed && (
+                    <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {logs.map((e, idx) => {
+                        const ctx = getExecutionContext(e);
+                        const CategoryIcon = CATEGORY_INFO[ctx.category]?.icon || Server;
+                        const catColor = CATEGORY_INFO[ctx.category]?.color || 'text-gray-500';
+                        const catBg = CATEGORY_INFO[ctx.category]?.bgColor || 'bg-gray-500/10';
+                        
+                        return (
+                          <div key={idx} className="p-3 hover:bg-gray-50 dark:hover:bg-gray-850">
+                            <div className="flex items-start gap-3">
+                              <div className={`p-1 rounded ${catBg}`}>
+                                <CategoryIcon className={`w-4 h-4 ${catColor}`} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded ${catBg} ${catColor}`}>
+                                    {ctx.category}
+                                  </span>
+                                  {ctx.phase && (
+                                    <span className="text-xs text-gray-600 dark:text-gray-400">
+                                      {ctx.phase}
+                                    </span>
+                                  )}
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wide ${
+                                    e.level === 'ERROR' ? 'bg-red-600/20 text-red-700 dark:bg-red-500/30 dark:text-red-200' : 
+                                    e.level === 'WARNING' ? 'bg-yellow-500/20 text-yellow-700 dark:bg-yellow-500/30 dark:text-yellow-100' : 
+                                    'bg-cyan-500/20 text-cyan-700 dark:bg-cyan-500/30 dark:text-cyan-100'
+                                  }`}>
+                                    {e.level}
+                                  </span>
+                                  <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                                    {e.timestamp?.replace('T',' ').split('.')[0]}
+                                  </span>
+                                </div>
+                                <div className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap break-words">
+                                  {e.message}
+                                </div>
+                                <div className="flex gap-4 mt-1 text-xs text-gray-600 dark:text-gray-400 font-mono">
+                                  <span>{e.module}.{e.function}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          // Flat table view  
+          <table className="w-full text-sm">
           <thead className="bg-gray-100 dark:bg-gray-800 sticky top-0">
             <tr>
+              <th className="text-left p-2 font-semibold">Category</th>
               <th className="text-left p-2 font-semibold">Module</th>
               <th className="text-left p-2 font-semibold">Function</th>
               <th className="text-left p-2 font-semibold">Message</th>
               <th className="text-left p-2 font-semibold">Timestamp</th>
               <th className="text-left p-2 font-semibold">Level</th>
-              <th className="text-left p-2 font-semibold">Logger</th>
             </tr>
           </thead>
           <tbody>
-            {paginated.map((e, idx) => (
-              <tr key={idx} className="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                <td className="p-2 font-mono text-[11px] text-gray-800 dark:text-gray-200">{e.module}</td>
-                <td className="p-2 font-mono text-[11px] text-gray-700 dark:text-gray-300">{e.function}</td>
-                <td className="p-2 text-[12px] whitespace-pre-wrap break-words leading-snug text-gray-900 dark:text-gray-100 max-w-[480px]">{e.message}</td>
-                <td className="p-2 font-mono text-[11px] text-gray-600 dark:text-gray-400 whitespace-nowrap">{e.timestamp?.replace('T',' ').replace('Z','')}</td>
-                <td className="p-2 font-semibold text-[11px]">
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wide ${e.level === 'ERROR' ? 'bg-red-600/20 text-red-700 dark:bg-red-500/30 dark:text-red-200' : e.level === 'WARNING' ? 'bg-yellow-500/20 text-yellow-700 dark:bg-yellow-500/30 dark:text-yellow-100' : 'bg-cyan-500/20 text-cyan-700 dark:bg-cyan-500/30 dark:text-cyan-100'}`}>{e.level}</span>
-                </td>
-                <td className="p-2 font-mono text-[11px] text-gray-700 dark:text-gray-300">{e.logger}</td>
-              </tr>
-            ))}
+            {paginated.map((e, idx) => {
+              const ctx = getExecutionContext(e);
+              const CategoryIcon = CATEGORY_INFO[ctx.category]?.icon || Server;
+              const catColor = CATEGORY_INFO[ctx.category]?.color || 'text-gray-500';
+              
+              return (
+                <tr key={idx} className="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                  <td className="p-2">
+                    <div className="flex items-center gap-1">
+                      <CategoryIcon className={`w-3 h-3 ${catColor}`} />
+                      <span className={`text-[10px] font-semibold ${catColor}`}>{ctx.category}</span>
+                    </div>
+                  </td>
+                  <td className="p-2 font-mono text-[11px] text-gray-800 dark:text-gray-200">{e.module}</td>
+                  <td className="p-2 font-mono text-[11px] text-gray-700 dark:text-gray-300">{e.function}</td>
+                  <td className="p-2 text-[12px] whitespace-pre-wrap break-words leading-snug text-gray-900 dark:text-gray-100 max-w-[480px]">{e.message}</td>
+                  <td className="p-2 font-mono text-[11px] text-gray-600 dark:text-gray-400 whitespace-nowrap">{e.timestamp?.replace('T',' ').split('.')[0]}</td>
+                  <td className="p-2 font-semibold text-[11px]">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wide ${e.level === 'ERROR' ? 'bg-red-600/20 text-red-700 dark:bg-red-500/30 dark:text-red-200' : e.level === 'WARNING' ? 'bg-yellow-500/20 text-yellow-700 dark:bg-yellow-500/30 dark:text-yellow-100' : 'bg-cyan-500/20 text-cyan-700 dark:bg-cyan-500/30 dark:text-cyan-100'}`}>{e.level}</span>
+                  </td>
+                </tr>
+              );
+            })}
             {!filtered.length && !loading && (
               <tr><td colSpan={6} className="p-4 text-center text-gray-500">No log entries</td></tr>
             )}
           </tbody>
         </table>
+        )}
       </div>
     </div>
   );

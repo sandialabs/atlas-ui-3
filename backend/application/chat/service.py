@@ -27,6 +27,12 @@ from .agent import AgentLoopFactory
 from .agent.protocols import AgentContext, AgentEvent
 from core.auth_utils import create_authorization_manager
 from core.utils import sanitize_for_logging
+from core.execution_context import (
+    set_conversation_context, 
+    log_chat_event, 
+    log_file_operation,
+    ExecutionPhase
+)
 
 # Import new refactored modules
 from .policies.tool_authorization import ToolAuthorizationService
@@ -220,17 +226,24 @@ class ChatService:
         Returns:
             Response dictionary to send to client
         """
+        # Set execution context for tracking
+        set_conversation_context(str(session_id))
+        
         # Log input arguments with content trimmed
         content_preview = content[:100] + "..." if len(content) > 100 else content
         sanitized_kwargs = error_utils.sanitize_kwargs_for_logging(kwargs)
 
-        logger.info(
-            f"handle_chat_message called - session_id: {session_id}, "
-            f"content: '{sanitize_for_logging(content_preview)}', model: {model}, "
-            f"selected_tools: {selected_tools}, selected_prompts: {selected_prompts}, selected_data_sources: {selected_data_sources}, "
-            f"only_rag: {only_rag}, tool_choice_required: {tool_choice_required}, "
-            f"user_email: {sanitize_for_logging(user_email)}, agent_mode: {agent_mode}, "
-            f"kwargs: {sanitized_kwargs}"
+        log_chat_event(
+            logger,
+            f"Chat message received: model={model}, user={sanitize_for_logging(user_email or 'unknown')}, "
+            f"tools={len(selected_tools or [])}, rag={only_rag}, agent={agent_mode}",
+            ExecutionPhase.MESSAGE_RECEIVED,
+            model=model,
+            content_preview=sanitize_for_logging(content_preview),
+            selected_tools_count=len(selected_tools or []),
+            selected_data_sources_count=len(selected_data_sources or []),
+            only_rag=only_rag,
+            agent_mode=agent_mode
         )
 
         # Get or create session
@@ -336,7 +349,16 @@ class ChatService:
             }
 
             sanitized_s3_key = s3_key.replace('\r', '').replace('\n', '')
-            logger.info(f"Attached file ({sanitized_s3_key}) to session {session_id}")
+            
+            # Log file attach operation
+            log_file_operation(
+                logger,
+                operation="attach",
+                filename=filename,
+                status="success",
+                s3_key=sanitized_s3_key,
+                size=file_result.get("size")
+            )
 
             # Emit files_update to notify UI
             if update_callback:
@@ -355,12 +377,23 @@ class ChatService:
             }
 
         except Exception as e:
-            logger.error(f"Failed to attach file {s3_key.replace('\n', '').replace('\r', '')} to session {session_id}: {str(e).replace('\n', '').replace('\r', '')}")
+            error_msg = str(e).replace('\n', '').replace('\r', '')
+            sanitized_s3_key = s3_key.replace('\n', '').replace('\r', '')
+            
+            # Log file attach error
+            log_file_operation(
+                logger,
+                operation="attach",
+                filename=sanitized_s3_key,
+                status="failed",
+                error=error_msg
+            )
+            
             return {
                 "type": "file_attach",
                 "s3_key": s3_key,
                 "success": False,
-                "error": str(e)
+                "error": error_msg
             }
 
     async def handle_download_file(
