@@ -69,3 +69,7 @@ frontend/ React 19 + Vite + Tailwind; state via contexts (Chat/WS/Marketplace)
 - Change agent loop: set AGENT_LOOP_STRATEGY to react | think-act | act; ChatService uses app_settings.agent_loop_strategy.
 
 Common pitfalls: “uv not found” → install uv; frontend not loading → npm run build; missing tools → check MCP transport/URL and server logs; empty lists → check auth groups and compliance filtering.
+
+# Style
+
+No emojis please
