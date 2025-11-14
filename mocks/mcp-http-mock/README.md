@@ -59,7 +59,6 @@ Add this configuration to your `mcp.json` file:
     "url": "http://127.0.0.1:8005/mcp",
     "auth_token": "test-api-key-123",
     "groups": ["users"],
-    "is_exclusive": false,
     "description": "Database simulation MCP server providing SQL-like query capabilities over HTTP/SSE transport",
     "author": "Chat UI Team",
     "short_description": "Database simulation server",

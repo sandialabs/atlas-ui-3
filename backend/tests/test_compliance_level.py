@@ -44,7 +44,6 @@ def test_compliance_level_in_config_response():
         "author": "Test",
         "compliance_level": "SOC2",
         "groups": ["users"],
-        "is_exclusive": False,
         "enabled": True
     }
     server_config = MCPServerConfig(**config_dict)

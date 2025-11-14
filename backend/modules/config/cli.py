@@ -85,8 +85,6 @@ def list_servers(args) -> None:
             print(f"   URL: {server.url}")
         if server.groups:
             print(f"   Groups: {', '.join(server.groups)}")
-        if server.is_exclusive:
-            print("   Exclusive: ⚠️  Yes")
         print()
 
 

@@ -136,7 +136,6 @@ Here is an example of a server configuration that uses all available options.
     "author": "Your Team Name",
     "help_email": "support@example.com",
     "groups": ["admin", "engineering"],
-    "is_exclusive": false,
     "command": ["python", "mcp/MyExampleServer/main.py"],
     "cwd": "backend",
     "url": null,
@@ -156,13 +155,12 @@ Here is an example of a server configuration that uses all available options.
 *   **`author`**: (string) The name of the team or individual who created the server.
 *   **`help_email`**: (string) A contact email for users who need help with the server's tools.
 *   **`groups`**: (list of strings) A list of user groups that are allowed to access this server. If a user is not in any of these groups, the server will be hidden from them.
-*   **`is_exclusive`**: (boolean) If `true`, this server cannot be used at the same time as any other server. This is useful for tools that operate in a sensitive context.
 *   **`command`**: (list of strings) For servers using `stdio` transport, this is the command and its arguments used to start the server process.
 *   **`cwd`**: (string) The working directory from which to run the `command`.
 *   **`url`**: (string) For servers using `http` or `sse` transport, this is the URL of the server's endpoint.
 *   **`transport`**: (string) The communication protocol to use. Can be `stdio`, `http`, or `sse`. This takes priority over auto-detection.
 *   **`auth_token`**: (string) For HTTP/SSE servers, the bearer token used for authentication. Use environment variable substitution (e.g., `"${MCP_SERVER_TOKEN}"`) to avoid storing secrets in config files. Stdio servers ignore this field.
-*   **`compliance_level`**: (string) The security compliance level of this server (e.g., "Public", "Internal", "SOC2"). This is used for data segregation.
+*   **`compliance_level`**: (string) The security compliance level of this server (e.g., "Public", "Internal", "SOC2"). This is used for data segregation and access control.
 *   **`require_approval`**: (list of strings) A list of tool names (without the server prefix) that will always require user approval before execution.
 *   **`allow_edit`**: (list of strings) A list of tool names for which the user is allowed to edit the arguments before approving. (Note: This is a legacy field and may be deprecated; the UI may allow editing for all approval requests).
 

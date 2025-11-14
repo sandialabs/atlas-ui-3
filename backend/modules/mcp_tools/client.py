@@ -471,12 +471,6 @@ class MCPToolManager:
             return self.servers_config[server_name].get("groups", [])
         return []
     
-    def is_server_exclusive(self, server_name: str) -> bool:
-        """Check if server is exclusive (cannot run with others)."""
-        if server_name in self.servers_config:
-            return self.servers_config[server_name].get("is_exclusive", False)
-        return False
-    
     def get_available_servers(self) -> List[str]:
         """Get list of configured servers."""
         return list(self.servers_config.keys())

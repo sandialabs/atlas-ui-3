@@ -10,7 +10,6 @@
         "groups": [
           "users"
         ],
-        "is_exclusive": false,
         "enabled": true,
         "command": [
           "python",
@@ -29,7 +28,6 @@
         "groups": [
           "users"
         ],
-        "is_exclusive": false,
         "enabled": true,
         "command": [
           "python",
@@ -48,7 +46,6 @@
         "groups": [
           "users"
         ],
-        "is_exclusive": false,
         "enabled": true,
         "command": [
           "python",
@@ -67,7 +64,6 @@
         "groups": [
           "users"
         ],
-        "is_exclusive": false,
         "enabled": true,
         "command": [
           "python",
@@ -86,7 +82,6 @@
         "groups": [
           "users"
         ],
-        "is_exclusive": false,
         "enabled": true,
         "command": [
           "python",
@@ -110,7 +105,6 @@
         "groups": [
           "users"
         ],
-        "is_exclusive": false,
         "enabled": true,
         "command": [
           "python",
@@ -158,7 +152,6 @@
         "groups": [
           "users"
         ],
-        "is_exclusive": false,
         "enabled": true,
         "command": [
           "python",
@@ -203,7 +196,6 @@
         "groups": [
           "users"
         ],
-        "is_exclusive": false,
         "enabled": true,
         "command": [
           "python",
@@ -276,7 +268,6 @@
         "groups": [
           "users"
         ],
-        "is_exclusive": false,
         "enabled": true,
         "command": [
           "python",
@@ -340,7 +331,6 @@
         "groups": [
           "users"
         ],
-        "is_exclusive": false,
         "enabled": true,
         "command": [
           "python",
