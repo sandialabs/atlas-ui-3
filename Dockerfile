@@ -7,8 +7,13 @@ WORKDIR /app
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Install system dependencies including Python and Node.js
-RUN dnf update -y && dnf install -y     python3     python3-pip     python3-virtualenv     nodejs     npm     curl     hostname     sudo     && dnf clean all
+# Install system dependencies including Python
+RUN dnf update -y && dnf install -y     python3     python3-pip     python3-virtualenv     curl     hostname     sudo     && dnf clean all
+
+# Install Node.js 20.x from NodeSource
+RUN curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && \
+    dnf install -y nodejs && \
+    dnf clean all
 
 # Install uv for better Python dependency management
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
