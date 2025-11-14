@@ -1,81 +1,76 @@
-# name: CI/CD Pipeline
+name: CI/CD Pipeline
 
-# on:
-#   push:
-#     branches: [ main, develop ]
-#   pull_request:
-#     branches: [ main ]
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
 
-# env:
-#   REGISTRY: ghcr.io
-#   IMAGE_NAME: ${{ github.repository }}
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
-# jobs:
-#   build-and-test:
-#     runs-on: ubuntu-latest
-#     permissions:
-#       contents: read
-#       packages: write
-#     steps:
-#     - uses: actions/checkout@v5
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - uses: actions/checkout@v5
     
-#     - name: Setup Node.js
-#       uses: actions/setup-node@v4
-#       with:
-#         node-version: '22.12.0'
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     
-#     - name: Log in to Container Registry
-#       uses: docker/login-action@v3
-#       with:
-#         registry: ${{ env.REGISTRY }}
-#         username: ${{ github.actor }}
-#         password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          # Add SHA tags safely for both branches and PRs without generating an invalid leading '-'
+          type=sha,enable=true,prefix=${{ github.ref_name }}-
+          type=sha,enable=${{ github.event_name == 'pull_request' }},prefix=pr-
+          type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
     
-#     - name: Extract metadata
-#       id: meta
-#       uses: docker/metadata-action@v5
-#       with:
-#         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-#         tags: |
-#           type=ref,event=branch
-#           type=ref,event=pr
-#           # Add SHA tags safely for both branches and PRs without generating an invalid leading '-'
-#           type=sha,enable=true,prefix=${{ github.ref_name }}-
-#           type=sha,enable=${{ github.event_name == 'pull_request' }},prefix=pr-
-#           type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+    - name: Build test Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ./Dockerfile-test
+        load: true
+        tags: test-image:latest
+        labels: ${{ steps.meta.outputs.labels }}
     
-#     - name: Build test Docker image
-#       uses: docker/build-push-action@v6
-#       with:
-#         context: .
-#         file: ./Dockerfile-test
-#         load: true
-#         tags: test-image:latest
-#         labels: ${{ steps.meta.outputs.labels }}
-    
-#     - name: Run tests in container
-#       run: |
-#         echo "Running tests in test container: test-image:latest"
+    - name: Run tests in container
+      run: |
+        echo "Running tests in test container: test-image:latest"
         
-#         # Run the master test script in the test container
-#         docker run --rm --workdir /app test-image:latest bash /app/test/run_tests.sh all
+        # Run the master test script in the test container
+        docker run --rm --workdir /app test-image:latest bash /app/test/run_tests.sh all
 
-#     - name: Build production Docker image
-#       uses: docker/build-push-action@v6
-#       with:
-#         context: .
-#         load: true
-#         build-args: |
-#           VITE_APP_NAME=Chat UI
-#         tags: ${{ steps.meta.outputs.tags }}
-#         labels: ${{ steps.meta.outputs.labels }}
+    - name: Build production Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        load: true
+        build-args: |
+          VITE_APP_NAME=Chat UI
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
 
-#     - name: Push production Docker image
-#       uses: docker/build-push-action@v6
-#       with:
-#         context: .
-#         push: true
-#         build-args: |
-#           VITE_APP_NAME=Chat UI
-#         tags: ${{ steps.meta.outputs.tags }}
-#         labels: ${{ steps.meta.outputs.labels }}
+    - name: Push production Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: true
+        build-args: |
+          VITE_APP_NAME=Chat UI
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
