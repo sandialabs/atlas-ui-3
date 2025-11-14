@@ -75,7 +75,7 @@ async def lifespan(app: typer.Typer):
 app = typer.Typer()
 
 @app.callback()
-async def main(
+def main(
     config: Optional[Path] = typer.Option(
         None,
         "--config",
@@ -98,20 +98,17 @@ async def main(
 @app.command()
 def list_models():
     """Lists all available LLM models."""
-    async def _list_models():
-        console.print("[bold green]Available LLM Models:[/bold green]")
-        config_manager = app_factory.get_config_manager()
-        table = Table("ID", "Model Name", "Provider", "Compliance Level")
-        for model_id, model_config in config_manager.llm_config.models.items():
-            table.add_row(
-                model_id,
-                model_config.model_name,
-                "N/A", # Provider not directly available in ModelConfig
-                model_config.compliance_level if model_config.compliance_level else "N/A"
-            )
-        console.print(table)
-
-    asyncio.run(_list_models())
+    console.print("[bold green]Available LLM Models:[/bold green]")
+    config_manager = app_factory.get_config_manager()
+    table = Table("ID", "Model Name", "Provider", "Compliance Level")
+    for model_id, model_config in config_manager.llm_config.models.items():
+        table.add_row(
+            model_id,
+            model_config.model_name,
+            "N/A", # Provider not directly available in ModelConfig
+            model_config.compliance_level if model_config.compliance_level else "N/A"
+        )
+    console.print(table)
 
 @app.command()
 def list_tools():
@@ -119,9 +116,31 @@ def list_tools():
     async def _list_tools():
         console.print("[bold green]Available Tools (MCPs):[/bold green]")
         mcp_manager = app_factory.get_mcp_manager()
-        table = Table("ID", "Name", "Description")
-        for tool_id, tool in mcp_manager.tools.items():
-            table.add_row(tool_id, tool.name, tool.description)
+
+        # Initialize MCP tools if not already initialized
+        if not mcp_manager.available_tools:
+            logger.info("Initializing MCP tools...")
+            try:
+                await asyncio.wait_for(mcp_manager.initialize_clients(), timeout=10.0)
+                await asyncio.wait_for(mcp_manager.discover_tools(), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning("MCP initialization timed out")
+                console.print("[yellow]No tools available (initialization timed out).[/yellow]")
+                return
+            except Exception as e:
+                logger.error(f"Error during MCP initialization: {e}", exc_info=True)
+                console.print(f"[red]Error initializing MCP tools: {e}[/red]")
+                return
+
+        if not mcp_manager.available_tools:
+            console.print("[yellow]No tools available.[/yellow]")
+            return
+
+        table = Table("Server", "Tool Name", "Description")
+        for server_name, server_data in mcp_manager.available_tools.items():
+            tools_list = server_data.get('tools', [])
+            for tool in tools_list:
+                table.add_row(server_name, tool.name, tool.description or "N/A")
         console.print(table)
 
     asyncio.run(_list_tools())
@@ -144,6 +163,18 @@ def chat(
     final_tools = selected_tools or config.get("selected_tools", [])
 
     async def _chat():
+        # Initialize MCP tools for chat
+        mcp_manager = app_factory.get_mcp_manager()
+        try:
+            await asyncio.wait_for(mcp_manager.initialize_clients(), timeout=10.0)
+            await asyncio.wait_for(mcp_manager.discover_tools(), timeout=10.0)
+            await asyncio.wait_for(mcp_manager.discover_prompts(), timeout=10.0)
+        except asyncio.TimeoutError:
+            logger.warning("MCP initialization timed out - continuing without MCP tools")
+        except Exception as e:
+            logger.error(f"Error during MCP initialization: {e}", exc_info=True)
+            logger.warning("Continuing without MCP tools")
+
         session_id = uuid4()
         connection = CLIConnectionAdapter(final_user_email)
         chat_service = app_factory.create_chat_service(connection)
@@ -165,12 +196,18 @@ def chat(
             agent_max_steps=10,
         )
 
-        await asyncio.sleep(5)
+        # Small delay to ensure all output is flushed
+        await asyncio.sleep(0.1)
         chat_service.end_session(session_id)
         console.print(f"[bold red]Chat session {session_id} ended.[/bold red]")
 
+        # Cleanup MCP
+        try:
+            await asyncio.wait_for(mcp_manager.cleanup(), timeout=5.0)
+        except Exception as e:
+            logger.error(f"Error during MCP cleanup: {e}")
+
+    asyncio.run(_chat())
+
 if __name__ == "__main__":
-    async def run_app():
-        async with lifespan(app):
-            app()
-    asyncio.run(run_app())
+    app()
