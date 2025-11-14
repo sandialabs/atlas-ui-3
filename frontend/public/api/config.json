@@ -7,15 +7,13 @@
       "server": "canvas",
       "tools": ["canvas"],
       "description": "Create and display visual content",
-      "tool_count": 1,
-      "is_exclusive": false
+      "tool_count": 1
     },
     {
       "server": "math",
       "tools": ["add", "subtract", "multiply", "divide"],
       "description": "Basic mathematical operations",
-      "tool_count": 4,
-      "is_exclusive": false
+      "tool_count": 4
     }
   ],
   "data_sources": ["documents", "knowledge_base"],

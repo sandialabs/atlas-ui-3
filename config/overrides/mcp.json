@@ -12,22 +12,26 @@
     "author": "Chat UI Team",
     "short_description": "Mathematical calculator",
     "help_email": "support@chatui.example.com",
-    "compliance_level": "Public"
+    "compliance_level": "Public",
+    "require_approval": [],
+    "allow_edit": [
+      "evaluate"
+    ]
   },
-  "thinking": {
+  "pptx_generator": {
     "command": [
       "python",
-      "mcp/thinking/main.py"
+      "mcp/pptx_generator/main.py"
     ],
     "cwd": "backend",
     "groups": [
       "users"
     ],
-    "description": "Structured thinking and problem analysis tool",
+    "description": "Create professional PowerPoint presentations from JSON data or Markdown content with automatic slide generation, bullet point formatting, and multimedia support",
     "author": "Chat UI Team",
-    "short_description": "Structured problem analysis",
+    "short_description": "PowerPoint presentation generator",
     "help_email": "support@chatui.example.com",
-    "compliance_level": "Public"
+    "compliance_level": "SOC2"
   },
   "pdfbasic": {
     "command": [
@@ -42,37 +46,29 @@
     "author": "Chat UI Team",
     "short_description": "PDF text extraction and analysis",
     "help_email": "support@chatui.example.com",
-    "compliance_level": "SOC2"
+    "compliance_level": "SOC2",
+    "require_approval": [
+      "generate_report_about_pdf",
+      "word_frequency_pdf"
+    ],
+    "allow_edit": [
+      "generate_report_about_pdf",
+      "word_frequency_pdf"
+    ]
   },
-  "ui-demo": {
+  "file_size_test": {
     "command": [
       "python",
-      "mcp/ui-demo/main.py"
+      "mcp/file_size_test/main.py"
     ],
     "cwd": "backend",
     "groups": [
       "users"
     ],
-    "description": "Demo server showcasing custom UI modification capabilities",
+    "description": "Simple test tool that accepts a file transfer and returns the file size in bytes",
     "author": "Chat UI Team",
-    "short_description": "UI customization demo",
-    "help_email": "support@chatui.example.com",
-    "compliance_level": "Public"
-  },
-  "code-executor": {
-    "command": [
-      "python",
-      "mcp/code-executor/main.py"
-    ],
-    "cwd": "backend",
-    "groups": [
-      "users"
-    ],
-    "description": "Execute Python, JavaScript, and other code snippets in a secure sandboxed environment with safety validation",
-    "author": "Chat UI Team",
-    "short_description": "Secure code execution sandbox",
-    "help_email": "support@chatui.example.com",
-    "compliance_level": "SOC2"
+    "short_description": "File transfer test tool",
+    "help_email": "support@chatui.example.com"
   },
   "prompts": {
     "command": [
@@ -89,7 +85,20 @@
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
   },
+  "progress_demo": {
+    "transport": "stdio",
+    "command": [
+      "python",
+      "main.py"
+    ],
+    "cwd": "backend/mcp/progress_demo",
+    "groups": [
+      "mcp_basic"
+    ],
+    "compliance_level": "Public"
+  },
   "external-api-example": {
+    "enabled": true,
     "url": "http://127.0.0.1:8005/mcp",
     "transport": "http",
     "groups": [

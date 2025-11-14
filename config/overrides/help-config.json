@@ -1,0 +1,198 @@
+{
+  "title": "Help & Documentation",
+  "sections": [
+    {
+      "id": "quick-start",
+      "type": "section",
+      "title": "Quick Start",
+      "icon": "zap",
+      "iconColor": "blue-400",
+      "description": "Welcome to the Chat UI! This application provides an advanced chat interface with AI models, enhanced by powerful tools and data sources.",
+      "layout": "cards-grid",
+      "cards": [
+        {
+          "title": "Start a New Chat",
+          "content": "Click \"New Chat\" button or press Ctrl+Alt+N",
+          "hasKeyboard": true,
+          "keyboardShortcut": "Ctrl+Alt+N"
+        },
+        {
+          "title": "Access Tools",
+          "content": "Click the Settings icon in the header to open the tools panel",
+          "hasIcon": true,
+          "iconName": "settings"
+        }
+      ]
+    },
+    {
+      "id": "core-features",
+      "type": "section", 
+      "title": "Core Features",
+      "icon": "message-square",
+      "iconColor": "green-400",
+      "layout": "feature-list",
+      "features": [
+        {
+          "title": "RAG (Retrieval-Augmented Generation)",
+          "icon": "database",
+          "iconColor": "blue-400",
+          "borderColor": "blue-400",
+          "description": "Connect your chats to external data sources for enhanced, context-aware responses.",
+          "bullets": [
+            "Click the menu icon to open data sources panel",
+            "Select which documents/databases to include in your conversation", 
+            "Toggle \"RAG Only\" mode to query only your documents without LLM processing",
+            "View source attribution to see which documents informed the response"
+          ]
+        },
+        {
+          "title": "Tools & MCP Servers",
+          "icon": "settings",
+          "iconColor": "green-400",
+          "borderColor": "green-400",
+          "description": "Extend AI capabilities with specialized tools through Model Context Protocol (MCP) servers.",
+          "bullets": [
+            "Click the Settings icon to view available tools",
+            "Built-in tools include file operations, calculations, and UI demos",
+            "Tools can create interactive content in the Canvas panel",
+            "Select specific tools in the marketplace for personalized experience"
+          ]
+        },
+        {
+          "title": "MCP Store/Marketplace",
+          "icon": "store",
+          "iconColor": "purple-400", 
+          "borderColor": "purple-400",
+          "description": "Browse and select MCP servers that provide different capabilities.",
+          "bullets": [
+            "Navigate to /marketplace to browse available servers",
+            "Select which MCP servers you want to use in your chats",
+            "Each server provides specific tools and functionalities",
+            "Your selections are saved and persist across sessions"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tips-best-practices",
+      "type": "section",
+      "title": "Tips & Best Practices", 
+      "icon": "alert-triangle",
+      "iconColor": "yellow-400",
+      "layout": "tip-cards",
+      "tips": [
+        {
+          "title": "Starting Fresh Conversations",
+          "content": "For best results, start a new chat session when switching to a completely different topic. This prevents context confusion and ensures cleaner responses."
+        },
+        {
+          "title": "Handling Errors", 
+          "content": "If you encounter errors or unexpected behavior, restart your chat session using the \"New Chat\" button. This clears the conversation history and resets the context."
+        },
+        {
+          "title": "Keyboard Shortcuts",
+          "content": "Learn these helpful shortcuts to improve your workflow.",
+          "shortcuts": [
+            {"key": "Ctrl+Alt+N", "description": "Start new chat"},
+            {"key": "Enter", "description": "Send message"},
+            {"key": "Shift+Enter", "description": "New line in message"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "technical-docs",
+      "type": "section",
+      "title": "Technical Documentation",
+      "icon": "code",
+      "iconColor": "orange-400", 
+      "layout": "technical",
+      "subsections": [
+        {
+          "title": "Building Your Own MCP Server",
+          "borderColor": "orange-400",
+          "description": "Create custom tools and functionality by developing your own MCP servers.",
+          "content": [
+            {
+              "type": "subsection",
+              "title": "Special Return Types",
+              "bullets": [
+                {"code": "returned_files", "description": "Return files for Canvas rendering (HTML, images, PDFs, text)"},
+                {"code": "file_path", "description": "Reference files for download/display"},
+                {"code": "content", "description": "Standard text response"},
+                {"code": "success", "description": "Boolean indicating operation success"}
+              ]
+            },
+            {
+              "type": "code-example",
+              "title": "Returned Files Example",
+              "language": "json",
+              "code": "{\n    \"content\": \"Created interactive chart\",\n    \"returned_files\": [{\n        \"filename\": \"chart.html\",\n        \"content_base64\": \"PGRpdj5Zb3VyIEhUTUwgaGVyZTwvZGl2Pg==\"\n    }],\n    \"success\": true\n}"
+            }
+          ]
+        },
+        {
+          "title": "UI Modification & Custom Prompts",
+          "borderColor": "cyan-400",
+          "description": "Advanced customization options for developers.",
+          "bullets": [
+            "MCP servers can return files (HTML, images, PDFs, text) that render in the Canvas panel",
+            "All HTML is sanitized for security using DOMPurify", 
+            "JavaScript is supported for interactive elements",
+            "Use custom prompts to modify AI behavior",
+            "Create specialized tools for domain-specific tasks"
+          ]
+        },
+        {
+          "title": "Development Resources",
+          "type": "resource-card",
+          "resources": [
+            {"file": "docs/mcp-development.md", "description": "Comprehensive MCP development guide"},
+            {"file": "docs/advanced-features.md", "description": "Advanced features and examples"},
+            {"file": "docs/configuration.md", "description": "Configuration options"},
+            {"file": "backend/mcp/", "description": "Example MCP server implementations"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "agent-mode",
+      "type": "section",
+      "title": "Agent Mode",
+      "icon": "bot", 
+      "iconColor": "gradient",
+      "gradientFrom": "blue-400",
+      "gradientTo": "purple-600",
+      "layout": "simple",
+      "description": "Agent mode enables multi-step reasoning where the AI breaks down complex tasks into manageable steps.",
+      "features": [
+        "Step-by-step task breakdown and execution",
+        "Visual progress tracking", 
+        "Integration with MCP tools during reasoning",
+        "Ability to interrupt the reasoning process"
+      ],
+      "note": "Agent mode availability depends on your configuration. Check with your administrator if this feature is not visible."
+    },
+    {
+      "id": "support",
+      "type": "section",
+      "title": "Need More Help?",
+      "icon": "file-text",
+      "iconColor": "gray-400",
+      "layout": "support-cards",
+      "description": "For additional information and detailed guides:",
+      "cards": [
+        {
+          "title": "Documentation",
+          "content": "Check the docs/ folder for comprehensive guides on setup, configuration, and development.",
+          "code": "docs/"
+        },
+        {
+          "title": "Configuration", 
+          "content": "Refer to .env.example and configuration documentation for customization options.",
+          "code": ".env.example"
+        }
+      ]
+    }
+  ]
+}
