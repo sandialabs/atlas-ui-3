@@ -123,7 +123,11 @@ RateLimit first to cheaply throttle abusive traffic before heavier logic.
 """
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
-app.add_middleware(AuthMiddleware, debug_mode=config.app_settings.debug_mode)
+app.add_middleware(
+    AuthMiddleware, 
+    debug_mode=config.app_settings.debug_mode,
+    auth_header_name=config.app_settings.auth_user_header
+)
 
 # Include essential routes (add files API)
 app.include_router(config_router)
@@ -186,9 +190,12 @@ async def websocket_endpoint(websocket: WebSocket):
     2. Reverse proxy intercepts WebSocket handshake (HTTP Upgrade request)
     3. Reverse proxy delegates to authentication service
     4. Auth service validates JWT/session from cookies or headers
-    5. If valid: Auth service returns X-Authenticated-User header
-    6. Reverse proxy forwards connection to this app with X-Authenticated-User header
+    5. If valid: Auth service returns authenticated user header
+    6. Reverse proxy forwards connection to this app with authenticated user header
     7. This app trusts the header (already validated by auth service)
+    
+    The header name is configurable via AUTH_USER_HEADER environment variable
+    (default: X-User-Email). This allows flexibility for different reverse proxy setups.
 
     SECURITY REQUIREMENTS:
     - This app MUST ONLY be accessible via reverse proxy
@@ -197,7 +204,7 @@ async def websocket_endpoint(websocket: WebSocket):
     - The /login endpoint lives in the separate auth service
 
     DEVELOPMENT vs PRODUCTION:
-    - Production: Extracts user from X-Authenticated-User header (set by reverse proxy)
+    - Production: Extracts user from configured auth header (set by reverse proxy)
     - Development: Falls back to 'user' query parameter (INSECURE, local only)
 
     See docs/security_architecture.md for complete architecture details.

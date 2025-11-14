@@ -198,6 +198,13 @@ class AppSettings(BaseSettings):
     auth_group_check_url: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_URL")
     auth_group_check_api_key: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_API_KEY")
     
+    # Authentication header configuration
+    auth_user_header: str = Field(
+        default="X-User-Email",
+        description="HTTP header name to extract authenticated username from reverse proxy",
+        validation_alias="AUTH_USER_HEADER"
+    )
+    
     # S3/MinIO storage settings
     use_mock_s3: bool = False  # Use in-process S3 mock (no Docker required)
     s3_endpoint: str = "http://localhost:9000"
