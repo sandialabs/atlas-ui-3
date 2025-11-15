@@ -180,7 +180,7 @@ def log_high_risk_event(*, source: str, user: Optional[str], content: str, score
         log_path = base_dir / "logs" / "security_high_risk.jsonl"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
-            "ts": datetime.utcnow().isoformat() + "Z",
+            "ts": datetime.now(datetime.UTC).isoformat() + "Z",
             "type": "prompt_risk",
             "source": source,
             "user": user,
