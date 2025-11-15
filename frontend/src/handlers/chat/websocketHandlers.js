@@ -111,6 +111,55 @@ export function createWebSocketHandler(deps) {
         case 'tool_result':
           mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === updateData.tool_call_id ? { ...msg, content: `**Tool: ${updateData.tool_name}** - ${updateData.success ? 'Success' : 'Failed'}`, status: updateData.success ? 'completed' : 'failed', result: updateData.result || updateData.error || null } : msg))
           break
+        case 'system_message':
+          // Rich system message from MCP server during tool execution
+          if (updateData && updateData.message) {
+            addMessage({
+              role: 'system',
+              content: updateData.message,
+              type: 'system',
+              subtype: updateData.subtype || 'info',
+              tool_call_id: updateData.tool_call_id,
+              tool_name: updateData.tool_name,
+              timestamp: new Date().toISOString()
+            })
+          }
+          break
+        case 'progress_artifacts':
+          // Handle artifacts sent during tool execution
+          if (updateData && updateData.artifacts) {
+            // Process artifacts similar to final tool results
+            const artifacts = updateData.artifacts
+            const display = updateData.display || {}
+            
+            // Convert artifacts to canvas files if they have viewer hints
+            const canvasFiles = artifacts
+              .filter(art => art.b64 && art.mime && art.viewer)
+              .map(art => ({
+                filename: art.name,
+                content_base64: art.b64,
+                mime_type: art.mime,
+                type: art.viewer,
+                description: art.description || art.name
+              }))
+            
+            if (canvasFiles.length > 0) {
+              setCanvasFiles(canvasFiles)
+              // Respect primary_file hint if provided
+              if (display.primary_file) {
+                const idx = canvasFiles.findIndex(f => f.filename === display.primary_file)
+                setCurrentCanvasFileIndex(idx >= 0 ? idx : 0)
+              } else {
+                setCurrentCanvasFileIndex(0)
+              }
+              // Only clear text content if display wants to open canvas
+              if (display.open_canvas) {
+                setCanvasContent('')
+                setCustomUIContent(null)
+              }
+            }
+          }
+          break
         case 'canvas_content':
           if (updateData && updateData.content) {
             setCanvasContent(typeof updateData.content === 'string' ? updateData.content : String(updateData.content || ''))
