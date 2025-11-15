@@ -62,6 +62,7 @@ cp .env.example .env
 Key settings in the `.env` file include:
 
 *   **API Keys**: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.
+*   **Authentication Header**: `AUTH_USER_HEADER` configures the HTTP header name used to extract the authenticated username from your reverse proxy (default: `X-User-Email`).
 *   **Feature Flags**: Enable or disable major features like `FEATURE_AGENT_MODE_AVAILABLE`.
 *   **S3 Connection**: Configure the connection to your S3-compatible storage. For local testing, you can set `USE_MOCK_S3=true` to use an in-memory mock instead of a real S3 bucket. **This mock must never be used in production.**
 *   **Log Directory**: The `APP_LOG_DIR` variable points to the folder where the application log file (`app.jsonl`) will be stored. This path must be updated to a valid directory in your deployment environment.
@@ -234,13 +235,36 @@ The intended flow for user authentication in a production environment is as foll
 
 1.  The user makes a request to the application's public URL, which is handled by the **Reverse Proxy**.
 2.  The Reverse Proxy communicates with an **Authentication Service** (e.g., an SSO provider, an OAuth server) to validate the user's credentials (like cookies or tokens).
-3.  Once the user is authenticated, the Reverse Proxy **injects the user's identity** (e.g., their email address) into the `x-email-header` and forwards the request to the **Atlas UI Backend**.
+3.  Once the user is authenticated, the Reverse Proxy **injects the user's identity** (e.g., their email address) into an HTTP header and forwards the request to the **Atlas UI Backend**.
 
-The backend application then reads this header to identify the user. This model is secure only if the backend is not directly exposed to the internet, ensuring that all requests are processed by the proxy first.
+The backend application reads this header to identify the user. The header name is configurable via the `AUTH_USER_HEADER` environment variable (default: `X-User-Email`). This allows flexibility for different reverse proxy setups that may use different header names (e.g., `X-Authenticated-User`, `X-Remote-User`). This model is secure only if the backend is not directly exposed to the internet, ensuring that all requests are processed by the proxy first.
 
 ### Development Behavior
 
-In a local development environment (when `DEBUG_MODE=true` in the `.env` file), the system falls back to using a default `test@test.com` user if the `x-email-header` is not present.
+In a local development environment (when `DEBUG_MODE=true` in the `.env` file), the system falls back to using a default `test@test.com` user if the configured authentication header is not present.
+
+### Configuring the Authentication Header
+
+Different reverse proxy setups use different header names to pass authenticated user information. The application supports configuring the header name via the `AUTH_USER_HEADER` environment variable.
+
+**Default Configuration:**
+```
+AUTH_USER_HEADER=X-User-Email
+```
+
+**Common Alternative Headers:**
+```
+# For Apache mod_auth setups
+AUTH_USER_HEADER=X-Remote-User
+
+# For some SSO providers
+AUTH_USER_HEADER=X-Authenticated-User
+
+# For custom reverse proxy configurations
+AUTH_USER_HEADER=X-Custom-Auth-Header
+```
+
+This setting allows the application to work with various authentication infrastructures without code changes.
 
 ### Customizing Authorization
 
