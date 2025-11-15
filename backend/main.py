@@ -215,16 +215,16 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
     # Extract user email using the same authentication flow as HTTP requests
-    # Priority: 1) X-User-Email header (production), 2) query param (dev), 3) test user (dev fallback)
+    # Priority: 1) configured auth header (production), 2) query param (dev), 3) test user (dev fallback)
     config_manager = app_factory.get_config_manager()
     user_email = None
     
-    # Check X-User-Email header first (consistent with AuthMiddleware)
-    x_email_header = websocket.headers.get('X-User-Email')
+    # Check configured auth header first (consistent with AuthMiddleware)
+    auth_header_name = config_manager.app_settings.auth_user_header
+    x_email_header = websocket.headers.get(auth_header_name)
     if x_email_header:
-
         user_email = get_user_from_header(x_email_header)
-        logger.info("WebSocket authenticated via X-User-Email header: %s", sanitize_for_logging(user_email))
+        logger.info("WebSocket authenticated via %s header: %s", auth_header_name, sanitize_for_logging(user_email))
     
     # Fallback to query parameter for backward compatibility (development/testing)
     if not user_email:

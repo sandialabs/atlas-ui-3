@@ -1,4 +1,13 @@
-"""Test WebSocket authentication using X-User-Email header."""
+"""
+Tests for WebSocket authentication using the configured authentication header.
+
+These tests validate that the backend correctly extracts the user email from the
+configured authentication header (default: X-User-Email) for WebSocket connections,
+which is critical for the production authentication flow where the reverse proxy
+sets this header. The tests also ensure that fallback mechanisms (query parameter,
+test user from config) work as expected, and that the header takes precedence when
+both are present.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +24,7 @@ def mock_app_factory():
         mock_config = MagicMock()
         mock_config.app_settings.test_user = 'test@test.com'
         mock_config.app_settings.debug_mode = False
+        mock_config.app_settings.auth_user_header = 'X-User-Email'
         mock_factory.get_config_manager.return_value = mock_config
         
         # Mock chat service

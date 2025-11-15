@@ -7,8 +7,8 @@ This test simulates the exact scenario from the issue:
 - Attaching the file should succeed (not fail with "Access denied")
 """
 
-import pytest
 import base64
+import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from fastapi.testclient import TestClient
 
@@ -22,6 +22,7 @@ def mock_components():
         # Mock config
         mock_config = MagicMock()
         mock_config.app_settings.test_user = 'test@test.com'
+        mock_config.app_settings.auth_user_header = 'X-User-Email'
         mock_factory.get_config_manager.return_value = mock_config
         
         # Mock file manager with S3 client
@@ -106,6 +107,7 @@ def test_issue_scenario_would_fail_without_header():
         # Mock config
         mock_config = MagicMock()
         mock_config.app_settings.test_user = 'test@test.com'
+        mock_config.app_settings.auth_user_header = 'X-User-Email'
         mock_factory.get_config_manager.return_value = mock_config
         
         # Mock chat service
