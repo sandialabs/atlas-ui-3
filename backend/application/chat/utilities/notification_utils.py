@@ -191,11 +191,33 @@ async def notify_tool_progress(
     Send tool progress notification.
 
     Emits an event shaped for the UI to render progress bars/messages.
+    
+    Enhanced to support structured progress updates:
+    - If message starts with "MCP_UPDATE:", parse as JSON for special updates
+    - Supports canvas updates, system messages, and file artifacts during execution
     """
     if not update_callback:
         return
 
     try:
+        # Check for structured progress updates
+        if message and message.startswith("MCP_UPDATE:"):
+            try:
+                structured_data = json.loads(message[11:])  # Remove "MCP_UPDATE:" prefix
+                await _handle_structured_progress_update(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    progress=progress,
+                    total=total,
+                    structured_data=structured_data,
+                    update_callback=update_callback
+                )
+                return
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse structured progress update: {e}")
+                # Fall through to regular progress handling
+        
+        # Regular progress notification
         pct: Optional[float] = None
         if total is not None and total != 0:
             try:
@@ -214,6 +236,86 @@ async def notify_tool_progress(
         await safe_notify(update_callback, payload)
     except Exception as e:
         logger.warning(f"Failed to emit tool_progress: {e}")
+
+
+async def _handle_structured_progress_update(
+    tool_call_id: str,
+    tool_name: str,
+    progress: float,
+    total: Optional[float],
+    structured_data: Dict[str, Any],
+    update_callback: UpdateCallback
+) -> None:
+    """
+    Handle structured progress updates from MCP servers.
+    
+    Supports:
+    - canvas_update: Display content in canvas during tool execution
+    - system_message: Add rich system messages to chat history
+    - artifacts: Send file artifacts during execution
+    """
+    update_type = structured_data.get("type")
+    
+    if update_type == "canvas_update":
+        # Display content in canvas
+        content = structured_data.get("content")
+        if content:
+            await safe_notify(update_callback, {
+                "type": "canvas_content",
+                "content": content
+            })
+            logger.info(f"Tool {tool_name} sent canvas update during execution")
+    
+    elif update_type == "system_message":
+        # Send rich system message to chat
+        msg_content = structured_data.get("message", "")
+        msg_subtype = structured_data.get("subtype", "info")
+        await safe_notify(update_callback, {
+            "type": "intermediate_update",
+            "update_type": "system_message",
+            "data": {
+                "message": msg_content,
+                "subtype": msg_subtype,
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name
+            }
+        })
+        logger.info(f"Tool {tool_name} sent system message during execution")
+    
+    elif update_type == "artifacts":
+        # Send file artifacts during execution
+        artifacts = structured_data.get("artifacts", [])
+        display_config = structured_data.get("display")
+        if artifacts:
+            await safe_notify(update_callback, {
+                "type": "intermediate_update",
+                "update_type": "progress_artifacts",
+                "data": {
+                    "artifacts": artifacts,
+                    "display": display_config,
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name
+                }
+            })
+            logger.info(f"Tool {tool_name} sent {len(artifacts)} artifact(s) during execution")
+    
+    # Still send progress info along with the structured update
+    pct: Optional[float] = None
+    if total is not None and total != 0:
+        try:
+            pct = (float(progress) / float(total)) * 100.0
+        except Exception:
+            pct = None
+    
+    await safe_notify(update_callback, {
+        "type": "tool_progress",
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "progress": progress,
+        "total": total,
+        "percentage": pct,
+        "message": structured_data.get("progress_message", "Processing..."),
+    })
 
 
 async def notify_canvas_content(
