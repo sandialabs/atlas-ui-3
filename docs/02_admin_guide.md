@@ -266,6 +266,33 @@ AUTH_USER_HEADER=X-Custom-Auth-Header
 
 This setting allows the application to work with various authentication infrastructures without code changes.
 
+### WebSocket Authentication
+
+The application uses WebSocket connections for real-time chat functionality. WebSocket authentication works consistently with HTTP authentication, using the same configured header.
+
+**Authentication Flow for WebSockets:**
+
+1. Client initiates WebSocket connection to `/ws`
+2. Reverse proxy intercepts the WebSocket upgrade request (HTTP Upgrade)
+3. Reverse proxy validates authentication and adds the configured auth header (e.g., `X-User-Email`)
+4. Backend extracts user identity from the header during WebSocket handshake
+5. All subsequent WebSocket operations use the authenticated user identity
+
+**Important Security Notes:**
+
+- The reverse proxy **must** strip any client-provided authentication headers before adding its own (otherwise attackers could inject headers like `X-User-Email: admin@company.com`)
+- The backend trusts the header value because it assumes the reverse proxy has already validated the user
+- Direct access to the backend (bypassing the reverse proxy) would allow header injection attacks
+
+**Development Fallback:**
+
+In development mode (`DEBUG_MODE=true`), if the authentication header is not present, the WebSocket connection falls back to:
+1. The `user` query parameter (e.g., `/ws?user=test@test.com`)
+2. The configured test user from `TEST_USER` environment variable
+3. Default test user: `test@test.com`
+
+This fallback behavior makes local development easier but should never be used in production.
+
 ### Customizing Authorization
 
 **IMPORTANT: For production deployments, configuring authorization is essential.** The default implementation is a mock and **must be replaced** with your organization's actual authorization system. You have two primary methods to achieve this:
