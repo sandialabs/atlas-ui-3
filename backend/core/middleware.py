@@ -17,9 +17,10 @@ logger = logging.getLogger(__name__)
 class AuthMiddleware(BaseHTTPMiddleware):
     """Middleware to handle authentication and logging."""
     
-    def __init__(self, app, debug_mode: bool = False):
+    def __init__(self, app, debug_mode: bool = False, auth_header_name: str = "X-User-Email"):
         super().__init__(app)
         self.debug_mode = debug_mode
+        self.auth_header_name = auth_header_name
         
     async def dispatch(self, request: Request, call_next) -> Response:
         # Log request
@@ -50,11 +51,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 else:
                     logger.warning("Invalid capability token provided")
 
-        # Check authentication via X-User-Email header
+        # Check authentication via configured header (default: X-User-Email)
         user_email = None
         if self.debug_mode:
-            # In debug mode, honor X-User-Email header if provided, otherwise use config test user
-            x_email_header = request.headers.get('X-User-Email')
+            # In debug mode, honor auth header if provided, otherwise use config test user
+            x_email_header = request.headers.get(self.auth_header_name)
             if x_email_header:
                 user_email = get_user_from_header(x_email_header)
             else:
@@ -63,7 +64,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 user_email = config_manager.app_settings.test_user
             # logger.info(f"Debug mode: using user {user_email}")
         else:
-            x_email_header = request.headers.get('X-User-Email')
+            x_email_header = request.headers.get(self.auth_header_name)
             user_email = get_user_from_header(x_email_header)
 
             if not user_email:
@@ -72,7 +73,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     logger.warning(f"Missing authentication for API endpoint: {request.url.path}")
                     raise HTTPException(status_code=401, detail="Unauthorized")
                 else:
-                    logger.warning("Missing X-User-Email, redirecting to auth")
+                    logger.warning(f"Missing {self.auth_header_name}, redirecting to auth")
                     return RedirectResponse(url="/auth", status_code=302)
 
         # Add user to request state
