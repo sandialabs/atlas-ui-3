@@ -1,79 +1,110 @@
 {
-
-
   "calculator": {
-    "command": ["python", "mcp/calculator/main.py"],
+    "command": [
+      "python",
+      "mcp/calculator/main.py"
+    ],
     "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
+    "groups": [
+      "users"
+    ],
     "description": "Evaluate mathematical expressions, perform calculations with basic arithmetic, trigonometry, and logarithms",
     "author": "Chat UI Team",
     "short_description": "Mathematical calculator",
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public",
     "require_approval": [],
-    "allow_edit": ["evaluate"]
+    "allow_edit": [
+      "evaluate"
+    ]
   },
-
   "pptx_generator": {
-    "command": ["python", "mcp/pptx_generator/main.py"],
+    "command": [
+      "python",
+      "mcp/pptx_generator/main.py"
+    ],
     "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
+    "groups": [
+      "users"
+    ],
     "description": "Create professional PowerPoint presentations from JSON data or Markdown content with automatic slide generation, bullet point formatting, and multimedia support",
     "author": "Chat UI Team",
     "short_description": "PowerPoint presentation generator",
     "help_email": "support@chatui.example.com",
     "compliance_level": "SOC2"
-  }, 
+  },
   "pdfbasic": {
-    "command": ["python", "mcp/pdfbasic/main.py"],
+    "command": [
+      "python",
+      "mcp/pdfbasic/main.py"
+    ],
     "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
+    "groups": [
+      "users"
+    ],
     "description": "Extract and analyze text content from PDF documents, search within PDFs, and summarize content",
     "author": "Chat UI Team",
     "short_description": "PDF text extraction and analysis",
     "help_email": "support@chatui.example.com",
     "compliance_level": "SOC2",
-    "require_approval": ["generate_report_about_pdf", "word_frequency_pdf"],
-    "allow_edit": ["generate_report_about_pdf", "word_frequency_pdf"]
+    "require_approval": [
+      "generate_report_about_pdf",
+      "word_frequency_pdf"
+    ],
+    "allow_edit": [
+      "generate_report_about_pdf",
+      "word_frequency_pdf"
+    ]
   },
   "file_size_test": {
-    "command": ["python", "mcp/file_size_test/main.py"],
+    "command": [
+      "python",
+      "mcp/file_size_test/main.py"
+    ],
     "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
+    "groups": [
+      "users"
+    ],
     "description": "Simple test tool that accepts a file transfer and returns the file size in bytes",
     "author": "Chat UI Team",
     "short_description": "File transfer test tool",
     "help_email": "support@chatui.example.com"
-  }, 
-   "prompts": {
-    "command": ["python", "mcp/prompts/main.py"],
+  },
+  "prompts": {
+    "command": [
+      "python",
+      "mcp/prompts/main.py"
+    ],
     "cwd": "backend",
-    "groups": ["users"],
-    "is_exclusive": false,
+    "groups": [
+      "users"
+    ],
     "description": "Specialized system prompts for AI behavior modification",
     "author": "Chat UI Team",
     "short_description": "AI behavior prompts",
     "help_email": "support@chatui.example.com",
-      "compliance_level": "Public"
+    "compliance_level": "Public"
   },
   "progress_demo": {
     "transport": "stdio",
-    "command": ["python", "main.py"],
+    "command": [
+      "python",
+      "main.py"
+    ],
     "cwd": "backend/mcp/progress_demo",
-    "groups": ["mcp_basic"],
+    "groups": [
+      "mcp_basic"
+    ],
     "compliance_level": "Public"
-  }, 
-    "external-api-example": {
-      "enabled": true,
+  },
+  "external-api-example": {
+    "enabled": true,
     "url": "http://127.0.0.1:8005/mcp",
     "transport": "http",
-    "groups": ["users"],
+    "groups": [
+      "users"
+    ],
     "description": "Mock HTTP MCP server for testing authentication",
     "auth_token": "${MCP_EXTERNAL_API_TOKEN}"
   }
-
 }

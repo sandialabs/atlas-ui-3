@@ -98,7 +98,6 @@ class MCPServerConfig(BaseModel):
     short_description: Optional[str] = None  # Short description for marketplace display
     help_email: Optional[str] = None     # Contact email for help/support
     groups: List[str] = Field(default_factory=list)
-    is_exclusive: bool = False
     enabled: bool = True
     command: Optional[List[str]] = None  # Command to run server (for stdio servers)
     cwd: Optional[str] = None            # Working directory for command
@@ -198,6 +197,13 @@ class AppSettings(BaseSettings):
     test_user: str = "test@test.com"  # Test user for development
     auth_group_check_url: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_URL")
     auth_group_check_api_key: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_API_KEY")
+    
+    # Authentication header configuration
+    auth_user_header: str = Field(
+        default="X-User-Email",
+        description="HTTP header name to extract authenticated username from reverse proxy",
+        validation_alias="AUTH_USER_HEADER"
+    )
     
     # S3/MinIO storage settings
     use_mock_s3: bool = False  # Use in-process S3 mock (no Docker required)
