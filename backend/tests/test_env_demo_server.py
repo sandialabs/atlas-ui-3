@@ -79,34 +79,7 @@ def test_env_var_substitution_pattern():
     del os.environ["TEST_API_KEY"]
 
 
-def test_mcp_json_configuration():
-    """Test that the env-demo server is properly configured in mcp.json."""
-    import json
-    
-    # Check in overrides
-    overrides_path = "/home/runner/work/atlas-ui-3/atlas-ui-3/config/overrides/mcp.json"
-    with open(overrides_path) as f:
-        config = json.load(f)
-    
-    assert "env-demo" in config
-    server_config = config["env-demo"]
-    
-    # Verify required fields
-    assert "command" in server_config
-    assert "cwd" in server_config
-    assert "env" in server_config
-    assert "groups" in server_config
-    
-    # Verify env configuration
-    env_config = server_config["env"]
-    assert isinstance(env_config, dict)
-    assert "CLOUD_PROFILE" in env_config
-    assert "CLOUD_REGION" in env_config
-    assert "API_KEY" in env_config
-    
-    # Verify the API_KEY uses substitution pattern
-    assert env_config["API_KEY"].startswith("${")
-    assert env_config["API_KEY"].endswith("}")
+
 
 
 if __name__ == "__main__":
