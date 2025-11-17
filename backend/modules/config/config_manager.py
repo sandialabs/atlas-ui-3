@@ -101,6 +101,7 @@ class MCPServerConfig(BaseModel):
     enabled: bool = True
     command: Optional[List[str]] = None  # Command to run server (for stdio servers)
     cwd: Optional[str] = None            # Working directory for command
+    env: Optional[Dict[str, str]] = None  # Environment variables for stdio servers
     url: Optional[str] = None            # URL for HTTP servers
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
