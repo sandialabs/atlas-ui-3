@@ -139,6 +139,11 @@ Here is an example of a server configuration that uses all available options.
     "groups": ["admin", "engineering"],
     "command": ["python", "mcp/MyExampleServer/main.py"],
     "cwd": "backend",
+    "env": {
+      "API_KEY": "${MY_API_KEY}",
+      "DEBUG_MODE": "false",
+      "MAX_RETRIES": "3"
+    },
     "url": null,
     "transport": "stdio",
     "compliance_level": "Internal",
@@ -158,6 +163,7 @@ Here is an example of a server configuration that uses all available options.
 *   **`groups`**: (list of strings) A list of user groups that are allowed to access this server. If a user is not in any of these groups, the server will be hidden from them.
 *   **`command`**: (list of strings) For servers using `stdio` transport, this is the command and its arguments used to start the server process.
 *   **`cwd`**: (string) The working directory from which to run the `command`.
+*   **`env`**: (object) Environment variables to set for `stdio` servers. Keys are variable names, values can be literal strings or use environment variable substitution (e.g., `"${ENV_VAR}"`). This is only applicable to stdio servers and will be ignored for HTTP/SSE servers.
 *   **`url`**: (string) For servers using `http` or `sse` transport, this is the URL of the server's endpoint.
 *   **`transport`**: (string) The communication protocol to use. Can be `stdio`, `http`, or `sse`. This takes priority over auto-detection.
 *   **`auth_token`**: (string) For HTTP/SSE servers, the bearer token used for authentication. Use environment variable substitution (e.g., `"${MCP_SERVER_TOKEN}"`) to avoid storing secrets in config files. Stdio servers ignore this field.
@@ -208,6 +214,51 @@ export MCP_EXTERNAL_API_TOKEN="your-secret-api-key"
 - **Recommended**: Use environment variables for all production tokens
 - **Alternative**: For development/testing, you can use direct string values (not recommended for production)
 - **Never**: Commit tokens to `config/defaults/mcp.json` or any version-controlled files
+
+### Environment Variables for Stdio Servers
+
+For stdio servers, you can pass custom environment variables to the server process using the `env` field. This is useful for:
+- Configuring server behavior without modifying command arguments
+- Passing credentials or API keys securely
+- Setting runtime configuration options
+
+#### Example Configuration
+
+```json
+{
+  "my-external-tool": {
+    "command": ["wrapper-cli", "my.external.tool@latest", "--allow-write"],
+    "cwd": "backend",
+    "env": {
+      "CLOUD_PROFILE": "my-profile-9",
+      "CLOUD_REGION": "us-east-7",
+      "API_KEY": "${MY_API_KEY}",
+      "DEBUG_MODE": "false"
+    },
+    "groups": ["users"]
+  }
+}
+```
+
+Then set the environment variable before starting Atlas UI:
+```bash
+export MY_API_KEY="your-secret-api-key"
+```
+
+#### Environment Variable Features
+
+- **Literal Values**: Environment variables can contain literal string values (e.g., `"CLOUD_REGION": "us-east-7"`)
+- **Variable Substitution**: Use `${VAR_NAME}` syntax to reference system environment variables (e.g., `"API_KEY": "${MY_API_KEY}"`)
+- **Empty Values**: An empty object `{}` is valid and will set no environment variables
+- **Error Handling**: If a referenced environment variable (e.g., `${MY_API_KEY}`) is not set in the system, the server initialization will fail with a clear error message
+- **Stdio Only**: The `env` field only applies to stdio servers; it is ignored for HTTP/SSE servers
+
+#### Security Best Practices
+
+- Use environment variable substitution for all sensitive values (API keys, passwords, tokens)
+- Never store secrets directly in the `env` object values
+- Set environment variables via your deployment system (Docker, Kubernetes, systemd, etc.)
+- Use different values for development, staging, and production environments
 
 ### Access Control with Groups
 
