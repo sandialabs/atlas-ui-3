@@ -96,6 +96,7 @@ describe('createWebSocketHandler – intermediate updates', () => {
         mime_type: 'text/html',
         type: 'html',
         description: 'Chart artifact',
+        isInline: true,
       },
     ])
 

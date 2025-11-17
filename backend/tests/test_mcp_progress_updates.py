@@ -2,7 +2,7 @@
 
 import pytest
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 from application.chat.utilities.notification_utils import (
     notify_tool_progress,

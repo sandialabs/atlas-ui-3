@@ -204,24 +204,39 @@ async def task_with_canvas_updates(
             message=f"Starting {task_name}..."
         )
     
-    # Process each step and send canvas updates
+    # Process each step and send visual updates as artifacts
     for step in range(1, total + 1):
         await asyncio.sleep(interval)
         
         # Create progress visualization HTML
         html_content = create_progress_html(step, total, f"Processing {task_name}: Step {step}")
-        
-        # Send canvas update via structured progress message
+
+        # Send progress HTML as an artifact so it uses the HTML viewer
         if ctx:
+            artifact_html = base64.b64encode(html_content.encode("utf-8")).decode("utf-8")
             update_payload = {
-                "type": "canvas_update",
-                "content": html_content,
-                "progress_message": f"{task_name}: Step {step}/{total}"
+                "type": "artifacts",
+                "artifacts": [
+                    {
+                        "name": f"progress_step_{step}.html",
+                        "b64": artifact_html,
+                        "mime": "text/html",
+                        "size": len(html_content),
+                        "description": f"Progress for {task_name} step {step}/{total}",
+                        "viewer": "html",
+                    }
+                ],
+                "display": {
+                    "open_canvas": True,
+                    "primary_file": f"progress_step_{step}.html",
+                    "mode": "replace",
+                },
+                "progress_message": f"{task_name}: Step {step}/{total}",
             }
             await ctx.report_progress(
                 progress=step,
                 total=total,
-                message=f"MCP_UPDATE:{json.dumps(update_payload)}"
+                message=f"MCP_UPDATE:{json.dumps(update_payload)}",
             )
     
     # Final result with chart

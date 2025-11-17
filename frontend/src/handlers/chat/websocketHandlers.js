@@ -126,13 +126,11 @@ export function createWebSocketHandler(deps) {
           }
           break
         case 'progress_artifacts':
-          // Handle artifacts sent during tool execution
+          // Handle artifacts sent during tool execution as inline canvas content
           if (updateData && updateData.artifacts) {
-            // Process artifacts similar to final tool results
             const artifacts = updateData.artifacts
             const display = updateData.display || {}
-            
-            // Convert artifacts to canvas files if they have viewer hints
+
             const canvasFiles = artifacts
               .filter(art => art.b64 && art.mime && art.viewer)
               .map(art => ({
@@ -140,19 +138,19 @@ export function createWebSocketHandler(deps) {
                 content_base64: art.b64,
                 mime_type: art.mime,
                 type: art.viewer,
-                description: art.description || art.name
+                description: art.description || art.name,
+                // Inline artifacts are rendered from base64; no download key
+                isInline: true,
               }))
-            
+
             if (canvasFiles.length > 0) {
               setCanvasFiles(canvasFiles)
-              // Respect primary_file hint if provided
               if (display.primary_file) {
                 const idx = canvasFiles.findIndex(f => f.filename === display.primary_file)
                 setCurrentCanvasFileIndex(idx >= 0 ? idx : 0)
               } else {
                 setCurrentCanvasFileIndex(0)
               }
-              // Only clear text content if display wants to open canvas
               if (display.open_canvas) {
                 setCanvasContent('')
                 setCustomUIContent(null)
