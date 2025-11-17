@@ -4,7 +4,6 @@ Tests the environment variable demonstration functionality.
 """
 import os
 import pytest
-from unittest.mock import patch
 
 # Test that the server can be imported
 def test_server_imports():
