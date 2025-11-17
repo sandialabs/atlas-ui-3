@@ -89,6 +89,28 @@
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
   },
+  "env-demo": {
+    "command": [
+      "python",
+      "mcp/env-demo/main.py"
+    ],
+    "cwd": "backend",
+    "env": {
+      "CLOUD_PROFILE": "demo-profile",
+      "CLOUD_REGION": "us-west-2",
+      "DEBUG_MODE": "true",
+      "ENVIRONMENT": "development",
+      "API_KEY": "${DEMO_API_KEY}"
+    },
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates environment variable passing to MCP servers. Shows how to configure servers with env vars in mcp.json using both literal values and ${VAR} substitution.",
+    "author": "Chat UI Team",
+    "short_description": "Environment variable demonstration",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Public"
+  },
   "external-api-example": {
     "url": "http://127.0.0.1:8005/mcp",
     "transport": "http",
