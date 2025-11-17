@@ -1,6 +1,6 @@
 import os
 import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from unittest.mock import Mock, patch
 from backend.modules.mcp_tools.client import MCPToolManager
 
 
