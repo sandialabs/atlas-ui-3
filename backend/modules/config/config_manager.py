@@ -163,6 +163,13 @@ class AppSettings(BaseSettings):
     # Banner settings
     banner_enabled: bool = False
     
+    # Splash screen settings
+    feature_splash_screen_enabled: bool = Field(
+        False,
+        description="Enable startup splash screen for displaying policies and information",
+        validation_alias=AliasChoices("FEATURE_SPLASH_SCREEN_ENABLED", "SPLASH_SCREEN_ENABLED"),
+    )
+    
     # Agent settings
     # Renamed to feature_agent_mode_available to align with other FEATURE_* flags.
     feature_agent_mode_available: bool = Field(
@@ -293,6 +300,7 @@ class AppSettings(BaseSettings):
     help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
     tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
+    splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
     
     # Config directory paths
     app_config_overrides: str = Field(default="config/overrides", validation_alias="APP_CONFIG_OVERRIDES")
