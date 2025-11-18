@@ -1,0 +1,12 @@
+# Generated sample files
+samples/
+test_output/
+*.vtk
+*.stl
+*.obj
+*.ply
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

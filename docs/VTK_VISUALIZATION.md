@@ -54,6 +54,31 @@ The system automatically detects file types based on extension and routes them t
 
 ## Usage
 
+### Via VTK Example MCP Server
+Atlas UI includes a built-in MCP server that generates 3D shapes on demand:
+
+**Generate a single shape:**
+```
+Generate a sphere in VTK format
+Create a torus for visualization
+Show me a cylinder
+```
+
+**Generate multiple sample files:**
+```
+Generate sample 3D files
+Show me VTK examples
+```
+
+The server can create:
+- Cube (simple 1x1x1 unit cube)
+- Sphere (parametric sphere)
+- Pyramid (four-sided pyramid)
+- Cylinder (circular cylinder)
+- Torus (donut shape)
+
+Files are automatically opened in the canvas with the 3D viewer.
+
 ### Via Tool Integration
 When MCP tools generate VTK files, they will automatically appear in the canvas panel with the 3D viewer.
 
@@ -117,6 +142,13 @@ Potential improvements for future versions:
 - Multiple viewport support for side-by-side comparison
 
 ## Examples
+
+### Using the VTK Example MCP Server
+```
+Generate a sphere
+Show me a torus
+Create all sample shapes
+```
 
 ### CFD Simulation Results
 ```
