@@ -340,6 +340,78 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
         }
 
 
+@router.get("/splash")
+async def get_splash_config(current_user: str = Depends(get_current_user)):
+    """Get splash screen configuration."""
+    config_manager = app_factory.get_config_manager()
+    app_settings = config_manager.app_settings
+    
+    # Read splash screen configuration
+    splash_config = {}
+    import json
+    splash_config_filename = app_settings.splash_config_file
+    splash_paths = []
+    try:
+        # Reuse config manager search logic
+        try:
+            splash_paths = config_manager._search_paths(splash_config_filename)  # type: ignore[attr-defined]
+        except AttributeError:
+            # Fallback minimal search if method renamed/removed
+            from pathlib import Path
+            backend_root = Path(__file__).parent.parent
+            project_root = backend_root.parent
+            splash_paths = [
+                project_root / "config" / "overrides" / splash_config_filename,
+                project_root / "config" / "defaults" / splash_config_filename,
+                backend_root / "configfilesadmin" / splash_config_filename,
+                backend_root / "configfiles" / splash_config_filename,
+                backend_root / splash_config_filename,
+                project_root / splash_config_filename,
+            ]
+
+        found_path = None
+        for p in splash_paths:
+            if p.exists():
+                found_path = p
+                break
+        if found_path:
+            with open(found_path, "r", encoding="utf-8") as f:
+                splash_config = json.load(f)
+            logger.info(f"Loaded splash config from {found_path}")
+        else:
+            logger.info(
+                "Splash config not found in any of these locations: %s",
+                [str(p) for p in splash_paths]
+            )
+            # Return default disabled config
+            splash_config = {
+                "enabled": False,
+                "title": "",
+                "messages": [],
+                "dismissible": True,
+                "require_accept": False,
+                "dismiss_duration_days": 30,
+                "accept_button_text": "Accept",
+                "dismiss_button_text": "Dismiss",
+                "show_on_every_visit": False
+            }
+    except Exception as e:
+        logger.warning(f"Error loading splash config: {e}")
+        splash_config = {
+            "enabled": False,
+            "title": "",
+            "messages": [],
+            "dismissible": True,
+            "require_accept": False,
+            "dismiss_duration_days": 30,
+            "accept_button_text": "Accept",
+            "dismiss_button_text": "Dismiss",
+            "show_on_every_visit": False
+        }
+    
+    return splash_config
+
+
 # @router.get("/sessions")
 # async def get_session_info(current_user: str = Depends(get_current_user)):
 #     """Get session information for the current user."""
