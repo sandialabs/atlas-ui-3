@@ -28,7 +28,7 @@
     }
   ],
   "dismissible": true,
-  "require_accept": true,
+  "require_accept": false,
   "dismiss_duration_days": 30,
   "accept_button_text": "I Accept",
   "dismiss_button_text": "Close",
