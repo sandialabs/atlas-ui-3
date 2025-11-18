@@ -126,7 +126,11 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     AuthMiddleware, 
     debug_mode=config.app_settings.debug_mode,
-    auth_header_name=config.app_settings.auth_user_header
+    auth_header_name=config.app_settings.auth_user_header,
+    proxy_secret_enabled=config.app_settings.feature_proxy_secret_enabled,
+    proxy_secret_header=config.app_settings.proxy_secret_header,
+    proxy_secret=config.app_settings.proxy_secret,
+    auth_redirect_url=config.app_settings.auth_redirect_url
 )
 
 # Include essential routes (add files API)

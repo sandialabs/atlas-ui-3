@@ -213,6 +213,28 @@ class AppSettings(BaseSettings):
         validation_alias="AUTH_USER_HEADER"
     )
     
+    # Proxy secret authentication configuration
+    feature_proxy_secret_enabled: bool = Field(
+        default=False,
+        description="Enable proxy secret validation to ensure requests come from trusted reverse proxy",
+        validation_alias="FEATURE_PROXY_SECRET_ENABLED"
+    )
+    proxy_secret_header: str = Field(
+        default="X-Proxy-Secret",
+        description="HTTP header name for proxy secret validation",
+        validation_alias="PROXY_SECRET_HEADER"
+    )
+    proxy_secret: Optional[str] = Field(
+        default=None,
+        description="Secret value that must be sent by reverse proxy for validation",
+        validation_alias="PROXY_SECRET"
+    )
+    auth_redirect_url: str = Field(
+        default="/auth",
+        description="URL to redirect to when authentication fails",
+        validation_alias="AUTH_REDIRECT_URL"
+    )
+    
     # S3/MinIO storage settings
     use_mock_s3: bool = False  # Use in-process S3 mock (no Docker required)
     s3_endpoint: str = "http://localhost:9000"
