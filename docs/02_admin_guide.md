@@ -317,6 +317,71 @@ AUTH_USER_HEADER=X-Custom-Auth-Header
 
 This setting allows the application to work with various authentication infrastructures without code changes.
 
+### Proxy Secret Authentication (Optional Security Layer)
+
+For additional security, you can configure the application to require a secret value in a specific header to validate that requests are coming from your trusted reverse proxy. This prevents direct access to the backend application, even if it's accidentally exposed.
+
+**When to Use Proxy Secret Authentication:**
+- When you want an additional layer of security beyond network isolation
+- To prevent unauthorized access if the backend accidentally becomes publicly accessible
+- To ensure requests only come from your approved reverse proxy
+
+**Configuration:**
+
+Add the following to your `.env` file:
+
+```bash
+# Enable proxy secret validation
+FEATURE_PROXY_SECRET_ENABLED=true
+
+# Header name for the proxy secret (default: X-Proxy-Secret)
+PROXY_SECRET_HEADER=X-Proxy-Secret
+
+# The actual secret value - use a strong, randomly generated value
+PROXY_SECRET=your-secure-random-secret-here
+
+# Optional: Customize the redirect URL for failed authentication (default: /auth)
+AUTH_REDIRECT_URL=/auth
+```
+
+**Reverse Proxy Configuration:**
+
+Configure your reverse proxy to inject the secret header with every request. Examples:
+
+**NGINX:**
+```nginx
+location / {
+    proxy_pass http://backend:8000;
+    proxy_set_header X-Proxy-Secret "your-secure-random-secret-here";
+    proxy_set_header X-User-Email $remote_user;
+    # ... other headers
+}
+```
+
+**Apache:**
+```apache
+<Location />
+    RequestHeader set X-Proxy-Secret "your-secure-random-secret-here"
+    RequestHeader set X-User-Email %{REMOTE_USER}e
+    ProxyPass http://backend:8000/
+    ProxyPassReverse http://backend:8000/
+</Location>
+```
+
+**Behavior:**
+- When enabled, the middleware validates the proxy secret on every request (except static files and the auth endpoint)
+- If the secret is missing or incorrect:
+  - **API endpoints** (`/api/*`): Return 401 Unauthorized
+  - **Browser endpoints**: Redirect to the configured auth URL
+- **Debug mode** (`DEBUG_MODE=true`): Proxy secret validation is automatically disabled for local development
+
+**Security Best Practices:**
+- Generate a strong, random secret (e.g., 32+ characters)
+- Store the secret securely in environment variables, not in configuration files
+- Use different secrets for different environments (dev, staging, production)
+- Rotate the secret periodically as part of your security policy
+- Never commit the secret to version control
+
 ### Customizing Authorization
 
 **IMPORTANT: For production deployments, configuring authorization is essential.** The default implementation is a mock and **must be replaced** with your organization's actual authorization system. You have two primary methods to achieve this:
