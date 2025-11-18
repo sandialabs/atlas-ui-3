@@ -101,6 +101,7 @@ class MCPServerConfig(BaseModel):
     enabled: bool = True
     command: Optional[List[str]] = None  # Command to run server (for stdio servers)
     cwd: Optional[str] = None            # Working directory for command
+    env: Optional[Dict[str, str]] = None  # Environment variables for stdio servers
     url: Optional[str] = None            # URL for HTTP servers
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
@@ -162,6 +163,13 @@ class AppSettings(BaseSettings):
     # Banner settings
     banner_enabled: bool = False
     
+    # Splash screen settings
+    feature_splash_screen_enabled: bool = Field(
+        False,
+        description="Enable startup splash screen for displaying policies and information",
+        validation_alias=AliasChoices("FEATURE_SPLASH_SCREEN_ENABLED", "SPLASH_SCREEN_ENABLED"),
+    )
+    
     # Agent settings
     # Renamed to feature_agent_mode_available to align with other FEATURE_* flags.
     feature_agent_mode_available: bool = Field(
@@ -203,6 +211,28 @@ class AppSettings(BaseSettings):
         default="X-User-Email",
         description="HTTP header name to extract authenticated username from reverse proxy",
         validation_alias="AUTH_USER_HEADER"
+    )
+    
+    # Proxy secret authentication configuration
+    feature_proxy_secret_enabled: bool = Field(
+        default=False,
+        description="Enable proxy secret validation to ensure requests come from trusted reverse proxy",
+        validation_alias="FEATURE_PROXY_SECRET_ENABLED"
+    )
+    proxy_secret_header: str = Field(
+        default="X-Proxy-Secret",
+        description="HTTP header name for proxy secret validation",
+        validation_alias="PROXY_SECRET_HEADER"
+    )
+    proxy_secret: Optional[str] = Field(
+        default=None,
+        description="Secret value that must be sent by reverse proxy for validation",
+        validation_alias="PROXY_SECRET"
+    )
+    auth_redirect_url: str = Field(
+        default="/auth",
+        description="URL to redirect to when authentication fails",
+        validation_alias="AUTH_REDIRECT_URL"
     )
     
     # S3/MinIO storage settings
@@ -270,6 +300,7 @@ class AppSettings(BaseSettings):
     help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
     tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
+    splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
     
     # Config directory paths
     app_config_overrides: str = Field(default="config/overrides", validation_alias="APP_CONFIG_OVERRIDES")

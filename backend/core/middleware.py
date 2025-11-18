@@ -3,7 +3,7 @@
 import logging
 
 from fastapi import HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -17,18 +17,46 @@ logger = logging.getLogger(__name__)
 class AuthMiddleware(BaseHTTPMiddleware):
     """Middleware to handle authentication and logging."""
     
-    def __init__(self, app, debug_mode: bool = False, auth_header_name: str = "X-User-Email"):
+    def __init__(
+        self, 
+        app, 
+        debug_mode: bool = False, 
+        auth_header_name: str = "X-User-Email",
+        proxy_secret_enabled: bool = False,
+        proxy_secret_header: str = "X-Proxy-Secret",
+        proxy_secret: str = None,
+        auth_redirect_url: str = "/auth"
+    ):
         super().__init__(app)
         self.debug_mode = debug_mode
         self.auth_header_name = auth_header_name
+        self.proxy_secret_enabled = proxy_secret_enabled
+        self.proxy_secret_header = proxy_secret_header
+        self.proxy_secret = proxy_secret
+        self.auth_redirect_url = auth_redirect_url
         
     async def dispatch(self, request: Request, call_next) -> Response:
         # Log request
         logger.info(f"Request: {request.method} {request.url.path}")
 
-        # Skip auth for static files and auth endpoint
-        if request.url.path.startswith('/static') or request.url.path == '/auth':
+        # Skip auth for static files and configured auth endpoint
+        if request.url.path.startswith('/static') or request.url.path == self.auth_redirect_url:
             return await call_next(request)
+        
+        # Validate proxy secret if enabled (skip in debug mode for local development)
+        if self.proxy_secret_enabled and self.proxy_secret and not self.debug_mode:
+            proxy_secret_value = request.headers.get(self.proxy_secret_header)
+            
+            if not proxy_secret_value or proxy_secret_value != self.proxy_secret:
+                logger.warning(f"Invalid or missing proxy secret for {request.url.path}")
+                # Distinguish between API endpoints (return 401) and browser endpoints (redirect)
+                if request.url.path.startswith('/api/'):
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Unauthorized: Invalid proxy secret"}
+                    )
+                else:
+                    return RedirectResponse(url=self.auth_redirect_url, status_code=302)
 
         # Check for capability token in download URLs (allows MCP servers to access files)
         if request.url.path.startswith('/api/files/download/'):
@@ -73,8 +101,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     logger.warning(f"Missing authentication for API endpoint: {request.url.path}")
                     raise HTTPException(status_code=401, detail="Unauthorized")
                 else:
-                    logger.warning(f"Missing {self.auth_header_name}, redirecting to auth")
-                    return RedirectResponse(url="/auth", status_code=302)
+                    logger.warning(f"Missing {self.auth_header_name}, redirecting to {self.auth_redirect_url}")
+                    return RedirectResponse(url=self.auth_redirect_url, status_code=302)
 
         # Add user to request state
         request.state.user_email = user_email

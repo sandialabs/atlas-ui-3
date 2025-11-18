@@ -20,6 +20,7 @@ To customize your instance, you will place your own versions of the configuratio
 *   **`llmconfig.yml`**: Defines the list of available Large Language Models and their connection details.
 *   **`compliance-levels.json`**: Defines the security compliance levels (e.g., Public, Internal, HIPAA) and the rules for how they can interact.
 *   **`help-config.json`**: Populates the content of the "Help" modal in the user interface.
+*   **`splash-config.json`**: Configures the startup splash screen for displaying policies and information to users.
 *   **`messages.txt`**: Defines the text for system-wide banner messages that can be displayed to all users.
 
 ### Customizing the Help Modal (`help-config.json`)
@@ -50,6 +51,64 @@ The file consists of a title and a list of sections, each with a title and conte
   ]
 }
 ```
+
+### Configuring the Splash Screen (`splash-config.json`)
+
+The splash screen feature allows you to display important policies and information to users when they first access the application. This is commonly used for displaying cookie policies, acceptable use policies, and other legal or organizational information.
+
+*   **Location**: Place your custom file at `config/overrides/splash-config.json`.
+*   **Feature Flag**: Enable the splash screen by setting `FEATURE_SPLASH_SCREEN_ENABLED=true` in your `.env` file.
+
+The splash screen supports two operational modes:
+
+1.  **Accept Mode** (`require_accept: true`): Users must explicitly click "I Accept" to proceed. The close (X) button is hidden.
+2.  **Dismiss Mode** (`require_accept: false`): Users can dismiss the screen by clicking "Close" or the X button in the header.
+
+User dismissals are tracked in the browser's local storage and will not show again until the configured duration expires (default: 30 days).
+
+**Example `splash-config.json`:**
+```json
+{
+  "enabled": true,
+  "title": "Important Policies and Information",
+  "messages": [
+    {
+      "type": "heading",
+      "content": "Cookie Policy"
+    },
+    {
+      "type": "text",
+      "content": "This application uses cookies to enhance your experience and maintain your session. By continuing to use this application, you consent to our use of cookies."
+    },
+    {
+      "type": "heading",
+      "content": "Acceptable Use Policy"
+    },
+    {
+      "type": "text",
+      "content": "This system is for authorized use only. Users must comply with all applicable policies and regulations. Unauthorized access or misuse of this system may result in disciplinary action and/or legal prosecution."
+    }
+  ],
+  "dismissible": true,
+  "require_accept": true,
+  "dismiss_duration_days": 30,
+  "accept_button_text": "I Accept",
+  "dismiss_button_text": "Close",
+  "show_on_every_visit": false
+}
+```
+
+**Configuration Fields:**
+
+*   **`enabled`**: (boolean) Whether the splash screen is shown. Must be `true` and `FEATURE_SPLASH_SCREEN_ENABLED=true` in `.env`.
+*   **`title`**: (string) The title displayed at the top of the splash screen modal.
+*   **`messages`**: (array) A list of message objects. Each message has a `type` (`"heading"` or `"text"`) and `content` (string).
+*   **`dismissible`**: (boolean) Whether users can dismiss the splash screen.
+*   **`require_accept`**: (boolean) If `true`, users must click the accept button. If `false`, users can dismiss casually.
+*   **`dismiss_duration_days`**: (number) Number of days before showing the splash screen again after dismissal.
+*   **`accept_button_text`**: (string) Text for the accept button (shown when `require_accept` is `true`).
+*   **`dismiss_button_text`**: (string) Text for the dismiss button (shown when `require_accept` is `false`).
+*   **`show_on_every_visit`**: (boolean) If `true`, the splash screen will show every time, ignoring dismissal tracking.
 
 ### The `.env` File
 
@@ -139,6 +198,11 @@ Here is an example of a server configuration that uses all available options.
     "groups": ["admin", "engineering"],
     "command": ["python", "mcp/MyExampleServer/main.py"],
     "cwd": "backend",
+    "env": {
+      "API_KEY": "${MY_API_KEY}",
+      "DEBUG_MODE": "false",
+      "MAX_RETRIES": "3"
+    },
     "url": null,
     "transport": "stdio",
     "compliance_level": "Internal",
@@ -158,6 +222,7 @@ Here is an example of a server configuration that uses all available options.
 *   **`groups`**: (list of strings) A list of user groups that are allowed to access this server. If a user is not in any of these groups, the server will be hidden from them.
 *   **`command`**: (list of strings) For servers using `stdio` transport, this is the command and its arguments used to start the server process.
 *   **`cwd`**: (string) The working directory from which to run the `command`.
+*   **`env`**: (object) Environment variables to set for `stdio` servers. Keys are variable names, values can be literal strings or use environment variable substitution (e.g., `"${ENV_VAR}"`). This is only applicable to stdio servers and will be ignored for HTTP/SSE servers.
 *   **`url`**: (string) For servers using `http` or `sse` transport, this is the URL of the server's endpoint.
 *   **`transport`**: (string) The communication protocol to use. Can be `stdio`, `http`, or `sse`. This takes priority over auto-detection.
 *   **`auth_token`**: (string) For HTTP/SSE servers, the bearer token used for authentication. Use environment variable substitution (e.g., `"${MCP_SERVER_TOKEN}"`) to avoid storing secrets in config files. Stdio servers ignore this field.
@@ -208,6 +273,51 @@ export MCP_EXTERNAL_API_TOKEN="your-secret-api-key"
 - **Recommended**: Use environment variables for all production tokens
 - **Alternative**: For development/testing, you can use direct string values (not recommended for production)
 - **Never**: Commit tokens to `config/defaults/mcp.json` or any version-controlled files
+
+### Environment Variables for Stdio Servers
+
+For stdio servers, you can pass custom environment variables to the server process using the `env` field. This is useful for:
+- Configuring server behavior without modifying command arguments
+- Passing credentials or API keys securely
+- Setting runtime configuration options
+
+#### Example Configuration
+
+```json
+{
+  "my-external-tool": {
+    "command": ["wrapper-cli", "my.external.tool@latest", "--allow-write"],
+    "cwd": "backend",
+    "env": {
+      "CLOUD_PROFILE": "my-profile-9",
+      "CLOUD_REGION": "us-east-7",
+      "API_KEY": "${MY_API_KEY}",
+      "DEBUG_MODE": "false"
+    },
+    "groups": ["users"]
+  }
+}
+```
+
+Then set the environment variable before starting Atlas UI:
+```bash
+export MY_API_KEY="your-secret-api-key"
+```
+
+#### Environment Variable Features
+
+- **Literal Values**: Environment variables can contain literal string values (e.g., `"CLOUD_REGION": "us-east-7"`)
+- **Variable Substitution**: Use `${VAR_NAME}` syntax to reference system environment variables (e.g., `"API_KEY": "${MY_API_KEY}"`)
+- **Empty Values**: An empty object `{}` is valid and will set no environment variables
+- **Error Handling**: If a referenced environment variable (e.g., `${MY_API_KEY}`) is not set in the system, the server initialization will fail with a clear error message
+- **Stdio Only**: The `env` field only applies to stdio servers; it is ignored for HTTP/SSE servers
+
+#### Security Best Practices
+
+- Use environment variable substitution for all sensitive values (API keys, passwords, tokens)
+- Never store secrets directly in the `env` object values
+- Set environment variables via your deployment system (Docker, Kubernetes, systemd, etc.)
+- Use different values for development, staging, and production environments
 
 ### Access Control with Groups
 
@@ -266,32 +376,70 @@ AUTH_USER_HEADER=X-Custom-Auth-Header
 
 This setting allows the application to work with various authentication infrastructures without code changes.
 
-### WebSocket Authentication
+### Proxy Secret Authentication (Optional Security Layer)
 
-The application uses WebSocket connections for real-time chat functionality. WebSocket authentication works consistently with HTTP authentication, using the same configured header.
+For additional security, you can configure the application to require a secret value in a specific header to validate that requests are coming from your trusted reverse proxy. This prevents direct access to the backend application, even if it's accidentally exposed.
 
-**Authentication Flow for WebSockets:**
+**When to Use Proxy Secret Authentication:**
+- When you want an additional layer of security beyond network isolation
+- To prevent unauthorized access if the backend accidentally becomes publicly accessible
+- To ensure requests only come from your approved reverse proxy
 
-1. Client initiates WebSocket connection to `/ws`
-2. Reverse proxy intercepts the WebSocket upgrade request (HTTP Upgrade)
-3. Reverse proxy validates authentication and adds the configured auth header (e.g., `X-User-Email`)
-4. Backend extracts user identity from the header during WebSocket handshake
-5. All subsequent WebSocket operations use the authenticated user identity
+**Configuration:**
 
-**Important Security Notes:**
+Add the following to your `.env` file:
 
-- The reverse proxy **must** strip any client-provided authentication headers before adding its own (otherwise attackers could inject headers like `X-User-Email: admin@company.com`)
-- The backend trusts the header value because it assumes the reverse proxy has already validated the user
-- Direct access to the backend (bypassing the reverse proxy) would allow header injection attacks
+```bash
+# Enable proxy secret validation
+FEATURE_PROXY_SECRET_ENABLED=true
 
-**Development Fallback:**
+# Header name for the proxy secret (default: X-Proxy-Secret)
+PROXY_SECRET_HEADER=X-Proxy-Secret
 
-In development mode (`DEBUG_MODE=true`), if the authentication header is not present, the WebSocket connection falls back to:
-1. The `user` query parameter (e.g., `/ws?user=test@test.com`)
-2. The configured test user from `TEST_USER` environment variable
-3. Default test user: `test@test.com`
+# The actual secret value - use a strong, randomly generated value
+PROXY_SECRET=your-secure-random-secret-here
 
-This fallback behavior makes local development easier but should never be used in production.
+# Optional: Customize the redirect URL for failed authentication (default: /auth)
+AUTH_REDIRECT_URL=/auth
+```
+
+**Reverse Proxy Configuration:**
+
+Configure your reverse proxy to inject the secret header with every request. Examples:
+
+**NGINX:**
+```nginx
+location / {
+    proxy_pass http://backend:8000;
+    proxy_set_header X-Proxy-Secret "your-secure-random-secret-here";
+    proxy_set_header X-User-Email $remote_user;
+    # ... other headers
+}
+```
+
+**Apache:**
+```apache
+<Location />
+    RequestHeader set X-Proxy-Secret "your-secure-random-secret-here"
+    RequestHeader set X-User-Email %{REMOTE_USER}e
+    ProxyPass http://backend:8000/
+    ProxyPassReverse http://backend:8000/
+</Location>
+```
+
+**Behavior:**
+- When enabled, the middleware validates the proxy secret on every request (except static files and the auth endpoint)
+- If the secret is missing or incorrect:
+  - **API endpoints** (`/api/*`): Return 401 Unauthorized
+  - **Browser endpoints**: Redirect to the configured auth URL
+- **Debug mode** (`DEBUG_MODE=true`): Proxy secret validation is automatically disabled for local development
+
+**Security Best Practices:**
+- Generate a strong, random secret (e.g., 32+ characters)
+- Store the secret securely in environment variables, not in configuration files
+- Use different secrets for different environments (dev, staging, production)
+- Rotate the secret periodically as part of your security policy
+- Never commit the secret to version control
 
 ### Customizing Authorization
 

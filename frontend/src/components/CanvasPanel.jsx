@@ -111,6 +111,43 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
       setFileError(null);
 
       try {
+        // Inline files (e.g., progress artifacts) are rendered from base64 content
+        if (currentFile.isInline && currentFile.content_base64) {
+          try {
+            if (currentFile.type === 'image') {
+              const byteCharacters = atob(currentFile.content_base64);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray], { type: currentFile.mime_type || 'application/octet-stream' });
+              const imageUrl = URL.createObjectURL(blob);
+              setCurrentFileContent({ type: 'image', url: imageUrl, file: currentFile });
+            } else if (currentFile.type === 'pdf') {
+              const byteCharacters = atob(currentFile.content_base64);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray], { type: currentFile.mime_type || 'application/pdf' });
+              const pdfUrl = URL.createObjectURL(blob);
+              setCurrentFileContent({ type: 'pdf', url: pdfUrl, file: currentFile });
+            } else {
+              const decoded = atob(currentFile.content_base64);
+              setCurrentFileContent({ type: currentFile.type, content: decoded, file: currentFile });
+            }
+          } catch (error) {
+            console.error('Error decoding inline canvas file:', error);
+            setFileError('Failed to decode inline file content');
+            setCurrentFileContent(null);
+          } finally {
+            setIsLoadingFile(false);
+          }
+          return;
+        }
+
         // Fetch file content from the backend
         const response = await fetch(`/api/files/download/${currentFile.s3_key}`, {
           method: 'GET',
@@ -164,7 +201,8 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
 
   const handleDownload = () => {
     const currentFile = canvasFiles[currentCanvasFileIndex];
-    if (currentFile && downloadFile) {
+    // Inline-only files are not downloadable via backend
+    if (currentFile && !currentFile.isInline && downloadFile) {
       downloadFile(currentFile.filename);
     }
   };
