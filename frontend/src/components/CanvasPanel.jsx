@@ -21,7 +21,7 @@ const processCanvasContent = (content) => {
       // Fallback to JSON for other objects
       try {
         return JSON.stringify(content, null, 2)
-      } catch (e) {
+      } catch {
         return String(content || '')
       }
     }
@@ -313,7 +313,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
                 dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
               />
             );
-          } catch (error) {
+          } catch {
             // Fallback to plain text with syntax highlighting for code files
             const fileExt = currentFileContent.file.filename.split('.').pop().toLowerCase();
             const isCodeFile = ['js', 'py', 'java', 'cpp', 'ts', 'jsx', 'tsx', 'css', 'html', 'json', 'sql'].includes(fileExt);

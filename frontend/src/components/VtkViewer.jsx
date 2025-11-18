@@ -12,12 +12,11 @@ import vtkSTLReader from '@kitware/vtk.js/IO/Geometry/STLReader'
 import vtkOBJReader from '@kitware/vtk.js/IO/Misc/OBJReader'
 import vtkPLYReader from '@kitware/vtk.js/IO/Geometry/PLYReader'
 
-const VtkViewer = ({ fileContent, filename, fileType }) => {
+const VtkViewer = ({ fileContent, filename }) => {
   const containerRef = useRef(null)
   const fullScreenRendererRef = useRef(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [isInteracting, setIsInteracting] = useState(false)
 
   useEffect(() => {
     if (!containerRef.current || !fileContent) {
