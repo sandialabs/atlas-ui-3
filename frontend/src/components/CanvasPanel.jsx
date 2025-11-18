@@ -1,8 +1,9 @@
-import { X, ChevronLeft, ChevronRight, Download, FileText, Image, File, Code } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, Download, FileText, Image, File, Code, Box } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useState, useEffect } from 'react'
+import VtkViewer from './VtkViewer'
 
 // Helper function to process canvas content (strings and structured objects)
 const processCanvasContent = (content) => {
@@ -134,6 +135,9 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
               const blob = new Blob([byteArray], { type: currentFile.mime_type || 'application/pdf' });
               const pdfUrl = URL.createObjectURL(blob);
               setCurrentFileContent({ type: 'pdf', url: pdfUrl, file: currentFile });
+            } else if (currentFile.type === 'vtk') {
+              // VTK files are binary, pass base64 directly to the viewer
+              setCurrentFileContent({ type: 'vtk', content: currentFile.content_base64, file: currentFile });
             } else {
               const decoded = atob(currentFile.content_base64);
               setCurrentFileContent({ type: currentFile.type, content: decoded, file: currentFile });
@@ -167,6 +171,10 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
           const blob = await response.blob();
           const pdfUrl = URL.createObjectURL(blob);
           setCurrentFileContent({ type: 'pdf', url: pdfUrl, file: currentFile });
+        } else if (currentFile.type === 'vtk') {
+          // VTK files need to be loaded as binary data
+          const blob = await response.blob();
+          setCurrentFileContent({ type: 'vtk', content: blob, file: currentFile });
         } else {
           // Text-based files (HTML, text, code, etc.)
           const text = await response.text();
@@ -212,6 +220,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
       case 'image': return <Image className="w-4 h-4" />;
       case 'pdf': return <File className="w-4 h-4" />;
       case 'html': return <Code className="w-4 h-4" />;
+      case 'vtk': return <Box className="w-4 h-4" />;
       default: return <FileText className="w-4 h-4" />;
     }
   };
@@ -267,6 +276,17 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
                 src={currentFileContent.url}
                 className="w-full h-full border-0 rounded-lg"
                 title={currentFileContent.file.filename}
+              />
+            </div>
+          );
+
+        case 'vtk':
+          return (
+            <div className="h-full">
+              <VtkViewer 
+                fileContent={currentFileContent.content} 
+                filename={currentFileContent.file.filename}
+                fileType={currentFileContent.type}
               />
             </div>
           );

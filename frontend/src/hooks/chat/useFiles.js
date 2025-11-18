@@ -11,6 +11,8 @@ function getFileType(filename) {
   if (['png', 'jpg', 'jpeg', 'gif', 'svg'].includes(extension)) return 'image'
   if (extension === 'pdf') return 'pdf'
   if (extension === 'html') return 'html'
+  // Engineering/scientific visualization file formats
+  if (['vtk', 'vtp', 'vtu', 'vti', 'vts', 'vtr', 'stl', 'obj', 'ply', 'gltf', 'glb'].includes(extension)) return 'vtk'
   return 'other'
 }
 
