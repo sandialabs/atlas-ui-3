@@ -304,7 +304,8 @@ async def get_config(
             "marketplace": app_settings.feature_marketplace_enabled,
             "files_panel": app_settings.feature_files_panel_enabled,
             "chat_history": app_settings.feature_chat_history_enabled,
-            "compliance_levels": app_settings.feature_compliance_levels_enabled
+            "compliance_levels": app_settings.feature_compliance_levels_enabled,
+            "splash_screen": app_settings.feature_splash_screen_enabled
         }
     }
 
@@ -345,6 +346,20 @@ async def get_splash_config(current_user: str = Depends(get_current_user)):
     """Get splash screen configuration."""
     config_manager = app_factory.get_config_manager()
     app_settings = config_manager.app_settings
+    
+    # Check if splash screen feature is enabled
+    if not app_settings.feature_splash_screen_enabled:
+        return {
+            "enabled": False,
+            "title": "",
+            "messages": [],
+            "dismissible": True,
+            "require_accept": False,
+            "dismiss_duration_days": 30,
+            "accept_button_text": "Accept",
+            "dismiss_button_text": "Dismiss",
+            "show_on_every_visit": False
+        }
     
     # Read splash screen configuration
     splash_config = {}

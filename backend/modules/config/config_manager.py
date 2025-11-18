@@ -163,6 +163,13 @@ class AppSettings(BaseSettings):
     # Banner settings
     banner_enabled: bool = False
     
+    # Splash screen settings
+    feature_splash_screen_enabled: bool = Field(
+        False,
+        description="Enable startup splash screen for displaying policies and information",
+        validation_alias=AliasChoices("FEATURE_SPLASH_SCREEN_ENABLED", "SPLASH_SCREEN_ENABLED"),
+    )
+    
     # Agent settings
     # Renamed to feature_agent_mode_available to align with other FEATURE_* flags.
     feature_agent_mode_available: bool = Field(
