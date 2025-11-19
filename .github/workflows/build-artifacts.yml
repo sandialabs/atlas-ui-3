@@ -78,7 +78,7 @@ jobs:
         cd ..
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: atlas-ui-3-built-${{ github.sha }}
         path: atlas-ui-3-built-${{ github.sha }}.zip
