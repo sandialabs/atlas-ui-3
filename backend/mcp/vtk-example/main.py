@@ -245,7 +245,7 @@ POLYGONS {len(polygons)} {len(polygons) * 5}
 
 
 def generate_cantilever_beam_vtk(modules: DictType[str, float], load: float, num_points: int) -> str:
-    """Generate a cantilever beam deflection analysis in VTK format."""
+    """Generate a cantilever beam deflection analysis in VTK POLYDATA format."""
 
     # Extract beam parameters from modules
     LENGTH = modules.get('length', 10.0)
@@ -273,7 +273,7 @@ def generate_cantilever_beam_vtk(modules: DictType[str, float], load: float, num
         stress = M * y_position / I
         return stress
 
-    # Generate mesh points
+    # Generate mesh points for surface representation
     x_coords = np.linspace(0, LENGTH, num_points)
     y_coords = np.linspace(-HEIGHT/2, HEIGHT/2, 5)
     z_coords = np.linspace(-WIDTH/2, WIDTH/2, 3)
@@ -306,13 +306,13 @@ def generate_cantilever_beam_vtk(modules: DictType[str, float], load: float, num
     deformed_points = points.copy()
     deformed_points[:, 1] -= deflections * 100  # Scale deflection for visibility
 
-    # Create VTK file content
+    # Create VTK POLYDATA file content
     num_points_total = len(points)
 
     vtk_content = f"""# vtk DataFile Version 3.0
 Cantilever Beam Deflection Analysis
 ASCII
-DATASET UNSTRUCTURED_GRID
+DATASET POLYDATA
 
 POINTS {num_points_total} float
 """
@@ -321,34 +321,77 @@ POINTS {num_points_total} float
     for point in deformed_points:
         vtk_content += f"{point[0]:.6f} {point[1]:.6f} {point[2]:.6f}\n"
 
-    # Create hexahedral cells
-    cells = []
+    # Create surface quads (6 faces of the beam volume)
+    polygons = []
     nx, ny, nz = num_points, len(y_coords), len(z_coords)
 
+    # Helper function to get point index
+    def idx(i, j, k):
+        return i * ny * nz + j * nz + k
+
+    # Top face (y = HEIGHT/2)
+    for i in range(nx - 1):
+        for k in range(nz - 1):
+            j = ny - 1  # Top surface
+            p0 = idx(i, j, k)
+            p1 = idx(i + 1, j, k)
+            p2 = idx(i + 1, j, k + 1)
+            p3 = idx(i, j, k + 1)
+            polygons.append(f"4 {p0} {p1} {p2} {p3}")
+
+    # Bottom face (y = -HEIGHT/2)
+    for i in range(nx - 1):
+        for k in range(nz - 1):
+            j = 0  # Bottom surface
+            p0 = idx(i, j, k)
+            p1 = idx(i, j, k + 1)
+            p2 = idx(i + 1, j, k + 1)
+            p3 = idx(i + 1, j, k)
+            polygons.append(f"4 {p0} {p1} {p2} {p3}")
+
+    # Front face (z = WIDTH/2)
     for i in range(nx - 1):
         for j in range(ny - 1):
-            for k in range(nz - 1):
-                # Calculate indices for hexahedron
-                n0 = i * ny * nz + j * nz + k
-                n1 = i * ny * nz + j * nz + (k + 1)
-                n2 = i * ny * nz + (j + 1) * nz + (k + 1)
-                n3 = i * ny * nz + (j + 1) * nz + k
-                n4 = (i + 1) * ny * nz + j * nz + k
-                n5 = (i + 1) * ny * nz + j * nz + (k + 1)
-                n6 = (i + 1) * ny * nz + (j + 1) * nz + (k + 1)
-                n7 = (i + 1) * ny * nz + (j + 1) * nz + k
+            k = nz - 1  # Front surface
+            p0 = idx(i, j, k)
+            p1 = idx(i + 1, j, k)
+            p2 = idx(i + 1, j + 1, k)
+            p3 = idx(i, j + 1, k)
+            polygons.append(f"4 {p0} {p1} {p2} {p3}")
 
-                cells.append([n0, n1, n2, n3, n4, n5, n6, n7])
+    # Back face (z = -WIDTH/2)
+    for i in range(nx - 1):
+        for j in range(ny - 1):
+            k = 0  # Back surface
+            p0 = idx(i, j, k)
+            p1 = idx(i, j + 1, k)
+            p2 = idx(i + 1, j + 1, k)
+            p3 = idx(i + 1, j, k)
+            polygons.append(f"4 {p0} {p1} {p2} {p3}")
 
-    num_cells = len(cells)
-    vtk_content += f"\nCELLS {num_cells} {num_cells * 9}\n"
+    # Left face (x = 0, fixed end)
+    for j in range(ny - 1):
+        for k in range(nz - 1):
+            i = 0  # Left surface
+            p0 = idx(i, j, k)
+            p1 = idx(i, j, k + 1)
+            p2 = idx(i, j + 1, k + 1)
+            p3 = idx(i, j + 1, k)
+            polygons.append(f"4 {p0} {p1} {p2} {p3}")
 
-    for cell in cells:
-        vtk_content += f"8 {' '.join(map(str, cell))}\n"
+    # Right face (x = LENGTH, free end)
+    for j in range(ny - 1):
+        for k in range(nz - 1):
+            i = nx - 1  # Right surface
+            p0 = idx(i, j, k)
+            p1 = idx(i, j + 1, k)
+            p2 = idx(i, j + 1, k + 1)
+            p3 = idx(i, j, k + 1)
+            polygons.append(f"4 {p0} {p1} {p2} {p3}")
 
-    vtk_content += f"\nCELL_TYPES {num_cells}\n"
-    for _ in range(num_cells):
-        vtk_content += "12\n"  # VTK_HEXAHEDRON
+    num_polygons = len(polygons)
+    vtk_content += f"\nPOLYGONS {num_polygons} {num_polygons * 5}\n"
+    vtk_content += "\n".join(polygons) + "\n"
 
     # Add point data (deflections and stresses)
     vtk_content += f"\nPOINT_DATA {num_points_total}\n"
