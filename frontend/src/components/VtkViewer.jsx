@@ -72,6 +72,16 @@ const VtkViewer = ({ fileContent, filename }) => {
         switch (extension) {
           case 'vtk':
             reader = vtkPolyDataReader.newInstance()
+            // Legacy VTK format uses parseAsText for ASCII files
+            if (typeof fileContent === 'string') {
+              // If we have base64 string, decode to text first
+              const textContent = new TextDecoder().decode(arrayBuffer)
+              reader.parseAsText(textContent)
+            } else {
+              // For binary content, convert ArrayBuffer to string
+              const textContent = new TextDecoder().decode(arrayBuffer)
+              reader.parseAsText(textContent)
+            }
             break
           case 'vtp':
           case 'vtu':
@@ -79,22 +89,23 @@ const VtkViewer = ({ fileContent, filename }) => {
           case 'vts':
           case 'vtr':
             reader = vtkXMLPolyDataReader.newInstance()
+            reader.parseAsArrayBuffer(arrayBuffer)
             break
           case 'stl':
             reader = vtkSTLReader.newInstance()
+            reader.parseAsArrayBuffer(arrayBuffer)
             break
           case 'obj':
             reader = vtkOBJReader.newInstance()
+            reader.parseAsArrayBuffer(arrayBuffer)
             break
           case 'ply':
             reader = vtkPLYReader.newInstance()
+            reader.parseAsArrayBuffer(arrayBuffer)
             break
           default:
             throw new Error(`Unsupported file format: ${extension}`)
         }
-
-        // Parse the data
-        reader.parseAsArrayBuffer(arrayBuffer)
 
         // Create mapper
         const mapper = vtkMapper.newInstance()
