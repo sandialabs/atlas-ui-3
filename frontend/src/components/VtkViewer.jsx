@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { RotateCw, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
+import { RotateCw, ZoomIn, ZoomOut, Maximize2, Scissors } from 'lucide-react'
 
 // Import VTK.js modules
 import '@kitware/vtk.js/Rendering/Profiles/Geometry'
@@ -11,12 +11,18 @@ import vtkXMLPolyDataReader from '@kitware/vtk.js/IO/XML/XMLPolyDataReader'
 import vtkSTLReader from '@kitware/vtk.js/IO/Geometry/STLReader'
 import vtkOBJReader from '@kitware/vtk.js/IO/Misc/OBJReader'
 import vtkPLYReader from '@kitware/vtk.js/IO/Geometry/PLYReader'
+import vtkPlane from '@kitware/vtk.js/Common/DataModel/Plane'
+import vtkCutter from '@kitware/vtk.js/Filters/Core/Cutter'
 
 const VtkViewer = ({ fileContent, filename }) => {
   const containerRef = useRef(null)
   const fullScreenRendererRef = useRef(null)
+  const polyDataRef = useRef(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [slicingEnabled, setSlicingEnabled] = useState(false)
+  const [slicePosition, setSlicePosition] = useState(50)
+  const [sliceAxis, setSliceAxis] = useState('z')
 
   useEffect(() => {
     if (!containerRef.current || !fileContent) {
@@ -107,6 +113,10 @@ const VtkViewer = ({ fileContent, filename }) => {
             throw new Error(`Unsupported file format: ${extension}`)
         }
 
+        // Store polydata for slicing operations
+        const polyData = reader.getOutputData()
+        polyDataRef.current = polyData
+
         // Create mapper
         const mapper = vtkMapper.newInstance()
         mapper.setInputConnection(reader.getOutputPort())
@@ -178,6 +188,63 @@ const VtkViewer = ({ fileContent, filename }) => {
     }
   }
 
+  const toggleSlicing = () => {
+    setSlicingEnabled(!slicingEnabled)
+  }
+
+  // Apply slicing when enabled or slice parameters change
+  useEffect(() => {
+    if (!fullScreenRendererRef.current || !polyDataRef.current) {
+      return
+    }
+
+    const renderer = fullScreenRendererRef.current.getRenderer()
+    const renderWindow = fullScreenRendererRef.current.getRenderWindow()
+    const actors = renderer.getActors()
+    
+    if (actors.length === 0) return
+    
+    const actor = actors[0]
+    const mapper = actor.getMapper()
+
+    if (slicingEnabled) {
+      // Get bounds of the data
+      const bounds = polyDataRef.current.getBounds()
+      const [xMin, xMax, yMin, yMax, zMin, zMax] = bounds
+
+      // Create cutting plane
+      const plane = vtkPlane.newInstance()
+      
+      // Set plane position and normal based on axis
+      if (sliceAxis === 'x') {
+        const x = xMin + (xMax - xMin) * (slicePosition / 100)
+        plane.setOrigin(x, 0, 0)
+        plane.setNormal(1, 0, 0)
+      } else if (sliceAxis === 'y') {
+        const y = yMin + (yMax - yMin) * (slicePosition / 100)
+        plane.setOrigin(0, y, 0)
+        plane.setNormal(0, 1, 0)
+      } else { // z
+        const z = zMin + (zMax - zMin) * (slicePosition / 100)
+        plane.setOrigin(0, 0, z)
+        plane.setNormal(0, 0, 1)
+      }
+
+      // Create cutter for cross-section
+      const cutter = vtkCutter.newInstance()
+      cutter.setInputData(polyDataRef.current)
+      cutter.setCutFunction(plane)
+
+      // Update mapper to show the slice
+      mapper.setInputConnection(cutter.getOutputPort())
+    } else {
+      // Reset to original data
+      mapper.setInputData(polyDataRef.current)
+    }
+
+    renderWindow.render()
+  }, [slicingEnabled, slicePosition, sliceAxis])
+
   return (
     <div className="relative w-full h-full bg-gray-900">
       {isLoading && (
@@ -204,6 +271,15 @@ const VtkViewer = ({ fileContent, filename }) => {
       {!isLoading && !error && (
         <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
           <button
+            onClick={toggleSlicing}
+            className={`p-2 rounded-lg transition-colors shadow-lg ${
+              slicingEnabled ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-700 hover:bg-gray-600'
+            }`}
+            title="Toggle Slicing"
+          >
+            <Scissors className="w-5 h-5 text-white" />
+          </button>
+          <button
             onClick={handleResetView}
             className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors shadow-lg"
             title="Reset View"
@@ -224,6 +300,49 @@ const VtkViewer = ({ fileContent, filename }) => {
           >
             <ZoomOut className="w-5 h-5 text-white" />
           </button>
+        </div>
+      )}
+
+      {!isLoading && !error && slicingEnabled && (
+        <div className="absolute bottom-16 left-4 bg-gray-800 p-3 rounded-lg shadow-lg z-20">
+          <div className="text-xs text-gray-300 mb-2 font-semibold">Section View</div>
+          <div className="flex gap-2 mb-3">
+            <button
+              onClick={() => setSliceAxis('x')}
+              className={`px-3 py-1 text-xs rounded transition-colors ${
+                sliceAxis === 'x' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              X
+            </button>
+            <button
+              onClick={() => setSliceAxis('y')}
+              className={`px-3 py-1 text-xs rounded transition-colors ${
+                sliceAxis === 'y' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Y
+            </button>
+            <button
+              onClick={() => setSliceAxis('z')}
+              className={`px-3 py-1 text-xs rounded transition-colors ${
+                sliceAxis === 'z' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Z
+            </button>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={slicePosition}
+            onChange={(e) => setSlicePosition(Number(e.target.value))}
+            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
+          />
+          <div className="text-xs text-gray-400 mt-1 text-center">
+            {sliceAxis.toUpperCase()}: {slicePosition}%
+          </div>
         </div>
       )}
 
