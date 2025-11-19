@@ -12,7 +12,7 @@ import vtkSTLReader from '@kitware/vtk.js/IO/Geometry/STLReader'
 import vtkOBJReader from '@kitware/vtk.js/IO/Misc/OBJReader'
 import vtkPLYReader from '@kitware/vtk.js/IO/Geometry/PLYReader'
 import vtkPlane from '@kitware/vtk.js/Common/DataModel/Plane'
-import vtkCutter from '@kitware/vtk.js/Filters/Core/Cutter'
+import vtkPolyDataNormals from '@kitware/vtk.js/Filters/Core/PolyDataNormals'
 
 const VtkViewer = ({ fileContent, filename }) => {
   const containerRef = useRef(null)
@@ -117,9 +117,15 @@ const VtkViewer = ({ fileContent, filename }) => {
         const polyData = reader.getOutputData()
         polyDataRef.current = polyData
 
+        // Compute normals if not present (fixes WebGL samplerBuffer errors)
+        const normalsFilter = vtkPolyDataNormals.newInstance()
+        normalsFilter.setInputConnection(reader.getOutputPort())
+        normalsFilter.setComputePointNormals(true)
+        normalsFilter.setComputeCellNormals(false)
+
         // Create mapper
         const mapper = vtkMapper.newInstance()
-        mapper.setInputConnection(reader.getOutputPort())
+        mapper.setInputConnection(normalsFilter.getOutputPort())
 
         // Create actor
         actor = vtkActor.newInstance()
@@ -207,12 +213,15 @@ const VtkViewer = ({ fileContent, filename }) => {
     const actor = actors[0]
     const mapper = actor.getMapper()
 
+    // Remove all existing clipping planes
+    mapper.removeAllClippingPlanes()
+
     if (slicingEnabled) {
       // Get bounds of the data
       const bounds = polyDataRef.current.getBounds()
       const [xMin, xMax, yMin, yMax, zMin, zMax] = bounds
 
-      // Create cutting plane
+      // Create clipping plane
       const plane = vtkPlane.newInstance()
       
       // Set plane position and normal based on axis
@@ -230,16 +239,11 @@ const VtkViewer = ({ fileContent, filename }) => {
         plane.setNormal(0, 0, 1)
       }
 
-      // Create cutter for cross-section
-      const cutter = vtkCutter.newInstance()
-      cutter.setInputData(polyDataRef.current)
-      cutter.setCutFunction(plane)
-
-      // Update mapper to show the slice
-      mapper.setInputConnection(cutter.getOutputPort())
-    } else {
-      // Reset to original data
-      mapper.setInputData(polyDataRef.current)
+      // Add clipping plane to mapper
+      mapper.addClippingPlane(plane)
+      
+      // Important: Call modified() to trigger update
+      mapper.modified()
     }
 
     renderWindow.render()
