@@ -18,6 +18,9 @@ import math
 from typing import Any, Dict, Literal
 
 from fastmcp import FastMCP, Context
+import numpy as np
+import base64
+from typing import Dict as DictType
 
 
 # Initialize the MCP server
@@ -199,12 +202,12 @@ POLYGONS {len(polygons)} {num_polygon_data}
 """
 
 
-def generate_torus_vtk(major_radius: float = 1.0, minor_radius: float = 0.3, 
+def generate_torus_vtk(major_radius: float = 1.0, minor_radius: float = 0.3,
                        u_res: int = 30, v_res: int = 20) -> str:
     """Generate a torus in VTK format."""
     points = []
     polygons = []
-    
+
     # Generate points
     for i in range(u_res):
         u = (i / u_res) * 2 * math.pi
@@ -214,7 +217,7 @@ def generate_torus_vtk(major_radius: float = 1.0, minor_radius: float = 0.3,
             y = (major_radius + minor_radius * math.cos(v)) * math.sin(u)
             z = minor_radius * math.sin(v)
             points.append(f"{x:.6f} {y:.6f} {z:.6f}")
-    
+
     # Generate polygons (quads)
     for i in range(u_res):
         next_i = (i + 1) % u_res
@@ -225,10 +228,10 @@ def generate_torus_vtk(major_radius: float = 1.0, minor_radius: float = 0.3,
             p2 = next_i * v_res + next_j
             p3 = i * v_res + next_j
             polygons.append(f"4 {p0} {p1} {p2} {p3}")
-    
+
     points_str = "\n".join(points)
     polygons_str = "\n".join(polygons)
-    
+
     return f"""# vtk DataFile Version 3.0
 Torus
 ASCII
@@ -239,6 +242,128 @@ POINTS {len(points)} float
 POLYGONS {len(polygons)} {len(polygons) * 5}
 {polygons_str}
 """
+
+
+def generate_cantilever_beam_vtk(modules: DictType[str, float], load: float, num_points: int) -> str:
+    """Generate a cantilever beam deflection analysis in VTK format."""
+
+    # Extract beam parameters from modules
+    LENGTH = modules.get('length', 10.0)
+    WIDTH = modules.get('width', 0.5)
+    HEIGHT = modules.get('height', 0.8)
+    E = modules.get('e_modulus', 200e9)  # Young's modulus (Pa)
+
+    # Calculate second moment of area
+    I = (WIDTH * HEIGHT**3) / 12
+
+    # Adjust num_points if too large
+    if num_points > 1000:
+        num_points = 1000
+
+    def calculate_deflection(x, load, E, I, L):
+        """Calculate beam deflection at position x"""
+        w = load
+        deflection = (w / (24 * E * I)) * (x**4 - 4*L*x**3 + 6*L**2*x**2)
+        return deflection
+
+    def calculate_stress(x, load, I, L, y_position):
+        """Calculate bending stress at position x and y"""
+        w = load
+        M = w * (L - x)**2 / 2  # Bending moment
+        stress = M * y_position / I
+        return stress
+
+    # Generate mesh points
+    x_coords = np.linspace(0, LENGTH, num_points)
+    y_coords = np.linspace(-HEIGHT/2, HEIGHT/2, 5)
+    z_coords = np.linspace(-WIDTH/2, WIDTH/2, 3)
+
+    # Create 3D grid
+    points = []
+    deflections = []
+    stresses = []
+
+    for x in x_coords:
+        deflection = calculate_deflection(x, load, E, I, LENGTH)
+
+        for y in y_coords:
+            for z in z_coords:
+                # Original point position
+                points.append([x, y, z])
+
+                # Deflection in y-direction (scaled up 100x for visualization)
+                deflections.append(deflection)
+
+                # Calculate stress at this point
+                stress = calculate_stress(x, load, I, LENGTH, y)
+                stresses.append(stress)
+
+    points = np.array(points)
+    deflections = np.array(deflections)
+    stresses = np.array(stresses)
+
+    # Apply deflection to points (exaggerated for visualization)
+    deformed_points = points.copy()
+    deformed_points[:, 1] -= deflections * 100  # Scale deflection for visibility
+
+    # Create VTK file content
+    num_points_total = len(points)
+
+    vtk_content = f"""# vtk DataFile Version 3.0
+Cantilever Beam Deflection Analysis
+ASCII
+DATASET UNSTRUCTURED_GRID
+
+POINTS {num_points_total} float
+"""
+
+    # Write points
+    for point in deformed_points:
+        vtk_content += f"{point[0]:.6f} {point[1]:.6f} {point[2]:.6f}\n"
+
+    # Create hexahedral cells
+    cells = []
+    nx, ny, nz = num_points, len(y_coords), len(z_coords)
+
+    for i in range(nx - 1):
+        for j in range(ny - 1):
+            for k in range(nz - 1):
+                # Calculate indices for hexahedron
+                n0 = i * ny * nz + j * nz + k
+                n1 = i * ny * nz + j * nz + (k + 1)
+                n2 = i * ny * nz + (j + 1) * nz + (k + 1)
+                n3 = i * ny * nz + (j + 1) * nz + k
+                n4 = (i + 1) * ny * nz + j * nz + k
+                n5 = (i + 1) * ny * nz + j * nz + (k + 1)
+                n6 = (i + 1) * ny * nz + (j + 1) * nz + (k + 1)
+                n7 = (i + 1) * ny * nz + (j + 1) * nz + k
+
+                cells.append([n0, n1, n2, n3, n4, n5, n6, n7])
+
+    num_cells = len(cells)
+    vtk_content += f"\nCELLS {num_cells} {num_cells * 9}\n"
+
+    for cell in cells:
+        vtk_content += f"8 {' '.join(map(str, cell))}\n"
+
+    vtk_content += f"\nCELL_TYPES {num_cells}\n"
+    for _ in range(num_cells):
+        vtk_content += "12\n"  # VTK_HEXAHEDRON
+
+    # Add point data (deflections and stresses)
+    vtk_content += f"\nPOINT_DATA {num_points_total}\n"
+
+    vtk_content += "SCALARS Deflection float 1\n"
+    vtk_content += "LOOKUP_TABLE default\n"
+    for d in deflections:
+        vtk_content += f"{d:.6e}\n"
+
+    vtk_content += "\nSCALARS Stress float 1\n"
+    vtk_content += "LOOKUP_TABLE default\n"
+    for s in stresses:
+        vtk_content += f"{s:.6e}\n"
+
+    return vtk_content
 
 
 @mcp.tool
@@ -451,6 +576,141 @@ async def generate_sample_files(
         "display": {
             "open_canvas": True,
             "primary_file": "sphere.vtk",  # Start with sphere as it's most visually interesting
+            "mode": "replace",
+            "viewer_hint": "vtk"
+        }
+    }
+
+
+@mcp.tool
+async def cantilever_beam_analysis(
+    modules: DictType[str, float],
+    load: float,
+    num_points: int,
+    ctx: Context | None = None,
+) -> Dict[str, Any]:
+    """Perform cantilever beam deflection analysis and generate VTK visualization.
+
+    This tool analyzes a cantilever beam under uniform load and creates a 3D VTK file
+    showing the beam's deflection and stress distribution. The analysis uses
+    engineering beam theory to calculate deflections and stresses at discrete points
+    along the beam length.
+
+    **Beam Parameters (in modules dict):**
+    - length: Beam length in meters (default: 10.0)
+    - width: Beam width in meters (default: 0.5)
+    - height: Beam height in meters (default: 0.8)
+    - e_modulus: Young's modulus in Pa (default: 200e9 for steel)
+
+    **Analysis Features:**
+    - Calculates deflection at each position using beam theory
+    - Computes bending stress distribution
+    - Creates 3D mesh with hexahedral elements
+    - Applies exaggerated deflection for visualization
+    - Includes scalar data for deflection and stress
+
+    **Visualization:**
+    The generated VTK file can be rendered in the canvas panel with:
+    - 3D beam geometry with deformation
+    - Color-coded deflection and stress fields
+    - Interactive 3D rotation and zoom
+    - Detailed analysis metadata
+
+    **Applications:**
+    - Structural engineering analysis
+    - Educational demonstrations of beam theory
+    - Preliminary design validation
+    - Finite element analysis validation
+
+    Args:
+        modules: Dictionary containing beam material and geometry parameters
+            (length, width, height, e_modulus)
+        load: Uniform distributed load in N/m along the beam length
+        num_points: Number of discretization points along the beam (max 1000)
+        ctx: MCP context for progress reporting (automatically injected)
+
+    Returns:
+        Dictionary containing the analysis results and VTK file as base64-encoded artifact
+        that will be automatically rendered in the canvas panel
+
+    Examples:
+        >>> cantilever_beam_analysis(
+        ...     modules={"length": 5.0, "width": 0.3, "height": 0.6, "e_modulus": 200e9},
+        ...     load=5000,
+        ...     num_points=20
+        ... )
+        # Returns analysis of a 5m steel beam under 5kN/m load
+    """
+    if ctx:
+        await ctx.report_progress(progress=0, total=3, message="Starting cantilever beam analysis...")
+
+    # Validate and cap num_points
+    if num_points > 1000:
+        num_points = 1000
+    elif num_points < 2:
+        num_points = 2
+
+    # Extract parameters
+    length = modules.get('length', 10.0)
+    width = modules.get('width', 0.5)
+    height = modules.get('height', 0.8)
+    e_modulus = modules.get('e_modulus', 200e9)
+
+    # Calculate derived quantities
+    I = (width * height**3) / 12  # Second moment of area
+    max_deflection = (load * length**4) / (8 * e_modulus * I)
+    max_stress = (load * length**2) / (2 * I / (height / 2))  # At fixed end
+
+    if ctx:
+        await ctx.report_progress(progress=1, total=3, message="Computed beam parameters...")
+
+    # Generate VTK content
+    content = generate_cantilever_beam_vtk(modules, load, num_points)
+
+    if ctx:
+        await ctx.report_progress(progress=2, total=3, message="Generated VTK file...")
+
+    # Encode content as base64
+    content_b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+
+    filename = "cantilever_beam.vtk"
+
+    if ctx:
+        await ctx.report_progress(progress=3, total=3, message="Analysis complete")
+
+    return {
+        "results": {
+            "status": "success",
+            "analysis_type": "cantilever_beam_deflection",
+            "beam_parameters": {
+                "length": length,
+                "width": width,
+                "height": height,
+                "e_modulus": e_modulus,
+                "moment_of_inertia": I,
+                "uniform_load": load
+            },
+            "results": {
+                "max_deflection": max_deflection,
+                "max_stress": max_stress,
+                "discretization_points": num_points
+            },
+            "filename": filename,
+            "size_bytes": len(content)
+        },
+        "artifacts": [
+            {
+                "name": filename,
+                "b64": content_b64,
+                "mime": "application/octet-stream",
+                "size": len(content),
+                "description": "Cantilever beam deflection analysis in VTK format",
+                "viewer": "vtk"
+            }
+        ],
+        "display": {
+            "open_canvas": True,
+            "primary_file": filename,
             "mode": "replace",
             "viewer_hint": "vtk"
         }

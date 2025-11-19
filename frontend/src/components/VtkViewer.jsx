@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { RotateCw, ZoomIn, ZoomOut, Maximize2, Scissors } from 'lucide-react'
+import { RotateCw, ZoomIn, ZoomOut, Maximize2, Scissors, Play, Pause } from 'lucide-react'
 
 // Import VTK.js modules
 import '@kitware/vtk.js/Rendering/Profiles/Geometry'
@@ -18,11 +18,14 @@ const VtkViewer = ({ fileContent, filename }) => {
   const containerRef = useRef(null)
   const fullScreenRendererRef = useRef(null)
   const polyDataRef = useRef(null)
+  const autoRotateIntervalRef = useRef(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
   const [slicingEnabled, setSlicingEnabled] = useState(false)
   const [slicePosition, setSlicePosition] = useState(50)
   const [sliceAxis, setSliceAxis] = useState('z')
+  const [customNormal, setCustomNormal] = useState({ x: 0, y: 0, z: 1 })
+  const [isAutoRotating, setIsAutoRotating] = useState(false)
 
   useEffect(() => {
     if (!containerRef.current || !fileContent) {
@@ -198,6 +201,49 @@ const VtkViewer = ({ fileContent, filename }) => {
     setSlicingEnabled(!slicingEnabled)
   }
 
+  const toggleAutoRotate = () => {
+    setIsAutoRotating(!isAutoRotating)
+  }
+
+  // Auto-rotation effect
+  useEffect(() => {
+    if (!isAutoRotating || !fullScreenRendererRef.current) {
+      if (autoRotateIntervalRef.current) {
+        clearInterval(autoRotateIntervalRef.current)
+        autoRotateIntervalRef.current = null
+      }
+      return
+    }
+
+    const renderer = fullScreenRendererRef.current.getRenderer()
+    const renderWindow = fullScreenRendererRef.current.getRenderWindow()
+    const camera = renderer.getActiveCamera()
+
+    autoRotateIntervalRef.current = setInterval(() => {
+      camera.azimuth(0.5) // Rotate 0.5 degrees per frame (slow rotation)
+      renderer.resetCameraClippingRange() // Fix clipping issues during rotation
+      renderWindow.render()
+    }, 33) // ~30 fps
+
+    return () => {
+      if (autoRotateIntervalRef.current) {
+        clearInterval(autoRotateIntervalRef.current)
+        autoRotateIntervalRef.current = null
+      }
+    }
+  }, [isAutoRotating])
+
+  // Update custom normal when axis changes
+  useEffect(() => {
+    if (sliceAxis === 'x') {
+      setCustomNormal({ x: 1, y: 0, z: 0 })
+    } else if (sliceAxis === 'y') {
+      setCustomNormal({ x: 0, y: 1, z: 0 })
+    } else if (sliceAxis === 'z') {
+      setCustomNormal({ x: 0, y: 0, z: 1 })
+    }
+  }, [sliceAxis])
+
   // Apply slicing when enabled or slice parameters change
   useEffect(() => {
     if (!fullScreenRendererRef.current || !polyDataRef.current) {
@@ -224,20 +270,25 @@ const VtkViewer = ({ fileContent, filename }) => {
       // Create clipping plane
       const plane = vtkPlane.newInstance()
       
-      // Set plane position and normal based on axis
+      // Calculate position based on slice percentage
+      let position
       if (sliceAxis === 'x') {
-        const x = xMin + (xMax - xMin) * (slicePosition / 100)
-        plane.setOrigin(x, 0, 0)
-        plane.setNormal(1, 0, 0)
+        position = xMin + (xMax - xMin) * (slicePosition / 100)
       } else if (sliceAxis === 'y') {
-        const y = yMin + (yMax - yMin) * (slicePosition / 100)
-        plane.setOrigin(0, y, 0)
-        plane.setNormal(0, 1, 0)
+        position = yMin + (yMax - yMin) * (slicePosition / 100)
       } else { // z
-        const z = zMin + (zMax - zMin) * (slicePosition / 100)
-        plane.setOrigin(0, 0, z)
-        plane.setNormal(0, 0, 1)
+        position = zMin + (zMax - zMin) * (slicePosition / 100)
       }
+
+      // Set plane origin (at calculated position along the axis)
+      const origin = [
+        sliceAxis === 'x' ? position : 0,
+        sliceAxis === 'y' ? position : 0,
+        sliceAxis === 'z' ? position : 0
+      ]
+      
+      plane.setOrigin(origin[0], origin[1], origin[2])
+      plane.setNormal(customNormal.x, customNormal.y, customNormal.z)
 
       // Add clipping plane to mapper
       mapper.addClippingPlane(plane)
@@ -247,7 +298,7 @@ const VtkViewer = ({ fileContent, filename }) => {
     }
 
     renderWindow.render()
-  }, [slicingEnabled, slicePosition, sliceAxis])
+  }, [slicingEnabled, slicePosition, sliceAxis, customNormal])
 
   return (
     <div className="relative w-full h-full bg-gray-900">
@@ -274,6 +325,15 @@ const VtkViewer = ({ fileContent, filename }) => {
 
       {!isLoading && !error && (
         <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
+          <button
+            onClick={toggleAutoRotate}
+            className={`p-2 rounded-lg transition-colors shadow-lg ${
+              isAutoRotating ? 'bg-green-600 hover:bg-green-500' : 'bg-gray-700 hover:bg-gray-600'
+            }`}
+            title="Auto Rotate"
+          >
+            {isAutoRotating ? <Pause className="w-5 h-5 text-white" /> : <Play className="w-5 h-5 text-white" />}
+          </button>
           <button
             onClick={toggleSlicing}
             className={`p-2 rounded-lg transition-colors shadow-lg ${
@@ -308,44 +368,97 @@ const VtkViewer = ({ fileContent, filename }) => {
       )}
 
       {!isLoading && !error && slicingEnabled && (
-        <div className="absolute bottom-16 left-4 bg-gray-800 p-3 rounded-lg shadow-lg z-20">
-          <div className="text-xs text-gray-300 mb-2 font-semibold">Section View</div>
-          <div className="flex gap-2 mb-3">
-            <button
-              onClick={() => setSliceAxis('x')}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
-                sliceAxis === 'x' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-            >
-              X
-            </button>
-            <button
-              onClick={() => setSliceAxis('y')}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
-                sliceAxis === 'y' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-            >
-              Y
-            </button>
-            <button
-              onClick={() => setSliceAxis('z')}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
-                sliceAxis === 'z' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-            >
-              Z
-            </button>
+        <div className="absolute bottom-16 left-4 bg-gray-800 p-4 rounded-lg shadow-lg z-20 min-w-80">
+          <div className="text-sm text-gray-300 mb-3 font-semibold">Section View Controls</div>
+          
+          {/* Preset axis buttons */}
+          <div className="mb-4">
+            <div className="text-xs text-gray-400 mb-2">Quick Axes</div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setSliceAxis('x')}
+                className={`px-4 py-1.5 text-xs rounded transition-colors ${
+                  sliceAxis === 'x' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                X
+              </button>
+              <button
+                onClick={() => setSliceAxis('y')}
+                className={`px-4 py-1.5 text-xs rounded transition-colors ${
+                  sliceAxis === 'y' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                Y
+              </button>
+              <button
+                onClick={() => setSliceAxis('z')}
+                className={`px-4 py-1.5 text-xs rounded transition-colors ${
+                  sliceAxis === 'z' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                Z
+              </button>
+            </div>
           </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={slicePosition}
-            onChange={(e) => setSlicePosition(Number(e.target.value))}
-            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
-          />
-          <div className="text-xs text-gray-400 mt-1 text-center">
-            {sliceAxis.toUpperCase()}: {slicePosition}%
+
+          {/* Custom normal direction */}
+          <div className="mb-4">
+            <div className="text-xs text-gray-400 mb-2">Plane Normal Direction</div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-xs text-gray-500">X</label>
+                <input
+                  type="number"
+                  min="-1"
+                  max="1"
+                  step="0.1"
+                  value={customNormal.x}
+                  onChange={(e) => setCustomNormal({ ...customNormal, x: Number(e.target.value) })}
+                  className="w-full px-2 py-1 text-xs bg-gray-700 text-gray-200 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Y</label>
+                <input
+                  type="number"
+                  min="-1"
+                  max="1"
+                  step="0.1"
+                  value={customNormal.y}
+                  onChange={(e) => setCustomNormal({ ...customNormal, y: Number(e.target.value) })}
+                  className="w-full px-2 py-1 text-xs bg-gray-700 text-gray-200 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Z</label>
+                <input
+                  type="number"
+                  min="-1"
+                  max="1"
+                  step="0.1"
+                  value={customNormal.z}
+                  onChange={(e) => setCustomNormal({ ...customNormal, z: Number(e.target.value) })}
+                  className="w-full px-2 py-1 text-xs bg-gray-700 text-gray-200 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Position slider - larger */}
+          <div className="mb-2">
+            <div className="text-xs text-gray-400 mb-2">Plane Position: {slicePosition}%</div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={slicePosition}
+              onChange={(e) => setSlicePosition(Number(e.target.value))}
+              className="w-full h-3 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
+              style={{
+                background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${slicePosition}%, #374151 ${slicePosition}%, #374151 100%)`
+              }}
+            />
           </div>
         </div>
       )}
