@@ -13,6 +13,8 @@ import vtkOBJReader from '@kitware/vtk.js/IO/Misc/OBJReader'
 import vtkPLYReader from '@kitware/vtk.js/IO/Geometry/PLYReader'
 import vtkPlane from '@kitware/vtk.js/Common/DataModel/Plane'
 import vtkPolyDataNormals from '@kitware/vtk.js/Filters/Core/PolyDataNormals'
+import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction'
+import vtkColorMaps from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction/ColorMaps'
 
 const VtkViewer = ({ fileContent, filename }) => {
   const containerRef = useRef(null)
@@ -26,6 +28,8 @@ const VtkViewer = ({ fileContent, filename }) => {
   const [sliceAxis, setSliceAxis] = useState('z')
   const [customNormal, setCustomNormal] = useState({ x: 0, y: 0, z: 1 })
   const [isAutoRotating, setIsAutoRotating] = useState(false)
+  const [scalarArrays, setScalarArrays] = useState([])
+  const [activeScalar, setActiveScalar] = useState(null)
 
   useEffect(() => {
     if (!containerRef.current || !fileContent) {
@@ -120,6 +124,26 @@ const VtkViewer = ({ fileContent, filename }) => {
         const polyData = reader.getOutputData()
         polyDataRef.current = polyData
 
+        // Extract available scalar arrays
+        const pointData = polyData.getPointData()
+        const availableScalars = []
+        for (let i = 0; i < pointData.getNumberOfArrays(); i++) {
+          const array = pointData.getArray(i)
+          const arrayName = array.getName()
+          if (arrayName) {
+            availableScalars.push({
+              name: arrayName,
+              range: array.getRange()
+            })
+          }
+        }
+        setScalarArrays(availableScalars)
+        
+        // Auto-select first scalar if available
+        if (availableScalars.length > 0 && !activeScalar) {
+          setActiveScalar(availableScalars[0].name)
+        }
+
         // Compute normals if not present (fixes WebGL samplerBuffer errors)
         const normalsFilter = vtkPolyDataNormals.newInstance()
         normalsFilter.setInputConnection(reader.getOutputPort())
@@ -129,13 +153,32 @@ const VtkViewer = ({ fileContent, filename }) => {
         // Create mapper
         const mapper = vtkMapper.newInstance()
         mapper.setInputConnection(normalsFilter.getOutputPort())
+        
+        // Enable scalar coloring if we have scalar data
+        if (availableScalars.length > 0) {
+          // Create color transfer function (rainbow color map)
+          const lookupTable = vtkColorTransferFunction.newInstance()
+          const preset = vtkColorMaps.getPresetByName('erdc_rainbow_bright')
+          lookupTable.applyColorMap(preset)
+          lookupTable.setMappingRange(...availableScalars[0].range)
+          lookupTable.updateRange()
+          
+          // Configure mapper for scalar coloring
+          mapper.setLookupTable(lookupTable)
+          mapper.setScalarRange(...availableScalars[0].range)
+          mapper.setScalarVisibility(true)
+          mapper.setScalarModeToUsePointFieldData()
+          mapper.setColorByArrayName(availableScalars[0].name)
+        }
 
         // Create actor
         actor = vtkActor.newInstance()
         actor.setMapper(mapper)
         
-        // Set some nice default properties
-        actor.getProperty().setColor(0.8, 0.8, 0.9)
+        // Set properties only if NOT using scalar coloring
+        if (availableScalars.length === 0) {
+          actor.getProperty().setColor(0.8, 0.8, 0.9)
+        }
         actor.getProperty().setAmbient(0.3)
         actor.getProperty().setDiffuse(0.7)
         actor.getProperty().setSpecular(0.3)
@@ -300,6 +343,49 @@ const VtkViewer = ({ fileContent, filename }) => {
     renderWindow.render()
   }, [slicingEnabled, slicePosition, sliceAxis, customNormal])
 
+  // Update scalar field coloring
+  useEffect(() => {
+    if (!fullScreenRendererRef.current) {
+      return
+    }
+
+    const renderer = fullScreenRendererRef.current.getRenderer()
+    const renderWindow = fullScreenRendererRef.current.getRenderWindow()
+    const actors = renderer.getActors()
+    
+    if (actors.length === 0) return
+    
+    const actor = actors[0]
+    const mapper = actor.getMapper()
+
+    if (!activeScalar) {
+      // Disable scalar coloring, use solid color
+      mapper.setScalarVisibility(false)
+      actor.getProperty().setColor(0.8, 0.8, 0.9)
+    } else {
+      // Find the selected scalar array
+      const scalarInfo = scalarArrays.find(s => s.name === activeScalar)
+      if (scalarInfo) {
+        // Create/update color transfer function
+        const lookupTable = vtkColorTransferFunction.newInstance()
+        const preset = vtkColorMaps.getPresetByName('erdc_rainbow_bright')
+        lookupTable.applyColorMap(preset)
+        lookupTable.setMappingRange(...scalarInfo.range)
+        lookupTable.updateRange()
+        
+        // Configure mapper
+        mapper.setLookupTable(lookupTable)
+        mapper.setScalarRange(...scalarInfo.range)
+        mapper.setScalarVisibility(true)
+        mapper.setScalarModeToUsePointFieldData()
+        mapper.setColorByArrayName(activeScalar)
+      }
+    }
+    
+    mapper.modified()
+    renderWindow.render()
+  }, [activeScalar, scalarArrays])
+
   return (
     <div className="relative w-full h-full bg-gray-900">
       {isLoading && (
@@ -364,6 +450,29 @@ const VtkViewer = ({ fileContent, filename }) => {
           >
             <ZoomOut className="w-5 h-5 text-white" />
           </button>
+        </div>
+      )}
+
+      {!isLoading && !error && scalarArrays.length > 0 && (
+        <div className="absolute top-4 left-4 bg-gray-800 p-3 rounded-lg shadow-lg z-20 min-w-64">
+          <div className="text-xs text-gray-400 mb-2">Color By Scalar Field</div>
+          <select
+            value={activeScalar || ''}
+            onChange={(e) => setActiveScalar(e.target.value)}
+            className="w-full px-3 py-2 text-sm bg-gray-700 text-gray-200 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+          >
+            <option value="">Solid Color</option>
+            {scalarArrays.map((scalar) => (
+              <option key={scalar.name} value={scalar.name}>
+                {scalar.name}
+              </option>
+            ))}
+          </select>
+          {activeScalar && (
+            <div className="mt-2 text-xs text-gray-400">
+              Range: {scalarArrays.find(s => s.name === activeScalar)?.range.map(v => v.toExponential(2)).join(' to ')}
+            </div>
+          )}
         </div>
       )}
 
