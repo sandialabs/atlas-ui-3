@@ -30,6 +30,7 @@ const VtkViewer = ({ fileContent, filename }) => {
   const [isAutoRotating, setIsAutoRotating] = useState(false)
   const [scalarArrays, setScalarArrays] = useState([])
   const [activeScalar, setActiveScalar] = useState(null)
+  const [flipClipping, setFlipClipping] = useState(false)
 
   useEffect(() => {
     if (!containerRef.current || !fileContent) {
@@ -331,7 +332,14 @@ const VtkViewer = ({ fileContent, filename }) => {
       ]
       
       plane.setOrigin(origin[0], origin[1], origin[2])
-      plane.setNormal(customNormal.x, customNormal.y, customNormal.z)
+      
+      // Apply normal direction (flip if requested)
+      const normalDirection = flipClipping ? -1 : 1
+      plane.setNormal(
+        customNormal.x * normalDirection,
+        customNormal.y * normalDirection,
+        customNormal.z * normalDirection
+      )
 
       // Add clipping plane to mapper
       mapper.addClippingPlane(plane)
@@ -341,7 +349,7 @@ const VtkViewer = ({ fileContent, filename }) => {
     }
 
     renderWindow.render()
-  }, [slicingEnabled, slicePosition, sliceAxis, customNormal])
+  }, [slicingEnabled, slicePosition, sliceAxis, customNormal, flipClipping])
 
   // Update scalar field coloring
   useEffect(() => {
@@ -555,7 +563,7 @@ const VtkViewer = ({ fileContent, filename }) => {
           </div>
 
           {/* Position slider - larger */}
-          <div className="mb-2">
+          <div className="mb-4">
             <div className="text-xs text-gray-400 mb-2">Plane Position: {slicePosition}%</div>
             <input
               type="range"
@@ -568,6 +576,19 @@ const VtkViewer = ({ fileContent, filename }) => {
                 background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${slicePosition}%, #374151 ${slicePosition}%, #374151 100%)`
               }}
             />
+          </div>
+
+          {/* Flip clipping direction toggle */}
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-400">Flip Clipping Direction</span>
+            <button
+              onClick={() => setFlipClipping(!flipClipping)}
+              className={`px-4 py-1.5 text-xs rounded transition-colors ${
+                flipClipping ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              {flipClipping ? 'Flipped' : 'Normal'}
+            </button>
           </div>
         </div>
       )}

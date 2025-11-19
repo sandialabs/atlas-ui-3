@@ -247,10 +247,15 @@ async def execute_single_tool(
                     edited_args = response["arguments"]
                     # Check if arguments actually changed by comparing with what we sent (display_args)
                     # Use json comparison to avoid false positives from dict ordering
-                    if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
+                    original_json = json.dumps(original_display_args, sort_keys=True, separators=(',', ':'))
+                    edited_json = json.dumps(edited_args, sort_keys=True, separators=(',', ':'))
+                    
+                    if original_json != edited_json:
                         arguments_were_edited = True
                         filtered_args = edited_args
                         logger.info(f"User edited arguments for tool {tool_call.function.name}")
+                        logger.debug(f"Original: {original_json}")
+                        logger.debug(f"Edited: {edited_json}")
                     else:
                         # No actual changes, but response included arguments - keep original filtered_args
                         logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
