@@ -119,8 +119,22 @@
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
   },
+   "vtk-example": {
+    "command": [
+      "python",
+      "mcp/vtk-example/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Generate 3D geometric shapes (cube, sphere, pyramid, cylinder, torus) in VTK and STL formats for visualization in the canvas panel. Perfect for testing 3D rendering capabilities.",
+    "author": "Chat UI Team",
+    "short_description": "3D shape generator for VTK visualization",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Public"
+  },
   "external-api-example": {
-    "enabled": true,
     "url": "http://127.0.0.1:8005/mcp",
     "transport": "http",
     "groups": [

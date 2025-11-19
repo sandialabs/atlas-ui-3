@@ -111,15 +111,6 @@
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
   },
-  "external-api-example": {
-    "url": "http://127.0.0.1:8005/mcp",
-    "transport": "http",
-    "groups": [
-      "users"
-    ],
-    "description": "Mock HTTP MCP server for testing authentication",
-    "auth_token": "${MCP_EXTERNAL_API_TOKEN}"
-  },
   "vtk-example": {
     "command": [
       "python",
@@ -134,5 +125,14 @@
     "short_description": "3D shape generator for VTK visualization",
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
+  },
+  "external-api-example": {
+    "url": "http://127.0.0.1:8005/mcp",
+    "transport": "http",
+    "groups": [
+      "users"
+    ],
+    "description": "Mock HTTP MCP server for testing authentication",
+    "auth_token": "${MCP_EXTERNAL_API_TOKEN}"
   }
 }
