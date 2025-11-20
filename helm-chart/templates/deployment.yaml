@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "{{ .Release.Name }}-atlas-ui"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "chart.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "chart.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: "atlas-ui"
+          image: "{{ .Values.image }}"
+          imagePullPolicy: Always
+          env:
+            - name: PORT
+              value: "{{ .Values.port }}"
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: "{{ .Release.Name }}-secrets"
+          ports:
+            - name: "{{ .Release.Name }}-atlas-ui"
+              containerPort: {{ .Values.port }}
+          resources:
+            requests:
+              cpu: "{{ .Values.resources.requests.cpu }}"
+              memory: "{{ .Values.resources.requests.memory }}"
+            limits:
+              cpu: "{{ .Values.resources.limits.cpu }}"
+              memory: "{{ .Values.resources.limits.memory }}"
+          volumeMounts:
+            - name: {{ .Release.Name }}-logs-volume
+              mountPath: /app/backend/logs
+            - name: {{ .Release.Name }}-config-volume
+              mountPath: /app/config/defaults
+            - name: {{ .Release.Name }}-config-volume
+              mountPath: /app/config/overrides
+      volumes:
+        - name: {{ .Release.Name }}-logs-volume
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-logs-pvc
+        - name: {{ .Release.Name }}-config-volume
+          configMap:
+            name: "{{ .Release.Name }}-config"
