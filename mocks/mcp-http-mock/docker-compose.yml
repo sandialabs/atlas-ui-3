@@ -1,0 +1,55 @@
+# Docker Compose for MCP HTTP Mock Server
+# Provides easy local deployment and testing
+
+version: '3.8'
+
+services:
+  # Ubuntu-based MCP server
+  mcp-server-ubuntu:
+    build:
+      context: .
+      dockerfile: Dockerfile.ubuntu
+    container_name: mcp-server-ubuntu
+    ports:
+      - "8005:8005"
+    environment:
+      - MCP_MOCK_TOKEN_1=test-api-key-123
+      - MCP_MOCK_TOKEN_2=another-test-key-456
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/mcp"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+
+
+  # RHEL-based MCP server (alternative, commented out by default)
+  # mcp-server-rhel:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.rhel
+  #   container_name: mcp-server-rhel
+  #   ports:
+  #     - "8007:8005"
+  #   environment:
+  #     - MCP_MOCK_TOKEN_1=test-api-key-123
+  #     - MCP_MOCK_TOKEN_2=another-test-key-456
+  #     - PYTHONUNBUFFERED=1
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8005/mcp"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 10s
+  #   restart: unless-stopped
+  #   networks:
+  #     - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
