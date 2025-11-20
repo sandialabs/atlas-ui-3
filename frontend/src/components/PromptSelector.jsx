@@ -3,7 +3,7 @@ import { ChevronDown, Sparkles } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 
 const PromptSelector = () => {
-  const { prompts, selectedPrompts, togglePrompt, makePromptActive, selectedTools } = useChat()
+  const { prompts, selectedPrompts, makePromptActive, removePrompts } = useChat()
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef(null)
 
@@ -96,7 +96,9 @@ const PromptSelector = () => {
           <button
             onClick={() => {
               // Clear all selected prompts to use default
-              selectedPromptKeys.forEach(key => togglePrompt(key))
+              if (selectedPromptKeys.length > 0 && removePrompts) {
+                removePrompts(selectedPromptKeys)
+              }
               setIsOpen(false)
             }}
             className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 ${
@@ -121,7 +123,9 @@ const PromptSelector = () => {
           {selectedPromptKeys.length > 1 && (
             <button
               onClick={() => {
-                selectedPromptKeys.forEach(key => togglePrompt(key))
+                if (removePrompts) {
+                  removePrompts(selectedPromptKeys)
+                }
                 setIsOpen(false)
               }}
               className="w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 text-sm"
