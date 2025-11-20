@@ -101,9 +101,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             x_auth_header = request.headers.get(self.auth_header_name)
 
             # Extract the user's email, depending on the datatype of auth header
-            if self.auth_header_type = "aws-alb-jwt": # Amazon Application Load Balancer
+            if self.auth_header_type == "aws-alb-jwt": # Amazon Application Load Balancer
                 user_email = get_user_from_aws_alb_jwt(x_auth_header, self.auth_aws_expected_alb_arn, self.auth_aws_region)
-            else
+            else:
                 user_email = get_user_from_header(x_auth_header)
 
             if not user_email:

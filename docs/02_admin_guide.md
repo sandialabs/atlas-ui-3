@@ -352,10 +352,10 @@ The backend application reads this header to identify the user. The header name 
 If using AWS Application Load Balancer (ALB) as the Auth Service, the following authentication configuration should be used:
 
 ```
-    AUTH_USER_HEADER="x-amzn-oidc-data"
-    AUTH_USER_HEADER_TYPE="aws-alb-jwt"
-    AUTH_AWS_EXPECTED_ALB_ARN="arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/your-alb-name/..."
-    AUTH_AWS_REGION="us-east-1"
+    AUTH_USER_HEADER=x-amzn-oidc-data
+    AUTH_USER_HEADER_TYPE=aws-alb-jwt
+    AUTH_AWS_EXPECTED_ALB_ARN=arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/your-alb-name/...
+    AUTH_AWS_REGION=us-east-1
 ```
 
 This configuration will decode the base64-encoded JWT passed in the x-amzn-oidc-data header, validate it, and extract the user's email address from the validated JWT.
