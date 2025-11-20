@@ -11,7 +11,7 @@ RUN groupadd -r mcpuser && useradd -r -g mcpuser mcpuser
 
 # Install system dependencies
 RUN dnf update -y && \
-    dnf install -y \
+    dnf install -y --allowerasing \
         python3.11 \
         python3.11-pip \
         curl \
