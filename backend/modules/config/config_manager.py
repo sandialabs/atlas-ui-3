@@ -212,6 +212,27 @@ class AppSettings(BaseSettings):
         description="HTTP header name to extract authenticated username from reverse proxy",
         validation_alias="AUTH_USER_HEADER"
     )
+
+    # Authentication header configuration
+    auth_user_header_type: str = Field(
+        default="email-string",
+        description="The datatype stored in AUTH_USER_HEADER",
+        validation_alias="AUTH_USER_HEADER_TYPE"
+    )
+
+    # Authentication AWS expected ALB ARN
+    auth_aws_expected_alb_arn: str = Field(
+        default="arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/your-alb-name/...",
+        description="The expected AWS ALB ARN",
+        validation_alias="AUTH_AWS_EXPECTED_ALB_ARN"
+    )
+
+    # Authentication AWS region
+    auth_aws_region: str = Field(
+        default="us-east-1",
+        description="The AWS region",
+        validation_alias="AUTH_AWS_REGION"
+    )
     
     # Proxy secret authentication configuration
     feature_proxy_secret_enabled: bool = Field(

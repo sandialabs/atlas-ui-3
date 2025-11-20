@@ -22,6 +22,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         app, 
         debug_mode: bool = False, 
         auth_header_name: str = "X-User-Email",
+        auth_header_type: str = "email-string",
+        auth_aws_expected_alb_arn: str = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/your-alb-name/...",
+        auth_aws_region: str = "us-east-1",
         proxy_secret_enabled: bool = False,
         proxy_secret_header: str = "X-Proxy-Secret",
         proxy_secret: str = None,
@@ -30,6 +33,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.debug_mode = debug_mode
         self.auth_header_name = auth_header_name
+        self.auth_header_type = auth_header_type
+        self.auth_aws_expected_alb_arn = auth_aws_expected_alb_arn
+        self.auth_aws_region = auth_aws_region
         self.proxy_secret_enabled = proxy_secret_enabled
         self.proxy_secret_header = proxy_secret_header
         self.proxy_secret = proxy_secret
@@ -83,17 +89,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
         user_email = None
         if self.debug_mode:
             # In debug mode, honor auth header if provided, otherwise use config test user
-            x_email_header = request.headers.get(self.auth_header_name)
-            if x_email_header:
-                user_email = get_user_from_header(x_email_header)
+            x_auth_header = request.headers.get(self.auth_header_name)
+            if x_auth_header:
+                user_email = get_user_from_header(x_auth_header)
             else:
                 # Get test user from config
                 config_manager = app_factory.get_config_manager()
                 user_email = config_manager.app_settings.test_user
             # logger.info(f"Debug mode: using user {user_email}")
         else:
-            x_email_header = request.headers.get(self.auth_header_name)
-            user_email = get_user_from_header(x_email_header)
+            x_auth_header = request.headers.get(self.auth_header_name)
+
+            # Extract the user's email, depending on the datatype of auth header
+            if self.auth_header_type = "aws-alb-jwt": # Amazon Application Load Balancer
+                user_email = get_user_from_aws_alb_jwt(x_auth_header, self.auth_aws_expected_alb_arn, self.auth_aws_region)
+            else
+                user_email = get_user_from_header(x_auth_header)
 
             if not user_email:
                 # Distinguish between API endpoints (return 401) and browser endpoints (redirect)
