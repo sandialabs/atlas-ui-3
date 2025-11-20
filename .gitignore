@@ -81,5 +81,8 @@ data/minio/
 minio-data/
 backend/minio-data/
 
+# Test data (generated samples)
+test_data/
+
 # Legacy S3 Mock Storage (deprecated)
 mocks/s3-mock/s3-mock-storage/

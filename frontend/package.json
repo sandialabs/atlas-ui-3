@@ -12,6 +12,7 @@
     "test:ui": "vitest --ui --config ./vitest.config.js"
   },
   "dependencies": {
+    "@kitware/vtk.js": "^34.15.0",
     "@tailwindcss/typography": "^0.5.19",
     "@types/dompurify": "^3.2.0",
     "dompurify": "^3.3.0",

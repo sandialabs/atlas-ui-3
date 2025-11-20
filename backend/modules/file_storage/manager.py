@@ -72,19 +72,27 @@ class FileManager:
     def get_canvas_file_type(self, file_ext: str) -> str:
         """Determine canvas display type based on file extension."""
         image_exts = {'.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico'}
-        text_exts = {'.txt', '.md', '.rst', '.csv', '.json', '.xml', '.yaml', '.yml', 
-                    '.py', '.js', '.css', '.ts', '.jsx', '.tsx', '.vue', '.sql'}
-        
+        text_exts = {
+            '.txt', '.md', '.rst', '.csv', '.json', '.xml', '.yaml', '.yml',
+            '.py', '.js', '.css', '.ts', '.jsx', '.tsx', '.vue', '.sql'
+        }
+        # Engineering/scientific visualization formats rendered via VTK.js in the canvas
+        vtk_exts = {
+            '.vtk', '.vtp', '.vtu', '.vti', '.vts', '.vtr',
+            '.stl', '.obj', '.ply', '.gltf', '.glb'
+        }
+
         if file_ext in image_exts:
             return 'image'
-        elif file_ext == '.pdf':
+        if file_ext == '.pdf':
             return 'pdf'
-        elif file_ext in {'.html', '.htm'}:
+        if file_ext in {'.html', '.htm'}:
             return 'html'
-        elif file_ext in text_exts:
+        if file_ext in vtk_exts:
+            return 'vtk'
+        if file_ext in text_exts:
             return 'text'
-        else:
-            return 'other'
+        return 'other'
     
     def should_display_in_canvas(self, filename: str) -> bool:
         """Check if file should be displayed in canvas based on file type."""
@@ -95,9 +103,12 @@ class FileManager:
             '.pdf', '.html', '.htm',
             # Text/code files
             '.txt', '.md', '.rst', '.csv', '.json', '.xml', '.yaml', '.yml',
-            '.py', '.js', '.css', '.ts', '.jsx', '.tsx', '.vue', '.sql'
+            '.py', '.js', '.css', '.ts', '.jsx', '.tsx', '.vue', '.sql',
+            # Engineering/scientific visualization formats (VTK.js viewer)
+            '.vtk', '.vtp', '.vtu', '.vti', '.vts', '.vtr',
+            '.stl', '.obj', '.ply', '.gltf', '.glb'
         }
-        
+
         file_ext = self.get_file_extension(filename).lower()
         return file_ext in canvas_extensions
     
