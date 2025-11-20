@@ -78,6 +78,8 @@ def get_user_from_aws_alb_jwt(encoded_jwt, expected_alb_arn, aws_region):
     Returns:
         str: The user's email address, or None if validation fails.
     """
+    if not encoded_jwt:
+        return None
     try:
         # Step 1: Decode the JWT header to get the key ID (kid) and signer
         jwt_headers_encoded = encoded_jwt.split('.')[0]
