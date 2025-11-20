@@ -8,6 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from core.auth import get_user_from_header
+from core.auth import get_user_from_aws_alb_jwt
 from core.capabilities import verify_file_token
 from infrastructure.app_factory import app_factory
 
