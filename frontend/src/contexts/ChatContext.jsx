@@ -342,6 +342,7 @@ export const ChatProvider = ({ children }) => {
 		removeTools: selections.removeTools,
 		setSinglePrompt: selections.setSinglePrompt,
 		removePrompts: selections.removePrompts,
+		makePromptActive: selections.makePromptActive,
 		selectAllServerPrompts,
 		deselectAllServerPrompts,
 		selectedDataSources: selections.selectedDataSources,

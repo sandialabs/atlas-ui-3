@@ -274,7 +274,7 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
               <button
             onClick={onToggleTools}
             className="p-2 rounded-lg bg-yellow-500 border border-red-500 block"
-            title="Toggle Tools"
+            title="Toggle Tools, Integrations, and Prompts"
           >
             <Wrench className="w-5 h-5" />
           </button>
