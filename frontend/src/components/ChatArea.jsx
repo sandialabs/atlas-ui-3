@@ -5,6 +5,7 @@ import { Send, Paperclip, X, Square } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
+import PromptSelector from './PromptSelector'
 
 const ChatArea = () => {
   const [inputValue, setInputValue] = useState('')
@@ -598,6 +599,7 @@ const ChatArea = () => {
           )}
           
           <form onSubmit={handleSubmit} className="flex gap-3">
+            <PromptSelector />
             <button
               type="button"
               onClick={triggerFileUpload}
