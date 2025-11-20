@@ -26,11 +26,10 @@ The MCP HTTP Mock Server is a FastMCP-based HTTP server that simulates database 
 
 ### Available Dockerfiles
 
-Three Dockerfiles are provided to support different base images:
+Two Dockerfiles are provided to support different base images:
 
 1. **Dockerfile.ubuntu** - Ubuntu 24.04 based image (recommended for general use)
-2. **Dockerfile.fedora** - Fedora latest based image
-3. **Dockerfile.rhel** - Red Hat Enterprise Linux UBI 9 based image (for enterprise environments)
+2. **Dockerfile.rhel** - Red Hat Enterprise Linux UBI 9 based image (for enterprise environments)
 
 ### Building Docker Images
 
@@ -46,11 +45,6 @@ docker build -f Dockerfile.ubuntu -t mcp-http-mock:ubuntu-latest .
 docker build -f Dockerfile.ubuntu -t mcp-http-mock:ubuntu-1.0.0 .
 ```
 
-#### Fedora-based Image
-
-```bash
-docker build -f Dockerfile.fedora -t mcp-http-mock:fedora-latest .
-```
 
 #### RHEL-based Image
 
