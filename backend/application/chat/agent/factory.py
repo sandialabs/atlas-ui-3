@@ -30,6 +30,7 @@ class AgentLoopFactory:
         tool_manager: Optional[ToolManagerProtocol] = None,
         prompt_provider: Optional[PromptProvider] = None,
         connection: Optional[ChatConnectionProtocol] = None,
+        config_manager=None,
     ):
         """
         Initialize factory with shared dependencies.
@@ -39,11 +40,13 @@ class AgentLoopFactory:
             tool_manager: Optional tool manager
             prompt_provider: Optional prompt provider
             connection: Optional connection for sending updates
+            config_manager: Optional config manager for approval settings
         """
         self.llm = llm
         self.tool_manager = tool_manager
         self.prompt_provider = prompt_provider
         self.connection = connection
+        self.config_manager = config_manager
 
         # Registry of available strategies
         self._strategy_registry = {
@@ -93,6 +96,7 @@ class AgentLoopFactory:
             tool_manager=self.tool_manager,
             prompt_provider=self.prompt_provider,
             connection=self.connection,
+            config_manager=self.config_manager,
         )
 
         # Cache for future use

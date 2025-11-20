@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 import litellm
 from litellm import acompletion
 from .models import LLMResponse
+from modules.config.config_manager import resolve_env_var
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +77,14 @@ class LiteLLMCaller:
         else:
             kwargs["temperature"] = model_config.temperature or 0.7
         
-        # Set API key
-        api_key = os.path.expandvars(model_config.api_key)
-        if api_key and not api_key.startswith("${"):
+        # Set API key - resolve environment variables
+        try:
+            api_key = resolve_env_var(model_config.api_key)
+        except ValueError as e:
+            logger.error(f"Failed to resolve API key for model {model_name}: {e}")
+            raise
+        
+        if api_key:
             if "openrouter" in model_config.model_url:
                 kwargs["api_key"] = api_key
                 # LiteLLM will automatically set the correct env var
@@ -94,6 +100,18 @@ class LiteLLMCaller:
         if hasattr(model_config, 'model_url') and model_config.model_url:
             if not any(provider in model_config.model_url for provider in ["openrouter", "api.openai.com", "api.anthropic.com"]):
                 kwargs["api_base"] = model_config.model_url
+        
+        # Handle extra headers with environment variable expansion
+        if model_config.extra_headers:
+            extra_headers_resolved = {}
+            for header_key, header_value in model_config.extra_headers.items():
+                try:
+                    resolved_value = resolve_env_var(header_value)
+                    extra_headers_resolved[header_key] = resolved_value
+                except ValueError as e:
+                    logger.error(f"Failed to resolve extra header '{header_key}' for model {model_name}: {e}")
+                    raise
+            kwargs["extra_headers"] = extra_headers_resolved
         
         return kwargs
 

@@ -41,9 +41,9 @@ class SystemStatus(BaseModel):  # noqa: F841 (kept for future use)
     details: Optional[Dict[str, Any]] = None
 
 
-def require_admin(current_user: str = Depends(get_current_user)) -> str:
+async def require_admin(current_user: str = Depends(get_current_user)) -> str:
     admin_group = config_manager.app_settings.admin_group
-    if not is_user_in_group(current_user, admin_group):
+    if not await is_user_in_group(current_user, admin_group):
         raise HTTPException(
             status_code=403,
             detail=f"Admin access required. User must be in '{admin_group}' group.",
@@ -86,9 +86,9 @@ def setup_config_overrides() -> None:
                     dest = overrides_root / file_path.name
                     try:
                         shutil.copy2(file_path, dest)
-                        logger.info(f"Copied seed config {file_path} -> {dest}")
+                        logger.info(f"Copied seed config {sanitize_for_logging(str(file_path))} -> {sanitize_for_logging(str(dest))}")
                     except Exception as e:  # noqa: BLE001
-                        logger.error(f"Failed seeding {file_path}: {e}")
+                        logger.error(f"Failed seeding {sanitize_for_logging(str(file_path))}: {e}")
             break
 
 
@@ -236,7 +236,7 @@ async def update_banner_config(
         messages_file = get_admin_config_path("messages.txt")
         content = ("\n".join(update.messages) + "\n") if update.messages else ""
         write_file_content(messages_file, content)
-        logger.info(f"Banner messages updated by {admin_user}")
+        logger.info(f"Banner messages updated by {sanitize_for_logging(admin_user)}")
         return {
             "message": "Banner messages updated successfully",
             "messages": update.messages,

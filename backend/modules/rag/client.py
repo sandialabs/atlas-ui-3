@@ -137,7 +137,7 @@ class RAGClient:
         
         if self.mock_mode and self.test_client:
             try:
-                logger.info(f"Using TestClient to query RAG for {user_name} with data source {data_source}")
+                logger.info(f"Using TestClient to query RAG for {sanitize_for_logging(user_name)} with data source {sanitize_for_logging(data_source)}")
                 response = self.test_client.post("/v1/chat/completions", json=payload)
                 response.raise_for_status()
                 data = response.json()

@@ -12,7 +12,7 @@ import logging
 import math
 import re
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from pathlib import Path
 
@@ -180,7 +180,7 @@ def log_high_risk_event(*, source: str, user: Optional[str], content: str, score
         log_path = base_dir / "logs" / "security_high_risk.jsonl"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
-            "ts": datetime.utcnow().isoformat() + "Z",
+            "ts": datetime.now(timezone.utc).isoformat() + "Z",
             "type": "prompt_risk",
             "source": source,
             "user": user,

@@ -121,7 +121,7 @@ async def get_config(
         mcp_manager = app_factory.get_mcp_manager()
         
         # Get authorized servers for the user - this filters out unauthorized servers completely
-        authorized_servers = mcp_manager.get_authorized_servers(current_user, is_user_in_group)
+        authorized_servers = await mcp_manager.get_authorized_servers(current_user, is_user_in_group)
         
         # Add canvas pseudo-tool to authorized servers (available to all users)
         authorized_servers.append("canvas")
@@ -149,7 +149,6 @@ async def get_config(
                     }],
                     'tool_count': 1,
                     'description': 'Canvas for showing final rendered content: complete code, reports, and polished documents. Use this to finalize your work. Most code and reports will be shown here.',
-                    'is_exclusive': False,
                     'author': 'Chat UI Team',
                     'short_description': 'Visual content display',
                     'help_email': 'support@chatui.example.com',
@@ -177,7 +176,6 @@ async def get_config(
                         'tools_detailed': tools_detailed,
                         'tool_count': len(server_tools),
                         'description': server_config.get('description', f'{server_name} tools'),
-                        'is_exclusive': server_config.get('is_exclusive', False),
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', server_config.get('description', f'{server_name} tools')),
                         'help_email': server_config.get('help_email', ''),
@@ -259,6 +257,28 @@ async def get_config(
             model_info["compliance_level"] = model_config.compliance_level
         models_list.append(model_info)
     
+    # Build tool approval settings - only include tools from authorized servers
+    tool_approvals_config = config_manager.tool_approvals_config
+    filtered_tool_approvals = {}
+
+    # Get all tool names from authorized servers
+    authorized_tool_names = set()
+    for tool_group in tools_info:
+        server_name = tool_group.get('server')
+        if server_name in authorized_servers:
+            # tools is a list of strings (tool names), not dicts
+            for tool_name in tool_group.get('tools', []):
+                if isinstance(tool_name, str):
+                    authorized_tool_names.add(tool_name)
+
+    # Only include approval settings for tools the user has access to
+    for tool_name, approval_config in tool_approvals_config.tools.items():
+        if tool_name in authorized_tool_names:
+            filtered_tool_approvals[tool_name] = {
+                "require_approval": approval_config.require_approval,
+                "allow_edit": approval_config.allow_edit
+            }
+
     return {
         "app_name": app_settings.app_name,
         "models": models_list,
@@ -267,12 +287,16 @@ async def get_config(
         "data_sources": rag_data_sources,  # RAG data sources for the user
         "rag_servers": rag_servers,  # Optional richer structure for RAG UI
         "user": current_user,
-    "is_in_admin_group": is_user_in_group(current_user, app_settings.admin_group),
+    "is_in_admin_group": await is_user_in_group(current_user, app_settings.admin_group),
         "active_sessions": 0,  # TODO: Implement session counting in ChatService
         "authorized_servers": authorized_servers,  # Optional: expose for debugging
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
         "help_config": help_config,  # Help page configuration from help-config.json
+        "tool_approvals": {
+            "require_approval_by_default": tool_approvals_config.require_approval_by_default,
+            "tools": filtered_tool_approvals
+        },
         "features": {
             "workspaces": app_settings.feature_workspaces_enabled,
             "rag": app_settings.feature_rag_enabled,
@@ -280,7 +304,8 @@ async def get_config(
             "marketplace": app_settings.feature_marketplace_enabled,
             "files_panel": app_settings.feature_files_panel_enabled,
             "chat_history": app_settings.feature_chat_history_enabled,
-            "compliance_levels": app_settings.feature_compliance_levels_enabled
+            "compliance_levels": app_settings.feature_compliance_levels_enabled,
+            "splash_screen": app_settings.feature_splash_screen_enabled
         }
     }
 
@@ -314,6 +339,92 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
             "mode": "explicit_allowlist",
             "all_level_names": []
         }
+
+
+@router.get("/splash")
+async def get_splash_config(current_user: str = Depends(get_current_user)):
+    """Get splash screen configuration."""
+    config_manager = app_factory.get_config_manager()
+    app_settings = config_manager.app_settings
+    
+    # Check if splash screen feature is enabled
+    if not app_settings.feature_splash_screen_enabled:
+        return {
+            "enabled": False,
+            "title": "",
+            "messages": [],
+            "dismissible": True,
+            "require_accept": False,
+            "dismiss_duration_days": 30,
+            "accept_button_text": "Accept",
+            "dismiss_button_text": "Dismiss",
+            "show_on_every_visit": False
+        }
+    
+    # Read splash screen configuration
+    splash_config = {}
+    import json
+    splash_config_filename = app_settings.splash_config_file
+    splash_paths = []
+    try:
+        # Reuse config manager search logic
+        try:
+            splash_paths = config_manager._search_paths(splash_config_filename)  # type: ignore[attr-defined]
+        except AttributeError:
+            # Fallback minimal search if method renamed/removed
+            from pathlib import Path
+            backend_root = Path(__file__).parent.parent
+            project_root = backend_root.parent
+            splash_paths = [
+                project_root / "config" / "overrides" / splash_config_filename,
+                project_root / "config" / "defaults" / splash_config_filename,
+                backend_root / "configfilesadmin" / splash_config_filename,
+                backend_root / "configfiles" / splash_config_filename,
+                backend_root / splash_config_filename,
+                project_root / splash_config_filename,
+            ]
+
+        found_path = None
+        for p in splash_paths:
+            if p.exists():
+                found_path = p
+                break
+        if found_path:
+            with open(found_path, "r", encoding="utf-8") as f:
+                splash_config = json.load(f)
+            logger.info(f"Loaded splash config from {found_path}")
+        else:
+            logger.info(
+                "Splash config not found in any of these locations: %s",
+                [str(p) for p in splash_paths]
+            )
+            # Return default disabled config
+            splash_config = {
+                "enabled": False,
+                "title": "",
+                "messages": [],
+                "dismissible": True,
+                "require_accept": False,
+                "dismiss_duration_days": 30,
+                "accept_button_text": "Accept",
+                "dismiss_button_text": "Dismiss",
+                "show_on_every_visit": False
+            }
+    except Exception as e:
+        logger.warning(f"Error loading splash config: {e}")
+        splash_config = {
+            "enabled": False,
+            "title": "",
+            "messages": [],
+            "dismissible": True,
+            "require_accept": False,
+            "dismiss_duration_days": 30,
+            "accept_button_text": "Accept",
+            "dismiss_button_text": "Dismiss",
+            "show_on_every_visit": False
+        }
+    
+    return splash_config
 
 
 # @router.get("/sessions")

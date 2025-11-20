@@ -11,6 +11,8 @@ from backend.modules.config.config_manager import (
     AppSettings,
     LLMConfig,
     MCPConfig,
+    resolve_env_var,
+    MCPServerConfig,
 )
 
 
@@ -187,3 +189,214 @@ class TestConfigManagerCustomRoot:
         # Should still be able to load configs
         assert cm.app_settings is not None
         assert cm.llm_config is not None
+
+
+class TestResolveEnvVar:
+    """Test environment variable substitution in config values."""
+
+    def test_resolve_env_var_with_none(self):
+        """Should return None when input is None."""
+        assert resolve_env_var(None) is None
+
+    def test_resolve_env_var_with_literal_string(self):
+        """Should return literal string unchanged."""
+        assert resolve_env_var("my-literal-token") == "my-literal-token"
+
+    def test_resolve_env_var_with_existing_env_var(self, monkeypatch):
+        """Should resolve ${VAR_NAME} when env var exists."""
+        monkeypatch.setenv("TEST_TOKEN", "secret-123")
+        assert resolve_env_var("${TEST_TOKEN}") == "secret-123"
+
+    def test_resolve_env_var_with_missing_env_var(self):
+        """Should raise ValueError when env var doesn't exist."""
+        with pytest.raises(ValueError, match="Environment variable 'MISSING_VAR' is not set"):
+            resolve_env_var("${MISSING_VAR}")
+
+    def test_resolve_env_var_with_empty_string(self):
+        """Should return empty string unchanged."""
+        assert resolve_env_var("") == ""
+
+    def test_resolve_env_var_with_empty_env_var(self, monkeypatch):
+        """Should allow empty env var values."""
+        monkeypatch.setenv("EMPTY_VAR", "")
+        assert resolve_env_var("${EMPTY_VAR}") == ""
+
+    def test_resolve_env_var_with_partial_pattern(self):
+        """Should not match partial patterns like 'prefix-${VAR}'."""
+        # Only exact ${VAR} pattern is supported, not embedded in strings
+        assert resolve_env_var("prefix-${VAR}") == "prefix-${VAR}"
+
+    def test_resolve_env_var_with_invalid_pattern(self):
+        """Should return strings with invalid patterns unchanged."""
+        assert resolve_env_var("${123_INVALID}") == "${123_INVALID}"
+        assert resolve_env_var("${INVALID-NAME}") == "${INVALID-NAME}"
+        assert resolve_env_var("$VAR") == "$VAR"
+        assert resolve_env_var("{VAR}") == "{VAR}"
+
+    def test_resolve_env_var_case_sensitive(self, monkeypatch):
+        """Environment variable names should be case-sensitive."""
+        monkeypatch.setenv("MY_VAR", "value1")
+        monkeypatch.setenv("my_var", "value2")
+        assert resolve_env_var("${MY_VAR}") == "value1"
+        assert resolve_env_var("${my_var}") == "value2"
+
+    def test_resolve_env_var_with_special_chars(self, monkeypatch):
+        """Should handle env vars with special characters in values."""
+        monkeypatch.setenv("SPECIAL_TOKEN", "abc!@#$%^&*()_+-=[]{}|;:,.<>?")
+        assert resolve_env_var("${SPECIAL_TOKEN}") == "abc!@#$%^&*()_+-=[]{}|;:,.<>?"
+
+class TestMCPServerConfig:
+    """Test MCPServerConfig with auth_token field."""
+
+    def test_auth_token_is_optional(self):
+        """auth_token field should be optional."""
+        config = MCPServerConfig(
+            description="Test server",
+            command=["python", "server.py"]
+        )
+        assert config.auth_token is None
+
+    def test_auth_token_accepts_string(self):
+        """auth_token should accept string values."""
+        config = MCPServerConfig(
+            description="Test server",
+            command=["python", "server.py"],
+            auth_token="my-token-123"
+        )
+        assert config.auth_token == "my-token-123"
+
+    def test_auth_token_accepts_env_var_pattern(self):
+        """auth_token should accept environment variable patterns."""
+        config = MCPServerConfig(
+            description="Test server",
+            url="http://localhost:8000",
+            auth_token="${MY_TOKEN}"
+        )
+        assert config.auth_token == "${MY_TOKEN}"
+
+    def test_auth_token_accepts_none(self):
+        """auth_token should explicitly accept None."""
+        config = MCPServerConfig(
+            description="Test server",
+            command=["python", "server.py"],
+            auth_token=None
+        )
+        assert config.auth_token is None
+
+
+class TestLLMConfigEnvExpansion:
+    """Test LLM configuration with environment variable expansion."""
+
+    def test_llm_model_config_with_env_var_api_key(self, monkeypatch):
+        """LLM model config should accept environment variable patterns in api_key."""
+        from backend.modules.config.config_manager import ModelConfig
+        
+        monkeypatch.setenv("TEST_API_KEY", "secret-key-123")
+        
+        config = ModelConfig(
+            model_name="test-model",
+            model_url="https://api.openai.com/v1",
+            api_key="${TEST_API_KEY}"
+        )
+        assert config.api_key == "${TEST_API_KEY}"
+        
+        # Test that resolve_env_var works
+        resolved_key = resolve_env_var(config.api_key)
+        assert resolved_key == "secret-key-123"
+
+    def test_llm_model_config_with_literal_api_key(self):
+        """LLM model config should accept literal api_key values."""
+        from backend.modules.config.config_manager import ModelConfig
+        
+        config = ModelConfig(
+            model_name="test-model",
+            model_url="https://api.openai.com/v1",
+            api_key="sk-literal-key-123"
+        )
+        assert config.api_key == "sk-literal-key-123"
+        
+        # Test that resolve_env_var returns literal value unchanged
+        resolved_key = resolve_env_var(config.api_key)
+        assert resolved_key == "sk-literal-key-123"
+
+    def test_llm_model_config_with_missing_env_var(self):
+        """resolve_env_var should raise ValueError for missing env vars in api_key."""
+        from backend.modules.config.config_manager import ModelConfig
+        
+        config = ModelConfig(
+            model_name="test-model",
+            model_url="https://api.openai.com/v1",
+            api_key="${MISSING_API_KEY}"
+        )
+        
+        with pytest.raises(ValueError, match="Environment variable 'MISSING_API_KEY' is not set"):
+            resolve_env_var(config.api_key)
+
+    def test_llm_model_config_with_env_var_in_extra_headers(self, monkeypatch):
+        """LLM model config should support environment variables in extra_headers."""
+        from backend.modules.config.config_manager import ModelConfig
+        
+        monkeypatch.setenv("REFERER_URL", "https://myapp.com")
+        monkeypatch.setenv("APP_NAME", "MyApp")
+        
+        config = ModelConfig(
+            model_name="test-model",
+            model_url="https://openrouter.ai/api/v1",
+            api_key="sk-test",
+            extra_headers={
+                "HTTP-Referer": "${REFERER_URL}",
+                "X-Title": "${APP_NAME}"
+            }
+        )
+        
+        # Test that headers are stored as-is
+        assert config.extra_headers["HTTP-Referer"] == "${REFERER_URL}"
+        assert config.extra_headers["X-Title"] == "${APP_NAME}"
+        
+        # Test that resolve_env_var works for each header
+        resolved_referer = resolve_env_var(config.extra_headers["HTTP-Referer"])
+        resolved_title = resolve_env_var(config.extra_headers["X-Title"])
+        assert resolved_referer == "https://myapp.com"
+        assert resolved_title == "MyApp"
+
+    def test_llm_model_config_with_literal_extra_headers(self):
+        """LLM model config should support literal values in extra_headers."""
+        from backend.modules.config.config_manager import ModelConfig
+        
+        config = ModelConfig(
+            model_name="test-model",
+            model_url="https://api.openai.com/v1",
+            api_key="sk-test",
+            extra_headers={
+                "X-Custom-Header": "literal-value",
+                "X-Another-Header": "another-literal"
+            }
+        )
+        
+        # Test that headers are stored as-is
+        assert config.extra_headers["X-Custom-Header"] == "literal-value"
+        assert config.extra_headers["X-Another-Header"] == "another-literal"
+        
+        # Test that resolve_env_var returns literal values unchanged
+        resolved_custom = resolve_env_var(config.extra_headers["X-Custom-Header"])
+        resolved_another = resolve_env_var(config.extra_headers["X-Another-Header"])
+        assert resolved_custom == "literal-value"
+        assert resolved_another == "another-literal"
+
+    def test_llm_model_config_with_missing_env_var_in_extra_headers(self):
+        """resolve_env_var should raise ValueError for missing env vars in extra_headers."""
+        from backend.modules.config.config_manager import ModelConfig
+        
+        config = ModelConfig(
+            model_name="test-model",
+            model_url="https://api.openai.com/v1",
+            api_key="sk-test",
+            extra_headers={
+                "X-Custom-Header": "${MISSING_HEADER_VAR}"
+            }
+        )
+        
+        with pytest.raises(ValueError, match="Environment variable 'MISSING_HEADER_VAR' is not set"):
+            resolve_env_var(config.extra_headers["X-Custom-Header"])
+
+

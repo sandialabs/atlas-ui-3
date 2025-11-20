@@ -30,11 +30,13 @@ class ActAgentLoop(AgentLoopProtocol):
         tool_manager: Optional[ToolManagerProtocol],
         prompt_provider: Optional[PromptProvider],
         connection: Any = None,
+        config_manager=None,
     ) -> None:
         self.llm = llm
         self.tool_manager = tool_manager
         self.prompt_provider = prompt_provider
         self.connection = connection
+        self.config_manager = config_manager
 
     def _extract_finished_args(self, tool_calls: List[Dict[str, Any]]) -> Optional[str]:
         """Extract final_answer from finished tool call if present."""
@@ -151,6 +153,7 @@ class ActAgentLoop(AgentLoopProtocol):
                     },
                     tool_manager=self.tool_manager,
                     update_callback=(self.connection.send_json if self.connection else None),
+                    config_manager=self.config_manager,
                 )
 
                 messages.append({

@@ -90,14 +90,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   
   const serverList = Object.values(allServers)
 
-  // Ensure only one prompt remains selected globally if storage had more
-  useEffect(() => {
-    if (selectedPrompts && selectedPrompts.size > 1) {
-      const first = Array.from(selectedPrompts)[0]
-      setSinglePrompt(first)
-    }
-  }, [selectedPrompts, setSinglePrompt])
-
   // Derive currently selected prompt (if any)
   const selectedPromptKey = selectedPrompts && selectedPrompts.size > 0
     ? Array.from(selectedPrompts)[0]
@@ -229,7 +221,10 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     if (promptKeys.length > 0) {
       const alreadyOne = promptKeys.find(k => selectedPrompts.has(k))
       console.debug('[TOOLS_PANEL] handling prompts for server', { serverName, promptKeys, alreadyOne })
-      setSinglePrompt(alreadyOne || promptKeys[0])
+      // Add first prompt if none already selected from this server
+      if (!alreadyOne) {
+        togglePrompt(promptKeys[0])
+      }
     } else {
       console.debug('[TOOLS_PANEL] no prompts for this server', { serverName })
     }
@@ -255,9 +250,10 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       if (!selectedTools.has(first)) toggleTool(first)
       return
     }
-    // Else, pick first prompt (enforcing single prompt)
+    // Else, pick first prompt
     if (promptKeys.length > 0) {
-      setSinglePrompt(promptKeys[0])
+      const first = promptKeys[0]
+      if (!selectedPrompts.has(first)) togglePrompt(first)
     }
   }
 
@@ -380,30 +376,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
               />
             </button>
           </div>
-
-          {/* Selected Prompt Summary */}
-          <div className="flex items-center justify-between px-4 py-2 bg-gray-700 rounded-lg">
-            <div className="flex-1 min-w-0">
-              <h3 className="text-white text-sm font-medium">Selected Prompt</h3>
-              {selectedPromptInfo ? (
-                <p className="text-xs text-gray-300 truncate">
-                  <span className="font-semibold text-purple-300">{selectedPromptInfo.name}</span>
-                  <span className="text-gray-400"> from {selectedPromptInfo.server}</span>
-                </p>
-              ) : (
-                <p className="text-xs text-gray-400">None selected</p>
-              )}
-            </div>
-            {selectedPromptInfo && (
-              <button
-                onClick={() => setSinglePrompt(null)}
-                className="px-2 py-1 rounded text-xs font-medium bg-gray-600 hover:bg-gray-500 text-gray-100 transition-colors flex-shrink-0 ml-2"
-                title="Clear selected prompt"
-              >
-                Clear
-              </button>
-            )}
-          </div>
         </div>
 
         {/* Tools List */}
@@ -411,7 +383,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
           {serverList.length === 0 ? (
             <div className="text-gray-400 text-center py-12 px-6">
               <div className="text-lg mb-4">No servers selected</div>
-              <p className="mb-6 text-gray-500">Add MCP servers from the marketplace to enable tools and integrations</p>
+              <p className="mb-6 text-gray-500">Add MCP servers from the marketplace to enable tools, integrations, and prompts</p>
               <button
                 onClick={navigateToMarketplace}
                 className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -424,7 +396,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
               {/* Section Header */}
               <div className="px-4 py-2 border-b border-gray-700">
                 <h3 className="text-sm font-semibold text-white">
-                  Your Installed Tools ({serverList.reduce((total, server) => total + server.tool_count + server.prompt_count, 0)})
+                  Your Installed Tools, Integrations, and Prompts ({serverList.reduce((total, server) => total + server.tool_count + server.prompt_count, 0)})
                 </h3>
               </div>
               
@@ -546,15 +518,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                     return (
                                       <button
                                         key={prompt.name}
-                                        onClick={() => {
-                                          if (!isSelected) {
-                                            // Set this prompt as the single selected prompt
-                                            setSinglePrompt(promptKey)
-                                          } else {
-                                            // Deselect this prompt
-                                            togglePrompt(promptKey)
-                                          }
-                                        }}
+                                        onClick={() => togglePrompt(promptKey)}
                                         className={`px-2 py-0.5 text-xs rounded text-white transition-colors hover:opacity-80 ${
                                           isSelected ? 'bg-purple-600' : 'bg-gray-600 hover:bg-purple-600'
                                         }`}

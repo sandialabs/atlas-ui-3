@@ -1,0 +1,85 @@
+name: Build Artifacts
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '22.12'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install frontend dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: Build frontend
+      run: |
+        cd frontend
+        export VITE_APP_NAME="Chat UI"
+        npm run build
+
+    - name: Create build directory structure
+      run: |
+        mkdir -p build-artifacts
+        # Copy frontend build output
+        cp -r frontend/dist build-artifacts/frontend
+        # Copy backend source code
+        cp -r backend build-artifacts/
+        # Copy config directory
+        cp -r config build-artifacts/
+        # Copy docs
+        cp -r docs build-artifacts/
+        # Copy scripts
+        cp -r scripts build-artifacts/
+        # Copy prompts
+        cp -r prompts build-artifacts/
+        # Copy deployment files
+        cp agent_start.sh build-artifacts/
+        cp docker-compose.yml build-artifacts/
+        cp Dockerfile build-artifacts/
+        cp .env.example build-artifacts/ 2>/dev/null || true
+        # Copy other necessary files
+        cp requirements.txt build-artifacts/
+        cp pyproject.toml build-artifacts/
+        cp README.md build-artifacts/
+
+    - name: Create zip archive
+      run: |
+        cd build-artifacts
+        zip -r ../atlas-ui-3-built-${{ github.sha }}.zip .
+        cd ..
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v5
+      with:
+        name: atlas-ui-3-built-${{ github.sha }}
+        path: atlas-ui-3-built-${{ github.sha }}.zip
+        retention-days: 30

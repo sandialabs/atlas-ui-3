@@ -53,7 +53,7 @@ class RAGMCPService:
             pass
         try:
             # Determine servers current user can see
-            authorized_servers: List[str] = self.mcp_manager.get_authorized_servers(
+            authorized_servers: List[str] = await self.mcp_manager.get_authorized_servers(
                 username, self.auth_check_func
             )
 
@@ -171,7 +171,7 @@ class RAGMCPService:
         try:
             compliance_mgr = get_compliance_manager() if user_compliance_level else None
 
-            authorized_servers: List[str] = self.mcp_manager.get_authorized_servers(
+            authorized_servers: List[str] = await self.mcp_manager.get_authorized_servers(
                 username, self.auth_check_func
             )
 

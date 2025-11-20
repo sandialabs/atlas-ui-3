@@ -111,6 +111,53 @@ export function createWebSocketHandler(deps) {
         case 'tool_result':
           mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === updateData.tool_call_id ? { ...msg, content: `**Tool: ${updateData.tool_name}** - ${updateData.success ? 'Success' : 'Failed'}`, status: updateData.success ? 'completed' : 'failed', result: updateData.result || updateData.error || null } : msg))
           break
+        case 'system_message':
+          // Rich system message from MCP server during tool execution
+          if (updateData && updateData.message) {
+            addMessage({
+              role: 'system',
+              content: updateData.message,
+              type: 'system',
+              subtype: updateData.subtype || 'info',
+              tool_call_id: updateData.tool_call_id,
+              tool_name: updateData.tool_name,
+              timestamp: new Date().toISOString()
+            })
+          }
+          break
+        case 'progress_artifacts':
+          // Handle artifacts sent during tool execution as inline canvas content
+          if (updateData && updateData.artifacts) {
+            const artifacts = updateData.artifacts
+            const display = updateData.display || {}
+
+            const canvasFiles = artifacts
+              .filter(art => art.b64 && art.mime && art.viewer)
+              .map(art => ({
+                filename: art.name,
+                content_base64: art.b64,
+                mime_type: art.mime,
+                type: art.viewer,
+                description: art.description || art.name,
+                // Inline artifacts are rendered from base64; no download key
+                isInline: true,
+              }))
+
+            if (canvasFiles.length > 0) {
+              setCanvasFiles(canvasFiles)
+              if (display.primary_file) {
+                const idx = canvasFiles.findIndex(f => f.filename === display.primary_file)
+                setCurrentCanvasFileIndex(idx >= 0 ? idx : 0)
+              } else {
+                setCurrentCanvasFileIndex(0)
+              }
+              if (display.open_canvas) {
+                setCanvasContent('')
+                setCustomUIContent(null)
+              }
+            }
+          }
+          break
         case 'canvas_content':
           if (updateData && updateData.content) {
             setCanvasContent(typeof updateData.content === 'string' ? updateData.content : String(updateData.content || ''))
@@ -308,6 +355,22 @@ export function createWebSocketHandler(deps) {
               })
             }
           }
+          break
+        case 'tool_approval_request':
+            // Handle tool approval request - stop thinking and add as a message in the chat
+            try { setIsThinking(false) } catch (e) { /* no-op */ }
+          addMessage({
+            role: 'system',
+            content: `Tool Approval Required: ${data.tool_name}`,
+            type: 'tool_approval_request',
+            tool_call_id: data.tool_call_id,
+            tool_name: data.tool_name,
+            arguments: data.arguments || {},
+            allow_edit: data.allow_edit !== false,
+            admin_required: data.admin_required || false,
+            status: 'pending',
+            timestamp: new Date().toISOString()
+          })
           break
         case 'intermediate_update':
           handleIntermediateUpdate(data)

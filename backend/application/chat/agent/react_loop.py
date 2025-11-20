@@ -31,11 +31,13 @@ class ReActAgentLoop(AgentLoopProtocol):
         tool_manager: Optional[ToolManagerProtocol],
         prompt_provider: Optional[PromptProvider],
         connection: Any = None,
+        config_manager=None,
     ) -> None:
         self.llm = llm
         self.tool_manager = tool_manager
         self.prompt_provider = prompt_provider
         self.connection = connection
+        self.config_manager = config_manager
 
     # ---- Internal helpers (mirroring service implementation) ----
     def _latest_user_question(self, msgs: List[Dict[str, Any]]) -> str:
@@ -243,6 +245,7 @@ class ReActAgentLoop(AgentLoopProtocol):
                         },
                         tool_manager=self.tool_manager,
                         update_callback=(self.connection.send_json if self.connection else None),
+                        config_manager=self.config_manager,
                     )
                     tool_results.append(result)
                     messages.append({

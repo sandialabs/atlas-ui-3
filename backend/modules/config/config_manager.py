@@ -11,6 +11,7 @@ This module provides a unified configuration system that:
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,47 @@ from pydantic import BaseModel, Field, field_validator, AliasChoices
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_env_var(value: Optional[str]) -> Optional[str]:
+    """
+    Resolve environment variables in config values.
+
+    Supports patterns like:
+    - "${ENV_VAR_NAME}" -> replaced with os.environ.get("ENV_VAR_NAME")
+    - "literal-string" -> returned as-is
+    - None -> returned as-is
+
+    Args:
+        value: Config value that may contain env var pattern
+
+    Returns:
+        Resolved value with env vars substituted, or None if value is None
+
+    Raises:
+        ValueError: If env var pattern is found but variable is not set
+    """
+    if value is None:
+        return None
+
+    # Pattern: ${VAR_NAME}
+    # Uses match() not search() to ensure pattern matches from the beginning of the string
+    pattern = r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}'
+    match = re.match(pattern, value)
+
+    if match:
+        env_var_name = match.group(1)
+        env_value = os.environ.get(env_var_name)
+
+        if env_value is None:
+            raise ValueError(
+                f"Environment variable '{env_var_name}' is not set but required in config"
+            )
+
+        return env_value
+
+    # Return literal string if no pattern found
+    return value
 
 
 class ModelConfig(BaseModel):
@@ -56,14 +98,17 @@ class MCPServerConfig(BaseModel):
     short_description: Optional[str] = None  # Short description for marketplace display
     help_email: Optional[str] = None     # Contact email for help/support
     groups: List[str] = Field(default_factory=list)
-    is_exclusive: bool = False
     enabled: bool = True
     command: Optional[List[str]] = None  # Command to run server (for stdio servers)
     cwd: Optional[str] = None            # Working directory for command
+    env: Optional[Dict[str, str]] = None  # Environment variables for stdio servers
     url: Optional[str] = None            # URL for HTTP servers
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
+    auth_token: Optional[str] = None     # Bearer token for MCP server authentication
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
+    require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
+    allow_edit: List[str] = Field(default_factory=list)  # LEGACY. List of tool names (without server prefix) allowing argument editing
 
 
 class MCPConfig(BaseModel):
@@ -76,6 +121,27 @@ class MCPConfig(BaseModel):
         """Convert dict values to MCPServerConfig objects."""
         if isinstance(v, dict):
             return {name: MCPServerConfig(**config) if isinstance(config, dict) else config 
+                   for name, config in v.items()}
+        return v
+
+
+class ToolApprovalConfig(BaseModel):
+    """Configuration for a single tool's approval settings."""
+    require_approval: bool = False
+    allow_edit: bool = True
+
+
+class ToolApprovalsConfig(BaseModel):
+    """Configuration for tool approvals."""
+    require_approval_by_default: bool = False
+    tools: Dict[str, ToolApprovalConfig] = Field(default_factory=dict)
+    
+    @field_validator('tools', mode='before')
+    @classmethod
+    def validate_tools(cls, v):
+        """Convert dict values to ToolApprovalConfig objects."""
+        if isinstance(v, dict):
+            return {name: ToolApprovalConfig(**config) if isinstance(config, dict) else config 
                    for name, config in v.items()}
         return v
 
@@ -97,6 +163,13 @@ class AppSettings(BaseSettings):
     # Banner settings
     banner_enabled: bool = False
     
+    # Splash screen settings
+    feature_splash_screen_enabled: bool = Field(
+        False,
+        description="Enable startup splash screen for displaying policies and information",
+        validation_alias=AliasChoices("FEATURE_SPLASH_SCREEN_ENABLED", "SPLASH_SCREEN_ENABLED"),
+    )
+    
     # Agent settings
     # Renamed to feature_agent_mode_available to align with other FEATURE_* flags.
     feature_agent_mode_available: bool = Field(
@@ -115,7 +188,12 @@ class AppSettings(BaseSettings):
     def agent_mode_available(self) -> bool:
         """Maintain backward compatibility for code still referencing agent_mode_available."""
         return self.feature_agent_mode_available
-    
+
+    # Tool approval settings
+    require_tool_approval_by_default: bool = False
+    # When true, all tools require approval (admin-enforced), overriding per-tool and default settings
+    force_tool_approval_globally: bool = Field(default=False, validation_alias="FORCE_TOOL_APPROVAL_GLOBALLY")
+
     # LLM Health Check settings
     llm_health_check_interval: int = 5  # minutes
     
@@ -125,6 +203,37 @@ class AppSettings(BaseSettings):
     # Admin settings
     admin_group: str = "admin"
     test_user: str = "test@test.com"  # Test user for development
+    auth_group_check_url: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_URL")
+    auth_group_check_api_key: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_API_KEY")
+    
+    # Authentication header configuration
+    auth_user_header: str = Field(
+        default="X-User-Email",
+        description="HTTP header name to extract authenticated username from reverse proxy",
+        validation_alias="AUTH_USER_HEADER"
+    )
+    
+    # Proxy secret authentication configuration
+    feature_proxy_secret_enabled: bool = Field(
+        default=False,
+        description="Enable proxy secret validation to ensure requests come from trusted reverse proxy",
+        validation_alias="FEATURE_PROXY_SECRET_ENABLED"
+    )
+    proxy_secret_header: str = Field(
+        default="X-Proxy-Secret",
+        description="HTTP header name for proxy secret validation",
+        validation_alias="PROXY_SECRET_HEADER"
+    )
+    proxy_secret: Optional[str] = Field(
+        default=None,
+        description="Secret value that must be sent by reverse proxy for validation",
+        validation_alias="PROXY_SECRET"
+    )
+    auth_redirect_url: str = Field(
+        default="/auth",
+        description="URL to redirect to when authentication fails",
+        validation_alias="AUTH_REDIRECT_URL"
+    )
     
     # S3/MinIO storage settings
     use_mock_s3: bool = False  # Use in-process S3 mock (no Docker required)
@@ -190,6 +299,8 @@ class AppSettings(BaseSettings):
     llm_config_file: str = Field(default="llmconfig.yml", validation_alias="LLM_CONFIG_FILE")
     help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
+    tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
+    splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
     
     # Config directory paths
     app_config_overrides: str = Field(default="config/overrides", validation_alias="APP_CONFIG_OVERRIDES")
@@ -202,6 +313,7 @@ class AppSettings(BaseSettings):
     environment: str = Field(default="production", validation_alias="ENVIRONMENT")
     
     # Prompt injection risk thresholds
+    # NOT USED RIGHT NOW. 
     pi_threshold_low: int = Field(default=30, validation_alias="PI_THRESHOLD_LOW")
     pi_threshold_medium: int = Field(default=50, validation_alias="PI_THRESHOLD_MEDIUM")
     pi_threshold_high: int = Field(default=80, validation_alias="PI_THRESHOLD_HIGH")
@@ -226,6 +338,7 @@ class ConfigManager:
         self._llm_config: Optional[LLMConfig] = None
         self._mcp_config: Optional[MCPConfig] = None
         self._rag_mcp_config: Optional[MCPConfig] = None
+        self._tool_approvals_config: Optional[ToolApprovalsConfig] = None
     
     def _search_paths(self, file_name: str) -> List[Path]:
         """Generate common search paths for a configuration file.
@@ -435,6 +548,41 @@ class ConfigManager:
 
         return self._rag_mcp_config
     
+    @property
+    def tool_approvals_config(self) -> ToolApprovalsConfig:
+        """Get tool approvals configuration built from mcp.json and env variables (cached)."""
+        if self._tool_approvals_config is None:
+            try:
+                # Get default from environment
+                default_require_approval = self.app_settings.require_tool_approval_by_default
+
+                # Build tool-specific configs from MCP servers (Option B):
+                # Only include entries explicitly listed under require_approval.
+                tools_config: Dict[str, ToolApprovalConfig] = {}
+
+                for server_name, server_config in self.mcp_config.servers.items():
+                    require_approval_list = server_config.require_approval or []
+
+                    for tool_name in require_approval_list:
+                        full_tool_name = f"{server_name}_{tool_name}"
+                        # Mark as explicitly requiring approval; allow_edit is moot for requirement
+                        tools_config[full_tool_name] = ToolApprovalConfig(
+                            require_approval=True,
+                            allow_edit=True  # UI always allows edits; keep True for compatibility
+                        )
+
+                self._tool_approvals_config = ToolApprovalsConfig(
+                    require_approval_by_default=default_require_approval,
+                    tools=tools_config
+                )
+                logger.info(f"Built tool approvals config from mcp.json with {len(tools_config)} tool-specific settings (default: {default_require_approval})")
+
+            except Exception as e:
+                logger.error(f"Failed to build tool approvals configuration: {e}", exc_info=True)
+                self._tool_approvals_config = ToolApprovalsConfig()
+
+        return self._tool_approvals_config
+    
     def _validate_mcp_compliance_levels(self, config: MCPConfig, config_type: str):
         """Validate compliance levels for all MCP servers."""
         try:
@@ -459,6 +607,7 @@ class ConfigManager:
         self._llm_config = None
         self._mcp_config = None
         self._rag_mcp_config = None
+        self._tool_approvals_config = None
         logger.info("Configuration cache cleared, will reload on next access")
     
     def validate_config(self) -> Dict[str, bool]:

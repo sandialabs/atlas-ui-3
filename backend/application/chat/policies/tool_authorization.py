@@ -3,8 +3,6 @@
 import logging
 from typing import List, Optional, Any
 
-from core.auth_utils import create_authorization_manager
-
 logger = logging.getLogger(__name__)
 
 
@@ -33,11 +31,11 @@ class ToolAuthorizationService:
     ) -> List[str]:
         """
         Filter tools to only those the user is authorized to use.
-        
+
         Args:
             selected_tools: List of tool names (format: "server_toolname")
             user_email: Email of the user making the request
-            
+
         Returns:
             Filtered list of authorized tool names
         """
@@ -46,10 +44,10 @@ class ToolAuthorizationService:
 
         try:
             user = user_email or ""
-            
+
             # Get authorized servers for this user
-            authorized_servers = self._get_authorized_servers(user)
-            
+            authorized_servers = await self._get_authorized_servers(user)
+
             # Filter tools by server prefix
             filtered_tools: List[str] = []
             for tool in selected_tools:
@@ -57,7 +55,7 @@ class ToolAuthorizationService:
                 if tool == "canvas_canvas":
                     filtered_tools.append(tool)
                     continue
-                
+
                 # Check if tool belongs to an authorized server
                 if isinstance(tool, str) and "_" in tool:
                     # Match against authorized servers by checking if tool name starts with server_
@@ -67,12 +65,12 @@ class ToolAuthorizationService:
                         if tool.startswith(f"{auth_server}_"):
                             matched_server = auth_server
                             break
-                    
+
                     if matched_server:
                         filtered_tools.append(tool)
-            
+
             return filtered_tools
-            
+
         except Exception:
             logger.debug(
                 "Tool ACL filtering failed; proceeding with original selection",
@@ -80,25 +78,20 @@ class ToolAuthorizationService:
             )
             return selected_tools
 
-    def _get_authorized_servers(self, user: str) -> List[str]:
+    async def _get_authorized_servers(self, user: str) -> List[str]:
         """
         Get list of MCP servers the user is authorized to access.
-        
+
         Args:
             user: User email
-            
+
         Returns:
             List of authorized server names
         """
-        # Prefer tool_manager's own authorization method if available
+        # Use tool_manager's authorization method if available
         if hasattr(self.tool_manager, "get_authorized_servers"):
-            return self.tool_manager.get_authorized_servers(user, None)  # type: ignore[attr-defined]
-        
-        # Fallback to authorization manager
-        auth_mgr = create_authorization_manager()
-        servers_config = getattr(self.tool_manager, "servers_config", {})
-        return auth_mgr.filter_authorized_servers(
-            user,
-            servers_config,
-            getattr(self.tool_manager, "get_server_groups", lambda s: []),
-        )
+            return await self.tool_manager.get_authorized_servers(user, None)  # type: ignore[attr-defined]
+
+        # If no authorization method available, return empty list (no authorized servers)
+        logger.warning(f"Tool manager has no get_authorized_servers method for user {user}")
+        return []

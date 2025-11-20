@@ -1,87 +1,49 @@
-# Atlas  UI 3
+# Atlas UI 3
+
+[![CI/CD Pipeline](https://github.com/sandialabs/atlas-ui-3/actions/workflows/ci.yml/badge.svg)](https://github.com/sandialabs/atlas-ui-3/actions/workflows/ci.yml)
+[![Security Checks](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml/badge.svg)](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml)
+[![Docker Image](https://ghcr-badge.egpl.dev/sandialabs/atlas-ui-3/latest_tag?trim=major&label=latest)](https://github.com/sandialabs/atlas-ui-3/pkgs/container/atlas-ui-3)
+![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
+![React 19](https://img.shields.io/badge/react-19.2-blue.svg)
+![License MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
 A modern LLM chat interface with MCP (Model Context Protocol) integration.
 
-![Screenshot](docs/readme_img/screenshot-10-24-2025.png)
+![Screenshot](docs/readme_img/screenshot-11-6-2025image.png)
 
-# Note
+## About the Project
 
-This App is still under development. Not all features work well. 
+**Atlas UI 3** is a full-stack LLM chat interface that supports multiple AI models, including those from OpenAI, Anthropic, and Google. Its core feature is the integration with the Model Context Protocol (MCP), which allows the AI assistant to connect to external tools and data sources, enabling complex, real-time workflows.
 
-## Read this first (for contributors)
+### Features
 
-For the most current, concise guidance on how to work in this repository, read:
-- CLAUDE.md — architecture, workflows, and conventions verified against code
-- .github/copilot-instructions.md — a compact “AI agent guide” for getting productive fast
+*   **Multi-LLM Support**: Connect to various LLM providers.
+*   **MCP Integration**: Extend the AI's capabilities with custom tools.
+*   **RAG Support**: Enhance responses with Retrieval-Augmented Generation.
+*   **Secure and Configurable**: Features group-based access control, compliance levels, and a tool approval system.
+*   **Modern Stack**: Built with React 19, FastAPI, and WebSockets.
 
-These two docs are kept up-to-date more frequently than long-form docs. Start there before exploring the wider docs or codebase.
+## Documentation
 
-## Features
+We have created a set of comprehensive guides to help you get the most out of Atlas UI 3.
 
-- **Multi-LLM Support**: OpenAI GPT, Anthropic Claude, Google Gemini
-- **MCP Integration**: Connect to multiple MCP servers for tools and data sources  
-- **Real-time Communication**: WebSocket-based chat interface
-- **Custom UI**: MCP servers can modify the UI with custom HTML
-- **Authorization**: Group-based access control for MCP servers
-- **Modern Stack**: React frontend, FastAPI backend, Docker support
+*   **[Getting Started](./docs/01_getting_started.md)**: The perfect starting point for all users. This guide covers how to get the application running with Docker or on your local machine.
 
-## Quick Start
+*   **[Administrator's Guide](./docs/02_admin_guide.md)**: For those who will deploy and manage the application. This guide details configuration, security settings, access control, and other operational topics.
 
-### Docker (Recommended)
-```bash
-docker build -t atlas-ui-3 .
-docker run -p 8000:8000 atlas-ui-3
-```
-Open http://localhost:8000
+*   **[Developer's Guide](./docs/03_developer_guide.md)**: For developers who want to contribute to the project. It provides an overview of the architecture and instructions for creating new MCP servers.
 
-### Local Development
-**Important**: This project uses **uv** as the Python package manager.
+## For AI Agent Contributors
 
-```bash
-# Install uv if needed
-curl -LsSf https://astral.sh/uv/install.sh | sh
+If you are an AI agent working on this repository, please refer to the following documents for the most current and concise guidance:
 
-# Setup environment
-uv venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
-uv pip install -r requirements.txt
-
-# Configure
-cp .env.example .env  # Edit with your API keys
-
-# Build frontend
-cd frontend && npm install && npm run build
-
-# Start backend
-cd ../backend && python main.py
-
-# OR the quickest way to start is to use the agent_start.sh
-
-bash agent_start.sh
-
-```
-
-
-## Key Technologies
-
-- **Backend**: FastAPI + WebSockets  
-- **Frontend**: React + Vite + Tailwind CSS
-- **Python Package Manager**: **uv** (not pip!)
-- **Configuration**: Pydantic with type safety
-- **Containerization**: Docker
-
-## Important Notes
-
-- **Use `uv`** for Python package management, not pip or conda
-- **Don't use `uvicorn --reload`** - causes problems in development
-- **Use `npm run build`** instead of `npm run dev` for frontend development
-- **File limit**: Maximum 400 lines per file for maintainability
-- **Container Environment**: Use Fedora latest for Docker containers (GitHub Actions uses Ubuntu runners)
-- **Mock S3**: The included S3 mock (`mocks/s3-mock/`) is for development/testing only and must NEVER be used in production due to lack of authentication, encryption, and other critical security features.
+*   **[CLAUDE.md](./CLAUDE.md)**: Detailed architecture, workflows, and conventions.
+*   **[GEMINI.md](./GEMINI.md)**: Gemini-specific instructions.
+*   **[.github/copilot-instructions.md](./.github/copilot-instructions.md)**: A compact guide for getting productive quickly.
 
 ## License
 
 Copyright 2025 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
-
 
 MIT License
 

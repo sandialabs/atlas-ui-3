@@ -63,6 +63,15 @@ export function useSelections() {
     })
   }, [setPromptsRaw])
 
+  const makePromptActive = useCallback(promptKey => {
+    // Move the specified prompt to the front of the array (making it active)
+    // If it's not in the list, add it to the front
+    setPromptsRaw(prev => {
+      const filtered = prev.filter(k => k !== promptKey)
+      return [promptKey, ...filtered]
+    })
+  }, [setPromptsRaw])
+
   const clearToolsAndPrompts = useCallback(() => {
     setToolsRaw([])
     setPromptsRaw([])
@@ -81,6 +90,7 @@ export function useSelections() {
   removeTools,
   setSinglePrompt,
   removePrompts,
+  makePromptActive,
     toolChoiceRequired,
     setToolChoiceRequired,
     clearToolsAndPrompts,

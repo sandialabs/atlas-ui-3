@@ -7,11 +7,13 @@ It provides tools for querying simulated tables and retrieving data.
 """
 
 import json
+import os
 import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from fastmcp import FastMCP
+from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 # Simulated database data
 SIMULATED_DATABASE = {
@@ -38,14 +40,35 @@ SIMULATED_DATABASE = {
     ]
 }
 
+# Define test API keys
+# WARNING: StaticTokenVerifier is for DEVELOPMENT/TESTING ONLY.
+# Never use in production - use proper JWT/OAuth providers instead.
+# Tokens are read from environment variables for better configuration management
+verifier = StaticTokenVerifier(
+    tokens={
+        os.getenv("MCP_MOCK_TOKEN_1", "test-api-key-123"): {
+            "user_id": "test_user",
+            "client_id": "atlas-ui-backend",
+            "scopes": ["read", "write"]
+        },
+        os.getenv("MCP_MOCK_TOKEN_2", "another-test-key-456"): {
+            "user_id": "another_user",
+            "client_id": "atlas-ui-backend",
+            "scopes": ["read"]
+        }
+    }
+)
+
 # Initialize FastMCP server
 mcp = FastMCP(
-    name="Database Simulator",
+    name="Authenticated Database Simulator",
     instructions="""
     This server simulates a database with select statement capabilities.
     Use the available tools to query users, orders, and products tables.
     You can filter, sort, and limit results as needed.
-    """
+    This server requires Bearer Token authentication.
+    """,
+    auth=verifier
 )
 
 @dataclass

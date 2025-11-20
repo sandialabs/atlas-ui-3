@@ -10,6 +10,7 @@ from fastmcp import Client
 from modules.config import config_manager
 from core.auth_utils import create_authorization_manager
 from core.utils import sanitize_for_logging
+from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ class MCPToolManager:
 
     async def _initialize_single_client(self, server_name: str, config: Dict[str, Any]) -> Optional[Client]:
         """Initialize a single MCP client. Returns None if initialization fails."""
-        logger.info(f"=== Initializing client for server '{server_name}' ===\n\nServer config: {config}")
+        logger.info(f"=== Initializing client for server '{sanitize_for_logging(server_name)}' ===\n\nServer config: {sanitize_for_logging(str(config))}")
         try:
             transport_type = self._determine_transport_type(config)
             logger.info(f"Determined transport type: {transport_type}")
@@ -112,17 +113,22 @@ class MCPToolManager:
                 if not url.startswith(("http://", "https://")):
                     url = f"http://{url}"
                     logger.debug(f"Added http:// protocol to URL: {url}")
+
+                raw_token = config.get("auth_token")
+                try:
+                    token = resolve_env_var(raw_token)  # Resolve ${ENV_VAR} if present
+                except ValueError as e:
+                    logger.error(f"Failed to resolve auth_token for {server_name}: {e}")
+                    return None  # Skip this server
                 
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
-                    from fastmcp.client.transports import SSETransport
-                    transport = SSETransport(url)
-                    client = Client(transport)
+                    client = Client(url, auth=token)
                 else:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
-                    client = Client(url)
+                    client = Client(url, auth=token)
                 
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
                 return client
@@ -134,7 +140,22 @@ class MCPToolManager:
                 if command:
                     # Custom command specified
                     cwd = config.get("cwd")
+                    env = config.get("env")
                     logger.info(f"Working directory specified: {cwd}")
+                    
+                    # Resolve environment variables in env dict
+                    resolved_env = None
+                    if env is not None:
+                        resolved_env = {}
+                        for key, value in env.items():
+                            try:
+                                resolved_env[key] = resolve_env_var(value)
+                                logger.debug(f"Resolved env var {key} for {server_name}")
+                            except ValueError as e:
+                                logger.error(f"Failed to resolve env var {key} for {server_name}: {e}")
+                                return None  # Skip this server if env var resolution fails
+                        logger.info(f"Environment variables specified: {list(resolved_env.keys())}")
+                    
                     if cwd:
                         # Convert relative path to absolute path from project root
                         if not os.path.isabs(cwd):
@@ -149,7 +170,7 @@ class MCPToolManager:
                             logger.info(f"✓ Working directory exists: {cwd}")
                             logger.info(f"Creating STDIO client for {server_name} with command: {command} in cwd: {cwd}")
                             from fastmcp.client.transports import StdioTransport
-                            transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd)
+                            transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd, env=resolved_env)
                             client = Client(transport)
                             logger.info(f"✓ Successfully created STDIO MCP client for {server_name} with custom command and cwd")
                             return client
@@ -158,7 +179,9 @@ class MCPToolManager:
                             return None
                     else:
                         logger.info(f"No cwd specified, creating STDIO client for {server_name} with command: {command}")
-                        client = Client(command)
+                        from fastmcp.client.transports import StdioTransport
+                        transport = StdioTransport(command=command[0], args=command[1:], env=resolved_env)
+                        client = Client(transport)
                         logger.info(f"✓ Successfully created STDIO MCP client for {server_name} with custom command")
                         return client
                 else:
@@ -354,6 +377,22 @@ class MCPToolManager:
             tool_names = [tool.name for tool in server_data['tools']]
             logger.info(f"  {server_name}: {tool_count} tools {tool_names}")
         logger.info("=== END TOOL DISCOVERY SUMMARY ===")
+
+        # Build tool index for quick lookups
+        self._tool_index = {}
+        for server_name, server_data in self.available_tools.items():
+            if server_name == "canvas":
+                self._tool_index["canvas_canvas"] = {
+                    'server': 'canvas',
+                    'tool': None  # pseudo tool
+                }
+            else:
+                for tool in server_data.get('tools', []):
+                    full_name = f"{server_name}_{tool.name}"
+                    self._tool_index[full_name] = {
+                        'server': server_name,
+                        'tool': tool
+                    }
     
     async def _discover_prompts_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover prompts for a single server. Returns server prompts data."""
@@ -448,12 +487,6 @@ class MCPToolManager:
         if server_name in self.servers_config:
             return self.servers_config[server_name].get("groups", [])
         return []
-    
-    def is_server_exclusive(self, server_name: str) -> bool:
-        """Check if server is exclusive (cannot run with others)."""
-        if server_name in self.servers_config:
-            return self.servers_config[server_name].get("is_exclusive", False)
-        return False
     
     def get_available_servers(self) -> List[str]:
         """Get list of configured servers."""
@@ -576,18 +609,24 @@ class MCPToolManager:
         
         return available_prompts
     
-    def get_authorized_servers(self, user_email: str, auth_check_func) -> List[str]:
+    async def get_authorized_servers(self, user_email: str, auth_check_func) -> List[str]:
         """Get list of servers the user is authorized to use."""
-        try:
-            auth_manager = create_authorization_manager(auth_check_func)
-            return auth_manager.filter_authorized_servers(
-                user_email, 
-                self.servers_config, 
-                self.get_server_groups
-            )
-        except Exception as e:
-            logger.error(f"Error getting authorized servers for {user_email}: {e}", exc_info=True)
-            return []
+        authorized_servers = []
+        for server_name, server_config in self.servers_config.items():
+            if not server_config.get("enabled", True):
+                continue
+
+            required_groups = server_config.get("groups", [])
+            if not required_groups:
+                authorized_servers.append(server_name)
+                continue
+
+            # Check if user is in any of the required groups
+            # We need to await each call and collect results before using any()
+            group_checks = [await auth_check_func(user_email, group) for group in required_groups]
+            if any(group_checks):
+                authorized_servers.append(server_name)
+        return authorized_servers
     
     def get_available_tools(self) -> List[str]:
         """Get list of available tool names."""
