@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, AliasChoices
+from pydantic import BaseModel, Field, field_validator, AliasChoices, model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -212,6 +212,27 @@ class AppSettings(BaseSettings):
         description="HTTP header name to extract authenticated username from reverse proxy",
         validation_alias="AUTH_USER_HEADER"
     )
+
+    # Authentication header configuration
+    auth_user_header_type: str = Field(
+        default="email-string",
+        description="The datatype stored in AUTH_USER_HEADER",
+        validation_alias="AUTH_USER_HEADER_TYPE"
+    )
+
+    # Authentication AWS expected ALB ARN
+    auth_aws_expected_alb_arn: str = Field(
+        default="",
+        description="The expected AWS ALB ARN",
+        validation_alias="AUTH_AWS_EXPECTED_ALB_ARN"
+    )
+
+    # Authentication AWS region
+    auth_aws_region: str = Field(
+        default="us-east-1",
+        description="The AWS region",
+        validation_alias="AUTH_AWS_REGION"
+    )
     
     # Proxy secret authentication configuration
     feature_proxy_secret_enabled: bool = Field(
@@ -320,6 +341,18 @@ class AppSettings(BaseSettings):
     
     # Runtime directories
     runtime_feedback_dir: str = Field(default="runtime/feedback", validation_alias="RUNTIME_FEEDBACK_DIR")
+    
+    @model_validator(mode='after')
+    def validate_aws_alb_config(self):
+        """Validate that AWS ALB ARN is properly configured when using aws-alb-jwt auth."""
+        if self.auth_user_header_type == "aws-alb-jwt":
+            placeholder = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/your-alb-name/..."
+            if not self.auth_aws_expected_alb_arn or self.auth_aws_expected_alb_arn == placeholder:
+                raise ValueError(
+                    "auth_aws_expected_alb_arn must be set to a valid AWS ALB ARN when auth_user_header_type is 'aws-alb-jwt'. "
+                    "Current value is empty or a placeholder. Set AUTH_AWS_EXPECTED_ALB_ARN environment variable."
+                )
+        return self
     
     model_config = {
         "env_file": "../.env", 

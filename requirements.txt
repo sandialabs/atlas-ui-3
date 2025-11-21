@@ -8,8 +8,10 @@ pyyaml
 python-dotenv
 fastmcp>=2.3.5
 requests
+PyJWT
 httpx
 boto3>=1.34.0
+cryptography
 litellm
 duckduckgo-search
 PyPDF2

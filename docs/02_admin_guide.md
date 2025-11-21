@@ -349,6 +349,17 @@ The intended flow for user authentication in a production environment is as foll
 
 The backend application reads this header to identify the user. The header name is configurable via the `AUTH_USER_HEADER` environment variable (default: `X-User-Email`). This allows flexibility for different reverse proxy setups that may use different header names (e.g., `X-Authenticated-User`, `X-Remote-User`). This model is secure only if the backend is not directly exposed to the internet, ensuring that all requests are processed by the proxy first.
 
+If using AWS Application Load Balancer (ALB) as the Auth Service, the following authentication configuration should be used:
+
+```
+    AUTH_USER_HEADER=x-amzn-oidc-data
+    AUTH_USER_HEADER_TYPE=aws-alb-jwt
+    AUTH_AWS_EXPECTED_ALB_ARN=arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/your-alb-name/...
+    AUTH_AWS_REGION=us-east-1
+```
+
+This configuration will decode the base64-encoded JWT passed in the x-amzn-oidc-data header, validate it, and extract the user's email address from the validated JWT.
+
 ### Development Behavior
 
 In a local development environment (when `DEBUG_MODE=true` in the `.env` file), the system falls back to using a default `test@test.com` user if the configured authentication header is not present.
