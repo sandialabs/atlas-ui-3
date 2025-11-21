@@ -24,7 +24,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         debug_mode: bool = False, 
         auth_header_name: str = "X-User-Email",
         auth_header_type: str = "email-string",
-        auth_aws_expected_alb_arn: str = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/your-alb-name/...",
+        auth_aws_expected_alb_arn: str = "",
         auth_aws_region: str = "us-east-1",
         proxy_secret_enabled: bool = False,
         proxy_secret_header: str = "X-Proxy-Secret",
@@ -92,7 +92,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # In debug mode, honor auth header if provided, otherwise use config test user
             x_auth_header = request.headers.get(self.auth_header_name)
             if x_auth_header:
-                user_email = get_user_from_header(x_auth_header)
+                # Apply same authentication logic as production for testing
+                if self.auth_header_type == "aws-alb-jwt":
+                    user_email = get_user_from_aws_alb_jwt(x_auth_header, self.auth_aws_expected_alb_arn, self.auth_aws_region)
+                else:
+                    user_email = get_user_from_header(x_auth_header)
             else:
                 # Get test user from config
                 config_manager = app_factory.get_config_manager()

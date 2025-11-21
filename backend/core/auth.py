@@ -7,10 +7,8 @@ import httpx
 from modules.config.config_manager import config_manager
 
 import jwt
-import requests
-import base64
-import json
-import time
+from datetime import datetime, timedelta
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +64,34 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         return group_id in user_groups
 
 
+@lru_cache(maxsize=128)
+def _get_alb_public_key(kid: str, aws_region: str) -> Optional[str]:
+    """
+    Fetch and cache AWS ALB public key by key ID.
+    
+    Caching reduces latency and API calls since AWS ALB rotates keys infrequently.
+    Cache is keyed by (kid, aws_region) and will be invalidated on process restart.
+    
+    Args:
+        kid: Key ID from JWT header
+        aws_region: AWS region (e.g., 'us-east-1')
+        
+    Returns:
+        Public key string, or None if fetch fails
+    """
+    url = f'https://public-keys.auth.elb.{aws_region}.amazonaws.com/{kid}'
+    try:
+        response = httpx.get(url, timeout=5.0)
+        response.raise_for_status()
+        return response.text
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error fetching ALB public key from {url}: {e.response.status_code}")
+        return None
+    except httpx.RequestError as e:
+        logger.error(f"Error fetching ALB public key from {url}: {e}")
+        return None
+
+
 def get_user_from_aws_alb_jwt(encoded_jwt, expected_alb_arn, aws_region):
     """
     Validates the AWS ALB JWT and parses the email address from the payload.
@@ -81,24 +107,25 @@ def get_user_from_aws_alb_jwt(encoded_jwt, expected_alb_arn, aws_region):
     if not encoded_jwt:
         return None
     try:
-        # Step 1: Decode the JWT header to get the key ID (kid) and signer
-        jwt_headers_encoded = encoded_jwt.split('.')[0]
-        # JWTs use base64url encoding, not standard base64
-        # Add padding if missing, as Python's b64decode expects it
-        jwt_headers_decoded = base64.b64decode(jwt_headers_encoded + '===').decode("utf-8")
-        decoded_json_headers = json.loads(jwt_headers_decoded)
-        kid = decoded_json_headers['kid']
-        received_alb_arn = decoded_json_headers.get('signer')
+        # Step 1: Decode the JWT header to get the key ID (kid) and signer using PyJWT
+        header = jwt.get_unverified_header(encoded_jwt)
+        kid = header.get('kid')
+        received_alb_arn = header.get('signer')
+        
+        if not kid:
+            logger.error("Error: 'kid' not found in JWT header")
+            return None
 
         # Step 2: Validate the signer matches the expected ALB ARN
         if received_alb_arn != expected_alb_arn:
-            print(f"Error: Invalid signer ARN. Expected {expected_alb_arn}, got {received_alb_arn}")
+            logger.error(f"Error: Invalid signer ARN. Expected {expected_alb_arn}, got {received_alb_arn}")
             return None
 
-        # Step 3: Get the public key from the regional endpoint
-        url = f'https://public-keys.auth.elb.{aws_region}.amazonaws.com/{kid}'
-        req = requests.get(url)
-        pub_key = req.text
+        # Step 3: Get the public key from the regional endpoint (with caching)
+        pub_key = _get_alb_public_key(kid, aws_region)
+        if not pub_key:
+            logger.error("Error: Failed to fetch ALB public key")
+            return None
 
         # Step 4: Validate the signature and claims using PyJWT
         # The decode method handles signature verification and standard claims (like expiration)
@@ -116,20 +143,17 @@ def get_user_from_aws_alb_jwt(encoded_jwt, expected_alb_arn, aws_region):
         if email_address:
             return email_address
         else:
-            print("Error: 'email' claim not found in JWT payload.")
+            logger.error("Error: 'email' claim not found in JWT payload")
             return None
 
     except jwt.ExpiredSignatureError:
-        print("Error: Token has expired.")
+        logger.error("Error: Token has expired")
         return None
     except jwt.InvalidTokenError as e:
-        print(f"Error: Invalid token - {e}")
-        return None
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching public key: {e}")
+        logger.error(f"Error: Invalid token - {e}")
         return None
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        logger.error(f"An unexpected error occurred: {e}")
         return None
 
 
