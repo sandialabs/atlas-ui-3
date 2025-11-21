@@ -25,6 +25,7 @@ def mock_app_factory():
         mock_config.app_settings.test_user = 'test@test.com'
         mock_config.app_settings.debug_mode = False
         mock_config.app_settings.auth_user_header = 'X-User-Email'
+        mock_config.app_settings.feature_proxy_secret_enabled = False
         mock_factory.get_config_manager.return_value = mock_config
         
         # Mock chat service

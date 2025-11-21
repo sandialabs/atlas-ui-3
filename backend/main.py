@@ -225,7 +225,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
-        config_manager.app_settings.proxy_secret_enabled
+        config_manager.app_settings.feature_proxy_secret_enabled
         and config_manager.app_settings.proxy_secret
         and not config_manager.app_settings.debug_mode
     ):
