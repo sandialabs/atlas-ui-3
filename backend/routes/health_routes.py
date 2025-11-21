@@ -10,6 +10,8 @@ from typing import Dict, Any
 
 from fastapi import APIRouter
 
+from version import VERSION
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["health"])
@@ -33,6 +35,6 @@ async def health_check() -> Dict[str, Any]:
     return {
         "status": "healthy",
         "service": "atlas-ui-3-backend",
-        "version": "2.0.0",
+        "version": VERSION,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }

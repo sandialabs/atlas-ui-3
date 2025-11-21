@@ -38,7 +38,9 @@ def test_health_endpoint_response_structure():
     # Verify field values
     assert data["status"] == "healthy"
     assert data["service"] == "atlas-ui-3-backend"
-    assert data["version"] == "2.0.0"
+    
+    # This version number can change, so just check it's a non-empty string
+    assert isinstance(data["version"], str) and len(data["version"]) > 0
 
     # Verify timestamp is valid ISO-8601 format
     try:

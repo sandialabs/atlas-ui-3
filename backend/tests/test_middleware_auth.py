@@ -345,3 +345,35 @@ def test_proxy_secret_debug_mode_bypasses_validation():
     assert resp.status_code == 200
     assert resp.json()["user"] == "debug@example.com"
 
+
+def test_health_endpoint_bypasses_auth():
+    """Test that /api/health endpoint bypasses authentication middleware."""
+    app = FastAPI()
+
+    @app.get("/api/health")
+    def health():
+        return {"status": "healthy"}
+
+    @app.get("/api/other")
+    def other():
+        return {"data": "test"}
+
+    # Add an /auth route to receive redirects
+    @app.get("/auth")
+    def auth():
+        return {"login": True}
+
+    # Add middleware with auth required (debug_mode=False)
+    app.add_middleware(AuthMiddleware, debug_mode=False)
+    client = TestClient(app)
+
+    # Health endpoint should work without auth header
+    health_resp = client.get("/api/health")
+    assert health_resp.status_code == 200
+    assert health_resp.json()["status"] == "healthy"
+
+    # Other API endpoints should still require auth (return 401)
+    other_resp = client.get("/api/other")
+    assert other_resp.status_code == 401
+    assert "Unauthorized" in other_resp.json()["detail"]
+

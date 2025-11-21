@@ -46,8 +46,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Log request
         logger.info(f"Request: {request.method} {request.url.path}")
 
-        # Skip auth for static files and configured auth endpoint
-        if request.url.path.startswith('/static') or request.url.path == self.auth_redirect_url:
+        # Skip auth for static files, health check, and configured auth endpoint
+        if (request.url.path.startswith('/static') or
+            request.url.path == '/api/health' or
+            request.url.path == self.auth_redirect_url):
             return await call_next(request)
         
         # Validate proxy secret if enabled (skip in debug mode for local development)
@@ -115,7 +117,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 # Distinguish between API endpoints (return 401) and browser endpoints (redirect)
                 if request.url.path.startswith('/api/'):
                     logger.warning(f"Missing authentication for API endpoint: {request.url.path}")
-                    raise HTTPException(status_code=401, detail="Unauthorized")
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Unauthorized"}
+                    )
                 else:
                     logger.warning(f"Missing {self.auth_header_name}, redirecting to {self.auth_redirect_url}")
                     return RedirectResponse(url=self.auth_redirect_url, status_code=302)

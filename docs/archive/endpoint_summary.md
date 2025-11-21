@@ -2,7 +2,6 @@
 
 Generated: 2025-08-09
 Last Updated: 2025-11-21
-Branch: feature/s3-file-storage
 
 ## 1. Frontend-Used Endpoints
 (HTTP method inferred from usage / backend definition.)
