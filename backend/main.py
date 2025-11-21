@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, WebSocketException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
@@ -23,6 +23,7 @@ from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
 from core.otel_config import setup_opentelemetry
 from core.utils import sanitize_for_logging
+from core.auth import get_user_from_header
 
 # Import from infrastructure
 from infrastructure.app_factory import app_factory
@@ -209,6 +210,8 @@ async def websocket_endpoint(websocket: WebSocket):
     - Direct public access to this app bypasses authentication
     - Use network isolation to prevent direct access
     - The /login endpoint lives in the separate auth service
+    - Reverse proxy MUST strip client-provided X-User-Email headers before adding its own
+      (otherwise attackers can inject headers: X-User-Email: admin@company.com)
 
     DEVELOPMENT vs PRODUCTION:
     - Production: Extracts user from configured auth header (set by reverse proxy)
@@ -216,14 +219,50 @@ async def websocket_endpoint(websocket: WebSocket):
 
     See docs/security_architecture.md for complete architecture details.
     """
+    # Extract user email using the same authentication flow as HTTP requests
+    # Priority: 1) configured auth header (production), 2) query param (dev), 3) test user (dev fallback)
+    config_manager = app_factory.get_config_manager()
+
+    # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
+    if (
+        config_manager.app_settings.feature_proxy_secret_enabled
+        and config_manager.app_settings.proxy_secret
+        and not config_manager.app_settings.debug_mode
+    ):
+        proxy_secret_header = config_manager.app_settings.proxy_secret_header
+        proxy_secret_value = websocket.headers.get(proxy_secret_header)
+        if proxy_secret_value != config_manager.app_settings.proxy_secret:
+            logger.warning(
+                "WS proxy secret mismatch on %s",
+                sanitize_for_logging(websocket.client)
+            )
+            raise WebSocketException(code=1008, reason="Invalid proxy secret")
+
     await websocket.accept()
 
-    # Basic auth: derive user from query parameters or use test user
-    user_email = websocket.query_params.get('user')
+    user_email = None
+    
+    # Check configured auth header first (consistent with AuthMiddleware)
+    auth_header_name = config_manager.app_settings.auth_user_header
+    x_email_header = websocket.headers.get(auth_header_name)
+    if x_email_header:
+        user_email = get_user_from_header(x_email_header)
+        logger.info(
+            "WebSocket authenticated via %s header: %s",
+            sanitize_for_logging(auth_header_name),
+            sanitize_for_logging(user_email)
+        )
+    
+    # Fallback to query parameter for backward compatibility (development/testing)
     if not user_email:
-        # Fallback to test user or require auth
-        config_manager = app_factory.get_config_manager()
+        user_email = websocket.query_params.get('user')
+        if user_email:
+            logger.info("WebSocket authenticated via query parameter: %s", sanitize_for_logging(user_email))
+    
+    # Final fallback to test user (development mode only)
+    if not user_email:
         user_email = config_manager.app_settings.test_user or 'test@test.com'
+        logger.info(f"WebSocket using fallback test user: {sanitize_for_logging(user_email)}")
 
     session_id = uuid4()
 
