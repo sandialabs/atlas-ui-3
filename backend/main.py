@@ -33,6 +33,8 @@ from infrastructure.transport.websocket_connection_adapter import WebSocketConne
 from routes.config_routes import router as config_router
 from routes.admin_routes import admin_router
 from routes.files_routes import router as files_router
+from routes.health_routes import router as health_router
+from version import VERSION
 
 # Load environment variables from the parent directory
 load_dotenv(dotenv_path="../.env")
@@ -111,8 +113,8 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app with minimal setup
 app = FastAPI(
     title="Chat UI Backend",
-    description="Basic chat backend with modular architecture", 
-    version="2.0.0",
+    description="Basic chat backend with modular architecture",
+    version=VERSION,
     lifespan=lifespan,
 )
 
@@ -141,6 +143,7 @@ app.add_middleware(
 app.include_router(config_router)
 app.include_router(admin_router)
 app.include_router(files_router)
+app.include_router(health_router)
 
 # Serve frontend build (Vite)
 project_root = Path(__file__).resolve().parents[1]
