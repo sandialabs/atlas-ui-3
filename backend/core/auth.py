@@ -45,6 +45,9 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
             logger.error(f"Error during external auth check: {e}", exc_info=True)
             return False
     else:
+        # Everybody is in the users group by default
+        if (group_id == "users"):
+            return True
         # Fallback to mock implementation if no external endpoint is configured
         if (app_settings.debug_mode and
                 user_id == app_settings.test_user and
