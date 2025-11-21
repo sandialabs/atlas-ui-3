@@ -4,7 +4,6 @@ import hmac
 import logging
 import re
 from datetime import datetime, timedelta
-from functools import lru_cache
 from typing import Dict, Optional, Tuple
 
 import httpx
@@ -68,7 +67,6 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         return group_id in user_groups
 
 
-@lru_cache(maxsize=128)
 def _get_alb_public_key(kid: str, aws_region: str) -> Optional[str]:
     """
     Fetch and cache AWS ALB public key by key ID.
@@ -179,7 +177,7 @@ def get_user_from_aws_alb_jwt(encoded_jwt, expected_alb_arn, aws_region):
             if not isinstance(email_address, str) or not re.match(email_pattern, email_address):
                 logger.error(f"Error: Invalid email format in JWT payload: {email_address}")
                 return None
-            logger.info(f"Successfully authenticated user via AWS ALB JWT: {email_address}")
+            logger.debug("Successfully authenticated user via AWS ALB JWT")
             return email_address
         else:
             logger.error("Error: 'email' claim not found in JWT payload")
