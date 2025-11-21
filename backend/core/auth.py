@@ -1,16 +1,20 @@
 """Authentication and authorization module."""
 
+import hmac
 import logging
-from typing import Optional
-
-import httpx
-from modules.config.config_manager import config_manager
-
-import jwt
+import re
 from datetime import datetime, timedelta
 from functools import lru_cache
+from typing import Dict, Optional, Tuple
+
+import httpx
+import jwt
+from modules.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
+
+# Cache with TTL for ALB public keys: {(kid, region): (key, expiry_time)}
+_alb_key_cache: Dict[Tuple[str, str], Tuple[str, datetime]] = {}
 
 
 async def is_user_in_group(user_id: str, group_id: str) -> bool:
@@ -70,7 +74,7 @@ def _get_alb_public_key(kid: str, aws_region: str) -> Optional[str]:
     Fetch and cache AWS ALB public key by key ID.
     
     Caching reduces latency and API calls since AWS ALB rotates keys infrequently.
-    Cache is keyed by (kid, aws_region) and will be invalidated on process restart.
+    Cache has a 1-hour TTL to handle key rotation.
     
     Args:
         kid: Key ID from JWT header
@@ -79,11 +83,38 @@ def _get_alb_public_key(kid: str, aws_region: str) -> Optional[str]:
     Returns:
         Public key string, or None if fetch fails
     """
+    # Security: Validate inputs to prevent URL injection and cache poisoning attacks
+    # kid and region are used in URL construction, so strict validation is critical
+    if not re.match(r'^[a-zA-Z0-9\-]+$', kid):
+        logger.error(f"Invalid kid format: {kid}")
+        return None
+    if not re.match(r'^[a-z]{2}-[a-z]+-\d+$', aws_region):
+        logger.error(f"Invalid AWS region format: {aws_region}")
+        return None
+    
+    # Security: TTL-based cache (1 hour) allows key rotation and prevents stale keys
+    # if AWS rotates keys or a key is compromised
+    cache_key = (kid, aws_region)
+    now = datetime.utcnow()
+    if cache_key in _alb_key_cache:
+        cached_key, expiry = _alb_key_cache[cache_key]
+        if now < expiry:
+            return cached_key
+        else:
+            # Expired, remove from cache
+            del _alb_key_cache[cache_key]
+    
     url = f'https://public-keys.auth.elb.{aws_region}.amazonaws.com/{kid}'
     try:
         response = httpx.get(url, timeout=5.0)
         response.raise_for_status()
-        return response.text
+        pub_key = response.text
+        
+        # Cache with 1-hour TTL
+        expiry = now + timedelta(hours=1)
+        _alb_key_cache[cache_key] = (pub_key, expiry)
+        
+        return pub_key
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error fetching ALB public key from {url}: {e.response.status_code}")
         return None
@@ -117,7 +148,8 @@ def get_user_from_aws_alb_jwt(encoded_jwt, expected_alb_arn, aws_region):
             return None
 
         # Step 2: Validate the signer matches the expected ALB ARN
-        if received_alb_arn != expected_alb_arn:
+        # Security: hmac.compare_digest prevents timing attacks that could reveal the ARN
+        if not received_alb_arn or not hmac.compare_digest(received_alb_arn, expected_alb_arn):
             logger.error(f"Error: Invalid signer ARN. Expected {expected_alb_arn}, got {received_alb_arn}")
             return None
 
@@ -141,6 +173,13 @@ def get_user_from_aws_alb_jwt(encoded_jwt, expected_alb_arn, aws_region):
         # Step 5: Extract the email address from the payload
         email_address = payload.get('email')
         if email_address:
+            # Security: Validate email format to prevent injection attacks and ensure
+            # the email claim contains a properly formatted email address
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not isinstance(email_address, str) or not re.match(email_pattern, email_address):
+                logger.error(f"Error: Invalid email format in JWT payload: {email_address}")
+                return None
+            logger.info(f"Successfully authenticated user via AWS ALB JWT: {email_address}")
             return email_address
         else:
             logger.error("Error: 'email' claim not found in JWT payload")
