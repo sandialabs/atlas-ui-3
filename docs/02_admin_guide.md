@@ -479,6 +479,8 @@ You can configure the application to call an external HTTP endpoint to check for
 
 If `AUTH_GROUP_CHECK_URL` is not set, the application will fall back to the mock implementation in `backend/core/auth.py`.
 
+When using the mock implementation (no external endpoint configured), **all users are treated as part of the `users` group by default**. This ensures that basic, non-privileged features remain available even without an authorization service. Higher-privilege groups such as `admin` still require explicit membership via the mock group table or your real authorization system.
+
 #### Legacy Method: Modifying the Code
 
 For advanced use cases, you can still directly modify the `is_user_in_group` function located in `backend/core/auth.py`. The default implementation is a mock and **must be replaced** if you are not using the HTTP endpoint method.
