@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, WebSocketException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
@@ -219,11 +219,27 @@ async def websocket_endpoint(websocket: WebSocket):
 
     See docs/security_architecture.md for complete architecture details.
     """
-    await websocket.accept()
-
     # Extract user email using the same authentication flow as HTTP requests
     # Priority: 1) configured auth header (production), 2) query param (dev), 3) test user (dev fallback)
     config_manager = app_factory.get_config_manager()
+
+    # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
+    if (
+        config_manager.app_settings.proxy_secret_enabled
+        and config_manager.app_settings.proxy_secret
+        and not config_manager.app_settings.debug_mode
+    ):
+        proxy_secret_header = config_manager.app_settings.proxy_secret_header
+        proxy_secret_value = websocket.headers.get(proxy_secret_header)
+        if proxy_secret_value != config_manager.app_settings.proxy_secret:
+            logger.warning(
+                "WS proxy secret mismatch on %s",
+                sanitize_for_logging(websocket.client)
+            )
+            raise WebSocketException(code=1008, reason="Invalid proxy secret")
+
+    await websocket.accept()
+
     user_email = None
     
     # Check configured auth header first (consistent with AuthMiddleware)
@@ -231,7 +247,11 @@ async def websocket_endpoint(websocket: WebSocket):
     x_email_header = websocket.headers.get(auth_header_name)
     if x_email_header:
         user_email = get_user_from_header(x_email_header)
-        logger.info("WebSocket authenticated via %s header: %s", auth_header_name, sanitize_for_logging(user_email))
+        logger.info(
+            "WebSocket authenticated via %s header: %s",
+            sanitize_for_logging(auth_header_name),
+            sanitize_for_logging(user_email)
+        )
     
     # Fallback to query parameter for backward compatibility (development/testing)
     if not user_email:
