@@ -1,11 +1,25 @@
 import pytest
+from unittest.mock import patch, Mock
 
-from infrastructure.app_factory import app_factory
+from modules.mcp_tools.client import MCPToolManager
 
 
 @pytest.mark.asyncio
 async def test_mcp_prompts_discovery_includes_expert_dog_trainer():
-    mcp = app_factory.get_mcp_manager()
+    # Use the example prompts MCP config to ensure the prompts
+    # server is available in tests regardless of app settings
+    # and avoid depending on the global config manager.
+    with patch("modules.mcp_tools.client.config_manager") as mock_cm:
+        mock_cm.mcp_config.servers = {
+            "prompts": Mock(name="prompts_server_config")
+        }
+        mock_cm.mcp_config.servers["prompts"].model_dump.return_value = {
+            "command": ["python", "mcp/prompts/main.py"],
+            "cwd": "backend",
+            "groups": ["users"],
+        }
+
+        mcp = MCPToolManager()
 
     # Ensure fresh clients and prompt discovery
     await mcp.initialize_clients()
