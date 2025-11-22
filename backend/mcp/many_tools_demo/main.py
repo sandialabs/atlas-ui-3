@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MCP Server with 50+ tools for testing UI with many tools.
+MCP Server with 64 tools for testing UI with many tools.
 Demonstrates that the collapsible UI can handle servers with large numbers of tools.
 """
 
@@ -9,8 +9,8 @@ from fastmcp import FastMCP
 # Create the MCP server
 mcp = FastMCP("ManyToolsDemo")
 
-# Generate 50+ tools dynamically to test UI scalability
-# Categories: data, analytics, file, network, system, database, security, etc.
+# Generate 64 tools dynamically to test UI scalability
+# Categories: data, analytics, file, network, system, database, security, report
 
 TOOL_CATEGORIES = [
     ("data", 10, "Process and transform data"),
