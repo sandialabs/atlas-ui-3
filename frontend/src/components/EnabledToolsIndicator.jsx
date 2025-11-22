@@ -15,7 +15,7 @@ const EnabledToolsIndicator = () => {
   if (allTools.length === 0) return null
 
   // Threshold for showing compact view
-  const COMPACT_THRESHOLD = 3
+  const COMPACT_THRESHOLD = 5
   const shouldShowCompact = allTools.length > COMPACT_THRESHOLD
   const displayTools = shouldShowCompact && !isExpanded 
     ? allTools.slice(0, COMPACT_THRESHOLD) 
