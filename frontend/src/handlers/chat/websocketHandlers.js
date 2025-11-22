@@ -15,6 +15,7 @@ export function createWebSocketHandler(deps) {
     setCanvasFiles,
     setCurrentCanvasFileIndex,
     setCustomUIContent,
+    setIsCanvasOpen,
     setSessionFiles,
     getFileType,
     triggerFileDownload,
@@ -155,6 +156,9 @@ export function createWebSocketHandler(deps) {
                 setCurrentCanvasFileIndex(0)
               }
               if (display.open_canvas) {
+                if (typeof setIsCanvasOpen === 'function') {
+                  setIsCanvasOpen(true)
+                }
                 setCanvasContent('')
                 setCustomUIContent(null)
               }
@@ -169,7 +173,7 @@ export function createWebSocketHandler(deps) {
         case 'canvas_files':
           if (updateData && Array.isArray(updateData.files)) {
             let canvasFiles = updateData.files
-            
+
             // Check if display config specifies an iframe
             if (updateData.display && updateData.display.type === 'iframe' && updateData.display.url) {
               // Add iframe as a virtual canvas file
@@ -182,7 +186,7 @@ export function createWebSocketHandler(deps) {
               }
               canvasFiles = [iframeFile, ...canvasFiles]
             }
-            
+
             setCanvasFiles(canvasFiles)
             // If backend provided display hints, respect them (e.g., primary_file)
             if (updateData.display && updateData.display.primary_file) {
@@ -191,6 +195,12 @@ export function createWebSocketHandler(deps) {
             } else {
               setCurrentCanvasFileIndex(0)
             }
+
+            // Open canvas panel if display.open_canvas is true
+            if (updateData.display && updateData.display.open_canvas && typeof setIsCanvasOpen === 'function') {
+              setIsCanvasOpen(true)
+            }
+
             setCanvasContent('')
             setCustomUIContent(null)
           }

@@ -71,6 +71,103 @@ def create_html_report(title: str) -> Dict[str, Any]:
 
 For more details on how the canvas chooses viewers (including iframe support for external dashboards and embedded HTML), see `docs/developer/canvas-renderers.md`.
 
+## Displaying External Content with Iframes
+
+MCP tools can display external content (dashboards, visualizations, web applications) using iframes in two ways:
+
+### Method 1: Direct Iframe Display
+
+Return an iframe configuration in the `display` object:
+
+```python
+@mcp.tool
+def show_dashboard() -> Dict[str, Any]:
+    """Display an external dashboard in the canvas panel."""
+    return {
+        "results": {
+            "content": "Dashboard displayed in canvas panel"
+        },
+        "artifacts": [],
+        "display": {
+            "open_canvas": True,
+            "type": "iframe",
+            "url": "https://dashboard.example.com",
+            "title": "Analytics Dashboard",
+            "sandbox": "allow-scripts allow-same-origin",
+            "mode": "replace"
+        }
+    }
+```
+
+### Method 2: HTML Artifact with Embedded Iframes
+
+Return HTML content containing `<iframe>` tags:
+
+```python
+import base64
+
+@mcp.tool
+def create_embedded_viewer() -> Dict[str, Any]:
+    """Create HTML with embedded external content."""
+    html_content = """<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+        .iframe-container { width: 100%; height: 600px; border: 2px solid #444; }
+    </style>
+</head>
+<body>
+    <h1>External Content</h1>
+    <div class="iframe-container">
+        <iframe src="https://example.com"
+                width="100%"
+                height="100%"
+                sandbox="allow-scripts allow-same-origin">
+        </iframe>
+    </div>
+</body>
+</html>"""
+
+    html_base64 = base64.b64encode(html_content.encode('utf-8')).decode('utf-8')
+
+    return {
+        "results": {
+            "content": "HTML with embedded iframe created"
+        },
+        "artifacts": [{
+            "name": "viewer.html",
+            "b64": html_base64,
+            "mime": "text/html",
+            "size": len(html_content.encode('utf-8')),
+            "description": "HTML page with embedded iframe",
+            "viewer": "html"
+        }],
+        "display": {
+            "open_canvas": True,
+            "primary_file": "viewer.html",
+            "mode": "replace",
+            "viewer_hint": "html"
+        }
+    }
+```
+
+### CRITICAL: CSP Configuration Required
+
+**External iframe URLs will be blocked by the browser unless properly configured in the application's Content Security Policy.**
+
+For any external URL you want to display in an iframe, the system administrator must add that domain to the `SECURITY_CSP_VALUE` environment variable's `frame-src` directive.
+
+**Example `.env` configuration:**
+```bash
+# To allow https://dashboard.example.com and https://www.sandia.gov/
+SECURITY_CSP_VALUE="default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' blob: data: https://dashboard.example.com https://www.sandia.gov/; frame-ancestors 'self'"
+```
+
+**Best Practice:** Document which external URLs your MCP server uses in your server's `description` field in `mcp.json`, so administrators know which domains need to be added to the CSP configuration.
+
+See the `backend/mcp/ui-demo/main.py` file for working examples of both iframe patterns.
+
 ## 3. Registering the Server
 
 After creating your server, you must register it in `config/overrides/mcp.json`.

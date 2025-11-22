@@ -259,10 +259,19 @@ def get_image() -> Dict[str, Any]:
 def create_iframe_demo() -> Dict[str, Any]:
     """
     Create a demo showing how to embed external content using iframes.
-    
+
     This demonstrates the v2 MCP iframe capability for embedding interactive
     external content like dashboards, visualizations, or web applications.
-    
+
+    IMPORTANT - CSP Configuration Required:
+        To display external URLs in iframes, the SECURITY_CSP_VALUE environment
+        variable must include the iframe URL in the frame-src directive.
+
+        Example for https://www.sandia.gov/:
+        SECURITY_CSP_VALUE="... frame-src 'self' blob: data: https://www.sandia.gov/; ..."
+
+        Without proper CSP configuration, the browser will block the iframe.
+
     Returns:
         Dictionary with iframe display configuration
     """
@@ -286,10 +295,19 @@ def create_iframe_demo() -> Dict[str, Any]:
 def create_html_with_iframe() -> Dict[str, Any]:
     """
     Create an HTML artifact that includes an embedded iframe.
-    
+
     This demonstrates how MCP tools can return HTML content with embedded
     iframes that will be properly rendered in the canvas panel.
-    
+
+    IMPORTANT - CSP Configuration Required:
+        To display external URLs in iframes, the SECURITY_CSP_VALUE environment
+        variable must include the iframe URL in the frame-src directive.
+
+        Example for https://www.sandia.gov/:
+        SECURITY_CSP_VALUE="... frame-src 'self' blob: data: https://www.sandia.gov/; ..."
+
+        Without proper CSP configuration, the browser will block the iframe.
+
     Returns:
         Dictionary with HTML artifact containing an iframe
     """

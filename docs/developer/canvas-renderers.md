@@ -25,6 +25,30 @@ For iframe-based content, there are two primary patterns:
 
 In both cases, the frontend enforces a strict allowlist of iframe attributes (`src`, `sandbox`, `allow`, `allowfullscreen`, `frameborder`, `scrolling`) and sanitizes all HTML using DOMPurify before rendering.
 
+### IMPORTANT: CSP Configuration for External Iframes
+
+When displaying external URLs in iframes, the application's Content Security Policy (CSP) must be configured to allow those domains. Otherwise, browsers will block the iframe from loading.
+
+**To allow external iframe URLs:**
+
+1. Edit your `.env` file
+2. Update the `SECURITY_CSP_VALUE` variable's `frame-src` directive to include the external domains:
+
+```bash
+# Default (blocks external sites):
+SECURITY_CSP_VALUE="... frame-src 'self' blob: data:; ..."
+
+# Allow specific external domains:
+SECURITY_CSP_VALUE="... frame-src 'self' blob: data: https://example.com https://dashboard.example.com; ..."
+```
+
+**Example:** To allow embedding `https://www.sandia.gov/` in an iframe:
+```bash
+SECURITY_CSP_VALUE="default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' blob: data: https://www.sandia.gov/; frame-ancestors 'self'"
+```
+
+Without proper CSP configuration, users will see a blank iframe and browser console errors like "Refused to load frame because it violates the Content-Security-Policy directive."
+
 ## Steps to Add a New Type
 
 **1. Extend type detection** in `frontend/src/hooks/chat/useFiles.js`:

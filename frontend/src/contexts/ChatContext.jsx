@@ -96,6 +96,7 @@ export const ChatProvider = ({ children }) => {
 			setCanvasFiles: files.setCanvasFiles,
 			setCurrentCanvasFileIndex: files.setCurrentCanvasFileIndex,
 			setCustomUIContent: files.setCustomUIContent,
+			setIsCanvasOpen: config.setIsCanvasOpen,
 			setSessionFiles: files.setSessionFiles,
 			getFileType: files.getFileType,
 				triggerFileDownload,

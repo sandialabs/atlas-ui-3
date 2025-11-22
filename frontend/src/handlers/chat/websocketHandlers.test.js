@@ -16,6 +16,7 @@ const makeDeps = () => {
     setCanvasFiles: vi.fn(),
     setCurrentCanvasFileIndex: vi.fn(),
     setCustomUIContent: vi.fn(),
+    setIsCanvasOpen: vi.fn(),
     setSessionFiles: vi.fn(),
     getFileType: vi.fn(),
     triggerFileDownload: vi.fn(),
@@ -104,6 +105,9 @@ describe('createWebSocketHandler – intermediate updates', () => {
     expect(deps.setCurrentCanvasFileIndex).toHaveBeenCalledWith(0)
     expect(deps.setCanvasContent).toHaveBeenCalledWith('')
     expect(deps.setCustomUIContent).toHaveBeenCalledWith(null)
+
+    // Should open the canvas panel when display.open_canvas is true
+    expect(deps.setIsCanvasOpen).toHaveBeenCalledWith(true)
   })
 
   it('creates iframe canvas file from display config with type=iframe', () => {
@@ -144,5 +148,8 @@ describe('createWebSocketHandler – intermediate updates', () => {
     expect(deps.setCurrentCanvasFileIndex).toHaveBeenCalledWith(0)
     expect(deps.setCanvasContent).toHaveBeenCalledWith('')
     expect(deps.setCustomUIContent).toHaveBeenCalledWith(null)
+
+    // Should open the canvas panel when display.open_canvas is true
+    expect(deps.setIsCanvasOpen).toHaveBeenCalledWith(true)
   })
 })
