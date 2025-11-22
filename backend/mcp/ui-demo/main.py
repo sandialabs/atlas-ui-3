@@ -269,13 +269,13 @@ def create_iframe_demo() -> Dict[str, Any]:
     return {
         "results": {
             "content": "Iframe demo created! An external webpage will be displayed in the canvas panel.",
-            "iframe_url": "https://example.com"
+            "iframe_url": "https://www.sandia.gov/"
         },
         "artifacts": [],
         "display": {
             "open_canvas": True,
             "type": "iframe",
-            "url": "https://example.com",
+            "url": "https://www.sandia.gov/",
             "title": "Example Website",
             "sandbox": "allow-scripts allow-same-origin",
             "mode": "replace"
@@ -325,10 +325,10 @@ def create_html_with_iframe() -> Dict[str, Any]:
     <h1>Embedded Content Demo</h1>
     <p>This HTML artifact includes an embedded iframe showing external content:</p>
     <div class="iframe-container">
-        <iframe 
-            src="https://example.com" 
-            width="100%" 
-            height="100%" 
+        <iframe
+            src="https://www.sandia.gov/"
+            width="100%"
+            height="100%"
             sandbox="allow-scripts allow-same-origin"
             frameborder="0">
         </iframe>

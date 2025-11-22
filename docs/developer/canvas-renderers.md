@@ -1,13 +1,29 @@
 # Adding Custom Canvas Renderers
 
-The canvas panel displays tool-generated files (PDFs, images, HTML). To add support for new file types (e.g., `.stl`, `.obj`, `.ipynb`):
+The canvas panel displays tool-generated files (PDFs, images, HTML, iframes). To add support for new file types (e.g., `.stl`, `.obj`, `.ipynb`):
 
 ## Canvas Architecture Flow
 
-1. Backend tool returns artifacts → stored in S3 → sends `canvas_files` WebSocket message
-2. Frontend receives file metadata (filename, s3_key, type)
-3. Frontend fetches file content from `/api/files/download/{s3_key}`
-4. `CanvasPanel` renders based on file type
+1. Backend tool returns artifacts and optional `display` hints → stored in S3 → sends `canvas_files` WebSocket message
+2. Frontend receives file metadata (filename, s3_key, type, viewer_hint/display type)
+3. Frontend fetches file content from `/api/files/download/{s3_key}` when needed
+4. `CanvasPanel` renders based on file type and viewer configuration
+
+## Built-in Viewers and Iframe Support
+
+The canvas supports several built-in viewer types, selected via the artifact `viewer` field or display configuration:
+
+- `html`: Render HTML content in an isolated, sanitized frame
+- `image`: Display images such as PNG/JPEG
+- `pdf`: Render PDF documents
+- `iframe`: Embed external content from a URL
+
+For iframe-based content, there are two primary patterns:
+
+1. **Direct iframe via `display`** – the tool sets `display.type = "iframe"` and provides a `url`, `title`, and optional `sandbox` attributes.
+2. **HTML artifact with embedded `<iframe>`** – the tool returns a standard HTML artifact (with `viewer: "html"`) that includes one or more `<iframe>` elements in its content.
+
+In both cases, the frontend enforces a strict allowlist of iframe attributes (`src`, `sandbox`, `allow`, `allowfullscreen`, `frameborder`, `scrolling`) and sanitizes all HTML using DOMPurify before rendering.
 
 ## Steps to Add a New Type
 

@@ -69,6 +69,8 @@ def create_html_report(title: str) -> Dict[str, Any]:
     }
 ```
 
+For more details on how the canvas chooses viewers (including iframe support for external dashboards and embedded HTML), see `docs/developer/canvas-renderers.md`.
+
 ## 3. Registering the Server
 
 After creating your server, you must register it in `config/overrides/mcp.json`.
