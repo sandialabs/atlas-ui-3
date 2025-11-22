@@ -129,4 +129,5 @@
     "description": "Mock HTTP MCP server for testing authentication",
     "auth_token": "${MCP_EXTERNAL_API_TOKEN}"
   }
+ 
 }
