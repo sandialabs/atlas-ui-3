@@ -10,6 +10,17 @@ const IFRAME_SANITIZE_CONFIG = {
   ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
 };
 
+// Default sandbox permissions for iframes (restrictive by default)
+const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
+
+// Helper function to check if a file can be downloaded
+const canDownloadFile = (file) => {
+  if (!file) return false;
+  if (file.isInline) return false; // Inline files don't have backend storage
+  if (file.type === 'iframe') return false; // Iframes are not downloadable
+  return true;
+};
+
 // Helper function to process canvas content (strings and structured objects)
 const processCanvasContent = (content) => {
   if (typeof content === 'string') {
@@ -160,7 +171,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
             type: 'iframe', 
             url: currentFile.url, 
             file: currentFile,
-            sandbox: currentFile.sandbox || 'allow-scripts allow-same-origin'
+            sandbox: currentFile.sandbox || DEFAULT_IFRAME_SANDBOX
           });
           setIsLoadingFile(false);
           return;
@@ -219,8 +230,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
 
   const handleDownload = () => {
     const currentFile = canvasFiles[currentCanvasFileIndex];
-    const canDownload = currentFile && !currentFile.isInline && currentFile.type !== 'iframe';
-    if (canDownload && downloadFile) {
+    if (canDownloadFile(currentFile) && downloadFile) {
       downloadFile(currentFile.filename);
     }
   };

@@ -1,5 +1,8 @@
 // Handlers extracted from original ChatContext to keep provider lean
 
+// Default sandbox permissions for iframes (restrictive by default)
+const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
+
 export function createWebSocketHandler(deps) {
   const {
     addMessage,
@@ -174,7 +177,7 @@ export function createWebSocketHandler(deps) {
                 filename: updateData.display.title || 'Embedded Content',
                 type: 'iframe',
                 url: updateData.display.url,
-                sandbox: updateData.display.sandbox || 'allow-scripts allow-same-origin',
+                sandbox: updateData.display.sandbox || DEFAULT_IFRAME_SANDBOX,
                 isInline: true
               }
               canvasFiles = [iframeFile, ...canvasFiles]
