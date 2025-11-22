@@ -255,5 +255,32 @@ def get_image() -> Dict[str, Any]:
         }
     }
 
+@mcp.tool
+def create_iframe_demo() -> Dict[str, Any]:
+    """
+    Create a demo showing how to embed external content using iframes.
+    
+    This demonstrates the v2 MCP iframe capability for embedding interactive
+    external content like dashboards, visualizations, or web applications.
+    
+    Returns:
+        Dictionary with iframe display configuration
+    """
+    return {
+        "results": {
+            "content": "Iframe demo created! An external webpage will be displayed in the canvas panel.",
+            "iframe_url": "https://example.com"
+        },
+        "artifacts": [],
+        "display": {
+            "open_canvas": True,
+            "type": "iframe",
+            "url": "https://example.com",
+            "title": "Example Website",
+            "sandbox": "allow-scripts allow-same-origin",
+            "mode": "replace"
+        }
+    }
+
 if __name__ == "__main__":
     mcp.run()

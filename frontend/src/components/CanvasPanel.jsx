@@ -20,7 +20,7 @@ const processCanvasContent = (content) => {
       // Fallback to JSON for other objects
       try {
         return JSON.stringify(content, null, 2)
-      } catch (e) {
+      } catch {
         return String(content || '')
       }
     }
@@ -148,6 +148,18 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
           return;
         }
 
+        // Handle iframe artifacts (from display config with URL)
+        if (currentFile.type === 'iframe' && currentFile.url) {
+          setCurrentFileContent({ 
+            type: 'iframe', 
+            url: currentFile.url, 
+            file: currentFile,
+            sandbox: currentFile.sandbox || 'allow-scripts allow-same-origin allow-forms'
+          });
+          setIsLoadingFile(false);
+          return;
+        }
+
         // Fetch file content from the backend
         const response = await fetch(`/api/files/download/${currentFile.s3_key}`, {
           method: 'GET',
@@ -201,8 +213,8 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
 
   const handleDownload = () => {
     const currentFile = canvasFiles[currentCanvasFileIndex];
-    // Inline-only files are not downloadable via backend
-    if (currentFile && !currentFile.isInline && downloadFile) {
+    // Inline-only files and iframes are not downloadable via backend
+    if (currentFile && !currentFile.isInline && currentFile.type !== 'iframe' && downloadFile) {
       downloadFile(currentFile.filename);
     }
   };
@@ -212,6 +224,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
       case 'image': return <Image className="w-4 h-4" />;
       case 'pdf': return <File className="w-4 h-4" />;
       case 'html': return <Code className="w-4 h-4" />;
+      case 'iframe': return <Code className="w-4 h-4" />;
       default: return <FileText className="w-4 h-4" />;
     }
   };
@@ -271,12 +284,27 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
             </div>
           );
 
+        case 'iframe':
+          return (
+            <div className="p-4 h-full">
+              <iframe
+                src={currentFileContent.url}
+                className="w-full h-full border-0 rounded-lg"
+                title={currentFileContent.file.filename || 'Embedded Content'}
+                sandbox={currentFileContent.sandbox}
+              />
+            </div>
+          );
+
         case 'html':
           return (
             <div className="p-4">
               <div 
                 className="prose prose-invert max-w-none"
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(currentFileContent.content) }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(currentFileContent.content, {
+                  ADD_TAGS: ['iframe'],
+                  ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
+                }) }}
               />
             </div>
           );
@@ -285,7 +313,10 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
           try {
             // Try to parse as markdown first
             const markdownHtml = marked.parse(currentFileContent.content);
-            const sanitizedHtml = DOMPurify.sanitize(markdownHtml);
+            const sanitizedHtml = DOMPurify.sanitize(markdownHtml, {
+              ADD_TAGS: ['iframe'],
+              ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
+            });
             
             return (
               <div 
@@ -293,7 +324,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
                 dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
               />
             );
-          } catch (error) {
+          } catch {
             // Fallback to plain text with syntax highlighting for code files
             const fileExt = currentFileContent.file.filename.split('.').pop().toLowerCase();
             const isCodeFile = ['js', 'py', 'java', 'cpp', 'ts', 'jsx', 'tsx', 'css', 'html', 'json', 'sql'].includes(fileExt);
@@ -318,7 +349,10 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
           </div>
           <div 
             className="prose prose-invert max-w-none"
-            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(customUIContent.content) }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(customUIContent.content, {
+              ADD_TAGS: ['iframe'],
+              ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
+            }) }}
           />
         </div>
       )
@@ -340,7 +374,10 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
       
       try {
         const markdownHtml = marked.parse(content)
-        const sanitizedHtml = DOMPurify.sanitize(markdownHtml)
+        const sanitizedHtml = DOMPurify.sanitize(markdownHtml, {
+          ADD_TAGS: ['iframe'],
+          ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
+        })
 
         return (
           <div 

@@ -165,10 +165,25 @@ export function createWebSocketHandler(deps) {
           break
         case 'canvas_files':
           if (updateData && Array.isArray(updateData.files)) {
-            setCanvasFiles(updateData.files)
+            let canvasFiles = updateData.files
+            
+            // Check if display config specifies an iframe
+            if (updateData.display && updateData.display.type === 'iframe' && updateData.display.url) {
+              // Add iframe as a virtual canvas file
+              const iframeFile = {
+                filename: updateData.display.title || 'Embedded Content',
+                type: 'iframe',
+                url: updateData.display.url,
+                sandbox: updateData.display.sandbox || 'allow-scripts allow-same-origin allow-forms',
+                isInline: true
+              }
+              canvasFiles = [iframeFile, ...canvasFiles]
+            }
+            
+            setCanvasFiles(canvasFiles)
             // If backend provided display hints, respect them (e.g., primary_file)
             if (updateData.display && updateData.display.primary_file) {
-              const idx = updateData.files.findIndex(f => f.filename === updateData.display.primary_file)
+              const idx = canvasFiles.findIndex(f => f.filename === updateData.display.primary_file)
               setCurrentCanvasFileIndex(idx >= 0 ? idx : 0)
             } else {
               setCurrentCanvasFileIndex(0)
