@@ -256,6 +256,8 @@ MCP servers defined in `config/defaults/mcp.json`. The backend:
 3. Exposes tools to LLM via `ToolManagerProtocol`
 4. Supports group-based access control
 
+When testing or developing MCP-related features, example configurations can be found in config/mcp-example-configs/ with individual mcp-{servername}.json files for testing individual servers.
+
 ### Agent Modes
 Three agent loop strategies implement different reasoning patterns:
 - **ReAct** (`backend/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning

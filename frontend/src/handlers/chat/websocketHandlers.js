@@ -1,5 +1,8 @@
 // Handlers extracted from original ChatContext to keep provider lean
 
+// Default sandbox permissions for iframes (restrictive by default)
+const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
+
 export function createWebSocketHandler(deps) {
   const {
     addMessage,
@@ -12,6 +15,7 @@ export function createWebSocketHandler(deps) {
     setCanvasFiles,
     setCurrentCanvasFileIndex,
     setCustomUIContent,
+    setIsCanvasOpen,
     setSessionFiles,
     getFileType,
     triggerFileDownload,
@@ -152,6 +156,9 @@ export function createWebSocketHandler(deps) {
                 setCurrentCanvasFileIndex(0)
               }
               if (display.open_canvas) {
+                if (typeof setIsCanvasOpen === 'function') {
+                  setIsCanvasOpen(true)
+                }
                 setCanvasContent('')
                 setCustomUIContent(null)
               }
@@ -165,14 +172,35 @@ export function createWebSocketHandler(deps) {
           break
         case 'canvas_files':
           if (updateData && Array.isArray(updateData.files)) {
-            setCanvasFiles(updateData.files)
+            let canvasFiles = updateData.files
+
+            // Check if display config specifies an iframe
+            if (updateData.display && updateData.display.type === 'iframe' && updateData.display.url) {
+              // Add iframe as a virtual canvas file
+              const iframeFile = {
+                filename: updateData.display.title || 'Embedded Content',
+                type: 'iframe',
+                url: updateData.display.url,
+                sandbox: updateData.display.sandbox || DEFAULT_IFRAME_SANDBOX,
+                isInline: true
+              }
+              canvasFiles = [iframeFile, ...canvasFiles]
+            }
+
+            setCanvasFiles(canvasFiles)
             // If backend provided display hints, respect them (e.g., primary_file)
             if (updateData.display && updateData.display.primary_file) {
-              const idx = updateData.files.findIndex(f => f.filename === updateData.display.primary_file)
+              const idx = canvasFiles.findIndex(f => f.filename === updateData.display.primary_file)
               setCurrentCanvasFileIndex(idx >= 0 ? idx : 0)
             } else {
               setCurrentCanvasFileIndex(0)
             }
+
+            // Open canvas panel if display.open_canvas is true
+            if (updateData.display && updateData.display.open_canvas && typeof setIsCanvasOpen === 'function') {
+              setIsCanvasOpen(true)
+            }
+
             setCanvasContent('')
             setCustomUIContent(null)
           }

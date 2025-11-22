@@ -1,0 +1,1 @@
+{"progress_demo": {"command": ["python", "mcp/progress_demo/main.py"], "cwd": "backend", "groups": ["users"], "description": "progress_demo MCP server", "author": "Chat UI Team", "short_description": "progress_demo server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

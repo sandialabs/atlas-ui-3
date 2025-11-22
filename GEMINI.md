@@ -58,8 +58,10 @@ python main.py  # NEVER use uvicorn --reload (causes problems)
 - **No Emojis**: No emojis should ever be added in this repo.
 - **Linting**: Run `ruff check backend/` for Python and `npm run lint` for the frontend before committing.
 
+When testing or developing MCP-related features, example configurations can be found in config/mcp-example-configs/ with individual mcp-{servername}.json files for testing individual servers.
 
-Also read. 
+
+Also read.
 /workspaces/atlas-ui-3/.github/copilot-instructions.md
 
 and CLAUDE.md

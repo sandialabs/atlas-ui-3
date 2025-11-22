@@ -39,6 +39,7 @@ cd "$BACKEND_DIR"
 
 echo ""
 echo "\n🧪 Running Backend Tests..."
+echo "BACKEND_DIR full path: $(pwd)"
 echo "=============================="
 
 # If legacy targeted tests exist, run them; otherwise run all tests in backend/tests

@@ -1,0 +1,1 @@
+{"filesystem": {"command": ["python", "mcp/filesystem/main.py"], "cwd": "backend", "groups": ["users"], "description": "filesystem MCP server", "author": "Chat UI Team", "short_description": "filesystem server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

@@ -255,5 +255,129 @@ def get_image() -> Dict[str, Any]:
         }
     }
 
+@mcp.tool
+def create_iframe_demo() -> Dict[str, Any]:
+    """
+    Create a demo showing how to embed external content using iframes.
+
+    This demonstrates the v2 MCP iframe capability for embedding interactive
+    external content like dashboards, visualizations, or web applications.
+
+    IMPORTANT - CSP Configuration Required:
+        To display external URLs in iframes, the SECURITY_CSP_VALUE environment
+        variable must include the iframe URL in the frame-src directive.
+
+        Example for https://www.sandia.gov/:
+        SECURITY_CSP_VALUE="... frame-src 'self' blob: data: https://www.sandia.gov/; ..."
+
+        Without proper CSP configuration, the browser will block the iframe.
+
+    Returns:
+        Dictionary with iframe display configuration
+    """
+    return {
+        "results": {
+            "content": "Iframe demo created! An external webpage will be displayed in the canvas panel.",
+            "iframe_url": "https://www.sandia.gov/"
+        },
+        "artifacts": [],
+        "display": {
+            "open_canvas": True,
+            "type": "iframe",
+            "url": "https://www.sandia.gov/",
+            "title": "Example Website",
+            "sandbox": "allow-scripts allow-same-origin",
+            "mode": "replace"
+        }
+    }
+
+@mcp.tool
+def create_html_with_iframe() -> Dict[str, Any]:
+    """
+    Create an HTML artifact that includes an embedded iframe.
+
+    This demonstrates how MCP tools can return HTML content with embedded
+    iframes that will be properly rendered in the canvas panel.
+
+    IMPORTANT - CSP Configuration Required:
+        To display external URLs in iframes, the SECURITY_CSP_VALUE environment
+        variable must include the iframe URL in the frame-src directive.
+
+        Example for https://www.sandia.gov/:
+        SECURITY_CSP_VALUE="... frame-src 'self' blob: data: https://www.sandia.gov/; ..."
+
+        Without proper CSP configuration, the browser will block the iframe.
+
+    Returns:
+        Dictionary with HTML artifact containing an iframe
+    """
+    html_content = """<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .iframe-container {
+            width: 100%;
+            height: 600px;
+            border: 2px solid #444;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        h1 {
+            color: #4a9eff;
+            margin-bottom: 10px;
+        }
+        p {
+            color: #aaa;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Embedded Content Demo</h1>
+    <p>This HTML artifact includes an embedded iframe showing external content:</p>
+    <div class="iframe-container">
+        <iframe
+            src="https://www.sandia.gov/"
+            width="100%"
+            height="100%"
+            sandbox="allow-scripts allow-same-origin"
+            frameborder="0">
+        </iframe>
+    </div>
+</body>
+</html>"""
+    
+    import base64
+    html_base64 = base64.b64encode(html_content.encode('utf-8')).decode('utf-8')
+    
+    return {
+        "results": {
+            "content": "HTML with embedded iframe created! Check the canvas panel."
+        },
+        "artifacts": [
+            {
+                "name": "iframe_demo.html",
+                "b64": html_base64,
+                "mime": "text/html",
+                "size": len(html_content.encode('utf-8')),
+                "description": "HTML page with embedded iframe",
+                "viewer": "html"
+            }
+        ],
+        "display": {
+            "open_canvas": True,
+            "primary_file": "iframe_demo.html",
+            "mode": "replace",
+            "viewer_hint": "html"
+        }
+    }
+
 if __name__ == "__main__":
     mcp.run()

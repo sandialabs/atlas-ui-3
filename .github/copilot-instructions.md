@@ -36,8 +36,9 @@ frontend/ React 19 + Vite + Tailwind; state via contexts (Chat/WS/Marketplace)
 ## MCP + RAG conventions
 - MCP servers live in mcp.json (tools/prompts) and mcp-rag.json (RAG-only inventory). Fields: groups, transport|type, url|command/cwd, compliance_level.
 - Transport detection order: explicit transport → command (stdio) → URL protocol (http/sse) → type fallback.
-- Tool names exposed to LLM are fully-qualified: server_toolName. “canvas_canvas” is a pseudo-tool always available.
+- Tool names exposed to LLM are fully-qualified: server_toolName. "canvas_canvas" is a pseudo-tool always available.
 - RAG over MCP tools expected: rag_discover_resources, rag_get_raw_results, optional rag_get_synthesized_results. RAG resources and servers may include complianceLevel.
+- When testing or developing MCP-related features, example configurations can be found in config/mcp-example-configs/ with individual mcp-{servername}.json files for testing individual servers.
 
 ## Compliance levels (explicit allowlist)
 - Definitions in config/(overrides|defaults)/compliance-levels.json. core/compliance.py loads, normalizes aliases, and enforces allowed_with.
