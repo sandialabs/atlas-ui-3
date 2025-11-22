@@ -128,5 +128,20 @@
     ],
     "description": "Mock HTTP MCP server for testing authentication",
     "auth_token": "${MCP_EXTERNAL_API_TOKEN}"
+  },
+  "many_tools_demo": {
+    "command": [
+      "python",
+      "mcp/many_tools_demo/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Demo server with 64 tools to test UI scalability with large numbers of tools. Includes operations for data, analytics, files, network, system, database, security, and reporting.",
+    "author": "Chat UI Team",
+    "short_description": "Large tool set demo (64 tools)",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Public"
   }
 }
