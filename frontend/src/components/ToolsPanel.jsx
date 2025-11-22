@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -10,6 +10,7 @@ const DEFAULT_PARAM_TYPE = 'any'
 const ToolsPanel = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
+  const [collapsedServers, setCollapsedServers] = useState(new Set())
   const navigate = useNavigate()
   const { 
     selectedTools, 
@@ -279,6 +280,16 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     setExpandedTools(newExpanded)
   }
 
+  const toggleServerCollapse = (serverName) => {
+    const newCollapsed = new Set(collapsedServers)
+    if (newCollapsed.has(serverName)) {
+      newCollapsed.delete(serverName)
+    } else {
+      newCollapsed.add(serverName)
+    }
+    setCollapsedServers(newCollapsed)
+  }
+
   /**
    * Renders the input schema parameters for a tool.
    * @param {Object} schema - The JSON schema object containing properties and required fields
@@ -422,10 +433,28 @@ const ToolsPanel = ({ isOpen, onClose }) => {
               ) : (
                 <div className="px-4 pb-4 space-y-3">
                   {filteredServers.map(server => {
+                    const isCollapsed = collapsedServers.has(server.server)
+                    const toolCount = server.tools.length
+                    const promptCount = server.prompts.length
+                    const totalItems = toolCount + promptCount
+                    
                     return (
                       <div key={server.server} className="bg-gray-700 rounded-lg overflow-hidden">
                         {/* Main Server Row */}
                         <div className="p-2 flex items-start gap-2">
+                          {/* Collapse/Expand Button */}
+                          <button
+                            onClick={() => toggleServerCollapse(server.server)}
+                            className="flex-shrink-0 p-1 hover:bg-gray-600 rounded transition-colors"
+                            title={isCollapsed ? 'Expand server' : 'Collapse server'}
+                          >
+                            {isCollapsed ? (
+                              <ChevronRight className="w-4 h-4 text-gray-300" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4 text-gray-300" />
+                            )}
+                          </button>
+                          
                           {/* Server Icon */}
                           <div className="bg-gray-600 rounded p-1.5 flex-shrink-0">
                             <Wrench className="w-3 h-3 text-gray-300" />
@@ -437,6 +466,9 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                               <h3 className="text-white font-medium text-base capitalize truncate">
                                 {server.server}
                               </h3>
+                              <span className="text-xs text-gray-400 flex-shrink-0">
+                                ({totalItems} {totalItems === 1 ? 'item' : 'items'})
+                              </span>
                               {server.is_exclusive && (
                                 <span className="px-1.5 py-0.5 bg-orange-600 text-xs rounded text-white flex-shrink-0">
                                   Exclusive
@@ -451,11 +483,14 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                             </div>
                             <p className="text-xs text-gray-400 mb-2 line-clamp-1">{server.description}</p>
                             
-                            {/* Tools Display */}
-                            {server.tools.length > 0 && (
-                              <div className="mb-1">
-                                <div className="flex flex-wrap gap-1">
-          {server.tools.map(tool => {
+                            {/* Tools and Prompts - only show when not collapsed */}
+                            {!isCollapsed && (
+                              <>
+                                {/* Tools Display */}
+                                {server.tools.length > 0 && (
+                                  <div className="mb-1">
+                                    <div className="flex flex-wrap gap-1">
+                {server.tools.map(tool => {
                                     const toolKey = `${server.server}_${tool}`
                                     const isSelected = selectedTools.has(toolKey)
                                     const isToolExpanded = expandedTools.has(toolKey)
@@ -530,6 +565,8 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                   })}
                                 </div>
                               </div>
+                            )}
+                              </>
                             )}
                           </div>
                           

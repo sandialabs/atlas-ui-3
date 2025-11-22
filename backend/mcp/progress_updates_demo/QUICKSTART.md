@@ -270,4 +270,4 @@ See `/backend/mcp/progress_updates_demo/main.py` for complete working examples.
 
 ## Documentation
 
-Full documentation: [Developer Guide - Progress Updates](../docs/03_developer_guide.md#progress-updates-and-intermediate-results)
+Full documentation: [Developer Guide - Progress Updates](../../../docs/developer/progress-updates.md)
