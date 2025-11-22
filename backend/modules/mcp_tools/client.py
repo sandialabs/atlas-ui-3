@@ -8,7 +8,6 @@ from typing import Dict, List, Any, Optional
 
 from fastmcp import Client
 from modules.config import config_manager
-from core.auth_utils import create_authorization_manager
 from core.utils import sanitize_for_logging
 from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
@@ -640,6 +639,46 @@ class MCPToolManager:
             if any(group_checks):
                 authorized_servers.append(server_name)
         return authorized_servers
+    
+    async def get_discoverable_servers(self, user_email: str, auth_check_func) -> Dict[str, Dict[str, Any]]:
+        """Get servers that are discoverable but not authorized for the user.
+        
+        Returns a dict mapping server names to their basic info (description, author, help_email, groups).
+        Only includes servers with allow_discovery=true where the user lacks access.
+        """
+        discoverable_servers = {}
+        for server_name, server_config in self.servers_config.items():
+            if not server_config.get("enabled", True):
+                continue
+            
+            # Skip if discovery is not allowed
+            if not server_config.get("allow_discovery", False):
+                continue
+            
+            required_groups = server_config.get("groups", [])
+            
+            # Skip servers with no groups (they're accessible to everyone)
+            if not required_groups:
+                continue
+            
+            # Check if user is in any of the required groups
+            group_checks = [await auth_check_func(user_email, group) for group in required_groups]
+            
+            # Only include if user does NOT have access
+            if not any(group_checks):
+                discoverable_servers[server_name] = {
+                    'server': server_name,
+                    'description': server_config.get('description', ''),
+                    'author': server_config.get('author', ''),
+                    'short_description': server_config.get('short_description', ''),
+                    'help_email': server_config.get('help_email', ''),
+                    'groups': required_groups,
+                    'compliance_level': server_config.get('compliance_level'),
+                    'is_discoverable': True,
+                    'has_access': False
+                }
+        
+        return discoverable_servers
     
     def get_available_tools(self) -> List[str]:
         """Get list of available tool names."""

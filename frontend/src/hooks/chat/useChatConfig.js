@@ -16,6 +16,7 @@ export function useChatConfig() {
   const [models, setModels] = useState([])
   const [tools, setTools] = useState([])
   const [prompts, setPrompts] = useState([])
+  const [discoverableServers, setDiscoverableServers] = useState([])
   const [dataSources, setDataSources] = useState([])
   const [ragServers, setRagServers] = useState([]) // New state for rich RAG server data
   const [features, setFeatures] = useState(DEFAULT_FEATURES)
@@ -46,6 +47,7 @@ export function useChatConfig() {
         }))
         setTools(uniqueTools)
         setPrompts(cfg.prompts || [])
+        setDiscoverableServers(cfg.discoverable_servers || [])
         setDataSources(cfg.data_sources || [])
         setRagServers(cfg.rag_servers || []) // Capture rich RAG server data
         setUser(cfg.user || 'Unknown')
@@ -92,6 +94,7 @@ export function useChatConfig() {
     models,
     tools,
     prompts,
+    discoverableServers,
     dataSources,
     ragServers, // Expose new state
     features,

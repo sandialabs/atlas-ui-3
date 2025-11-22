@@ -115,6 +115,7 @@ async def get_config(
     tools_info = []
     prompts_info = []
     authorized_servers = []
+    discoverable_servers_info = []
     
     if app_settings.feature_tools_enabled:
         # Get MCP manager
@@ -122,6 +123,9 @@ async def get_config(
         
         # Get authorized servers for the user - this filters out unauthorized servers completely
         authorized_servers = await mcp_manager.get_authorized_servers(current_user, is_user_in_group)
+        
+        # Get discoverable servers (servers user can see but not access)
+        discoverable_servers = await mcp_manager.get_discoverable_servers(current_user, is_user_in_group)
         
         # Add canvas pseudo-tool to authorized servers (available to all users)
         authorized_servers.append("canvas")
@@ -197,6 +201,9 @@ async def get_config(
                         'help_email': server_config.get('help_email', ''),
                         'compliance_level': server_config.get('compliance_level')
                     })
+        
+        # Build discoverable servers info (limited information for servers user can't access)
+        discoverable_servers_info = list(discoverable_servers.values())
     
     # Read help page configuration (supports new config directory layout + legacy paths)
     help_config = {}
@@ -243,6 +250,7 @@ async def get_config(
 # Log what the user can see for debugging
     logger.info(
         f"User {sanitize_for_logging(current_user)} has access to {len(authorized_servers)} servers: {authorized_servers}\n"
+        f"User can discover {len(discoverable_servers_info)} additional servers: {[s['server'] for s in discoverable_servers_info]}\n"
         f"Returning {len(tools_info)} server tool groups to frontend for user {sanitize_for_logging(current_user)}"
     )
     # Build models list with compliance levels
@@ -284,6 +292,7 @@ async def get_config(
         "models": models_list,
         "tools": tools_info,  # Only authorized servers are included
         "prompts": prompts_info,  # Available prompts from authorized servers
+        "discoverable_servers": discoverable_servers_info,  # Servers user can see but not access
         "data_sources": rag_data_sources,  # RAG data sources for the user
         "rag_servers": rag_servers,  # Optional richer structure for RAG UI
         "user": current_user,
