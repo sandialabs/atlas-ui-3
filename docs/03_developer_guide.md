@@ -176,8 +176,8 @@ def create_page_with_iframe() -> Dict[str, Any]:
 **Security Considerations for Iframes:**
 
 *   Iframes are automatically sandboxed for security
-*   Default sandbox permissions: `"allow-scripts allow-same-origin allow-forms"`
-*   Tools can specify custom sandbox attributes via the `sandbox` field
+*   Default sandbox permissions: `"allow-scripts allow-same-origin"` (restrictive by default)
+*   Tools can specify custom sandbox attributes via the `sandbox` field to add permissions like `"allow-forms"` if needed
 *   Only whitelisted iframe attributes are preserved: `src`, `sandbox`, `allow`, `allowfullscreen`, `frameborder`, `scrolling`
 *   All HTML content is sanitized with DOMPurify before rendering
 

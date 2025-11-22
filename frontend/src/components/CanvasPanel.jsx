@@ -4,6 +4,12 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useState, useEffect } from 'react'
 
+// DOMPurify configuration for allowing iframes in HTML content
+const IFRAME_SANITIZE_CONFIG = {
+  ADD_TAGS: ['iframe'],
+  ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
+};
+
 // Helper function to process canvas content (strings and structured objects)
 const processCanvasContent = (content) => {
   if (typeof content === 'string') {
@@ -154,7 +160,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
             type: 'iframe', 
             url: currentFile.url, 
             file: currentFile,
-            sandbox: currentFile.sandbox || 'allow-scripts allow-same-origin allow-forms'
+            sandbox: currentFile.sandbox || 'allow-scripts allow-same-origin'
           });
           setIsLoadingFile(false);
           return;
@@ -213,8 +219,8 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
 
   const handleDownload = () => {
     const currentFile = canvasFiles[currentCanvasFileIndex];
-    // Inline-only files and iframes are not downloadable via backend
-    if (currentFile && !currentFile.isInline && currentFile.type !== 'iframe' && downloadFile) {
+    const canDownload = currentFile && !currentFile.isInline && currentFile.type !== 'iframe';
+    if (canDownload && downloadFile) {
       downloadFile(currentFile.filename);
     }
   };
@@ -301,10 +307,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
             <div className="p-4">
               <div 
                 className="prose prose-invert max-w-none"
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(currentFileContent.content, {
-                  ADD_TAGS: ['iframe'],
-                  ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
-                }) }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(currentFileContent.content, IFRAME_SANITIZE_CONFIG) }}
               />
             </div>
           );
@@ -313,10 +316,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
           try {
             // Try to parse as markdown first
             const markdownHtml = marked.parse(currentFileContent.content);
-            const sanitizedHtml = DOMPurify.sanitize(markdownHtml, {
-              ADD_TAGS: ['iframe'],
-              ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
-            });
+            const sanitizedHtml = DOMPurify.sanitize(markdownHtml, IFRAME_SANITIZE_CONFIG);
             
             return (
               <div 
@@ -349,10 +349,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
           </div>
           <div 
             className="prose prose-invert max-w-none"
-            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(customUIContent.content, {
-              ADD_TAGS: ['iframe'],
-              ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
-            }) }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(customUIContent.content, IFRAME_SANITIZE_CONFIG) }}
           />
         </div>
       )
@@ -374,10 +371,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
       
       try {
         const markdownHtml = marked.parse(content)
-        const sanitizedHtml = DOMPurify.sanitize(markdownHtml, {
-          ADD_TAGS: ['iframe'],
-          ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
-        })
+        const sanitizedHtml = DOMPurify.sanitize(markdownHtml, IFRAME_SANITIZE_CONFIG)
 
         return (
           <div 

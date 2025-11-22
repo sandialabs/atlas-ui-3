@@ -174,7 +174,7 @@ export function createWebSocketHandler(deps) {
                 filename: updateData.display.title || 'Embedded Content',
                 type: 'iframe',
                 url: updateData.display.url,
-                sandbox: updateData.display.sandbox || 'allow-scripts allow-same-origin allow-forms',
+                sandbox: updateData.display.sandbox || 'allow-scripts allow-same-origin',
                 isInline: true
               }
               canvasFiles = [iframeFile, ...canvasFiles]
