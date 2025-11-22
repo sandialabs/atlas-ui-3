@@ -8,7 +8,6 @@ from typing import Dict, List, Any, Optional
 
 from fastmcp import Client
 from modules.config import config_manager
-from core.auth_utils import create_authorization_manager
 from core.utils import sanitize_for_logging
 from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
