@@ -1,5 +1,7 @@
+import json
+from pathlib import Path
+
 import pytest
-from unittest.mock import patch, Mock
 
 from modules.mcp_tools.client import MCPToolManager
 from modules.config import ConfigManager
@@ -14,19 +16,18 @@ async def test_selected_mcp_prompt_overrides_system_prompt(monkeypatch):
     """
     # Ensure MCP clients and prompts are ready
     # Set up MCP manager directly (avoid importing app_factory/litellm).
-    # Patch config_manager so MCPToolManager sees a "prompts" server
-    # without depending on actual file-based config.
-    with patch("modules.mcp_tools.client.config_manager") as mock_cm:
-        mock_cm.mcp_config.servers = {
-            "prompts": Mock(name="prompts_server_config")
-        }
-        mock_cm.mcp_config.servers["prompts"].model_dump.return_value = {
-            "command": ["python", "mcp/prompts/main.py"],
-            "cwd": "backend",
-            "groups": ["users"],
-        }
+    # Use the example prompts MCP config file so this test uses
+    # the same JSON configuration as other prompts tests.
+    # tests run with cwd=backend/, so resolve from backend root
+    backend_root = Path(__file__).parent.parent
+    project_root = backend_root.parent
+    config_path = project_root / "config" / "mcp-example-configs" / "mcp-prompts.json"
+    assert config_path.exists(), f"Missing example prompts config: {config_path}"
 
-        mcp: MCPToolManager = MCPToolManager()
+    data = json.loads(config_path.read_text())
+    assert "prompts" in data, "prompts server not defined in example config"
+
+    mcp: MCPToolManager = MCPToolManager(config_path=str(config_path))
     await mcp.initialize_clients()
     await mcp.discover_prompts()
     assert "prompts" in mcp.available_prompts, "prompts server not discovered"
