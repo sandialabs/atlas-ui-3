@@ -27,14 +27,14 @@ class MCPToolManager:
             # Use config manager to get config path
             app_settings = config_manager.app_settings
             overrides_root = Path(app_settings.app_config_overrides)
-            
+
             # If relative, resolve from project root
             if not overrides_root.is_absolute():
                 # This file is in backend/modules/mcp_tools/client.py
                 backend_root = Path(__file__).parent.parent.parent
                 project_root = backend_root.parent
                 overrides_root = project_root / overrides_root
-            
+
             candidate = overrides_root / "mcp.json"
             if not candidate.exists():
                 # Legacy fallback
@@ -42,10 +42,23 @@ class MCPToolManager:
                 if not candidate.exists():
                     candidate = Path("backend/configfiles/mcp.json")
             self.config_path = str(candidate)
+            # Use default config manager when no path specified
+            mcp_config = config_manager.mcp_config
+            self.servers_config = {name: server.model_dump() for name, server in mcp_config.servers.items()}
         else:
+            # Load config from the specified path
             self.config_path = config_path
-        mcp_config = config_manager.mcp_config
-        self.servers_config = {name: server.model_dump() for name, server in mcp_config.servers.items()}
+            config_file = Path(config_path)
+            if config_file.exists():
+                from modules.config.config_manager import MCPConfig
+                data = json.loads(config_file.read_text())
+                # Convert flat structure to nested structure for Pydantic
+                servers_data = {"servers": data}
+                mcp_config = MCPConfig(**servers_data)
+                self.servers_config = {name: server.model_dump() for name, server in mcp_config.servers.items()}
+            else:
+                logger.warning(f"Custom config path specified but file not found: {config_path}")
+                self.servers_config = {}
         self.clients = {}
         self.available_tools = {}
         self.available_prompts = {}
