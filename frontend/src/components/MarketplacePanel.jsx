@@ -211,7 +211,7 @@ const MarketplacePanel = () => {
                   }
                 `}
                 onClick={() => !isDiscoverable && toggleServer(server.server)}
-                title={isDiscoverable ? 'You do not have access to this server. Contact support to request access.' : ''}
+                title={isDiscoverable ? (server.help_email ? 'You do not have access to this server. Use the Request Access link below to contact the server team.' : 'You do not have access to this server. Contact your administrator to request access.') : ''}
               >
                 {/* Selection Indicator or Lock Icon */}
                 {isDiscoverable ? (
