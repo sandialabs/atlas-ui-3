@@ -57,6 +57,8 @@ class LiteLLMCaller:
             return f"anthropic/{model_id}"
         elif "google" in model_config.model_url:
             return f"google/{model_id}"
+        elif "cerebras" in model_config.model_url:
+            return f"cerebras/{model_id}"
         else:
             # For custom endpoints, use the model_id directly
             return model_id
@@ -95,10 +97,12 @@ class LiteLLMCaller:
                 os.environ["ANTHROPIC_API_KEY"] = api_key
             elif "google" in model_config.model_url:
                 os.environ["GOOGLE_API_KEY"] = api_key
+            elif "cerebras" in model_config.model_url:
+                os.environ["CEREBRAS_API_KEY"] = api_key
         
         # Set custom API base for non-standard endpoints
         if hasattr(model_config, 'model_url') and model_config.model_url:
-            if not any(provider in model_config.model_url for provider in ["openrouter", "api.openai.com", "api.anthropic.com"]):
+            if not any(provider in model_config.model_url for provider in ["openrouter", "api.openai.com", "api.anthropic.com", "api.cerebras.ai"]):
                 kwargs["api_base"] = model_config.model_url
         
         # Handle extra headers with environment variable expansion
