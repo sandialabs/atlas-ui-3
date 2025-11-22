@@ -368,17 +368,47 @@ async def notify_canvas_files_v2(
 ) -> None:
     """
     Send v2 canvas files notification with display configuration.
-    
+
     Pure function with no side effects on session context.
     """
-    if not update_callback or not tool_result.artifacts:
+    if not update_callback:
         return
-        
+
+    # Check if there's an iframe display configuration (no artifacts needed)
+    has_iframe_display = (
+        tool_result.display_config and
+        isinstance(tool_result.display_config, dict) and
+        tool_result.display_config.get("type") == "iframe" and
+        tool_result.display_config.get("url")
+    )
+
+    # If no artifacts and no iframe display, nothing to show
+    if not tool_result.artifacts and not has_iframe_display:
+        return
+
     try:
         # Get uploaded file references from session context
         uploaded_refs = session_context.get("files", {})
         artifact_names = [artifact.get("name") for artifact in tool_result.artifacts if artifact.get("name")]
-        
+
+        # Handle iframe-only display (no artifacts)
+        if has_iframe_display and not artifact_names:
+            canvas_update = {
+                "type": "intermediate_update",
+                "update_type": "canvas_files",
+                "data": {
+                    "files": [],
+                    "display": tool_result.display_config
+                }
+            }
+            logger.info(
+                "Emitting canvas_files event for iframe display: url=%s, title=%s",
+                tool_result.display_config.get("url"),
+                tool_result.display_config.get("title", "Embedded Content"),
+            )
+            await update_callback(canvas_update)
+            return
+
         if uploaded_refs and artifact_names:
             canvas_files = []
             for fname in artifact_names:

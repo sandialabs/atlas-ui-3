@@ -1,0 +1,17 @@
+{
+  "calculator": {
+    "command": [
+      "python",
+      "mcp/calculator/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Evaluate mathematical expressions, perform calculations with basic arithmetic, trigonometry, and logarithms",
+    "author": "Chat UI Team",
+    "short_description": "Mathematical calculator",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Public"
+  }
+}

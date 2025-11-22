@@ -18,6 +18,21 @@
       "evaluate"
     ]
   },
+   "ui-demo": {
+    "command": [
+      "python",
+      "mcp/ui-demo/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Demo server showcasing custom UI modification capabilities",
+    "author": "Chat UI Team",
+    "short_description": "UI customization demo",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Public"
+  },
   "pptx_generator": {
     "command": [
       "python",
