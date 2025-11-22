@@ -82,6 +82,7 @@ The returned JSON object has the following structure:
     *   `name`: The filename (e.g., `report.html`).
     *   `b64`: The base64-encoded content of the file.
     *   `mime`: The MIME type (e.g., `text/html`, `image/png`).
+    *   `viewer`: The preferred viewer type (e.g., `html`, `image`, `pdf`, `iframe`).
 *   **`display`** (optional): A JSON object that provides hints to the UI on how to display the artifacts, such as whether to open the canvas automatically.
 
 **Example tool returning an artifact:**
@@ -99,7 +100,8 @@ def create_html_report(title: str) -> Dict[str, Any]:
         "artifacts": [{
             "name": "report.html",
             "b64": b64_content,
-            "mime": "text/html"
+            "mime": "text/html",
+            "viewer": "html"
         }],
         "display": {
             "open_canvas": True,
@@ -107,6 +109,77 @@ def create_html_report(title: str) -> Dict[str, Any]:
         }
     }
 ```
+
+#### Iframe Support for External Content
+
+MCP tools can embed external content using iframes in two ways:
+
+**Approach 1: Direct Iframe via Display Config**
+
+Use this when you want to display an external URL directly without wrapping it in HTML:
+
+```python
+@mcp.tool
+def show_dashboard() -> Dict[str, Any]:
+    """Display an external dashboard in the canvas."""
+    return {
+        "results": {"summary": "Dashboard loaded"},
+        "artifacts": [],
+        "display": {
+            "type": "iframe",
+            "url": "https://example.com/dashboard",
+            "title": "Analytics Dashboard",
+            "sandbox": "allow-scripts allow-same-origin",
+            "open_canvas": True
+        }
+    }
+```
+
+**Approach 2: HTML Artifact with Embedded Iframe**
+
+Use this when you want to create a custom HTML page that includes one or more iframes:
+
+```python
+@mcp.tool
+def create_page_with_iframe() -> Dict[str, Any]:
+    """Create an HTML page with embedded iframe."""
+    html_content = """
+    <html>
+    <body>
+        <h1>External Content</h1>
+        <iframe 
+            src="https://example.com" 
+            width="100%" 
+            height="600px"
+            sandbox="allow-scripts allow-same-origin">
+        </iframe>
+    </body>
+    </html>
+    """
+    b64_content = base64.b64encode(html_content.encode()).decode()
+    
+    return {
+        "results": {"summary": "Page created"},
+        "artifacts": [{
+            "name": "page.html",
+            "b64": b64_content,
+            "mime": "text/html",
+            "viewer": "html"
+        }],
+        "display": {
+            "open_canvas": True,
+            "primary_file": "page.html"
+        }
+    }
+```
+
+**Security Considerations for Iframes:**
+
+*   Iframes are automatically sandboxed for security
+*   Default sandbox permissions: `"allow-scripts allow-same-origin allow-forms"`
+*   Tools can specify custom sandbox attributes via the `sandbox` field
+*   Only whitelisted iframe attributes are preserved: `src`, `sandbox`, `allow`, `allowfullscreen`, `frameborder`, `scrolling`
+*   All HTML content is sanitized with DOMPurify before rendering
 
 ### 3. Registering the Server
 
