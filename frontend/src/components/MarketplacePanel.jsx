@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, X, Search } from 'lucide-react'
+import { ArrowLeft, Check, X, Search, Lock } from 'lucide-react'
 import { useState } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
@@ -7,7 +7,7 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 const MarketplacePanel = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const navigate = useNavigate()
-  const { tools, prompts } = useChat()
+  const { tools, prompts, discoverableServers } = useChat()
   const {
     selectedServers,
     toggleServer,
@@ -31,7 +31,9 @@ const MarketplacePanel = () => {
         tools: toolServer.tools || [],
         tool_count: toolServer.tool_count || 0,
         prompts: [],
-        prompt_count: 0
+        prompt_count: 0,
+        has_access: true,
+        is_discoverable: false
       }
     }
   })
@@ -49,13 +51,39 @@ const MarketplacePanel = () => {
         tools: [],
         tool_count: 0,
         prompts: promptServer.prompts || [],
-        prompt_count: promptServer.prompt_count || 0
+        prompt_count: promptServer.prompt_count || 0,
+        has_access: true,
+        is_discoverable: false
       }
     } else {
       allServers[promptServer.server].prompts = promptServer.prompts || []
       allServers[promptServer.server].prompt_count = promptServer.prompt_count || 0
     }
   })
+  
+  // Add discoverable servers (servers user can see but not access)
+  if (discoverableServers && Array.isArray(discoverableServers)) {
+    discoverableServers.forEach(discoverableServer => {
+      if (!allServers[discoverableServer.server]) {
+        allServers[discoverableServer.server] = {
+          server: discoverableServer.server,
+          description: discoverableServer.description,
+          is_exclusive: false,
+          author: discoverableServer.author,
+          short_description: discoverableServer.short_description,
+          help_email: discoverableServer.help_email,
+          groups: discoverableServer.groups,
+          compliance_level: discoverableServer.compliance_level,
+          tools: [],
+          tool_count: 0,
+          prompts: [],
+          prompt_count: 0,
+          has_access: false,
+          is_discoverable: true
+        }
+      }
+    })
+  }
   
   const serverList = Object.values(allServers)
   
@@ -168,34 +196,49 @@ const MarketplacePanel = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {filteredServers.map((server) => {
             const isSelected = isServerSelected(server.server)
+            const isDiscoverable = server.is_discoverable && !server.has_access
             
             return (
               <div
                 key={server.server}
                 className={`
-                  relative p-4 rounded-lg border-2 transition-all cursor-pointer
-                  ${isSelected 
-                    ? 'border-blue-500 bg-blue-500/10' 
-                    : 'border-gray-600 bg-gray-800 hover:border-gray-500'
+                  relative p-4 rounded-lg border-2 transition-all
+                  ${isDiscoverable 
+                    ? 'border-gray-700 bg-gray-800/50 opacity-75' 
+                    : isSelected 
+                      ? 'border-blue-500 bg-blue-500/10 cursor-pointer' 
+                      : 'border-gray-600 bg-gray-800 hover:border-gray-500 cursor-pointer'
                   }
                 `}
-                onClick={() => toggleServer(server.server)}
+                onClick={() => !isDiscoverable && toggleServer(server.server)}
+                title={isDiscoverable ? 'You do not have access to this server. Contact support to request access.' : ''}
               >
-                {/* Selection Indicator */}
-                <div className={`
-                  absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors
-                  ${isSelected 
-                    ? 'border-blue-500 bg-blue-500' 
-                    : 'border-gray-500'
-                  }
-                `}>
-                  {isSelected && <Check className="w-3 h-3 text-white" />}
-                </div>
+                {/* Selection Indicator or Lock Icon */}
+                {isDiscoverable ? (
+                  <div className="absolute top-3 right-3 w-5 h-5 flex items-center justify-center">
+                    <Lock className="w-4 h-4 text-gray-500" />
+                  </div>
+                ) : (
+                  <div className={`
+                    absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors
+                    ${isSelected 
+                      ? 'border-blue-500 bg-blue-500' 
+                      : 'border-gray-500'
+                    }
+                  `}>
+                    {isSelected && <Check className="w-3 h-3 text-white" />}
+                  </div>
+                )}
 
                 {/* Server Info */}
                 <div className="mb-3">
                   <h3 className="text-base font-semibold text-white capitalize mb-1">
                     {server.server}
+                    {isDiscoverable && (
+                      <span className="ml-2 px-2 py-0.5 bg-orange-600/20 border border-orange-600 text-orange-400 rounded text-xs font-normal">
+                        No Access
+                      </span>
+                    )}
                   </h3>
                   
                   {/* Short Description */}
@@ -222,15 +265,22 @@ const MarketplacePanel = () => {
                         className="text-blue-400 hover:text-blue-300 underline"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        Help
+                        {isDiscoverable ? 'Request Access' : 'Help'}
                       </a>
                     )}
                   </div>
                   
+                  {/* Required Groups for Discoverable Servers */}
+                  {isDiscoverable && server.groups && server.groups.length > 0 && (
+                    <div className="mb-2 text-xs text-gray-400">
+                      <span className="text-gray-500">Required groups:</span> {server.groups.join(', ')}
+                    </div>
+                  )}
+                  
                   {/* Server Stats */}
                   <div className="flex items-center gap-2 text-xs text-gray-400">
-                    {server.tool_count > 0 && <span>{server.tool_count} tools</span>}
-                    {server.prompt_count > 0 && <span>{server.prompt_count} prompts</span>}
+                    {!isDiscoverable && server.tool_count > 0 && <span>{server.tool_count} tools</span>}
+                    {!isDiscoverable && server.prompt_count > 0 && <span>{server.prompt_count} prompts</span>}
                     {server.is_exclusive && (
                       <span className="px-1 py-0.5 bg-orange-600 text-white rounded text-xs">
                         Exclusive
@@ -239,36 +289,38 @@ const MarketplacePanel = () => {
                   </div>
                 </div>
 
-                {/* Tools and Prompts Preview */}
-                <div className="flex flex-wrap gap-1">
-                  {/* Tools */}
-                  {server.tools.slice(0, 3).map((tool) => (
-                    <span
-                      key={tool}
-                      className="px-1.5 py-0.5 bg-gray-700 text-xs rounded text-gray-300"
-                    >
-                      {tool}
-                    </span>
-                  ))}
-                  
-                  {/* Prompts */}
-                  {server.prompts.slice(0, 3).map((prompt) => (
-                    <span
-                      key={prompt.name}
-                      className="px-1.5 py-0.5 bg-purple-700 text-xs rounded text-gray-300"
-                      title={prompt.description}
-                    >
-                      {prompt.name}
-                    </span>
-                  ))}
-                  
-                  {/* Show "more" indicator */}
-                  {(server.tools.length + server.prompts.length) > 3 && (
-                    <span className="px-1.5 py-0.5 bg-gray-700 text-xs rounded text-gray-300">
-                      +{(server.tools.length + server.prompts.length) - 3} more
-                    </span>
-                  )}
-                </div>
+                {/* Tools and Prompts Preview - Only show for accessible servers */}
+                {!isDiscoverable && (
+                  <div className="flex flex-wrap gap-1">
+                    {/* Tools */}
+                    {server.tools.slice(0, 3).map((tool) => (
+                      <span
+                        key={tool}
+                        className="px-1.5 py-0.5 bg-gray-700 text-xs rounded text-gray-300"
+                      >
+                        {tool}
+                      </span>
+                    ))}
+                    
+                    {/* Prompts */}
+                    {server.prompts.slice(0, 3).map((prompt) => (
+                      <span
+                        key={prompt.name}
+                        className="px-1.5 py-0.5 bg-purple-700 text-xs rounded text-gray-300"
+                        title={prompt.description}
+                      >
+                        {prompt.name}
+                      </span>
+                    ))}
+                    
+                    {/* Show "more" indicator */}
+                    {(server.tools.length + server.prompts.length) > 3 && (
+                      <span className="px-1.5 py-0.5 bg-gray-700 text-xs rounded text-gray-300">
+                        +{(server.tools.length + server.prompts.length) - 3} more
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
