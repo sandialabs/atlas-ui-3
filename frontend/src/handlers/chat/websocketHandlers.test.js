@@ -105,4 +105,44 @@ describe('createWebSocketHandler – intermediate updates', () => {
     expect(deps.setCanvasContent).toHaveBeenCalledWith('')
     expect(deps.setCustomUIContent).toHaveBeenCalledWith(null)
   })
+
+  it('creates iframe canvas file from display config with type=iframe', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    const payload = {
+      type: 'intermediate_update',
+      update_type: 'canvas_files',
+      data: {
+        files: [],
+        display: {
+          type: 'iframe',
+          url: 'https://example.com/dashboard',
+          title: 'Analytics Dashboard',
+          sandbox: 'allow-scripts allow-same-origin',
+          open_canvas: true
+        }
+      }
+    }
+
+    handler(payload)
+
+    // Should create a virtual iframe canvas file
+    expect(deps.setCanvasFiles).toHaveBeenCalledTimes(1)
+    const canvasFiles = deps.setCanvasFiles.mock.calls[0][0]
+    expect(canvasFiles).toEqual([
+      {
+        filename: 'Analytics Dashboard',
+        type: 'iframe',
+        url: 'https://example.com/dashboard',
+        sandbox: 'allow-scripts allow-same-origin',
+        isInline: true
+      }
+    ])
+
+    // Should select the iframe file
+    expect(deps.setCurrentCanvasFileIndex).toHaveBeenCalledWith(0)
+    expect(deps.setCanvasContent).toHaveBeenCalledWith('')
+    expect(deps.setCustomUIContent).toHaveBeenCalledWith(null)
+  })
 })
