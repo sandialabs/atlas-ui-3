@@ -282,5 +282,84 @@ def create_iframe_demo() -> Dict[str, Any]:
         }
     }
 
+@mcp.tool
+def create_html_with_iframe() -> Dict[str, Any]:
+    """
+    Create an HTML artifact that includes an embedded iframe.
+    
+    This demonstrates how MCP tools can return HTML content with embedded
+    iframes that will be properly rendered in the canvas panel.
+    
+    Returns:
+        Dictionary with HTML artifact containing an iframe
+    """
+    html_content = """<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .iframe-container {
+            width: 100%;
+            height: 600px;
+            border: 2px solid #444;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        h1 {
+            color: #4a9eff;
+            margin-bottom: 10px;
+        }
+        p {
+            color: #aaa;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Embedded Content Demo</h1>
+    <p>This HTML artifact includes an embedded iframe showing external content:</p>
+    <div class="iframe-container">
+        <iframe 
+            src="https://example.com" 
+            width="100%" 
+            height="100%" 
+            sandbox="allow-scripts allow-same-origin"
+            frameborder="0">
+        </iframe>
+    </div>
+</body>
+</html>"""
+    
+    import base64
+    html_base64 = base64.b64encode(html_content.encode('utf-8')).decode('utf-8')
+    
+    return {
+        "results": {
+            "content": "HTML with embedded iframe created! Check the canvas panel."
+        },
+        "artifacts": [
+            {
+                "name": "iframe_demo.html",
+                "b64": html_base64,
+                "mime": "text/html",
+                "size": len(html_content.encode('utf-8')),
+                "description": "HTML page with embedded iframe",
+                "viewer": "html"
+            }
+        ],
+        "display": {
+            "open_canvas": True,
+            "primary_file": "iframe_demo.html",
+            "mode": "replace",
+            "viewer_hint": "html"
+        }
+    }
+
 if __name__ == "__main__":
     mcp.run()
