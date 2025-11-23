@@ -10,12 +10,16 @@ class TestErrorClassification:
 
     def test_classify_rate_limit_error_by_type_name(self):
         """Test classification of rate limit errors by exception type name."""
-        error = Exception("Some error message")
-        error.__class__.__name__ = "RateLimitError"
+        # Create a custom exception class to test type name detection
+        class RateLimitError(Exception):
+            pass
         
+        error = RateLimitError("Some error message")
+        
+        from domain.errors import RateLimitError as DomainRateLimitError
         error_class, user_msg, log_msg = classify_llm_error(error)
         
-        assert error_class == RateLimitError
+        assert error_class == DomainRateLimitError
         assert "high traffic" in user_msg.lower()
         assert "try again" in user_msg.lower()
         assert "rate limit" in log_msg.lower()
