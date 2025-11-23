@@ -85,7 +85,7 @@ class TestErrorFlowIntegration:
         assert "authentication" in error_msg.lower()
         assert "administrator" in error_msg.lower()
         # Should NOT contain the actual API key reference
-        assert "API key" not in error_msg or "api key" not in error_msg.lower()
+        assert "API key" not in error_msg and "api key" not in error_msg.lower()
 
     @pytest.mark.asyncio
     async def test_successful_llm_call(self):

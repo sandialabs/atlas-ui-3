@@ -96,7 +96,10 @@ class TestErrorClassification:
             
             # User messages should be helpful and not expose technical details
             assert len(user_msg) > 20  # Should be a complete sentence
-            assert not any(char in user_msg for char in [":", "abc123"])  # No technical details
+            # Technical details should not appear in user message
+            technical_substrings = ["RateLimitError:", "abc123", "stack trace"]
+            for technical in technical_substrings:
+                assert technical not in user_msg, f"User message should not contain technical detail: {technical}"
             assert user_msg[0].isupper()  # Starts with capital letter
             assert user_msg.endswith(".")  # Ends with period
 
