@@ -85,11 +85,13 @@ class LiteLLMCaller:
         except ValueError as e:
             logger.error(f"Failed to resolve API key for model {model_name}: {e}")
             raise
-        
+
         if api_key:
+            # Always pass api_key to LiteLLM for all providers
+            kwargs["api_key"] = api_key
+
+            # Additionally set provider-specific env vars for LiteLLM's internal logic
             if "openrouter" in model_config.model_url:
-                kwargs["api_key"] = api_key
-                # LiteLLM will automatically set the correct env var
                 os.environ["OPENROUTER_API_KEY"] = api_key
             elif "openai" in model_config.model_url:
                 os.environ["OPENAI_API_KEY"] = api_key
@@ -99,6 +101,10 @@ class LiteLLMCaller:
                 os.environ["GOOGLE_API_KEY"] = api_key
             elif "cerebras" in model_config.model_url:
                 os.environ["CEREBRAS_API_KEY"] = api_key
+            else:
+                # Custom endpoint - set OPENAI_API_KEY as fallback
+                # (most custom endpoints are OpenAI-compatible)
+                os.environ["OPENAI_API_KEY"] = api_key
         
         # Set custom API base for non-standard endpoints
         if hasattr(model_config, 'model_url') and model_config.model_url:
