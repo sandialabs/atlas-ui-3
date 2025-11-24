@@ -2,6 +2,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 from starlette.testclient import TestClient
 
+from infrastructure.app_factory import app_factory
 from main import app
 
 
@@ -29,8 +30,6 @@ def test_rag_discovery_skipped_when_feature_disabled(monkeypatch):
     mock_rag_mcp.discover_data_sources = AsyncMock(return_value=[])
     mock_rag_mcp.discover_servers = AsyncMock(return_value=[])
 
-    from infrastructure.app_factory import app_factory
-    
     # Patch the app_factory methods
     with patch.object(app_factory, 'get_rag_client', return_value=mock_rag_client):
         with patch.object(app_factory, 'get_rag_mcp_service', return_value=mock_rag_mcp):
