@@ -24,9 +24,8 @@ cleanup_mcp() {
 }
 
 cleanup_processes() {
-    echo "Killing any running uvicorn processes for main backend... and python processes"
-    pkill -f "uvicorn main:app"
-    pkill -f python
+    echo "Killing any running uvicorn processes for main backend..."
+    pkill -f "uvicorn main:app" || true
     sleep 2
     clear
 }
