@@ -3,9 +3,23 @@
 Simple E2E tests using requests.
 Tests basic functionality without complex browser automation.
 """
+import os
+import subprocess
 import requests
 import time
 import sys
+
+# CLI test constants
+CLI_TIMEOUT_SHORT = 30
+CLI_TIMEOUT_LONG = 60  # For MCP initialization
+
+
+def get_cli_paths():
+    """Get backend directory and CLI script path."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_dir = os.path.join(os.path.dirname(script_dir), "backend")
+    cli_path = os.path.join(backend_dir, "cli.py")
+    return backend_dir, cli_path
 
 
 def wait_for_server(url, max_retries=30, delay=2):
@@ -109,15 +123,9 @@ def test_api_endpoints():
 
 def test_cli_list_models():
     """Test CLI list-models command."""
-    import subprocess
-    import os
-    
     print("Testing CLI list-models command...")
     
-    # Determine backend directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    backend_dir = os.path.join(os.path.dirname(script_dir), "backend")
-    cli_path = os.path.join(backend_dir, "cli.py")
+    backend_dir, cli_path = get_cli_paths()
     
     if not os.path.exists(cli_path):
         print(f"⚠️  CLI script not found at {cli_path}, skipping CLI tests")
@@ -129,7 +137,7 @@ def test_cli_list_models():
             capture_output=True,
             text=True,
             cwd=backend_dir,
-            timeout=30
+            timeout=CLI_TIMEOUT_SHORT
         )
         
         if result.returncode == 0 and "Available LLM Models" in result.stdout:
@@ -148,15 +156,9 @@ def test_cli_list_models():
 
 def test_cli_list_tools():
     """Test CLI list-tools command."""
-    import subprocess
-    import os
-    
     print("Testing CLI list-tools command...")
     
-    # Determine backend directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    backend_dir = os.path.join(os.path.dirname(script_dir), "backend")
-    cli_path = os.path.join(backend_dir, "cli.py")
+    backend_dir, cli_path = get_cli_paths()
     
     if not os.path.exists(cli_path):
         print(f"⚠️  CLI script not found at {cli_path}, skipping CLI tests")
@@ -168,7 +170,7 @@ def test_cli_list_tools():
             capture_output=True,
             text=True,
             cwd=backend_dir,
-            timeout=60  # Longer timeout for MCP initialization
+            timeout=CLI_TIMEOUT_LONG  # Longer timeout for MCP initialization
         )
         
         if result.returncode == 0 and "Available Tools" in result.stdout:
@@ -187,15 +189,9 @@ def test_cli_list_tools():
 
 def test_cli_help():
     """Test CLI help command."""
-    import subprocess
-    import os
-    
     print("Testing CLI help command...")
     
-    # Determine backend directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    backend_dir = os.path.join(os.path.dirname(script_dir), "backend")
-    cli_path = os.path.join(backend_dir, "cli.py")
+    backend_dir, cli_path = get_cli_paths()
     
     if not os.path.exists(cli_path):
         print(f"⚠️  CLI script not found at {cli_path}, skipping CLI tests")
@@ -207,7 +203,7 @@ def test_cli_help():
             capture_output=True,
             text=True,
             cwd=backend_dir,
-            timeout=30
+            timeout=CLI_TIMEOUT_SHORT
         )
         
         if result.returncode == 0 and "Headless CLI for Atlas UI 3" in result.stdout:
