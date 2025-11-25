@@ -27,6 +27,7 @@ from domain.errors import (
 from core.middleware import AuthMiddleware
 from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
+from core.doe_lab_middleware import DOELabMiddleware
 from core.otel_config import setup_opentelemetry
 from core.utils import sanitize_for_logging
 from core.auth import get_user_from_header
@@ -132,6 +133,12 @@ RateLimit first to cheaply throttle abusive traffic before heavier logic.
 """
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
+# DOE lab domain check (if enabled) - add before Auth so it runs after
+if config.app_settings.feature_doe_lab_check_enabled:
+    app.add_middleware(
+        DOELabMiddleware,
+        auth_redirect_url=config.app_settings.auth_redirect_url
+    )
 app.add_middleware(
     AuthMiddleware, 
     debug_mode=config.app_settings.debug_mode,

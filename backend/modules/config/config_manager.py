@@ -285,6 +285,12 @@ class AppSettings(BaseSettings):
         description="Enable compliance level filtering for MCP servers and data sources",
         validation_alias=AliasChoices("FEATURE_COMPLIANCE_LEVELS_ENABLED"),
     )
+    # DOE lab email domain check feature gate
+    feature_doe_lab_check_enabled: bool = Field(
+        False,
+        description="Enable DOE/NNSA/DOE lab email domain restriction",
+        validation_alias=AliasChoices("FEATURE_DOE_LAB_CHECK_ENABLED"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
