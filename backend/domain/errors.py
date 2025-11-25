@@ -46,6 +46,11 @@ class LLMError(DomainError):
     pass
 
 
+class LLMServiceError(LLMError):
+    """Generic LLM service failure that is not a validation issue."""
+    pass
+
+
 class ToolError(DomainError):
     """Tool execution error."""
     pass

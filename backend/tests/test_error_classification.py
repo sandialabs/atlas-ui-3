@@ -1,7 +1,7 @@
 """Tests for error classification and user-friendly error messages."""
 
 from application.chat.utilities.error_utils import classify_llm_error
-from domain.errors import RateLimitError, LLMTimeoutError, LLMAuthenticationError, ValidationError
+from domain.errors import RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError
 
 
 class TestErrorClassification:
@@ -77,7 +77,7 @@ class TestErrorClassification:
         
         error_class, user_msg, log_msg = classify_llm_error(error)
         
-        assert error_class == ValidationError
+        assert error_class == LLMServiceError
         assert "error" in user_msg.lower()
         assert "try again" in user_msg.lower() or "contact support" in user_msg.lower()
 

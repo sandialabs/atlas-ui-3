@@ -6,9 +6,9 @@ This provides a mock LLM service for testing purposes with rate limiting and ran
 It simulates OpenAI-compatible API responses for testing reliability and error handling.
 """
 
-import json
 import time
 import uuid
+import os
 import random
 import logging
 from datetime import datetime
@@ -52,7 +52,7 @@ class ChatCompletionResponse(BaseModel):
     choices: List[ChatCompletionChoice]
     usage: ChatCompletionUsage
 
-# Rate limiting
+# Rate limiting (test-only; not production-grade, no locking for concurrency).
 class RateLimiter:
     def __init__(self, requests_per_minute: int = 10):
         self.requests_per_minute = requests_per_minute
@@ -98,8 +98,16 @@ MOCK_RESPONSES = {
 }
 
 def should_simulate_error() -> Optional[str]:
-    """Randomly decide whether to simulate an error (10% chance)."""
-    error_types = ["server_error", "network_error", None, None, None, None]  #  error rate
+    """Optionally simulate errors.
+
+    Controlled via MOCK_LLM_DETERMINISTIC env var:
+    - if set to a truthy value ("1", "true", "yes"), no random errors.
+    - otherwise, ~10%% chance of server or network error.
+    """
+    if os.getenv("MOCK_LLM_DETERMINISTIC", "").lower() in {"1", "true", "yes"}:
+        return None
+
+    error_types = ["server_error", "network_error", None, None, None, None]
     error_type = random.choice(error_types)
 
     if error_type:
@@ -108,7 +116,13 @@ def should_simulate_error() -> Optional[str]:
     return None
 
 def add_random_delay():
-    """Add random delays to simulate network latency."""
+    """Optionally add random delays to simulate network latency.
+
+    Disabled when MOCK_LLM_DETERMINISTIC is truthy.
+    """
+    if os.getenv("MOCK_LLM_DETERMINISTIC", "").lower() in {"1", "true", "yes"}:
+        return
+
     # 30% chance of delay between 0.1-2 seconds
     if random.random() < 0.3:
         delay = random.uniform(0.1, 2.0)

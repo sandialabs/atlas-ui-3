@@ -1,3 +1,4 @@
+```markdown
 # Error Handling Improvements
 
 ## Problem
@@ -12,6 +13,7 @@ Implemented comprehensive error classification and user-friendly error messaging
 - `RateLimitError` - For rate limiting scenarios
 - `LLMTimeoutError` - For timeout scenarios
 - `LLMAuthenticationError` - For authentication failures
+- `LLMServiceError` - For generic LLM service failures
 
 ### 2. Error Classification (`backend/application/chat/utilities/error_utils.py`)
 Added `classify_llm_error()` function that:
@@ -56,12 +58,12 @@ User: ✅ *Knows to wait and try again*
 | **RateLimitError** | "The AI service is experiencing high traffic. Please try again in a moment." | API rate limits exceeded |
 | **LLMTimeoutError** | "The AI service request timed out. Please try again." | Request takes too long |
 | **LLMAuthenticationError** | "There was an authentication issue with the AI service. Please contact your administrator." | Invalid API keys, auth failures |
-| **ValidationError** | "The AI service encountered an error. Please try again or contact support if the issue persists." | Generic LLM errors |
+| **LLMServiceError** | "The AI service encountered an error. Please try again or contact support if the issue persists." | Generic LLM service errors |
 
 ## Security & Privacy
-- ✅ Sensitive details (API keys, etc.) NOT exposed to users
-- ✅ Full error details logged for admin debugging
-- ✅ User messages are helpful but non-technical
+- Sensitive details (API keys, etc.) NOT exposed to users
+- Full error details logged for admin debugging
+- User messages are helpful but non-technical
 
 ## Testing
 Run the demonstration:
@@ -75,4 +77,5 @@ cd backend
 export PYTHONPATH=/path/to/atlas-ui-3/backend
 python -m pytest tests/test_error_classification.py -v
 python -m pytest tests/test_error_flow_integration.py -v
+```
 ```

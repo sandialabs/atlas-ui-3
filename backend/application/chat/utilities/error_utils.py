@@ -8,7 +8,7 @@ across chat operations without maintaining any state.
 import logging
 from typing import Any, Dict, List, Optional, Callable, Awaitable, Tuple
 
-from domain.errors import ValidationError, RateLimitError, LLMTimeoutError, LLMAuthenticationError
+from domain.errors import ValidationError, RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError
 from domain.messages.models import MessageType
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,9 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
     Classify LLM errors and return appropriate error type, user message, and log message.
     
     Returns:
-        Tuple of (error_class, user_message, log_message)
+        Tuple of (error_class, user_message, log_message).
+
+    NOTE: user_message MUST NOT contain raw exception details or sensitive data.
     """
     error_str = str(error)
     error_type_name = type(error).__name__
@@ -88,10 +90,10 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
         log_msg = f"Authentication error: {error_str}"
         return (LLMAuthenticationError, user_msg, log_msg)
     
-    # Generic LLM error
-    user_msg = f"The AI service encountered an error. Please try again or contact support if the issue persists."
+    # Generic LLM service error (non-validation)
+    user_msg = "The AI service encountered an error. Please try again or contact support if the issue persists."
     log_msg = f"LLM error: {error_str}"
-    return (ValidationError, user_msg, log_msg)
+    return (LLMServiceError, user_msg, log_msg)
 
 
 async def safe_call_llm_with_tools(
