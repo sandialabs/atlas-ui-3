@@ -1,0 +1,122 @@
+# Example values for production environment
+replicaCount: 3
+
+image:
+  repository: your-registry.example.com/mcp-http-mock
+  pullPolicy: IfNotPresent
+  tag: "1.0.0"
+  baseImage: "ubuntu"
+
+# Image pull secrets for private registry
+imagePullSecrets:
+  - name: registry-credentials
+
+service:
+  type: LoadBalancer
+  port: 8005
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: mcp-server.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: mcp-server-tls
+      hosts:
+        - mcp-server.example.com
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Production tokens should be stored in Kubernetes secrets
+# Create secret: kubectl create secret generic mcp-tokens --from-literal=token1='xxx' --from-literal=token2='yyy'
+envFrom:
+  - secretRef:
+      name: mcp-tokens
+
+# Pod disruption budget for high availability
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Network policy for security
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: atlas-ui
+      ports:
+        - protocol: TCP
+          port: 8005
+  egress:
+    - to:
+      - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+
+# Service monitor for Prometheus
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    prometheus: kube-prometheus
+
+# Node affinity for production workloads
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - mcp-server
+          topologyKey: kubernetes.io/hostname
+
+# Production-ready probe settings
+livenessProbe:
+  httpGet:
+    path: /mcp
+    port: 8005
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /mcp
+    port: 8005
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3

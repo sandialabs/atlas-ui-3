@@ -9,13 +9,19 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, WebSocketException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 
 # Import domain errors
-from domain.errors import ValidationError
+from domain.errors import (
+    ValidationError, 
+    RateLimitError, 
+    LLMTimeoutError, 
+    LLMAuthenticationError,
+    DomainError
+)
 
 # Import from core (only essential middleware and config)
 from core.middleware import AuthMiddleware
@@ -23,6 +29,7 @@ from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
 from core.otel_config import setup_opentelemetry
 from core.utils import sanitize_for_logging
+from core.auth import get_user_from_header
 
 # Import from infrastructure
 from infrastructure.app_factory import app_factory
@@ -32,6 +39,8 @@ from infrastructure.transport.websocket_connection_adapter import WebSocketConne
 from routes.config_routes import router as config_router
 from routes.admin_routes import admin_router
 from routes.files_routes import router as files_router
+from routes.health_routes import router as health_router
+from version import VERSION
 
 # Load environment variables from the parent directory
 load_dotenv(dotenv_path="../.env")
@@ -110,8 +119,8 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app with minimal setup
 app = FastAPI(
     title="Chat UI Backend",
-    description="Basic chat backend with modular architecture", 
-    version="2.0.0",
+    description="Basic chat backend with modular architecture",
+    version=VERSION,
     lifespan=lifespan,
 )
 
@@ -123,12 +132,24 @@ RateLimit first to cheaply throttle abusive traffic before heavier logic.
 """
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
-app.add_middleware(AuthMiddleware, debug_mode=config.app_settings.debug_mode)
+app.add_middleware(
+    AuthMiddleware, 
+    debug_mode=config.app_settings.debug_mode,
+    auth_header_name=config.app_settings.auth_user_header,
+    auth_header_type=config.app_settings.auth_user_header_type,
+    auth_aws_expected_alb_arn=config.app_settings.auth_aws_expected_alb_arn,
+    auth_aws_region=config.app_settings.auth_aws_region,
+    proxy_secret_enabled=config.app_settings.feature_proxy_secret_enabled,
+    proxy_secret_header=config.app_settings.proxy_secret_header,
+    proxy_secret=config.app_settings.proxy_secret,
+    auth_redirect_url=config.app_settings.auth_redirect_url
+)
 
 # Include essential routes (add files API)
 app.include_router(config_router)
 app.include_router(admin_router)
 app.include_router(files_router)
+app.include_router(health_router)
 
 # Serve frontend build (Vite)
 project_root = Path(__file__).resolve().parents[1]
@@ -186,30 +207,71 @@ async def websocket_endpoint(websocket: WebSocket):
     2. Reverse proxy intercepts WebSocket handshake (HTTP Upgrade request)
     3. Reverse proxy delegates to authentication service
     4. Auth service validates JWT/session from cookies or headers
-    5. If valid: Auth service returns X-Authenticated-User header
-    6. Reverse proxy forwards connection to this app with X-Authenticated-User header
+    5. If valid: Auth service returns authenticated user header
+    6. Reverse proxy forwards connection to this app with authenticated user header
     7. This app trusts the header (already validated by auth service)
+    
+    The header name is configurable via AUTH_USER_HEADER environment variable
+    (default: X-User-Email). This allows flexibility for different reverse proxy setups.
 
     SECURITY REQUIREMENTS:
     - This app MUST ONLY be accessible via reverse proxy
     - Direct public access to this app bypasses authentication
     - Use network isolation to prevent direct access
     - The /login endpoint lives in the separate auth service
+    - Reverse proxy MUST strip client-provided X-User-Email headers before adding its own
+      (otherwise attackers can inject headers: X-User-Email: admin@company.com)
 
     DEVELOPMENT vs PRODUCTION:
-    - Production: Extracts user from X-Authenticated-User header (set by reverse proxy)
+    - Production: Extracts user from configured auth header (set by reverse proxy)
     - Development: Falls back to 'user' query parameter (INSECURE, local only)
 
     See docs/security_architecture.md for complete architecture details.
     """
+    # Extract user email using the same authentication flow as HTTP requests
+    # Priority: 1) configured auth header (production), 2) query param (dev), 3) test user (dev fallback)
+    config_manager = app_factory.get_config_manager()
+
+    # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
+    if (
+        config_manager.app_settings.feature_proxy_secret_enabled
+        and config_manager.app_settings.proxy_secret
+        and not config_manager.app_settings.debug_mode
+    ):
+        proxy_secret_header = config_manager.app_settings.proxy_secret_header
+        proxy_secret_value = websocket.headers.get(proxy_secret_header)
+        if proxy_secret_value != config_manager.app_settings.proxy_secret:
+            logger.warning(
+                "WS proxy secret mismatch on %s",
+                sanitize_for_logging(websocket.client)
+            )
+            raise WebSocketException(code=1008, reason="Invalid proxy secret")
+
     await websocket.accept()
 
-    # Basic auth: derive user from query parameters or use test user
-    user_email = websocket.query_params.get('user')
+    user_email = None
+    
+    # Check configured auth header first (consistent with AuthMiddleware)
+    auth_header_name = config_manager.app_settings.auth_user_header
+    x_email_header = websocket.headers.get(auth_header_name)
+    if x_email_header:
+        user_email = get_user_from_header(x_email_header)
+        logger.info(
+            "WebSocket authenticated via %s header: %s",
+            sanitize_for_logging(auth_header_name),
+            sanitize_for_logging(user_email)
+        )
+    
+    # Fallback to query parameter for backward compatibility (development/testing)
     if not user_email:
-        # Fallback to test user or require auth
-        config_manager = app_factory.get_config_manager()
+        user_email = websocket.query_params.get('user')
+        if user_email:
+            logger.info("WebSocket authenticated via query parameter: %s", sanitize_for_logging(user_email))
+    
+    # Final fallback to test user (development mode only)
+    if not user_email:
         user_email = config_manager.app_settings.test_user or 'test@test.com'
+        logger.info(f"WebSocket using fallback test user: {sanitize_for_logging(user_email)}")
 
     session_id = uuid4()
 
@@ -252,16 +314,47 @@ async def websocket_endpoint(websocket: WebSocket):
                             update_callback=lambda message: websocket_update_callback(websocket, message),
                             files=data.get("files")
                         )
-                    except ValidationError as e:
+                    except RateLimitError as e:
+                        logger.warning(f"Rate limit error in chat handler: {e}")
                         await websocket.send_json({
                             "type": "error",
-                            "message": str(e)
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "rate_limit"
+                        })
+                    except LLMTimeoutError as e:
+                        logger.warning(f"Timeout error in chat handler: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "timeout"
+                        })
+                    except LLMAuthenticationError as e:
+                        logger.error(f"Authentication error in chat handler: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "authentication"
+                        })
+                    except ValidationError as e:
+                        logger.warning(f"Validation error in chat handler: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "validation"
+                        })
+                    except DomainError as e:
+                        logger.error(f"Domain error in chat handler: {e}", exc_info=True)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "domain"
                         })
                     except Exception as e:
-                        logger.error(f"Error in chat handler: {e}", exc_info=True)
+                        logger.error(f"Unexpected error in chat handler: {e}", exc_info=True)
                         await websocket.send_json({
                             "type": "error",
-                            "message": "An unexpected error occurred"
+                            "message": "An unexpected error occurred. Please try again or contact support if the issue persists.",
+                            "error_type": "unexpected"
                         })
 
                 # Start chat handling in background

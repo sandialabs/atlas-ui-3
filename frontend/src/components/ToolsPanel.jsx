@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -10,6 +10,7 @@ const DEFAULT_PARAM_TYPE = 'any'
 const ToolsPanel = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
+  const [collapsedServers, setCollapsedServers] = useState(new Set())
   const navigate = useNavigate()
   const { 
     selectedTools, 
@@ -89,14 +90,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   })
   
   const serverList = Object.values(allServers)
-
-  // Ensure only one prompt remains selected globally if storage had more
-  useEffect(() => {
-    if (selectedPrompts && selectedPrompts.size > 1) {
-      const first = Array.from(selectedPrompts)[0]
-      setSinglePrompt(first)
-    }
-  }, [selectedPrompts, setSinglePrompt])
 
   // Derive currently selected prompt (if any)
   const selectedPromptKey = selectedPrompts && selectedPrompts.size > 0
@@ -229,7 +222,10 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     if (promptKeys.length > 0) {
       const alreadyOne = promptKeys.find(k => selectedPrompts.has(k))
       console.debug('[TOOLS_PANEL] handling prompts for server', { serverName, promptKeys, alreadyOne })
-      setSinglePrompt(alreadyOne || promptKeys[0])
+      // Add first prompt if none already selected from this server
+      if (!alreadyOne) {
+        togglePrompt(promptKeys[0])
+      }
     } else {
       console.debug('[TOOLS_PANEL] no prompts for this server', { serverName })
     }
@@ -255,9 +251,10 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       if (!selectedTools.has(first)) toggleTool(first)
       return
     }
-    // Else, pick first prompt (enforcing single prompt)
+    // Else, pick first prompt
     if (promptKeys.length > 0) {
-      setSinglePrompt(promptKeys[0])
+      const first = promptKeys[0]
+      if (!selectedPrompts.has(first)) togglePrompt(first)
     }
   }
 
@@ -281,6 +278,16 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       newExpanded.add(toolKey)
     }
     setExpandedTools(newExpanded)
+  }
+
+  const toggleServerCollapse = (serverName) => {
+    const newCollapsed = new Set(collapsedServers)
+    if (newCollapsed.has(serverName)) {
+      newCollapsed.delete(serverName)
+    } else {
+      newCollapsed.add(serverName)
+    }
+    setCollapsedServers(newCollapsed)
   }
 
   /**
@@ -380,30 +387,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
               />
             </button>
           </div>
-
-          {/* Selected Prompt Summary */}
-          <div className="flex items-center justify-between px-4 py-2 bg-gray-700 rounded-lg">
-            <div className="flex-1 min-w-0">
-              <h3 className="text-white text-sm font-medium">Selected Prompt</h3>
-              {selectedPromptInfo ? (
-                <p className="text-xs text-gray-300 truncate">
-                  <span className="font-semibold text-purple-300">{selectedPromptInfo.name}</span>
-                  <span className="text-gray-400"> from {selectedPromptInfo.server}</span>
-                </p>
-              ) : (
-                <p className="text-xs text-gray-400">None selected</p>
-              )}
-            </div>
-            {selectedPromptInfo && (
-              <button
-                onClick={() => setSinglePrompt(null)}
-                className="px-2 py-1 rounded text-xs font-medium bg-gray-600 hover:bg-gray-500 text-gray-100 transition-colors flex-shrink-0 ml-2"
-                title="Clear selected prompt"
-              >
-                Clear
-              </button>
-            )}
-          </div>
         </div>
 
         {/* Tools List */}
@@ -411,7 +394,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
           {serverList.length === 0 ? (
             <div className="text-gray-400 text-center py-12 px-6">
               <div className="text-lg mb-4">No servers selected</div>
-              <p className="mb-6 text-gray-500">Add MCP servers from the marketplace to enable tools and integrations</p>
+              <p className="mb-6 text-gray-500">Add MCP servers from the marketplace to enable tools, integrations, and prompts</p>
               <button
                 onClick={navigateToMarketplace}
                 className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -424,7 +407,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
               {/* Section Header */}
               <div className="px-4 py-2 border-b border-gray-700">
                 <h3 className="text-sm font-semibold text-white">
-                  Your Installed Tools ({serverList.reduce((total, server) => total + server.tool_count + server.prompt_count, 0)})
+                  Your Installed Tools, Integrations, and Prompts ({serverList.reduce((total, server) => total + server.tool_count + server.prompt_count, 0)})
                 </h3>
               </div>
               
@@ -450,10 +433,28 @@ const ToolsPanel = ({ isOpen, onClose }) => {
               ) : (
                 <div className="px-4 pb-4 space-y-3">
                   {filteredServers.map(server => {
+                    const isCollapsed = collapsedServers.has(server.server)
+                    const toolCount = server.tools.length
+                    const promptCount = server.prompts.length
+                    const totalItems = toolCount + promptCount
+                    
                     return (
                       <div key={server.server} className="bg-gray-700 rounded-lg overflow-hidden">
                         {/* Main Server Row */}
                         <div className="p-2 flex items-start gap-2">
+                          {/* Collapse/Expand Button */}
+                          <button
+                            onClick={() => toggleServerCollapse(server.server)}
+                            className="flex-shrink-0 p-1 hover:bg-gray-600 rounded transition-colors"
+                            title={isCollapsed ? 'Expand server' : 'Collapse server'}
+                          >
+                            {isCollapsed ? (
+                              <ChevronRight className="w-4 h-4 text-gray-300" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4 text-gray-300" />
+                            )}
+                          </button>
+                          
                           {/* Server Icon */}
                           <div className="bg-gray-600 rounded p-1.5 flex-shrink-0">
                             <Wrench className="w-3 h-3 text-gray-300" />
@@ -465,6 +466,9 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                               <h3 className="text-white font-medium text-base capitalize truncate">
                                 {server.server}
                               </h3>
+                              <span className="text-xs text-gray-400 flex-shrink-0">
+                                ({totalItems} {totalItems === 1 ? 'item' : 'items'})
+                              </span>
                               {server.is_exclusive && (
                                 <span className="px-1.5 py-0.5 bg-orange-600 text-xs rounded text-white flex-shrink-0">
                                   Exclusive
@@ -479,11 +483,14 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                             </div>
                             <p className="text-xs text-gray-400 mb-2 line-clamp-1">{server.description}</p>
                             
-                            {/* Tools Display */}
-                            {server.tools.length > 0 && (
-                              <div className="mb-1">
-                                <div className="flex flex-wrap gap-1">
-          {server.tools.map(tool => {
+                            {/* Tools and Prompts - only show when not collapsed */}
+                            {!isCollapsed && (
+                              <>
+                                {/* Tools Display */}
+                                {server.tools.length > 0 && (
+                                  <div className="mb-1">
+                                    <div className="flex flex-wrap gap-1">
+                {server.tools.map(tool => {
                                     const toolKey = `${server.server}_${tool}`
                                     const isSelected = selectedTools.has(toolKey)
                                     const isToolExpanded = expandedTools.has(toolKey)
@@ -546,15 +553,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                     return (
                                       <button
                                         key={prompt.name}
-                                        onClick={() => {
-                                          if (!isSelected) {
-                                            // Set this prompt as the single selected prompt
-                                            setSinglePrompt(promptKey)
-                                          } else {
-                                            // Deselect this prompt
-                                            togglePrompt(promptKey)
-                                          }
-                                        }}
+                                        onClick={() => togglePrompt(promptKey)}
                                         className={`px-2 py-0.5 text-xs rounded text-white transition-colors hover:opacity-80 ${
                                           isSelected ? 'bg-purple-600' : 'bg-gray-600 hover:bg-purple-600'
                                         }`}
@@ -566,6 +565,8 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                   })}
                                 </div>
                               </div>
+                            )}
+                              </>
                             )}
                           </div>
                           

@@ -4,6 +4,23 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useState, useEffect } from 'react'
 
+// DOMPurify configuration for allowing iframes in HTML content
+const IFRAME_SANITIZE_CONFIG = {
+  ADD_TAGS: ['iframe'],
+  ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src']
+};
+
+// Default sandbox permissions for iframes (restrictive by default)
+const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
+
+// Helper function to check if a file can be downloaded
+const canDownloadFile = (file) => {
+  if (!file) return false;
+  if (file.isInline) return false; // Inline files don't have backend storage
+  if (file.type === 'iframe') return false; // Iframes are not downloadable
+  return true;
+};
+
 // Helper function to process canvas content (strings and structured objects)
 const processCanvasContent = (content) => {
   if (typeof content === 'string') {
@@ -20,7 +37,7 @@ const processCanvasContent = (content) => {
       // Fallback to JSON for other objects
       try {
         return JSON.stringify(content, null, 2)
-      } catch (e) {
+      } catch {
         return String(content || '')
       }
     }
@@ -111,6 +128,55 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
       setFileError(null);
 
       try {
+        // Inline files (e.g., progress artifacts) are rendered from base64 content
+        if (currentFile.isInline && currentFile.content_base64) {
+          try {
+            if (currentFile.type === 'image') {
+              const byteCharacters = atob(currentFile.content_base64);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray], { type: currentFile.mime_type || 'application/octet-stream' });
+              const imageUrl = URL.createObjectURL(blob);
+              setCurrentFileContent({ type: 'image', url: imageUrl, file: currentFile });
+            } else if (currentFile.type === 'pdf') {
+              const byteCharacters = atob(currentFile.content_base64);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray], { type: currentFile.mime_type || 'application/pdf' });
+              const pdfUrl = URL.createObjectURL(blob);
+              setCurrentFileContent({ type: 'pdf', url: pdfUrl, file: currentFile });
+            } else {
+              const decoded = atob(currentFile.content_base64);
+              setCurrentFileContent({ type: currentFile.type, content: decoded, file: currentFile });
+            }
+          } catch (error) {
+            console.error('Error decoding inline canvas file:', error);
+            setFileError('Failed to decode inline file content');
+            setCurrentFileContent(null);
+          } finally {
+            setIsLoadingFile(false);
+          }
+          return;
+        }
+
+        // Handle iframe artifacts (from display config with URL)
+        if (currentFile.type === 'iframe' && currentFile.url) {
+          setCurrentFileContent({ 
+            type: 'iframe', 
+            url: currentFile.url, 
+            file: currentFile,
+            sandbox: currentFile.sandbox || DEFAULT_IFRAME_SANDBOX
+          });
+          setIsLoadingFile(false);
+          return;
+        }
+
         // Fetch file content from the backend
         const response = await fetch(`/api/files/download/${currentFile.s3_key}`, {
           method: 'GET',
@@ -164,7 +230,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
 
   const handleDownload = () => {
     const currentFile = canvasFiles[currentCanvasFileIndex];
-    if (currentFile && downloadFile) {
+    if (canDownloadFile(currentFile) && downloadFile) {
       downloadFile(currentFile.filename);
     }
   };
@@ -174,6 +240,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
       case 'image': return <Image className="w-4 h-4" />;
       case 'pdf': return <File className="w-4 h-4" />;
       case 'html': return <Code className="w-4 h-4" />;
+      case 'iframe': return <Code className="w-4 h-4" />;
       default: return <FileText className="w-4 h-4" />;
     }
   };
@@ -233,12 +300,24 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
             </div>
           );
 
+        case 'iframe':
+          return (
+            <div className="p-4 h-full">
+              <iframe
+                src={currentFileContent.url}
+                className="w-full h-full border-0 rounded-lg"
+                title={currentFileContent.file.filename || 'Embedded Content'}
+                sandbox={currentFileContent.sandbox}
+              />
+            </div>
+          );
+
         case 'html':
           return (
             <div className="p-4">
               <div 
                 className="prose prose-invert max-w-none"
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(currentFileContent.content) }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(currentFileContent.content, IFRAME_SANITIZE_CONFIG) }}
               />
             </div>
           );
@@ -247,7 +326,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
           try {
             // Try to parse as markdown first
             const markdownHtml = marked.parse(currentFileContent.content);
-            const sanitizedHtml = DOMPurify.sanitize(markdownHtml);
+            const sanitizedHtml = DOMPurify.sanitize(markdownHtml, IFRAME_SANITIZE_CONFIG);
             
             return (
               <div 
@@ -255,7 +334,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
                 dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
               />
             );
-          } catch (error) {
+          } catch {
             // Fallback to plain text with syntax highlighting for code files
             const fileExt = currentFileContent.file.filename.split('.').pop().toLowerCase();
             const isCodeFile = ['js', 'py', 'java', 'cpp', 'ts', 'jsx', 'tsx', 'css', 'html', 'json', 'sql'].includes(fileExt);
@@ -280,7 +359,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
           </div>
           <div 
             className="prose prose-invert max-w-none"
-            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(customUIContent.content) }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(customUIContent.content, IFRAME_SANITIZE_CONFIG) }}
           />
         </div>
       )
@@ -302,7 +381,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
       
       try {
         const markdownHtml = marked.parse(content)
-        const sanitizedHtml = DOMPurify.sanitize(markdownHtml)
+        const sanitizedHtml = DOMPurify.sanitize(markdownHtml, IFRAME_SANITIZE_CONFIG)
 
         return (
           <div 

@@ -72,7 +72,7 @@ class ChatOrchestrator:
         # Initialize services
         self.tool_authorization = ToolAuthorizationService(tool_manager=tool_manager)
         self.prompt_override = PromptOverrideService(tool_manager=tool_manager)
-        self.message_builder = MessageBuilder()
+        self.message_builder = MessageBuilder(prompt_provider=prompt_provider)
         
         # Initialize or use provided mode runners
         self.plain_mode = plain_mode or PlainModeRunner(

@@ -1,0 +1,1 @@
+{"duckduckgo": {"command": ["python", "mcp/duckduckgo/main.py"], "cwd": "backend", "groups": ["users"], "description": "duckduckgo MCP server", "author": "Chat UI Team", "short_description": "duckduckgo server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

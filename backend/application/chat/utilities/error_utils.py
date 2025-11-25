@@ -6,9 +6,9 @@ across chat operations without maintaining any state.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Callable, Awaitable
+from typing import Any, Dict, List, Optional, Callable, Awaitable, Tuple
 
-from domain.errors import ValidationError
+from domain.errors import ValidationError, RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError
 from domain.messages.models import MessageType
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,42 @@ async def safe_get_tools_schema(
         raise ValidationError(f"Failed to get tools schema: {str(e)}")
 
 
+def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
+    """
+    Classify LLM errors and return appropriate error type, user message, and log message.
+    
+    Returns:
+        Tuple of (error_class, user_message, log_message).
+
+    NOTE: user_message MUST NOT contain raw exception details or sensitive data.
+    """
+    error_str = str(error)
+    error_type_name = type(error).__name__
+    
+    # Check for rate limiting errors
+    if "RateLimitError" in error_type_name or "rate limit" in error_str.lower() or "high traffic" in error_str.lower():
+        user_msg = "The AI service is experiencing high traffic. Please try again in a moment."
+        log_msg = f"Rate limit error: {error_str}"
+        return (RateLimitError, user_msg, log_msg)
+    
+    # Check for timeout errors
+    if "timeout" in error_str.lower() or "timed out" in error_str.lower():
+        user_msg = "The AI service request timed out. Please try again."
+        log_msg = f"Timeout error: {error_str}"
+        return (LLMTimeoutError, user_msg, log_msg)
+    
+    # Check for authentication/authorization errors
+    if any(keyword in error_str.lower() for keyword in ["unauthorized", "authentication", "invalid api key", "invalid_api_key", "api key"]):
+        user_msg = "There was an authentication issue with the AI service. Please contact your administrator."
+        log_msg = f"Authentication error: {error_str}"
+        return (LLMAuthenticationError, user_msg, log_msg)
+    
+    # Generic LLM service error (non-validation)
+    user_msg = "The AI service encountered an error. Please try again or contact support if the issue persists."
+    log_msg = f"LLM error: {error_str}"
+    return (LLMServiceError, user_msg, log_msg)
+
+
 async def safe_call_llm_with_tools(
     llm_caller,
     model: str,
@@ -73,7 +109,7 @@ async def safe_call_llm_with_tools(
     """
     Safely call LLM with tools and error handling.
     
-    Pure function that handles LLM calling errors.
+    Pure function that handles LLM calling errors with proper classification.
     """
     try:
         if data_sources and user_email:
@@ -85,11 +121,13 @@ async def safe_call_llm_with_tools(
             llm_response = await llm_caller.call_with_tools(
                 model, messages, tools_schema, tool_choice, temperature=temperature
             )
-            logger.info(f"LLM response received with tools only, llm_response: {llm_response}")
+            logger.info("LLM response received with tools only, llm_response: %s", llm_response)
         return llm_response
     except Exception as e:
-        logger.error(f"Error calling LLM with tools: {e}", exc_info=True)
-        raise ValidationError(f"Failed to call LLM with tools: {str(e)}")
+        # Classify the error and raise appropriate error type
+        error_class, user_msg, log_msg = classify_llm_error(e)
+        logger.error(log_msg, exc_info=True)
+        raise error_class(user_msg)
 
 
 async def safe_execute_single_tool(

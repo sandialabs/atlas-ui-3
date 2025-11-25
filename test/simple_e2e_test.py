@@ -3,9 +3,23 @@
 Simple E2E tests using requests.
 Tests basic functionality without complex browser automation.
 """
+import os
+import subprocess
 import requests
 import time
 import sys
+
+# CLI test constants
+CLI_TIMEOUT_SHORT = 30
+CLI_TIMEOUT_LONG = 60  # For MCP initialization
+
+
+def get_cli_paths():
+    """Get backend directory and CLI script path."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_dir = os.path.join(os.path.dirname(script_dir), "backend")
+    cli_path = os.path.join(backend_dir, "cli.py")
+    return backend_dir, cli_path
 
 
 def wait_for_server(url, max_retries=30, delay=2):
@@ -105,6 +119,116 @@ def test_api_endpoints():
     return config_works or banners_works  # At least one should work
 
 
+# --- CLI E2E Tests ---
+
+def test_cli_list_models():
+    """Test CLI list-models command."""
+    print("Testing CLI list-models command...")
+    
+    backend_dir, cli_path = get_cli_paths()
+    
+    if not os.path.exists(cli_path):
+        print(f"⚠️  CLI script not found at {cli_path}, skipping CLI tests")
+        return True  # Skip gracefully
+    
+    try:
+        result = subprocess.run(
+            [sys.executable, cli_path, "list-models"],
+            capture_output=True,
+            text=True,
+            cwd=backend_dir,
+            timeout=CLI_TIMEOUT_SHORT
+        )
+        
+        if result.returncode == 0 and "Available LLM Models" in result.stdout:
+            print("✅ CLI list-models command works")
+            return True
+        else:
+            print(f"❌ CLI list-models failed: {result.stderr}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("❌ CLI list-models timed out")
+        return False
+    except Exception as e:
+        print(f"❌ CLI list-models failed: {e}")
+        return False
+
+
+def test_cli_list_tools():
+    """Test CLI list-tools command."""
+    print("Testing CLI list-tools command...")
+    
+    backend_dir, cli_path = get_cli_paths()
+    
+    if not os.path.exists(cli_path):
+        print(f"⚠️  CLI script not found at {cli_path}, skipping CLI tests")
+        return True  # Skip gracefully
+    
+    try:
+        result = subprocess.run(
+            [sys.executable, cli_path, "list-tools"],
+            capture_output=True,
+            text=True,
+            cwd=backend_dir,
+            timeout=CLI_TIMEOUT_LONG  # Longer timeout for MCP initialization
+        )
+        
+        if result.returncode == 0 and "Available Tools" in result.stdout:
+            print("✅ CLI list-tools command works")
+            return True
+        else:
+            print(f"❌ CLI list-tools failed: {result.stderr}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("❌ CLI list-tools timed out")
+        return False
+    except Exception as e:
+        print(f"❌ CLI list-tools failed: {e}")
+        return False
+
+
+def test_cli_help():
+    """Test CLI help command."""
+    print("Testing CLI help command...")
+    
+    backend_dir, cli_path = get_cli_paths()
+    
+    if not os.path.exists(cli_path):
+        print(f"⚠️  CLI script not found at {cli_path}, skipping CLI tests")
+        return True  # Skip gracefully
+    
+    try:
+        result = subprocess.run(
+            [sys.executable, cli_path, "--help"],
+            capture_output=True,
+            text=True,
+            cwd=backend_dir,
+            timeout=CLI_TIMEOUT_SHORT
+        )
+        
+        if result.returncode == 0 and "Headless CLI for Atlas UI 3" in result.stdout:
+            # Check that all expected commands are listed
+            has_chat = "chat" in result.stdout
+            has_list_models = "list-models" in result.stdout
+            has_list_tools = "list-tools" in result.stdout
+            
+            if has_chat and has_list_models and has_list_tools:
+                print("✅ CLI help command works and shows all expected commands")
+                return True
+            else:
+                print(f"⚠️  CLI help missing some commands: chat={has_chat}, list-models={has_list_models}, list-tools={has_list_tools}")
+                return False
+        else:
+            print(f"❌ CLI help failed: {result.stderr}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("❌ CLI help timed out")
+        return False
+    except Exception as e:
+        print(f"❌ CLI help failed: {e}")
+        return False
+
+
 def run_tests():
     """Run all E2E tests."""
     print("🧪 Starting Simple E2E Tests")
@@ -120,6 +244,9 @@ def run_tests():
         test_health_endpoint,
         test_static_files,
         test_api_endpoints,
+        test_cli_help,
+        test_cli_list_models,
+        test_cli_list_tools,
     ]
     
     results = []

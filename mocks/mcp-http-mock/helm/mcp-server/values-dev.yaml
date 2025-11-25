@@ -1,0 +1,48 @@
+# Example values for development environment
+replicaCount: 1
+
+image:
+  repository: mcp-http-mock
+  pullPolicy: IfNotPresent
+  tag: "latest"
+  baseImage: "ubuntu"
+
+service:
+  type: NodePort
+  port: 8005
+  nodePort: 30005
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+env:
+  MCP_MOCK_TOKEN_1: "dev-token-123"
+  MCP_MOCK_TOKEN_2: "dev-token-456"
+  PYTHONUNBUFFERED: "1"
+
+autoscaling:
+  enabled: false
+
+# Development-friendly probe settings
+livenessProbe:
+  httpGet:
+    path: /mcp
+    port: 8005
+  initialDelaySeconds: 20
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /mcp
+    port: 8005
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3

@@ -13,6 +13,7 @@ from domain.messages.models import (
     ToolResult
 )
 from domain.sessions.models import Session
+from domain.errors import DomainError
 from interfaces.llm import LLMProtocol, LLMResponse
 from interfaces.events import EventPublisher
 from interfaces.sessions import SessionRepository
@@ -262,7 +263,12 @@ class ChatService:
                 update_callback=update_callback,
                 **kwargs
             )
+        except DomainError:
+            # Let domain-level errors (e.g., LLM / rate limit / validation) bubble up
+            # so transport layers (WebSocket/HTTP) can handle them consistently.
+            raise
         except Exception as e:
+            # Fallback for unexpected errors in HTTP-style callers
             return error_utils.handle_chat_message_error(e, "chat message handling")
             
     async def handle_reset_session(

@@ -39,3 +39,8 @@ models:
     model_name: "gpt-4.1-nano"
     api_key: "${OPENAI_API_KEY}"
     compliance_level: "External"
+  cerebras-gpt-oss-120b:
+    model_url: "https://api.cerebras.ai/v1"
+    model_name: "gpt-oss-120b"
+    api_key: "${CEREBRAS_API_KEY}"
+    compliance_level: "External"

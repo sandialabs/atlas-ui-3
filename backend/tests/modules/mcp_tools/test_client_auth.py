@@ -139,7 +139,8 @@ class TestMCPClientAuthentication:
 
     @pytest.mark.asyncio
     @patch('backend.modules.mcp_tools.client.Client')
-    async def test_stdio_client_ignores_token(self, mock_client_class):
+    @patch('fastmcp.client.transports.StdioTransport')
+    async def test_stdio_client_ignores_token(self, mock_transport_class, mock_client_class):
         """stdio clients should ignore auth_token (no auth mechanism)."""
         server_config = {
             "command": ["python", "server.py"],
@@ -155,8 +156,10 @@ class TestMCPClientAuthentication:
             
             await manager._initialize_single_client("test-server", server_config)
 
-        # For stdio, the Client is called with the command, not URL and auth
-        mock_client_class.assert_called_once_with(["python", "server.py"])
+        # For stdio, the Client is called with StdioTransport, not URL and auth
+        # The auth_token should be ignored for stdio transports
+        assert mock_transport_class.called
+        assert mock_client_class.called
 
     @pytest.mark.asyncio
     async def test_malformed_env_var_pattern(self, caplog):

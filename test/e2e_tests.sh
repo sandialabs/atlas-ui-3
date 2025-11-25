@@ -17,6 +17,10 @@ echo "Frontend directory: $FRONTEND_DIR"
 echo "Backend directory: $BACKEND_DIR"
 echo "E2E test directory: $E2E_DIR"
 
+# Use minimal MCP config for faster startup (same as backend tests)
+export MCP_CONFIG_FILE="mcp-test.json"
+echo "Using minimal MCP config: $MCP_CONFIG_FILE"
+
 # Handle frontend build based on environment
 cd "$FRONTEND_DIR"
 

@@ -5,6 +5,7 @@ import { Send, Paperclip, X, Square } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
+import PromptSelector from './PromptSelector'
 
 const ChatArea = () => {
   const [inputValue, setInputValue] = useState('')
@@ -597,26 +598,27 @@ const ChatArea = () => {
             </div>
           )}
           
-          <form onSubmit={handleSubmit} className="flex gap-3">
-            <button
-              type="button"
-              onClick={triggerFileUpload}
-              className="px-3 py-3 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
-              title="Upload files"
-            >
-              <Paperclip className="w-5 h-5" />
-            </button>
-            {agentModeEnabled && (isThinking || agentPendingQuestion) && (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+            <div className="flex gap-3">
               <button
                 type="button"
-                onClick={stopAgent}
-                className="px-3 py-3 bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
-                title="Stop agent"
+                onClick={triggerFileUpload}
+                className="px-3 py-3 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                title="Upload files"
               >
-                <Square className="w-5 h-5" />
+                <Paperclip className="w-5 h-5" />
               </button>
-            )}
-            <div className="flex-1 relative">
+              {agentModeEnabled && (isThinking || agentPendingQuestion) && (
+                <button
+                  type="button"
+                  onClick={stopAgent}
+                  className="px-3 py-3 bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                  title="Stop agent"
+                >
+                  <Square className="w-5 h-5" />
+                </button>
+              )}
+              <div className="flex-1 relative">
               <textarea
                 ref={textareaRef}
                 value={inputValue}
@@ -701,6 +703,7 @@ const ChatArea = () => {
             >
               <Send className="w-5 h-5" />
             </button>
+          </div>
           </form>
           
           {/* Hidden file input */}
@@ -714,7 +717,10 @@ const ChatArea = () => {
           />
           
           <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
-            <span>Press Shift + Enter for new line</span>
+            <div className="flex items-center gap-3">
+              <PromptSelector />
+              <span>Press Shift + Enter for new line</span>
+            </div>
             {Object.keys(uploadedFiles).length > 0 && (
               <span>{Object.keys(uploadedFiles).length} file(s) uploaded</span>
             )}

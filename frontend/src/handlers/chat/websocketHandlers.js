@@ -1,5 +1,8 @@
 // Handlers extracted from original ChatContext to keep provider lean
 
+// Default sandbox permissions for iframes (restrictive by default)
+const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
+
 export function createWebSocketHandler(deps) {
   const {
     addMessage,
@@ -12,6 +15,7 @@ export function createWebSocketHandler(deps) {
     setCanvasFiles,
     setCurrentCanvasFileIndex,
     setCustomUIContent,
+    setIsCanvasOpen,
     setSessionFiles,
     getFileType,
     triggerFileDownload,
@@ -111,6 +115,56 @@ export function createWebSocketHandler(deps) {
         case 'tool_result':
           mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === updateData.tool_call_id ? { ...msg, content: `**Tool: ${updateData.tool_name}** - ${updateData.success ? 'Success' : 'Failed'}`, status: updateData.success ? 'completed' : 'failed', result: updateData.result || updateData.error || null } : msg))
           break
+        case 'system_message':
+          // Rich system message from MCP server during tool execution
+          if (updateData && updateData.message) {
+            addMessage({
+              role: 'system',
+              content: updateData.message,
+              type: 'system',
+              subtype: updateData.subtype || 'info',
+              tool_call_id: updateData.tool_call_id,
+              tool_name: updateData.tool_name,
+              timestamp: new Date().toISOString()
+            })
+          }
+          break
+        case 'progress_artifacts':
+          // Handle artifacts sent during tool execution as inline canvas content
+          if (updateData && updateData.artifacts) {
+            const artifacts = updateData.artifacts
+            const display = updateData.display || {}
+
+            const canvasFiles = artifacts
+              .filter(art => art.b64 && art.mime && art.viewer)
+              .map(art => ({
+                filename: art.name,
+                content_base64: art.b64,
+                mime_type: art.mime,
+                type: art.viewer,
+                description: art.description || art.name,
+                // Inline artifacts are rendered from base64; no download key
+                isInline: true,
+              }))
+
+            if (canvasFiles.length > 0) {
+              setCanvasFiles(canvasFiles)
+              if (display.primary_file) {
+                const idx = canvasFiles.findIndex(f => f.filename === display.primary_file)
+                setCurrentCanvasFileIndex(idx >= 0 ? idx : 0)
+              } else {
+                setCurrentCanvasFileIndex(0)
+              }
+              if (display.open_canvas) {
+                if (typeof setIsCanvasOpen === 'function') {
+                  setIsCanvasOpen(true)
+                }
+                setCanvasContent('')
+                setCustomUIContent(null)
+              }
+            }
+          }
+          break
         case 'canvas_content':
           if (updateData && updateData.content) {
             setCanvasContent(typeof updateData.content === 'string' ? updateData.content : String(updateData.content || ''))
@@ -118,14 +172,35 @@ export function createWebSocketHandler(deps) {
           break
         case 'canvas_files':
           if (updateData && Array.isArray(updateData.files)) {
-            setCanvasFiles(updateData.files)
+            let canvasFiles = updateData.files
+
+            // Check if display config specifies an iframe
+            if (updateData.display && updateData.display.type === 'iframe' && updateData.display.url) {
+              // Add iframe as a virtual canvas file
+              const iframeFile = {
+                filename: updateData.display.title || 'Embedded Content',
+                type: 'iframe',
+                url: updateData.display.url,
+                sandbox: updateData.display.sandbox || DEFAULT_IFRAME_SANDBOX,
+                isInline: true
+              }
+              canvasFiles = [iframeFile, ...canvasFiles]
+            }
+
+            setCanvasFiles(canvasFiles)
             // If backend provided display hints, respect them (e.g., primary_file)
             if (updateData.display && updateData.display.primary_file) {
-              const idx = updateData.files.findIndex(f => f.filename === updateData.display.primary_file)
+              const idx = canvasFiles.findIndex(f => f.filename === updateData.display.primary_file)
               setCurrentCanvasFileIndex(idx >= 0 ? idx : 0)
             } else {
               setCurrentCanvasFileIndex(0)
             }
+
+            // Open canvas panel if display.open_canvas is true
+            if (updateData.display && updateData.display.open_canvas && typeof setIsCanvasOpen === 'function') {
+              setIsCanvasOpen(true)
+            }
+
             setCanvasContent('')
             setCustomUIContent(null)
           }

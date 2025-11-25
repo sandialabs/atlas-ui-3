@@ -1,0 +1,16 @@
+apiVersion: v2
+name: mcp-server
+description: A Helm chart for deploying MCP HTTP Mock Server on Kubernetes
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - mcp
+  - model-context-protocol
+  - mock-server
+  - database-simulator
+maintainers:
+  - name: Atlas UI Team
+    email: support@example.com
+sources:
+  - https://github.com/sandialabs/atlas-ui-3

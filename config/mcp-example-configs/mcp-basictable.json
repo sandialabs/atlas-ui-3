@@ -1,0 +1,1 @@
+{"basictable": {"command": ["python", "mcp/basictable/main.py"], "cwd": "backend", "groups": ["users"], "description": "basictable MCP server", "author": "Chat UI Team", "short_description": "basictable server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

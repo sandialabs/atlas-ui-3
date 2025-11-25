@@ -46,6 +46,11 @@ class LLMError(DomainError):
     pass
 
 
+class LLMServiceError(LLMError):
+    """Generic LLM service failure that is not a validation issue."""
+    pass
+
+
 class ToolError(DomainError):
     """Tool execution error."""
     pass
@@ -73,4 +78,19 @@ class SessionNotFoundError(SessionError):
 
 class PromptOverrideError(DomainError):
     """Raised when MCP prompt override fails."""
+    pass
+
+
+class RateLimitError(LLMError):
+    """Raised when LLM rate limit is exceeded."""
+    pass
+
+
+class LLMTimeoutError(LLMError):
+    """Raised when LLM request times out."""
+    pass
+
+
+class LLMAuthenticationError(AuthenticationError):
+    """Raised when LLM authentication fails."""
     pass

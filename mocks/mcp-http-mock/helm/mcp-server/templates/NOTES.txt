@@ -1,0 +1,76 @@
+Thank you for installing {{ .Chart.Name }} version {{ .Chart.Version }}!
+
+Your MCP HTTP Mock Server has been deployed to namespace: {{ .Release.Namespace }}
+
+Release name: {{ .Release.Name }}
+
+To get the status of your deployment, run:
+  kubectl get deployment {{ include "mcp-server.fullname" . }} -n {{ .Release.Namespace }}
+
+To view the pods:
+  kubectl get pods -l "app.kubernetes.io/name={{ include "mcp-server.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -n {{ .Release.Namespace }}
+
+{{- if .Values.service.type }}
+{{- if eq .Values.service.type "NodePort" }}
+
+To access your MCP server:
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "mcp-server.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo "MCP Server URL: http://$NODE_IP:$NODE_PORT/mcp"
+
+{{- else if eq .Values.service.type "LoadBalancer" }}
+
+To access your MCP server:
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+  
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "mcp-server.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo "MCP Server URL: http://$SERVICE_IP:{{ .Values.service.port }}/mcp"
+
+{{- else if eq .Values.service.type "ClusterIP" }}
+
+To access your MCP server from outside the cluster:
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "mcp-server.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  echo "MCP Server URL: http://localhost:{{ .Values.service.port }}/mcp"
+
+{{- end }}
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+
+Your MCP server is accessible via Ingress at:
+{{- range .Values.ingress.hosts }}
+  {{- range .paths }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ .path }}
+  {{- end }}
+{{- end }}
+{{- end }}
+
+Authentication:
+  The server requires Bearer token authentication.
+  Default tokens (change for production):
+    - Token 1: {{ .Values.env.MCP_MOCK_TOKEN_1 }}
+    - Token 2: {{ .Values.env.MCP_MOCK_TOKEN_2 }}
+
+To test the server:
+  curl -H "Authorization: Bearer {{ .Values.env.MCP_MOCK_TOKEN_1 }}" http://localhost:{{ .Values.service.port }}/mcp
+
+To view logs:
+  kubectl logs -f deployment/{{ include "mcp-server.fullname" . }} -n {{ .Release.Namespace }}
+
+{{- if .Values.autoscaling.enabled }}
+
+Autoscaling is ENABLED:
+  Min replicas: {{ .Values.autoscaling.minReplicas }}
+  Max replicas: {{ .Values.autoscaling.maxReplicas }}
+{{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
+  Target CPU: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}%
+{{- end }}
+{{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+  Target Memory: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}%
+{{- end }}
+{{- end }}
+
+For more information, visit:
+  https://github.com/sandialabs/atlas-ui-3
+
+WARNING: This is a mock/development server. Do not use in production with default tokens!

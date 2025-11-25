@@ -18,6 +18,7 @@ import LogViewer from './components/LogViewer' // Import LogViewer
 import FeedbackButton from './components/FeedbackButton'
 import FileManagerPanel from './components/FileManagerPanel'
 import FilesPage from './components/FilesPage'
+import SplashScreen from './components/SplashScreen'
 
 function ChatInterface() {
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
@@ -174,11 +175,35 @@ function AppRoutes() {
 }
 
 function App() {
+  const [splashConfig, setSplashConfig] = useState(null)
+  
+  // Fetch splash screen configuration on app load
+  useEffect(() => {
+    const fetchSplashConfig = async () => {
+      try {
+        const response = await fetch('/api/splash')
+        if (response.ok) {
+          const config = await response.json()
+          setSplashConfig(config)
+        } else {
+          console.warn('Failed to fetch splash configuration')
+          setSplashConfig({ enabled: false })
+        }
+      } catch (error) {
+        console.error('Error fetching splash configuration:', error)
+        setSplashConfig({ enabled: false })
+      }
+    }
+    
+    fetchSplashConfig()
+  }, [])
+  
   return (
     <Router>
       <WSProvider>
         <ChatProvider>
           <MarketplaceProvider>
+            <SplashScreen config={splashConfig} />
             <AppRoutes />
           </MarketplaceProvider>
         </ChatProvider>

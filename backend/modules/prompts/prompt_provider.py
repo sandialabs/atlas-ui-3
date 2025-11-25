@@ -107,6 +107,24 @@ class PromptProvider:
             logger.warning("Formatting agent observe prompt failed: %s", e)
             return None
 
+    def get_system_prompt(self, user_email: Optional[str] = None) -> Optional[str]:
+        """Return formatted system prompt text or None if unavailable.
+
+        Expects template placeholder: {user_email}
+        Missing values are rendered as empty strings.
+        """
+        filename = self.config_manager.app_settings.system_prompt_filename
+        template = self._load_template(filename)
+        if not template:
+            return None
+        try:
+            return template.format(
+                user_email=(user_email or ""),
+            )
+        except Exception as e:  # pragma: no cover
+            logger.warning("Formatting system prompt failed: %s", e)
+            return None
+
     def clear_cache(self) -> None:
         """Clear in-memory prompt cache (e.g., after config reload)."""
         self._cache.clear()

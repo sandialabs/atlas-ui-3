@@ -1,0 +1,182 @@
+# Default values for mcp-server Helm chart
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Number of replicas for the MCP server deployment
+replicaCount: 1
+
+image:
+  # Image repository - replace with your container registry
+  repository: mcp-http-mock
+  # Image pull policy
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion
+  tag: "latest"
+  # Base image to use (fedora, rhel, or ubuntu)
+  baseImage: "ubuntu"
+
+# Image pull secrets for private registries
+imagePullSecrets: []
+
+# Override the name of the chart
+nameOverride: ""
+# Override the full name of the chart
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use
+  name: ""
+
+# Annotations to add to the pod
+podAnnotations: {}
+
+# Security context for the pod
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Security context for the container
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  allowPrivilegeEscalation: false
+
+service:
+  # Service type (ClusterIP, NodePort, LoadBalancer)
+  type: ClusterIP
+  # Service port
+  port: 8005
+  # Target port on the container
+  targetPort: 8005
+  # NodePort (only used if type is NodePort)
+  # nodePort: 30005
+
+ingress:
+  # Enable ingress
+  enabled: false
+  # Ingress class name
+  className: "nginx"
+  # Ingress annotations
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  # Ingress hosts configuration
+  hosts:
+    - host: mcp-server.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # TLS configuration
+  tls: []
+  #  - secretName: mcp-server-tls
+  #    hosts:
+  #      - mcp-server.local
+
+# Resource limits and requests
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Liveness probe configuration
+livenessProbe:
+  httpGet:
+    path: /mcp
+    port: 8005
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Readiness probe configuration
+readinessProbe:
+  httpGet:
+    path: /mcp
+    port: 8005
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Autoscaling configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+# Node selector for pod assignment
+nodeSelector: {}
+
+# Tolerations for pod assignment
+tolerations: []
+
+# Affinity for pod assignment
+affinity: {}
+
+# Environment variables
+env:
+  # MCP authentication tokens
+  MCP_MOCK_TOKEN_1: "test-api-key-123"
+  MCP_MOCK_TOKEN_2: "another-test-key-456"
+  # Python unbuffered mode
+  PYTHONUNBUFFERED: "1"
+
+# Additional environment variables from secrets or configmaps
+envFrom: []
+# - secretRef:
+#     name: mcp-secrets
+# - configMapRef:
+#     name: mcp-config
+
+# ConfigMap data (optional)
+configMap:
+  enabled: false
+  data: {}
+
+# Secret data (optional) - base64 encoded values
+secret:
+  enabled: false
+  data: {}
+
+# Persistence configuration (if needed for future use)
+persistence:
+  enabled: false
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  storageClass: ""
+  # existingClaim: ""
+
+# Service monitor for Prometheus (optional)
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# Network policy
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress: []

@@ -6,6 +6,16 @@ A FastMCP-based HTTP server that simulates database operations for testing and d
 
 This MCP server provides database simulation capabilities over HTTP/SSE transport, allowing clients to perform SQL-like operations on mock data. It includes users, orders, and products tables with realistic sample data.
 
+## Deployment Options
+
+This server can be deployed in multiple ways:
+
+- **Local Development**: Run directly with Python (see [Usage](#usage) section below)
+- **Docker**: Use provided Dockerfiles for containerized deployment
+- **Kubernetes**: Deploy using Helm charts for production environments
+
+For detailed Docker and Kubernetes deployment instructions, see **[DOCKER_K8S_DEPLOYMENT.md](DOCKER_K8S_DEPLOYMENT.md)**.
+
 ## Features
 
 - **HTTP/SSE Transport**: Supports both HTTP and Server-Sent Events (SSE) protocols
