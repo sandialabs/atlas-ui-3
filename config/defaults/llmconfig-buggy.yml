@@ -1,0 +1,11 @@
+models:
+  mock-llm-rate-limited:
+    model_url: "http://127.0.0.1:8002/v1"
+    model_name: "openai/mock-model"
+    api_key: "dummy-key"  # Not used by mock server
+    description: "Mock LLM server with rate limiting and error simulation for testing"
+    compliance_level: "Internal"
+    # Extra configuration for this mock server
+    max_retries: 3
+    retry_delay: 1.0
+    timeout_seconds: 30

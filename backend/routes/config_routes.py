@@ -74,42 +74,44 @@ async def get_config(
     # Get RAG data sources for the user (feature-gated MCP-backed discovery)
     rag_data_sources = []
     rag_servers = []
-    try:
-        if app_settings.feature_rag_mcp_enabled:
-            rag_mcp = app_factory.get_rag_mcp_service()
-            rag_data_sources = await rag_mcp.discover_data_sources(
-                current_user, user_compliance_level=compliance_level
-            )
-            rag_servers = await rag_mcp.discover_servers(
-                current_user, user_compliance_level=compliance_level
-            )
-        else:
-            rag_client = app_factory.get_rag_client()
-            # rag_client.discover_data_sources now returns List[DataSource] objects
-            data_source_objects = await rag_client.discover_data_sources(current_user)
-            # Convert to list of names (strings) for the 'data_sources' field (backward compatibility)
-            rag_data_sources = [ds.name for ds in data_source_objects]
-            # Populate rag_servers with the mock data in the expected format for the UI
-            rag_servers = [
-                {
-                    "server": "rag_mock",
-                    "displayName": "RAG Mock Data",
-                    "icon": "database",
-                    "complianceLevel": "Public", # Default compliance for the mock server itself
-                    "sources": [
-                        {
-                            "id": ds.name,
-                            "name": ds.name,
-                            "authRequired": True,
-                            "selected": False,
-                            "complianceLevel": ds.compliance_level,
-                        }
-                        for ds in data_source_objects
-                    ],
-                }
-            ]
-    except Exception as e:
-        logger.warning(f"Error resolving RAG data sources: {e}")
+    # Only attempt RAG discovery if RAG feature is enabled
+    if app_settings.feature_rag_enabled:
+        try:
+            if app_settings.feature_rag_mcp_enabled:
+                rag_mcp = app_factory.get_rag_mcp_service()
+                rag_data_sources = await rag_mcp.discover_data_sources(
+                    current_user, user_compliance_level=compliance_level
+                )
+                rag_servers = await rag_mcp.discover_servers(
+                    current_user, user_compliance_level=compliance_level
+                )
+            else:
+                rag_client = app_factory.get_rag_client()
+                # rag_client.discover_data_sources now returns List[DataSource] objects
+                data_source_objects = await rag_client.discover_data_sources(current_user)
+                # Convert to list of names (strings) for the 'data_sources' field (backward compatibility)
+                rag_data_sources = [ds.name for ds in data_source_objects]
+                # Populate rag_servers with the mock data in the expected format for the UI
+                rag_servers = [
+                    {
+                        "server": "rag_mock",
+                        "displayName": "RAG Mock Data",
+                        "icon": "database",
+                        "complianceLevel": "Public", # Default compliance for the mock server itself
+                        "sources": [
+                            {
+                                "id": ds.name,
+                                "name": ds.name,
+                                "authRequired": True,
+                                "selected": False,
+                                "complianceLevel": ds.compliance_level,
+                            }
+                            for ds in data_source_objects
+                        ],
+                    }
+                ]
+        except Exception as e:
+            logger.warning(f"Error resolving RAG data sources: {e}")
     
     # Check if tools are enabled
     tools_info = []
@@ -304,7 +306,8 @@ async def get_config(
             "marketplace": app_settings.feature_marketplace_enabled,
             "files_panel": app_settings.feature_files_panel_enabled,
             "chat_history": app_settings.feature_chat_history_enabled,
-            "compliance_levels": app_settings.feature_compliance_levels_enabled
+            "compliance_levels": app_settings.feature_compliance_levels_enabled,
+            "splash_screen": app_settings.feature_splash_screen_enabled
         }
     }
 
@@ -338,6 +341,92 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
             "mode": "explicit_allowlist",
             "all_level_names": []
         }
+
+
+@router.get("/splash")
+async def get_splash_config(current_user: str = Depends(get_current_user)):
+    """Get splash screen configuration."""
+    config_manager = app_factory.get_config_manager()
+    app_settings = config_manager.app_settings
+    
+    # Check if splash screen feature is enabled
+    if not app_settings.feature_splash_screen_enabled:
+        return {
+            "enabled": False,
+            "title": "",
+            "messages": [],
+            "dismissible": True,
+            "require_accept": False,
+            "dismiss_duration_days": 30,
+            "accept_button_text": "Accept",
+            "dismiss_button_text": "Dismiss",
+            "show_on_every_visit": False
+        }
+    
+    # Read splash screen configuration
+    splash_config = {}
+    import json
+    splash_config_filename = app_settings.splash_config_file
+    splash_paths = []
+    try:
+        # Reuse config manager search logic
+        try:
+            splash_paths = config_manager._search_paths(splash_config_filename)  # type: ignore[attr-defined]
+        except AttributeError:
+            # Fallback minimal search if method renamed/removed
+            from pathlib import Path
+            backend_root = Path(__file__).parent.parent
+            project_root = backend_root.parent
+            splash_paths = [
+                project_root / "config" / "overrides" / splash_config_filename,
+                project_root / "config" / "defaults" / splash_config_filename,
+                backend_root / "configfilesadmin" / splash_config_filename,
+                backend_root / "configfiles" / splash_config_filename,
+                backend_root / splash_config_filename,
+                project_root / splash_config_filename,
+            ]
+
+        found_path = None
+        for p in splash_paths:
+            if p.exists():
+                found_path = p
+                break
+        if found_path:
+            with open(found_path, "r", encoding="utf-8") as f:
+                splash_config = json.load(f)
+            logger.info(f"Loaded splash config from {found_path}")
+        else:
+            logger.info(
+                "Splash config not found in any of these locations: %s",
+                [str(p) for p in splash_paths]
+            )
+            # Return default disabled config
+            splash_config = {
+                "enabled": False,
+                "title": "",
+                "messages": [],
+                "dismissible": True,
+                "require_accept": False,
+                "dismiss_duration_days": 30,
+                "accept_button_text": "Accept",
+                "dismiss_button_text": "Dismiss",
+                "show_on_every_visit": False
+            }
+    except Exception as e:
+        logger.warning(f"Error loading splash config: {e}")
+        splash_config = {
+            "enabled": False,
+            "title": "",
+            "messages": [],
+            "dismissible": True,
+            "require_accept": False,
+            "dismiss_duration_days": 30,
+            "accept_button_text": "Accept",
+            "dismiss_button_text": "Dismiss",
+            "show_on_every_visit": False
+        }
+    
+    return splash_config
 
 
 # @router.get("/sessions")

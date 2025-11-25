@@ -1,0 +1,36 @@
+{
+  "enabled": true,
+  "title": "Important Policies and Information",
+  "messages": [
+    {
+      "type": "heading",
+      "content": "Cookie Policy"
+    },
+    {
+      "type": "text",
+      "content": "This application uses cookies to enhance your experience and maintain your session. By continuing to use this application, you consent to our use of cookies."
+    },
+    {
+      "type": "heading",
+      "content": "Acceptable Use Policy"
+    },
+    {
+      "type": "text",
+      "content": "This system is for authorized use only. Users must comply with all applicable policies and regulations. Unauthorized access or misuse of this system may result in disciplinary action and/or legal prosecution."
+    },
+    {
+      "type": "heading",
+      "content": "Data Privacy"
+    },
+    {
+      "type": "text",
+      "content": "Your conversations and data are processed in accordance with our privacy policy. Please do not share sensitive or confidential information unless explicitly authorized."
+    }
+  ],
+  "dismissible": true,
+  "require_accept": false,
+  "dismiss_duration_days": 30,
+  "accept_button_text": "I Accept",
+  "dismiss_button_text": "Close",
+  "show_on_every_visit": false
+}

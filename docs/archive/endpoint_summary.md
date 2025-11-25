@@ -1,7 +1,7 @@
 # Endpoint Summary
 
 Generated: 2025-08-09
-Branch: feature/s3-file-storage
+Last Updated: 2025-11-21
 
 ## 1. Frontend-Used Endpoints
 (HTTP method inferred from usage / backend definition.)
@@ -47,6 +47,7 @@ Branch: feature/s3-file-storage
 - GET /api/debug/servers
 - GET /healthz
 - GET /api/files/health
+- GET /api/health  (service health check for monitoring/load balancers, added 2025-11-21)
 - DELETE /api/feedback/{feedback_id}
 - GET /api/feedback/stats
 

@@ -27,14 +27,14 @@ class MCPToolManager:
             # Use config manager to get config path
             app_settings = config_manager.app_settings
             overrides_root = Path(app_settings.app_config_overrides)
-            
+
             # If relative, resolve from project root
             if not overrides_root.is_absolute():
                 # This file is in backend/modules/mcp_tools/client.py
                 backend_root = Path(__file__).parent.parent.parent
                 project_root = backend_root.parent
                 overrides_root = project_root / overrides_root
-            
+
             candidate = overrides_root / "mcp.json"
             if not candidate.exists():
                 # Legacy fallback
@@ -42,10 +42,23 @@ class MCPToolManager:
                 if not candidate.exists():
                     candidate = Path("backend/configfiles/mcp.json")
             self.config_path = str(candidate)
+            # Use default config manager when no path specified
+            mcp_config = config_manager.mcp_config
+            self.servers_config = {name: server.model_dump() for name, server in mcp_config.servers.items()}
         else:
+            # Load config from the specified path
             self.config_path = config_path
-        mcp_config = config_manager.mcp_config
-        self.servers_config = {name: server.model_dump() for name, server in mcp_config.servers.items()}
+            config_file = Path(config_path)
+            if config_file.exists():
+                from modules.config.config_manager import MCPConfig
+                data = json.loads(config_file.read_text())
+                # Convert flat structure to nested structure for Pydantic
+                servers_data = {"servers": data}
+                mcp_config = MCPConfig(**servers_data)
+                self.servers_config = {name: server.model_dump() for name, server in mcp_config.servers.items()}
+            else:
+                logger.warning(f"Custom config path specified but file not found: {config_path}")
+                self.servers_config = {}
         self.clients = {}
         self.available_tools = {}
         self.available_prompts = {}
@@ -140,7 +153,22 @@ class MCPToolManager:
                 if command:
                     # Custom command specified
                     cwd = config.get("cwd")
+                    env = config.get("env")
                     logger.info(f"Working directory specified: {cwd}")
+                    
+                    # Resolve environment variables in env dict
+                    resolved_env = None
+                    if env is not None:
+                        resolved_env = {}
+                        for key, value in env.items():
+                            try:
+                                resolved_env[key] = resolve_env_var(value)
+                                logger.debug(f"Resolved env var {key} for {server_name}")
+                            except ValueError as e:
+                                logger.error(f"Failed to resolve env var {key} for {server_name}: {e}")
+                                return None  # Skip this server if env var resolution fails
+                        logger.info(f"Environment variables specified: {list(resolved_env.keys())}")
+                    
                     if cwd:
                         # Convert relative path to absolute path from project root
                         if not os.path.isabs(cwd):
@@ -155,7 +183,7 @@ class MCPToolManager:
                             logger.info(f"✓ Working directory exists: {cwd}")
                             logger.info(f"Creating STDIO client for {server_name} with command: {command} in cwd: {cwd}")
                             from fastmcp.client.transports import StdioTransport
-                            transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd)
+                            transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd, env=resolved_env)
                             client = Client(transport)
                             logger.info(f"✓ Successfully created STDIO MCP client for {server_name} with custom command and cwd")
                             return client
@@ -164,7 +192,9 @@ class MCPToolManager:
                             return None
                     else:
                         logger.info(f"No cwd specified, creating STDIO client for {server_name} with command: {command}")
-                        client = Client(command)
+                        from fastmcp.client.transports import StdioTransport
+                        transport = StdioTransport(command=command[0], args=command[1:], env=resolved_env)
+                        client = Client(transport)
                         logger.info(f"✓ Successfully created STDIO MCP client for {server_name} with custom command")
                         return client
                 else:

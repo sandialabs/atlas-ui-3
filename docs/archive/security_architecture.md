@@ -46,7 +46,7 @@ Internet → Reverse Proxy → Authentication Service
 2. Reverse Proxy → Auth Service (validates during handshake)
 3. If invalid → Connection rejected (HTTP 401)
 4. If valid → Auth Service returns user identity header
-5. Reverse Proxy → Main App (with X-Authenticated-User header)
+5. Reverse Proxy → Main App (with X-User-Email header)
 6. Main App accepts WebSocket connection
 7. All subsequent messages occur over established connection
 ```
@@ -61,7 +61,7 @@ Internet → Reverse Proxy → Authentication Service
 
 ### Header-Based Trust
 
-The main application trusts the `X-Authenticated-User` header because:
+The main application trusts the `X-User-Email` header because:
 
 1. **Network Isolation**: Main app is not publicly accessible
 2. **Single Entry Point**: Only reverse proxy can reach main app
@@ -73,7 +73,7 @@ The main application trusts the `X-Authenticated-User` header because:
 When examining this codebase in isolation, the WebSocket endpoint appears to lack authentication:
 
 ```python
-user_email = websocket.headers.get('X-Authenticated-User')
+user_email = websocket.headers.get('X-User-Email')
 ```
 
 This is **intentional by design**. The security controls exist in the infrastructure layer, not the application layer.
@@ -104,7 +104,7 @@ Production deployments MUST:
 1. Deploy reverse proxy with auth delegation
 2. Deploy separate authentication service
 3. Isolate main app from public access
-4. Configure reverse proxy to set X-Authenticated-User header
+4. Configure reverse proxy to set X-User-Email header (after stripping client headers)
 5. Never expose main app ports publicly
 
 ### Example Network Configuration
@@ -227,12 +227,43 @@ Since WebSocket authentication happens only at handshake:
 
 ### Header Injection Prevention
 
-**Risk:** If main app is publicly accessible, attackers can inject headers
+**Risk:** Attackers can inject X-User-Email headers to impersonate users
 
-**Mitigation:**
-- Network isolation (main app not reachable publicly)
-- Reverse proxy strips client-provided headers
-- Only reverse proxy can set X-Authenticated-User
+**Attack Scenario:**
+```bash
+# Attacker sends malicious header
+curl -H "X-User-Email: admin@company.com" https://your-app.com/api/config
+```
+
+**Two-Layer Mitigation Required:**
+
+1. **Network Isolation** (Primary Defense)
+   - Main app MUST NOT be publicly accessible
+   - Only reverse proxy can reach main app
+   - Use Docker networks, VPCs, or firewall rules
+
+2. **Header Stripping** (Defense in Depth)
+   - Reverse proxy MUST strip client X-User-Email headers
+   - Then add authenticated user header
+   - Prevents injection even if proxy is misconfigured
+
+**Critical:** Even with a reverse proxy, if it doesn't strip client headers first, attackers can inject headers that arrive before the proxy's header (first header wins in most frameworks).
+
+**Nginx Example (Secure):**
+```nginx
+location /ws {
+    auth_request /auth/validate;
+    auth_request_set $authenticated_user $upstream_http_x_user_email;
+
+    # CRITICAL: Strip client headers first
+    proxy_set_header X-User-Email "";
+    proxy_set_header X-User-Email $authenticated_user;
+
+    proxy_pass http://main-app:8000;
+}
+```
+
+See `docs/reverse-proxy-examples.md` for complete configuration examples.
 
 ### Defense in Depth
 
@@ -249,16 +280,33 @@ Additional security layers:
 
 Before deploying to production:
 
-- [ ] Main application is NOT publicly accessible
-- [ ] Reverse proxy is configured with auth delegation
+**Network Security:**
+- [ ] Main application is NOT publicly accessible (test: `curl http://main-app:8000` should timeout from internet)
+- [ ] Reverse proxy is the only public-facing component
+- [ ] Network isolation is enforced (Docker networks, VPCs, firewall rules)
+- [ ] Direct access to main app ports is blocked (verify with nmap/telnet from outside network)
+
+**Authentication & Headers:**
+- [ ] Reverse proxy is configured with auth delegation to auth service
 - [ ] Authentication service is deployed and tested
-- [ ] Network isolation is enforced (firewall rules, VPC, etc.)
-- [ ] TLS certificates are valid and renewed
-- [ ] WebSocket upgrade is properly proxied
-- [ ] X-Authenticated-User header is set by reverse proxy
-- [ ] Client-provided headers are stripped
+- [ ] X-User-Email header is set by reverse proxy after authentication
+- [ ] **CRITICAL:** Client-provided X-User-Email headers are explicitly stripped before proxy adds its own
+  - Nginx: Verify `proxy_set_header X-User-Email "";` appears BEFORE setting the authenticated header
+  - Apache: Verify `RequestHeader unset X-User-Email` appears BEFORE setting the authenticated header
+- [ ] Header injection test passed (run `pytest backend/tests/test_security_header_injection.py::test_production_header_stripping`)
+- [ ] Backend logs confirm authenticated user is received (not client-provided values)
+
+**SSL/TLS & WebSocket:**
+- [ ] TLS certificates are valid and auto-renewal is configured
+- [ ] WebSocket upgrade is properly proxied (test WebSocket connection through proxy)
+- [ ] WebSocket authentication works during handshake (test with invalid credentials)
+
+**Monitoring & Testing:**
 - [ ] Logging and monitoring are configured
 - [ ] Token expiration and refresh are tested
+- [ ] Review security architecture documentation (docs/archive/security_architecture.md)
+- [ ] Review reverse proxy configuration examples (docs/reverse-proxy-examples.md)
+- [ ] Security tests pass: `pytest backend/tests/test_security_*.py`
 
 ## Testing Authentication
 
@@ -288,7 +336,7 @@ Before deploying to production:
    curl -i --no-buffer \
      -H "Connection: Upgrade" \
      -H "Upgrade: websocket" \
-     -H "X-Authenticated-User: attacker@example.com" \
+     -H "X-User-Email: attacker@example.com" \
      http://main-app:8000/ws
    # Should NOT be reachable from outside network
    ```

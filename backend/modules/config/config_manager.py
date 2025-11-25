@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, AliasChoices
+from pydantic import BaseModel, Field, field_validator, AliasChoices, model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -101,6 +101,7 @@ class MCPServerConfig(BaseModel):
     enabled: bool = True
     command: Optional[List[str]] = None  # Command to run server (for stdio servers)
     cwd: Optional[str] = None            # Working directory for command
+    env: Optional[Dict[str, str]] = None  # Environment variables for stdio servers
     url: Optional[str] = None            # URL for HTTP servers
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
@@ -162,6 +163,13 @@ class AppSettings(BaseSettings):
     # Banner settings
     banner_enabled: bool = False
     
+    # Splash screen settings
+    feature_splash_screen_enabled: bool = Field(
+        False,
+        description="Enable startup splash screen for displaying policies and information",
+        validation_alias=AliasChoices("FEATURE_SPLASH_SCREEN_ENABLED", "SPLASH_SCREEN_ENABLED"),
+    )
+    
     # Agent settings
     # Renamed to feature_agent_mode_available to align with other FEATURE_* flags.
     feature_agent_mode_available: bool = Field(
@@ -197,6 +205,56 @@ class AppSettings(BaseSettings):
     test_user: str = "test@test.com"  # Test user for development
     auth_group_check_url: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_URL")
     auth_group_check_api_key: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_API_KEY")
+    
+    # Authentication header configuration
+    auth_user_header: str = Field(
+        default="X-User-Email",
+        description="HTTP header name to extract authenticated username from reverse proxy",
+        validation_alias="AUTH_USER_HEADER"
+    )
+
+    # Authentication header configuration
+    auth_user_header_type: str = Field(
+        default="email-string",
+        description="The datatype stored in AUTH_USER_HEADER",
+        validation_alias="AUTH_USER_HEADER_TYPE"
+    )
+
+    # Authentication AWS expected ALB ARN
+    auth_aws_expected_alb_arn: str = Field(
+        default="",
+        description="The expected AWS ALB ARN",
+        validation_alias="AUTH_AWS_EXPECTED_ALB_ARN"
+    )
+
+    # Authentication AWS region
+    auth_aws_region: str = Field(
+        default="us-east-1",
+        description="The AWS region",
+        validation_alias="AUTH_AWS_REGION"
+    )
+    
+    # Proxy secret authentication configuration
+    feature_proxy_secret_enabled: bool = Field(
+        default=False,
+        description="Enable proxy secret validation to ensure requests come from trusted reverse proxy",
+        validation_alias="FEATURE_PROXY_SECRET_ENABLED"
+    )
+    proxy_secret_header: str = Field(
+        default="X-Proxy-Secret",
+        description="HTTP header name for proxy secret validation",
+        validation_alias="PROXY_SECRET_HEADER"
+    )
+    proxy_secret: Optional[str] = Field(
+        default=None,
+        description="Secret value that must be sent by reverse proxy for validation",
+        validation_alias="PROXY_SECRET"
+    )
+    auth_redirect_url: str = Field(
+        default="/auth",
+        description="URL to redirect to when authentication fails",
+        validation_alias="AUTH_REDIRECT_URL"
+    )
     
     # S3/MinIO storage settings
     use_mock_s3: bool = False  # Use in-process S3 mock (no Docker required)
@@ -251,6 +309,7 @@ class AppSettings(BaseSettings):
 
     # Prompt / template settings
     prompt_base_path: str = "prompts"  # Relative or absolute path to directory containing prompt templates
+    system_prompt_filename: str = "system_prompt.md"  # Filename for system prompt template
     tool_synthesis_prompt_filename: str = "tool_synthesis_prompt.md"  # Filename for tool synthesis prompt template
     # Agent prompts
     agent_reason_prompt_filename: str = "agent_reason_prompt.md"  # Filename for agent reason phase
@@ -263,6 +322,7 @@ class AppSettings(BaseSettings):
     help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
     tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
+    splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
     
     # Config directory paths
     app_config_overrides: str = Field(default="config/overrides", validation_alias="APP_CONFIG_OVERRIDES")
@@ -282,6 +342,18 @@ class AppSettings(BaseSettings):
     
     # Runtime directories
     runtime_feedback_dir: str = Field(default="runtime/feedback", validation_alias="RUNTIME_FEEDBACK_DIR")
+    
+    @model_validator(mode='after')
+    def validate_aws_alb_config(self):
+        """Validate that AWS ALB ARN is properly configured when using aws-alb-jwt auth."""
+        if self.auth_user_header_type == "aws-alb-jwt":
+            placeholder = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/your-alb-name/..."
+            if not self.auth_aws_expected_alb_arn or self.auth_aws_expected_alb_arn == placeholder:
+                raise ValueError(
+                    "auth_aws_expected_alb_arn must be set to a valid AWS ALB ARN when auth_user_header_type is 'aws-alb-jwt'. "
+                    "Current value is empty or a placeholder. Set AUTH_AWS_EXPECTED_ALB_ARN environment variable."
+                )
+        return self
     
     model_config = {
         "env_file": "../.env", 

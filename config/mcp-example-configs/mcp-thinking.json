@@ -1,0 +1,1 @@
+{"thinking": {"command": ["python", "mcp/thinking/main.py"], "cwd": "backend", "groups": ["users"], "description": "thinking MCP server", "author": "Chat UI Team", "short_description": "thinking server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

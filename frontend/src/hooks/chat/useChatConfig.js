@@ -19,6 +19,7 @@ export function useChatConfig() {
   const [dataSources, setDataSources] = useState([])
   const [ragServers, setRagServers] = useState([]) // New state for rich RAG server data
   const [features, setFeatures] = useState(DEFAULT_FEATURES)
+  const [isCanvasOpen, setIsCanvasOpen] = useState(false)
   // Load saved model from localStorage
   const [currentModel, setCurrentModel] = useState(() => {
     try {
@@ -95,6 +96,8 @@ export function useChatConfig() {
     ragServers, // Expose new state
     features,
     setFeatures,
+    isCanvasOpen,
+    setIsCanvasOpen,
     currentModel,
     setCurrentModel: (model) => {
       setCurrentModel(model)

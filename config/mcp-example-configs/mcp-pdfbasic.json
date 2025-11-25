@@ -1,0 +1,1 @@
+{"pdfbasic": {"command": ["python", "mcp/pdfbasic/main.py"], "cwd": "backend", "groups": ["users"], "description": "pdfbasic MCP server", "author": "Chat UI Team", "short_description": "pdfbasic server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

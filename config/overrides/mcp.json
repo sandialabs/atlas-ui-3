@@ -18,6 +18,21 @@
       "evaluate"
     ]
   },
+   "ui-demo": {
+    "command": [
+      "python",
+      "mcp/ui-demo/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Demo server showcasing custom UI modification capabilities",
+    "author": "Chat UI Team",
+    "short_description": "UI customization demo",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Public"
+  },
   "pptx_generator": {
     "command": [
       "python",
@@ -97,14 +112,26 @@
     ],
     "compliance_level": "Public"
   },
-  "external-api-example": {
-    "enabled": true,
-    "url": "http://127.0.0.1:8005/mcp",
-    "transport": "http",
+  "env-demo": {
+    "command": [
+      "python",
+      "mcp/env-demo/main.py"
+    ],
+    "cwd": "backend",
+    "env": {
+      "CLOUD_PROFILE": "demo-profile",
+      "CLOUD_REGION": "us-west-2",
+      "DEBUG_MODE": "true",
+      "ENVIRONMENT": "development",
+      "API_KEY": "${DEMO_API_KEY}"
+    },
     "groups": [
       "users"
     ],
-    "description": "Mock HTTP MCP server for testing authentication",
-    "auth_token": "${MCP_EXTERNAL_API_TOKEN}"
+    "description": "Demonstrates environment variable passing to MCP servers. Shows how to configure servers with env vars in mcp.json using both literal values and ${VAR} substitution.",
+    "author": "Chat UI Team",
+    "short_description": "Environment variable demonstration",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Public"
   }
 }
