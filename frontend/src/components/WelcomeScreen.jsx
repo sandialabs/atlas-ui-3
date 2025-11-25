@@ -32,6 +32,21 @@ const WelcomeScreen = () => {
           Select a model and start chatting. You can also explore available tools in the side panel.
         </p>
       </div>
+
+      {/* Smaller logo in the lower right corner */}
+      <div className="absolute bottom-6 right-7">
+        <img
+          src="/sandia-powered-by-atlas.png"
+          alt="Powered By SNL ATLAS Logo"
+          className="w-64 h-64 object-contain"
+          onError={(e) => {
+            // Fallback to a placeholder if the smaller logo fails to load
+            e.target.style.display = 'none'
+            // Optionally, you can show a fallback image or text here
+          }}
+        />
+      </div>
+
     </div>
   )
 }
