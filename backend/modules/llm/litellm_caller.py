@@ -99,6 +99,8 @@ class LiteLLMCaller:
                 os.environ["GOOGLE_API_KEY"] = api_key
             elif "cerebras" in model_config.model_url:
                 os.environ["CEREBRAS_API_KEY"] = api_key
+            else:
+                os.environ["OPENAI_API_KEY"] = api_key
         
         # Set custom API base for non-standard endpoints
         if hasattr(model_config, 'model_url') and model_config.model_url:
