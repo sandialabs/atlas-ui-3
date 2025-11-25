@@ -99,7 +99,7 @@ MOCK_RESPONSES = {
 
 def should_simulate_error() -> Optional[str]:
     """Randomly decide whether to simulate an error (10% chance)."""
-    error_types = ["server_error", "network_error", None, None, None, None, None, None, None, None]  # 20% error rate
+    error_types = ["server_error", "network_error", None, None, None, None]  #  error rate
     error_type = random.choice(error_types)
 
     if error_type:
