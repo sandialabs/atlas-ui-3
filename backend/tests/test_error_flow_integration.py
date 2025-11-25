@@ -1,7 +1,7 @@
 """Integration test for error flow from LLM to WebSocket."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from domain.errors import RateLimitError, LLMTimeoutError, LLMAuthenticationError
 
 

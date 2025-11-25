@@ -11,7 +11,6 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
 from application.chat.utilities.error_utils import classify_llm_error
-from domain.errors import RateLimitError, LLMTimeoutError, LLMAuthenticationError, ValidationError
 
 
 def print_separator():

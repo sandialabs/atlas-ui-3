@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""
-Mock LLM Server - Testing Support (Rate Limit / Timeout Variant)
+"""Mock LLM Server - Testing Support (Rate Limit / Timeout Variant).
 
-This is a copy of main.py that we will customize to
-simulate rate limiting / timeouts after a few successful calls.
+This module re-exports selected symbols from ``main`` to avoid
+wildcard imports while preserving the existing public API used in
+tests and demos.
 """
 
-from main import *  # noqa: F401,F403
+from main import app, logger  # type: ignore
+
+__all__ = [
+	"app",
+	"logger",
+]

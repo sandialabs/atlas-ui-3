@@ -1,6 +1,5 @@
 """Tests for error classification and user-friendly error messages."""
 
-import pytest
 from application.chat.utilities.error_utils import classify_llm_error
 from domain.errors import RateLimitError, LLMTimeoutError, LLMAuthenticationError, ValidationError
 
