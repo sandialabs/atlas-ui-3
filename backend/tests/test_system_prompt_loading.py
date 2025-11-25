@@ -125,7 +125,6 @@ async def test_message_builder_without_system_prompt(tmp_path):
 async def test_system_prompt_sent_to_llm():
     """Test that system prompt is sent to LLM in chat flow"""
     # Create a temporary directory for prompts
-    import tempfile
     with tempfile.TemporaryDirectory() as tmp_dir:
         prompts_dir = Path(tmp_dir) / "prompts"
         prompts_dir.mkdir()
