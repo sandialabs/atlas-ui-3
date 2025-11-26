@@ -2,11 +2,9 @@ import { useChat } from '../contexts/ChatContext'
 
 const WelcomeScreen = () => {
   const { appName } = useChat()
-  const showPoweredByAtlas =
-    import.meta.env.VITE_FEATURE_POWERED_BY_ATLAS === 'true'
 
   return (
-    <div className="flex flex-col items-center justify-center flex-1 p-8 text-center relative">
+    <div className="flex flex-col items-center justify-center flex-1 p-8 text-center">
       <div className="mb-8">
         <img
           src="/logo.png"
@@ -34,21 +32,6 @@ const WelcomeScreen = () => {
           Select a model and start chatting. You can also explore available tools in the side panel.
         </p>
       </div>
-
-      {/* Smaller logo in the lower right corner, feature-flagged */}
-      {showPoweredByAtlas && (
-        <div className="absolute inset-x-0 bottom-4 flex justify-end px-4 sm:bottom-6 sm:px-6">
-          <img
-            src="/sandia-powered-by-atlas.png"
-            alt="Powered By SNL ATLAS Logo"
-            className="w-32 sm:w-40 md:w-56 lg:w-64 object-contain"
-            onError={(e) => {
-              e.target.style.display = 'none'
-            }}
-          />
-        </div>
-      )}
-
     </div>
   )
 }
