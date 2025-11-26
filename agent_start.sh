@@ -66,6 +66,21 @@ setup_minio() {
 
 setup_environment() {
     cd "$PROJECT_ROOT"
+    
+    # Check if .venv exists
+    if [ ! -d "$PROJECT_ROOT/.venv" ]; then
+        echo "Error: Virtual environment not found at $PROJECT_ROOT/.venv"
+        echo "Please run: uv venv && uv pip install -r requirements.txt"
+        exit 1
+    fi
+    
+    # Check if uvicorn is installed
+    if [ ! -f "$PROJECT_ROOT/.venv/bin/uvicorn" ]; then
+        echo "Error: uvicorn not found in virtual environment"
+        echo "Please run: uv pip install -r requirements.txt"
+        exit 1
+    fi
+    
     . .venv/bin/activate
     
     # Load environment variables from .env if present
@@ -125,7 +140,7 @@ start_backend() {
     local host="${2:-127.0.0.1}"
     
     cd "$PROJECT_ROOT/backend"
-    uvicorn main:app --host "$host" --port "$port" &
+    "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" &
     echo "Backend server started on $host:$port"
     cd "$PROJECT_ROOT"
 }
