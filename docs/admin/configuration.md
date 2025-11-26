@@ -32,6 +32,7 @@ Key settings in the `.env` file include:
 *   **API Keys**: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.
 *   **Authentication Header**: `AUTH_USER_HEADER` configures the HTTP header name used to extract the authenticated username from your reverse proxy (default: `X-User-Email`).
 *   **Feature Flags**: Enable or disable major features like `FEATURE_AGENT_MODE_AVAILABLE`.
+*   **Branding Flags**: Control frontend branding such as `VITE_APP_NAME` and the optional `VITE_FEATURE_POWERED_BY_ATLAS` badge on the welcome screen.
 *   **S3 Connection**: Configure the connection to your S3-compatible storage. For local testing, you can set `USE_MOCK_S3=true` to use an in-memory mock instead of a real S3 bucket. **This mock must never be used in production.**
 *   **Log Directory**: The `APP_LOG_DIR` variable points to the folder where the application log file (`app.jsonl`) will be stored. This path must be updated to a valid directory in your deployment environment.
 *   **Security Headers**: Configure Content Security Policy (CSP) and other security headers. See the Security Configuration section below for details.
