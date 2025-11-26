@@ -1,8 +1,8 @@
-"""DOE lab email domain validation middleware.
+"""Email domain whitelist validation middleware.
 
-This middleware enforces that users must have email addresses from DOE, NNSA,
-or DOE national laboratory domains. It can be enabled/disabled via the
-FEATURE_DOE_LAB_CHECK_ENABLED feature flag.
+This middleware enforces that users must have email addresses from whitelisted
+domains. Configuration is loaded from domain-whitelist.json and can be
+enabled/disabled via the FEATURE_DOMAIN_WHITELIST_ENABLED feature flag.
 """
 
 import logging
@@ -10,25 +10,16 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from core.domain_whitelist import DomainWhitelistManager
+
 logger = logging.getLogger(__name__)
 
 
-class DOELabMiddleware(BaseHTTPMiddleware):
-    """Middleware to enforce DOE/NNSA/DOE lab email domain restrictions."""
-    
-    # Comprehensive list of DOE, NNSA, and DOE national laboratory domains
-    DOE_LAB_DOMAINS = frozenset([
-        # HQ / NNSA / DOE-wide
-        "doe.gov", "nnsa.doe.gov", "hq.doe.gov",
-        # National labs (broad coverage)
-        "anl.gov", "bnl.gov", "fnal.gov", "inl.gov", "lbl.gov", "lanl.gov",
-        "llnl.gov", "ornl.gov", "pnnl.gov", "sandia.gov", "srnl.doe.gov",
-        "ameslab.gov", "jlab.org", "princeton.edu", "slac.stanford.edu",
-        "pppl.gov", "nrel.gov", "netl.doe.gov", "stanford.edu",
-    ])
+class DomainWhitelistMiddleware(BaseHTTPMiddleware):
+    """Middleware to enforce email domain whitelist restrictions."""
     
     def __init__(self, app, auth_redirect_url: str = "/auth"):
-        """Initialize DOE lab middleware.
+        """Initialize domain whitelist middleware.
         
         Args:
             app: ASGI application
@@ -36,9 +27,15 @@ class DOELabMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
         self.auth_redirect_url = auth_redirect_url
+        self.whitelist_manager = DomainWhitelistManager()
+        
+        if self.whitelist_manager.is_enabled():
+            logger.info(f"Domain whitelist enabled with {len(self.whitelist_manager.get_domains())} domains")
+        else:
+            logger.info("Domain whitelist disabled")
     
     async def dispatch(self, request: Request, call_next) -> Response:
-        """Check if user email is from DOE/lab domain.
+        """Check if user email is from a whitelisted domain.
         
         Args:
             request: Incoming HTTP request
@@ -51,35 +48,27 @@ class DOELabMiddleware(BaseHTTPMiddleware):
         if request.url.path == '/api/health' or request.url.path == self.auth_redirect_url:
             return await call_next(request)
         
+        # If whitelist is not enabled in config, allow all
+        if not self.whitelist_manager.is_enabled():
+            return await call_next(request)
+        
         # Get email from request state (set by AuthMiddleware)
         email = getattr(request.state, "user_email", None)
         
         if not email or "@" not in email:
-            logger.warning(f"DOE check failed: missing or invalid email")
+            logger.warning("Domain whitelist check failed: missing or invalid email")
             return self._unauthorized_response(request, "User email required")
         
-        # Extract domain and check against allowed list
-        domain = email.split("@", 1)[1].lower()
-        if not self._is_doe_domain(domain):
-            logger.warning(f"DOE check failed: unauthorized domain {domain}")
+        # Check if domain is allowed
+        if not self.whitelist_manager.is_domain_allowed(email):
+            domain = email.split("@", 1)[1].lower()
+            logger.warning(f"Domain whitelist check failed: unauthorized domain {domain}")
             return self._unauthorized_response(
                 request, 
-                "Access restricted to DOE / NNSA / DOE labs"
+                "Access restricted to whitelisted domains"
             )
         
         return await call_next(request)
-    
-    def _is_doe_domain(self, domain: str) -> bool:
-        """Check if domain is a DOE/lab domain or subdomain.
-        
-        Args:
-            domain: Email domain to check
-            
-        Returns:
-            True if domain is authorized, False otherwise
-        """
-        # Direct match or subdomain match (e.g., foo.sandia.gov matches sandia.gov)
-        return any(domain == d or domain.endswith("." + d) for d in self.DOE_LAB_DOMAINS)
     
     def _unauthorized_response(self, request: Request, detail: str) -> Response:
         """Return appropriate unauthorized response based on endpoint type.
