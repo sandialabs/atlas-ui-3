@@ -198,6 +198,12 @@ if static_dir.exists():
         path = static_dir / "logo.png"
         return FileResponse(str(path))
 
+    @app.get("/sandia-powered-by-atlas.png")
+    async def logo2_png():
+        path = static_dir / "sandia-powered-by-atlas.png"
+        return FileResponse(str(path))
+
+
 # WebSocket endpoint for chat
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
