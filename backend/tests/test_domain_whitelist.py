@@ -106,27 +106,39 @@ class TestDomainWhitelistManager:
         assert manager.is_domain_allowed("no-at-sign.com") is False
 
 
-class TestDomainWhitelistMiddleware:
-    """Test domain whitelist middleware."""
-
-    def test_middleware_with_allowed_domain(self, temp_config):
-        """Test that allowed domains pass through."""
-        from starlette.requests import Request
-        from starlette.responses import Response
-        from starlette.middleware.base import BaseHTTPMiddleware
-        
+@pytest.fixture
+def create_middleware():
+    """Factory fixture to create middleware with custom config."""
+    from starlette.middleware.base import BaseHTTPMiddleware
+    
+    def _create(config_path):
         app = FastAPI()
         
-        # Monkey-patch the middleware to use our temp config
+        # Monkey-patch to use custom config
         original_init = DomainWhitelistMiddleware.__init__
         def patched_init(self, app, auth_redirect_url="/auth"):
             BaseHTTPMiddleware.__init__(self, app)
             self.auth_redirect_url = auth_redirect_url
-            self.whitelist_manager = DomainWhitelistManager(config_path=temp_config)
+            self.whitelist_manager = DomainWhitelistManager(config_path=config_path)
         
         DomainWhitelistMiddleware.__init__ = patched_init
         middleware = DomainWhitelistMiddleware(app)
         DomainWhitelistMiddleware.__init__ = original_init
+        
+        return middleware
+    
+    return _create
+
+
+class TestDomainWhitelistMiddleware:
+    """Test domain whitelist middleware."""
+
+    def test_middleware_with_allowed_domain(self, temp_config, create_middleware):
+        """Test that allowed domains pass through."""
+        from starlette.requests import Request
+        from starlette.responses import Response
+        
+        middleware = create_middleware(temp_config)
         
         async def call_next(request):
             return Response("OK", status_code=200)
@@ -149,24 +161,12 @@ class TestDomainWhitelistMiddleware:
         import asyncio
         asyncio.run(test_request())
 
-    def test_middleware_with_disallowed_domain(self, temp_config):
+    def test_middleware_with_disallowed_domain(self, temp_config, create_middleware):
         """Test that disallowed domains are blocked."""
         from starlette.requests import Request
         from starlette.responses import Response
-        from starlette.middleware.base import BaseHTTPMiddleware
         
-        app = FastAPI()
-        
-        # Monkey-patch the middleware to use our temp config
-        original_init = DomainWhitelistMiddleware.__init__
-        def patched_init(self, app, auth_redirect_url="/auth"):
-            BaseHTTPMiddleware.__init__(self, app)
-            self.auth_redirect_url = auth_redirect_url
-            self.whitelist_manager = DomainWhitelistManager(config_path=temp_config)
-        
-        DomainWhitelistMiddleware.__init__ = patched_init
-        middleware = DomainWhitelistMiddleware(app)
-        DomainWhitelistMiddleware.__init__ = original_init
+        middleware = create_middleware(temp_config)
         
         async def call_next(request):
             return Response("OK", status_code=200)
@@ -189,24 +189,12 @@ class TestDomainWhitelistMiddleware:
         import asyncio
         asyncio.run(test_request())
 
-    def test_middleware_disabled(self, disabled_config):
+    def test_middleware_disabled(self, disabled_config, create_middleware):
         """Test that disabled config allows all domains."""
         from starlette.requests import Request
         from starlette.responses import Response
-        from starlette.middleware.base import BaseHTTPMiddleware
         
-        app = FastAPI()
-        
-        # Monkey-patch the middleware to use our disabled config
-        original_init = DomainWhitelistMiddleware.__init__
-        def patched_init(self, app, auth_redirect_url="/auth"):
-            BaseHTTPMiddleware.__init__(self, app)
-            self.auth_redirect_url = auth_redirect_url
-            self.whitelist_manager = DomainWhitelistManager(config_path=disabled_config)
-        
-        DomainWhitelistMiddleware.__init__ = patched_init
-        middleware = DomainWhitelistMiddleware(app)
-        DomainWhitelistMiddleware.__init__ = original_init
+        middleware = create_middleware(disabled_config)
         
         async def call_next(request):
             return Response("OK", status_code=200)
@@ -230,23 +218,12 @@ class TestDomainWhitelistMiddleware:
         import asyncio
         asyncio.run(test_request())
 
-    def test_health_endpoint_bypass(self, temp_config):
+    def test_health_endpoint_bypass(self, temp_config, create_middleware):
         """Test that health endpoint bypasses whitelist check."""
         from starlette.requests import Request
         from starlette.responses import Response
-        from starlette.middleware.base import BaseHTTPMiddleware
         
-        app = FastAPI()
-        
-        original_init = DomainWhitelistMiddleware.__init__
-        def patched_init(self, app, auth_redirect_url="/auth"):
-            BaseHTTPMiddleware.__init__(self, app)
-            self.auth_redirect_url = auth_redirect_url
-            self.whitelist_manager = DomainWhitelistManager(config_path=temp_config)
-        
-        DomainWhitelistMiddleware.__init__ = patched_init
-        middleware = DomainWhitelistMiddleware(app)
-        DomainWhitelistMiddleware.__init__ = original_init
+        middleware = create_middleware(temp_config)
         
         async def call_next(request):
             return Response("OK", status_code=200)

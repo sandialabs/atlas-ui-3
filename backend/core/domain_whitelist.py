@@ -126,13 +126,19 @@ class DomainWhitelistManager:
         
         domain = email.split("@", 1)[1].lower()
         
-        # Check if domain is in whitelist
+        # Check if domain is in whitelist (O(1) lookup)
         if domain in self.config.domains:
             return True
         
-        # Check subdomains if enabled
+        # Check subdomains if enabled - check each parent level
         if self.config.subdomain_matching:
-            return any(domain.endswith("." + d) for d in self.config.domains)
+            # Split domain and check each parent level
+            # e.g., for "mail.dept.sandia.gov" check: "dept.sandia.gov", "sandia.gov"
+            parts = domain.split(".")
+            for i in range(1, len(parts)):
+                parent_domain = ".".join(parts[i:])
+                if parent_domain in self.config.domains:
+                    return True
         
         return False
     

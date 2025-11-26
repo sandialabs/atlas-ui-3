@@ -85,6 +85,11 @@
     },
     {
       "domain": "princeton.edu",
+      "description": "Princeton University (PPPL host institution)",
+      "category": "University"
+    },
+    {
+      "domain": "pppl.gov",
       "description": "Princeton Plasma Physics Laboratory",
       "category": "National Laboratory"
     },
