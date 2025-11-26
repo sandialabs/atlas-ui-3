@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DomainWhitelistConfig:
     """Configuration for domain whitelist."""
-    enabled: bool
     domains: Set[str]
     subdomain_matching: bool
     version: str
@@ -55,9 +54,8 @@ class DomainWhitelistManager:
         if config_path and config_path.exists():
             self._load_config(config_path)
         else:
-            logger.warning("No domain-whitelist.json found, domain whitelist disabled")
+            logger.warning("No domain-whitelist.json found, using empty domain list")
             self.config = DomainWhitelistConfig(
-                enabled=False,
                 domains=set(),
                 subdomain_matching=True,
                 version="1.0",
@@ -79,7 +77,6 @@ class DomainWhitelistManager:
                     domains.add(domain_entry.lower())
             
             self.config = DomainWhitelistConfig(
-                enabled=config_data.get('enabled', False),
                 domains=domains,
                 subdomain_matching=config_data.get('subdomain_matching', True),
                 version=config_data.get('version', '1.0'),
@@ -87,29 +84,23 @@ class DomainWhitelistManager:
             )
             
             logger.info(f"Loaded {len(self.config.domains)} domains from {config_path}")
-            logger.debug(f"Domain whitelist enabled: {self.config.enabled}")
             
         except Exception as e:
             logger.error(f"Error loading domain-whitelist.json: {e}")
-            # Use disabled config on error
+            # Use empty config on error
             self.config = DomainWhitelistConfig(
-                enabled=False,
                 domains=set(),
                 subdomain_matching=True,
                 version="1.0",
                 description="Error loading config"
             )
     
-    def is_enabled(self) -> bool:
-        """Check if domain whitelist is enabled.
-        
-        Returns:
-            True if enabled, False otherwise
-        """
-        return self.config is not None and self.config.enabled
-    
     def is_domain_allowed(self, email: str) -> bool:
         """Check if an email address is from an allowed domain.
+        
+        Note: This method only validates against the whitelist.
+        The FEATURE_DOMAIN_WHITELIST_ENABLED flag controls whether
+        the middleware uses this validation.
         
         Args:
             email: Email address to validate
@@ -117,8 +108,8 @@ class DomainWhitelistManager:
         Returns:
             True if domain is allowed, False otherwise
         """
-        if not self.config or not self.config.enabled:
-            # If not enabled or no config, allow all
+        if not self.config:
+            # If no config, allow all
             return True
         
         if not email or "@" not in email:

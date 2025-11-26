@@ -16,7 +16,6 @@ def temp_config():
     config_data = {
         "version": "1.0",
         "description": "Test config",
-        "enabled": True,
         "domains": [
             {"domain": "sandia.gov", "description": "Sandia National Labs"},
             {"domain": "doe.gov", "description": "DOE"},
@@ -36,28 +35,6 @@ def temp_config():
         temp_path.unlink()
 
 
-@pytest.fixture
-def disabled_config():
-    """Create a config file with whitelist disabled."""
-    config_data = {
-        "version": "1.0",
-        "description": "Disabled config",
-        "enabled": False,
-        "domains": [
-            {"domain": "sandia.gov", "description": "Sandia National Labs"},
-        ],
-        "subdomain_matching": True
-    }
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        json.dump(config_data, f)
-        temp_path = Path(f.name)
-    
-    yield temp_path
-    
-    if temp_path.exists():
-        temp_path.unlink()
-
 
 class TestDomainWhitelistManager:
     """Test the domain whitelist manager."""
@@ -66,19 +43,11 @@ class TestDomainWhitelistManager:
         """Test loading configuration from file."""
         manager = DomainWhitelistManager(config_path=temp_config)
         
-        assert manager.is_enabled() is True
         assert "sandia.gov" in manager.get_domains()
         assert "doe.gov" in manager.get_domains()
         assert "example.org" in manager.get_domains()
         assert len(manager.get_domains()) == 3
 
-    def test_disabled_config(self, disabled_config):
-        """Test that disabled config doesn't enforce whitelist."""
-        manager = DomainWhitelistManager(config_path=disabled_config)
-        
-        assert manager.is_enabled() is False
-        # Even though disabled, should allow all
-        assert manager.is_domain_allowed("user@gmail.com") is True
 
     def test_domain_matching(self, temp_config):
         """Test domain matching logic."""
@@ -188,34 +157,6 @@ class TestDomainWhitelistMiddleware:
         import asyncio
         asyncio.run(test_request())
 
-    def test_middleware_disabled(self, disabled_config, create_middleware):
-        """Test that disabled config allows all domains."""
-        from starlette.requests import Request
-        from starlette.responses import Response
-        
-        middleware = create_middleware(disabled_config)
-        
-        async def call_next(request):
-            return Response("OK", status_code=200)
-        
-        async def test_request():
-            scope = {
-                "type": "http",
-                "method": "GET",
-                "path": "/api/test",
-                "query_string": b"",
-                "headers": [],
-                "state": {},
-            }
-            request = Request(scope)
-            request.state.user_email = "test@gmail.com"
-            
-            # Should pass even though gmail.com is not in whitelist
-            response = await middleware.dispatch(request, call_next)
-            assert response.status_code == 200
-        
-        import asyncio
-        asyncio.run(test_request())
 
     def test_health_endpoint_bypass(self, temp_config, create_middleware):
         """Test that health endpoint bypasses whitelist check."""
