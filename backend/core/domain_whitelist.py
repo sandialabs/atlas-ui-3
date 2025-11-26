@@ -8,7 +8,7 @@ validation for user email domains.
 import json
 import logging
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import Optional, Set
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

@@ -4,8 +4,7 @@ import json
 import pytest
 import tempfile
 from pathlib import Path
-from fastapi import FastAPI, Request
-from starlette.testclient import TestClient
+from fastapi import FastAPI
 
 from core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from core.domain_whitelist import DomainWhitelistManager
