@@ -24,9 +24,8 @@ cleanup_mcp() {
 }
 
 cleanup_processes() {
-    echo "Killing any running uvicorn processes for main backend... and python processes"
-    pkill -f "uvicorn main:app"
-    pkill -f python
+    echo "Killing any running uvicorn processes for main backend..."
+    pkill -f "uvicorn main:app" || true
     sleep 2
     clear
 }
@@ -69,6 +68,13 @@ setup_environment() {
     cd "$PROJECT_ROOT"
     . .venv/bin/activate
     
+    # Load environment variables from .env if present
+    if [ -f "$PROJECT_ROOT/.env" ]; then
+        set -a
+        . "$PROJECT_ROOT/.env"
+        set +a
+    fi
+    
     echo "Setting MCP_EXTERNAL_API_TOKEN for testing purposes."
     if [ -z "$MCP_EXTERNAL_API_TOKEN" ]; then
         export MCP_EXTERNAL_API_TOKEN="test-api-key-123"
@@ -101,7 +107,11 @@ build_frontend() {
     echo "Building frontend..."
     cd "$PROJECT_ROOT/frontend"
     npm install
-    export VITE_APP_NAME="Chat UI"
+    # Use VITE_* values from the environment / .env instead of hardcoding.
+    # If VITE_APP_NAME is not already set, fall back to the example default.
+    if [ -z "$VITE_APP_NAME" ]; then
+        export VITE_APP_NAME="Chat UI 13"
+    fi
     npm run build
     cd "$PROJECT_ROOT"
 }

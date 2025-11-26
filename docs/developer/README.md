@@ -5,13 +5,9 @@ This guide provides technical details for developers contributing to the Atlas U
 ## Topics
 
 ### Getting Started
-- [Architecture Overview](architecture.md) - System architecture and design patterns
-- [Development Conventions](conventions.md) - Coding standards and best practices
 
 ### Building MCP Servers
-- [Creating MCP Servers](creating-mcp-servers.md) - How to build tool servers
-- [Working with Files](working-with-files.md) - File access patterns for tools
-- [Progress Updates](progress-updates.md) - Sending intermediate results to users
 
 ### Frontend Development
-- [Custom Canvas Renderers](canvas-renderers.md) - Adding support for new file types
+- [Error Handling Improvements](error_handling_improvements.md) - LLM error classification and surfacing
+- [Error Flow Diagram](error_flow_diagram.md) - End-to-end error flow diagram

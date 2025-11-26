@@ -1,0 +1,124 @@
+{
+  "version": "1.0",
+  "description": "Email domain whitelist for user access control. When enabled, only users with email addresses from whitelisted domains can access the application.",
+  "enabled": false,
+  "domains": [
+    {
+      "domain": "doe.gov",
+      "description": "Department of Energy",
+      "category": "Government - DOE HQ"
+    },
+    {
+      "domain": "nnsa.doe.gov",
+      "description": "National Nuclear Security Administration",
+      "category": "Government - DOE HQ"
+    },
+    {
+      "domain": "hq.doe.gov",
+      "description": "DOE Headquarters",
+      "category": "Government - DOE HQ"
+    },
+    {
+      "domain": "anl.gov",
+      "description": "Argonne National Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "bnl.gov",
+      "description": "Brookhaven National Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "fnal.gov",
+      "description": "Fermi National Accelerator Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "inl.gov",
+      "description": "Idaho National Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "lbl.gov",
+      "description": "Lawrence Berkeley National Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "lanl.gov",
+      "description": "Los Alamos National Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "llnl.gov",
+      "description": "Lawrence Livermore National Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "ornl.gov",
+      "description": "Oak Ridge National Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "pnnl.gov",
+      "description": "Pacific Northwest National Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "sandia.gov",
+      "description": "Sandia National Laboratories",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "srnl.doe.gov",
+      "description": "Savannah River National Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "ameslab.gov",
+      "description": "Ames Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "jlab.org",
+      "description": "Thomas Jefferson National Accelerator Facility",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "princeton.edu",
+      "description": "Princeton University (PPPL host institution)",
+      "category": "University"
+    },
+    {
+      "domain": "pppl.gov",
+      "description": "Princeton Plasma Physics Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "slac.stanford.edu",
+      "description": "SLAC National Accelerator Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "pppl.gov",
+      "description": "Princeton Plasma Physics Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "nrel.gov",
+      "description": "National Renewable Energy Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "netl.doe.gov",
+      "description": "National Energy Technology Laboratory",
+      "category": "National Laboratory"
+    },
+    {
+      "domain": "stanford.edu",
+      "description": "Stanford University (SLAC host institution)",
+      "category": "University"
+    }
+  ],
+  "subdomain_matching": true,
+  "subdomain_matching_description": "When true, subdomains are automatically allowed (e.g., mail.sandia.gov matches sandia.gov)"
+}

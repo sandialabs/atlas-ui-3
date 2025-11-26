@@ -15,12 +15,19 @@ from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 
 # Import domain errors
-from domain.errors import ValidationError
+from domain.errors import (
+    ValidationError, 
+    RateLimitError, 
+    LLMTimeoutError, 
+    LLMAuthenticationError,
+    DomainError
+)
 
 # Import from core (only essential middleware and config)
 from core.middleware import AuthMiddleware
 from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
+from core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from core.otel_config import setup_opentelemetry
 from core.utils import sanitize_for_logging
 from core.auth import get_user_from_header
@@ -126,6 +133,12 @@ RateLimit first to cheaply throttle abusive traffic before heavier logic.
 """
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
+# Domain whitelist check (if enabled) - add before Auth so it runs after
+if config.app_settings.feature_domain_whitelist_enabled:
+    app.add_middleware(
+        DomainWhitelistMiddleware,
+        auth_redirect_url=config.app_settings.auth_redirect_url
+    )
 app.add_middleware(
     AuthMiddleware, 
     debug_mode=config.app_settings.debug_mode,
@@ -184,6 +197,12 @@ if static_dir.exists():
     async def logo_png():
         path = static_dir / "logo.png"
         return FileResponse(str(path))
+
+    @app.get("/sandia-powered-by-atlas.png")
+    async def logo2_png():
+        path = static_dir / "sandia-powered-by-atlas.png"
+        return FileResponse(str(path))
+
 
 # WebSocket endpoint for chat
 @app.websocket("/ws")
@@ -308,16 +327,47 @@ async def websocket_endpoint(websocket: WebSocket):
                             update_callback=lambda message: websocket_update_callback(websocket, message),
                             files=data.get("files")
                         )
-                    except ValidationError as e:
+                    except RateLimitError as e:
+                        logger.warning(f"Rate limit error in chat handler: {e}")
                         await websocket.send_json({
                             "type": "error",
-                            "message": str(e)
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "rate_limit"
+                        })
+                    except LLMTimeoutError as e:
+                        logger.warning(f"Timeout error in chat handler: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "timeout"
+                        })
+                    except LLMAuthenticationError as e:
+                        logger.error(f"Authentication error in chat handler: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "authentication"
+                        })
+                    except ValidationError as e:
+                        logger.warning(f"Validation error in chat handler: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "validation"
+                        })
+                    except DomainError as e:
+                        logger.error(f"Domain error in chat handler: {e}", exc_info=True)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "domain"
                         })
                     except Exception as e:
-                        logger.error(f"Error in chat handler: {e}", exc_info=True)
+                        logger.error(f"Unexpected error in chat handler: {e}", exc_info=True)
                         await websocket.send_json({
                             "type": "error",
-                            "message": "An unexpected error occurred"
+                            "message": "An unexpected error occurred. Please try again or contact support if the issue persists.",
+                            "error_type": "unexpected"
                         })
 
                 # Start chat handling in background

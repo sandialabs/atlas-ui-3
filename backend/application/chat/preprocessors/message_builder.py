@@ -1,9 +1,10 @@
 """Message builder - constructs messages with history and files manifest."""
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from domain.sessions.models import Session
+from modules.prompts.prompt_provider import PromptProvider
 from ..utilities import file_utils
 
 logger = logging.getLogger(__name__)
@@ -12,10 +13,10 @@ logger = logging.getLogger(__name__)
 def build_session_context(session: Session) -> Dict[str, Any]:
     """
     Build session context dictionary from session.
-    
+
     Args:
         session: Chat session
-        
+
     Returns:
         Session context dictionary
     """
@@ -30,14 +31,24 @@ def build_session_context(session: Session) -> Dict[str, Any]:
 class MessageBuilder:
     """
     Service that builds complete message arrays for LLM calls.
-    
-    Combines conversation history with files manifest and other context.
+
+    Combines conversation history with files manifest and system prompt.
     """
+
+    def __init__(self, prompt_provider: Optional[PromptProvider] = None):
+        """
+        Initialize message builder.
+
+        Args:
+            prompt_provider: Optional prompt provider for loading system prompt
+        """
+        self.prompt_provider = prompt_provider
 
     async def build_messages(
         self,
         session: Session,
         include_files_manifest: bool = True,
+        include_system_prompt: bool = True,
     ) -> List[Dict[str, Any]]:
         """
         Build messages array from session history and context.
@@ -45,12 +56,25 @@ class MessageBuilder:
         Args:
             session: Current chat session
             include_files_manifest: Whether to append files manifest
+            include_system_prompt: Whether to prepend system prompt
 
         Returns:
             List of messages ready for LLM call
         """
+        messages = []
+
+        # Optionally add system prompt at the beginning
+        if include_system_prompt and self.prompt_provider:
+            system_prompt = self.prompt_provider.get_system_prompt(
+                user_email=session.user_email
+            )
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+                logger.debug(f"Added system prompt (len={len(system_prompt)})")
+
         # Get conversation history from session
-        messages = session.history.get_messages_for_llm()
+        history_messages = session.history.get_messages_for_llm()
+        messages.extend(history_messages)
 
         # Optionally add files manifest
         if include_files_manifest:

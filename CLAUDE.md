@@ -237,6 +237,24 @@ User Input → ChatContext → WebSocket → Backend ChatService
 - **MCP Servers**: `config/defaults/mcp.json` and `config/overrides/mcp.json`
 - **Environment**: `.env` (copy from `.env.example`)
 
+### Prompt System (Updated 2025-11-24)
+The application uses a prompt system to manage various LLM prompts:
+
+- **System Prompt**: `prompts/system_prompt.md` - Default system prompt prepended to all conversations
+  - Configurable via `system_prompt_filename` in AppSettings (default: `system_prompt.md`)
+  - Supports `{user_email}` template variable
+  - Can be overridden by MCP-provided prompts
+  - Loaded by `PromptProvider.get_system_prompt()`
+  - Automatically injected by `MessageBuilder` at conversation start
+
+- **Agent Prompts**: Used in agent loop strategies
+  - `prompts/agent_reason_prompt.md` - Reasoning phase
+  - `prompts/agent_observe_prompt.md` - Observation phase
+
+- **Tool Synthesis**: `prompts/tool_synthesis_prompt.md` - Tool selection guidance
+
+All prompts are loaded from the directory specified by `prompt_base_path` (default: `prompts/`). The system caches loaded prompts for performance.
+
 ### WebSocket Communication
 Backend serves WebSocket at `/ws` with message types:
 - `chat` - User sends message

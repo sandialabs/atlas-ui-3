@@ -285,6 +285,12 @@ class AppSettings(BaseSettings):
         description="Enable compliance level filtering for MCP servers and data sources",
         validation_alias=AliasChoices("FEATURE_COMPLIANCE_LEVELS_ENABLED"),
     )
+    # Email domain whitelist feature gate
+    feature_domain_whitelist_enabled: bool = Field(
+        False,
+        description="Enable email domain whitelist restriction (configured in domain-whitelist.json)",
+        validation_alias=AliasChoices("FEATURE_DOMAIN_WHITELIST_ENABLED", "FEATURE_DOE_LAB_CHECK_ENABLED"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
@@ -309,6 +315,7 @@ class AppSettings(BaseSettings):
 
     # Prompt / template settings
     prompt_base_path: str = "prompts"  # Relative or absolute path to directory containing prompt templates
+    system_prompt_filename: str = "system_prompt.md"  # Filename for system prompt template
     tool_synthesis_prompt_filename: str = "tool_synthesis_prompt.md"  # Filename for tool synthesis prompt template
     # Agent prompts
     agent_reason_prompt_filename: str = "agent_reason_prompt.md"  # Filename for agent reason phase
