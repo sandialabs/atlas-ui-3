@@ -35,6 +35,9 @@ COPY frontend/ .
 # Set default app name for build (can be overridden via build arg)
 ARG VITE_APP_NAME="ATLAS"
 ENV VITE_APP_NAME=${VITE_APP_NAME}
+# Set default whether to display powered by atlas logo on welcome screen (can be overridden via build arg)
+ARG VITE_FEATURE_POWERED_BY_ATLAS="false"
+ENV VITE_FEATURE_POWERED_BY_ATLAS=${VITE_FEATURE_POWERED_BY_ATLAS}
 # build and delete the node_modules
 RUN  npm run build && rm -rf node_modules
 
