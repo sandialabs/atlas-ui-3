@@ -30,6 +30,7 @@ Set-Location $PROJECT_ROOT
 
 # Global variables
 $MCP_PID = $null
+$UVICORN_PID = $null
 $ONLY_FRONTEND = $FrontendOnly
 $ONLY_BACKEND = $BackendOnly
 $START_MCP_MOCK = $StartMcpMock
@@ -49,14 +50,23 @@ function Stop-Mcp {
     }
 }
 
+function Stop-Uvicorn {
+    if ($null -ne $UVICORN_PID -and !$UVICORN_PID.HasExited) {
+        Write-Host "Stopping uvicorn server (PID: $($UVICORN_PID.Id))..."
+        $UVICORN_PID.Kill()
+        $UVICORN_PID.WaitForExit()
+        Write-Host "Uvicorn server stopped."
+    }
+}
+
 function Stop-Processes {
     Write-Host "Killing any running uvicorn processes for main backend..."
 
     # Kill uvicorn processes using the backend main:app pattern
     # Use Get-CimInstance to access CommandLine property
     $uvicornProcesses = Get-CimInstance Win32_Process | Where-Object {
-        $_.Name -eq "uvicorn.exe" -or
-        $_.Name -eq "python.exe" -and $_.CommandLine -like "*uvicorn*main:app*"
+        ($_.Name -eq "uvicorn.exe" -or $_.Name -eq "python.exe") -and
+        $_.CommandLine -like "*uvicorn*main:app*"
     }
 
     foreach ($proc in $uvicornProcesses) {
@@ -115,7 +125,7 @@ function Initialize-ContainerRuntime {
 
         # Check if docker compose (v2) is available
         try {
-            $null = & docker compose version 2>$null
+            $null = & docker compose version -ErrorAction SilentlyContinue
             $script:COMPOSE_CMD = "docker compose"
         } catch {
             # Fall back to docker-compose v1
@@ -167,8 +177,8 @@ function Initialize-MinIO {
 
             # Handle both space-separated and single command formats
             if ($COMPOSE_CMD -like "* *") {
-                $cmdParts = $COMPOSE_CMD -split " ", 2
-                & $cmdParts[0] $cmdParts[1] up -d minio minio-init
+                $cmdParts = $COMPOSE_CMD -split " "
+                & $cmdParts[0] $cmdParts[1..($cmdParts.Length-1)] up -d minio minio-init
             } else {
                 & $COMPOSE_CMD up -d minio minio-init
             }
@@ -243,12 +253,7 @@ function Start-McpMock {
 # FRONTEND BUILD FUNCTIONS
 # =============================================================================
 
-function New-Frontend {
-    $useNewFrontend = $env:USE_NEW_FRONTEND
-    if (-not $useNewFrontend) {
-        $useNewFrontend = "true"
-    }
-
+function Build-Frontend {
     Write-Host "Building frontend..."
     Set-Location "$PROJECT_ROOT/frontend"
     npm install
@@ -277,9 +282,9 @@ function Start-Backend {
     $uvicornExe = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
     $arguments = "main:app --host $HostName --port $Port"
 
-    Start-Process -FilePath $uvicornExe -ArgumentList $arguments -NoNewWindow
+    $script:UVICORN_PID = Start-Process -FilePath $uvicornExe -ArgumentList $arguments -PassThru -NoNewWindow
 
-    Write-Host "Backend server started on ${HostName}:$Port"
+    Write-Host "Backend server started on ${HostName}:$Port (PID: $($script:UVICORN_PID.Id))"
     Set-Location $PROJECT_ROOT
 }
 
@@ -295,7 +300,7 @@ function Main {
 
     # Handle frontend-only mode
     if ($ONLY_FRONTEND) {
-        New-Frontend
+        Build-Frontend
         Write-Host "Frontend rebuilt successfully. Exiting as requested."
         exit 0
     }
@@ -317,6 +322,7 @@ function Main {
         }
         finally {
             Stop-Mcp
+            Stop-Uvicorn
         }
         exit 0
     }
@@ -324,7 +330,7 @@ function Main {
     # Full startup mode (default)
     Stop-Processes
     Clear-Logs
-    New-Frontend
+    Build-Frontend
     Start-McpMock
     Start-Backend -Port 8000 -HostName "127.0.0.1"
 
@@ -345,15 +351,11 @@ function Main {
     }
     finally {
         Stop-Mcp
+        Stop-Uvicorn
     }
 }
 
-# Register cleanup handler for script exit (equivalent to bash trap)
-Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-    if ($null -ne $MCP_PID -and !$MCP_PID.HasExited) {
-        $MCP_PID.Kill()
-    }
-} | Out-Null
+# Cleanup is handled by the finally blocks in the Main function and surrounding try blocks
 
 # Run main function
 try {
@@ -361,6 +363,7 @@ try {
 }
 finally {
     Stop-Mcp
+    Stop-Uvicorn
 }
 
 # # PowerShell equivalents for the commented-out bash code:
