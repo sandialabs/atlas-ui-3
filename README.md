@@ -23,6 +23,22 @@ A modern LLM chat interface with MCP (Model Context Protocol) integration.
 *   **Secure and Configurable**: Features group-based access control, compliance levels, and a tool approval system.
 *   **Modern Stack**: Built with React 19, FastAPI, and WebSockets.
 
+## Quick Start
+
+### Linux/macOS
+```bash
+bash agent_start.sh
+```
+
+### Windows
+```powershell
+.\ps_agent_start.ps1
+```
+
+**Note for Windows users**: If you encounter frontend build errors related to Rollup dependencies, delete `frontend/package-lock.json` and `frontend/node_modules`, then run the script again.
+
+Both scripts automatically detect and work with Docker or Podman.
+
 ## Documentation
 
 We have created a set of comprehensive guides to help you get the most out of Atlas UI 3.
