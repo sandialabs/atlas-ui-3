@@ -100,11 +100,11 @@ def _clean_markdown_text(text: str) -> str:
     # Remove inline code markers (`text`)
     text = re.sub(r'`([^`]+?)`', r'\1', text)
     
+    # Remove image syntax ![alt](url) - must come before link syntax
+    text = re.sub(r'!\[([^\]]*?)\]\([^)]+?\)', r'\1', text)
+    
     # Remove link syntax [text](url) - keep the text
     text = re.sub(r'\[([^\]]+?)\]\([^)]+?\)', r'\1', text)
-    
-    # Remove image syntax ![alt](url)
-    text = re.sub(r'!\[([^\]]*?)\]\([^)]+?\)', r'\1', text)
     
     # Clean up any remaining markdown artifacts
     text = re.sub(r'^\s*#{1,6}\s*', '', text)  # Remove header markers at start of line
