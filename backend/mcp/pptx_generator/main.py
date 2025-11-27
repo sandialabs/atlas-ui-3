@@ -74,8 +74,14 @@ SANDIA_GRAY = RGBColor(102, 102, 102)  # Gray for secondary text
 SANDIA_WHITE = RGBColor(255, 255, 255)
 
 # 16:9 slide dimensions (standard widescreen)
-SLIDE_WIDTH = Inches(13.333)  # 16:9 width
-SLIDE_HEIGHT = Inches(7.5)    # 16:9 height
+# Height is 7.5 inches, width is calculated for exact 16:9 ratio
+SLIDE_HEIGHT = Inches(7.5)
+SLIDE_WIDTH = Inches(7.5 * 16 / 9)  # 16:9 aspect ratio = 13.333... inches
+
+
+def _calculate_indent_level(leading_spaces: int) -> int:
+    """Calculate bullet indent level from leading whitespace."""
+    return leading_spaces // 2 if leading_spaces >= 2 else 0
 
 
 def _clean_markdown_text(text: str) -> str:
@@ -267,7 +273,7 @@ def _add_image_to_slide(slide_obj, image_bytes: bytes,
             
             return pic
     except Exception as e:
-        print(f"Error adding image to slide: {e}")
+        logger.error(f"Error adding image to slide: {e}")
         return None
 
 
@@ -392,22 +398,14 @@ def markdown_to_pptx(
                     if numbered_match:
                         is_bullet = True
                         bullet_text = numbered_match.group(2)
-                        indent_level = leading_spaces // 2 if leading_spaces >= 2 else 0
-                    # Handle dash bullets (- item)
-                    elif stripped_line.startswith('- '):
-                        is_bullet = True
-                        bullet_text = stripped_line[2:]
-                        indent_level = leading_spaces // 2 if leading_spaces >= 2 else 0
-                    # Handle asterisk bullets (* item)
-                    elif stripped_line.startswith('* '):
-                        is_bullet = True
-                        bullet_text = stripped_line[2:]
-                        indent_level = leading_spaces // 2 if leading_spaces >= 2 else 0
-                    # Handle plus bullets (+ item)
-                    elif stripped_line.startswith('+ '):
-                        is_bullet = True
-                        bullet_text = stripped_line[2:]
-                        indent_level = leading_spaces // 2 if leading_spaces >= 2 else 0
+                        indent_level = _calculate_indent_level(leading_spaces)
+                    # Handle bullet points (-, *, +) with regex for proper text extraction
+                    else:
+                        bullet_match = re.match(r'^[-*+]\s+(.+)$', stripped_line)
+                        if bullet_match:
+                            is_bullet = True
+                            bullet_text = bullet_match.group(1)
+                            indent_level = _calculate_indent_level(leading_spaces)
                     
                     # Clean the bullet text from markdown formatting
                     bullet_text = _clean_markdown_text(bullet_text.strip())
@@ -555,6 +553,7 @@ def markdown_to_pptx(
                 if content.strip():
                     lines = content.split('\n')
                     in_list = False
+                    current_indent = 0
                     
                     for line in lines:
                         stripped = line.strip()
@@ -564,16 +563,19 @@ def markdown_to_pptx(
                         # Detect bullet points with various formats
                         is_bullet = False
                         bullet_text = stripped
-                        indent = len(line) - len(line.lstrip())
+                        indent = _calculate_indent_level(len(line) - len(line.lstrip()))
                         
                         # Numbered list
                         numbered_match = re.match(r'^(\d+)\.\s+(.+)$', stripped)
                         if numbered_match:
                             is_bullet = True
                             bullet_text = numbered_match.group(2)
-                        elif stripped.startswith(('- ', '* ', '+ ')):
-                            is_bullet = True
-                            bullet_text = stripped[2:]
+                        else:
+                            # Handle bullet points (-, *, +) with regex
+                            bullet_match = re.match(r'^[-*+]\s+(.+)$', stripped)
+                            if bullet_match:
+                                is_bullet = True
+                                bullet_text = bullet_match.group(1)
                         
                         # Clean markdown from text
                         bullet_text = _clean_markdown_text(bullet_text)
@@ -582,16 +584,31 @@ def markdown_to_pptx(
                             if not in_list:
                                 html_content += "<ul>"
                                 in_list = True
-                            if indent >= 2:
-                                html_content += f"<ul><li>{bullet_text}</li></ul>"
-                            else:
-                                html_content += f"<li>{bullet_text}</li>"
+                                current_indent = indent
+                            
+                            # Handle indent changes
+                            while current_indent < indent:
+                                html_content += "<ul>"
+                                current_indent += 1
+                            while current_indent > indent:
+                                html_content += "</ul>"
+                                current_indent -= 1
+                            
+                            html_content += f"<li>{bullet_text}</li>"
                         else:
+                            # Close all open lists
+                            while current_indent > 0:
+                                html_content += "</ul>"
+                                current_indent -= 1
                             if in_list:
                                 html_content += "</ul>"
                                 in_list = False
                             html_content += f"<p>{_clean_markdown_text(stripped)}</p>"
                     
+                    # Close any remaining open lists
+                    while current_indent > 0:
+                        html_content += "</ul>"
+                        current_indent -= 1
                     if in_list:
                         html_content += "</ul>"
 
@@ -686,7 +703,7 @@ def markdown_to_pptx(
                 },
             }
     except Exception as e:
-        print(f"Error in markdown_to_pptx: {str(e)}")
+        logger.error(f"Error in markdown_to_pptx: {str(e)}")
         return {"results": {"error": f"Error creating PowerPoint from markdown: {str(e)}"}}
 
 
