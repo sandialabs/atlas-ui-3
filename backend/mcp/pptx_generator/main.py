@@ -281,7 +281,7 @@ def _add_image_to_slide(slide_obj, image_bytes: bytes,
 @mcp.tool
 def markdown_to_pptx(
     markdown_content: Annotated[str, "Markdown content with headers (# or ##) as slide titles and content below each header"],
-    output_filename: Annotated[Optional[str], "Base name for output files (without extension)"] = "presentation",
+    file_name: Annotated[Optional[str], "Output file name (base name for generated files without extension)"] = None,
     image_filename: Annotated[Optional[str], "Optional image filename to integrate into the presentation"] = "",
     image_data_base64: Annotated[Optional[str], "Framework may supply Base64 image content as fallback"] = ""
 ) -> Dict[str, Any]:
@@ -293,7 +293,7 @@ def markdown_to_pptx(
 
     Args:
         markdown_content: Markdown content where headers (# or ##) become slide titles and content below becomes slide content
-        output_filename: Base name for output files (without extension, default: "presentation")
+        file_name: Output file name (base name for generated files without extension)
         image_filename: Optional image filename to integrate into the presentation
         image_data_base64: Framework may supply Base64 image content as fallback
 
@@ -308,7 +308,8 @@ def markdown_to_pptx(
         # Handle None values and sanitize the output filename
         image_filename = image_filename or ""
         image_data_base64 = image_data_base64 or ""
-        output_filename = _sanitize_filename(output_filename or "presentation")
+        # Use file_name if provided, otherwise use default "presentation"
+        output_filename = _sanitize_filename(file_name or "presentation")
 
         # Parse markdown into slides
         slides = _parse_markdown_slides(markdown_content)
