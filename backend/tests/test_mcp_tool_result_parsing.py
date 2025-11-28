@@ -40,6 +40,24 @@ class MockMCPResultWithoutStructuredContent:
         self.meta = None
 
 
+class MockMCPResultPlainText:
+    """Mock MCP result with non-JSON plain text content."""
+    def __init__(self, text: str = "Just a plain text result"):
+        self.content = [MockTextContent(text)]
+        self.structured_content = None
+        self.data = None
+        self.is_error = False
+
+
+class MockMCPResultMalformedJson:
+    """Mock MCP result with malformed JSON in content."""
+    def __init__(self, text: str = "{invalid json: true"):
+        self.content = [MockTextContent(text)]
+        self.structured_content = None
+        self.data = None
+        self.is_error = False
+
+
 class TestMCPToolResultParsing:
     """Tests for parsing MCP tool results."""
 
@@ -209,14 +227,7 @@ class TestMCPToolResultParsing:
                 mock_client_instance = MockFastMCPClient.return_value
                 mock_client_instance.__aenter__.return_value = mock_client_instance
 
-                # Create result with non-JSON text content
-                class MockPlainResult:
-                    content = [MockTextContent("Just a plain text result")]
-                    structured_content = None
-                    data = None
-                    is_error = False
-
-                mock_client_instance.call_tool = AsyncMock(return_value=MockPlainResult())
+                mock_client_instance.call_tool = AsyncMock(return_value=MockMCPResultPlainText())
 
                 await manager.initialize_clients()
 
@@ -257,14 +268,7 @@ class TestMCPToolResultParsing:
                 mock_client_instance = MockFastMCPClient.return_value
                 mock_client_instance.__aenter__.return_value = mock_client_instance
 
-                # Create result with malformed JSON
-                class MockMalformedResult:
-                    content = [MockTextContent("{invalid json: true")]
-                    structured_content = None
-                    data = None
-                    is_error = False
-
-                mock_client_instance.call_tool = AsyncMock(return_value=MockMalformedResult())
+                mock_client_instance.call_tool = AsyncMock(return_value=MockMCPResultMalformedJson())
 
                 await manager.initialize_clients()
 

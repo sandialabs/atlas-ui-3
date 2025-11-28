@@ -936,7 +936,7 @@ class MCPToolManager:
                         # This handles MCP responses that return data only in content[0].text
                         if hasattr(raw_result, "content"):
                             contents = getattr(raw_result, "content")
-                            if contents and hasattr(contents[0], "text"):
+                            if contents and len(contents) > 0 and hasattr(contents[0], "text"):
                                 first_text = getattr(contents[0], "text")
                                 if isinstance(first_text, str) and first_text.strip().startswith("{"):
                                     try:
