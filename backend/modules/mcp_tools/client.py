@@ -1,14 +1,15 @@
 """FastMCP client for connecting to MCP servers and managing tools."""
 
+import asyncio
 import logging
 import os
 import json
+import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 from fastmcp import Client
 from modules.config import config_manager
-from core.auth_utils import create_authorization_manager
 from core.utils import sanitize_for_logging
 from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
@@ -20,6 +21,11 @@ class MCPToolManager:
     """Manager for MCP servers and their tools.
 
     Default config path now points to config/overrides (or env override) with legacy fallback.
+    
+    Supports:
+    - Hot-reloading configuration from disk via reload_config()
+    - Tracking failed server connections for retry
+    - Auto-reconnect with exponential backoff (when feature flag is enabled)
     """
     
     def __init__(self, config_path: Optional[str] = None):
@@ -62,6 +68,95 @@ class MCPToolManager:
         self.clients = {}
         self.available_tools = {}
         self.available_prompts = {}
+        
+        # Track failed servers for reconnection with backoff
+        self._failed_servers: Dict[str, Dict[str, Any]] = {}
+        # {server_name: {"last_attempt": timestamp, "attempt_count": int, "error": str}}
+        
+        # Reconnect task reference (used by auto-reconnect background task)
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._reconnect_running = False
+    
+    def reload_config(self) -> Dict[str, Any]:
+        """Reload MCP server configuration from disk.
+        
+        This re-reads the mcp.json configuration file and updates servers_config.
+        Call initialize_clients() and discover_tools()/discover_prompts() afterward
+        to apply the changes.
+        
+        Returns:
+            Dict with previous and new server lists for comparison
+        """
+        previous_servers = set(self.servers_config.keys())
+        
+        # Reload from config manager (which reads from disk)
+        new_mcp_config = config_manager.reload_mcp_config()
+        self.servers_config = {
+            name: server.model_dump() 
+            for name, server in new_mcp_config.servers.items()
+        }
+        
+        new_servers = set(self.servers_config.keys())
+        
+        # Clear failed servers tracking for removed servers
+        removed_servers = previous_servers - new_servers
+        for server_name in removed_servers:
+            self._failed_servers.pop(server_name, None)
+        
+        added_servers = new_servers - previous_servers
+        unchanged_servers = previous_servers & new_servers
+        
+        logger.info(
+            f"MCP config reloaded: added={list(added_servers)}, "
+            f"removed={list(removed_servers)}, unchanged={list(unchanged_servers)}"
+        )
+        
+        return {
+            "previous_servers": list(previous_servers),
+            "new_servers": list(new_servers),
+            "added": list(added_servers),
+            "removed": list(removed_servers),
+            "unchanged": list(unchanged_servers)
+        }
+    
+    def get_failed_servers(self) -> Dict[str, Dict[str, Any]]:
+        """Get information about servers that failed to connect.
+        
+        Returns:
+            Dict mapping server name to failure info including last_attempt time,
+            attempt_count, and error message.
+        """
+        return dict(self._failed_servers)
+    
+    def _record_server_failure(self, server_name: str, error: str) -> None:
+        """Record a server connection failure for tracking."""
+        if server_name in self._failed_servers:
+            self._failed_servers[server_name]["attempt_count"] += 1
+            self._failed_servers[server_name]["last_attempt"] = time.time()
+            self._failed_servers[server_name]["error"] = error
+        else:
+            self._failed_servers[server_name] = {
+                "last_attempt": time.time(),
+                "attempt_count": 1,
+                "error": error
+            }
+    
+    def _clear_server_failure(self, server_name: str) -> None:
+        """Clear failure tracking for a server after successful connection."""
+        self._failed_servers.pop(server_name, None)
+    
+    def _calculate_backoff_delay(self, attempt_count: int) -> float:
+        """Calculate exponential backoff delay for reconnection attempts.
+        
+        Uses settings from config_manager for base interval, max interval, and multiplier.
+        """
+        app_settings = config_manager.app_settings
+        base_interval = app_settings.mcp_reconnect_interval
+        max_interval = app_settings.mcp_reconnect_max_interval
+        multiplier = app_settings.mcp_reconnect_backoff_multiplier
+        
+        delay = base_interval * (multiplier ** (attempt_count - 1))
+        return min(delay, max_interval)
         
     
     def _determine_transport_type(self, config: Dict[str, Any]) -> str:
@@ -283,17 +378,189 @@ class MCPToolManager:
         # Process results and store successful clients
         for server_name, result in zip(server_names, results):
             if isinstance(result, Exception):
-                logger.error(f"✗ Exception during client initialization for {server_name}: {result}", exc_info=True)
+                error_msg = f"{type(result).__name__}: {result}"
+                logger.error(f"Exception during client initialization for {server_name}: {error_msg}", exc_info=True)
+                self._record_server_failure(server_name, error_msg)
             elif result is not None:
                 self.clients[server_name] = result
-                logger.info(f"✓ Successfully initialized client for {server_name}")
+                self._clear_server_failure(server_name)
+                logger.info(f"Successfully initialized client for {server_name}")
             else:
-                logger.warning(f"⚠ Failed to initialize client for {server_name}")
+                self._record_server_failure(server_name, "Initialization returned None")
+                logger.warning(f"Failed to initialize client for {server_name}")
         
         logger.info("=== CLIENT INITIALIZATION COMPLETE ===")
         logger.info(f"Successfully initialized {len(self.clients)} clients: {list(self.clients.keys())}")
-        logger.info(f"Failed to initialize: {set(self.servers_config.keys()) - set(self.clients.keys())}")
+        failed_servers = set(self.servers_config.keys()) - set(self.clients.keys())
+        logger.info(f"Failed to initialize: {failed_servers}")
         logger.info("=== END CLIENT INITIALIZATION SUMMARY ===")
+    
+    async def reconnect_failed_servers(self) -> Dict[str, Any]:
+        """Attempt to reconnect to servers that previously failed.
+        
+        Only attempts to reconnect servers that have exceeded their backoff delay.
+        
+        Returns:
+            Dict with reconnection results including newly connected and still failed servers.
+        """
+        if not self._failed_servers:
+            return {
+                "attempted": [],
+                "reconnected": [],
+                "still_failed": [],
+                "skipped_backoff": []
+            }
+        
+        current_time = time.time()
+        attempted = []
+        reconnected = []
+        still_failed = []
+        skipped_backoff = []
+        
+        for server_name, failure_info in list(self._failed_servers.items()):
+            # Skip if server is no longer in config
+            if server_name not in self.servers_config:
+                self._clear_server_failure(server_name)
+                continue
+            
+            # Skip if already connected
+            if server_name in self.clients:
+                self._clear_server_failure(server_name)
+                continue
+            
+            # Check backoff delay
+            backoff_delay = self._calculate_backoff_delay(failure_info["attempt_count"])
+            time_since_last = current_time - failure_info["last_attempt"]
+            
+            if time_since_last < backoff_delay:
+                skipped_backoff.append({
+                    "server": server_name,
+                    "wait_remaining": backoff_delay - time_since_last,
+                    "attempt_count": failure_info["attempt_count"]
+                })
+                continue
+            
+            # Attempt reconnection
+            attempted.append(server_name)
+            config = self.servers_config[server_name]
+            
+            try:
+                client = await self._initialize_single_client(server_name, config)
+                if client is not None:
+                    self.clients[server_name] = client
+                    self._clear_server_failure(server_name)
+                    reconnected.append(server_name)
+                    logger.info(f"Successfully reconnected to MCP server: {server_name}")
+                    
+                    # Discover tools and prompts for the reconnected server
+                    await self._discover_and_register_server(server_name, client)
+                else:
+                    self._record_server_failure(server_name, "Reconnection returned None")
+                    still_failed.append(server_name)
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {e}"
+                self._record_server_failure(server_name, error_msg)
+                still_failed.append(server_name)
+                logger.warning(f"Failed to reconnect to MCP server {server_name}: {error_msg}")
+        
+        return {
+            "attempted": attempted,
+            "reconnected": reconnected,
+            "still_failed": still_failed,
+            "skipped_backoff": skipped_backoff
+        }
+    
+    async def _discover_and_register_server(self, server_name: str, client: Client) -> None:
+        """Discover tools and prompts for a single server and register them."""
+        try:
+            # Discover tools
+            tool_data = await self._discover_tools_for_server(server_name, client)
+            self.available_tools[server_name] = tool_data
+            
+            # Update tool index
+            if hasattr(self, "_tool_index"):
+                for tool in tool_data.get('tools', []):
+                    full_name = f"{server_name}_{tool.name}"
+                    self._tool_index[full_name] = {
+                        'server': server_name,
+                        'tool': tool
+                    }
+            
+            # Discover prompts
+            prompt_data = await self._discover_prompts_for_server(server_name, client)
+            self.available_prompts[server_name] = prompt_data
+            
+            logger.info(
+                f"Registered server {server_name}: "
+                f"{len(tool_data.get('tools', []))} tools, "
+                f"{len(prompt_data.get('prompts', []))} prompts"
+            )
+        except Exception as e:
+            logger.error(f"Error discovering tools/prompts for {server_name}: {e}")
+    
+    async def start_auto_reconnect(self) -> None:
+        """Start the background auto-reconnect task.
+        
+        This task periodically attempts to reconnect to failed MCP servers
+        using exponential backoff. Only runs if FEATURE_MCP_AUTO_RECONNECT_ENABLED is true.
+        """
+        app_settings = config_manager.app_settings
+        if not app_settings.feature_mcp_auto_reconnect_enabled:
+            logger.info("MCP auto-reconnect is disabled (FEATURE_MCP_AUTO_RECONNECT_ENABLED=false)")
+            return
+        
+        if self._reconnect_running:
+            logger.warning("Auto-reconnect task is already running")
+            return
+        
+        self._reconnect_running = True
+        self._reconnect_task = asyncio.create_task(self._auto_reconnect_loop())
+        logger.info("Started MCP auto-reconnect background task")
+    
+    async def stop_auto_reconnect(self) -> None:
+        """Stop the background auto-reconnect task."""
+        self._reconnect_running = False
+        if self._reconnect_task:
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
+            self._reconnect_task = None
+        logger.info("Stopped MCP auto-reconnect background task")
+    
+    async def _auto_reconnect_loop(self) -> None:
+        """Background loop that periodically attempts to reconnect failed servers."""
+        app_settings = config_manager.app_settings
+        base_interval = app_settings.mcp_reconnect_interval
+        
+        while self._reconnect_running:
+            try:
+                await asyncio.sleep(base_interval)
+                
+                if not self._failed_servers:
+                    continue
+                
+                logger.debug(
+                    f"Auto-reconnect: checking {len(self._failed_servers)} failed servers"
+                )
+                result = await self.reconnect_failed_servers()
+                
+                if result["reconnected"]:
+                    logger.info(
+                        f"Auto-reconnect: successfully reconnected {len(result['reconnected'])} servers: "
+                        f"{result['reconnected']}"
+                    )
+                if result["still_failed"]:
+                    logger.debug(
+                        f"Auto-reconnect: {len(result['still_failed'])} servers still failed"
+                    )
+                    
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in auto-reconnect loop: {e}", exc_info=True)
+                await asyncio.sleep(base_interval)  # Wait before retrying
     
     async def _discover_tools_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover tools for a single server. Returns server tools data."""
