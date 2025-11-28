@@ -3,8 +3,95 @@
 import time
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from starlette.testclient import TestClient
 
 from modules.mcp_tools.client import MCPToolManager
+
+
+class TestMCPAdminEndpoints:
+    """Integration tests for MCP admin endpoints."""
+
+    def test_mcp_status_endpoint_requires_admin(self):
+        """Test that MCP status endpoint requires admin access."""
+        from main import app
+        client = TestClient(app)
+        
+        # Non-admin user should be denied
+        r = client.get("/admin/mcp/status", headers={"X-User-Email": "user@example.com"})
+        assert r.status_code in (302, 403)
+        
+    def test_mcp_status_endpoint_returns_data(self):
+        """Test that MCP status endpoint returns expected data structure."""
+        from main import app
+        client = TestClient(app)
+        
+        # Admin user should get response
+        r = client.get("/admin/mcp/status", headers={"X-User-Email": "admin@example.com"})
+        assert r.status_code == 200
+        
+        data = r.json()
+        assert "connected_servers" in data
+        assert "configured_servers" in data
+        assert "failed_servers" in data
+        assert "auto_reconnect" in data
+        assert "tool_counts" in data
+        assert "prompt_counts" in data
+        
+        # Check auto_reconnect structure
+        auto_reconnect = data["auto_reconnect"]
+        assert "enabled" in auto_reconnect
+        assert "base_interval" in auto_reconnect
+        assert "max_interval" in auto_reconnect
+        assert "backoff_multiplier" in auto_reconnect
+        assert "running" in auto_reconnect
+
+    def test_mcp_reload_endpoint_requires_admin(self):
+        """Test that MCP reload endpoint requires admin access."""
+        from main import app
+        client = TestClient(app)
+        
+        # Non-admin user should be denied
+        r = client.post("/admin/mcp/reload", headers={"X-User-Email": "user@example.com"})
+        assert r.status_code in (302, 403)
+
+    def test_mcp_reconnect_endpoint_requires_admin(self):
+        """Test that MCP reconnect endpoint requires admin access."""
+        from main import app
+        client = TestClient(app)
+        
+        # Non-admin user should be denied
+        r = client.post("/admin/mcp/reconnect", headers={"X-User-Email": "user@example.com"})
+        assert r.status_code in (302, 403)
+
+    def test_mcp_reconnect_endpoint_returns_data(self):
+        """Test that MCP reconnect endpoint returns expected data structure."""
+        from main import app
+        client = TestClient(app)
+        
+        # Admin user should get response
+        r = client.post("/admin/mcp/reconnect", headers={"X-User-Email": "admin@example.com"})
+        assert r.status_code == 200
+        
+        data = r.json()
+        assert "message" in data
+        assert "result" in data
+        assert "current_servers" in data
+        assert "failed_servers" in data
+        assert "triggered_by" in data
+
+    def test_admin_dashboard_includes_mcp_endpoints(self):
+        """Test that admin dashboard lists MCP endpoints."""
+        from main import app
+        client = TestClient(app)
+        
+        r = client.get("/admin/", headers={"X-User-Email": "admin@example.com"})
+        assert r.status_code == 200
+        
+        data = r.json()
+        endpoints = data.get("available_endpoints", [])
+        assert "/admin/mcp/reload" in endpoints
+        assert "/admin/mcp/reconnect" in endpoints
+        assert "/admin/mcp/status" in endpoints
 
 
 class TestMCPFailedServerTracking:
