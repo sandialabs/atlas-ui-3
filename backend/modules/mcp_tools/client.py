@@ -931,6 +931,18 @@ class MCPToolManager:
                         dt = raw_result.data  # type: ignore[attr-defined]
                         if isinstance(dt, dict):
                             structured = dt
+                    else:
+                        # Fallback: parse first textual content if JSON-like
+                        # This handles MCP responses that return data only in content[0].text
+                        if hasattr(raw_result, "content"):
+                            contents = getattr(raw_result, "content")
+                            if contents and hasattr(contents[0], "text"):
+                                first_text = getattr(contents[0], "text")
+                                if isinstance(first_text, str) and first_text.strip().startswith("{"):
+                                    try:
+                                        structured = json.loads(first_text)
+                                    except Exception:
+                                        pass
 
                 if isinstance(structured, dict) and structured:
                     # Extract artifacts
