@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -327,7 +328,6 @@ async def get_mcp_status(admin_user: str = Depends(require_admin)):
         failed_servers = mcp.get_failed_servers()
         
         # Calculate next retry time for each failed server
-        import time
         current_time = time.time()
         failed_servers_with_timing = {}
         for server_name, failure_info in failed_servers.items():
