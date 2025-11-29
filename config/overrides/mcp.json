@@ -8,7 +8,7 @@
     "groups": [
       "users"
     ],
-    "description": "Evaluate mathematical expressions, perform calculations with basic arithmetic, trigonometry, and logarithms",
+    "description": "2Evaluate mathematical expressions, perform calculations with basic arithmetic, trigonometry, and logarithms",
     "author": "Chat UI Team",
     "short_description": "Mathematical calculator",
     "help_email": "support@chatui.example.com",

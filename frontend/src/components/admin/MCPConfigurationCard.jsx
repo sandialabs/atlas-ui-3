@@ -6,9 +6,13 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
     connected_servers: [],
     failed_servers: {},
   })
+  const [statusLoading, setStatusLoading] = useState(false)
+  const [reloadLoading, setReloadLoading] = useState(false)
+  const [reconnectLoading, setReconnectLoading] = useState(false)
 
   const loadMCPStatus = async () => {
     try {
+      setStatusLoading(true)
       const response = await fetch('/admin/mcp/status')
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
@@ -21,21 +25,35 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
     } catch (err) {
       // Keep this quiet in the UI but log to console for debugging
       console.error('Error loading MCP status for card:', err)
+    } finally {
+      setStatusLoading(false)
     }
   }
 
   useEffect(() => {
     loadMCPStatus()
+
+    // Poll MCP status periodically to keep inline view fresh
+    const intervalId = setInterval(() => {
+      loadMCPStatus()
+    }, 15000) // 15 seconds
+
+    return () => clearInterval(intervalId)
   }, [])
   const manageMCP = async () => {
     try {
-      const response = await fetch('/admin/mcp-config')
+      const response = await fetch('/admin/config/view')
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
       const data = await response.json()
-      
+
+      const mcpConfigJson = JSON.stringify(data.mcp_config || {}, null, 2)
+
       openModal('Edit MCP Configuration', {
         type: 'textarea',
-        value: data.content,
-        description: 'Configure MCP servers and their properties. Use the MCP Controls below to hot-reload changes without restarting.'
+        value: mcpConfigJson,
+        description: 'Configure MCP servers and their properties. Changes here should be saved back to config/overrides/mcp.json and then hot-reloaded using the controls below.'
       }, 'mcp-config')
     } catch (err) {
       addNotification('Error loading MCP configuration: ' + err.message, 'error')
@@ -62,6 +80,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
 
   const reloadMCP = async () => {
     try {
+      setReloadLoading(true)
       const response = await fetch('/admin/mcp/reload', { method: 'POST' })
       const data = await response.json()
 
@@ -74,11 +93,14 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   loadMCPStatus()
     } catch (err) {
       addNotification('Error reloading MCP servers: ' + err.message, 'error')
+    } finally {
+      setReloadLoading(false)
     }
   }
 
   const reconnectMCP = async () => {
     try {
+      setReconnectLoading(true)
       const response = await fetch('/admin/mcp/reconnect', { method: 'POST' })
       const data = await response.json()
 
@@ -94,6 +116,8 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
       loadMCPStatus()
     } catch (err) {
       addNotification('Error reconnecting MCP servers: ' + err.message, 'error')
+    } finally {
+      setReconnectLoading(false)
     }
   }
 
@@ -114,7 +138,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
       </div>
       <p className="text-gray-400 mb-4">Configure MCP servers and manage hot reload and reconnect.</p>
       <div className={`px-3 py-1 rounded text-sm font-medium mb-4 ${getStatusColor(systemStatus.overall_status || 'healthy')}`}>
-        {systemStatus.overall_status || 'Ready'}
+        {statusLoading ? 'Updating MCP status…' : (systemStatus.overall_status || 'Ready')}
       </div>
       {/* Inline MCP server status */}
       <div className="mb-4 space-y-2 text-sm">
@@ -171,17 +195,19 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={reloadMCP}
-            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm flex items-center justify-center gap-2"
+            disabled={reloadLoading}
+            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-900 disabled:opacity-60 rounded-lg text-sm flex items-center justify-center gap-2"
           >
-            <RefreshCw className="w-4 h-4" />
-            Reload
+            <RefreshCw className={`w-4 h-4 ${reloadLoading ? 'animate-spin' : ''}`} />
+            {reloadLoading ? 'Reloading and reconnecting…' : 'Reload and reconnect all MCP servers'}
           </button>
           <button
             onClick={reconnectMCP}
-            className="px-3 py-2 bg-sky-600 hover:bg-sky-700 rounded-lg text-sm flex items-center justify-center gap-2"
+            disabled={reconnectLoading}
+            className="px-3 py-2 bg-sky-600 hover:bg-sky-700 disabled:bg-sky-900 disabled:opacity-60 rounded-lg text-sm flex items-center justify-center gap-2"
           >
-            <RotateCcw className="w-4 h-4" />
-            Reconnect
+            <RotateCcw className={`w-4 h-4 ${reconnectLoading ? 'animate-spin' : ''}`} />
+            {reconnectLoading ? 'Reconnecting failed servers…' : 'Reconnect disconnected MCP servers only'}
           </button>
         </div>
       </div>

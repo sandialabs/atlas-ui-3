@@ -267,6 +267,55 @@ class TestMCPConfigReload:
 
 
 @pytest.mark.asyncio
+class TestMCPDiscoveryResilience:
+    """Tests to ensure tool/prompt discovery tolerates removed servers."""
+
+    async def test_discover_tools_skips_removed_server(self):
+        """If a client exists without config, discovery should not crash."""
+        manager = MCPToolManager.__new__(MCPToolManager)
+        # Simulate one valid server and one removed server
+        manager.servers_config = {"server-a": {"description": "A"}}
+        manager.clients = {
+            "server-a": AsyncMock(),
+            "removed-server": AsyncMock(),
+        }
+
+        async def fake_discover(server_name, client):  # noqa: ARG001
+            if server_name == "server-a":
+                return {"tools": [MagicMock(name="t1")], "config": {"description": "A"}}
+            # Simulate that removed-server had a client but config was deleted
+            raise RuntimeError("Simulated failure for removed-server")
+
+        manager._discover_tools_for_server = fake_discover  # type: ignore[assignment]
+
+        # Should complete without raising, and only include server-a in available_tools
+        await manager.discover_tools()
+        assert "server-a" in manager.available_tools
+        assert "removed-server" not in manager.available_tools
+
+    @pytest.mark.asyncio
+    async def test_discover_prompts_skips_removed_server(self):
+        """Prompt discovery should also skip servers missing from config."""
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {"server-a": {"description": "A"}}
+        manager.clients = {
+            "server-a": AsyncMock(),
+            "removed-server": AsyncMock(),
+        }
+
+        async def fake_discover_prompts(server_name, client):  # noqa: ARG001
+            if server_name == "server-a":
+                return {"prompts": [MagicMock(name="p1")], "config": {"description": "A"}}
+            raise RuntimeError("Simulated failure for removed-server")
+
+        manager._discover_prompts_for_server = fake_discover_prompts  # type: ignore[assignment]
+
+        await manager.discover_prompts()
+        assert "server-a" in manager.available_prompts
+        assert "removed-server" not in manager.available_prompts
+
+
+@pytest.mark.asyncio
 class TestMCPReconnection:
     """Tests for MCP server reconnection functionality."""
 

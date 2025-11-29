@@ -613,11 +613,12 @@ class MCPToolManager:
                 
             logger.debug(f"Full tool discovery traceback for {server_name}:", exc_info=True)
             
+            server_config = self.servers_config.get(server_name)
             server_data = {
                 'tools': [],
-                'config': self.servers_config[server_name]
+                'config': server_config,
             }
-            logger.error(f"Set empty tools list for failed server {server_name}")
+            logger.error(f"Set empty tools list for failed server {server_name} (config_present={server_config is not None})")
             logger.info(f"=== TOOL DISCOVERY: Failed for server '{server_name}' ===")
             return server_data
 
@@ -640,12 +641,19 @@ class MCPToolManager:
         
         # Process results and store server tools data
         for server_name, result in zip(server_names, results):
+            # Skip clients whose config was removed during reload
+            if server_name not in self.servers_config:
+                logger.warning(
+                    f"Skipping tool discovery result for '{server_name}' because it is no longer in servers_config"
+                )
+                continue
+
             if isinstance(result, Exception):
                 logger.error(f"✗ Exception during tool discovery for {server_name}: {result}", exc_info=True)
                 # Set empty tools list for failed server
                 self.available_tools[server_name] = {
                     'tools': [],
-                    'config': self.servers_config[server_name]
+                    'config': self.servers_config.get(server_name),
                 }
             else:
                 self.available_tools[server_name] = result
@@ -686,9 +694,10 @@ class MCPToolManager:
                     logger.debug(
                         f"Got {len(prompts)} prompts from {server_name}: {[prompt.name for prompt in prompts]}"
                     )
+                    config = self.servers_config.get(server_name)
                     server_data = {
                         'prompts': prompts,
-                        'config': self.servers_config[server_name]
+                        'config': config,
                     }
                     logger.info(f"Discovered {len(prompts)} prompts from {server_name}")
                     logger.debug(f"Successfully stored prompts for {server_name}")
@@ -698,7 +707,7 @@ class MCPToolManager:
                     logger.debug(f"Server {server_name} does not support prompts")
                     return {
                         'prompts': [],
-                        'config': self.servers_config[server_name]
+                        'config': self.servers_config.get(server_name),
                     }
         except Exception as e:
             error_type = type(e).__name__
@@ -721,7 +730,7 @@ class MCPToolManager:
             logger.debug(f"Set empty prompts list for failed server {server_name}")
             return {
                 'prompts': [],
-                'config': self.servers_config[server_name]
+                'config': self.servers_config.get(server_name),
             }
 
     async def discover_prompts(self):
@@ -743,12 +752,19 @@ class MCPToolManager:
         
         # Process results and store server prompts data
         for server_name, result in zip(server_names, results):
+            # Skip clients whose config was removed during reload
+            if server_name not in self.servers_config:
+                logger.warning(
+                    f"Skipping prompt discovery result for '{server_name}' because it is no longer in servers_config"
+                )
+                continue
+
             if isinstance(result, Exception):
                 logger.error(f"✗ Exception during prompt discovery for {server_name}: {result}", exc_info=True)
                 # Set empty prompts list for failed server
                 self.available_prompts[server_name] = {
                     'prompts': [],
-                    'config': self.servers_config[server_name]
+                    'config': self.servers_config.get(server_name),
                 }
             else:
                 self.available_prompts[server_name] = result
