@@ -19,7 +19,6 @@ from pydantic import BaseModel
 from core.auth import is_user_in_group
 from core.utils import get_current_user, sanitize_for_logging
 from modules.config import config_manager
-from core.otel_config import get_otel_config  # noqa: F401 (may be used later)
 from infrastructure.app_factory import app_factory
 
 logger = logging.getLogger(__name__)
@@ -34,12 +33,6 @@ class AdminConfigUpdate(BaseModel):
 
 class BannerMessageUpdate(BaseModel):
     messages: List[str]
-
-
-class SystemStatus(BaseModel):  # noqa: F841 (kept for future use)
-    component: str
-    status: str
-    details: Optional[Dict[str, Any]] = None
 
 
 async def require_admin(current_user: str = Depends(get_current_user)) -> str:
@@ -360,128 +353,8 @@ async def get_mcp_status(admin_user: str = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# # --- MCP Configuration ---
-
-# @admin_router.get("/mcp-config")
-# async def get_mcp_config(admin_user: str = Depends(require_admin)):
-#     """Get current MCP server configuration."""
-#     try:
-#         mcp_file = get_admin_config_path("mcp.json")
-#         content = get_file_content(mcp_file)
-        
-#         return {
-#             "content": content,
-#             "parsed": json.loads(content),
-#             "file_path": str(mcp_file),
-#             "last_modified": mcp_file.stat().st_mtime
-#         }
-#     except Exception as e:
-#         logger.error(f"Error getting MCP config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# @admin_router.post("/mcp-config")
-# async def update_mcp_config(
-#     update: AdminConfigUpdate,
-#     admin_user: str = Depends(require_admin)
-# ):
-#     """Update MCP server configuration."""
-#     try:
-#         mcp_file = get_admin_config_path("mcp.json")
-#         write_file_content(mcp_file, update.content, "json")
-        
-#         logger.info(f"MCP configuration updated by {admin_user}")
-#         return {
-#             "message": "MCP configuration updated successfully",
-#             "updated_by": admin_user
-#         }
-#     except Exception as e:
-#         logger.error(f"Error updating MCP config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# # --- LLM Configuration ---
-
-# @admin_router.get("/llm-config")
-# async def get_llm_config(admin_user: str = Depends(require_admin)):
-#     """Get current LLM configuration."""
-#     try:
-#         llm_file = get_admin_config_path("llmconfig.yml")
-#         content = get_file_content(llm_file)
-        
-#         return {
-#             "content": content,
-#             "parsed": yaml.safe_load(content),
-#             "file_path": str(llm_file),
-#             "last_modified": llm_file.stat().st_mtime
-#         }
-#     except Exception as e:
-#         logger.error(f"Error getting LLM config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# @admin_router.post("/llm-config")
-# async def update_llm_config(
-#     update: AdminConfigUpdate,
-#     admin_user: str = Depends(require_admin)
-# ):
-#     """Update LLM configuration."""
-#     try:
-#         llm_file = get_admin_config_path("llmconfig.yml")
-#         write_file_content(llm_file, update.content, "yaml")
-        
-#         logger.info(f"LLM configuration updated by {admin_user}")
-#         return {
-#             "message": "LLM configuration updated successfully", 
-#             "updated_by": admin_user
-#         }
-#     except Exception as e:
-#         logger.error(f"Error updating LLM config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# # --- Help Configuration ---
-
-# @admin_router.get("/help-config")
-# async def get_help_config(admin_user: str = Depends(require_admin)):
-#     """Get current help configuration."""
-#     try:
-#         help_file = get_admin_config_path("help-config.json")
-#         content = get_file_content(help_file)
-        
-#         return {
-#             "content": content,
-#             "parsed": json.loads(content),
-#             "file_path": str(help_file),
-#             "last_modified": help_file.stat().st_mtime
-#         }
-#     except Exception as e:
-#         logger.error(f"Error getting help config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# @admin_router.post("/help-config")
-# async def update_help_config(
-#     update: AdminConfigUpdate,
-#     admin_user: str = Depends(require_admin)
-# ):
-#     """Update help configuration."""
-#     try:
-#         help_file = get_admin_config_path("help-config.json")
-#         write_file_content(help_file, update.content, "json")
-        
-#         logger.info(f"Help configuration updated by {admin_user}")
-#         return {
-#             "message": "Help configuration updated successfully",
-#             "updated_by": admin_user
-#         }
-#     except Exception as e:
-#         logger.error(f"Error updating help config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
 
 # --- Config Viewer ---
-
 @admin_router.get("/config/view")
 async def get_all_configs(admin_user: str = Depends(require_admin)):
     """Get all configuration values for admin viewing."""

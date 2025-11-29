@@ -1,7 +1,6 @@
 {
   "version": "1.0",
-  "description": "Email domain whitelist for user access control. When enabled, only users with email addresses from whitelisted domains can access the application.",
-  "enabled": false,
+  "description": "Email domain whitelist for user access control. Enable/disable via FEATURE_DOMAIN_WHITELIST_ENABLED environment variable. When enabled, only users with email addresses from whitelisted domains can access the application.",
   "domains": [
     {
       "domain": "doe.gov",

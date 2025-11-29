@@ -83,4 +83,5 @@ backend/minio-data/
 
 # Legacy S3 Mock Storage (deprecated)
 mocks/s3-mock/s3-mock-storage/
+.old.env
 old.env
