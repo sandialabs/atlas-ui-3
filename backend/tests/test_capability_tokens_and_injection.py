@@ -86,7 +86,8 @@ def _extract_key(resp_json) -> Optional[str]:
 
 
 def test_download_with_and_without_token(client):
-    # Upload a small text file via API
+    """Test file upload/download with proper authentication in production mode."""
+    # Upload a small text file via API with authentication header
     content = base64.b64encode(b"hello world").decode("utf-8")
     upload_resp = client.post(
         "/api/files",
@@ -96,25 +97,63 @@ def test_download_with_and_without_token(client):
             "content_type": "text/plain",
             "tags": {"source": "test"},
         },
+        headers={"X-User-Email": "test@example.com"},
     )
     assert upload_resp.status_code == 200
     key = _extract_key(upload_resp.json())
     assert key
 
-    # Without token (uses default get_current_user), should succeed in dev
-    dl_resp = client.get(f"/api/files/download/{key}")
+    # Download with same user authentication
+    dl_resp = client.get(
+        f"/api/files/download/{key}",
+        headers={"X-User-Email": "test@example.com"}
+    )
     assert dl_resp.status_code == 200
     assert dl_resp.content == b"hello world"
 
-    # With token for a different (explicit) user
+    # With capability token for a different user (token grants access)
     token = generate_file_token("alice@example.com", key, ttl_seconds=60)
-    dl_resp2 = client.get(f"/api/files/download/{key}", params={"token": token})
+    dl_resp2 = client.get(
+        f"/api/files/download/{key}",
+        params={"token": token},
+        headers={"X-User-Email": "alice@example.com"}
+    )
     assert dl_resp2.status_code == 200
     assert dl_resp2.content == b"hello world"
 
 
+def test_download_without_auth_fails_in_production_mode(client):
+    """Test that requests without authentication fail in production mode (debug_mode=False).
+    
+    This test validates that when debug_mode=False (production mode), requests without
+    the X-User-Email header are rejected with 401 Unauthorized.
+    
+    Note: This test will pass in production mode and fail in debug mode, which is expected.
+    CI runs tests in both modes to validate both behaviors.
+    """
+    from infrastructure.app_factory import app_factory  # type: ignore
+    
+    # Skip this test if running in debug mode (it's expected to fail)
+    if app_factory.config_manager.app_settings.debug_mode:
+        pytest.skip("Skipping production mode test - running in debug mode")
+    
+    content = base64.b64encode(b"test content").decode("utf-8")
+    
+    # Try to upload without authentication - should fail with 401 in production mode
+    upload_resp = client.post(
+        "/api/files",
+        json={
+            "filename": "test.txt",
+            "content_base64": content,
+            "content_type": "text/plain",
+            "tags": {"source": "test"},
+        },
+    )
+    assert upload_resp.status_code == 401
+
+
 def test_injection_produces_tokenized_urls(client, monkeypatch):
-    # Verify that tool argument injection replaces filename with tokenized URL
+    """Verify that tool argument injection replaces filename with tokenized URL."""
     from application.chat.utilities.tool_utils import inject_context_into_args  # type: ignore
 
     # Create a fake session context with a file mapping
