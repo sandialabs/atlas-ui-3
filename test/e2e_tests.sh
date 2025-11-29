@@ -86,7 +86,12 @@ MAX_RETRIES=15
 RETRY_INTERVAL=2
 SUCCESS=false
 for i in $(seq 1 $MAX_RETRIES); do
-    if curl --silent --fail http://127.0.0.1:8000/api/config >/dev/null 2>&1; then
+    # /api/config is protected by AuthMiddleware in production mode.
+    # Use the configured test user header so readiness works in both
+    # DEBUG_MODE=true and DEBUG_MODE=false environments.
+    if curl --silent --fail \
+        -H "X-User-Email: test@test.com" \
+        http://127.0.0.1:8000/api/config >/dev/null 2>&1; then
         echo "Backend is up (after $i attempt(s))"
         SUCCESS=true
         break
