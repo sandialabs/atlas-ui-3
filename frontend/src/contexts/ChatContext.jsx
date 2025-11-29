@@ -324,6 +324,7 @@ export const ChatProvider = ({ children }) => {
 		models: config.models,
 		tools: config.tools,
 		prompts: config.prompts,
+		discoverableServers: config.discoverableServers,
 		dataSources: config.dataSources,
 		ragServers: config.ragServers, // Expose rich server structure
 		ragSources, // Expose flattened list of sources

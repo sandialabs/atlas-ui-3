@@ -99,6 +99,7 @@ class MCPServerConfig(BaseModel):
     help_email: Optional[str] = None     # Contact email for help/support
     groups: List[str] = Field(default_factory=list)
     enabled: bool = True
+    allow_discovery: bool = False        # Allow users to discover server even without access (shows overview and contact info only)
     command: Optional[List[str]] = None  # Command to run server (for stdio servers)
     cwd: Optional[str] = None            # Working directory for command
     env: Optional[Dict[str, str]] = None  # Environment variables for stdio servers
