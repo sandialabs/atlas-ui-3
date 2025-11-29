@@ -96,18 +96,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     ? Array.from(selectedPrompts)[0]
     : null
 
-  const selectedPromptInfo = (() => {
-    if (!selectedPromptKey) return null
-    const idx = selectedPromptKey.indexOf('_')
-    if (idx === -1) return { key: selectedPromptKey, server: 'Unknown', name: selectedPromptKey }
-    const server = selectedPromptKey.slice(0, idx)
-    const name = selectedPromptKey.slice(idx + 1)
-    // Try to find description from our server list
-    const srv = serverList.find(s => s.server === server)
-    const desc = srv?.prompts?.find(p => p.name === name)?.description || ''
-    return { key: selectedPromptKey, server, name, description: desc }
-  })()
-
   // Filter servers based on search term
   const filteredServers = serverList.filter(server => {
     if (!searchTerm) return true
