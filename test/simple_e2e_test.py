@@ -21,6 +21,7 @@ def wait_for_server(url, max_retries=30, delay=2):
                 print(f"✅ Server is ready (attempt {i+1})")
                 return True
         except requests.exceptions.RequestException:
+            # Intentionally ignore connection errors
             pass
         
         print(f"  [{i+1}/{max_retries}] Server not ready yet, waiting {delay}s...")

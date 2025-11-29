@@ -5,14 +5,12 @@ from typing import Any, Dict, List, Optional, Callable, Awaitable
 from uuid import UUID
 
 from domain.messages.models import (
-    Message,
-    MessageRole,
     MessageType,
     ToolResult
 )
 from domain.sessions.models import Session
 from domain.errors import DomainError
-from interfaces.llm import LLMProtocol, LLMResponse
+from interfaces.llm import LLMProtocol
 from interfaces.events import EventPublisher
 from interfaces.sessions import SessionRepository
 from modules.config import ConfigManager
@@ -21,9 +19,8 @@ from interfaces.tools import ToolManagerProtocol
 from interfaces.transport import ChatConnectionProtocol
 
 # Import utilities
-from .utilities import tool_utils, file_utils, notification_utils, error_utils
+from .utilities import file_utils, error_utils
 from .agent import AgentLoopFactory
-from .agent.protocols import AgentContext, AgentEvent
 from core.utils import sanitize_for_logging
 
 # Import new refactored modules

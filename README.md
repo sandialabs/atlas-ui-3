@@ -7,6 +7,8 @@
 ![React 19](https://img.shields.io/badge/react-19.2-blue.svg)
 ![License MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
+Atlas UI 3 is a secure chat application developed by Sandia National Laboratories, a U.S. Department of Energy national laboratory, and is primarily intended to support U.S. Government customers.
+
 A modern LLM chat interface with MCP (Model Context Protocol) integration.
 
 ![Screenshot](docs/readme_img/screenshot-11-6-2025image.png)

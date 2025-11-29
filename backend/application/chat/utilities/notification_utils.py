@@ -174,6 +174,7 @@ async def notify_tool_complete(
                 bool(disp),
             )
     except Exception:
+        # Fail open on artifact/display logging to avoid breaking tool completion
         pass
 
     await safe_notify(update_callback, complete_payload)
@@ -497,5 +498,3 @@ def create_chat_response(message: str, message_type: str = "chat_response") -> D
         "type": message_type,
         "message": message
     }
-
-
