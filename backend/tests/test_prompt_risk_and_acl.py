@@ -31,14 +31,10 @@ async def test_rag_results_risk_logging(tmp_path, monkeypatch):
     # Redirect log file path by setting cwd and verifying file output
     log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "logs", "security_high_risk.jsonl")
     try:
-        if os.path.exists(log_file):
-            os.remove(log_file)
-    except FileNotFoundError:
-        # Log file does not exist; nothing to remove
-        pass
+        os.remove(log_file)
     except OSError:
-        # Other OS errors (e.g., permissions) are unexpected and should not be silently ignored
-        raise
+        # Ignore removal failures to clean up
+        pass
 
     from domain.rag_mcp_service import RAGMCPService
 

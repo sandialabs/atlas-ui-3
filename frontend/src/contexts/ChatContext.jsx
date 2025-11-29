@@ -38,7 +38,7 @@ export const ChatProvider = ({ children }) => {
 	const [isThinking, setIsThinking] = useState(false)
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
-	const [, setPendingFileEvents] = useState(new Map())
+	const [pendingFileEvents, setPendingFileEvents] = useState(new Map())
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {

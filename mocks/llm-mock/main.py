@@ -6,7 +6,7 @@ This provides a mock LLM service for testing purposes, similar to mcp-http-mock.
 It simulates OpenAI-compatible API responses for testing chat functionality.
 """
 
-import datetime
+from datetime import datetime
 import json
 import time
 import uuid
