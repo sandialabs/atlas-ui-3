@@ -123,10 +123,23 @@ def test_download_with_and_without_token(client):
 
 
 def test_download_without_auth_fails_in_production_mode(client):
-    """Test that requests without authentication fail in production mode (debug_mode=False)."""
+    """Test that requests without authentication fail in production mode (debug_mode=False).
+    
+    This test validates that when debug_mode=False (production mode), requests without
+    the X-User-Email header are rejected with 401 Unauthorized.
+    
+    Note: This test will pass in production mode and fail in debug mode, which is expected.
+    CI runs tests in both modes to validate both behaviors.
+    """
+    from infrastructure.app_factory import app_factory  # type: ignore
+    
+    # Skip this test if running in debug mode (it's expected to fail)
+    if app_factory.config_manager.app_settings.debug_mode:
+        pytest.skip("Skipping production mode test - running in debug mode")
+    
     content = base64.b64encode(b"test content").decode("utf-8")
     
-    # Try to upload without authentication - should fail with 401
+    # Try to upload without authentication - should fail with 401 in production mode
     upload_resp = client.post(
         "/api/files",
         json={
