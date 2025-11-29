@@ -1,8 +1,8 @@
 """Email domain whitelist validation middleware.
 
 This middleware enforces that users must have email addresses from whitelisted
-domains. Configuration is loaded from domain-whitelist.json and can be
-enabled/disabled via the FEATURE_DOMAIN_WHITELIST_ENABLED feature flag.
+domains. Enabled/disabled via the FEATURE_DOMAIN_WHITELIST_ENABLED feature flag.
+Domain list is loaded from domain-whitelist.json.
 """
 
 import logging
@@ -29,10 +29,7 @@ class DomainWhitelistMiddleware(BaseHTTPMiddleware):
         self.auth_redirect_url = auth_redirect_url
         self.whitelist_manager = DomainWhitelistManager()
         
-        if self.whitelist_manager.is_enabled():
-            logger.info(f"Domain whitelist enabled with {len(self.whitelist_manager.get_domains())} domains")
-        else:
-            logger.info("Domain whitelist disabled")
+        logger.info(f"Domain whitelist middleware loaded: {len(self.whitelist_manager.get_domains())} domains (config_loaded={self.whitelist_manager.config_loaded})")
     
     async def dispatch(self, request: Request, call_next) -> Response:
         """Check if user email is from a whitelisted domain.
@@ -46,10 +43,6 @@ class DomainWhitelistMiddleware(BaseHTTPMiddleware):
         """
         # Skip check for health endpoint and auth redirect endpoint
         if request.url.path == '/api/health' or request.url.path == self.auth_redirect_url:
-            return await call_next(request)
-        
-        # If whitelist is not enabled in config, allow all
-        if not self.whitelist_manager.is_enabled():
             return await call_next(request)
         
         # Get email from request state (set by AuthMiddleware)
