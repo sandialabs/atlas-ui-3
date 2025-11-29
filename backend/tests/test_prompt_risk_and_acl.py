@@ -33,8 +33,12 @@ async def test_rag_results_risk_logging(tmp_path, monkeypatch):
     try:
         if os.path.exists(log_file):
             os.remove(log_file)
-    except OSError:
+    except FileNotFoundError:
+        # Log file does not exist; nothing to remove
         pass
+    except OSError:
+        # Other OS errors (e.g., permissions) are unexpected and should not be silently ignored
+        raise
 
     from domain.rag_mcp_service import RAGMCPService
 

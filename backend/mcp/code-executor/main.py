@@ -525,6 +525,5 @@ def execute_python_code_with_file(
             }
             }
 
-# Code executor completed
 if __name__ == "__main__":
     mcp.run()
