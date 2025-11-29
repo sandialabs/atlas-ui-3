@@ -361,8 +361,6 @@ class MCPToolManager:
 
     async def initialize_clients(self):
         """Initialize FastMCP clients for all configured servers in parallel."""
-        import asyncio
-        
         logger.info(f"=== CLIENT INITIALIZATION: Starting parallel initialization for {len(self.servers_config)} servers: {list(self.servers_config.keys())} ===")
         
         # Create tasks for parallel initialization
@@ -629,8 +627,6 @@ class MCPToolManager:
 
     async def discover_tools(self):
         """Discover tools from all MCP servers in parallel."""
-        import asyncio
-        
         logger.info(f"Starting parallel tool discovery for {len(self.clients)} clients: {list(self.clients.keys())}")
         self.available_tools = {}
 
@@ -707,9 +703,11 @@ class MCPToolManager:
                     logger.info(f"Discovered {len(prompts)} prompts from {server_name}")
                     logger.debug(f"Successfully stored prompts for {server_name}")
                     return server_data
-                except Exception:
-                    # Server might not support prompts – store empty list
-                    logger.debug(f"Server {server_name} does not support prompts")
+                except Exception as e:
+                    # Server might not support prompts or list_prompts() failed  store empty list
+                    logger.debug(
+                        f"Server {server_name} does not support prompts or list_prompts() failed: {e}"
+                    )
                     return {
                         'prompts': [],
                         'config': self.servers_config.get(server_name),
@@ -740,8 +738,6 @@ class MCPToolManager:
 
     async def discover_prompts(self):
         """Discover prompts from all MCP servers in parallel."""
-        import asyncio
-        
         logger.info(f"Starting parallel prompt discovery for {len(self.clients)} clients: {list(self.clients.keys())}")
         self.available_prompts = {}
         
