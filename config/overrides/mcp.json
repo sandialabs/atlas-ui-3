@@ -1,5 +1,5 @@
 {
-  "calculator2": {
+  "calculator": {
     "command": [
       "python",
       "mcp/calculator/main.py"

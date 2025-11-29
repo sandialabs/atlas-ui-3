@@ -18,9 +18,18 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         throw new Error(`HTTP ${response.status}`)
       }
       const data = await response.json()
+      // Normalize status so we don't show stale servers that no longer exist
+      const configured = new Set(data.configured_servers || [])
+
+      const freshConnected = (data.connected_servers || []).filter((name) => configured.has(name))
+
+      const freshFailedEntries = Object.entries(data.failed_servers || {}).filter(
+        ([name]) => configured.has(name)
+      )
+
       setMcpStatus({
-        connected_servers: data.connected_servers || [],
-        failed_servers: data.failed_servers || {},
+        connected_servers: freshConnected,
+        failed_servers: Object.fromEntries(freshFailedEntries),
       })
     } catch (err) {
       // Keep this quiet in the UI but log to console for debugging
@@ -50,10 +59,11 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
 
       const mcpConfigJson = JSON.stringify(data.mcp_config || {}, null, 2)
 
-      openModal('Edit MCP Configuration', {
+      openModal('View MCP Configuration', {
         type: 'textarea',
         value: mcpConfigJson,
-        description: 'Configure MCP servers and their properties. Changes here should be saved back to config/overrides/mcp.json and then hot-reloaded using the controls below.'
+        readOnly: true,
+        description: 'Current MCP servers and their properties, as loaded from config/overrides/mcp.json. To make changes, edit that file directly and then use the controls below to hot-reload.',
       }, 'mcp-config')
     } catch (err) {
       addNotification('Error loading MCP configuration: ' + err.message, 'error')
@@ -183,7 +193,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
           className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           <Settings className="w-4 h-4" />
-          Edit MCP Config
+          View MCP Config
         </button>
         <button
           onClick={viewMCPStatus}
