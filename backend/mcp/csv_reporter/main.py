@@ -128,6 +128,7 @@ def _dataframe_report(df: pd.DataFrame, *, username: str, source_name: str) -> s
         lines.append("Sample (first 5 rows):")
         lines.append(sample.to_string(index=False))
     except Exception:
+        # Ignore display errors for sample rows
         pass
     return "\n".join(lines)
 

@@ -1011,17 +1011,7 @@ class MCPToolManager:
                     }
                 })
 
-        # Helpful logging / diagnostics
-        # try:
-        #     logger.info(
-        #         f"get_tools_schema: requested={tool_names} matched={len(matched)} missing={missing} available_index_size={len(index)}"
-        #     )
-        #     if missing:
-        #         logger.warning(
-        #             "Some requested tools were not found. This usually means discover_tools() ran before those tools were available, or the tool names contain unexpected characters. Missing: %s", missing
-        #         )
-        # except Exception:
-        #     pass
+
 
         return matched
 
