@@ -8,16 +8,20 @@ import time
 import sys
 
 
+AUTH_HEADERS = {"X-User-Email": "test@test.com"}
+
+
 def wait_for_server(url, max_retries=30, delay=2):
     """Wait for the server to be ready."""
     print(f"Waiting for server at {url}...")
     for i in range(max_retries):
         try:
-            response = requests.get(f"{url}/api/config", timeout=5)
+            response = requests.get(f"{url}/api/config", headers=AUTH_HEADERS, timeout=5)
             if response.status_code in [200, 302]:  # 302 is redirect, which is also OK
                 print(f"✅ Server is ready (attempt {i+1})")
                 return True
         except requests.exceptions.RequestException:
+            # Intentionally ignore connection errors
             pass
         
         print(f"  [{i+1}/{max_retries}] Server not ready yet, waiting {delay}s...")
@@ -31,7 +35,7 @@ def test_health_endpoint():
     """Test the health endpoint."""
     print("Testing health endpoint...")
     try:
-        response = requests.get("http://127.0.0.1:8000/api/config", timeout=10)
+        response = requests.get("http://127.0.0.1:8000/api/config", headers=AUTH_HEADERS, timeout=10)
         print(f"✅ Health endpoint responded with status {response.status_code}")
         return True
     except Exception as e:
@@ -78,7 +82,7 @@ def test_api_endpoints():
     
     # Test config endpoint
     try:
-        response = requests.get("http://127.0.0.1:8000/api/config", timeout=10)
+        response = requests.get("http://127.0.0.1:8000/api/config", headers=AUTH_HEADERS, timeout=10)
         if response.status_code == 200:
             print("✅ /api/config endpoint is accessible")
             config_works = True
@@ -91,7 +95,7 @@ def test_api_endpoints():
     
     # Test banners endpoint
     try:
-        response = requests.get("http://127.0.0.1:8000/api/banners", timeout=10)
+        response = requests.get("http://127.0.0.1:8000/api/banners", headers=AUTH_HEADERS, timeout=10)
         if response.status_code == 200:
             print("✅ /api/banners endpoint is accessible")
             banners_works = True

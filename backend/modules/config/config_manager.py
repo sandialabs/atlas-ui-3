@@ -200,6 +200,28 @@ class AppSettings(BaseSettings):
     # MCP Health Check settings  
     mcp_health_check_interval: int = 300  # seconds (5 minutes)
     
+    # MCP Auto-Reconnect settings
+    feature_mcp_auto_reconnect_enabled: bool = Field(
+        False,
+        description="Enable automatic reconnection to failed MCP servers with exponential backoff",
+        validation_alias=AliasChoices("FEATURE_MCP_AUTO_RECONNECT_ENABLED"),
+    )
+    mcp_reconnect_interval: int = Field(
+        default=60,
+        description="Base interval in seconds between MCP reconnect attempts",
+        validation_alias="MCP_RECONNECT_INTERVAL"
+    )
+    mcp_reconnect_max_interval: int = Field(
+        default=300,
+        description="Maximum interval in seconds between MCP reconnect attempts (caps exponential backoff)",
+        validation_alias="MCP_RECONNECT_MAX_INTERVAL"
+    )
+    mcp_reconnect_backoff_multiplier: float = Field(
+        default=2.0,
+        description="Multiplier for exponential backoff between reconnect attempts",
+        validation_alias="MCP_RECONNECT_BACKOFF_MULTIPLIER"
+    )
+    
     # Admin settings
     admin_group: str = "admin"
     test_user: str = "test@test.com"  # Test user for development
@@ -649,6 +671,20 @@ class ConfigManager:
         self._rag_mcp_config = None
         self._tool_approvals_config = None
         logger.info("Configuration cache cleared, will reload on next access")
+    
+    def reload_mcp_config(self) -> MCPConfig:
+        """Reload MCP configuration from disk.
+        
+        This clears the cached MCP config and forces a reload from the config file.
+        Used for hot-reloading MCP server configuration without restarting the application.
+        
+        Returns:
+            The newly loaded MCPConfig
+        """
+        self._mcp_config = None
+        self._tool_approvals_config = None  # Also clear tool approvals since they depend on MCP
+        logger.info("MCP configuration cache cleared, reloading from disk")
+        return self.mcp_config
     
     def validate_config(self) -> Dict[str, bool]:
         """Validate all configurations and return status."""

@@ -37,6 +37,33 @@ Key settings in the `.env` file include:
 *   **Log Directory**: The `APP_LOG_DIR` variable points to the folder where the application log file (`app.jsonl`) will be stored. This path must be updated to a valid directory in your deployment environment.
 *   **Security Headers**: Configure Content Security Policy (CSP) and other security headers. See the Security Configuration section below for details.
 
+### MCP Auto-Reconnect Settings
+
+Atlas UI can automatically retry failed MCP server connections using exponential backoff. This is controlled by environment variables in `.env`.
+
+```bash
+# Enable automatic reconnection for failed MCP servers (default: false)
+FEATURE_MCP_AUTO_RECONNECT_ENABLED=false
+
+# Base interval in seconds between reconnect attempts (default: 60)
+MCP_RECONNECT_INTERVAL=60
+
+# Maximum interval in seconds between reconnect attempts (caps exponential backoff, default: 300)
+MCP_RECONNECT_MAX_INTERVAL=300
+
+# Multiplier for exponential backoff (default: 2.0)
+MCP_RECONNECT_BACKOFF_MULTIPLIER=2.0
+```
+
+When `FEATURE_MCP_AUTO_RECONNECT_ENABLED=true`, the backend starts a background task that periodically retries connections for servers that previously failed to initialize.
+
+- The effective delay after the *n*-th failure is:
+
+	$$\text{delay} = \min(\text{MCP\_RECONNECT\_INTERVAL} \times \text{MCP\_RECONNECT\_BACKOFF\_MULTIPLIER}^{(n-1)},\ \text{MCP\_RECONNECT\_MAX\_INTERVAL})$$
+
+- This avoids hammering flaky or down MCP servers while still ensuring they are retried over time.
+- You can monitor this behavior via `GET /admin/mcp/status`, which reports per-server backoff details and whether the auto-reconnect loop is currently running.
+
 ## Security Configuration (CSP and Headers)
 
 The application includes security headers middleware that sets browser security policies. These are configured via environment variables in `.env`.

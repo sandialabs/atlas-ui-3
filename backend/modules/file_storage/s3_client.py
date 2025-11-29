@@ -203,7 +203,7 @@ class S3StorageClient:
                     Key=file_key
                 )
                 tags = {tag['Key']: tag['Value'] for tag in tags_response.get('TagSet', [])}
-            except:
+            except Exception:
                 tags = {}
 
             # Extract filename from metadata or key
