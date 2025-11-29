@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -16,7 +17,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.auth import is_user_in_group
-from core.utils import get_current_user
+from core.utils import get_current_user, sanitize_for_logging
 from modules.config import config_manager
 from infrastructure.app_factory import app_factory
 
@@ -197,6 +198,9 @@ async def admin_dashboard(admin_user: str = Depends(require_admin)):
             "/admin/logs/viewer",
             "/admin/logs/clear",
             "/admin/logs/download",
+            "/admin/mcp/reload",
+            "/admin/mcp/reconnect",
+            "/admin/mcp/status",
         ],
     }
 
@@ -242,16 +246,32 @@ async def update_banner_config(
 
 @admin_router.post("/mcp/reload")
 async def reload_mcp_servers(admin_user: str = Depends(require_admin)):
-    """Reload MCP servers (clients, tools, prompts)."""
+    """Reload MCP servers from disk configuration and reinitialize connections.
+    
+    This endpoint:
+    1. Reloads the mcp.json configuration from disk (hot-reload)
+    2. Reinitializes all MCP client connections
+    3. Rediscovers tools and prompts from all servers
+    
+    Use this after modifying the mcp.json configuration file to apply changes
+    without restarting the application.
+    """
     try:
         mcp = app_factory.get_mcp_manager()
+        
+        # Reload config from disk first
+        config_changes = mcp.reload_config()
+        
         # Re-initialize clients and rediscover
         await mcp.initialize_clients()
         await mcp.discover_tools()
         await mcp.discover_prompts()
+        
         return {
-            "message": "MCP servers reloaded",
+            "message": "MCP servers reloaded from disk configuration",
+            "config_changes": config_changes,
             "servers": list(mcp.clients.keys()),
+            "failed_servers": list(mcp.get_failed_servers().keys()),
             "tool_counts": {k: len(v.get("tools", [])) for k, v in mcp.available_tools.items()},
             "prompt_counts": {k: len(v.get("prompts", [])) for k, v in mcp.available_prompts.items()},
             "reloaded_by": admin_user,
@@ -261,8 +281,81 @@ async def reload_mcp_servers(admin_user: str = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- Config Viewer ---
+@admin_router.post("/mcp/reconnect")
+async def reconnect_failed_mcp_servers(admin_user: str = Depends(require_admin)):
+    """Attempt to reconnect to MCP servers that previously failed.
+    
+    This endpoint manually triggers reconnection attempts for servers that failed
+    to connect during initialization or previous reconnection attempts.
+    Respects exponential backoff unless force=true is specified.
+    """
+    try:
+        mcp = app_factory.get_mcp_manager()
+        # Admin-triggered reconnect should bypass backoff and try immediately
+        result = await mcp.reconnect_failed_servers(force=True)
+        
+        return {
+            "message": "Reconnection attempt completed",
+            "result": result,
+            "current_servers": list(mcp.clients.keys()),
+            "failed_servers": mcp.get_failed_servers(),
+            "triggered_by": admin_user,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error reconnecting MCP servers: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
+
+@admin_router.get("/mcp/status")
+async def get_mcp_status(admin_user: str = Depends(require_admin)):
+    """Get current MCP server connection status.
+    
+    Returns information about:
+    - Currently connected servers
+    - Failed servers with error details and backoff info
+    - Auto-reconnect feature status
+    """
+    try:
+        mcp = app_factory.get_mcp_manager()
+        app_settings = config_manager.app_settings
+        
+        failed_servers = mcp.get_failed_servers()
+        
+        # Calculate next retry time for each failed server
+        current_time = time.time()
+        failed_servers_with_timing = {}
+        for server_name, failure_info in failed_servers.items():
+            backoff_delay = mcp._calculate_backoff_delay(failure_info["attempt_count"])
+            time_since_last = current_time - failure_info["last_attempt"]
+            next_retry_in = max(0, backoff_delay - time_since_last)
+            
+            failed_servers_with_timing[server_name] = {
+                **failure_info,
+                "backoff_delay": backoff_delay,
+                "next_retry_in_seconds": next_retry_in,
+            }
+        
+        return {
+            "connected_servers": list(mcp.clients.keys()),
+            "configured_servers": list(mcp.servers_config.keys()),
+            "failed_servers": failed_servers_with_timing,
+            "auto_reconnect": {
+                "enabled": app_settings.feature_mcp_auto_reconnect_enabled,
+                "base_interval": app_settings.mcp_reconnect_interval,
+                "max_interval": app_settings.mcp_reconnect_max_interval,
+                "backoff_multiplier": app_settings.mcp_reconnect_backoff_multiplier,
+                "running": mcp._reconnect_running,
+            },
+            "tool_counts": {k: len(v.get("tools", [])) for k, v in mcp.available_tools.items()},
+            "prompt_counts": {k: len(v.get("prompts", [])) for k, v in mcp.available_prompts.items()},
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error getting MCP status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# --- Config Viewer ---
 @admin_router.get("/config/view")
 async def get_all_configs(admin_user: str = Depends(require_admin)):
     """Get all configuration values for admin viewing."""

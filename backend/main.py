@@ -105,6 +105,12 @@ async def lifespan(app: FastAPI):
         logger.info("Step 3 complete: Prompt discovery finished")
         
         logger.info("MCP tools manager initialization complete")
+        
+        # Start auto-reconnect background task if enabled
+        logger.info("Step 4: Starting MCP auto-reconnect (if enabled)...")
+        await mcp_manager.start_auto_reconnect()
+        logger.info("Step 4 complete: Auto-reconnect task started (if enabled)")
+        
     except Exception as e:
         logger.error(f"Error during MCP initialization: {e}", exc_info=True)
         # Continue startup even if MCP fails
@@ -113,6 +119,8 @@ async def lifespan(app: FastAPI):
     yield
     
     logger.info("Shutting down Chat UI Backend")
+    # Stop auto-reconnect task
+    await mcp_manager.stop_auto_reconnect()
     # Cleanup MCP clients
     await mcp_manager.cleanup()
 
