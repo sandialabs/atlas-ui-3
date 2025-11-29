@@ -57,6 +57,15 @@ fi
 echo "Starting backend server..."
 cd "$BACKEND_DIR"
 
+# Ensure Python virtual environment is activated so uvicorn is available
+if [ -d "$PROJECT_ROOT/.venv" ]; then
+    echo "Activating Python virtual environment at $PROJECT_ROOT/.venv"
+    # shellcheck disable=SC1090
+    source "$PROJECT_ROOT/.venv/bin/activate"
+else
+    echo "WARNING: .venv directory not found at $PROJECT_ROOT/.venv; proceeding without virtualenv"
+fi
+
 # Check if port 8000 is already in use
 if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
     echo "⚠️  Port 8000 is already in use. Attempting to continue with existing service..."

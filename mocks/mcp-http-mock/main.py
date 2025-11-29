@@ -7,9 +7,7 @@ It provides tools for querying simulated tables and retrieving data.
 """
 
 import json
-import os
 import re
-from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from fastmcp import FastMCP
@@ -46,12 +44,12 @@ SIMULATED_DATABASE = {
 # Tokens are read from environment variables for better configuration management
 verifier = StaticTokenVerifier(
     tokens={
-        os.getenv("MCP_MOCK_TOKEN_1", "test-api-key-123"): {
+        "test-api-key-123": {
             "user_id": "test_user",
             "client_id": "atlas-ui-backend",
             "scopes": ["read", "write"]
         },
-        os.getenv("MCP_MOCK_TOKEN_2", "another-test-key-456"): {
+        "another-test-key-456": {
             "user_id": "another_user",
             "client_id": "atlas-ui-backend",
             "scopes": ["read"]

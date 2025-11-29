@@ -9,7 +9,6 @@ It simulates OpenAI-compatible API responses for testing chat functionality.
 import json
 import time
 import uuid
-from datetime import datetime
 from typing import Dict, List, Any, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel

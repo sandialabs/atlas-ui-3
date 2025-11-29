@@ -1,8 +1,6 @@
 """Chat service - core business logic for chat operations."""
 
 import logging
-import json
-import asyncio
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 from uuid import UUID
 
@@ -26,7 +24,6 @@ from interfaces.transport import ChatConnectionProtocol
 from .utilities import tool_utils, file_utils, notification_utils, error_utils
 from .agent import AgentLoopFactory
 from .agent.protocols import AgentContext, AgentEvent
-from core.auth_utils import create_authorization_manager
 from core.utils import sanitize_for_logging
 
 # Import new refactored modules
