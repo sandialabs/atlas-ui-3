@@ -1,7 +1,32 @@
-import React from 'react'
-import { Settings } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { Settings, RefreshCw, RotateCcw, Activity } from 'lucide-react'
 
 const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
+  const [mcpStatus, setMcpStatus] = useState({
+    connected_servers: [],
+    failed_servers: {},
+  })
+
+  const loadMCPStatus = async () => {
+    try {
+      const response = await fetch('/admin/mcp/status')
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const data = await response.json()
+      setMcpStatus({
+        connected_servers: data.connected_servers || [],
+        failed_servers: data.failed_servers || {},
+      })
+    } catch (err) {
+      // Keep this quiet in the UI but log to console for debugging
+      console.error('Error loading MCP status for card:', err)
+    }
+  }
+
+  useEffect(() => {
+    loadMCPStatus()
+  }, [])
   const manageMCP = async () => {
     try {
       const response = await fetch('/admin/mcp-config')
@@ -10,10 +35,65 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
       openModal('Edit MCP Configuration', {
         type: 'textarea',
         value: data.content,
-        description: 'Configure MCP servers and their properties. Changes require application restart.'
+        description: 'Configure MCP servers and their properties. Use the MCP Controls below to hot-reload changes without restarting.'
       }, 'mcp-config')
     } catch (err) {
       addNotification('Error loading MCP configuration: ' + err.message, 'error')
+    }
+  }
+
+  const viewMCPStatus = async () => {
+    try {
+      const response = await fetch('/admin/mcp/status')
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const data = await response.json()
+
+      openModal('MCP Status', {
+        type: 'textarea',
+        value: JSON.stringify(data, null, 2),
+        description: 'You don’t need to restart after editing mcp.json.\n\n- POST /admin/mcp/reload applies config changes and rediscover tools/prompts.\n- GET /admin/mcp/status shows which servers are connected or failing.\n- POST /admin/mcp/reconnect (plus the auto-reconnect feature flag) retries failed servers with exponential backoff.'
+      })
+    } catch (err) {
+      addNotification('Error loading MCP status: ' + err.message, 'error')
+    }
+  }
+
+  const reloadMCP = async () => {
+    try {
+      const response = await fetch('/admin/mcp/reload', { method: 'POST' })
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.detail || `HTTP ${response.status}`)
+      }
+
+      addNotification(`MCP reload completed: ${data.servers.length} servers loaded, ${data.failed_servers.length} failed`, 'success')
+  // Refresh inline status after reload
+  loadMCPStatus()
+    } catch (err) {
+      addNotification('Error reloading MCP servers: ' + err.message, 'error')
+    }
+  }
+
+  const reconnectMCP = async () => {
+    try {
+      const response = await fetch('/admin/mcp/reconnect', { method: 'POST' })
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.detail || `HTTP ${response.status}`)
+      }
+
+      const attempted = data.result?.attempted?.length || 0
+      const reconnected = data.result?.reconnected?.length || 0
+      const stillFailed = data.result?.still_failed?.length || 0
+      addNotification(`MCP reconnect: attempted ${attempted}, reconnected ${reconnected}, still failing ${stillFailed}`, 'success')
+      // Refresh inline status after reconnect
+      loadMCPStatus()
+    } catch (err) {
+      addNotification('Error reconnecting MCP servers: ' + err.message, 'error')
     }
   }
 
@@ -30,18 +110,81 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
     <div className="bg-gray-800 rounded-lg p-6">
       <div className="flex items-center gap-3 mb-4">
         <Settings className="w-6 h-6 text-purple-400" />
-        <h2 className="text-lg font-semibold">MCP Configuration</h2>
+        <h2 className="text-lg font-semibold">MCP Configuration & Controls</h2>
       </div>
-      <p className="text-gray-400 mb-4">Configure MCP servers and their settings.</p>
+      <p className="text-gray-400 mb-4">Configure MCP servers and manage hot reload and reconnect.</p>
       <div className={`px-3 py-1 rounded text-sm font-medium mb-4 ${getStatusColor(systemStatus.overall_status || 'healthy')}`}>
         {systemStatus.overall_status || 'Ready'}
       </div>
-      <button 
-        onClick={manageMCP}
-        className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors"
-      >
-        Edit MCP Config
-      </button>
+      {/* Inline MCP server status */}
+      <div className="mb-4 space-y-2 text-sm">
+        {mcpStatus.connected_servers.length > 0 && (
+          <div>
+            <div className="text-gray-400 mb-1">Connected servers</div>
+            <div className="flex flex-wrap gap-1">
+              {mcpStatus.connected_servers.map((name) => (
+                <span
+                  key={name}
+                  className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-green-900/40 text-green-300 border border-green-700/60"
+                >
+                  ● {name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {Object.keys(mcpStatus.failed_servers).length > 0 && (
+          <div>
+            <div className="text-gray-400 mb-1">Failed servers</div>
+            <div className="flex flex-wrap gap-1">
+              {Object.entries(mcpStatus.failed_servers).map(([name, info]) => (
+                <span
+                  key={name}
+                  className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-red-900/40 text-red-300 border border-red-700/60"
+                  title={info?.error || 'Failed to connect'}
+                >
+                  ● {name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {mcpStatus.connected_servers.length === 0 && Object.keys(mcpStatus.failed_servers).length === 0 && (
+          <div className="text-gray-500 text-xs">No MCP status available yet.</div>
+        )}
+      </div>
+      <div className="space-y-2">
+        <button 
+          onClick={manageMCP}
+          className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors flex items-center justify-center gap-2"
+        >
+          <Settings className="w-4 h-4" />
+          Edit MCP Config
+        </button>
+        <button
+          onClick={viewMCPStatus}
+          className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors flex items-center justify-center gap-2"
+        >
+          <Activity className="w-4 h-4" />
+          View MCP Status
+        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={reloadMCP}
+            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm flex items-center justify-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Reload
+          </button>
+          <button
+            onClick={reconnectMCP}
+            className="px-3 py-2 bg-sky-600 hover:bg-sky-700 rounded-lg text-sm flex items-center justify-center gap-2"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Reconnect
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
