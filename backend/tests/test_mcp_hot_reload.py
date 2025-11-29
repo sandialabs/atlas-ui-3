@@ -333,7 +333,7 @@ class TestMCPReconnection:
 
     @patch('modules.mcp_tools.client.config_manager')
     async def test_reconnect_respects_backoff(self, mock_config_manager):
-        """Test that reconnect skips servers still in backoff period."""
+        """When not forced, reconnect should skip servers still in backoff."""
         mock_settings = MagicMock()
         mock_settings.mcp_reconnect_interval = 60
         mock_settings.mcp_reconnect_max_interval = 300
@@ -352,14 +352,14 @@ class TestMCPReconnection:
             }
         }
         
-        result = await manager.reconnect_failed_servers()
+        result = await manager.reconnect_failed_servers(force=False)
         
         assert result["attempted"] == []
         assert result["skipped_backoff"][0]["server"] == "test-server"
 
     @patch('modules.mcp_tools.client.config_manager')
     async def test_reconnect_attempts_after_backoff(self, mock_config_manager):
-        """Test that reconnect attempts servers after backoff period."""
+        """When backoff has elapsed, reconnect should attempt server."""
         mock_settings = MagicMock()
         mock_settings.mcp_reconnect_interval = 60
         mock_settings.mcp_reconnect_max_interval = 300
@@ -381,10 +381,40 @@ class TestMCPReconnection:
         # Mock the initialization method to return None (still failing)
         manager._initialize_single_client = AsyncMock(return_value=None)
         
-        result = await manager.reconnect_failed_servers()
+        result = await manager.reconnect_failed_servers(force=False)
         
         assert "test-server" in result["attempted"]
         assert "test-server" in result["still_failed"]
+        manager._initialize_single_client.assert_called_once()
+
+    @patch('modules.mcp_tools.client.config_manager')
+    async def test_reconnect_force_ignores_backoff(self, mock_config_manager):
+        """Forced reconnect should attempt even inside backoff window."""
+        mock_settings = MagicMock()
+        mock_settings.mcp_reconnect_interval = 60
+        mock_settings.mcp_reconnect_max_interval = 300
+        mock_settings.mcp_reconnect_backoff_multiplier = 2.0
+        mock_config_manager.app_settings = mock_settings
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {"test-server": {"description": "Test"}}
+        manager.clients = {}
+        # Server failed just now, so normally it would be in backoff
+        manager._failed_servers = {
+            "test-server": {
+                "last_attempt": time.time(),
+                "attempt_count": 1,
+                "error": "Connection refused"
+            }
+        }
+
+        # Mock the initialization method to return None (still failing)
+        manager._initialize_single_client = AsyncMock(return_value=None)
+
+        # With force=True, it should attempt despite backoff
+        result = await manager.reconnect_failed_servers(force=True)
+
+        assert "test-server" in result["attempted"]
         manager._initialize_single_client.assert_called_once()
 
 

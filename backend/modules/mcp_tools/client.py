@@ -395,13 +395,18 @@ class MCPToolManager:
         logger.info(f"Failed to initialize: {failed_servers}")
         logger.info("=== END CLIENT INITIALIZATION SUMMARY ===")
     
-    async def reconnect_failed_servers(self) -> Dict[str, Any]:
+    async def reconnect_failed_servers(self, force: bool = False) -> Dict[str, Any]:
         """Attempt to reconnect to servers that previously failed.
         
-        Only attempts to reconnect servers that have exceeded their backoff delay.
+        When ``force`` is False (default), this respects exponential backoff and
+        only attempts servers whose backoff delay has elapsed. When ``force`` is
+        True, backoff delays are ignored and all currently failed servers are
+        attempted immediately. The admin `/admin/mcp/reconnect` endpoint uses
+        ``force=True`` to provide an on-demand retry button.
         
         Returns:
-            Dict with reconnection results including newly connected and still failed servers.
+            Dict with reconnection results including newly connected, still
+            failed, and skipped servers due to backoff.
         """
         if not self._failed_servers:
             return {
@@ -428,11 +433,11 @@ class MCPToolManager:
                 self._clear_server_failure(server_name)
                 continue
             
-            # Check backoff delay
+            # Check backoff delay unless this is a forced reconnect
             backoff_delay = self._calculate_backoff_delay(failure_info["attempt_count"])
             time_since_last = current_time - failure_info["last_attempt"]
             
-            if time_since_last < backoff_delay:
+            if not force and time_since_last < backoff_delay:
                 skipped_backoff.append({
                     "server": server_name,
                     "wait_remaining": backoff_delay - time_since_last,

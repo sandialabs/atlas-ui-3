@@ -291,7 +291,8 @@ async def reconnect_failed_mcp_servers(admin_user: str = Depends(require_admin))
     """
     try:
         mcp = app_factory.get_mcp_manager()
-        result = await mcp.reconnect_failed_servers()
+        # Admin-triggered reconnect should bypass backoff and try immediately
+        result = await mcp.reconnect_failed_servers(force=True)
         
         return {
             "message": "Reconnection attempt completed",
