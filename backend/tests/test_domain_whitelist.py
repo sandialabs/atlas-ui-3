@@ -48,6 +48,66 @@ class TestDomainWhitelistManager:
         assert "example.org" in manager.get_domains()
         assert len(manager.get_domains()) == 3
 
+    def test_missing_config_file(self):
+        """Test that missing config file allows all domains (fail open)."""
+        non_existent_path = Path("/tmp/nonexistent_whitelist_config_12345.json")
+        manager = DomainWhitelistManager(config_path=non_existent_path)
+        
+        # Config should not be loaded
+        assert manager.config_loaded is False
+        assert len(manager.get_domains()) == 0
+        
+        # But should allow all domains (fail open)
+        assert manager.is_domain_allowed("user@gmail.com") is True
+        assert manager.is_domain_allowed("user@any-domain.com") is True
+        assert manager.is_domain_allowed("test@example.org") is True
+
+    def test_invalid_json_config(self):
+        """Test that invalid JSON config allows all domains (fail open)."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write("{ invalid json content ]}")
+            temp_path = Path(f.name)
+        
+        try:
+            manager = DomainWhitelistManager(config_path=temp_path)
+            
+            # Config should not be loaded
+            assert manager.config_loaded is False
+            assert len(manager.get_domains()) == 0
+            
+            # Should allow all domains (fail open)
+            assert manager.is_domain_allowed("user@gmail.com") is True
+            assert manager.is_domain_allowed("test@example.org") is True
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    def test_empty_domains_list(self):
+        """Test config with empty domains list."""
+        config_data = {
+            "version": "1.0",
+            "description": "Empty config",
+            "domains": [],
+            "subdomain_matching": True
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config_data, f)
+            temp_path = Path(f.name)
+        
+        try:
+            manager = DomainWhitelistManager(config_path=temp_path)
+            
+            # Config should be loaded successfully even with empty domains
+            assert manager.config_loaded is True
+            assert len(manager.get_domains()) == 0
+            
+            # Should block all domains when config is valid but empty
+            assert manager.is_domain_allowed("user@gmail.com") is False
+            assert manager.is_domain_allowed("user@sandia.gov") is False
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
 
     def test_domain_matching(self, temp_config):
         """Test domain matching logic."""
@@ -185,3 +245,114 @@ class TestDomainWhitelistMiddleware:
         
         import asyncio
         asyncio.run(test_request())
+
+    def test_middleware_with_missing_config(self, create_middleware):
+        """Test that middleware with missing config allows all domains."""
+        from starlette.requests import Request
+        from starlette.responses import Response
+        
+        non_existent_path = Path("/tmp/nonexistent_whitelist_config_12345.json")
+        middleware = create_middleware(non_existent_path)
+        
+        async def call_next(request):
+            return Response("OK", status_code=200)
+        
+        async def test_request():
+            scope = {
+                "type": "http",
+                "method": "GET",
+                "path": "/api/test",
+                "query_string": b"",
+                "headers": [],
+                "state": {},
+            }
+            request = Request(scope)
+            request.state.user_email = "test@gmail.com"
+            
+            # Should pass even though config is missing (fail open)
+            response = await middleware.dispatch(request, call_next)
+            assert response.status_code == 200
+        
+        import asyncio
+        asyncio.run(test_request())
+
+    def test_middleware_with_invalid_config(self, create_middleware):
+        """Test that middleware with invalid config allows all domains."""
+        from starlette.requests import Request
+        from starlette.responses import Response
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write("{ invalid json }")
+            temp_path = Path(f.name)
+        
+        try:
+            middleware = create_middleware(temp_path)
+            
+            async def call_next(request):
+                return Response("OK", status_code=200)
+            
+            async def test_request():
+                scope = {
+                    "type": "http",
+                    "method": "GET",
+                    "path": "/api/test",
+                    "query_string": b"",
+                    "headers": [],
+                    "state": {},
+                }
+                request = Request(scope)
+                request.state.user_email = "test@anydomain.com"
+                
+                # Should pass even though config is invalid (fail open)
+                response = await middleware.dispatch(request, call_next)
+                assert response.status_code == 200
+            
+            import asyncio
+            asyncio.run(test_request())
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    def test_middleware_with_empty_domains(self, create_middleware):
+        """Test that middleware with empty domains list blocks all."""
+        from starlette.requests import Request
+        from starlette.responses import Response
+        
+        config_data = {
+            "version": "1.0",
+            "description": "Empty config",
+            "domains": [],
+            "subdomain_matching": True
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config_data, f)
+            temp_path = Path(f.name)
+        
+        try:
+            middleware = create_middleware(temp_path)
+            
+            async def call_next(request):
+                return Response("OK", status_code=200)
+            
+            async def test_request():
+                scope = {
+                    "type": "http",
+                    "method": "GET",
+                    "path": "/api/test",
+                    "query_string": b"",
+                    "headers": [],
+                    "state": {},
+                }
+                request = Request(scope)
+                request.state.user_email = "test@anydomain.com"
+                
+                # Should block because empty domains is a valid config
+                response = await middleware.dispatch(request, call_next)
+                assert response.status_code == 403
+            
+            import asyncio
+            asyncio.run(test_request())
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()

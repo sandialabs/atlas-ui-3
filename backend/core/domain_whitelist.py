@@ -33,6 +33,7 @@ class DomainWhitelistManager:
             config_path: Path to domain-whitelist.json. If None, uses default location.
         """
         self.config: Optional[DomainWhitelistConfig] = None
+        self.config_loaded: bool = False
         
         if config_path is None:
             # Try to find config in standard locations
@@ -54,13 +55,14 @@ class DomainWhitelistManager:
         if config_path and config_path.exists():
             self._load_config(config_path)
         else:
-            logger.warning("No domain-whitelist.json found, using empty domain list")
+            logger.warning("No domain-whitelist.json found, whitelist validation disabled")
             self.config = DomainWhitelistConfig(
                 domains=set(),
                 subdomain_matching=True,
                 version="1.0",
                 description="No config loaded"
             )
+            self.config_loaded = False
     
     def _load_config(self, config_path: Path):
         """Load domain whitelist configuration from JSON file."""
@@ -82,11 +84,13 @@ class DomainWhitelistManager:
                 version=config_data.get('version', '1.0'),
                 description=config_data.get('description', '')
             )
+            self.config_loaded = True
             
             logger.info(f"Loaded {len(self.config.domains)} domains from {config_path}")
             
         except Exception as e:
             logger.error(f"Error loading domain-whitelist.json: {e}")
+            logger.warning("Whitelist validation disabled due to config error")
             # Use empty config on error
             self.config = DomainWhitelistConfig(
                 domains=set(),
@@ -94,6 +98,7 @@ class DomainWhitelistManager:
                 version="1.0",
                 description="Error loading config"
             )
+            self.config_loaded = False
     
     def is_domain_allowed(self, email: str) -> bool:
         """Check if an email address is from an allowed domain.
@@ -108,8 +113,8 @@ class DomainWhitelistManager:
         Returns:
             True if domain is allowed, False otherwise
         """
-        if not self.config:
-            # If no config, allow all
+        # If config wasn't successfully loaded, allow all (fail open)
+        if not self.config_loaded:
             return True
         
         if not email or "@" not in email:
