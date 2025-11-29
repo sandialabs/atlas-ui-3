@@ -11,3 +11,5 @@ This directory contains the main documentation for Atlas UI 3. Use this guide to
 - `readme_img/`: Images and diagrams used by README and other documentation files.
 
 If you add a new documentation area, please update this file with a short description so the structure stays discoverable.
+
+**Note for MCP admins:** Hot-reloading MCP servers and auto-reconnect behavior are documented in `admin/mcp-servers.md` and `admin/configuration.md` (see the hot reload note and MCP auto-reconnect settings).
