@@ -29,7 +29,7 @@ class DomainWhitelistMiddleware(BaseHTTPMiddleware):
         self.auth_redirect_url = auth_redirect_url
         self.whitelist_manager = DomainWhitelistManager()
         
-        logger.info(f"Domain whitelist middleware loaded with {len(self.whitelist_manager.get_domains())} domains")
+        logger.info(f"Domain whitelist middleware loaded: {len(self.whitelist_manager.get_domains())} domains (config_loaded={self.whitelist_manager.config_loaded})")
     
     async def dispatch(self, request: Request, call_next) -> Response:
         """Check if user email is from a whitelisted domain.
