@@ -1049,8 +1049,10 @@ class MCPToolManager:
                     contents = getattr(raw_result, "content")
                     if contents and hasattr(contents[0], "text"):
                         first_text = getattr(contents[0], "text")
-                        if isinstance(first_text, str) and first_text.strip().startswith("{"):
+                        # Allow JSON objects and arrays in content[0].text
+                        if isinstance(first_text, str) and first_text.strip().startswith(("{", "[")):
                             try:
+                                logger.info("MCP tool result normalization: using content[0].text JSON fallback for structured extraction")
                                 structured = json.loads(first_text)
                             except Exception:  # pragma: no cover - defensive
                                 pass
