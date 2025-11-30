@@ -14,9 +14,16 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 
 # Style note
 
-No Emojis should ever be added in this repo. If you find one, then remove it.
+**No Emojis**: No emojis should ever be added anywhere in this codebase (code, comments, docs, commit messages). If you find one, remove it.
 
 **File Naming**: Do not use generic names like `main.py`, `cli.py`, `utils.py`, or `helpers.py`. Use descriptive names that reflect the file's purpose (e.g., `chat_service.py`, `mcp_tool_manager.py`, `websocket_handler.py`). Exception: top-level entry points like `backend/main.py` are acceptable.
+
+**Documentation Requirements**: Every PR or feature implementation MUST include updates to relevant documentation in the `/docs` folder. This includes:
+- Architecture changes: Update architecture docs
+- New features: Add feature documentation with usage examples
+- API changes: Update API documentation
+- Configuration changes: Update configuration guides
+- Bug fixes: Update troubleshooting docs if applicable
 
 **Documentation Date-Time Stamping**: When creating markdown (.md) files, always include date-time stamps either in the filename or as a header in key sections to help track if docs are stale. Format: `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. Examples:
 - Filename: `feature-plan-2025-11-02.md`

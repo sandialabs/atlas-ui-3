@@ -61,8 +61,10 @@ frontend/ React 19 + Vite + Tailwind; state via contexts (Chat/WS/Marketplace)
 ## Repo conventions (important)
 - Use uv; do not use npm run dev; do not use uvicorn --reload.
 - File naming: avoid generic names (utils.py, helpers.py). Prefer descriptive names; backend/main.py is the entry-point exception.
-- No emojis in code or docs. Prefer files ≤ ~400 lines when practical.
+- No emojis anywhere in codebase (code, comments, docs, commit messages). If you find one, remove it.
+- Prefer files ≤ ~400 lines when practical.
 - Auth assumption: in prod, reverse proxy injects X-User-Email (after stripping client headers); dev falls back to test user.
+- Documentation requirements: Every PR or feature MUST include updates to relevant docs in /docs folder (architecture, features, API, config, troubleshooting).
 
 ## Extend by example
 - Add a tool server: edit config/overrides/mcp.json (set groups, transport, url/command, compliance_level). Restart or call discovery on startup.
