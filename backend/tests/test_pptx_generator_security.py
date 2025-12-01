@@ -42,7 +42,9 @@ class TestHTMLEscaping:
     def test_escape_html_quotes(self):
         """Test that quotes are escaped."""
         result = _escape_html('test "quoted" text')
-        assert '"' not in result or '&quot;' in result
+        # Double quotes should be escaped to &quot;
+        assert '&quot;' in result
+        assert '"' not in result
 
     def test_escape_html_preserves_safe_text(self):
         """Test that safe text is preserved."""
@@ -53,8 +55,9 @@ class TestHTMLEscaping:
         """Test that onclick handlers are escaped."""
         malicious = '<img src="x" onerror="alert(1)">'
         escaped = _escape_html(malicious)
+        # HTML tags should be escaped
         assert "<img" not in escaped
-        assert "onerror" not in escaped or "&lt;" in escaped
+        assert "&lt;img" in escaped
 
     def test_escape_html_event_handlers(self):
         """Test that event handler injections are escaped."""
@@ -98,11 +101,11 @@ class TestPathTraversalProtection:
     def test_unsafe_path_with_null_bytes(self):
         """Test that paths with null bytes are handled safely."""
         # Paths with null bytes could be used in certain attacks
-        # The function should handle these without crashing
+        # The function should handle these without crashing and reject them
         try:
             result = _is_safe_local_path("test\x00file.txt")
-            # Should either return False or handle gracefully
-            assert result is False or result is True
+            # Null bytes in paths should be rejected
+            assert result is False
         except (ValueError, OSError):
             # These exceptions are acceptable for malformed paths
             pass
@@ -171,6 +174,6 @@ class TestIntegrationXSSPrevention:
         # Then escape for HTML
         safe_content = _escape_html(cleaned)
         
-        # Should not contain executable HTML
+        # Should not contain executable HTML - tags should be escaped
         assert "<img" not in safe_content
-        assert "onerror" not in safe_content or "&lt;" in safe_content
+        assert "&lt;img" in safe_content
