@@ -4,13 +4,15 @@ import logging
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 
-from domain.errors import SessionNotFoundError
+from domain.errors import SessionNotFoundError, DomainError
 from domain.messages.models import Message, MessageRole
+from domain.sessions.models import Session
 from interfaces.llm import LLMProtocol
 from interfaces.tools import ToolManagerProtocol
 from interfaces.events import EventPublisher
 from interfaces.sessions import SessionRepository
 from modules.prompts.prompt_provider import PromptProvider
+from core.security_check import SecurityCheckService, SecurityCheckResult
 
 from .policies.tool_authorization import ToolAuthorizationService
 from .preprocessors.prompt_override_service import PromptOverrideService
@@ -45,6 +47,7 @@ class ChatOrchestrator:
         rag_mode: Optional[RagModeRunner] = None,
         tools_mode: Optional[ToolsModeRunner] = None,
         agent_mode: Optional[AgentModeRunner] = None,
+        security_check_service: Optional[SecurityCheckService] = None,
     ):
         """
         Initialize chat orchestrator.
@@ -61,6 +64,7 @@ class ChatOrchestrator:
             rag_mode: Optional pre-configured RAG mode runner
             tools_mode: Optional pre-configured tools mode runner
             agent_mode: Optional pre-configured agent mode runner
+            security_check_service: Optional security check service
         """
         self.llm = llm
         self.event_publisher = event_publisher
@@ -68,6 +72,7 @@ class ChatOrchestrator:
         self.tool_manager = tool_manager
         self.prompt_provider = prompt_provider
         self.file_manager = file_manager
+        self.security_check_service = security_check_service
         
         # Initialize services
         self.tool_authorization = ToolAuthorizationService(tool_manager=tool_manager)
@@ -143,6 +148,61 @@ class ChatOrchestrator:
         session.history.add_message(user_message)
         session.update_timestamp()
         
+        # Perform input security check if enabled
+        if self.security_check_service:
+            # Convert message history to list of dicts for API
+            message_history = [
+                {"role": msg.role.value, "content": msg.content}
+                for msg in session.history.messages[:-1]  # Exclude current message
+            ]
+            
+            input_check = await self.security_check_service.check_input(
+                content=content,
+                message_history=message_history,
+                user_email=user_email
+            )
+            
+            if input_check.is_blocked():
+                # Content is blocked - return error response
+                logger.warning(
+                    f"User input blocked by security check for {user_email}: {input_check.message}"
+                )
+                
+                # Send blocked notification to user
+                await self.event_publisher.publish_message(
+                    message_type="security_warning",
+                    content={
+                        "type": "input_blocked",
+                        "message": input_check.message or "Your input was blocked by content security policy.",
+                        "details": input_check.details
+                    }
+                )
+                
+                # Remove the blocked message from history
+                session.history.messages.pop()
+                
+                # Return error response
+                return {
+                    "type": "error",
+                    "error": input_check.message or "Input blocked by security policy",
+                    "blocked": True
+                }
+            
+            elif input_check.has_warnings():
+                # Content has warnings - notify user but allow processing
+                logger.info(
+                    f"User input has warnings from security check for {user_email}: {input_check.message}"
+                )
+                
+                await self.event_publisher.publish_message(
+                    message_type="security_warning",
+                    content={
+                        "type": "input_warning",
+                        "message": input_check.message or "Your input triggered security warnings.",
+                        "details": input_check.details
+                    }
+                )
+        
         # Handle file ingestion
         update_callback = kwargs.get("update_callback")
         session.context = await file_utils.handle_session_files(
@@ -165,9 +225,9 @@ class ChatOrchestrator:
             selected_prompts=selected_prompts
         )
         
-        # Route to appropriate mode
+        # Route to appropriate mode and execute
         if agent_mode and self.agent_mode:
-            return await self.agent_mode.run(
+            result = await self.agent_mode.run(
                 session=session,
                 model=model,
                 messages=messages,
@@ -183,7 +243,7 @@ class ChatOrchestrator:
                 selected_tools=selected_tools,
                 user_email=user_email
             )
-            return await self.tools_mode.run(
+            result = await self.tools_mode.run(
                 session=session,
                 model=model,
                 messages=messages,
@@ -195,7 +255,7 @@ class ChatOrchestrator:
                 temperature=temperature,
             )
         elif selected_data_sources:
-            return await self.rag_mode.run(
+            result = await self.rag_mode.run(
                 session=session,
                 model=model,
                 messages=messages,
@@ -204,9 +264,89 @@ class ChatOrchestrator:
                 temperature=temperature,
             )
         else:
-            return await self.plain_mode.run(
+            result = await self.plain_mode.run(
                 session=session,
                 model=model,
                 messages=messages,
                 temperature=temperature,
             )
+        
+        # Perform output security check if enabled
+        if self.security_check_service:
+            # Extract the assistant's response content for checking
+            assistant_content = self._extract_response_content(session)
+            
+            if assistant_content:
+                # Convert message history to list of dicts for API
+                message_history = [
+                    {"role": msg.role.value, "content": msg.content}
+                    for msg in session.history.messages[:-1]  # Exclude current response
+                ]
+                
+                output_check = await self.security_check_service.check_output(
+                    content=assistant_content,
+                    message_history=message_history,
+                    user_email=user_email
+                )
+                
+                if output_check.is_blocked():
+                    # Output is blocked - remove from history and return error
+                    logger.warning(
+                        f"LLM output blocked by security check for {user_email}: {output_check.message}"
+                    )
+                    
+                    # Remove the blocked response from history
+                    session.history.messages.pop()
+                    
+                    # Send blocked notification to user
+                    await self.event_publisher.publish_message(
+                        message_type="security_warning",
+                        content={
+                            "type": "output_blocked",
+                            "message": output_check.message or "The response was blocked by content security policy.",
+                            "details": output_check.details
+                        }
+                    )
+                    
+                    # Return error response
+                    return {
+                        "type": "error",
+                        "error": output_check.message or "Response blocked by security policy",
+                        "blocked": True
+                    }
+                
+                elif output_check.has_warnings():
+                    # Output has warnings - notify user
+                    logger.info(
+                        f"LLM output has warnings from security check for {user_email}: {output_check.message}"
+                    )
+                    
+                    await self.event_publisher.publish_message(
+                        message_type="security_warning",
+                        content={
+                            "type": "output_warning",
+                            "message": output_check.message or "The response triggered security warnings.",
+                            "details": output_check.details
+                        }
+                    )
+        
+        return result
+    
+    def _extract_response_content(self, session: Session) -> Optional[str]:
+        """
+        Extract the most recent assistant response content from session.
+        
+        Args:
+            session: Chat session
+            
+        Returns:
+            Assistant response content, or None if not found
+        """
+        if not session.history.messages:
+            return None
+        
+        last_message = session.history.messages[-1]
+        if last_message.role == MessageRole.ASSISTANT:
+            return last_message.content
+        
+        return None

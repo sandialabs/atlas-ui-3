@@ -163,6 +163,15 @@ class ChatService:
         """Lazy initialization of orchestrator."""
         if self.orchestrator is None:
             from .orchestrator import ChatOrchestrator
+            from core.security_check import get_security_check_service
+            
+            # Create security check service if config_manager is available
+            security_check_service = None
+            if self.config_manager:
+                security_check_service = get_security_check_service(
+                    self.config_manager.app_settings
+                )
+            
             self.orchestrator = ChatOrchestrator(
                 llm=self.llm,
                 event_publisher=self.event_publisher,
@@ -175,6 +184,7 @@ class ChatService:
                 rag_mode=self.rag_mode,
                 tools_mode=self.tools_mode,
                 agent_mode=self.agent_mode,
+                security_check_service=security_check_service,
             )
         return self.orchestrator
 
