@@ -14,6 +14,7 @@ Demonstrates: Markdown parsing, file output with base64 encoding, and profession
 from __future__ import annotations
 
 import base64
+import html
 import logging
 import os
 import tempfile
@@ -77,6 +78,44 @@ SANDIA_WHITE = RGBColor(255, 255, 255)
 # Height is 7.5 inches, width is calculated for exact 16:9 ratio
 SLIDE_HEIGHT = Inches(7.5)
 SLIDE_WIDTH = Inches(7.5 * 16 / 9)  # 16:9 aspect ratio = 13.333... inches
+
+# Allowed base paths for local file access (security constraint)
+# Only allow files relative to the current working directory
+ALLOWED_BASE_PATH = Path(".").resolve()
+
+
+def _escape_html(text: str) -> str:
+    """Escape HTML special characters to prevent XSS attacks."""
+    return html.escape(text, quote=True)
+
+
+def _is_safe_local_path(filepath: str) -> bool:
+    """Check if a local file path is safe (within allowed base directory).
+
+    Prevents path traversal attacks by ensuring the resolved path
+    is within the allowed base directory.
+
+    Args:
+        filepath: The file path to validate
+
+    Returns:
+        True if the path is safe to access, False otherwise
+    """
+    if not filepath:
+        return False
+
+    try:
+        requested_path = Path(filepath)
+        if requested_path.is_absolute():
+            resolved_path = requested_path.resolve()
+        else:
+            resolved_path = (ALLOWED_BASE_PATH / requested_path).resolve()
+
+        # Ensure the path is within the allowed base directory
+        resolved_path.relative_to(ALLOWED_BASE_PATH)
+        return True
+    except (ValueError, OSError):
+        return False
 
 
 def _calculate_indent_level(leading_spaces: int) -> int:
@@ -212,8 +251,8 @@ def _load_image_bytes(filename: str, file_data_base64: str = "") -> Optional[byt
                 logger.info(f"Error fetching image from {full_url}: {e}")
             return None
     
-    # Try as local file path
-    if os.path.isfile(filename):
+    # Try as local file path - with path traversal protection
+    if _is_safe_local_path(filename) and os.path.isfile(filename):
         try:
             with open(filename, "rb") as f:
                 return f.read()
@@ -221,6 +260,10 @@ def _load_image_bytes(filename: str, file_data_base64: str = "") -> Optional[byt
             if VERBOSE:
                 logger.info(f"Error reading local image file {filename}: {e}")
             return None
+    elif not _is_safe_local_path(filename):
+        if VERBOSE:
+            logger.warning(f"Blocked access to unsafe path: {filename}")
+        return None
     
     if VERBOSE:
         logger.info(f"Image file not found: {filename}")
@@ -532,11 +575,14 @@ def markdown_to_pptx(
                 title = slide_data.get('title', 'Untitled Slide')
                 content = slide_data.get('content', '')
 
+                # Escape HTML to prevent XSS attacks
+                safe_title = _escape_html(_clean_markdown_text(title))
+
                 html_content += f"""
     <div class="slide">
         <div class="header-bar"></div>
         <div class="slide-content-wrapper">
-            <div class="slide-title">{_clean_markdown_text(title)}</div>
+            <div class="slide-title">{safe_title}</div>
             <div class="slide-content">"""
                 
                 # Add image to first slide if provided
@@ -578,8 +624,8 @@ def markdown_to_pptx(
                                 is_bullet = True
                                 bullet_text = bullet_match.group(1)
                         
-                        # Clean markdown from text
-                        bullet_text = _clean_markdown_text(bullet_text)
+                        # Clean markdown from text and escape HTML
+                        bullet_text = _escape_html(_clean_markdown_text(bullet_text))
                         
                         if is_bullet:
                             if not in_list:
@@ -604,7 +650,9 @@ def markdown_to_pptx(
                             if in_list:
                                 html_content += "</ul>"
                                 in_list = False
-                            html_content += f"<p>{_clean_markdown_text(stripped)}</p>"
+                            # Escape HTML in paragraph text to prevent XSS
+                            safe_paragraph = _escape_html(_clean_markdown_text(stripped))
+                            html_content += f"<p>{safe_paragraph}</p>"
                     
                     # Close any remaining open lists
                     while current_indent > 0:
