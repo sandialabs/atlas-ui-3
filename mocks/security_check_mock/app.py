@@ -1,11 +1,51 @@
 import os
 import random
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware import Middleware
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 
-app = FastAPI(title="Mock Security Check Service")
+API_KEY_ENV = "SECURITY_CHECK_API_KEY"
+
+
+async def api_key_middleware(request: Request, call_next):
+    """Simple middleware to validate the Bearer API key.
+
+    Behavior:
+    - If `SECURITY_CHECK_API_KEY` env var is unset or empty, no auth is enforced.
+    - Otherwise, requires an `Authorization: Bearer <key>` header matching the
+      configured key. On mismatch, returns `allowed-with-warnings` so flows
+      continue but you can see auth issues.
+    """
+
+    configured_key = os.getenv(API_KEY_ENV, "").strip()
+    if not configured_key:
+        return await call_next(request)
+
+    auth_header = request.headers.get("authorization") or ""
+    if not auth_header.startswith("Bearer "):
+        return SecurityCheckResponse(
+            status="allowed-with-warnings",
+            message="Missing or invalid Authorization header (middleware)",
+            details={"reason": "missing_auth"},
+        )
+
+    provided_key = auth_header[len("Bearer ") :].strip()
+    if provided_key != configured_key:
+        return SecurityCheckResponse(
+            status="allowed-with-warnings",
+            message="Incorrect API key (middleware)",
+            details={"reason": "bad_api_key"},
+        )
+
+    return await call_next(request)
+
+
+app = FastAPI(
+    title="Mock Security Check Service",
+    middleware=[Middleware(api_key_middleware)],
+)
 
 
 class SecurityCheckRequest(BaseModel):
@@ -34,14 +74,6 @@ async def check_content(
     - If content contains "warn-me": status="allowed-with-warnings".
     - Otherwise: status="good".
     """
-
-    # Treat missing/invalid auth as warning but not hard failure, to keep tests easy.
-    if not authorization or not authorization.startswith("Bearer "):
-        return SecurityCheckResponse(
-            status="allowed-with-warnings",
-            message="Missing or invalid Authorization header in mock server",
-            details={"reason": "missing_auth"},
-        )
 
     content_lower = request.content.lower()
 
@@ -80,14 +112,6 @@ async def check_content_probabilistic(
     - SECURITY_MOCK_BLOCK_FRACTION: fraction of flagged cases that are
       blocked (0.0–1.0, default 0.5). The rest are warnings.
     """
-
-    # Auth behavior mirrors /check
-    if not authorization or not authorization.startswith("Bearer "):
-        return SecurityCheckResponse(
-            status="allowed-with-warnings",
-            message="Missing or invalid Authorization header in mock server",
-            details={"reason": "missing_auth"},
-        )
 
     # Read configuration from environment
     try:

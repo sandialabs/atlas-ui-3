@@ -66,7 +66,8 @@ From the repo root (after creating/activating the uv venv):
 
 ```bash
 cd mocks/security_check_mock
-uvicorn app:app --host 0.0.0.0 --port 8089
+chmod +x run.sh
+./run.sh
 ```
 
 Then configure the backend to use it, for example in `.env`:
