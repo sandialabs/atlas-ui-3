@@ -4,17 +4,10 @@ Tests XSS prevention and path traversal protection.
 """
 
 import os
-import sys
 import tempfile
 from pathlib import Path
 
 import pytest
-
-# Add MCP directory to path for imports
-backend_root = Path(__file__).resolve().parents[1]
-mcp_pptx_dir = backend_root / "mcp" / "pptx_generator"
-if str(mcp_pptx_dir) not in sys.path:
-    sys.path.insert(0, str(mcp_pptx_dir))
 
 from main import (
     _escape_html,
@@ -43,7 +36,7 @@ class TestHTMLEscaping:
         """Test that quotes are escaped."""
         result = _escape_html('test "quoted" text')
         # Double quotes should be escaped to &quot;
-        assert '&quot;' in result
+        assert "&quot;" in result
         assert '"' not in result
 
     def test_escape_html_preserves_safe_text(self):
@@ -64,7 +57,7 @@ class TestHTMLEscaping:
         malicious = '" onmouseover="alert(1)" "'
         escaped = _escape_html(malicious)
         # Should not contain unescaped quotes that could break out of attributes
-        assert '&quot;' in escaped or '&#x27;' in escaped
+        assert "&quot;" in escaped or "&#x27;" in escaped
 
 
 class TestPathTraversalProtection:
@@ -128,7 +121,7 @@ class TestPathTraversalProtection:
             subdir.mkdir()
             test_file = subdir / "test.txt"
             test_file.write_text("test")
-            
+
             # Relative path to file in subdirectory should be safe
             relative_path = str(test_file)
             # Note: this should be safe because it's within the base directory
@@ -161,7 +154,7 @@ class TestIntegrationXSSPrevention:
         # For now, we test the building blocks are in place
         malicious_title = "<script>alert('xss')</script>"
         safe_title = _escape_html(_clean_markdown_text(malicious_title))
-        
+
         # The result should not contain executable script tags
         assert "<script>" not in safe_title
         assert "alert" in safe_title or "xss" in safe_title  # Content preserved but escaped
@@ -173,7 +166,7 @@ class TestIntegrationXSSPrevention:
         cleaned = _clean_markdown_text(malicious_content.lstrip("- "))
         # Then escape for HTML
         safe_content = _escape_html(cleaned)
-        
+
         # Should not contain executable HTML - tags should be escaped
         assert "<img" not in safe_content
         assert "&lt;img" in safe_content
