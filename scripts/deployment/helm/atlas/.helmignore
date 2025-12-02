@@ -1,0 +1,37 @@
+# VCS
+.git/
+.gitignore
+.svn/
+.hg/
+
+# Editors & temp
+*.swp
+*.bak
+*.tmp
+*.orig
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+__pycache__/
+
+# Local env files
+.env
+.env.*
+
+# Chart build output
+*.tgz
+
+# Repo-specific ignored paths (do not package sources)
+backend/
+frontend/
+tests/
+test/
+scripts/
+docs/
+prompts/
+logs/
+minio-data/

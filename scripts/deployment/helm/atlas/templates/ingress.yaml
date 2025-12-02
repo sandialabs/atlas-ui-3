@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-atlas-ui
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+  annotations:
+    route.openshift.io/termination: "edge"
+spec:
+  rules:
+  - host: {{ .Values.ingressHostURL }}
+    http:
+      paths:
+        - path: ''
+          pathType: ImplementationSpecific
+          backend:
+            service:
+              name: {{ .Release.Name }}-atlas-ui
+              port: 
+                name: {{ .Release.Name }}-atlas-ui

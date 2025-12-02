@@ -1,0 +1,435 @@
+# -- Container image
+image: "atlas-ui-3:latest"
+
+# -- Container port
+port: 8000
+
+# -- Environment variables to pass to the container
+env:
+  - name: APP_NAME
+    value: "ATLAS UI"
+
+  #############################################
+  # Development mode - skip authentication when true
+  #############################################
+  - name: DEBUG_MODE
+    value: "true"
+  - name: MOCK_RAG
+    value: "true"
+
+  #############################################
+  # Agent mode configuration
+  #############################################
+  - name: AGENT_MAX_STEPS
+    value: "30"
+  - name: AGENT_DEFAULT_ENABLED
+    value: "true"
+  - name: AGENT_MODE_AVAILABLE
+    value: "true"
+
+  #############################################
+  # Banner system configuration
+  #############################################
+  - name: BANNER_ENABLED
+    value: "false"
+
+  #############################################
+  # Environment mode (development or production)
+  #############################################
+  - name: ENVIRONMENT
+    value: "development"
+
+  #############################################
+  # UI / Frontend
+  #############################################
+  - name: VITE_APP_NAME
+    value: "Chat UI 13"
+  - name: USE_NEW_FRONTEND
+    value: "true"
+  - name: APP_LOG_DIR
+    value: "/app/backend/logs/atlas-ui"
+  #- name: LOG_LEVEL
+  #  value: "INFO"
+
+  #############################################
+  # Feature Flags (rollout controls)
+  # Toggle advanced capabilities without changing code.
+  # Set to true to enable in UI + API; false hides & suppresses data.
+  # These are initialized to reflect your current enabled features.
+  #############################################
+
+  # Workspace selector (none configured yet)
+  - name: FEATURE_WORKSPACES_ENABLED
+    value: "false"
+  # RAG sources (MOCK_RAG currently true)
+  - name: FEATURE_RAG_ENABLED
+    value: "false"
+  # MCP / tools panel
+  - name: FEATURE_TOOLS_ENABLED
+    value: "true"
+  # Marketplace browsing
+  - name: FEATURE_MARKETPLACE_ENABLED
+    value: "true"
+  # Uploaded/session files panel
+  - name: FEATURE_FILES_PANEL_ENABLED
+    value: "false"
+  # Previous chat history list
+  - name: FEATURE_CHAT_HISTORY_ENABLED
+    value: "false"
+
+  #############################################
+  # S3/MinIO Storage Configuration
+  #############################################
+  # MinIO endpoint (use localhost for local dev, minio for docker-compose)
+  - name: S3_ENDPOINT
+    value: "http://localhost:9000"
+  - name: S3_BUCKET_NAME
+    value: "atlas-files"
+  - name: S3_ACCESS_KEY
+    value: "minioadmin"
+  - name: S3_SECRET_KEY
+    value: "minioadmin"
+  - name: S3_REGION
+    value: "us-east-1"
+  - name: S3_TIMEOUT
+    value: "30"
+  - name: S3_USE_SSL
+    value: "false"
+
+# -- Secrets configuration
+secrets:
+  #############################################
+  # -- API key for Capability API
+  #############################################
+  CAPABILITY_TOKEN_SECRET: "blablah"
+
+  #############################################
+  # -- API keys for LLM / AI services
+  #############################################
+  OPENAI_API_KEY: "your_openai_api_key_here"
+  ANTHROPIC_API_KEY: "your_anthropic_api_key_here"
+  GOOGLE_API_KEY: "your_google_api_key_here"
+  OPENROUTER_API_KEY: "sk-or"
+
+# -- Resources configuration
+resources:
+  requests:
+    cpu: 8
+    memory: 32Gi
+  limits:
+    cpu: 8
+    memory: 32Gi
+
+# -- Persistent storage configuration
+persistence:
+  logs:
+    size: 10Gi
+    accessMode: ReadWriteOnce
+    storageClassName: null
+    annotations:
+      helm.sh/resource-policy: "keep"
+
+# -- Ingress configuration
+ingressHostURL: "your.ingress.host.url.com"
+
+# -- Match labels configuration
+labels:
+  environment: "test"
+  release: "test"
+
+# -- Configuration files
+configFiles:
+  # This key 'mcp.json' will become the filename inside the container.
+  # The value is the content of the file. Using a multi-line string for readability.
+  mcp.json: |
+    {
+      "calculator": {
+        "command": ["python", "mcp/calculator/main.py"],
+        "cwd": "backend",
+        "groups": ["users"],
+        "is_exclusive": false,
+        "description": "Evaluate mathematical expressions, perform calculations with basic arithmetic, trigonometry, and logarithms",
+        "author": "Chat UI Team",
+        "short_description": "Mathematical calculator",
+        "help_email": "support@chatui.example.com"
+      },
+      "thinking": {
+        "command": ["python", "mcp/thinking/main.py"],
+        "cwd": "backend",
+        "groups": ["users"],
+        "is_exclusive": false,
+        "description": "Structured thinking and problem analysis tool",
+        "author": "Chat UI Team",
+        "short_description": "Structured problem analysis",
+        "help_email": "support@chatui.example.com"
+      },
+      "pdfbasic": {
+        "command": ["python", "mcp/pdfbasic/main.py"],
+        "cwd": "backend",
+        "groups": ["users"],
+        "is_exclusive": false,
+        "description": "Extract and analyze text content from PDF documents, search within PDFs, and summarize content",
+        "author": "Chat UI Team",
+        "short_description": "PDF text extraction and analysis",
+        "help_email": "support@chatui.example.com"
+      },
+      "ui-demo": {
+        "command": ["python", "mcp/ui-demo/main.py"],
+        "cwd": "backend",
+        "groups": ["users"],
+        "is_exclusive": false,
+        "description": "Demo server showcasing custom UI modification capabilities",
+        "author": "Chat UI Team",
+        "short_description": "UI customization demo",
+        "help_email": "support@chatui.example.com"
+      }, 
+      "code-executor": {
+        "command": ["python", "mcp/code-executor/main.py"],
+        "cwd": "backend",
+        "groups": ["users"],
+        "is_exclusive": false,
+        "description": "Execute Python, JavaScript, and other code snippets in a secure sandboxed environment with safety validation",
+        "author": "Chat UI Team",
+        "short_description": "Secure code execution sandbox",
+        "help_email": "support@chatui.example.com"
+      },
+      "prompts": {
+        "command": ["python", "mcp/prompts/main.py"],
+        "cwd": "backend",
+        "groups": ["users"],
+        "is_exclusive": false,
+        "description": "Specialized system prompts for AI behavior modification",
+        "author": "Chat UI Team",
+        "short_description": "AI behavior prompts",
+        "help_email": "support@chatui.example.com"
+      }
+    }
+  mcp-rag.json: |
+    {
+      "corporate_cars": {
+        "command": ["python", "mcp/corporate_cars/main.py"],
+        "cwd": "backend",
+        "groups": ["users"],
+        "is_exclusive": false,
+        "description": "Fleet RAG server: discover resources and retrieve locations/meta-data for corporate cars in use by employees.",
+        "author": "Chat UI Team",
+        "short_description": "Corporate cars location & metadata",
+        "help_email": "support@chatui.example.com"
+      }
+    }
+  llmconfig.yml: |
+    models:
+      gpt-4.1:
+        model_url: "https://api.openai.com/v1/chat/completions"
+        model_name: "gpt-4.1"
+        api_key: "${OPENAI_API_KEY}"
+      gpt-4.1-nano:
+        model_url: "https://api.openai.com/v1/chat/completions"
+        model_name: "gpt-4.1-nano"
+        api_key: "${OPENAI_API_KEY}"
+      openrouter-gpt-4o:
+        model_url: "https://openrouter.ai/api/v1/chat/completions"
+        model_name: "openai/gpt-oss-120b"
+        api_key: "${OPENROUTER_API_KEY}"
+        description: "OpenRouter openai oss-120b"
+        extra_headers:
+          X-Title: "chat-11"
+  help-config.json: |
+    {
+      "title": "Help & Documentation",
+      "sections": [
+        {
+          "id": "quick-start",
+          "type": "section",
+          "title": "Quick Start",
+          "icon": "zap",
+          "iconColor": "blue-400",
+          "description": "Welcome to the Chat UI! This application provides an advanced chat interface with AI models, enhanced by powerful tools and data sources.",
+          "layout": "cards-grid",
+          "cards": [
+            {
+              "title": "Start a New Chat",
+              "content": "Click \"New Chat\" button or press Ctrl+Alt+N",
+              "hasKeyboard": true,
+              "keyboardShortcut": "Ctrl+Alt+N"
+            },
+            {
+              "title": "Access Tools",
+              "content": "Click the Settings icon in the header to open the tools panel",
+              "hasIcon": true,
+              "iconName": "settings"
+            }
+          ]
+        },
+        {
+          "id": "core-features",
+          "type": "section", 
+          "title": "Core Features",
+          "icon": "message-square",
+          "iconColor": "green-400",
+          "layout": "feature-list",
+          "features": [
+            {
+              "title": "RAG (Retrieval-Augmented Generation)",
+              "icon": "database",
+              "iconColor": "blue-400",
+              "borderColor": "blue-400",
+              "description": "Connect your chats to external data sources for enhanced, context-aware responses.",
+              "bullets": [
+                "Click the menu icon to open data sources panel",
+                "Select which documents/databases to include in your conversation", 
+                "Toggle \"RAG Only\" mode to query only your documents without LLM processing",
+                "View source attribution to see which documents informed the response"
+              ]
+            },
+            {
+              "title": "Tools & MCP Servers",
+              "icon": "settings",
+              "iconColor": "green-400",
+              "borderColor": "green-400",
+              "description": "Extend AI capabilities with specialized tools through Model Context Protocol (MCP) servers.",
+              "bullets": [
+                "Click the Settings icon to view available tools",
+                "Built-in tools include file operations, calculations, and UI demos",
+                "Tools can create interactive content in the Canvas panel",
+                "Select specific tools in the marketplace for personalized experience"
+              ]
+            },
+            {
+              "title": "MCP Store/Marketplace",
+              "icon": "store",
+              "iconColor": "purple-400", 
+              "borderColor": "purple-400",
+              "description": "Browse and select MCP servers that provide different capabilities.",
+              "bullets": [
+                "Navigate to /marketplace to browse available servers",
+                "Select which MCP servers you want to use in your chats",
+                "Each server provides specific tools and functionalities",
+                "Your selections are saved and persist across sessions"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "tips-best-practices",
+          "type": "section",
+          "title": "Tips & Best Practices", 
+          "icon": "alert-triangle",
+          "iconColor": "yellow-400",
+          "layout": "tip-cards",
+          "tips": [
+            {
+              "title": "Starting Fresh Conversations",
+              "content": "For best results, start a new chat session when switching to a completely different topic. This prevents context confusion and ensures cleaner responses."
+            },
+            {
+              "title": "Handling Errors", 
+              "content": "If you encounter errors or unexpected behavior, restart your chat session using the \"New Chat\" button. This clears the conversation history and resets the context."
+            },
+            {
+              "title": "Keyboard Shortcuts",
+              "content": "Learn these helpful shortcuts to improve your workflow.",
+              "shortcuts": [
+                {"key": "Ctrl+Alt+N", "description": "Start new chat"},
+                {"key": "Enter", "description": "Send message"},
+                {"key": "Shift+Enter", "description": "New line in message"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "technical-docs",
+          "type": "section",
+          "title": "Technical Documentation",
+          "icon": "code",
+          "iconColor": "orange-400", 
+          "layout": "technical",
+          "subsections": [
+            {
+              "title": "Building Your Own MCP Server",
+              "borderColor": "orange-400",
+              "description": "Create custom tools and functionality by developing your own MCP servers.",
+              "content": [
+                {
+                  "type": "subsection",
+                  "title": "Special Return Types",
+                  "bullets": [
+                    {"code": "returned_files", "description": "Return files for Canvas rendering (HTML, images, PDFs, text)"},
+                    {"code": "file_path", "description": "Reference files for download/display"},
+                    {"code": "content", "description": "Standard text response"},
+                    {"code": "success", "description": "Boolean indicating operation success"}
+                  ]
+                },
+                {
+                  "type": "code-example",
+                  "title": "Returned Files Example",
+                  "language": "json",
+                  "code": "{\n    \"content\": \"Created interactive chart\",\n    \"returned_files\": [{\n        \"filename\": \"chart.html\",\n        \"content_base64\": \"PGRpdj5Zb3VyIEhUTUwgaGVyZTwvZGl2Pg==\"\n    }],\n    \"success\": true\n}"
+                }
+              ]
+            },
+            {
+              "title": "UI Modification & Custom Prompts",
+              "borderColor": "cyan-400",
+              "description": "Advanced customization options for developers.",
+              "bullets": [
+                "MCP servers can return files (HTML, images, PDFs, text) that render in the Canvas panel",
+                "All HTML is sanitized for security using DOMPurify", 
+                "JavaScript is supported for interactive elements",
+                "Use custom prompts to modify AI behavior",
+                "Create specialized tools for domain-specific tasks"
+              ]
+            },
+            {
+              "title": "Development Resources",
+              "type": "resource-card",
+              "resources": [
+                {"file": "docs/mcp-development.md", "description": "Comprehensive MCP development guide"},
+                {"file": "docs/advanced-features.md", "description": "Advanced features and examples"},
+                {"file": "docs/configuration.md", "description": "Configuration options"},
+                {"file": "backend/mcp/", "description": "Example MCP server implementations"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "agent-mode",
+          "type": "section",
+          "title": "Agent Mode",
+          "icon": "bot", 
+          "iconColor": "gradient",
+          "gradientFrom": "blue-400",
+          "gradientTo": "purple-600",
+          "layout": "simple",
+          "description": "Agent mode enables multi-step reasoning where the AI breaks down complex tasks into manageable steps.",
+          "features": [
+            "Step-by-step task breakdown and execution",
+            "Visual progress tracking", 
+            "Integration with MCP tools during reasoning",
+            "Ability to interrupt the reasoning process"
+          ],
+          "note": "Agent mode availability depends on your configuration. Check with your administrator if this feature is not visible."
+        },
+        {
+          "id": "support",
+          "type": "section",
+          "title": "Need More Help?",
+          "icon": "file-text",
+          "iconColor": "gray-400",
+          "layout": "support-cards",
+          "description": "For additional information and detailed guides:",
+          "cards": [
+            {
+              "title": "Documentation",
+              "content": "Check the docs/ folder for comprehensive guides on setup, configuration, and development.",
+              "code": "docs/"
+            },
+            {
+              "title": "Configuration", 
+              "content": "Refer to .env.example and configuration documentation for customization options.",
+              "code": ".env.example"
+            }
+          ]
+        }
+      ]
+    }
