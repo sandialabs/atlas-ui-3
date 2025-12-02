@@ -4,7 +4,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 
-from domain.errors import SessionNotFoundError, DomainError
+from domain.errors import SessionNotFoundError
 from domain.messages.models import Message, MessageRole
 from domain.sessions.models import Session
 from interfaces.llm import LLMProtocol
@@ -12,7 +12,7 @@ from interfaces.tools import ToolManagerProtocol
 from interfaces.events import EventPublisher
 from interfaces.sessions import SessionRepository
 from modules.prompts.prompt_provider import PromptProvider
-from core.security_check import SecurityCheckService, SecurityCheckResult
+from core.security_check import SecurityCheckService
 
 from .policies.tool_authorization import ToolAuthorizationService
 from .preprocessors.prompt_override_service import PromptOverrideService

@@ -30,6 +30,8 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 - Section header: `## Implementation Plan (2025-11-02)`
 - Status update: `Last updated: 2025-11-02 14:30`
 
+**Implementation Summaries**: After completing a long or complex task, write an implementation summary document in `docs/agent-implementation-summaries/` with a descriptive filename and date stamp (e.g., `security-check-feature-2025-12-02.md`). Include what was implemented, key decisions made, and any important technical details for future reference.
+
 # Tests
 
 Before you mark a job as finished, be sure to run the unit test script. 

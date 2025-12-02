@@ -12,7 +12,7 @@ from backend.core.security_check import (
 )
 from backend.domain.sessions.models import Session
 from backend.domain.messages.models import Message, MessageRole
-from backend.modules.config.config_manager import AppSettings
+
 
 
 @pytest.fixture
