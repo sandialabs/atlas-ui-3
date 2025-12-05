@@ -275,22 +275,22 @@ class MCPToolManager:
                             logger.info(f"Converted relative cwd to absolute: {cwd} (project_root: {project_root})")
                         
                         if os.path.exists(cwd):
-                            logger.info(f"✓ Working directory exists: {cwd}")
+                            logger.info(f"Working directory exists: {cwd}")
                             logger.info(f"Creating STDIO client for {server_name} with command: {command} in cwd: {cwd}")
                             from fastmcp.client.transports import StdioTransport
                             transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd, env=resolved_env)
                             client = Client(transport)
-                            logger.info(f"✓ Successfully created STDIO MCP client for {server_name} with custom command and cwd")
+                            logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command and cwd")
                             return client
                         else:
-                            logger.error(f"✗ Working directory does not exist: {cwd}")
+                            logger.error(f"Working directory does not exist: {cwd}")
                             return None
                     else:
                         logger.info(f"No cwd specified, creating STDIO client for {server_name} with command: {command}")
                         from fastmcp.client.transports import StdioTransport
                         transport = StdioTransport(command=command[0], args=command[1:], env=resolved_env)
                         client = Client(transport)
-                        logger.info(f"✓ Successfully created STDIO MCP client for {server_name} with custom command")
+                        logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command")
                         return client
                 else:
                     # Fallback to old behavior for backward compatibility
@@ -312,46 +312,46 @@ class MCPToolManager:
         except Exception as e:
             # Targeted debugging for MCP startup errors
             error_type = type(e).__name__
-            logger.error(f"✗ Error creating client for {server_name}: {error_type}: {e}")
+            logger.error(f"Error creating client for {server_name}: {error_type}: {e}")
             
             # Provide specific debugging information based on error type and config
             if "connection" in str(e).lower() or "refused" in str(e).lower():
                 if transport_type in ["http", "sse"]:
-                    logger.error(f"🔍 DEBUG: Connection failed for HTTP/SSE server '{server_name}'")
+                    logger.error(f"DEBUG: Connection failed for HTTP/SSE server '{server_name}'")
                     logger.error(f"    → URL: {config.get('url', 'Not specified')}")
                     logger.error(f"    → Transport: {transport_type}")
                     logger.error("    → Check if server is running and accessible")
                 else:
-                    logger.error(f"🔍 DEBUG: STDIO connection failed for server '{server_name}'")
+                    logger.error(f"DEBUG: STDIO connection failed for server '{server_name}'")
                     logger.error(f"    → Command: {config.get('command', 'Not specified')}")
                     logger.error(f"    → CWD: {config.get('cwd', 'Not specified')}")
                     logger.error("    → Check if command exists and is executable")
                     
             elif "timeout" in str(e).lower():
-                logger.error(f"🔍 DEBUG: Timeout connecting to server '{server_name}'")
+                logger.error(f"DEBUG: Timeout connecting to server '{server_name}'")
                 logger.error("    → Server may be slow to start or overloaded")
                 logger.error("    → Consider increasing timeout or checking server health")
                 
             elif "permission" in str(e).lower() or "access" in str(e).lower():
-                logger.error(f"🔍 DEBUG: Permission error for server '{server_name}'")
+                logger.error(f"DEBUG: Permission error for server '{server_name}'")
                 if config.get('cwd'):
                     logger.error(f"    → Check directory permissions: {config.get('cwd')}")
                 if config.get('command'):
                     logger.error(f"    → Check executable permissions: {config.get('command')}")
                     
             elif "module" in str(e).lower() or "import" in str(e).lower():
-                logger.error(f"🔍 DEBUG: Import/module error for server '{server_name}'")
+                logger.error(f"DEBUG: Import/module error for server '{server_name}'")
                 logger.error("    → Check if required dependencies are installed")
                 logger.error("    → Check Python path and virtual environment")
                 
             elif "json" in str(e).lower() or "decode" in str(e).lower():
-                logger.error(f"🔍 DEBUG: JSON/protocol error for server '{server_name}'")
+                logger.error(f"DEBUG: JSON/protocol error for server '{server_name}'")
                 logger.error("    → Server may not be MCP-compatible")
                 logger.error("    → Check server output format")
                 
             else:
                 # Generic debugging info
-                logger.error(f"🔍 DEBUG: Generic error for server '{server_name}'")
+                logger.error(f"DEBUG: Generic error for server '{server_name}'")
                 logger.error(f"    → Config: {config}")
                 logger.error(f"    → Transport type: {transport_type}")
                 
@@ -567,14 +567,17 @@ class MCPToolManager:
     
     async def _discover_tools_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover tools for a single server. Returns server tools data."""
-        logger.info(f"=== TOOL DISCOVERY: Starting discovery for server '{server_name}' ===")
-        logger.debug(f"Server config: {self.servers_config.get(server_name, 'No config found')}")
+        safe_server_name = sanitize_for_logging(server_name)
+        server_config = self.servers_config.get(server_name, {})
+        safe_config = sanitize_for_logging(str(server_config))
+        logger.info(f"=== TOOL DISCOVERY: Starting discovery for server '{safe_server_name}' ===")
+        logger.debug(f"Server config: {safe_config}")
         try:
-            logger.info(f"Opening client connection for {server_name}...")
+            logger.info(f"Opening client connection for {safe_server_name}...")
             async with client:
-                logger.info(f"Client connected successfully for {server_name}, listing tools...")
+                logger.info(f"Client connected successfully for {safe_server_name}, listing tools...")
                 tools = await client.list_tools()
-                logger.info(f"✓ Successfully got {len(tools)} tools from {server_name}: {[tool.name for tool in tools]}")
+                logger.info(f"Successfully got {len(tools)} tools from {safe_server_name}: {[tool.name for tool in tools]}")
 
                 # Log detailed tool information
                 for i, tool in enumerate(tools):
@@ -589,40 +592,56 @@ class MCPToolManager:
                     'tools': tools,
                     'config': self.servers_config[server_name]
                 }
-                logger.info(f"✓ Successfully stored {len(tools)} tools for {server_name} in available_tools")
-                logger.info(f"=== TOOL DISCOVERY: Completed successfully for server '{server_name}' ===")
+                logger.info(f"Successfully stored {len(tools)} tools for {safe_server_name} in available_tools")
+                logger.info(f"=== TOOL DISCOVERY: Completed successfully for server '{safe_server_name}' ===")
                 return server_data
         except Exception as e:
             error_type = type(e).__name__
-            logger.error(f"✗ TOOL DISCOVERY FAILED for {server_name}: {error_type}: {e}")
+            error_msg = sanitize_for_logging(str(e))
+            logger.error(f"TOOL DISCOVERY FAILED for '{safe_server_name}': {error_type}: {error_msg}")
             
             # Targeted debugging for tool discovery errors
-            if "connection" in str(e).lower() or "refused" in str(e).lower():
-                logger.error(f"🔍 DEBUG: Connection lost during tool discovery for '{server_name}'")
+            error_lower = str(e).lower()
+            if "connection" in error_lower or "refused" in error_lower:
+                logger.error(f"DEBUG: Connection lost during tool discovery for '{safe_server_name}'")
                 logger.error("    → Server may have crashed or disconnected")
                 logger.error("    → Check server logs for startup errors")
-            elif "timeout" in str(e).lower():
-                logger.error(f"🔍 DEBUG: Timeout during tool discovery for '{server_name}'")
+                # Check if this is an HTTPS/SSL issue
+                if "ssl" in error_lower or "certificate" in error_lower or "https" in error_lower:
+                    logger.error("    → SSL/HTTPS error detected")
+                    logger.error("    → On Windows, ensure SSL certificates are properly configured")
+                    logger.error("    → Try setting REQUESTS_CA_BUNDLE or SSL_CERT_FILE environment variables")
+            elif "timeout" in error_lower:
+                logger.error(f"DEBUG: Timeout during tool discovery for '{safe_server_name}'")
                 logger.error("    → Server is slow to respond to list_tools() request")
                 logger.error("    → Server may be overloaded or hanging")
-            elif "json" in str(e).lower() or "decode" in str(e).lower():
-                logger.error(f"🔍 DEBUG: Protocol error during tool discovery for '{server_name}'")
+            elif "json" in error_lower or "decode" in error_lower:
+                logger.error(f"DEBUG: Protocol error during tool discovery for '{safe_server_name}'")
                 logger.error("    → Server returned invalid MCP response")
                 logger.error("    → Check if server implements MCP protocol correctly")
+            elif "ssl" in error_lower or "certificate" in error_lower:
+                logger.error(f"DEBUG: SSL/Certificate error during tool discovery for '{safe_server_name}'")
+                logger.error(f"    → URL: {server_config.get('url', 'N/A')}")
+                logger.error("    → SSL certificate verification failed")
+                logger.error("    → On Windows, this may require installing/updating CA certificates")
+                logger.error("    → Check if the server URL uses HTTPS with a self-signed or untrusted certificate")
             else:
-                logger.error(f"🔍 DEBUG: Generic tool discovery error for '{server_name}'")
-                logger.error(f"    → Client object: {client}")
-                logger.error(f"    → Client type: {type(client)}")
+                logger.error(f"DEBUG: Generic tool discovery error for '{safe_server_name}'")
+                logger.error(f"    → Client type: {type(client).__name__}")
+                logger.error(f"    → Server URL: {server_config.get('url', 'N/A')}")
+                logger.error(f"    → Transport type: {server_config.get('transport', server_config.get('type', 'N/A'))}")
                 
-            logger.debug(f"Full tool discovery traceback for {server_name}:", exc_info=True)
-            
-            server_config = self.servers_config.get(server_name)
+            # Record failure for status/reconnect purposes
+            self._record_server_failure(server_name, f"{error_type}: {error_msg}")
+
+            logger.debug(f"Full tool discovery traceback for {safe_server_name}:", exc_info=True)
+
             server_data = {
                 'tools': [],
                 'config': server_config,
             }
-            logger.error(f"Set empty tools list for failed server {server_name} (config_present={server_config is not None})")
-            logger.info(f"=== TOOL DISCOVERY: Failed for server '{server_name}' ===")
+            logger.error(f"Set empty tools list for failed server '{safe_server_name}' (config_present={server_config is not None})")
+            logger.info(f"=== TOOL DISCOVERY: Failed for server '{safe_server_name}' ===")
             return server_data
 
     async def discover_tools(self):
@@ -650,13 +669,16 @@ class MCPToolManager:
                 continue
 
             if isinstance(result, Exception):
-                logger.error(f"✗ Exception during tool discovery for {server_name}: {result}", exc_info=True)
-                # Set empty tools list for failed server
+                logger.error(f"Exception during tool discovery for {server_name}: {result}", exc_info=True)
+                # Record failure and set empty tools list for failed server
+                self._record_server_failure(server_name, f"Exception during tool discovery: {result}")
                 self.available_tools[server_name] = {
                     'tools': [],
                     'config': self.servers_config.get(server_name),
                 }
             else:
+                # Clear any previous discovery failure on success
+                self._clear_server_failure(server_name)
                 self.available_tools[server_name] = result
         
         logger.info("=== TOOL DISCOVERY COMPLETE ===")
@@ -685,55 +707,70 @@ class MCPToolManager:
     
     async def _discover_prompts_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover prompts for a single server. Returns server prompts data."""
-        logger.debug(f"Attempting to discover prompts from {server_name}")
+        safe_server_name = sanitize_for_logging(server_name)
+        server_config = self.servers_config.get(server_name, {})
+        logger.debug(f"Attempting to discover prompts from {safe_server_name}")
         try:
-            logger.debug(f"Opening client connection for {server_name}")
+            logger.debug(f"Opening client connection for {safe_server_name}")
             async with client:
-                logger.debug(f"Client connected for {server_name}, listing prompts...")
+                logger.debug(f"Client connected for {safe_server_name}, listing prompts...")
                 try:
                     prompts = await client.list_prompts()
                     logger.debug(
-                        f"Got {len(prompts)} prompts from {server_name}: {[prompt.name for prompt in prompts]}"
+                        f"Got {len(prompts)} prompts from {safe_server_name}: {[prompt.name for prompt in prompts]}"
                     )
-                    config = self.servers_config.get(server_name)
                     server_data = {
                         'prompts': prompts,
-                        'config': config,
+                        'config': server_config,
                     }
-                    logger.info(f"Discovered {len(prompts)} prompts from {server_name}")
-                    logger.debug(f"Successfully stored prompts for {server_name}")
+                    logger.info(f"Discovered {len(prompts)} prompts from {safe_server_name}")
+                    logger.debug(f"Successfully stored prompts for {safe_server_name}")
                     return server_data
                 except Exception as e:
                     # Server might not support prompts or list_prompts() failed  store empty list
                     logger.debug(
-                        f"Server {server_name} does not support prompts or list_prompts() failed: {e}"
+                        f"Server {safe_server_name} does not support prompts or list_prompts() failed: {e}"
                     )
                     return {
                         'prompts': [],
-                        'config': self.servers_config.get(server_name),
+                        'config': server_config,
                     }
         except Exception as e:
             error_type = type(e).__name__
-            logger.error(f"✗ PROMPT DISCOVERY FAILED for {server_name}: {error_type}: {e}")
+            error_msg = sanitize_for_logging(str(e))
+            logger.error(f"PROMPT DISCOVERY FAILED for '{safe_server_name}': {error_type}: {error_msg}")
             
             # Targeted debugging for prompt discovery errors
-            if "connection" in str(e).lower() or "refused" in str(e).lower():
-                logger.error(f"🔍 DEBUG: Connection lost during prompt discovery for '{server_name}'")
+            error_lower = str(e).lower()
+            if "connection" in error_lower or "refused" in error_lower:
+                logger.error(f"DEBUG: Connection lost during prompt discovery for '{safe_server_name}'")
                 logger.error("    → Server may have crashed or disconnected")
-            elif "timeout" in str(e).lower():
-                logger.error(f"🔍 DEBUG: Timeout during prompt discovery for '{server_name}'")
+                # Check if this is an HTTPS/SSL issue
+                if "ssl" in error_lower or "certificate" in error_lower or "https" in error_lower:
+                    logger.error("    → SSL/HTTPS error detected")
+                    logger.error("    → On Windows, ensure SSL certificates are properly configured")
+            elif "timeout" in error_lower:
+                logger.error(f"DEBUG: Timeout during prompt discovery for '{safe_server_name}'")
                 logger.error("    → Server is slow to respond to list_prompts() request")
-            elif "json" in str(e).lower() or "decode" in str(e).lower():
-                logger.error(f"🔍 DEBUG: Protocol error during prompt discovery for '{server_name}'")
+            elif "json" in error_lower or "decode" in error_lower:
+                logger.error(f"DEBUG: Protocol error during prompt discovery for '{safe_server_name}'")
                 logger.error("    → Server returned invalid MCP response for prompts")
+            elif "ssl" in error_lower or "certificate" in error_lower:
+                logger.error(f"DEBUG: SSL/Certificate error during prompt discovery for '{safe_server_name}'")
+                logger.error(f"    → URL: {server_config.get('url', 'N/A')}")
+                logger.error("    → SSL certificate verification failed")
+                logger.error("    → On Windows, this may require installing/updating CA certificates")
             else:
-                logger.error(f"🔍 DEBUG: Generic prompt discovery error for '{server_name}'")
+                logger.error(f"DEBUG: Generic prompt discovery error for '{safe_server_name}'")
                 
-            logger.debug(f"Full prompt discovery traceback for {server_name}:", exc_info=True)
-            logger.debug(f"Set empty prompts list for failed server {server_name}")
+            # Record failure for status/reconnect purposes
+            self._record_server_failure(server_name, f"{error_type}: {error_msg}")
+
+            logger.debug(f"Full prompt discovery traceback for {safe_server_name}:", exc_info=True)
+            logger.debug(f"Set empty prompts list for failed server {safe_server_name}")
             return {
                 'prompts': [],
-                'config': self.servers_config.get(server_name),
+                'config': server_config,
             }
 
     async def discover_prompts(self):
@@ -761,13 +798,16 @@ class MCPToolManager:
                 continue
 
             if isinstance(result, Exception):
-                logger.error(f"✗ Exception during prompt discovery for {server_name}: {result}", exc_info=True)
-                # Set empty prompts list for failed server
+                logger.error(f"Exception during prompt discovery for {server_name}: {result}", exc_info=True)
+                # Record failure and set empty prompts list for failed server
+                self._record_server_failure(server_name, f"Exception during prompt discovery: {result}")
                 self.available_prompts[server_name] = {
                     'prompts': [],
                     'config': self.servers_config.get(server_name),
                 }
             else:
+                # Clear any previous discovery failure on success
+                self._clear_server_failure(server_name)
                 self.available_prompts[server_name] = result
         
         logger.info("=== PROMPT DISCOVERY COMPLETE ===")

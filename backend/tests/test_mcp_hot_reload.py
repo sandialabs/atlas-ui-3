@@ -45,6 +45,29 @@ class TestMCPAdminEndpoints:
         assert "backoff_multiplier" in auto_reconnect
         assert "running" in auto_reconnect
 
+    def test_mcp_status_marks_failed_servers_not_connected(self):
+        """Servers with recorded failures should not appear as connected."""
+        from main import app
+        client = TestClient(app)
+
+        # Seed a fake failure in the MCP manager
+        from backend.infrastructure.app_factory import app_factory
+        mcp = app_factory.get_mcp_manager()
+        mcp._failed_servers["failing-server"] = {
+            "last_attempt": time.time(),
+            "attempt_count": 1,
+            "error": "Simulated failure",
+        }
+        mcp.clients["failing-server"] = AsyncMock()
+        mcp.available_tools["failing-server"] = {"tools": [], "config": {}}
+        mcp.available_prompts["failing-server"] = {"prompts": [], "config": {}}
+
+        r = client.get("/admin/mcp/status", headers={"X-User-Email": "admin@example.com"})
+        assert r.status_code == 200
+
+        data = r.json()
+        assert "failing-server" not in data["connected_servers"]
+
     def test_mcp_reload_endpoint_requires_admin(self):
         """Test that MCP reload endpoint requires admin access."""
         from main import app
@@ -275,6 +298,7 @@ class TestMCPDiscoveryResilience:
         manager = MCPToolManager.__new__(MCPToolManager)
         # Simulate one valid server and one removed server
         manager.servers_config = {"server-a": {"description": "A"}}
+        manager._failed_servers = {}
         manager.clients = {
             "server-a": AsyncMock(),
             "removed-server": AsyncMock(),
@@ -298,6 +322,7 @@ class TestMCPDiscoveryResilience:
         """Prompt discovery should also skip servers missing from config."""
         manager = MCPToolManager.__new__(MCPToolManager)
         manager.servers_config = {"server-a": {"description": "A"}}
+        manager._failed_servers = {}
         manager.clients = {
             "server-a": AsyncMock(),
             "removed-server": AsyncMock(),
@@ -313,6 +338,47 @@ class TestMCPDiscoveryResilience:
         await manager.discover_prompts()
         assert "server-a" in manager.available_prompts
         assert "removed-server" not in manager.available_prompts
+
+
+@pytest.mark.asyncio
+class TestMCPDiscoveryFailureTracking:
+    """Tests for tracking discovery failures so admin status can reflect them."""
+
+    async def test_tool_discovery_failure_records_failed_server(self):
+        """Tool discovery exception should record server in _failed_servers."""
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {"bad-server": {"description": "Bad"}}
+        manager.clients = {"bad-server": AsyncMock()}
+        manager._failed_servers = {}
+
+        async def failing_discover(server_name, client):  # noqa: ARG001
+            raise RuntimeError("Simulated tool discovery failure")
+
+        manager._discover_tools_for_server = failing_discover  # type: ignore[assignment]
+
+        await manager.discover_tools()
+
+        assert "bad-server" in manager._failed_servers
+        error = manager._failed_servers["bad-server"]["error"]
+        assert "Simulated tool discovery failure" in error
+
+    async def test_prompt_discovery_failure_records_failed_server(self):
+        """Prompt discovery exception should record server in _failed_servers."""
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {"bad-server": {"description": "Bad"}}
+        manager.clients = {"bad-server": AsyncMock()}
+        manager._failed_servers = {}
+
+        async def failing_discover_prompts(server_name, client):  # noqa: ARG001
+            raise RuntimeError("Simulated prompt discovery failure")
+
+        manager._discover_prompts_for_server = failing_discover_prompts  # type: ignore[assignment]
+
+        await manager.discover_prompts()
+
+        assert "bad-server" in manager._failed_servers
+        error = manager._failed_servers["bad-server"]["error"]
+        assert "Simulated prompt discovery failure" in error
 
 
 @pytest.mark.asyncio
