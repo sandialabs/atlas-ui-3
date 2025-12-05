@@ -335,8 +335,23 @@ async def get_mcp_status(admin_user: str = Depends(require_admin)):
                 "next_retry_in_seconds": next_retry_in,
             }
         
+        # A server is considered "connected" only if it has a client AND
+        # at least one tool or prompt discovered (or explicitly marked as
+        # having zero tools/prompts but no recorded failure). This prevents
+        # HTTP/SSE/SSL discovery failures from showing as connected.
+        connected_servers: List[str] = []
+        for server_name in mcp.clients.keys():
+            tools = mcp.available_tools.get(server_name, {}).get("tools", [])
+            prompts = mcp.available_prompts.get(server_name, {}).get("prompts", [])
+            if tools or prompts:
+                connected_servers.append(server_name)
+            elif server_name not in failed_servers_with_timing:
+                # No tools/prompts but also no recorded failure; treat as connected
+                # to preserve behavior for servers that legitimately expose nothing.
+                connected_servers.append(server_name)
+
         return {
-            "connected_servers": list(mcp.clients.keys()),
+            "connected_servers": connected_servers,
             "configured_servers": list(mcp.servers_config.keys()),
             "failed_servers": failed_servers_with_timing,
             "auto_reconnect": {

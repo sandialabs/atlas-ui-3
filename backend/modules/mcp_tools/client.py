@@ -631,8 +631,11 @@ class MCPToolManager:
                 logger.error(f"    → Server URL: {server_config.get('url', 'N/A')}")
                 logger.error(f"    → Transport type: {server_config.get('transport', server_config.get('type', 'N/A'))}")
                 
+            # Record failure for status/reconnect purposes
+            self._record_server_failure(server_name, f"{error_type}: {error_msg}")
+
             logger.debug(f"Full tool discovery traceback for {safe_server_name}:", exc_info=True)
-            
+
             server_data = {
                 'tools': [],
                 'config': server_config,
@@ -667,12 +670,15 @@ class MCPToolManager:
 
             if isinstance(result, Exception):
                 logger.error(f"Exception during tool discovery for {server_name}: {result}", exc_info=True)
-                # Set empty tools list for failed server
+                # Record failure and set empty tools list for failed server
+                self._record_server_failure(server_name, f"Exception during tool discovery: {result}")
                 self.available_tools[server_name] = {
                     'tools': [],
                     'config': self.servers_config.get(server_name),
                 }
             else:
+                # Clear any previous discovery failure on success
+                self._clear_server_failure(server_name)
                 self.available_tools[server_name] = result
         
         logger.info("=== TOOL DISCOVERY COMPLETE ===")
@@ -757,6 +763,9 @@ class MCPToolManager:
             else:
                 logger.error(f"DEBUG: Generic prompt discovery error for '{safe_server_name}'")
                 
+            # Record failure for status/reconnect purposes
+            self._record_server_failure(server_name, f"{error_type}: {error_msg}")
+
             logger.debug(f"Full prompt discovery traceback for {safe_server_name}:", exc_info=True)
             logger.debug(f"Set empty prompts list for failed server {safe_server_name}")
             return {
@@ -790,12 +799,15 @@ class MCPToolManager:
 
             if isinstance(result, Exception):
                 logger.error(f"Exception during prompt discovery for {server_name}: {result}", exc_info=True)
-                # Set empty prompts list for failed server
+                # Record failure and set empty prompts list for failed server
+                self._record_server_failure(server_name, f"Exception during prompt discovery: {result}")
                 self.available_prompts[server_name] = {
                     'prompts': [],
                     'config': self.servers_config.get(server_name),
                 }
             else:
+                # Clear any previous discovery failure on success
+                self._clear_server_failure(server_name)
                 self.available_prompts[server_name] = result
         
         logger.info("=== PROMPT DISCOVERY COMPLETE ===")
