@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Filter, ChevronDown, ChevronUp, ToggleLeft, ToggleRight } from 'lucide-react';
+import { useChat } from '../contexts/ChatContext';
 
 const DEFAULT_POLL_INTERVAL = 60000; // 60s refresh
 
 export default function LogViewer() {
+  const { user } = useChat();
   const [entries, setEntries] = useState([]);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
@@ -26,10 +28,6 @@ export default function LogViewer() {
   const isScrolledToBottom = useRef(true); // Track if user has scrolled up
   const intervalIdRef = useRef(null); // Ref to store interval ID
 
-  const getUserEmail = () => {
-    return localStorage.getItem('userEmail') || 'test@test.com';
-  };
-
   const fetchLogs = useCallback(() => {
     setLoading(true);
     const params = new URLSearchParams();
@@ -37,7 +35,7 @@ export default function LogViewer() {
     if (moduleFilter) params.append('module_filter', moduleFilter);
     fetch(`/admin/logs/viewer?${params.toString()}`, {
       headers: {
-        'X-User-Email': getUserEmail()
+        'X-User-Email': user
       }
     })
       .then(r => {
@@ -64,7 +62,7 @@ export default function LogViewer() {
       })
       .catch(err => setError(err))
       .finally(() => setLoading(false));
-  }, [levelFilter, moduleFilter, autoScrollEnabled]); // Removed entries.length to prevent infinite loop
+  }, [levelFilter, moduleFilter, autoScrollEnabled, user]); // Added user dependency
 
   // Function to clear all logs
   const clearLogs = useCallback(() => {
@@ -72,7 +70,7 @@ export default function LogViewer() {
     fetch('/admin/logs/clear', {
       method: 'POST', // Correct method as defined in admin_routes.py
       headers: {
-        'X-User-Email': getUserEmail()
+        'X-User-Email': user
       }
     })
       .then(r => {
