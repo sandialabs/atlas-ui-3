@@ -26,6 +26,10 @@ export default function LogViewer() {
   const isScrolledToBottom = useRef(true); // Track if user has scrolled up
   const intervalIdRef = useRef(null); // Ref to store interval ID
 
+  const getUserEmail = () => {
+    return localStorage.getItem('userEmail') || 'test@test.com';
+  };
+
   const fetchLogs = useCallback(() => {
     setLoading(true);
     const params = new URLSearchParams();
@@ -33,7 +37,7 @@ export default function LogViewer() {
     if (moduleFilter) params.append('module_filter', moduleFilter);
     fetch(`/admin/logs/viewer?${params.toString()}`, {
       headers: {
-        'X-User-Email': 'test@test.com'
+        'X-User-Email': getUserEmail()
       }
     })
       .then(r => {
@@ -68,7 +72,7 @@ export default function LogViewer() {
     fetch('/admin/logs/clear', {
       method: 'POST', // Correct method as defined in admin_routes.py
       headers: {
-        'X-User-Email': 'test@test.com'
+        'X-User-Email': getUserEmail()
       }
     })
       .then(r => {
