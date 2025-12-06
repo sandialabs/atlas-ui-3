@@ -77,9 +77,20 @@ jobs:
         zip -r ../atlas-ui-3-built-${{ github.sha }}.zip .
         cd ..
 
+    - name: Bundle documentation
+      run: |
+        bash scripts/bundle-docs.sh .
+
     - name: Upload build artifacts
       uses: actions/upload-artifact@v5
       with:
         name: atlas-ui-3-built-${{ github.sha }}
         path: atlas-ui-3-built-${{ github.sha }}.zip
+        retention-days: 30
+
+    - name: Upload documentation bundle
+      uses: actions/upload-artifact@v5
+      with:
+        name: atlas-ui-3-docs
+        path: atlas-ui-3-docs.zip
         retention-days: 30
