@@ -9,6 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DOCS_DIR="${PROJECT_ROOT}/docs"
 OUTPUT_DIR="${1:-${PROJECT_ROOT}}"
+# Convert OUTPUT_DIR to absolute path
+OUTPUT_DIR="$(cd "${OUTPUT_DIR}" && pwd)"
 OUTPUT_FILE="${OUTPUT_DIR}/atlas-ui-3-docs.zip"
 
 # Ensure docs directory exists
