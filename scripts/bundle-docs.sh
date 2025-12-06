@@ -35,4 +35,4 @@ zip -r "${OUTPUT_FILE}" docs/
 
 echo "Documentation bundle created successfully: ${OUTPUT_FILE}"
 echo "Contents:"
-unzip -l "${OUTPUT_FILE}" | head -30
+unzip -l "${OUTPUT_FILE}"
