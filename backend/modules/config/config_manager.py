@@ -325,6 +325,11 @@ class AppSettings(BaseSettings):
         description="Enable post-check security moderation for LLM output",
         validation_alias=AliasChoices("FEATURE_SECURITY_CHECK_OUTPUT_ENABLED"),
     )
+    feature_security_check_tool_rag_enabled: bool = Field(
+        False,
+        description="Enable security check for tool and RAG outputs before sending to LLM",
+        validation_alias=AliasChoices("FEATURE_SECURITY_CHECK_TOOL_RAG_ENABLED"),
+    )
     
     # Security check API configuration
     security_check_api_url: Optional[str] = Field(

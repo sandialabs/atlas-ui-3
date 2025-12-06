@@ -1,15 +1,16 @@
 # Content Security Check
 
-The content security check feature provides pre and post moderation capabilities for user input and LLM-generated output. This allows administrators to integrate external security APIs to validate content before and after processing.
+The content security check feature provides comprehensive moderation capabilities for user input, LLM-generated output, and tool/RAG outputs. This allows administrators to integrate external security APIs to validate content at multiple stages of processing.
 
 ## Overview
 
-The security check feature consists of two independent checks:
+The security check feature consists of three independent checks:
 
 1. **Input Security Check (Pre-check)**: Validates user input before sending it to the LLM
 2. **Output Security Check (Post-check)**: Validates LLM-generated responses before showing them to users
+3. **Tool/RAG Output Security Check**: Validates tool and RAG outputs before sending them to the LLM to prevent prompt injection attacks
 
-Both checks are optional and can be enabled independently via feature flags.
+All checks are optional and can be enabled independently via feature flags.
 
 ## Configuration
 
@@ -23,6 +24,9 @@ FEATURE_SECURITY_CHECK_INPUT_ENABLED=true
 
 # Enable post-check security moderation for LLM output
 FEATURE_SECURITY_CHECK_OUTPUT_ENABLED=true
+
+# Enable security check for tool and RAG outputs before sending to LLM
+FEATURE_SECURITY_CHECK_TOOL_RAG_ENABLED=true
 ```
 
 ### API Endpoint Configuration
@@ -46,8 +50,8 @@ The security check API must accept POST requests with the following payload:
 
 ```json
 {
-  "content": "The user input or LLM output to check",
-  "check_type": "input" | "output",
+  "content": "The user input, LLM output, or tool/RAG output to check",
+  "check_type": "input" | "output" | "tool_rag_tool" | "tool_rag_rag",
   "username": "user@example.com",
   "message_history": [
     {"role": "user", "content": "Previous user message"},
@@ -55,6 +59,12 @@ The security check API must accept POST requests with the following payload:
   ]
 }
 ```
+
+**Check Types:**
+- `input`: User input before sending to LLM
+- `output`: LLM response before showing to user
+- `tool_rag_tool`: Tool output before sending to LLM
+- `tool_rag_rag`: RAG retrieval results before sending to LLM
 
 The API must respond with one of the following statuses:
 
@@ -111,6 +121,25 @@ When output security checking is enabled:
 5. If **good**:
    - Response is delivered normally
 
+### Tool/RAG Output Check
+
+When tool/RAG output security checking is enabled:
+
+1. Tool executes or RAG retrieves content
+2. System performs security check on tool/RAG output before sending to LLM
+3. If **blocked**:
+   - Tool/RAG output is rejected
+   - User sees error message explaining why
+   - Request terminates without calling LLM
+   - Prevents malicious prompt injection from tools/RAG sources
+4. If **allowed-with-warnings**:
+   - Warning message is shown to user
+   - Output is sent to LLM for processing
+5. If **good**:
+   - Output is sent to LLM normally
+
+**Important**: This check prevents compromised or malicious tool/RAG outputs from manipulating the LLM through prompt injection or other attacks. It's particularly important when using third-party tools or external data sources.
+
 ## Error Handling
 
 The security check service is designed to fail open for reliability:
@@ -137,6 +166,13 @@ or
 
 ```
 Response blocked: The response was blocked by content security policy.
+[Details provided by the security API]
+```
+
+or
+
+```
+Tool output blocked: Tool output was blocked by content security policy.
 [Details provided by the security API]
 ```
 

@@ -34,6 +34,7 @@ class ToolsModeRunner:
         prompt_provider: Optional[PromptProvider] = None,
         artifact_processor: Optional[Callable[[Session, List[ToolResult], Optional[UpdateCallback]], Awaitable[None]]] = None,
         config_manager=None,
+        security_check_service=None,
     ):
         """
         Initialize tools mode runner.
@@ -45,6 +46,7 @@ class ToolsModeRunner:
             prompt_provider: Optional prompt provider
             artifact_processor: Optional callback for processing tool artifacts
             config_manager: Optional config manager for approval settings
+            security_check_service: Optional security check service for tool output validation
         """
         self.llm = llm
         self.tool_manager = tool_manager
@@ -52,6 +54,7 @@ class ToolsModeRunner:
         self.prompt_provider = prompt_provider
         self.artifact_processor = artifact_processor
         self.config_manager = config_manager
+        self.security_check_service = security_check_service
     
     async def run(
         self,
@@ -124,6 +127,58 @@ class ToolsModeRunner:
             update_callback=update_callback or self._get_send_json(),
             config_manager=self.config_manager,
         )
+        
+        # Security check tool outputs before they go to LLM
+        if self.security_check_service:
+            for tool_result in tool_results:
+                # Convert message history to list of dicts for API
+                message_history = [
+                    {"role": msg.role.value, "content": msg.content}
+                    for msg in session.history.messages
+                ]
+                
+                tool_check = await self.security_check_service.check_tool_rag_output(
+                    content=tool_result.content,
+                    source_type="tool",
+                    message_history=message_history,
+                    user_email=user_email
+                )
+                
+                if tool_check.is_blocked():
+                    # Tool output is blocked - return error
+                    logger.warning(
+                        f"Tool output blocked by security check for {user_email}: {tool_check.message}"
+                    )
+                    
+                    await self.event_publisher.publish_message(
+                        message_type="security_warning",
+                        content={
+                            "type": "tool_output_blocked",
+                            "message": tool_check.message or "Tool output was blocked by content security policy.",
+                            "details": tool_check.details
+                        }
+                    )
+                    
+                    return {
+                        "type": "error",
+                        "error": tool_check.message or "Tool output blocked by security policy",
+                        "blocked": True
+                    }
+                
+                elif tool_check.has_warnings():
+                    # Tool output has warnings - notify user
+                    logger.info(
+                        f"Tool output has warnings from security check for {user_email}: {tool_check.message}"
+                    )
+                    
+                    await self.event_publisher.publish_message(
+                        message_type="security_warning",
+                        content={
+                            "type": "tool_output_warning",
+                            "message": tool_check.message or "Tool output triggered security warnings.",
+                            "details": tool_check.details
+                        }
+                    )
 
         # Process artifacts if handler provided
         if self.artifact_processor:

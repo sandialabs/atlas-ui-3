@@ -87,6 +87,7 @@ class ChatOrchestrator:
         self.rag_mode = rag_mode or RagModeRunner(
             llm=llm,
             event_publisher=event_publisher,
+            security_check_service=security_check_service,
         )
         self.tools_mode = tools_mode or ToolsModeRunner(
             llm=llm,
@@ -94,6 +95,7 @@ class ChatOrchestrator:
             event_publisher=event_publisher,
             prompt_provider=prompt_provider,
             artifact_processor=artifact_processor,
+            security_check_service=security_check_service,
         )
         self.agent_mode = agent_mode
     

@@ -68,6 +68,7 @@ class SecurityCheckService:
         self.timeout = app_settings.security_check_timeout
         self.input_enabled = app_settings.feature_security_check_input_enabled
         self.output_enabled = app_settings.feature_security_check_output_enabled
+        self.tool_rag_enabled = app_settings.feature_security_check_tool_rag_enabled
     
     async def check_input(
         self,
@@ -133,6 +134,45 @@ class SecurityCheckService:
         return await self._perform_check(
             content=content,
             check_type="output",
+            message_history=message_history,
+            user_email=user_email
+        )
+    
+    async def check_tool_rag_output(
+        self,
+        content: str,
+        source_type: str,
+        message_history: Optional[List[Dict]] = None,
+        user_email: Optional[str] = None
+    ) -> SecurityCheckResponse:
+        """
+        Check tool or RAG output for security issues before sending to LLM.
+        
+        This prevents malicious tool/RAG outputs from manipulating the LLM
+        via prompt injection or other attacks.
+        
+        Args:
+            content: Tool or RAG output content to check
+            source_type: Type of source ("tool" or "rag")
+            message_history: Optional message history for context
+            user_email: Optional user email for auditing
+            
+        Returns:
+            SecurityCheckResponse with status and optional message
+        """
+        if not self.tool_rag_enabled:
+            return SecurityCheckResponse(status=SecurityCheckResult.GOOD)
+        
+        if not self.api_url or not self.api_key:
+            logger.warning(
+                "Security check for tool/RAG output is enabled but API URL or key is not configured. "
+                "Allowing content by default."
+            )
+            return SecurityCheckResponse(status=SecurityCheckResult.GOOD)
+        
+        return await self._perform_check(
+            content=content,
+            check_type=f"tool_rag_{source_type}",
             message_history=message_history,
             user_email=user_email
         )

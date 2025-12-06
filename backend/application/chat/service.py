@@ -100,6 +100,14 @@ class ChatService:
         # Kept temporarily for backward compatibility
         self.sessions: Dict[UUID, Session] = {}
 
+        # Initialize security check service
+        self.security_check_service = None
+        if self.config_manager:
+            from core.security_check import get_security_check_service
+            self.security_check_service = get_security_check_service(
+                self.config_manager.app_settings
+            )
+
         # Initialize refactored services
         self.tool_authorization = ToolAuthorizationService(tool_manager=self.tool_manager)
         self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
@@ -113,6 +121,7 @@ class ChatService:
         self.rag_mode = RagModeRunner(
             llm=self.llm,
             event_publisher=self.event_publisher,
+            security_check_service=self.security_check_service,
         )
         self.tools_mode = ToolsModeRunner(
             llm=self.llm,
@@ -121,6 +130,7 @@ class ChatService:
             prompt_provider=self.prompt_provider,
             artifact_processor=self._update_session_from_tool_results,
             config_manager=self.config_manager,
+            security_check_service=self.security_check_service,
         )
 
 
