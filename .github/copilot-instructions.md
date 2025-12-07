@@ -66,6 +66,7 @@ frontend/ React 19 + Vite + Tailwind; state via contexts (Chat/WS/Marketplace)
 - Auth assumption: in prod, reverse proxy injects X-User-Email (after stripping client headers); dev falls back to test user.
 - Documentation requirements: Every PR or feature MUST include updates to relevant docs in /docs folder (architecture, features, API, config, troubleshooting).
 - Implementation summaries: After completing a long or complex task, write an implementation summary document in docs/agent-implementation-summaries/ with a descriptive filename and date stamp (e.g., security-check-feature-2025-12-02.md). Include what was implemented, key decisions made, and important technical details.
+- Changelog maintenance: For every PR, add an entry to CHANGELOG.md in the root directory. Each entry should be 1-2 lines describing the core features or changes. Format: "### PR #<number> - YYYY-MM-DD" followed by a bullet point list of changes.
 
 ## Extend by example
 - Add a tool server: edit config/overrides/mcp.json (set groups, transport, url/command, compliance_level). Restart or call discovery on startup.

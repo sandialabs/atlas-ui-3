@@ -64,6 +64,7 @@ python main.py  # NEVER use uvicorn --reload (causes problems)
   - Configuration changes: Update configuration guides
   - Bug fixes: Update troubleshooting docs if applicable
 - **Implementation Summaries**: After completing a long or complex task, write an implementation summary document in `docs/agent-implementation-summaries/` with a descriptive filename and date stamp (e.g., `security-check-feature-2025-12-02.md`). Include what was implemented, key decisions made, and any important technical details for future reference.
+- **Changelog Maintenance**: For every PR, add an entry to CHANGELOG.md in the root directory. Each entry should be 1-2 lines describing the core features or changes. Format: "### PR #<number> - YYYY-MM-DD" followed by a bullet point list of changes.
 
 When testing or developing MCP-related features, example configurations can be found in config/mcp-example-configs/ with individual mcp-{servername}.json files for testing individual servers.
 
