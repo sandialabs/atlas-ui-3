@@ -74,7 +74,7 @@ APP_LOG_DIR=/path/to/logs              # Optional: Custom log directory
 
 # RAG Settings
 MOCK_RAG=true               # Use mock RAG service for testing
-RAG_MOCK_URL=http://localhost:8001  # RAG service URL
+RAG_URL=http://localhost:8001  # RAG service URL
 
 # Agent Settings
 FEATURE_AGENT_MODE_AVAILABLE=true  # Enable agent mode UI
@@ -294,14 +294,14 @@ Always be helpful, accurate, and considerate of the user's context.
 For development and testing:
 ```bash
 MOCK_RAG=true
-RAG_MOCK_URL=http://localhost:8001
+RAG_URL=http://localhost:8001
 ```
 
 ### Production RAG Service
 For production deployment:
 ```bash
 MOCK_RAG=false
-RAG_MOCK_URL=https://your-rag-service.com/api
+RAG_URL=https://your-rag-service.com/api
 ```
 
 The RAG service should implement the expected API endpoints for document retrieval and processing.

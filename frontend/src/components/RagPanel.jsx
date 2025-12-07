@@ -83,8 +83,9 @@ const RagPanel = ({ isOpen, onClose }) => {
           ) : (
             <div className="space-y-3">
               {filteredDataSources.map(dataSource => {
-                // The key for selection is the resource ID, which is 'id' in the ragSources object
-                const selectionKey = `${dataSource.serverName}:${dataSource.id}`
+                // Use just the data source ID without server prefix
+                // Server grouping is handled by the UI structure, not the selection key
+                const selectionKey = dataSource.id
                 const isSelected = selectedDataSources.has(selectionKey)
                 
                 return (

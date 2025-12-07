@@ -158,7 +158,11 @@ class AppSettings(BaseSettings):
     
     # RAG settings
     mock_rag: bool = False
-    rag_mock_url: str = "http://localhost:8001"
+    # Base URL for external RAG HTTP server
+    rag_url: str = Field(
+        default="http://localhost:8001",
+        validation_alias=AliasChoices("RAG_URL"),
+    )
     
     # Banner settings
     banner_enabled: bool = False

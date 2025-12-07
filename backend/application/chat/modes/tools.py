@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
+# Message shown when content is blocked and history is cleared
+BLOCKED_HISTORY_CLEARED_MESSAGE = "Tool output violated our content policy. The conversation history has been cleared. Please start a new conversation."
+
 
 class ToolsModeRunner:
     """
@@ -142,20 +145,25 @@ class ToolsModeRunner:
                 )
                 
                 if tool_check.is_blocked():
-                    # Tool output is blocked - return error
+                    # Tool output is blocked
                     logger.warning(
                         f"Tool output blocked by security check for {user_email}: {tool_check.message}"
                     )
 
+                    # CLEAR ALL CONVERSATION HISTORY
+                    session.history.messages.clear()
+
+                    # Note: session_repository not available here, orchestrator will save
+
                     await self.event_publisher.send_json({
                         "type": "security_warning",
                         "status": "blocked",
-                        "message": "The system was unable to process your request due to policy concerns."
+                        "message": BLOCKED_HISTORY_CLEARED_MESSAGE
                     })
 
                     return {
                         "type": "error",
-                        "error": "Tool output blocked by security policy",
+                        "error": "Tool output blocked",
                         "blocked": True
                     }
 

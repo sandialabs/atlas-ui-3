@@ -29,10 +29,13 @@ logger = logging.getLogger(__name__)
 class ChatOrchestrator:
     """
     Orchestrates the full chat request flow.
-    
+
     Coordinates preprocessing, policy checks, mode selection, and execution.
     Provides clean separation between request handling and business logic.
     """
+
+    # Message shown when content is blocked and history is cleared
+    BLOCKED_HISTORY_CLEARED_MESSAGE = "Your message violated our content policy. The conversation history has been cleared. Please start a new conversation."
     
     def __init__(
         self,
@@ -165,27 +168,25 @@ class ChatOrchestrator:
             )
             
             if input_check.is_blocked():
-                # Content is blocked - return error response
+                # Content is blocked
                 logger.warning(
                     f"User input blocked by security check for {user_email}: {input_check.message}"
                 )
 
-                # Send blocked notification to user
+                # CLEAR ALL CONVERSATION HISTORY
+                session.history.messages.clear()
+
+                # Save cleared session
+                await self.session_repository.update(session)
+
+                # Send updated message
                 await self.event_publisher.send_json({
                     "type": "security_warning",
                     "status": "blocked",
-                    "message": "The system was unable to process your request due to policy concerns."
+                    "message": self.BLOCKED_HISTORY_CLEARED_MESSAGE
                 })
 
-                # Remove the blocked message from history
-                session.history.messages.pop()
-
-                # Return error response
-                return {
-                    "type": "error",
-                    "error": "Request blocked by security policy",
-                    "blocked": True
-                }
+                return {"type": "error", "error": "Input blocked", "blocked": True}
             
             elif input_check.has_warnings():
                 # Content has warnings - notify user but allow processing
@@ -266,7 +267,12 @@ class ChatOrchestrator:
                 messages=messages,
                 temperature=temperature,
             )
-        
+
+        # If tools/agent mode blocked content and cleared history, save the session
+        if result.get("blocked") and result.get("type") == "error":
+            await self.session_repository.update(session)
+            return result
+
         # Perform output security check if enabled
         if self.security_check_service:
             # Extract the assistant's response content for checking
@@ -286,27 +292,28 @@ class ChatOrchestrator:
                 )
                 
                 if output_check.is_blocked():
-                    # Output is blocked - remove from history and return error
+                    # Output is blocked
                     logger.warning(
                         f"LLM output blocked by security check for {user_email}: {output_check.message}"
                     )
 
-                    # Remove the blocked response from history
+                    # Remove the blocked response
                     session.history.messages.pop()
 
-                    # Send blocked notification to user
+                    # CLEAR ALL REMAINING HISTORY TOO
+                    session.history.messages.clear()
+
+                    # Save cleared session
+                    await self.session_repository.update(session)
+
+                    # Send updated message
                     await self.event_publisher.send_json({
                         "type": "security_warning",
                         "status": "blocked",
-                        "message": "The system was unable to process your request due to policy concerns."
+                        "message": self.BLOCKED_HISTORY_CLEARED_MESSAGE
                     })
 
-                    # Return error response
-                    return {
-                        "type": "error",
-                        "error": "Response blocked by security policy",
-                        "blocked": True
-                    }
+                    return {"type": "error", "error": "Response blocked", "blocked": True}
 
                 elif output_check.has_warnings():
                     # Output has warnings - notify user
