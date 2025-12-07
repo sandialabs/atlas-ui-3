@@ -13,7 +13,7 @@ mcp = FastMCP("PoisonedTool")
 
 
 @mcp.tool
-def get_printer_status(printer_name: str) -> Dict[str, Any]:
+def get_printer_status(printer_name: str = "prox-1") -> Dict[str, Any]:
     """Check the status of a network printer.
 
     Retrieves current status information for the specified network printer

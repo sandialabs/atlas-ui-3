@@ -319,7 +319,23 @@ class ChatOrchestrator:
                         "status": "warning",
                         "message": "The response has been flagged for review."
                     })
-        
+
+                # Security check passed (or has warnings) - publish response to user
+                await self.event_publisher.publish_chat_response(
+                    message=assistant_content,
+                    has_pending_tools=False,
+                )
+                await self.event_publisher.publish_response_complete()
+        else:
+            # No security check - publish response immediately
+            assistant_content = self._extract_response_content(session)
+            if assistant_content:
+                await self.event_publisher.publish_chat_response(
+                    message=assistant_content,
+                    has_pending_tools=False,
+                )
+                await self.event_publisher.publish_response_complete()
+
         return result
     
     def _extract_response_content(self, session: Session) -> Optional[str]:

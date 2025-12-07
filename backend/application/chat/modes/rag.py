@@ -73,11 +73,7 @@ class RagModeRunner:
         )
         session.history.add_message(assistant_message)
 
-        # Publish events
-        await self.event_publisher.publish_chat_response(
-            message=response_content,
-            has_pending_tools=False,
-        )
-        await self.event_publisher.publish_response_complete()
+        # NOTE: Do NOT publish the response here - orchestrator will publish
+        # after security check passes. This prevents showing blocked content to users.
 
         return notification_utils.create_chat_response(response_content)

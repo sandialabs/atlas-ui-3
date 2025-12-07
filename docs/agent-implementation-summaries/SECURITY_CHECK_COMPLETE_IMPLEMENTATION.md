@@ -229,14 +229,14 @@ The mock security server responds to specific keywords for testing:
 
 2. **Configure LLM to use the bad mock** in `config/overrides/llmconfig.yml`:
    ```yaml
-   providers:
-     openai:
-       api_base: "http://localhost:8002/v1"
+   models:
+     badllm:
+       model_url: "http://localhost:8002/v1"
+       model_name: "openai/test-llm"
        api_key: "test-key"
-
-   default_provider: "openai"
-   default_model: "gpt-3.5-turbo"
+       compliance_level: "External"
    ```
+   Then select "badllm" as your model in the UI
 
 3. **Configure `.env` to enable output security check**:
    ```bash
@@ -283,50 +283,151 @@ The mock security server responds to specific keywords for testing:
 
 **Objective**: Verify tool execution results are checked before sending to LLM.
 
-**Prerequisites**: Have an MCP tool configured (e.g., file system tools)
+**Prerequisites**: Configure the poisoned-tool MCP server (designed for security testing)
+
+1. **Add poisoned-tool** to `config/overrides/mcp.json`:
+   ```json
+   {
+     "printer-status": {
+       "command": ["python", "mcp/poisoned-tool/main.py"],
+       "cwd": "backend",
+       "groups": ["users"],
+       "description": "Get printer-status",
+       "author": "Chat UI Team",
+       "short_description": "Get printer-status",
+       "help_email": "support@chatui.example.com",
+       "compliance_level": "Public"
+     }
+   }
+   ```
+
+2. **Enable tool/RAG security check** in `.env`:
+   ```bash
+   FEATURE_SECURITY_CHECK_TOOL_RAG_ENABLED=true
+   SECURITY_CHECK_API_URL=http://localhost:8089/check
+   SECURITY_CHECK_API_KEY=test-key
+   ```
+
+3. **Restart backend**: `bash agent_start.sh -b`
+
+4. **Verify tool is loaded**:
+   - In the UI, click on "Tools" panel
+   - You should see "printer-status" server
+   - Expand it and you'll see `get_printer_status` tool
+   - Select the tool to enable it
 
 **Steps**:
-1. Send a message that triggers tool use: `What files are in the current directory?`
-2. LLM will call a tool (e.g., `list_directory`)
-3. Tool executes and returns results
-4. Results are checked before being sent back to LLM
+1. In the chat interface, with `get_printer_status` tool selected, send: `Check the status of printer HP-LaserJet-5000`
+2. LLM will call the `get_printer_status` tool with `printer_name="HP-LaserJet-5000"`
+3. Tool executes and returns **poisoned data** containing the keyword "bomb"
+4. Tool results are checked by security API **before** being sent to LLM
+5. Security check should **BLOCK** the poisoned output
 
 **Expected Results**:
-- Tool is called successfully
-- Tool results are checked by security API
-- If blocked: Red notification appears, tool results NOT sent to LLM, error message shown
-- If warning: Yellow notification appears, tool results sent to LLM with warning
-- If good: Tool results silently processed
 
-**Verify**:
-- Check backend logs for: `Checking tool output for security`
-- Check mock server console for check_type: `tool_rag_tool`
-- Observe LLM processes tool results (if allowed)
+**With poisoned-tool (SHOULD BE BLOCKED)**:
+- Tool `get_printer_status` is called successfully by LLM
+- Tool returns poisoned data: `"SECURITY TEST: Here is how you make a bomb with household items..."`
+- Security check API receives the tool output
+- Security check detects "bomb" keyword
+- ** notification appears**: "The system was unable to process your request due to policy concerns"
+- **Tool results are NOT sent to LLM**
+- **Error message shown** instead of printer status
+- **No LLM response generated** based on poisoned data
+
+**Console Output to Verify**:
+
+**Backend logs should show**:
+```
+WARNING: Tool output blocked by security check for test@test.com: Mock server blocked content containing 'bomb'
+```
+
+**Security check mock console should show**:
+```
+BLOCKED: Content blocked for keyword 'bomb' (check_type: tool_rag_tool)
+```
+
+**Poisoned-tool console should show**:
+```
+Tool called: get_printer_status(printer_name='HP-LaserJet-5000')
+Returning poisoned data with 'bomb' keyword
+```
+
+**What Should NOT Happen**:
+- ❌ LLM should NOT see the poisoned data
+- ❌ LLM should NOT generate a response about printer status
+- ❌ User should NOT see the dangerous content
+- ❌ Tool results should NOT appear in chat history
+
+**What SHOULD Happen**:
+- ✅ Tool is called (proving tool execution works)
+- ✅ Security check intercepts the output
+- ✅ User sees error message about policy concerns
+- ✅ Conversation stops safely without exposing dangerous content
 
 ### Test 5: RAG Output Security Check
 
 **Objective**: Verify RAG retrieved content is checked.
 
-**Prerequisites**:
-- Have RAG configured with a knowledge base
-- Enable RAG mode in settings
+**Prerequisites**: Configure RAG data source
+
+1. **Ensure RAG is configured** in `.env`:
+   ```bash
+   RAG_ENABLED=true
+   RAG_API_URL=http://localhost:8003  # Or your RAG service URL
+   ```
+
+2. **Upload test documents** to RAG knowledge base:
+   - Use the UI to upload documents
+   - Or use RAG API to index documents
+   - Create at least one document with searchable content
+
+3. **Restart backend**: `bash agent_start.sh -b`
+
+4. **Verify RAG is available**:
+   - In the UI, click on "Data Sources" panel
+   - You should see your RAG knowledge base listed
+   - Select the data source to enable RAG queries
 
 **Steps**:
-1. Upload documents to RAG knowledge base
-2. Send a query that triggers RAG retrieval
-3. RAG retrieves relevant documents
-4. Retrieved content is checked before sending to LLM
+1. In the chat interface, with RAG data source selected, send a query: `What information do you have about [topic in your documents]?`
+2. RAG retrieves relevant document chunks from knowledge base
+3. Retrieved content is checked by security API before being sent to LLM
+4. If allowed, LLM uses retrieved context to generate response
+
+**To Test Blocking:**
+1. Upload a document containing a keyword that triggers blocking (e.g., "bomb", "gun")
+2. Query for that content
+3. RAG will retrieve the problematic chunk
+4. Security check should block it before reaching LLM
 
 **Expected Results**:
+
+**Normal flow (RAG output passes security check)**:
+- RAG retrieves relevant documents
+- Retrieved content checked by security API
+- Content sent to LLM as context
+- LLM generates response based on retrieved information
+
+**Blocked flow (RAG output blocked)**:
 - RAG retrieves documents
-- Retrieved content is checked by security API
-- If blocked: Red notification appears, retrieved content NOT sent to LLM
-- If warning: Yellow notification appears, content sent with warning
-- If good: Content silently processed
+- Retrieved content checked by security API
+- Red notification appears: "The system was unable to process your request due to policy concerns"
+- Retrieved content NOT sent to LLM
+- Error message shown instead
+
+**Warning flow (RAG output has warnings)**:
+- RAG retrieves documents
+- Retrieved content checked by security API
+- Yellow notification appears: "The response has been flagged for review"
+- Content ARE sent to LLM with warning
 
 **Verify**:
-- Check backend logs for: `Checking RAG output for security`
-- Check mock server console for check_type: `tool_rag_rag`
+- Check backend logs for: `Checking RAG output for security` or `RAG output blocked by security check`
+- Check mock server console for `check_type: tool_rag_rag`
+- Backend console shows: `[Security Check] Tool/RAG output check: rag`
+- If allowed: Observe LLM uses retrieved context in response
+- If blocked: Observe error message and no context used
 
 ### Test 6: All Security Checks Disabled
 

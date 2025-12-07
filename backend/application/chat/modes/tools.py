@@ -105,13 +105,10 @@ class ToolsModeRunner:
             content = llm_response.content if llm_response else ""
             assistant_message = Message(role=MessageRole.ASSISTANT, content=content)
             session.history.add_message(assistant_message)
-            
-            await self.event_publisher.publish_chat_response(
-                message=content,
-                has_pending_tools=False,
-            )
-            await self.event_publisher.publish_response_complete()
-            
+
+            # NOTE: Do NOT publish the response here - orchestrator will publish
+            # after security check passes. This prevents showing blocked content to users.
+
             return notification_utils.create_chat_response(content)
 
         # Execute tool workflow
@@ -189,12 +186,8 @@ class ToolsModeRunner:
         )
         session.history.add_message(assistant_message)
 
-        # Emit final chat response
-        await self.event_publisher.publish_chat_response(
-            message=final_response,
-            has_pending_tools=False,
-        )
-        await self.event_publisher.publish_response_complete()
+        # NOTE: Do NOT publish the response here - orchestrator will publish
+        # after security check passes. This prevents showing blocked content to users.
 
         return notification_utils.create_chat_response(final_response)
     

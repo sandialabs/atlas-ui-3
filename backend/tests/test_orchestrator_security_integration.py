@@ -245,6 +245,76 @@ class TestOrchestratorSecurityCheckIntegration:
         assert test_session.history.messages[0].role.value == MessageRole.USER.value
 
     @pytest.mark.asyncio
+    async def test_output_blocked_does_not_publish_to_frontend(
+        self,
+        mock_llm,
+        mock_event_publisher,
+        mock_session_repository,
+        mock_security_service,
+        test_session
+    ):
+        """
+        Regression test: Verify blocked output is NOT published to frontend.
+
+        This test prevents a bug where blocked LLM responses were being published
+        to the user via publish_chat_response() before the security check could
+        block them, causing users to see content that should have been blocked.
+        """
+        # Setup
+        mock_session_repository.get.return_value = test_session
+        mock_security_service.check_input.return_value = SecurityCheckResponse(
+            status=SecurityCheckResult.GOOD
+        )
+        # LLM returns problematic content that security check will block
+        mock_llm.call_plain.return_value = "This response contains a bomb reference."
+        mock_security_service.check_output.return_value = SecurityCheckResponse(
+            status=SecurityCheckResult.BLOCKED,
+            message="Response contains prohibited keyword 'bomb'"
+        )
+
+        orchestrator = ChatOrchestrator(
+            llm=mock_llm,
+            event_publisher=mock_event_publisher,
+            session_repository=mock_session_repository,
+            security_check_service=mock_security_service,
+        )
+
+        # Execute
+        result = await orchestrator.execute(
+            session_id=test_session.id,
+            content="Tell me about security",
+            model="test-model",
+            user_email="test@test.com"
+        )
+
+        # Verify result is error
+        assert result["type"] == "error"
+        assert result["blocked"] is True
+
+        # LLM was called (content was generated)
+        mock_llm.call_plain.assert_called_once()
+
+        # CRITICAL: publish_chat_response should NOT have been called
+        # This prevents showing blocked content to the user
+        mock_event_publisher.publish_chat_response.assert_not_called()
+
+        # CRITICAL: publish_response_complete should NOT have been called
+        mock_event_publisher.publish_response_complete.assert_not_called()
+
+        # Security warning notification should have been sent
+        mock_event_publisher.send_json.assert_called()
+        security_warning_calls = [
+            call for call in mock_event_publisher.send_json.call_args_list
+            if call.args[0].get("type") == "security_warning"
+        ]
+        assert len(security_warning_calls) == 1
+        assert security_warning_calls[0].args[0]["status"] == "blocked"
+
+        # Response should not be in history
+        assert len(test_session.history.messages) == 1
+        assert test_session.history.messages[0].role.value == MessageRole.USER.value
+
+    @pytest.mark.asyncio
     async def test_output_with_warnings_allows_response(
         self,
         mock_llm,

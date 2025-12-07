@@ -63,27 +63,29 @@ All mock servers expose OpenAI-compatible endpoints:
 
 Edit `config/overrides/llmconfig.yml`:
 ```yaml
-providers:
-  openai:
-    api_base: "http://localhost:8001/v1"
+models:
+  mock-llm:
+    model_url: "http://localhost:8001/v1"
+    model_name: "gpt-3.5-turbo"
     api_key: "test-key"
-
-default_provider: "openai"
-default_model: "gpt-3.5-turbo"
+    compliance_level: "External"
 ```
+
+Then select "mock-llm" as your model in the UI.
 
 ### Rate Limit Testing (main_rate_limit.py)
 
 Edit `config/overrides/llmconfig.yml`:
 ```yaml
-providers:
-  openai:
-    api_base: "http://localhost:8002/v1"
+models:
+  rate-limited-llm:
+    model_url: "http://localhost:8002/v1"
+    model_name: "gpt-3.5-turbo"
     api_key: "test-key"
-
-default_provider: "openai"
-default_model: "gpt-3.5-turbo"
+    compliance_level: "External"
 ```
+
+Then select "rate-limited-llm" as your model in the UI.
 
 ### Security Testing (main_bad_llm.py)
 
@@ -99,18 +101,19 @@ default_model: "gpt-3.5-turbo"
 
 3. Configure LLM to use bad mock in `config/overrides/llmconfig.yml`:
    ```yaml
-   providers:
-     openai:
-       api_base: "http://localhost:8002/v1"
+   models:
+     badllm:
+       model_url: "http://localhost:8002/v1"
+       model_name: "openai/test-llm"
        api_key: "test-key"
-
-   default_provider: "openai"
-   default_model: "gpt-3.5-turbo"
+       compliance_level: "External"
    ```
 
 4. Restart backend: `bash agent_start.sh -b`
 
-5. Send messages and observe:
+5. Select "badllm" as your model in the UI
+
+6. Send messages and observe:
    - First message: WARNING (contains "gun")
    - Second message: BLOCKED (contains "bomb" and "gun")
    - Third message: BLOCKED (contains "bomb")
