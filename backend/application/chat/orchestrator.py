@@ -169,24 +169,21 @@ class ChatOrchestrator:
                 logger.warning(
                     f"User input blocked by security check for {user_email}: {input_check.message}"
                 )
-                
+
                 # Send blocked notification to user
-                await self.event_publisher.publish_message(
-                    message_type="security_warning",
-                    content={
-                        "type": "input_blocked",
-                        "message": input_check.message or "Your input was blocked by content security policy.",
-                        "details": input_check.details
-                    }
-                )
-                
+                await self.event_publisher.send_json({
+                    "type": "security_warning",
+                    "status": "blocked",
+                    "message": "The system was unable to process your request due to policy concerns."
+                })
+
                 # Remove the blocked message from history
                 session.history.messages.pop()
-                
+
                 # Return error response
                 return {
                     "type": "error",
-                    "error": input_check.message or "Input blocked by security policy",
+                    "error": "Request blocked by security policy",
                     "blocked": True
                 }
             
@@ -195,15 +192,12 @@ class ChatOrchestrator:
                 logger.info(
                     f"User input has warnings from security check for {user_email}: {input_check.message}"
                 )
-                
-                await self.event_publisher.publish_message(
-                    message_type="security_warning",
-                    content={
-                        "type": "input_warning",
-                        "message": input_check.message or "Your input triggered security warnings.",
-                        "details": input_check.details
-                    }
-                )
+
+                await self.event_publisher.send_json({
+                    "type": "security_warning",
+                    "status": "warning",
+                    "message": "Your request has been flagged for review but will be processed."
+                })
         
         # Handle file ingestion
         update_callback = kwargs.get("update_callback")
@@ -296,41 +290,35 @@ class ChatOrchestrator:
                     logger.warning(
                         f"LLM output blocked by security check for {user_email}: {output_check.message}"
                     )
-                    
+
                     # Remove the blocked response from history
                     session.history.messages.pop()
-                    
+
                     # Send blocked notification to user
-                    await self.event_publisher.publish_message(
-                        message_type="security_warning",
-                        content={
-                            "type": "output_blocked",
-                            "message": output_check.message or "The response was blocked by content security policy.",
-                            "details": output_check.details
-                        }
-                    )
-                    
+                    await self.event_publisher.send_json({
+                        "type": "security_warning",
+                        "status": "blocked",
+                        "message": "The system was unable to process your request due to policy concerns."
+                    })
+
                     # Return error response
                     return {
                         "type": "error",
-                        "error": output_check.message or "Response blocked by security policy",
+                        "error": "Response blocked by security policy",
                         "blocked": True
                     }
-                
+
                 elif output_check.has_warnings():
                     # Output has warnings - notify user
                     logger.info(
                         f"LLM output has warnings from security check for {user_email}: {output_check.message}"
                     )
-                    
-                    await self.event_publisher.publish_message(
-                        message_type="security_warning",
-                        content={
-                            "type": "output_warning",
-                            "message": output_check.message or "The response triggered security warnings.",
-                            "details": output_check.details
-                        }
-                    )
+
+                    await self.event_publisher.send_json({
+                        "type": "security_warning",
+                        "status": "warning",
+                        "message": "The response has been flagged for review."
+                    })
         
         return result
     

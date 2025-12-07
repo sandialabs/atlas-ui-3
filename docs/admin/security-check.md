@@ -2,6 +2,8 @@
 
 The content security check feature provides comprehensive moderation capabilities for user input, LLM-generated output, and tool/RAG outputs. This allows administrators to integrate external security APIs to validate content at multiple stages of processing.
 
+![Security Check Flow](imgs/image.png)
+
 ## Overview
 
 The security check feature consists of three independent checks:
@@ -140,6 +142,40 @@ When tool/RAG output security checking is enabled:
 
 **Important**: This check prevents compromised or malicious tool/RAG outputs from manipulating the LLM through prompt injection or other attacks. It's particularly important when using third-party tools or external data sources.
 
+#### Tool Output Security
+
+Tools can execute arbitrary code or interact with external systems. The tool output security check validates the output from tools before it's sent to the LLM. This is critical because:
+
+- **Prompt Injection Prevention**: Malicious tools could return outputs designed to manipulate the LLM's behavior
+- **Third-party Tool Safety**: When using tools from external sources, you can't always trust their outputs
+- **Data Validation**: Ensures tool outputs meet your security and content policies before they influence LLM responses
+
+**Example Scenarios:**
+- A compromised file reading tool could return content containing prompt injection attacks
+- A web scraping tool could return malicious content from a compromised website
+- An API integration tool could return manipulated data designed to bypass security policies
+
+#### RAG (Retrieval-Augmented Generation) Output Security
+
+RAG systems retrieve information from external knowledge bases. The RAG output security check validates retrieved content before it's sent to the LLM:
+
+- **Knowledge Base Integrity**: Protects against poisoned or compromised knowledge bases
+- **Content Validation**: Ensures retrieved content meets security policies
+- **Injection Prevention**: Prevents malicious content in RAG results from manipulating the LLM
+
+**Example Scenarios:**
+- A compromised document in the knowledge base could contain prompt injection instructions
+- RAG retrieval from untrusted sources could return malicious content
+- Outdated or policy-violating content in the knowledge base could be flagged before use
+
+#### Check Types in API Calls
+
+The `check_type` parameter distinguishes between tool and RAG outputs:
+- `tool_rag_tool`: Used when checking tool execution output
+- `tool_rag_rag`: Used when checking RAG retrieval results
+
+This allows your security API to apply different policies or severity levels based on the source of the content.
+
 ## Error Handling
 
 The security check service is designed to fail open for reliability:
@@ -155,24 +191,33 @@ This ensures that temporary API issues do not block legitimate user interactions
 
 ### Blocked Content
 
-When content is blocked, users see a clear error message:
+When content is blocked, users see a clear error message in the UI with visual indicators:
 
+**Input Blocked:**
 ```
-Input blocked: Your input was blocked by content security policy.
+🚫 Content Blocked
+Your input was blocked by content security policy.
 [Details provided by the security API]
 ```
 
-or
-
+**Output Blocked:**
 ```
-Response blocked: The response was blocked by content security policy.
+🚫 Content Blocked
+The response was blocked by content security policy.
 [Details provided by the security API]
 ```
 
-or
-
+**Tool Output Blocked:**
 ```
-Tool output blocked: Tool output was blocked by content security policy.
+🚫 Content Blocked
+Tool output was blocked by content security policy.
+[Details provided by the security API]
+```
+
+**RAG Output Blocked:**
+```
+🚫 Content Blocked
+Retrieved content was blocked by content security policy.
 [Details provided by the security API]
 ```
 
@@ -180,10 +225,28 @@ Tool output blocked: Tool output was blocked by content security policy.
 
 When content has warnings, users see a notification but can proceed:
 
+**Input Warning:**
 ```
-Warning: Your input triggered security warnings.
+⚠️ Security Warning
+Your input triggered security warnings.
 [Details provided by the security API]
 ```
+
+**Output Warning:**
+```
+⚠️ Security Warning
+The response triggered security warnings.
+[Details provided by the security API]
+```
+
+**Tool/RAG Output Warning:**
+```
+⚠️ Security Warning
+Tool/RAG output triggered security warnings.
+[Details provided by the security API]
+```
+
+All security warnings are displayed with color-coded backgrounds (red for blocked, yellow for warnings) and collapsible details sections for transparency.
 
 ## Implementation Details
 
@@ -198,8 +261,10 @@ The security check is implemented as a service layer (`SecurityCheckService`) th
 
 ### Integration Points
 
-- **Orchestrator**: Performs checks before and after mode execution
-- **Event Publisher**: Notifies users of blocked content or warnings
+- **Orchestrator**: Performs input and output checks before and after LLM execution
+- **Tools Mode**: Performs security checks on tool outputs before sending to LLM
+- **RAG Integration**: Performs security checks on retrieved content before sending to LLM
+- **Event Publisher**: Notifies users of blocked content or warnings via WebSocket
 - **Session Management**: Removes blocked messages from history
 
 ### Performance
@@ -234,8 +299,8 @@ The security check is implemented as a service layer (`SecurityCheckService`) th
 Monitor the following metrics:
 
 - Security check API response times
-- Number of blocked inputs/outputs
-- Number of warnings generated
+- Number of blocked inputs/outputs/tool results/RAG results
+- Number of warnings generated (by check type)
 - API error rates
 - Timeout occurrences
 
@@ -244,7 +309,11 @@ Check application logs for security check events:
 ```
 WARNING: User input blocked by security check for user@example.com: Offensive content detected
 INFO: LLM output has warnings from security check for user@example.com: Potentially sensitive topics
+WARNING: Tool output blocked by security check for user@example.com: Prompt injection detected
+INFO: RAG output has warnings from security check for user@example.com: Outdated information
 ```
+
+Security check events are also logged to `logs/security_high_risk.jsonl` when content is blocked, allowing for audit trail and analysis of security incidents.
 
 ## Testing
 
@@ -267,9 +336,34 @@ pytest backend/tests/test_orchestrator_security_integration.py -v
 ### Manual Testing
 
 1. Enable security checks in `.env`
-2. Configure a test API endpoint
+2. Configure a test API endpoint (see mock server below)
 3. Send test inputs with various content
-4. Verify blocking, warnings, and normal flow work correctly
+4. Verify blocking, warnings, and normal flow work correctly for:
+   - User input messages
+   - LLM-generated responses
+   - Tool execution outputs
+   - RAG retrieval results
+
+### Mock Security Check Server
+
+A mock security check server is provided for testing at `mocks/security_check_mock/`:
+
+```bash
+cd mocks/security_check_mock
+bash run.sh
+```
+
+The mock server implements simple keyword-based checks:
+- Content containing "bomb" → `blocked`
+- Content containing "block-me" → `blocked`
+- Content containing "warn-me" → `allowed-with-warnings`
+- All other content → `good`
+
+Configure your `.env` to use the mock server:
+```bash
+SECURITY_CHECK_API_URL=http://localhost:8089/check
+SECURITY_CHECK_API_KEY=test-key-12345
+```
 
 ## Troubleshooting
 

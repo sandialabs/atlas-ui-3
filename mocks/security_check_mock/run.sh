@@ -12,4 +12,4 @@ cd "$SCRIPT_DIR"
 : "${SECURITY_CHECK_API_KEY:=test-key}"
 export SECURITY_CHECK_API_KEY
 
-exec uvicorn app:app --host 0.0.0.0 --port 8089
+exec uvicorn app:app --host 0.0.0.0 --port 8089 --reload

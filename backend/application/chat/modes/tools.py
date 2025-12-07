@@ -149,36 +149,30 @@ class ToolsModeRunner:
                     logger.warning(
                         f"Tool output blocked by security check for {user_email}: {tool_check.message}"
                     )
-                    
-                    await self.event_publisher.publish_message(
-                        message_type="security_warning",
-                        content={
-                            "type": "tool_output_blocked",
-                            "message": tool_check.message or "Tool output was blocked by content security policy.",
-                            "details": tool_check.details
-                        }
-                    )
-                    
+
+                    await self.event_publisher.send_json({
+                        "type": "security_warning",
+                        "status": "blocked",
+                        "message": "The system was unable to process your request due to policy concerns."
+                    })
+
                     return {
                         "type": "error",
-                        "error": tool_check.message or "Tool output blocked by security policy",
+                        "error": "Tool output blocked by security policy",
                         "blocked": True
                     }
-                
+
                 elif tool_check.has_warnings():
                     # Tool output has warnings - notify user
                     logger.info(
                         f"Tool output has warnings from security check for {user_email}: {tool_check.message}"
                     )
-                    
-                    await self.event_publisher.publish_message(
-                        message_type="security_warning",
-                        content={
-                            "type": "tool_output_warning",
-                            "message": tool_check.message or "Tool output triggered security warnings.",
-                            "details": tool_check.details
-                        }
-                    )
+
+                    await self.event_publisher.send_json({
+                        "type": "security_warning",
+                        "status": "warning",
+                        "message": "The response has been flagged for review."
+                    })
 
         # Process artifacts if handler provided
         if self.artifact_processor:

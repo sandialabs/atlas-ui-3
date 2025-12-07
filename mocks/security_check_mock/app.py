@@ -2,11 +2,15 @@ import os
 import random
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.middleware import Middleware
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 
 API_KEY_ENV = "SECURITY_CHECK_API_KEY"
+
+
+app = FastAPI(
+    title="Mock Security Check Service",
+)
 
 
 async def api_key_middleware(request: Request, call_next):
@@ -25,27 +29,32 @@ async def api_key_middleware(request: Request, call_next):
 
     auth_header = request.headers.get("authorization") or ""
     if not auth_header.startswith("Bearer "):
-        return SecurityCheckResponse(
-            status="allowed-with-warnings",
-            message="Missing or invalid Authorization header (middleware)",
-            details={"reason": "missing_auth"},
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "allowed-with-warnings",
+                "message": "Missing or invalid Authorization header (middleware)",
+                "details": {"reason": "missing_auth"},
+            },
         )
 
     provided_key = auth_header[len("Bearer ") :].strip()
     if provided_key != configured_key:
-        return SecurityCheckResponse(
-            status="allowed-with-warnings",
-            message="Incorrect API key (middleware)",
-            details={"reason": "bad_api_key"},
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "allowed-with-warnings",
+                "message": "Incorrect API key (middleware)",
+                "details": {"reason": "bad_api_key"},
+            },
         )
 
     return await call_next(request)
 
 
-app = FastAPI(
-    title="Mock Security Check Service",
-    middleware=[Middleware(api_key_middleware)],
-)
+app.middleware("http")(api_key_middleware)
 
 
 class SecurityCheckRequest(BaseModel):
@@ -70,7 +79,7 @@ async def check_content(
 
     Behavior:
     - If no/invalid Authorization header: return allowed-with-warnings.
-    - If content contains "block-me": status="blocked".
+    - If content contains "block-me" or "bomb": status="blocked".
     - If content contains "warn-me": status="allowed-with-warnings".
     - Otherwise: status="good".
     """
@@ -78,13 +87,23 @@ async def check_content(
     content_lower = request.content.lower()
 
     if "block-me" in content_lower:
+        print(f"BLOCKED: Content blocked for keyword 'block-me' (check_type: {request.check_type})")
         return SecurityCheckResponse(
             status="blocked",
             message="Mock server blocked content containing 'block-me'",
             details={"keyword": "block-me", "check_type": request.check_type},
         )
 
+    if "bomb" in content_lower:
+        print(f"BLOCKED: Content blocked for keyword 'bomb' (check_type: {request.check_type})")
+        return SecurityCheckResponse(
+            status="blocked",
+            message="Mock server blocked content containing 'bomb'",
+            details={"keyword": "bomb", "check_type": request.check_type},
+        )
+
     if "warn-me" in content_lower:
+        print(f"WARNING: Content flagged for keyword 'warn-me' (check_type: {request.check_type})")
         return SecurityCheckResponse(
             status="allowed-with-warnings",
             message="Mock server warns on content containing 'warn-me'",

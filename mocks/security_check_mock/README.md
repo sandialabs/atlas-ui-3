@@ -11,22 +11,30 @@ A minimal FastAPI app that implements the security check API contract used by `S
 ```json
 {
   "content": "...",
-  "check_type": "input" | "output",
+  "check_type": "input" | "output" | "tool_rag_tool" | "tool_rag_rag",
   "username": "user@example.com",
   "message_history": [{"role": "user", "content": "..."}]
 }
 ```
 
+**Check Types:**
+- `input`: User input before sending to LLM
+- `output`: LLM response before showing to user  
+- `tool_rag_tool`: Tool output before sending to LLM
+- `tool_rag_rag`: RAG retrieval results before sending to LLM
+
 #### Response body
 
 The mock returns deterministic responses based on `content`:
 
-- Contains `"block-me"` →
+- Contains `"block-me"` or `"bomb"` →
   - `status`: `"blocked"`
   - `message`: explains it was blocked
+  - Prints to console for visibility
 - Contains `"warn-me"` →
   - `status`: `"allowed-with-warnings"`
   - `message`: explains it was warned
+  - Prints to console for visibility
 - Otherwise →
   - `status`: `"good"`
 
@@ -75,6 +83,7 @@ Then configure the backend to use it, for example in `.env`:
 ```bash
 FEATURE_SECURITY_CHECK_INPUT_ENABLED=true
 FEATURE_SECURITY_CHECK_OUTPUT_ENABLED=true
+FEATURE_SECURITY_CHECK_TOOL_RAG_ENABLED=true
 SECURITY_CHECK_API_URL=http://localhost:8089/check
 SECURITY_CHECK_API_KEY=test-key
 ```
@@ -82,8 +91,21 @@ SECURITY_CHECK_API_KEY=test-key
 You can exercise it directly with curl:
 
 ```bash
+# Test input blocking
 curl -X POST "http://localhost:8089/check" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer test-key" \
   -d '{"content": "please block-me", "check_type": "input", "username": "me@example.com", "message_history": []}'
+
+# Test tool output warning
+curl -X POST "http://localhost:8089/check" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test-key" \
+  -d '{"content": "warn-me about this tool output", "check_type": "tool_rag_tool", "username": "me@example.com", "message_history": []}'
+
+# Test RAG output blocking  
+curl -X POST "http://localhost:8089/check" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test-key" \
+  -d '{"content": "Retrieved document contains bomb instructions", "check_type": "tool_rag_rag", "username": "me@example.com", "message_history": []}'
 ```
