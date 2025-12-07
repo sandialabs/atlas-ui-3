@@ -12,15 +12,16 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [expandedTools, setExpandedTools] = useState(new Set())
   const [collapsedServers, setCollapsedServers] = useState(new Set())
   const navigate = useNavigate()
-  const { 
-    selectedTools, 
-    toggleTool, 
+  const {
+    selectedTools,
+    toggleTool,
     selectedPrompts,
     togglePrompt,
     addTools,
     removeTools,
+    addPrompts,
     removePrompts,
-    toolChoiceRequired, 
+    toolChoiceRequired,
     setToolChoiceRequired,
     clearToolsAndPrompts,
     complianceLevelFilter,
@@ -128,14 +129,14 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     }
   }
 
-  // Returns true if ALL tools are selected AND (if prompts exist) one prompt is selected
+  // Returns true if ALL tools AND ALL prompts are selected
   const isServerAllSelected = (serverName) => {
     const server = getServerByName(serverName)
     if (!server) return false
     const { toolKeys, promptKeys } = getServerKeys(server)
     const allToolsSelected = toolKeys.length === 0 || toolKeys.every(k => selectedTools.has(k))
-    const promptSatisfied = promptKeys.length === 0 || promptKeys.some(k => selectedPrompts.has(k))
-    return allToolsSelected && promptSatisfied
+    const allPromptsSelected = promptKeys.length === 0 || promptKeys.every(k => selectedPrompts.has(k))
+    return allToolsSelected && allPromptsSelected
   }
 
   // Backward compat helper retained but now references "all selected" semantics
@@ -190,13 +191,13 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       addTools(toolsToAdd)
     }
 
-    // If server has prompts choose first (or existing) and enforce single-prompt global rule
+    // Add all prompts for this server
     if (promptKeys.length > 0) {
-      const alreadyOne = promptKeys.find(k => selectedPrompts.has(k))
-      console.debug('[TOOLS_PANEL] handling prompts for server', { serverName, promptKeys, alreadyOne })
-      // Add first prompt if none already selected from this server
-      if (!alreadyOne) {
-        togglePrompt(promptKeys[0])
+      const promptsToAdd = promptKeys.filter(k => !selectedPrompts.has(k))
+      console.debug('[TOOLS_PANEL] handling prompts for server', { serverName, promptKeys, promptsToAdd })
+      if (promptsToAdd.length) {
+        console.debug('[TOOLS_PANEL] batch add prompts', promptsToAdd)
+        addPrompts(promptsToAdd)
       }
     } else {
       console.debug('[TOOLS_PANEL] no prompts for this server', { serverName })
@@ -523,7 +524,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                   ? 'bg-green-600 hover:bg-green-700 text-white'
                                   : 'bg-gray-600 hover:bg-gray-500 text-gray-200'
                               }`}
-                              title="Enable all tools (and choose a prompt if available)"
+                              title="Toggle all tools and prompts for this server"
                             >
                               {isServerAllSelected(server.server) ? 'All On' : 'Enable All'}
                             </button>
