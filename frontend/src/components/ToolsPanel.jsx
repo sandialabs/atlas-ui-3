@@ -432,10 +432,10 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                               <>
                                 {/* Tools Display */}
                                 {server.tools.length > 0 && (
-                                  <div className="mb-2">
+                                  <div className="mb-4">
                                     <div className="flex items-center gap-1 mb-1">
-                                      <Wrench className="w-3 h-3 text-green-400" />
-                                      <span className="text-xs font-semibold text-green-400">Tools</span>
+                                      <Wrench className="w-3 h-3 text-white" />
+                                      <span className="text-sm font-bold text-white">Tools</span>
                                     </div>
                                     <div className="flex flex-wrap gap-1">
                 {server.tools.map(tool => {
@@ -491,12 +491,17 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                               </div>
                             )}
                             
+                            {/* Divider between Tools and Prompts */}
+                            {server.tools.length > 0 && server.prompts.length > 0 && (
+                              <div className="h-px bg-gray-500 opacity-60 my-3"></div>
+                            )}
+                            
                             {/* Prompts Display */}
                             {server.prompts.length > 0 && (
                               <div className="mb-2">
                                 <div className="flex items-center gap-1 mb-1">
-                                  <Sparkles className="w-3 h-3 text-green-400" />
-                                  <span className="text-xs font-semibold text-green-400">Prompts</span>
+                                  <Sparkles className="w-3 h-3 text-white" />
+                                  <span className="text-sm font-bold text-white">Prompts</span>
                                 </div>
                                 <div className="flex flex-wrap gap-1">
                                   {server.prompts.map(prompt => {
