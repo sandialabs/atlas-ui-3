@@ -25,6 +25,8 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 - Configuration changes: Update configuration guides
 - Bug fixes: Update troubleshooting docs if applicable
 
+**Changelog Maintenance**: For every PR, add an entry to CHANGELOG.md in the root directory. Each entry should be 1-2 lines describing the core features or changes. Format: "### PR #<number> - YYYY-MM-DD" followed by a bullet point list of changes.
+
 **Documentation Date-Time Stamping**: When creating markdown (.md) files, always include date-time stamps either in the filename or as a header in key sections to help track if docs are stale. Format: `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. Examples:
 - Filename: `feature-plan-2025-11-02.md`
 - Section header: `## Implementation Plan (2025-11-02)`
