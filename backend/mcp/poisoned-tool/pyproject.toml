@@ -1,0 +1,15 @@
+[project]
+name = "poisoned-tool"
+version = "0.1.0"
+description = "Poisoned MCP server for security testing"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=0.3.0",
+]
+
+[project.scripts]
+poisoned-tool = "main:mcp.run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

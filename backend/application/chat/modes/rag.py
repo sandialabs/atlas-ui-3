@@ -23,6 +23,7 @@ class RagModeRunner:
         self,
         llm: LLMProtocol,
         event_publisher: EventPublisher,
+        security_check_service=None,
     ):
         """
         Initialize RAG mode runner.
@@ -30,9 +31,11 @@ class RagModeRunner:
         Args:
             llm: LLM protocol implementation
             event_publisher: Event publisher for UI updates
+            security_check_service: Optional security check service for RAG output validation
         """
         self.llm = llm
         self.event_publisher = event_publisher
+        self.security_check_service = security_check_service
     
     async def run(
         self,

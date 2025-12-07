@@ -12,6 +12,7 @@ This guide is for administrators responsible for deploying, configuring, and man
 ### Security & Access Control
 - [Authentication & Authorization](authentication.md) - User authentication and group-based access control
 - [Compliance & Data Security](compliance.md) - Compliance levels and data segregation
+- [Content Security Check](security-check.md) - Pre and post moderation for user input and LLM output
 - [Tool Approval System](tool-approval.md) - Managing tool execution permissions
 
 ### Storage & Infrastructure

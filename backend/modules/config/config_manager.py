@@ -313,6 +313,40 @@ class AppSettings(BaseSettings):
         description="Enable email domain whitelist restriction (configured in domain-whitelist.json)",
         validation_alias=AliasChoices("FEATURE_DOMAIN_WHITELIST_ENABLED", "FEATURE_DOE_LAB_CHECK_ENABLED"),
     )
+    
+    # Content security check feature gates
+    feature_security_check_input_enabled: bool = Field(
+        False,
+        description="Enable pre-check security moderation for user input",
+        validation_alias=AliasChoices("FEATURE_SECURITY_CHECK_INPUT_ENABLED"),
+    )
+    feature_security_check_output_enabled: bool = Field(
+        False,
+        description="Enable post-check security moderation for LLM output",
+        validation_alias=AliasChoices("FEATURE_SECURITY_CHECK_OUTPUT_ENABLED"),
+    )
+    feature_security_check_tool_rag_enabled: bool = Field(
+        False,
+        description="Enable security check for tool and RAG outputs before sending to LLM",
+        validation_alias=AliasChoices("FEATURE_SECURITY_CHECK_TOOL_RAG_ENABLED"),
+    )
+    
+    # Security check API configuration
+    security_check_api_url: Optional[str] = Field(
+        default=None,
+        description="API endpoint for content security checks",
+        validation_alias="SECURITY_CHECK_API_URL",
+    )
+    security_check_api_key: Optional[str] = Field(
+        default=None,
+        description="API key for security check endpoint",
+        validation_alias="SECURITY_CHECK_API_KEY",
+    )
+    security_check_timeout: int = Field(
+        default=10,
+        description="Timeout in seconds for security check API calls",
+        validation_alias="SECURITY_CHECK_TIMEOUT",
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
