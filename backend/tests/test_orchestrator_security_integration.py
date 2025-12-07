@@ -412,7 +412,7 @@ class TestOrchestratorSecurityNotificationAPI:
         )
         
         # Execute - this should NOT raise AttributeError
-        result = await orchestrator.execute(
+        await orchestrator.execute(
             session_id=test_session.id,
             content="bad content",
             model="test-model",
@@ -511,7 +511,7 @@ class TestOrchestratorSecurityNotificationAPI:
         )
         
         # Execute
-        result = await orchestrator.execute(
+        await orchestrator.execute(
             session_id=test_session.id,
             content="good input",
             model="test-model",
@@ -643,13 +643,6 @@ class TestToolRagSecurityNotificationAPI:
         )
         
         mock_session_repository.get.return_value = test_session
-        
-        orchestrator = ChatOrchestrator(
-            llm=mock_llm,
-            event_publisher=mock_event_publisher,
-            session_repository=mock_session_repository,
-            security_check_service=mock_security_service,
-        )
         
         # Add a user message to test message history
         test_session.history.add_message(Message(

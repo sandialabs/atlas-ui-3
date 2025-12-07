@@ -1,7 +1,7 @@
 import os
 import random
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, Request
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 
@@ -80,7 +80,7 @@ async def check_content(
     Behavior:
     - If no/invalid Authorization header: return allowed-with-warnings.
     - If content contains "block-me" or "bomb": status="blocked".
-    - If content contains "warn-me": status="allowed-with-warnings".
+    - If content contains "warn-me" or "gun": status="allowed-with-warnings".
     - Otherwise: status="good".
     """
 
@@ -108,6 +108,14 @@ async def check_content(
             status="allowed-with-warnings",
             message="Mock server warns on content containing 'warn-me'",
             details={"keyword": "warn-me", "check_type": request.check_type},
+        )
+
+    if "gun" in content_lower:
+        print(f"WARNING: Content flagged for keyword 'gun' (check_type: {request.check_type})")
+        return SecurityCheckResponse(
+            status="allowed-with-warnings",
+            message="Mock server warns on content containing 'gun'",
+            details={"keyword": "gun", "check_type": request.check_type},
         )
 
     return SecurityCheckResponse(status="good")

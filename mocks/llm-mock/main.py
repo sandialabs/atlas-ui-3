@@ -7,44 +7,21 @@ It simulates OpenAI-compatible API responses for testing chat functionality.
 """
 
 from datetime import datetime
-import json
 import time
 import uuid
-from typing import Dict, List, Any, Optional
+from typing import List
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 import uvicorn
 
+from models import (
+    ChatMessage,
+    ChatCompletionRequest,
+    ChatCompletionChoice,
+    ChatCompletionUsage,
+    ChatCompletionResponse
+)
+
 app = FastAPI(title="Mock LLM Server", description="Mock LLM service for testing")
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-class ChatCompletionRequest(BaseModel):
-    model: str
-    messages: List[ChatMessage]
-    max_tokens: Optional[int] = 1000
-    temperature: Optional[float] = 0.7
-    stream: Optional[bool] = False
-
-class ChatCompletionChoice(BaseModel):
-    index: int
-    message: ChatMessage
-    finish_reason: str
-
-class ChatCompletionUsage(BaseModel):
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-
-class ChatCompletionResponse(BaseModel):
-    id: str
-    object: str
-    created: int
-    model: str
-    choices: List[ChatCompletionChoice]
-    usage: ChatCompletionUsage
 
 # Mock responses for different scenarios
 MOCK_RESPONSES = {

@@ -8,16 +8,13 @@ Future work: Refactor ToolsModeRunner to make it more testable, or use integrati
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from unittest.mock import AsyncMock
 
 from backend.application.chat.modes.tools import ToolsModeRunner
 from backend.core.security_check import (
-    SecurityCheckService,
     SecurityCheckResponse,
     SecurityCheckResult,
 )
-from backend.domain.sessions.models import Session
 
 
 pytestmark = pytest.mark.skip(reason="Tools mode requires complex test setup - see test_orchestrator_security_integration.py for core regression tests")
@@ -65,7 +62,7 @@ class TestToolsModeSecurityNotificationAPI:
         )
         
         # Execute with tool results that will be checked
-        result = await runner.run(
+        await runner.run(
             session=test_session,
             model="test-model",
             messages=[{"role": "user", "content": "test"}],
