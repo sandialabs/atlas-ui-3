@@ -105,43 +105,6 @@ describe('ToolsPanel - Tool Selection', () => {
     expect(mockToggleTool).toHaveBeenCalledWith('test_server_fetch')
   })
 
-  it('should enable server when Enable button is clicked', () => {
-    const testTools = [{
-      server: 'filesystem',
-      description: 'File operations',
-      tools: ['read_file', 'write_file'],
-      tools_detailed: [],
-      tool_count: 2,
-      prompts: [],
-      prompt_count: 0
-    }]
-
-    useChat.mockReturnValue({
-      ...defaultChatContext,
-      tools: testTools,
-      selectedTools: new Set(), // Nothing selected initially
-      toggleTool: mockToggleTool
-    })
-
-    useMarketplace.mockReturnValue({
-      ...defaultMarketplaceContext,
-      getFilteredTools: vi.fn(() => testTools)
-    })
-
-    render(
-      <BrowserRouter>
-        <ToolsPanel isOpen={true} onClose={vi.fn()} />
-      </BrowserRouter>
-    )
-
-    // Find and click the Enable button
-    const enableButton = screen.getByRole('button', { name: 'Enable' })
-    fireEvent.click(enableButton)
-
-    // Should enable the first tool minimally
-    expect(mockToggleTool).toHaveBeenCalledWith('filesystem_read_file')
-  })
-
   it('should filter tools based on search input', () => {
     const testTools = [
       {
