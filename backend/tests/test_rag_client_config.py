@@ -15,10 +15,11 @@ class TestRAGClientConfiguration:
         mock_app_settings.mock_rag = False
         mock_app_settings.rag_url = "http://localhost:8001"
         
+        mock_config_manager = MagicMock()
+        mock_config_manager.app_settings = mock_app_settings
+        
         # Patch config_manager at the modules.config level where it's imported from
-        with patch('modules.config.config_manager') as mock_config:
-            mock_config.app_settings = mock_app_settings
-            
+        with patch('modules.config.config_manager', mock_config_manager):
             with patch('modules.rag.client.create_rag_client') as mock_create:
                 mock_http_client = MagicMock()
                 mock_create.return_value = mock_http_client
@@ -42,9 +43,10 @@ class TestRAGClientConfiguration:
         mock_app_settings.mock_rag = True
         mock_app_settings.rag_url = "http://localhost:8001"
         
-        with patch('modules.config.config_manager') as mock_config:
-            mock_config.app_settings = mock_app_settings
-            
+        mock_config_manager = MagicMock()
+        mock_config_manager.app_settings = mock_app_settings
+        
+        with patch('modules.config.config_manager', mock_config_manager):
             with patch('modules.rag.client.create_rag_client') as mock_create:
                 mock_http_client = MagicMock()
                 mock_create.return_value = mock_http_client
@@ -67,9 +69,10 @@ class TestRAGClientConfiguration:
         mock_app_settings.mock_rag = False
         mock_app_settings.rag_url = custom_url
         
-        with patch('modules.config.config_manager') as mock_config:
-            mock_config.app_settings = mock_app_settings
-            
+        mock_config_manager = MagicMock()
+        mock_config_manager.app_settings = mock_app_settings
+        
+        with patch('modules.config.config_manager', mock_config_manager):
             with patch('modules.rag.client.create_rag_client') as mock_create:
                 RAGClient()
                 
@@ -180,9 +183,10 @@ class TestRAGHTTPClient:
         mock_app_settings.mock_rag = False
         mock_app_settings.rag_url = "http://localhost:8001"
         
-        with patch('modules.config.config_manager') as mock_config:
-            mock_config.app_settings = mock_app_settings
-            
+        mock_config_manager = MagicMock()
+        mock_config_manager.app_settings = mock_app_settings
+        
+        with patch('modules.config.config_manager', mock_config_manager):
             with patch('modules.rag.client.create_rag_client') as mock_create:
                 mock_http_client = AsyncMock()
                 mock_http_client.get = AsyncMock(return_value={
