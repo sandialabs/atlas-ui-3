@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2024-12-08
+- Add custom system prompt feature allowing users to override default system prompt at runtime
+- Add custom system prompt input field in SettingsPanel with clear button
+- Pass custom_system_prompt through WebSocket chat messages
+- Update MessageBuilder to use custom system prompt when provided, falling back to default when empty
+- Add comprehensive test coverage for custom system prompt functionality
+
 ### PR #156 - 2024-12-07
 - Add CHANGELOG.md to track changes across PRs
 - Update agent instructions to require changelog entries for each PR
