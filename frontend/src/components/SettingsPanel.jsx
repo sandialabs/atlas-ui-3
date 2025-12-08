@@ -7,7 +7,8 @@ const SettingsPanel = ({ isOpen, onClose }) => {
   const defaultSettings = {
     llmTemperature: 0.7,
     maxIterations: 10,
-    agentLoopStrategy: 'think-act'
+    agentLoopStrategy: 'think-act',
+    customSystemPrompt: ''
   }
 
   // State for settings
@@ -213,6 +214,33 @@ const SettingsPanel = ({ isOpen, onClose }) => {
                 <strong>⚠ Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
               </p>
             )}
+          </div>
+
+          {/* Custom System Prompt Setting */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-white font-medium">Custom System Prompt</label>
+              {settings.customSystemPrompt && (
+                <button
+                  onClick={() => handleSettingChange('customSystemPrompt', '')}
+                  className="text-xs text-gray-400 hover:text-gray-300 underline"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="space-y-2">
+              <textarea
+                value={settings.customSystemPrompt}
+                onChange={(e) => handleSettingChange('customSystemPrompt', e.target.value)}
+                placeholder="Enter a custom system prompt to override the default behavior. Leave empty to use the default system prompt."
+                className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px] resize-y custom-scrollbar"
+              />
+              <p className="text-sm text-gray-400">
+                Set a custom system prompt to override the default AI behavior. This prompt will be used 
+                for all conversations until cleared. Leave empty to use the default system prompt.
+              </p>
+            </div>
           </div>
 
           {/* Future Settings Placeholder */}

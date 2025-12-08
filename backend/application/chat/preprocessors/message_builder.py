@@ -49,6 +49,7 @@ class MessageBuilder:
         session: Session,
         include_files_manifest: bool = True,
         include_system_prompt: bool = True,
+        custom_system_prompt: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Build messages array from session history and context.
@@ -57,6 +58,7 @@ class MessageBuilder:
             session: Current chat session
             include_files_manifest: Whether to append files manifest
             include_system_prompt: Whether to prepend system prompt
+            custom_system_prompt: Optional custom system prompt to use instead of default
 
         Returns:
             List of messages ready for LLM call
@@ -64,13 +66,18 @@ class MessageBuilder:
         messages = []
 
         # Optionally add system prompt at the beginning
-        if include_system_prompt and self.prompt_provider:
-            system_prompt = self.prompt_provider.get_system_prompt(
-                user_email=session.user_email
-            )
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-                logger.debug(f"Added system prompt (len={len(system_prompt)})")
+        if include_system_prompt:
+            # Use custom system prompt if provided, otherwise use default from prompt provider
+            if custom_system_prompt:
+                messages.append({"role": "system", "content": custom_system_prompt})
+                logger.debug(f"Added custom system prompt (len={len(custom_system_prompt)})")
+            elif self.prompt_provider:
+                system_prompt = self.prompt_provider.get_system_prompt(
+                    user_email=session.user_email
+                )
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                    logger.debug(f"Added system prompt (len={len(system_prompt)})")
 
         # Get conversation history from session
         history_messages = session.history.get_messages_for_llm()

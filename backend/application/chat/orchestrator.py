@@ -105,6 +105,7 @@ class ChatOrchestrator:
         tool_choice_required: bool = False,
         agent_mode: bool = False,
         temperature: float = 0.7,
+        custom_system_prompt: Optional[str] = None,
         files: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> Dict[str, Any]:
@@ -156,7 +157,8 @@ class ChatOrchestrator:
         # Build messages with history and files manifest
         messages = await self.message_builder.build_messages(
             session=session,
-            include_files_manifest=True
+            include_files_manifest=True,
+            custom_system_prompt=custom_system_prompt
         )
         
         # Apply MCP prompt override
