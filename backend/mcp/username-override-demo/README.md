@@ -54,10 +54,16 @@ Add this server to your `config/overrides/mcp.json` or use the example config:
 }
 ```
 
-Or use the pre-configured example:
+Or reference the pre-configured example:
 ```bash
-cp config/mcp-example-configs/mcp-username-override-demo.json config/overrides/mcp.json
-# Or merge with existing config
+# WARNING: Do NOT simply copy the example file as it will overwrite your existing config!
+# Instead, manually merge the server configuration into your existing mcp.json file,
+# or use a JSON merge tool to combine the configurations.
+
+# View the example configuration:
+cat config/mcp-example-configs/mcp-username-override-demo.json
+
+# Manually add the "username-override-demo" entry to your config/overrides/mcp.json
 ```
 
 ## Available Tools
@@ -127,8 +133,8 @@ Permission checks are ALWAYS performed for the authenticated user. The LLM canno
 Explicitly demonstrates the username override feature in action.
 
 **Parameters:**
-- `username` (string, optional): Will be injected by Atlas UI backend
-- `attempted_username` (string, optional): A username the LLM might try to use
+- `username` (string): Automatically injected by Atlas UI backend with authenticated user's email
+- `attempted_username` (string, optional): A username the LLM might try to use (for demonstration)
 
 **Example Usage:**
 ```

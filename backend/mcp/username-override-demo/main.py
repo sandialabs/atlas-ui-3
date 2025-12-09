@@ -164,15 +164,15 @@ def check_user_permissions(username: str, resource: str, action: str) -> Dict[st
 
 
 @mcp.tool
-def demonstrate_override_attempt(username: Optional[str] = None, attempted_username: Optional[str] = None) -> Dict[str, Any]:
+def demonstrate_override_attempt(username: str, attempted_username: Optional[str] = None) -> Dict[str, Any]:
     """Demonstrate what happens when trying to override the username.
     
     This tool explicitly shows the security feature in action. Even if the LLM
-    tries to pass an attempted_username or omits the username, the backend will
-    inject the authenticated user's email.
+    tries to pass an attempted_username, the backend will always inject the
+    authenticated user's email into the username parameter.
     
     Args:
-        username: Will be injected by Atlas UI backend with authenticated user
+        username: The authenticated user (automatically injected by Atlas UI backend)
         attempted_username: A username the LLM might try to use (for demonstration)
     
     Returns:
@@ -181,7 +181,8 @@ def demonstrate_override_attempt(username: Optional[str] = None, attempted_usern
           "results": {
             "actual_username": str,
             "attempted_username": str or None,
-            "override_successful": bool,
+            "override_occurred": bool,
+            "impersonation_attempted": bool,
             "explanation": str
           },
           "meta_data": {
@@ -191,8 +192,9 @@ def demonstrate_override_attempt(username: Optional[str] = None, attempted_usern
     """
     start = time.perf_counter()
     
-    # The override always occurs when username is injected by the backend
-    override_occurred = username is not None
+    # The override always occurs - username is always injected by the backend
+    # when a tool declares it accepts a username parameter
+    override_occurred = True
     # Detect if an impersonation attempt was made
     impersonation_attempted = attempted_username is not None and username != attempted_username
     
