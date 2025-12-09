@@ -141,8 +141,9 @@ Try to demonstrate the username override by attempting to use admin@company.com
   "results": {
     "actual_username": "alice@example.com",
     "attempted_username": "admin@company.com",
-    "override_successful": true,
-    "explanation": "The authenticated user is: alice@example.com. The LLM attempted to use: admin@company.com. Atlas UI backend always injects the real authenticated user's email into the username parameter, overriding any value the LLM might provide."
+    "override_occurred": true,
+    "impersonation_attempted": true,
+    "explanation": "The authenticated user is: alice@example.com. The LLM attempted to use: admin@company.com. Atlas UI backend detected and blocked this impersonation attempt by overriding the username parameter with the real authenticated user's email."
   }
 }
 ```

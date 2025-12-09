@@ -191,14 +191,30 @@ def demonstrate_override_attempt(username: Optional[str] = None, attempted_usern
     """
     start = time.perf_counter()
     
-    override_successful = username is not None and (attempted_username is None or username != attempted_username)
+    # The override always occurs when username is injected by the backend
+    override_occurred = username is not None
+    # Detect if an impersonation attempt was made
+    impersonation_attempted = attempted_username is not None and username != attempted_username
     
-    explanation = (
-        f"The authenticated user is: {username}. "
-        f"{'The LLM attempted to use: ' + attempted_username + '. ' if attempted_username else ''}"
-        "Atlas UI backend always injects the real authenticated user's email "
-        "into the username parameter, overriding any value the LLM might provide."
-    )
+    if impersonation_attempted:
+        explanation = (
+            f"The authenticated user is: {username}. "
+            f"The LLM attempted to use: {attempted_username}. "
+            "Atlas UI backend detected and blocked this impersonation attempt by "
+            "overriding the username parameter with the real authenticated user's email."
+        )
+    elif attempted_username and username == attempted_username:
+        explanation = (
+            f"The authenticated user is: {username}. "
+            "The LLM correctly identified the authenticated user. "
+            "The Atlas UI backend still injects the username parameter as a security measure."
+        )
+    else:
+        explanation = (
+            f"The authenticated user is: {username}. "
+            "Atlas UI backend automatically injected the authenticated user's email "
+            "into the username parameter. No impersonation attempt was made."
+        )
     
     elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
     
@@ -206,7 +222,8 @@ def demonstrate_override_attempt(username: Optional[str] = None, attempted_usern
         "results": {
             "actual_username": username,
             "attempted_username": attempted_username,
-            "override_successful": override_successful,
+            "override_occurred": override_occurred,
+            "impersonation_attempted": impersonation_attempted,
             "explanation": explanation
         },
         "meta_data": {
