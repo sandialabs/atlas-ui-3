@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2024-12-09
+- Added username-override-demo MCP server to demonstrate the username security feature
+- Server includes tools showing how Atlas UI prevents LLM user impersonation
+- Added comprehensive documentation and example configuration
+
 ### PR #156 - 2024-12-07
 - Add CHANGELOG.md to track changes across PRs
 - Update agent instructions to require changelog entries for each PR
