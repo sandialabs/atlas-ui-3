@@ -117,7 +117,6 @@ class MCPServerConfig(BaseModel):
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
     auth_token: Optional[str] = None     # Bearer token for MCP server authentication (env var pattern supported)
     oauth_config: Optional[OAuthConfig] = None  # OAuth 2.1 authentication configuration
-    jwt_file: Optional[str] = None       # Path to user-uploaded JWT file (for manual JWT upload)
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
     require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
     allow_edit: List[str] = Field(default_factory=list)  # LEGACY. List of tool names (without server prefix) allowing argument editing

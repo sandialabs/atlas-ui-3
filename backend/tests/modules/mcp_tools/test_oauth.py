@@ -59,26 +59,16 @@ class TestMCPServerConfigOAuth:
         )
         assert config.oauth_config is None
 
-    def test_server_config_with_jwt_file(self):
-        """Test server config with JWT file path."""
-        config = MCPServerConfig(
-            url="https://api.example.com/mcp",
-            jwt_file="/path/to/jwt.txt"
-        )
-        assert config.jwt_file == "/path/to/jwt.txt"
-
     def test_auth_priority_fields(self):
         """Test that all auth fields can coexist in config."""
         config = MCPServerConfig(
             url="https://api.example.com/mcp",
             auth_token="${MY_TOKEN}",
-            oauth_config=OAuthConfig(enabled=True),
-            jwt_file="/path/to/jwt.txt"
+            oauth_config=OAuthConfig(enabled=True)
         )
         # All fields should be present
         assert config.auth_token == "${MY_TOKEN}"
         assert config.oauth_config.enabled is True
-        assert config.jwt_file == "/path/to/jwt.txt"
 
 
 class TestMCPClientOAuthIntegration:

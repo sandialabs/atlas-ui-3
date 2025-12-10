@@ -271,9 +271,15 @@ class MCPToolManager:
                                     "Set OAUTH_STORAGE_ENCRYPTION_KEY env var for production."
                                 )
                         
+                        # Ensure key is bytes for Fernet
+                        if isinstance(encryption_key, str):
+                            encryption_key_bytes = encryption_key.encode()
+                        else:
+                            encryption_key_bytes = encryption_key
+                        
                         encrypted_storage = FernetEncryptionWrapper(
                             key_value=DiskStore(directory=str(storage_path)),
-                            fernet=Fernet(encryption_key.encode())
+                            fernet=Fernet(encryption_key_bytes)
                         )
                         oauth_kwargs["token_storage"] = encrypted_storage
                         logger.info(f"Configured encrypted token storage at {storage_path}")

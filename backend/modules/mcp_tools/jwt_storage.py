@@ -57,7 +57,13 @@ class JWTStorage:
                     "Set JWT_STORAGE_ENCRYPTION_KEY env var for production use."
                 )
         
-        self.fernet = Fernet(encryption_key.encode() if isinstance(encryption_key, str) else encryption_key)
+        # Ensure encryption key is bytes for Fernet
+        if isinstance(encryption_key, str):
+            encryption_key_bytes = encryption_key.encode()
+        else:
+            encryption_key_bytes = encryption_key
+        
+        self.fernet = Fernet(encryption_key_bytes)
         logger.info(f"JWT storage initialized at {self.storage_dir}")
     
     def _get_jwt_path(self, server_name: str) -> Path:
