@@ -68,7 +68,15 @@ After editing `config/overrides/mcp.json`, you do **not** need to restart the ba
 
 ## MCP Server Authentication
 
-For MCP servers that require authentication, you can configure bearer token authentication using the `auth_token` field.
+For MCP servers that require authentication, Atlas UI 3 supports multiple authentication methods:
+
+1. **Bearer Token Authentication** - Simple token-based auth for API keys
+2. **OAuth 2.1** - Full OAuth flow with user consent for user-facing apps
+3. **Manual JWT Upload** - Securely upload and store JWT tokens via admin panel
+
+### Bearer Token Authentication
+
+For MCP servers that require a simple bearer token (API key), use the `auth_token` field:
 
 ### Environment Variable Substitution
 
@@ -90,12 +98,66 @@ Then set the environment variable:
 export MCP_EXTERNAL_API_TOKEN="your-secret-api-key"
 ```
 
+### OAuth 2.1 Authentication
+
+For MCP servers that require OAuth 2.1 authentication with user consent, configure an `oauth_config` section:
+
+```json
+{
+  "oauth-server": {
+    "url": "https://fastmcp.cloud/mcp",
+    "transport": "http",
+    "groups": ["users"],
+    "oauth_config": {
+      "enabled": true,
+      "scopes": "read write",
+      "client_name": "Atlas UI 3",
+      "token_storage_path": "~/.atlas-ui-3/oauth-tokens/oauth-server"
+    }
+  }
+}
+```
+
+When Atlas UI connects to this server, it will:
+1. Open a browser for user authentication
+2. Request user consent for the specified scopes
+3. Exchange authorization code for access tokens
+4. Store tokens securely with encryption
+5. Automatically refresh tokens when they expire
+
+**See [OAuth 2.1 Authentication Guide](mcp-oauth.md) for complete documentation.**
+
+### Manual JWT Upload
+
+For service accounts or pre-issued JWT tokens, administrators can manually upload JWTs via the admin API:
+
+```bash
+curl -X POST "http://localhost:8000/admin/mcp/my-server/jwt" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Email: admin@example.com" \
+  -d '{"jwt_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}'
+```
+
+Uploaded JWTs are:
+- Encrypted with Fernet encryption
+- Stored in `~/.atlas-ui-3/jwt-storage/`
+- Automatically injected into MCP server requests
+
+### Authentication Priority
+
+When multiple authentication methods are configured, Atlas UI uses this priority:
+
+1. **OAuth** (if `oauth_config.enabled` is `true`)
+2. **Manual JWT** (if JWT uploaded via admin panel)
+3. **Bearer Token** (if `auth_token` is set)
+4. **None** (no authentication)
+
 ### How It Works
 
-1. **HTTP/SSE Servers**: The `auth_token` value is passed as a Bearer token in the `Authorization` header when connecting to the MCP server.
-2. **Stdio Servers**: The `auth_token` field is ignored since stdio servers don't use HTTP authentication.
+1. **HTTP/SSE Servers**: The authentication token/JWT is passed in the `Authorization: Bearer <token>` header when connecting to the MCP server.
+2. **Stdio Servers**: The `auth_token` and OAuth fields are ignored since stdio servers don't use HTTP authentication.
 3. **Environment Variables**: If the token contains `${VAR_NAME}` pattern, it's replaced with the value of the environment variable `VAR_NAME`.
-4. **Error Handling**: If a required environment variable is missing, the server initialization will fail gracefully with a clear error message.
+4. **Error Handling**: If a required environment variable is missing or OAuth flow fails, the server initialization will fail gracefully with a clear error message.
 
 ### Security Considerations
 
