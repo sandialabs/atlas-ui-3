@@ -1,0 +1,33 @@
+{
+  "oauth-example": {
+    "url": "https://fastmcp.cloud/mcp",
+    "transport": "http",
+    "groups": ["users"],
+    "description": "Example MCP server using OAuth 2.1 authentication. Demonstrates the Authorization Code Flow with PKCE for user-facing applications.",
+    "author": "Atlas UI Team",
+    "short_description": "OAuth 2.1 authentication demo",
+    "help_email": "support@example.com",
+    "compliance_level": "Internal",
+    "oauth_config": {
+      "enabled": true,
+      "scopes": "read write",
+      "client_name": "Atlas UI 3",
+      "callback_port": null,
+      "token_storage_path": "~/.atlas-ui-3/oauth-tokens/oauth-example",
+      "additional_metadata": null
+    }
+  },
+  "oauth-with-jwt-example": {
+    "url": "https://api.example.com/mcp",
+    "transport": "http",
+    "groups": ["admin"],
+    "description": "Example MCP server that accepts manually uploaded JWT tokens. Use the admin panel to upload a JWT for this server.",
+    "author": "Atlas UI Team",
+    "short_description": "Manual JWT upload demo",
+    "help_email": "support@example.com",
+    "compliance_level": "Internal",
+    "oauth_config": {
+      "enabled": false
+    }
+  }
+}

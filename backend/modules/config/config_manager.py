@@ -91,6 +91,16 @@ class LLMConfig(BaseModel):
         return v
 
 
+class OAuthConfig(BaseModel):
+    """OAuth 2.1 configuration for MCP server authentication."""
+    enabled: bool = False                # Whether to use OAuth for this server
+    scopes: Optional[str] = None         # OAuth scopes (space-separated or list will be joined)
+    client_name: Optional[str] = "Atlas UI 3"  # Client name for dynamic registration
+    callback_port: Optional[int] = None  # Fixed port for OAuth callback server
+    token_storage_path: Optional[str] = None  # Path to encrypted token storage directory
+    additional_metadata: Optional[Dict[str, Any]] = None  # Extra metadata for client registration
+
+
 class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server."""
     description: Optional[str] = None
@@ -105,7 +115,9 @@ class MCPServerConfig(BaseModel):
     url: Optional[str] = None            # URL for HTTP servers
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
-    auth_token: Optional[str] = None     # Bearer token for MCP server authentication
+    auth_token: Optional[str] = None     # Bearer token for MCP server authentication (env var pattern supported)
+    oauth_config: Optional[OAuthConfig] = None  # OAuth 2.1 authentication configuration
+    jwt_file: Optional[str] = None       # Path to user-uploaded JWT file (for manual JWT upload)
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
     require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
     allow_edit: List[str] = Field(default_factory=list)  # LEGACY. List of tool names (without server prefix) allowing argument editing

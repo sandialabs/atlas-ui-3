@@ -642,3 +642,164 @@ async def get_system_status(admin_user: str = Depends(require_admin)):
     except Exception as e:  # noqa: BLE001
         logger.error(f"Error getting system status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# JWT Management Endpoints
+
+class JWTUpload(BaseModel):
+    """Model for JWT upload request."""
+    jwt_token: str
+
+
+@admin_router.post("/mcp/{server_name}/jwt")
+async def upload_jwt(
+    server_name: str,
+    jwt_upload: JWTUpload,
+    admin_user: str = Depends(require_admin)
+):
+    """
+    Upload and store a JWT for a specific MCP server.
+    
+    The JWT will be encrypted and stored securely. It will be used for authentication
+    when connecting to the MCP server.
+    
+    Args:
+        server_name: Name of the MCP server
+        jwt_upload: JWT token to store
+        admin_user: Current admin user (from auth)
+    
+    Returns:
+        Success message with server name
+    """
+    try:
+        from modules.mcp_tools.jwt_storage import get_jwt_storage
+        
+        # Validate that the server exists in config
+        mcp_config = config_manager.mcp_config
+        if server_name not in mcp_config.servers:
+            raise HTTPException(
+                status_code=404,
+                detail=f"MCP server '{server_name}' not found in configuration"
+            )
+        
+        # Store the JWT
+        jwt_storage = get_jwt_storage()
+        jwt_storage.store_jwt(server_name, jwt_upload.jwt_token)
+        
+        logger.info(f"Admin user {admin_user} uploaded JWT for MCP server: {server_name}")
+        
+        return {
+            "status": "success",
+            "message": f"JWT stored for server '{server_name}'",
+            "server_name": server_name
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading JWT for {server_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to store JWT: {str(e)}")
+
+
+@admin_router.get("/mcp/{server_name}/jwt")
+async def get_jwt_status(
+    server_name: str,
+    admin_user: str = Depends(require_admin)
+):
+    """
+    Check if a JWT exists for a specific MCP server.
+    
+    Does not return the actual JWT for security reasons, only whether it exists.
+    
+    Args:
+        server_name: Name of the MCP server
+        admin_user: Current admin user (from auth)
+    
+    Returns:
+        JWT status information
+    """
+    try:
+        from modules.mcp_tools.jwt_storage import get_jwt_storage
+        
+        jwt_storage = get_jwt_storage()
+        has_jwt = jwt_storage.has_jwt(server_name)
+        
+        return {
+            "server_name": server_name,
+            "has_jwt": has_jwt,
+            "storage_path": str(jwt_storage.storage_dir)
+        }
+    
+    except Exception as e:
+        logger.error(f"Error checking JWT status for {server_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check JWT status: {str(e)}")
+
+
+@admin_router.delete("/mcp/{server_name}/jwt")
+async def delete_jwt(
+    server_name: str,
+    admin_user: str = Depends(require_admin)
+):
+    """
+    Delete the stored JWT for a specific MCP server.
+    
+    Args:
+        server_name: Name of the MCP server
+        admin_user: Current admin user (from auth)
+    
+    Returns:
+        Success message
+    """
+    try:
+        from modules.mcp_tools.jwt_storage import get_jwt_storage
+        
+        jwt_storage = get_jwt_storage()
+        deleted = jwt_storage.delete_jwt(server_name)
+        
+        if not deleted:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No JWT found for server '{server_name}'"
+            )
+        
+        logger.info(f"Admin user {admin_user} deleted JWT for MCP server: {server_name}")
+        
+        return {
+            "status": "success",
+            "message": f"JWT deleted for server '{server_name}'",
+            "server_name": server_name
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting JWT for {server_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete JWT: {str(e)}")
+
+
+@admin_router.get("/mcp/jwt/list")
+async def list_servers_with_jwt(admin_user: str = Depends(require_admin)):
+    """
+    List all MCP servers that have stored JWTs.
+    
+    Args:
+        admin_user: Current admin user (from auth)
+    
+    Returns:
+        List of server names with stored JWTs
+    """
+    try:
+        from modules.mcp_tools.jwt_storage import get_jwt_storage
+        
+        jwt_storage = get_jwt_storage()
+        servers = jwt_storage.list_servers_with_jwt()
+        
+        return {
+            "servers": servers,
+            "count": len(servers),
+            "storage_path": str(jwt_storage.storage_dir)
+        }
+    
+    except Exception as e:
+        logger.error(f"Error listing servers with JWT: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list servers: {str(e)}")

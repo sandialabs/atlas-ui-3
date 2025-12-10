@@ -13,6 +13,7 @@ from modules.config import config_manager
 from core.utils import sanitize_for_logging
 from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
+from modules.mcp_tools.jwt_storage import get_jwt_storage
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,121 @@ class MCPToolManager:
         transport_type = config.get("type", "stdio")
         logger.debug(f"Using fallback transport type: {transport_type}")
         return transport_type
+    
+    def _get_auth_for_server(self, server_name: str, config: Dict[str, Any], url: Optional[str] = None) -> Any:
+        """
+        Determine the authentication method for an MCP server.
+        
+        Priority order:
+        1. OAuth 2.1 if oauth_config.enabled is True
+        2. User-uploaded JWT from jwt_storage
+        3. Bearer token from auth_token field
+        4. None (no authentication)
+        
+        Args:
+            server_name: Name of the MCP server
+            config: Server configuration dictionary
+            url: MCP server URL (required for OAuth)
+            
+        Returns:
+            Auth parameter for FastMCP Client (OAuth instance, token string, or None)
+        """
+        # Check for OAuth configuration
+        oauth_config = config.get("oauth_config")
+        if oauth_config and oauth_config.get("enabled"):
+            logger.info(f"Using OAuth 2.1 authentication for {server_name}")
+            try:
+                from fastmcp.client.auth import OAuth
+                
+                # Build OAuth configuration
+                oauth_kwargs = {
+                    "mcp_url": url or config.get("url")
+                }
+                
+                if oauth_config.get("scopes"):
+                    oauth_kwargs["scopes"] = oauth_config["scopes"]
+                
+                if oauth_config.get("client_name"):
+                    oauth_kwargs["client_name"] = oauth_config["client_name"]
+                
+                if oauth_config.get("callback_port"):
+                    oauth_kwargs["callback_port"] = oauth_config["callback_port"]
+                
+                if oauth_config.get("additional_metadata"):
+                    oauth_kwargs["additional_client_metadata"] = oauth_config["additional_metadata"]
+                
+                # Set up token storage if path is specified
+                if oauth_config.get("token_storage_path"):
+                    try:
+                        from key_value.aio.stores.disk import DiskStore
+                        from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+                        from cryptography.fernet import Fernet
+                        
+                        storage_path = Path(oauth_config["token_storage_path"]).expanduser()
+                        storage_path.mkdir(parents=True, exist_ok=True)
+                        
+                        # Get or generate encryption key
+                        encryption_key = os.environ.get("OAUTH_STORAGE_ENCRYPTION_KEY")
+                        if not encryption_key:
+                            key_file = storage_path / ".encryption_key"
+                            if key_file.exists():
+                                encryption_key = key_file.read_text().strip()
+                            else:
+                                encryption_key = Fernet.generate_key().decode()
+                                key_file.write_text(encryption_key)
+                                key_file.chmod(0o600)
+                                logger.warning(
+                                    f"Generated new OAuth storage encryption key for {server_name}. "
+                                    "Set OAUTH_STORAGE_ENCRYPTION_KEY env var for production."
+                                )
+                        
+                        encrypted_storage = FernetEncryptionWrapper(
+                            key_value=DiskStore(directory=str(storage_path)),
+                            fernet=Fernet(encryption_key.encode())
+                        )
+                        oauth_kwargs["token_storage"] = encrypted_storage
+                        logger.info(f"Configured encrypted token storage at {storage_path}")
+                    except ImportError as e:
+                        logger.warning(
+                            f"Could not set up encrypted OAuth token storage for {server_name}: {e}. "
+                            "Install key-value library for persistent token storage."
+                        )
+                
+                oauth_auth = OAuth(**oauth_kwargs)
+                logger.info(f"OAuth 2.1 configured for {server_name}")
+                return oauth_auth
+                
+            except ImportError as e:
+                logger.error(
+                    f"OAuth authentication requested for {server_name} but fastmcp.client.auth.OAuth not available: {e}"
+                )
+                return None
+            except Exception as e:
+                logger.error(f"Failed to configure OAuth for {server_name}: {e}")
+                return None
+        
+        # Check for user-uploaded JWT
+        jwt_storage = get_jwt_storage()
+        if jwt_storage.has_jwt(server_name):
+            jwt_token = jwt_storage.get_jwt(server_name)
+            if jwt_token:
+                logger.info(f"Using user-uploaded JWT for {server_name}")
+                return jwt_token
+        
+        # Check for auth_token field
+        raw_token = config.get("auth_token")
+        if raw_token:
+            try:
+                token = resolve_env_var(raw_token)
+                logger.info(f"Using bearer token from auth_token field for {server_name}")
+                return token
+            except ValueError as e:
+                logger.error(f"Failed to resolve auth_token for {server_name}: {e}")
+                return None
+        
+        # No authentication
+        logger.debug(f"No authentication configured for {server_name}")
+        return None
 
     async def _initialize_single_client(self, server_name: str, config: Dict[str, Any]) -> Optional[Client]:
         """Initialize a single MCP client. Returns None if initialization fails."""
@@ -222,21 +338,17 @@ class MCPToolManager:
                     url = f"http://{url}"
                     logger.debug(f"Added http:// protocol to URL: {url}")
 
-                raw_token = config.get("auth_token")
-                try:
-                    token = resolve_env_var(raw_token)  # Resolve ${ENV_VAR} if present
-                except ValueError as e:
-                    logger.error(f"Failed to resolve auth_token for {server_name}: {e}")
-                    return None  # Skip this server
+                # Get authentication (OAuth, JWT, or bearer token)
+                auth = self._get_auth_for_server(server_name, config, url)
                 
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
-                    client = Client(url, auth=token)
+                    client = Client(url, auth=auth)
                 else:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
-                    client = Client(url, auth=token)
+                    client = Client(url, auth=auth)
                 
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
                 return client
