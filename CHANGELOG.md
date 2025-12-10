@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2025-12-10
+- Add explicit "Save Changes" and "Cancel" buttons to Tools & Integration Panel (ToolsPanel)
+- Add explicit "Save Changes" and "Cancel" buttons to Data Sources Panel (RagPanel)
+- Implement pending state pattern to track unsaved changes
+- Save button is disabled when no changes are made, enabled when changes are pending
+- Changes only persist to localStorage when user clicks "Save Changes"
+- Cancel button reverts all pending changes and closes panel
+- Updated tests to verify save/cancel functionality
+
 ### PR #156 - 2024-12-07
 - Add CHANGELOG.md to track changes across PRs
 - Update agent instructions to require changelog entries for each PR
