@@ -1,8 +1,9 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { X, Save } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 
 const RagPanel = ({ isOpen, onClose }) => {
+  const prevOpenRef = useRef(false)
   const {
     ragSources, // Use rich source data
     selectedDataSources: savedSelectedDataSources,
@@ -20,13 +21,14 @@ const RagPanel = ({ isOpen, onClose }) => {
   const [pendingOnlyRag, setPendingOnlyRag] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   
-  // Initialize pending state from saved state when panel opens
+  // Initialize pending state from saved state only when panel transitions from closed to open
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevOpenRef.current) {
       setPendingSelectedDataSources(new Set(savedSelectedDataSources))
       setPendingOnlyRag(savedOnlyRag)
       setHasChanges(false)
     }
+    prevOpenRef.current = isOpen
   }, [isOpen, savedSelectedDataSources, savedOnlyRag])
   
   // Use pending state while editing

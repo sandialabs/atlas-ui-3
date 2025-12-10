@@ -1,6 +1,6 @@
 import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 
@@ -12,6 +12,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [expandedTools, setExpandedTools] = useState(new Set())
   const [collapsedServers, setCollapsedServers] = useState(new Set())
   const navigate = useNavigate()
+  const prevOpenRef = useRef(false)
   const {
     selectedTools: savedSelectedTools,
     selectedPrompts: savedSelectedPrompts,
@@ -35,14 +36,15 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [pendingToolChoiceRequired, setPendingToolChoiceRequired] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   
-  // Initialize pending state from saved state when panel opens
+  // Initialize pending state from saved state only when panel transitions from closed to open
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevOpenRef.current) {
       setPendingSelectedTools(new Set(savedSelectedTools))
       setPendingSelectedPrompts(new Set(savedSelectedPrompts))
       setPendingToolChoiceRequired(savedToolChoiceRequired)
       setHasChanges(false)
     }
+    prevOpenRef.current = isOpen
   }, [isOpen, savedSelectedTools, savedSelectedPrompts, savedToolChoiceRequired])
   
   // Use pending state while editing
