@@ -5,11 +5,10 @@ This module provides encrypted storage for user-uploaded JWTs that are associate
 with specific MCP servers.
 """
 
-import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
@@ -142,7 +141,7 @@ class JWTStorage:
         """
         return self._get_jwt_path(server_name).exists()
     
-    def list_servers_with_jwt(self) -> list[str]:
+    def list_servers_with_jwt(self) -> List[str]:
         """
         List all servers that have stored JWTs.
         

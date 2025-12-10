@@ -20,6 +20,7 @@ from core.auth import is_user_in_group
 from core.utils import get_current_user, sanitize_for_logging
 from modules.config import config_manager
 from infrastructure.app_factory import app_factory
+from modules.mcp_tools.jwt_storage import get_jwt_storage
 
 logger = logging.getLogger(__name__)
 
@@ -672,8 +673,6 @@ async def upload_jwt(
         Success message with server name
     """
     try:
-        from modules.mcp_tools.jwt_storage import get_jwt_storage
-        
         # Validate that the server exists in config
         mcp_config = config_manager.mcp_config
         if server_name not in mcp_config.servers:
@@ -719,8 +718,6 @@ async def get_jwt_status(
         JWT status information
     """
     try:
-        from modules.mcp_tools.jwt_storage import get_jwt_storage
-        
         jwt_storage = get_jwt_storage()
         has_jwt = jwt_storage.has_jwt(server_name)
         
@@ -751,8 +748,6 @@ async def delete_jwt(
         Success message
     """
     try:
-        from modules.mcp_tools.jwt_storage import get_jwt_storage
-        
         jwt_storage = get_jwt_storage()
         deleted = jwt_storage.delete_jwt(server_name)
         
@@ -789,8 +784,6 @@ async def list_servers_with_jwt(admin_user: str = Depends(require_admin)):
         List of server names with stored JWTs
     """
     try:
-        from modules.mcp_tools.jwt_storage import get_jwt_storage
-        
         jwt_storage = get_jwt_storage()
         servers = jwt_storage.list_servers_with_jwt()
         
