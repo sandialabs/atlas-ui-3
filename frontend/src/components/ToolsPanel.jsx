@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -152,6 +152,13 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     setPendingToolChoiceRequired(savedToolChoiceRequired)
     setHasChanges(false)
     onClose()
+  }
+  
+  // Clear all tools and prompts in pending state
+  const handleClearAll = () => {
+    setPendingSelectedTools(new Set())
+    setPendingSelectedPrompts(new Set())
+    setHasChanges(true)
   }
   
   // Use compliance-filtered tools and prompts if feature is enabled, otherwise use marketplace filtered
@@ -426,7 +433,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
               Add from Marketplace
             </button>
             <button
-              onClick={clearToolsAndPrompts}
+              onClick={handleClearAll}
               className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
               title="Clear all tool and prompt selections"
             >
@@ -524,7 +531,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                           
                           {/* Server Icon */}
                           <div className="bg-gray-600 rounded p-1.5 flex-shrink-0">
-                            <Wrench className="w-3 h-3 text-gray-300" />
+                            <Server className="w-3 h-3 text-gray-300" />
                           </div>
                           
                           {/* Server Content */}

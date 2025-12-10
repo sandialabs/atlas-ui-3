@@ -164,26 +164,31 @@ describe('ToolsPanel - Tool Selection', () => {
   })
 
   it('should clear all tools and prompts when Clear All button is clicked', () => {
+    const mockRemoveTools = vi.fn()
+    const mockRemovePrompts = vi.fn()
     const testTools = [{
       server: 'test_server',
       description: 'Test server',
       tools: ['tool1', 'tool2'],
       tools_detailed: [],
       tool_count: 2,
-      prompts: [],
-      prompt_count: 0
+      prompts: [{name: 'prompt1', description: 'Test prompt'}],
+      prompt_count: 1
     }]
 
     useChat.mockReturnValue({
       ...defaultChatContext,
       tools: testTools,
-      selectedTools: new Set(['test_server_tool1']),
-      clearToolsAndPrompts: mockClearToolsAndPrompts
+      selectedTools: new Set(['test_server_tool1', 'test_server_tool2']),
+      selectedPrompts: new Set(['test_server_prompt1']),
+      removeTools: mockRemoveTools,
+      removePrompts: mockRemovePrompts
     })
 
     useMarketplace.mockReturnValue({
       ...defaultMarketplaceContext,
-      getFilteredTools: vi.fn(() => testTools)
+      getFilteredTools: vi.fn(() => testTools),
+      getFilteredPrompts: vi.fn(() => [])
     })
 
     render(
@@ -192,12 +197,23 @@ describe('ToolsPanel - Tool Selection', () => {
       </BrowserRouter>
     )
 
+    // Initially save button should be disabled
+    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    expect(saveButton).toBeDisabled()
+
     // Find and click the Clear All button
     const clearButton = screen.getByRole('button', { name: 'Clear All' })
     fireEvent.click(clearButton)
 
-    // Verify clearToolsAndPrompts was called
-    expect(mockClearToolsAndPrompts).toHaveBeenCalled()
+    // Save button should now be enabled since we made changes
+    expect(saveButton).not.toBeDisabled()
+    
+    // Click save to persist the changes
+    fireEvent.click(saveButton)
+
+    // Verify removeTools and removePrompts were called with all selected items
+    expect(mockRemoveTools).toHaveBeenCalledWith(['test_server_tool1', 'test_server_tool2'])
+    expect(mockRemovePrompts).toHaveBeenCalledWith(['test_server_prompt1'])
   })
 
   it('should toggle Required Tool Usage setting', () => {
