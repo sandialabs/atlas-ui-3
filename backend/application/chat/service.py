@@ -206,6 +206,7 @@ class ChatService:
         user_email: Optional[str] = None,
         agent_mode: bool = False,
         temperature: float = 0.7,
+        custom_system_prompt: Optional[str] = None,
         update_callback: Optional[UpdateCallback] = None,
         **kwargs
     ) -> Dict[str, Any]:
@@ -254,6 +255,7 @@ class ChatService:
                 tool_choice_required=tool_choice_required,
                 agent_mode=agent_mode,
                 temperature=temperature,
+                custom_system_prompt=custom_system_prompt,
                 update_callback=update_callback,
                 **kwargs
             )
