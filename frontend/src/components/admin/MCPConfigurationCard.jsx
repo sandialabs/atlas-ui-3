@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Settings, RefreshCw, RotateCcw, Activity } from 'lucide-react'
+import { Settings, RefreshCw, RotateCcw, Activity, Key } from 'lucide-react'
 
 const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   const [mcpStatus, setMcpStatus] = useState({
@@ -131,6 +131,63 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
     }
   }
 
+  const manageJWT = async () => {
+    try {
+      const response = await fetch('/admin/config/view')
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const data = await response.json()
+
+      // Get list of configured MCP servers
+      const mcpConfig = data.mcp_config || {}
+      const servers = Object.keys(mcpConfig)
+
+      if (servers.length === 0) {
+        addNotification('No MCP servers configured', 'warning')
+        return
+      }
+
+      // Check which servers have JWTs
+      const jwtResponse = await fetch('/admin/mcp/jwt/list')
+      const jwtData = jwtResponse.ok ? await jwtResponse.json() : { servers: [] }
+      const serversWithJWT = new Set(jwtData.servers || [])
+
+      // Create server list with JWT status
+      const serverList = servers.map(name => {
+        const hasJWT = serversWithJWT.has(name)
+        return `${name}: ${hasJWT ? '[JWT stored]' : '[No JWT]'}`
+      }).join('\n')
+
+      const description = `Upload and manage JWT tokens for MCP servers.
+
+Configured servers:
+${serverList}
+
+To upload a JWT:
+1. Paste JWT token in the field below
+2. Select target server from dropdown
+3. Click Upload
+
+To delete a JWT:
+1. Select server from dropdown
+2. Click Delete
+
+Note: JWTs are encrypted and stored securely. OAuth and manually uploaded JWTs take priority over bearer tokens in auth_token field.`
+
+      openModal('Manage JWT Tokens', {
+        type: 'textarea',
+        value: '',
+        description: description,
+        readOnly: false,
+        servers: servers,
+        serversWithJWT: Array.from(serversWithJWT)
+      }, 'jwt-manager')
+    } catch (err) {
+      addNotification('Error loading JWT management: ' + err.message, 'error')
+    }
+  }
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'healthy': return 'text-green-400 bg-green-900/20'
@@ -201,6 +258,13 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         >
           <Activity className="w-4 h-4" />
           View MCP Status
+        </button>
+        <button
+          onClick={manageJWT}
+          className="w-full px-4 py-2 bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors flex items-center justify-center gap-2"
+        >
+          <Key className="w-4 h-4" />
+          Manage JWT Tokens
         </button>
         <div className="grid grid-cols-2 gap-2">
           <button
