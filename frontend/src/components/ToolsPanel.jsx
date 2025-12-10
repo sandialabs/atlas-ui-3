@@ -14,9 +14,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const navigate = useNavigate()
   const {
     selectedTools: savedSelectedTools,
-    toggleTool: saveToggleTool,
     selectedPrompts: savedSelectedPrompts,
-    togglePrompt: saveTogglePrompt,
     addTools: saveAddTools,
     removeTools: saveRemoveTools,
     addPrompts: saveAddPrompts,
