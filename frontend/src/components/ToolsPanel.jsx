@@ -1,8 +1,9 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Key } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
+import JWTUploadDialog from './JWTUploadDialog'
 
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
@@ -11,6 +12,8 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
   const [collapsedServers, setCollapsedServers] = useState(new Set())
+  const [jwtDialogOpen, setJwtDialogOpen] = useState(false)
+  const [selectedServerForJWT, setSelectedServerForJWT] = useState(null)
   const navigate = useNavigate()
   const {
     selectedTools,
@@ -541,6 +544,19 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                             >
                               {isServerAllSelected(server.server) ? 'All On' : 'Enable All'}
                             </button>
+                            
+                            {/* JWT Upload Button */}
+                            <button
+                              onClick={() => {
+                                setSelectedServerForJWT(server.server)
+                                setJwtDialogOpen(true)
+                              }}
+                              className="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5"
+                              title="Upload JWT token for authentication"
+                            >
+                              <Key className="w-3 h-3" />
+                              JWT
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -553,6 +569,19 @@ const ToolsPanel = ({ isOpen, onClose }) => {
           )}
         </div>
       </div>
+      
+      {/* JWT Upload Dialog */}
+      <JWTUploadDialog
+        isOpen={jwtDialogOpen}
+        onClose={() => {
+          setJwtDialogOpen(false)
+          setSelectedServerForJWT(null)
+        }}
+        serverName={selectedServerForJWT}
+        onSuccess={() => {
+          console.log('JWT uploaded successfully for', selectedServerForJWT)
+        }}
+      />
     </div>
   )
 }
