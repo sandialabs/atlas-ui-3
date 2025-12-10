@@ -438,3 +438,188 @@ async def get_splash_config(current_user: str = Depends(get_current_user)):
 #         "user_sessions": 0,
 #         "sessions": []
 #     }
+
+
+# User JWT Management Endpoints (Non-Admin)
+
+from pydantic import BaseModel
+from fastapi import HTTPException
+from modules.mcp_tools.jwt_storage import get_jwt_storage
+
+
+class UserJWTUpload(BaseModel):
+    """Model for user JWT upload request."""
+    server_name: str
+    jwt_token: str
+
+
+@router.post("/user/mcp/jwt")
+async def upload_user_jwt(
+    jwt_upload: UserJWTUpload,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Upload and store a JWT for a specific MCP server (user-accessible).
+    
+    Regular users can upload JWT tokens for MCP servers they have access to.
+    The JWT will be encrypted and stored securely per user.
+    
+    Args:
+        jwt_upload: Server name and JWT token to store
+        current_user: Current user (from auth)
+    
+    Returns:
+        Success message with server name
+    """
+    try:
+        from modules.config import config_manager
+        
+        # Validate that the server exists in config
+        mcp_config = config_manager.mcp_config
+        if jwt_upload.server_name not in mcp_config.servers:
+            raise HTTPException(
+                status_code=404,
+                detail=f"MCP server '{jwt_upload.server_name}' not found in configuration"
+            )
+        
+        # Check if user has access to this server (via groups)
+        server_config = mcp_config.servers[jwt_upload.server_name]
+        user_has_access = False
+        
+        for group in server_config.groups:
+            if await is_user_in_group(current_user, group):
+                user_has_access = True
+                break
+        
+        if not user_has_access and server_config.groups:
+            raise HTTPException(
+                status_code=403,
+                detail=f"User does not have access to server '{jwt_upload.server_name}'"
+            )
+        
+        # Store the JWT with user prefix to keep per-user storage
+        jwt_storage = get_jwt_storage()
+        user_server_name = f"{current_user}_{jwt_upload.server_name}"
+        jwt_storage.store_jwt(user_server_name, jwt_upload.jwt_token)
+        
+        logger.info(f"User {current_user} uploaded JWT for MCP server: {jwt_upload.server_name}")
+        
+        return {
+            "status": "success",
+            "message": f"JWT stored for server '{jwt_upload.server_name}'",
+            "server_name": jwt_upload.server_name
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading JWT for {jwt_upload.server_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to store JWT: {str(e)}")
+
+
+@router.get("/user/mcp/{server_name}/jwt")
+async def get_user_jwt_status(
+    server_name: str,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Check if a JWT exists for a specific MCP server for the current user.
+    
+    Does not return the actual JWT for security reasons, only whether it exists.
+    
+    Args:
+        server_name: Name of the MCP server
+        current_user: Current user (from auth)
+    
+    Returns:
+        JWT status information
+    """
+    try:
+        jwt_storage = get_jwt_storage()
+        user_server_name = f"{current_user}_{server_name}"
+        has_jwt = jwt_storage.has_jwt(user_server_name)
+        
+        return {
+            "server_name": server_name,
+            "has_jwt": has_jwt,
+            "user": current_user
+        }
+    
+    except Exception as e:
+        logger.error(f"Error checking JWT status for {server_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check JWT status: {str(e)}")
+
+
+@router.delete("/user/mcp/{server_name}/jwt")
+async def delete_user_jwt(
+    server_name: str,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Delete the stored JWT for a specific MCP server for the current user.
+    
+    Args:
+        server_name: Name of the MCP server
+        current_user: Current user (from auth)
+    
+    Returns:
+        Success message
+    """
+    try:
+        jwt_storage = get_jwt_storage()
+        user_server_name = f"{current_user}_{server_name}"
+        deleted = jwt_storage.delete_jwt(user_server_name)
+        
+        if not deleted:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No JWT found for server '{server_name}'"
+            )
+        
+        logger.info(f"User {current_user} deleted JWT for MCP server: {server_name}")
+        
+        return {
+            "status": "success",
+            "message": f"JWT deleted for server '{server_name}'",
+            "server_name": server_name
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting JWT for {server_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete JWT: {str(e)}")
+
+
+@router.get("/user/mcp/jwt/list")
+async def list_user_servers_with_jwt(current_user: str = Depends(get_current_user)):
+    """
+    List all MCP servers that have stored JWTs for the current user.
+    
+    Args:
+        current_user: Current user (from auth)
+    
+    Returns:
+        List of server names with stored JWTs
+    """
+    try:
+        jwt_storage = get_jwt_storage()
+        all_servers = jwt_storage.list_servers_with_jwt()
+        
+        # Filter to only this user's JWTs
+        user_prefix = f"{current_user}_"
+        user_servers = [
+            s.replace(user_prefix, "") 
+            for s in all_servers 
+            if s.startswith(user_prefix)
+        ]
+        
+        return {
+            "servers": user_servers,
+            "count": len(user_servers),
+            "user": current_user
+        }
+    
+    except Exception as e:
+        logger.error(f"Error listing servers with JWT: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list servers: {str(e)}")

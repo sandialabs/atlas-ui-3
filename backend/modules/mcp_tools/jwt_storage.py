@@ -27,16 +27,19 @@ class JWTStorage:
         Initialize JWT storage.
         
         Args:
-            storage_dir: Directory to store encrypted JWT files. Defaults to ~/.atlas-ui-3/jwt-storage
+            storage_dir: Directory to store encrypted JWT files. 
+                        Defaults to JWT_STORAGE_DIR env var or ~/.atlas-ui-3/jwt-storage
             encryption_key: Fernet encryption key (base64-encoded). If not provided, uses
                           JWT_STORAGE_ENCRYPTION_KEY env var or generates a new key.
         """
-        # Set storage directory
+        # Set storage directory from env var or default
         if storage_dir is None:
-            storage_dir = os.path.expanduser("~/.atlas-ui-3/jwt-storage")
+            storage_dir = os.environ.get("JWT_STORAGE_DIR", "~/.atlas-ui-3/jwt-storage")
         
-        self.storage_dir = Path(storage_dir)
+        self.storage_dir = Path(os.path.expanduser(storage_dir))
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"JWT storage directory: {self.storage_dir}")
         
         # Set up encryption key
         if encryption_key is None:
