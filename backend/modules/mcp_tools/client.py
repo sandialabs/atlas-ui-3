@@ -151,7 +151,7 @@ class MCPToolManager:
                 # Log to backend logger with server context
                 logger.log(
                     python_log_level,
-                    f"[MCP:{sanitize_for_logging(server_name)}] {msg}",
+                    f"[MCP:{sanitize_for_logging(server_name)}] {sanitize_for_logging(msg)}",
                     extra={"mcp_server": server_name, "mcp_extra": extra}
                 )
                 

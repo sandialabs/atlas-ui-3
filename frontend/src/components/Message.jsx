@@ -1001,8 +1001,8 @@ const renderContent = () => {
       // Handle tool log messages with badges and colors
       if (message.type === 'tool_log') {
         const logLevel = message.log_level || message.subtype || 'info'
-        let badgeColor = 'bg-blue-500 text-white'
-        let textColor = 'text-gray-200'
+        let badgeColor
+        let textColor
         
         // Apply colors based on log level
         switch (logLevel.toLowerCase()) {

@@ -8,8 +8,9 @@ These tests verify that:
 """
 
 import logging
+import os
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, AsyncMock
 from backend.modules.mcp_tools.client import MCPToolManager, MCP_TO_PYTHON_LOG_LEVEL
 
 
