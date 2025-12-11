@@ -6,7 +6,7 @@ import os
 import json
 import time
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Callable, Awaitable
 
 from fastmcp import Client
 from modules.config import config_manager
@@ -15,6 +15,19 @@ from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
+
+# Mapping from MCP log levels to Python logging levels
+MCP_TO_PYTHON_LOG_LEVEL = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "notice": logging.INFO,
+    "warning": logging.WARNING,
+    "warn": logging.WARNING,
+    "error": logging.ERROR,
+    "alert": logging.CRITICAL,
+    "critical": logging.CRITICAL,
+    "emergency": logging.CRITICAL,
+}
 
 
 class MCPToolManager:
@@ -28,7 +41,7 @@ class MCPToolManager:
     - Auto-reconnect with exponential backoff (when feature flag is enabled)
     """
     
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None, log_callback: Optional[Callable[[str, str, str, Dict[str, Any]], Awaitable[None]]] = None):
         if config_path is None:
             # Use config manager to get config path
             app_settings = config_manager.app_settings
@@ -76,6 +89,85 @@ class MCPToolManager:
         # Reconnect task reference (used by auto-reconnect background task)
         self._reconnect_task: Optional[asyncio.Task] = None
         self._reconnect_running = False
+        
+        # Log callback for forwarding MCP server logs to UI
+        # Signature: (server_name, level, message, extra_data) -> None
+        self._log_callback = log_callback
+        
+        # Get configured log level for filtering
+        self._min_log_level = self._get_min_log_level()
+    
+    def _get_min_log_level(self) -> int:
+        """Get the minimum log level from environment or config."""
+        try:
+            app_settings = config_manager.app_settings
+            level_name = app_settings.log_level.upper()
+        except Exception:
+            level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+        
+        level = getattr(logging, level_name, None)
+        return level if isinstance(level, int) else logging.INFO
+    
+    def _create_log_handler(self, server_name: str):
+        """Create a log handler for an MCP server.
+        
+        This handler forwards MCP server logs to the backend logger and optionally to the UI.
+        Logs are filtered based on the configured LOG_LEVEL.
+        
+        Args:
+            server_name: Name of the MCP server
+            
+        Returns:
+            An async function that handles LogMessage objects from fastmcp
+        """
+        async def log_handler(message) -> None:
+            """Handle log messages from MCP server."""
+            try:
+                # Import here to avoid circular dependency
+                from fastmcp.client.logging import LogMessage
+                
+                # Handle both LogMessage objects and dict-like structures
+                if hasattr(message, 'level'):
+                    log_level_str = message.level.lower()
+                    log_data = message.data if hasattr(message, 'data') else {}
+                else:
+                    # Fallback for dict-like messages
+                    log_level_str = message.get('level', 'info').lower()
+                    log_data = message.get('data', {})
+                
+                msg = log_data.get('msg', '') if isinstance(log_data, dict) else str(log_data)
+                extra = log_data.get('extra', {}) if isinstance(log_data, dict) else {}
+                
+                # Convert MCP log level to Python logging level
+                python_log_level = MCP_TO_PYTHON_LOG_LEVEL.get(log_level_str, logging.INFO)
+                
+                # Filter based on configured minimum log level
+                if python_log_level < self._min_log_level:
+                    return
+                
+                # Log to backend logger with server context
+                logger.log(
+                    python_log_level,
+                    f"[MCP:{sanitize_for_logging(server_name)}] {msg}",
+                    extra={"mcp_server": server_name, "mcp_extra": extra}
+                )
+                
+                # Forward to UI callback if available
+                if self._log_callback is not None:
+                    await self._log_callback(server_name, log_level_str, msg, extra)
+                    
+            except Exception as e:
+                logger.warning(f"Error handling log from MCP server {server_name}: {e}")
+        
+        return log_handler
+    
+    def set_log_callback(self, callback: Optional[Callable[[str, str, str, Dict[str, Any]], Awaitable[None]]]) -> None:
+        """Set or update the log callback for forwarding MCP server logs to UI.
+        
+        Args:
+            callback: Async function that receives (server_name, level, message, extra_data)
+        """
+        self._log_callback = callback
     
     def reload_config(self) -> Dict[str, Any]:
         """Reload MCP server configuration from disk.
@@ -229,14 +321,17 @@ class MCPToolManager:
                     logger.error(f"Failed to resolve auth_token for {server_name}: {e}")
                     return None  # Skip this server
                 
+                # Create log handler for this server
+                log_handler = self._create_log_handler(server_name)
+                
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
-                    client = Client(url, auth=token)
+                    client = Client(url, auth=token, log_handler=log_handler)
                 else:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
-                    client = Client(url, auth=token)
+                    client = Client(url, auth=token, log_handler=log_handler)
                 
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
                 return client
@@ -264,6 +359,9 @@ class MCPToolManager:
                                 return None  # Skip this server if env var resolution fails
                         logger.info(f"Environment variables specified: {list(resolved_env.keys())}")
                     
+                    # Create log handler for this server
+                    log_handler = self._create_log_handler(server_name)
+                    
                     if cwd:
                         # Convert relative path to absolute path from project root
                         if not os.path.isabs(cwd):
@@ -279,7 +377,7 @@ class MCPToolManager:
                             logger.info(f"Creating STDIO client for {server_name} with command: {command} in cwd: {cwd}")
                             from fastmcp.client.transports import StdioTransport
                             transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd, env=resolved_env)
-                            client = Client(transport)
+                            client = Client(transport, log_handler=log_handler)
                             logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command and cwd")
                             return client
                         else:
@@ -289,7 +387,7 @@ class MCPToolManager:
                         logger.info(f"No cwd specified, creating STDIO client for {server_name} with command: {command}")
                         from fastmcp.client.transports import StdioTransport
                         transport = StdioTransport(command=command[0], args=command[1:], env=resolved_env)
-                        client = Client(transport)
+                        client = Client(transport, log_handler=log_handler)
                         logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command")
                         return client
                 else:
@@ -298,7 +396,8 @@ class MCPToolManager:
                     logger.debug(f"Attempting to initialize {server_name} at path: {server_path}")
                     if os.path.exists(server_path):
                         logger.debug(f"Server script exists for {server_name}, creating client...")
-                        client = Client(server_path)  # Client auto-detects STDIO transport from .py file
+                        log_handler = self._create_log_handler(server_name)
+                        client = Client(server_path, log_handler=log_handler)  # Client auto-detects STDIO transport from .py file
                         logger.info(f"Created MCP client for {server_name}")
                         logger.debug(f"Successfully created client for {server_name}")
                         return client

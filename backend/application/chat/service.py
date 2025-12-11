@@ -104,6 +104,10 @@ class ChatService:
         self.tool_authorization = ToolAuthorizationService(tool_manager=self.tool_manager)
         self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
         self.message_builder = MessageBuilder()
+        
+        # Set up MCP log callback to forward logs to UI
+        if self.tool_manager and hasattr(self.tool_manager, 'set_log_callback'):
+            self.tool_manager.set_log_callback(self._create_mcp_log_callback())
 
         # Initialize mode runners
         self.plain_mode = PlainModeRunner(
@@ -158,6 +162,37 @@ class ChatService:
         
         # Initialize orchestrator
         self.orchestrator = None  # Will be initialized lazily to avoid circular dependency
+    
+    def _create_mcp_log_callback(self):
+        """Create callback for handling MCP server logs.
+        
+        Returns an async function that forwards logs to the UI via the connection.
+        """
+        async def mcp_log_callback(server_name: str, level: str, message: str, extra: Dict[str, Any]) -> None:
+            """Handle log messages from MCP servers and forward to UI."""
+            if self.connection:
+                try:
+                    # Import here to avoid circular dependency
+                    from application.chat.utilities import notification_utils
+                    
+                    # Create update callback for this connection
+                    async def update_callback(msg: Dict[str, Any]) -> None:
+                        await self.connection.send_message(msg)
+                    
+                    # Forward the log message
+                    await notification_utils.notify_tool_log(
+                        server_name=server_name,
+                        tool_name=None,  # Logs outside tool execution don't have a tool name
+                        tool_call_id=None,
+                        level=level,
+                        message=message,
+                        extra=extra,
+                        update_callback=update_callback
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to forward MCP log to UI: {e}")
+        
+        return mcp_log_callback
 
     def _get_orchestrator(self):
         """Lazy initialization of orchestrator."""
