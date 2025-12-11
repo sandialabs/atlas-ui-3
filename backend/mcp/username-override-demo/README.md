@@ -111,6 +111,9 @@ Create a note for me with the text "Meeting at 3pm"
 **Security Guarantee:**
 The record will ALWAYS be created for the authenticated user, regardless of what the LLM tries to specify.
 
+**Approval Flow Security:**
+When tool approval with argument editing is enabled, users cannot bypass the username override by editing the username field in the approval dialog. The system re-applies security injections after user edits to ensure username and other security-critical parameters cannot be tampered with.
+
 ### 3. `check_user_permissions`
 
 Checks if the authenticated user has permission for a specific action.

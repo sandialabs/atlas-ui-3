@@ -249,8 +249,23 @@ async def execute_single_tool(
                     # Use json comparison to avoid false positives from dict ordering
                     if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
                         arguments_were_edited = True
-                        filtered_args = edited_args
                         logger.info(f"User edited arguments for tool {tool_call.function.name}")
+
+                        # SECURITY: Re-apply security injections after user edits
+                        # This ensures username and other security-critical parameters cannot be tampered with
+                        re_injected_args = inject_context_into_args(
+                            edited_args,
+                            session_context,
+                            tool_call.function.name,
+                            tool_manager
+                        )
+
+                        # Re-filter to schema to ensure only valid parameters
+                        filtered_args = _filter_args_to_schema(
+                            re_injected_args,
+                            tool_call.function.name,
+                            tool_manager
+                        )
                     else:
                         # No actual changes, but response included arguments - keep original filtered_args
                         logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
@@ -289,9 +304,9 @@ async def execute_single_tool(
         if arguments_were_edited:
             edit_note = (
                 f"[IMPORTANT: The user manually edited the tool arguments before execution. "
-                f"Disregard your original arguments. The ACTUAL arguments executed were: {json.dumps(filtered_args)}. "
-                f"Your response must reflect these edited arguments as the user's true intent. "
-                # f"Do NOT reference the original arguments: {json.dumps(original_filtered_args)}]\n\n"
+                f"Security-critical parameters (like username) were re-injected by the system and cannot be modified. "
+                f"The ACTUAL arguments executed were: {json.dumps(filtered_args)}. "
+                f"Your response must reflect these arguments as the user's true intent.]\\n\\n"
             )
             if isinstance(result.content, str):
                 result.content = edit_note + result.content
