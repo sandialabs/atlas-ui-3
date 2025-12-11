@@ -16,6 +16,9 @@ from domain.messages.models import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
 
+# Type alias for log callback function
+LogCallback = Callable[[str, str, str, Dict[str, Any]], Awaitable[None]]
+
 # Mapping from MCP log levels to Python logging levels
 MCP_TO_PYTHON_LOG_LEVEL = {
     "debug": logging.DEBUG,
@@ -41,7 +44,7 @@ class MCPToolManager:
     - Auto-reconnect with exponential backoff (when feature flag is enabled)
     """
     
-    def __init__(self, config_path: Optional[str] = None, log_callback: Optional[Callable[[str, str, str, Dict[str, Any]], Awaitable[None]]] = None):
+    def __init__(self, config_path: Optional[str] = None, log_callback: Optional[LogCallback] = None):
         if config_path is None:
             # Use config manager to get config path
             app_settings = config_manager.app_settings
@@ -161,7 +164,7 @@ class MCPToolManager:
         
         return log_handler
     
-    def set_log_callback(self, callback: Optional[Callable[[str, str, str, Dict[str, Any]], Awaitable[None]]]) -> None:
+    def set_log_callback(self, callback: Optional[LogCallback]) -> None:
         """Set or update the log callback for forwarding MCP server logs to UI.
         
         Args:
