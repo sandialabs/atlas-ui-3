@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 
-### PR  169 - 2024-12-09
+### PR  163 - 2024-12-09
 - Added username-override-demo MCP server to demonstrate the username security feature
 - Server includes tools showing how Atlas UI prevents LLM user impersonation
 - Added comprehensive documentation and example configuration
