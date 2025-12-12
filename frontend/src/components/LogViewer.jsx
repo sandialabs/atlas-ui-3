@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Filter, ChevronDown, ChevronUp, ToggleLeft, ToggleRight } from 'lucide-react';
 import { useChat } from '../contexts/ChatContext';
 
@@ -140,11 +140,20 @@ export default function LogViewer() {
     setHideDiscoverDataSources(newState);
   };
 
-  const levels = Array.from(new Set(entries.map(e => e.level))).sort();
-  const modules = Array.from(new Set(entries.map(e => e.module))).sort();
+  // Memoize unique levels extracted from entries
+  const levels = useMemo(() => 
+    Array.from(new Set(entries.map(e => e.level))).sort(),
+    [entries]
+  );
 
-  // Apply all filtering logic
-  const filtered = entries.filter(e => {
+  // Memoize unique modules extracted from entries
+  const modules = useMemo(() => 
+    Array.from(new Set(entries.map(e => e.module))).sort(),
+    [entries]
+  );
+
+  // Memoize filtered entries based on all filter states
+  const filtered = useMemo(() => entries.filter(e => {
     // Hide log viewer requests
     if (hideViewerRequests && (
       (e.message && e.message.includes('GET /admin/logs/viewer')) ||
@@ -179,10 +188,18 @@ export default function LogViewer() {
     }
     
     return true;
-  });
+  }), [entries, hideViewerRequests, hideMiddleware, hideConfigRoutes, hideWebsocketEndpoint, hideHttpClientCalls, hideDiscoverDataSources]);
 
-  const paginated = filtered.slice().reverse().slice(page * pageSize, (page + 1) * pageSize);
-  const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+  // Memoize paginated results - compute reverse and slice in a single pass
+  const paginated = useMemo(() => {
+    const reversed = [...filtered].reverse();
+    return reversed.slice(page * pageSize, (page + 1) * pageSize);
+  }, [filtered, page, pageSize]);
+
+  const totalPages = useMemo(() => 
+    Math.ceil(filtered.length / pageSize) || 1,
+    [filtered.length, pageSize]
+  );
 
   const changePage = (delta) => {
     setPage(p => Math.min(Math.max(0, p + delta), totalPages - 1));
