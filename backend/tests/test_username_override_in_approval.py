@@ -1,10 +1,7 @@
 """Tests for username override security in tool approval flow."""
 
 
-import json
 from unittest.mock import Mock
-
-import pytest
 
 from application.chat.utilities.tool_utils import inject_context_into_args, _filter_args_to_schema
 
