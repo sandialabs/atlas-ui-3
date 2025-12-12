@@ -177,7 +177,7 @@ class ChatService:
                     
                     # Create update callback for this connection
                     async def update_callback(msg: Dict[str, Any]) -> None:
-                        await self.connection.send_message(msg)
+                        await self.connection.send_json(msg)
                     
                     # Forward the log message
                     await notification_utils.notify_tool_log(
