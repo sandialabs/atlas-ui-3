@@ -329,7 +329,7 @@ const FilesPage = () => {
                       <button
                         onClick={() => {
                           if (confirm(`Are you sure you want to delete "${file.filename}"?`)) {
-                            deleteFile(file.s3_key, file.filename)
+                            deleteFile(file.s3_key)
                           }
                         }}
                         className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"

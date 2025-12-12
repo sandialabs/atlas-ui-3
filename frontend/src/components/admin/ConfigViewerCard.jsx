@@ -126,7 +126,7 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
             <div key={objKey} className="ml-4">
               <span className="text-cyan-400">"{objKey}"</span>
               <span className="text-gray-400">: </span>
-              {renderValue(objValue, objKey)}
+              {renderValue(objValue)}
               {index < entries.length - 1 && <span className="text-gray-400">,</span>}
             </div>
           ))}

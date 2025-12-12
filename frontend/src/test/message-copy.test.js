@@ -50,8 +50,7 @@ describe('Message Copy Functionality', () => {
     };
 
     // Test string content
-    const mockButton = { classList: { add: vi.fn(), remove: vi.fn() } };
-    copyMessageContent(testContent, mockButton);
+    copyMessageContent(testContent);
     
     expect(mockWriteText).toHaveBeenCalledWith(testContent);
   });
@@ -81,8 +80,7 @@ describe('Message Copy Functionality', () => {
 
     // Test object with raw property
     const objWithRaw = { raw: "Raw content here", other: "data" };
-    const mockButton = { classList: { add: vi.fn(), remove: vi.fn() } };
-    copyMessageContent(objWithRaw, mockButton);
+    copyMessageContent(objWithRaw);
     
     expect(mockWriteText).toHaveBeenCalledWith("Raw content here");
   });
