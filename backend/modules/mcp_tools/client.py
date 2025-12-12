@@ -104,7 +104,10 @@ class MCPToolManager:
         """Get the minimum log level from environment or config."""
         try:
             app_settings = config_manager.app_settings
-            level_name = app_settings.log_level.upper()
+            raw_level_name = getattr(app_settings, "log_level", None)
+            if not isinstance(raw_level_name, str):
+                raise TypeError("log_level must be a string")
+            level_name = raw_level_name.upper()
         except Exception:
             level_name = os.getenv("LOG_LEVEL", "INFO").upper()
         
