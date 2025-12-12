@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2025-12-11
+### PR #169 - 2025-12-11
 - Implement MCP server logging infrastructure with FastMCP log_handler
 - Add log level filtering based on environment LOG_LEVEL configuration
 - Forward MCP server logs to chat UI via intermediate_update websocket messages
@@ -14,7 +14,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Create comprehensive test suite for MCP logging functionality
 - Add demo MCP server (logging_demo) for testing log output
 
-### PR #TBD - 2025-12-10
+
+
+### PR  163 - 2024-12-09
+- **SECURITY FIX**: Fixed edit args security bug that allowed bypassing username override security through approval argument editing
+- Added username-override-demo MCP server to demonstrate the username security feature
+- Server includes tools showing how Atlas UI prevents LLM user impersonation
+- Added comprehensive documentation and example configuration
+
+### PR #158 - 2025-12-10
 - Add explicit "Save Changes" and "Cancel" buttons to Tools & Integration Panel (ToolsPanel)
 - Add explicit "Save Changes" and "Cancel" buttons to Data Sources Panel (RagPanel)
 - Implement pending state pattern to track unsaved changes
@@ -22,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Changes only persist to localStorage when user clicks "Save Changes"
 - Cancel button reverts all pending changes and closes panel
 - Updated tests to verify save/cancel functionality
+
 
 ### PR #156 - 2024-12-07
 - Add CHANGELOG.md to track changes across PRs
