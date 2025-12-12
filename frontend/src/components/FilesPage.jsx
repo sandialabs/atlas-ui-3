@@ -53,7 +53,7 @@ const FilesPage = () => {
     }
   }
 
-  const deleteFile = async (fileKey, filename) => {
+  const deleteFile = async (fileKey) => {
     try {
       const response = await fetch(`/api/files/${fileKey}`, {
         method: 'DELETE',
