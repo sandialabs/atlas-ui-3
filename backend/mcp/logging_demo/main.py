@@ -4,6 +4,7 @@ Logging Demo MCP Server using FastMCP
 Demonstrates MCP server logging at various levels.
 """
 
+import asyncio
 import time
 from typing import Any, Dict
 from fastmcp import FastMCP, Context
@@ -27,6 +28,7 @@ async def test_logging(operation: str, ctx: Context) -> Dict[str, Any]:
             - "warning": Warning level only
             - "error": Error level only
             - "mixed": A realistic mix of levels
+            - "mixed-delay": Like "mixed", but with short delays between log calls
 
     Returns:
         Dict with results and logs emitted
@@ -59,6 +61,25 @@ async def test_logging(operation: str, ctx: Context) -> Dict[str, Any]:
         await ctx.debug("Processing step 3")
         await ctx.warning("Encountered a minor issue, continuing...")
         await ctx.debug("Processing step 4")
+        await ctx.info("Operation completed successfully")
+        logs_emitted = ["info", "debug", "debug", "info", "debug", "warning", "debug", "info"]
+
+    if operation == "mixed-delay":
+        delay_s = 0.35
+        await ctx.info("Starting operation...")
+        await asyncio.sleep(delay_s)
+        await ctx.debug("Processing step 1")
+        await asyncio.sleep(delay_s)
+        await ctx.debug("Processing step 2")
+        await asyncio.sleep(delay_s)
+        await ctx.info("Operation in progress (50% complete)")
+        await asyncio.sleep(delay_s)
+        await ctx.debug("Processing step 3")
+        await asyncio.sleep(delay_s)
+        await ctx.warning("Encountered a minor issue, continuing...")
+        await asyncio.sleep(delay_s)
+        await ctx.debug("Processing step 4")
+        await asyncio.sleep(delay_s)
         await ctx.info("Operation completed successfully")
         logs_emitted = ["info", "debug", "debug", "info", "debug", "warning", "debug", "info"]
     
