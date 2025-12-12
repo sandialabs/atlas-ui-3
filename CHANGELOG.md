@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Create comprehensive test suite for MCP logging functionality
 - Add demo MCP server (logging_demo) for testing log output
 
+### PR #170 - 2025-12-12
+- Improve LogViewer performance by memoizing expensive computations with `useMemo`
 
 
 ### PR  163 - 2024-12-09
