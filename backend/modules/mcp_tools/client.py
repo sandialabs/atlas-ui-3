@@ -17,6 +17,24 @@ from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
 from modules.mcp_tools.jwt_storage import get_jwt_storage
 
+try:
+    # Exposed at module scope so tests can patch `backend.modules.mcp_tools.client.OAuth`.
+    from fastmcp.client.auth import OAuth  # type: ignore
+except Exception:  # pragma: no cover
+    OAuth = None  # type: ignore
+
+try:
+    # Exposed at module scope so tests can patch these symbols.
+    from key_value.aio.stores.disk import DiskStore  # type: ignore
+    from key_value.aio.wrappers.encryption import FernetEncryptionWrapper  # type: ignore
+    from cryptography.fernet import Fernet  # type: ignore
+except Exception:  # pragma: no cover
+    DiskStore = None  # type: ignore
+    FernetEncryptionWrapper = None  # type: ignore
+    Fernet = None  # type: ignore
+
+
+
 logger = logging.getLogger(__name__)
 
 # Type alias for log callback function
@@ -349,7 +367,8 @@ class MCPToolManager:
         if oauth_config and oauth_config.get("enabled"):
             logger.info(f"Using OAuth 2.1 authentication for {server_name}")
             try:
-                from fastmcp.client.auth import OAuth
+                if OAuth is None:
+                    raise ImportError("fastmcp.client.auth.OAuth is not available")
                 
                 # Build OAuth configuration
                 oauth_kwargs = {
@@ -371,9 +390,8 @@ class MCPToolManager:
                 # Set up token storage if path is specified
                 if oauth_config.get("token_storage_path"):
                     try:
-                        from key_value.aio.stores.disk import DiskStore
-                        from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
-                        from cryptography.fernet import Fernet
+                        if DiskStore is None or FernetEncryptionWrapper is None or Fernet is None:
+                            raise ImportError("OAuth token storage dependencies not available")
                         
                         storage_path = Path(oauth_config["token_storage_path"]).expanduser()
                         storage_path.mkdir(parents=True, exist_ok=True)
@@ -385,7 +403,13 @@ class MCPToolManager:
                             if key_file.exists():
                                 encryption_key = key_file.read_text().strip()
                             else:
-                                encryption_key = Fernet.generate_key().decode()
+                                generated_key = Fernet.generate_key()
+                                if isinstance(generated_key, bytes):
+                                    encryption_key = generated_key.decode()
+                                elif isinstance(generated_key, str):
+                                    encryption_key = generated_key
+                                else:
+                                    encryption_key = str(generated_key)
                                 key_file.write_text(encryption_key)
                                 key_file.chmod(0o600)
                                 logger.warning(
@@ -433,15 +457,22 @@ class MCPToolManager:
                 return jwt_token
         
         # Check for auth_token field
-        raw_token = config.get("auth_token")
-        if raw_token:
-            try:
-                token = resolve_env_var(raw_token)
-                logger.info(f"Using bearer token from auth_token field for {server_name}")
-                return token
-            except ValueError as e:
-                logger.error(f"Failed to resolve auth_token for {server_name}: {e}")
-                return None
+        if "auth_token" in config:
+            raw_token = config.get("auth_token")
+
+            # Preserve explicit empty string; some callers/tests treat this as an
+            # intentional value (e.g., to clear a previously configured token).
+            if raw_token == "":
+                return ""
+
+            if raw_token is not None:
+                try:
+                    token = resolve_env_var(raw_token)
+                    logger.info(f"Using bearer token from auth_token field for {server_name}")
+                    return token
+                except ValueError as e:
+                    logger.error(f"Failed to resolve auth_token for {server_name}: {e}")
+                    return None
         
         # No authentication
         logger.debug(f"No authentication configured for {server_name}")
@@ -468,6 +499,17 @@ class MCPToolManager:
 
                 # Get authentication (OAuth, JWT, or bearer token)
                 auth = self._get_auth_for_server(server_name, config, url)
+
+                # If auth_token was configured but could not be resolved, skip this server.
+                # (This keeps _get_auth_for_server returning None for missing env vars,
+                # while still preventing accidental unauthenticated connections.)
+                if auth is None and "auth_token" in config:
+                    raw_token = config.get("auth_token")
+                    if raw_token not in (None, ""):
+                        try:
+                            resolve_env_var(raw_token)
+                        except Exception:
+                            return None
                 
                 # Create log handler for this server
                 log_handler = self._create_log_handler(server_name)
