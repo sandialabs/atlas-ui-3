@@ -6,11 +6,14 @@ This directory contains the centralized testing infrastructure for the project.
 
 ```
 test/
-├── README.md           # This file
-├── run_tests.sh        # Master test script (entry point)
-├── backend_tests.sh    # Backend test execution
-├── frontend_tests.sh   # Frontend test execution
-└── e2e_tests.sh        # End-to-end test execution
+├── README.md              # This file
+├── run_tests.sh           # Master test script (entry point)
+├── backend_tests.sh       # Backend test execution
+├── frontend_tests.sh      # Frontend test execution
+├── e2e_tests.sh           # End-to-end test execution
+├── simple_e2e_test.py     # Simple Python-based e2e tests
+├── oauth_e2e_test.py      # OAuth 2.1 authentication e2e tests
+└── OAUTH_E2E_TESTS.md     # OAuth 2.1 test documentation
 ```
 
 ## Usage
@@ -63,9 +66,19 @@ To test the containerized approach locally:
 
 ## Test Status
 
-Currently configured to run only working tests:
+Currently configured test coverage:
 - Backend: 17 passing tests
 - Frontend: 3 passing tests  
-- E2E: Disabled (no working tests)
+- E2E: Simple e2e tests + OAuth 2.1 authentication tests
+
+### E2E Tests
+
+The e2e test suite includes:
+
+1. **Simple E2E Tests** (`simple_e2e_test.py`): Basic functionality tests using requests library
+2. **OAuth 2.1 Tests** (`oauth_e2e_test.py`): Bearer token authentication flow tests
+3. **Playwright Tests** (`../test_e2e/tests/*.spec.js`): Browser-based UI tests
+
+For detailed information on OAuth 2.1 tests, see `OAUTH_E2E_TESTS.md`.
 
 See `TEST_STATUS.md` in the project root for details on disabled tests and re-enabling strategy.
