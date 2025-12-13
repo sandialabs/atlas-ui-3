@@ -158,7 +158,7 @@ class ChatService:
         
         # Initialize orchestrator
         self.orchestrator = None  # Will be initialized lazily to avoid circular dependency
-
+    
     def _get_orchestrator(self):
         """Lazy initialization of orchestrator."""
         if self.orchestrator is None:
