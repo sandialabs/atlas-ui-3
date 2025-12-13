@@ -328,6 +328,18 @@ export function createWebSocketHandler(deps) {
           setIsThinking(false)
           addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
           break
+        case 'security_warning':
+          // Handle security check warnings/blocks
+          setIsThinking(false)
+          addMessage({
+            role: 'system',
+            content: data.message || 'Content security warning',
+            type: 'security_warning',
+            subtype: data.status || 'warning', // 'blocked' or 'warning'
+            details: data.details,
+            timestamp: new Date().toISOString()
+          })
+          break
         case 'agent_step_update':
           setCurrentAgentStep(data.current_step)
           break

@@ -160,13 +160,13 @@ RAG integration allows the AI to access and query external document sources for 
 **Mock RAG Service** (development):
 ```bash
 MOCK_RAG=true
-RAG_MOCK_URL=http://localhost:8001
+RAG_URL=http://localhost:8001
 ```
 
 **Production RAG Service**:
 ```bash
 MOCK_RAG=false
-RAG_MOCK_URL=https://your-rag-service.com/api
+RAG_URL=https://your-rag-service.com/api
 ```
 
 ### Features

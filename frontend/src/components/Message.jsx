@@ -1022,6 +1022,16 @@ const renderContent = () => {
             return <div className="text-gray-200">{message.content}</div>
         }
       }
+      
+      // Handle security warnings
+      if (message.type === 'security_warning') {
+        return (
+          <div className="text-gray-300">
+            {message.content}
+          </div>
+        )
+      }
+      
       return <div className="text-gray-200">{message.content}</div>
     }
 
