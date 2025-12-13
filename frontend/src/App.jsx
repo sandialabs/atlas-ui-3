@@ -25,7 +25,7 @@ function ChatInterface() {
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false)
   const [ragPanelOpen, setRagPanelOpen] = useState(false)
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false)
-  const [canvasPanelWidth, setCanvasPanelWidth] = useState(0)
+  const [, setCanvasPanelWidth] = useState(0)
   const [filesPanelOpen, setFilesPanelOpen] = useState(false)
   const { canvasContent, customUIContent, canvasFiles, features } = useChat()
 

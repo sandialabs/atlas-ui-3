@@ -88,8 +88,8 @@ export function createWebSocketHandler(deps) {
           // ignore unknown
           break
       }
-    } catch (e) {
-      console.error('Error handling agent update', e, data)
+    } catch (err) {
+      console.error('Error handling agent update', err, data)
     }
   }
 
@@ -386,7 +386,7 @@ export function createWebSocketHandler(deps) {
           break
         case 'tool_approval_request':
             // Handle tool approval request - stop thinking and add as a message in the chat
-            try { setIsThinking(false) } catch (e) { /* no-op */ }
+            try { setIsThinking(false) } catch { /* no-op */ }
           addMessage({
             role: 'system',
             content: `Tool Approval Required: ${data.tool_name}`,
