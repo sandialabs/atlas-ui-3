@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #172 - 2025-12-13
+- Resolve all frontend ESLint errors and warnings; update ESLint config and tests for consistency.
+
 
 ### PR  163 - 2024-12-09
 - **SECURITY FIX**: Fixed edit args security bug that allowed bypassing username override security through approval argument editing

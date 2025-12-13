@@ -64,6 +64,7 @@ python main.py  # NEVER use uvicorn --reload (causes problems)
   - Configuration changes: Update configuration guides
   - Bug fixes: Update troubleshooting docs if applicable
 - **Changelog Maintenance**: For every PR, add an entry to CHANGELOG.md in the root directory. Each entry should be 1-2 lines describing the core features or changes. Format: "### PR #<number> - YYYY-MM-DD" followed by a bullet point list of changes.
+- **PR Validation**: Before creating or accepting a PR, run `cd frontend && npm run lint` to ensure no frontend syntax errors or style issues.
 
 When testing or developing MCP-related features, example configurations can be found in config/mcp-example-configs/ with individual mcp-{servername}.json files for testing individual servers.
 
