@@ -1,6 +1,5 @@
 """Tests for domain errors module."""
 
-import pytest
 
 from domain.errors import (
     DomainError,
