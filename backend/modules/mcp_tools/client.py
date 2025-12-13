@@ -1,12 +1,14 @@
 """FastMCP client for connecting to MCP servers and managing tools."""
 
 import asyncio
+import contextvars
 import logging
 import os
 import json
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Callable, Awaitable
+from typing import Dict, List, Any, Optional, Callable, Awaitable, AsyncIterator
 
 from fastmcp import Client
 from modules.config import config_manager
@@ -18,6 +20,13 @@ logger = logging.getLogger(__name__)
 
 # Type alias for log callback function
 LogCallback = Callable[[str, str, str, Dict[str, Any]], Awaitable[None]]
+
+# Context-local override used to route MCP logs to the *current* request/session.
+# This prevents cross-user log leakage when MCPToolManager is shared across connections.
+_ACTIVE_LOG_CALLBACK: contextvars.ContextVar[Optional[LogCallback]] = contextvars.ContextVar(
+    "mcp_active_log_callback",
+    default=None,
+)
 
 # Mapping from MCP log levels to Python logging levels
 MCP_TO_PYTHON_LOG_LEVEL = {
@@ -93,9 +102,9 @@ class MCPToolManager:
         self._reconnect_task: Optional[asyncio.Task] = None
         self._reconnect_running = False
         
-        # Log callback for forwarding MCP server logs to UI
+        # Default log callback (used when no request-scoped callback is active).
         # Signature: (server_name, level, message, extra_data) -> None
-        self._log_callback = log_callback
+        self._default_log_callback = log_callback
         
         # Get configured log level for filtering
         self._min_log_level = self._get_min_log_level()
@@ -158,9 +167,11 @@ class MCPToolManager:
                     extra={"mcp_server": server_name, "mcp_extra": extra}
                 )
                 
-                # Forward to UI callback if available
-                if self._log_callback is not None:
-                    await self._log_callback(server_name, log_level_str, msg, extra)
+                # Forward to the active (request-scoped) callback when present,
+                # otherwise fall back to the default callback.
+                callback = _ACTIVE_LOG_CALLBACK.get() or self._default_log_callback
+                if callback is not None:
+                    await callback(server_name, log_level_str, msg, extra)
                     
             except Exception as e:
                 logger.warning(f"Error handling log from MCP server {server_name}: {e}")
@@ -173,7 +184,20 @@ class MCPToolManager:
         Args:
             callback: Async function that receives (server_name, level, message, extra_data)
         """
-        self._log_callback = callback
+        self._default_log_callback = callback
+
+    @asynccontextmanager
+    async def _use_log_callback(self, callback: Optional[LogCallback]) -> AsyncIterator[None]:
+        """Temporarily set a request-scoped log callback.
+
+        This is used to bind MCP server logs to the current tool execution so they
+        are forwarded only to the correct user's WebSocket connection.
+        """
+        token = _ACTIVE_LOG_CALLBACK.set(callback)
+        try:
+            yield
+        finally:
+            _ACTIVE_LOG_CALLBACK.reset(token)
     
     def reload_config(self) -> Dict[str, Any]:
         """Reload MCP server configuration from disk.
@@ -1305,12 +1329,36 @@ class MCPToolManager:
         actual_tool_name = tool_entry['tool'].name if tool_entry['tool'] else tool_call.name
         
         try:
+            update_cb = None
+            if isinstance(context, dict):
+                update_cb = context.get("update_callback")
+
+            async def _tool_log_callback(
+                log_server_name: str,
+                level: str,
+                message: str,
+                extra: Dict[str, Any],
+            ) -> None:
+                if update_cb is None:
+                    return
+                try:
+                    # Deferred import to avoid cycles
+                    from application.chat.utilities.notification_utils import notify_tool_log
+                    await notify_tool_log(
+                        server_name=log_server_name,
+                        tool_name=tool_call.name,
+                        tool_call_id=tool_call.id,
+                        level=level,
+                        message=sanitize_for_logging(message),
+                        extra=extra,
+                        update_callback=update_cb,
+                    )
+                except Exception:
+                    logger.debug("Tool log forwarding failed", exc_info=True)
+
             # Build a progress handler that forwards to UI if provided via context
             async def _progress_handler(progress: float, total: Optional[float], message: Optional[str]) -> None:
                 try:
-                    update_cb = None
-                    if isinstance(context, dict):
-                        update_cb = context.get("update_callback")
                     if update_cb is not None:
                         # Deferred import to avoid cycles
                         from application.chat.utilities.notification_utils import notify_tool_progress
@@ -1325,12 +1373,21 @@ class MCPToolManager:
                 except Exception:
                     logger.debug("Progress handler forwarding failed", exc_info=True)
 
-            raw_result = await self.call_tool(
-                server_name,
-                actual_tool_name,
-                tool_call.arguments,
-                progress_handler=_progress_handler,
-            )
+            if update_cb is not None:
+                async with self._use_log_callback(_tool_log_callback):
+                    raw_result = await self.call_tool(
+                        server_name,
+                        actual_tool_name,
+                        tool_call.arguments,
+                        progress_handler=_progress_handler,
+                    )
+            else:
+                raw_result = await self.call_tool(
+                    server_name,
+                    actual_tool_name,
+                    tool_call.arguments,
+                    progress_handler=_progress_handler,
+                )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
             

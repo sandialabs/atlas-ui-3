@@ -7,6 +7,7 @@ These tests verify that:
 4. Backend logger receives MCP server logs
 """
 
+import asyncio
 import logging
 import os
 import pytest
@@ -97,13 +98,13 @@ class TestMCPLogging:
         manager = MCPToolManager()
         
         # Initially no callback
-        assert manager._log_callback is None
+        assert manager._default_log_callback is None
         
         # Set a callback
         mock_callback = AsyncMock()
         manager.set_log_callback(mock_callback)
         
-        assert manager._log_callback is mock_callback
+        assert manager._default_log_callback is mock_callback
         
         # Test that it's used
         log_handler = manager._create_log_handler("test_server")
@@ -128,4 +129,43 @@ class TestMCPLogging:
         
         # Verify the callback was attempted
         mock_callback.assert_called_once()
+
+    async def test_request_scoped_callback_overrides_default(self):
+        """Request-scoped callback should override the default callback.
+
+        This is the core mechanism preventing cross-user log leakage when MCPToolManager
+        is shared across multiple websocket connections.
+        """
+        default_cb = AsyncMock()
+        request_cb = AsyncMock()
+
+        manager = MCPToolManager(log_callback=default_cb)
+        log_handler = manager._create_log_handler("test_server")
+
+        msg = MockLogMessage('info', 'Scoped message')
+
+        async with manager._use_log_callback(request_cb):
+            await log_handler(msg)
+
+        request_cb.assert_called_once()
+        default_cb.assert_not_called()
+
+    async def test_request_scoped_callbacks_are_isolated_across_tasks(self):
+        """Two concurrent tasks should not receive each other's MCP logs."""
+        cb_a = AsyncMock()
+        cb_b = AsyncMock()
+        manager = MCPToolManager()
+        log_handler = manager._create_log_handler("test_server")
+
+        async def run_with(cb, text):
+            async with manager._use_log_callback(cb):
+                await log_handler(MockLogMessage('info', text))
+
+        await asyncio.gather(
+            run_with(cb_a, "message-a"),
+            run_with(cb_b, "message-b"),
+        )
+
+        cb_a.assert_called_once()
+        cb_b.assert_called_once()
 
