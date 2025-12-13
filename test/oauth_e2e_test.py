@@ -43,22 +43,22 @@ class Colors:
 
 def print_success(message: str):
     """Print a success message in green"""
-    print(f"{Colors.GREEN}✅ {message}{Colors.END}")
+    print(f"{Colors.GREEN}[PASS] {message}{Colors.END}")
 
 
 def print_error(message: str):
     """Print an error message in red"""
-    print(f"{Colors.RED}❌ {message}{Colors.END}")
+    print(f"{Colors.RED}[FAIL] {message}{Colors.END}")
 
 
 def print_warning(message: str):
     """Print a warning message in yellow"""
-    print(f"{Colors.YELLOW}⚠️  {message}{Colors.END}")
+    print(f"{Colors.YELLOW}[WARN] {message}{Colors.END}")
 
 
 def print_info(message: str):
     """Print an info message in blue"""
-    print(f"{Colors.BLUE}ℹ️  {message}{Colors.END}")
+    print(f"{Colors.BLUE}[INFO] {message}{Colors.END}")
 
 
 def wait_for_server(url: str, timeout: int = 30) -> bool:

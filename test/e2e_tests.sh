@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 trap 'rc=$?; echo "Cleaning up..."; [[ -n "${BACKEND_PID-}" ]] && { echo "Killing backend process (PID: $BACKEND_PID)"; kill "${BACKEND_PID}" 2>/dev/null || true; }; exit $rc' EXIT
