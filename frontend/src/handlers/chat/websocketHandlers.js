@@ -115,6 +115,32 @@ export function createWebSocketHandler(deps) {
         case 'tool_result':
           mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === updateData.tool_call_id ? { ...msg, content: `**Tool: ${updateData.tool_name}** - ${updateData.success ? 'Success' : 'Failed'}`, status: updateData.success ? 'completed' : 'failed', result: updateData.result || updateData.error || null } : msg))
           break
+        case 'tool_log':
+          // Log message from MCP server
+          if (updateData && updateData.message) {
+            const logLevel = updateData.level || 'info'
+            const serverName = updateData.server_name || 'unknown'
+            const toolName = updateData.tool_name
+            
+            // Create prefix based on context
+            let prefix = `[${serverName}]`
+            if (toolName) {
+              prefix = `[${serverName}:${toolName}]`
+            }
+            
+            addMessage({
+              role: 'system',
+              content: `${prefix} ${updateData.message}`,
+              type: 'tool_log',
+              subtype: logLevel,
+              log_level: logLevel,
+              server_name: serverName,
+              tool_name: toolName,
+              tool_call_id: updateData.tool_call_id,
+              timestamp: new Date().toISOString()
+            })
+          }
+          break
         case 'system_message':
           // Rich system message from MCP server during tool execution
           if (updateData && updateData.message) {

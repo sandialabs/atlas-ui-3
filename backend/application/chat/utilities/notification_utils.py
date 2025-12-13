@@ -476,6 +476,40 @@ async def notify_canvas_files(
     })
 
 
+async def notify_tool_log(
+    server_name: str,
+    tool_name: Optional[str],
+    tool_call_id: Optional[str],
+    level: str,
+    message: str,
+    extra: Dict[str, Any],
+    update_callback: UpdateCallback
+) -> None:
+    """Send a log message from an MCP tool to the UI.
+    
+    Args:
+        server_name: Name of the MCP server
+        tool_name: Name of the tool (if during tool execution)
+        tool_call_id: ID of the tool call (if during tool execution)
+        level: Log level (debug, info, warning, error, etc.)
+        message: Log message
+        extra: Extra metadata from the log
+        update_callback: Callback to send updates
+    """
+    await safe_notify(update_callback, {
+        "type": "intermediate_update",
+        "update_type": "tool_log",
+        "data": {
+            "server_name": server_name,
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "level": level,
+            "message": message,
+            "extra": extra,
+        }
+    })
+
+
 def create_error_response(error_message: str, message_type: str = "error") -> Dict[str, str]:
     """
     Create standardized error response.
