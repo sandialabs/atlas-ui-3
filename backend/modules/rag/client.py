@@ -48,7 +48,8 @@ class RAGClient:
         from modules.config import config_manager
         app_settings = config_manager.app_settings
         self.mock_mode = app_settings.mock_rag
-        self.base_url = app_settings.rag_mock_url
+        # Use RAG base URL from settings (RAG_URL / RAG_MOCK_URL env alias)
+        self.base_url = app_settings.rag_url
         self.timeout = 30.0
         self.test_client = None
         self.http_client = create_rag_client(self.base_url, self.timeout)
