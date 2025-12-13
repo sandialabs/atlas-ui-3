@@ -183,11 +183,8 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
   });
 
   test('should handle token resolution from environment variables', async ({ page }) => {
+    // beforeEach already navigated to the app
     await setupPage(page);
-    
-    // Navigate to the app
-    await page.goto('/');
-    await page.waitForSelector('h1:has-text("Chat UI")');
     
     // Make API request to verify configuration is loaded
     const response = await page.request.get('http://localhost:8000/api/config', {
@@ -216,9 +213,7 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
       }
     });
     
-    // Navigate and open tools panel
-    await page.goto('/');
-    await page.waitForSelector('h1:has-text("Chat UI")');
+    // Open tools panel (beforeEach already navigated to the app)
     await openToolsPanel(page);
     
     // Wait for tools to load completely
