@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-trap 'rc=$?; echo "🧹 Cleaning up..."; [[ -n "${BACKEND_PID-}" ]] && { echo "Killing backend process (PID: $BACKEND_PID)"; kill "${BACKEND_PID}" 2>/dev/null || true; }; exit $rc' EXIT
+trap 'rc=$?; echo "Cleaning up..."; [[ -n "${BACKEND_PID-}" ]] && { echo "Killing backend process (PID: $BACKEND_PID)"; kill "${BACKEND_PID}" 2>/dev/null || true; }; exit $rc' EXIT
 
 echo "Running E2E Tests..."
 echo "================================="
@@ -27,7 +27,7 @@ if [ "${ENVIRONMENT:-}" = "cicd" ]; then
         echo "ERROR: Frontend dist directory not found. Docker build may have failed."
         exit 1
     fi
-    echo "✅ Frontend build verified (dist directory exists)"
+    echo "Frontend build verified (dist directory exists)"
 else
     echo "Local environment: Installing dependencies and building frontend..."
     export PATH="$FRONTEND_DIR/node_modules/.bin:$PATH"
@@ -68,10 +68,10 @@ fi
 
 # Check if port 8000 is already in use
 if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    echo "⚠️  Port 8000 is already in use. Attempting to continue with existing service..."
+    echo "Port 8000 is already in use. Attempting to continue with existing service..."
     # Get the PID of the existing process for potential cleanup
     EXISTING_PID=$(lsof -Pi :8000 -sTCP:LISTEN -t 2>/dev/null | head -1)
-    echo "ℹ️  Existing service PID: ${EXISTING_PID:-unknown}"
+    echo "Existing service PID: ${EXISTING_PID:-unknown}"
 else
     echo "Starting uvicorn server..."
     uvicorn main:app --host 0.0.0.0 --port 8000 &
@@ -82,11 +82,11 @@ else
     
     # Verify the process started successfully
     if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
-        echo "❌ Backend process failed to start or died immediately"
+        echo "Backend process failed to start or died immediately"
         exit 1
     fi
     
-    echo "✅ Backend server started successfully (PID: $BACKEND_PID)"
+    echo "Backend server started successfully (PID: $BACKEND_PID)"
 fi
 
 # Wait for backend to be healthy (probe)
@@ -122,21 +122,33 @@ echo "Executing simple E2E test suite..."
 
 # Run the simple Python E2E tests
 if python3 simple_e2e_test.py; then
-    echo "🎉 Simple E2E tests completed successfully!"
+    echo "Simple E2E tests completed successfully!"
 else
-    echo "💥 Simple E2E tests failed."
+    echo "Simple E2E tests failed."
     exit 1
 fi
 
+echo ""
+echo "Running OAuth 2.1 E2E tests..."
+
+# Run OAuth 2.1 authentication tests
+if python3 oauth_e2e_test.py; then
+    echo "OAuth 2.1 E2E tests completed successfully!"
+else
+    echo "OAuth 2.1 E2E tests failed."
+    exit 1
+fi
+
+echo ""
 echo "E2E tests finished."
 
 # Explicit cleanup before exit
 if [[ -n "${BACKEND_PID-}" ]]; then
-    echo "🧹 Stopping backend server (PID: $BACKEND_PID)..."
+    echo "Stopping backend server (PID: $BACKEND_PID)..."
     kill "${BACKEND_PID}" 2>/dev/null || true
     # Wait a moment for graceful shutdown
     sleep 2
     # Force kill if still running
     kill -9 "${BACKEND_PID}" 2>/dev/null || true
-    echo "✅ Backend server stopped"
+    echo "Backend server stopped"
 fi
