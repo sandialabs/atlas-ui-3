@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #173 - 2025-12-13
+- Increase unit test coverage across backend and frontend; add useSettings localStorage error-handling tests and harden the hook against localStorage failures.
+
 ### PR #172 - 2025-12-13
 - Resolve all frontend ESLint errors and warnings; update ESLint config and tests for consistency.
 ### PR #170 - 2025-12-12
