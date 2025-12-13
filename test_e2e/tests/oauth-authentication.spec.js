@@ -1,5 +1,26 @@
 import { test, expect } from '@playwright/test';
 
+// Constants
+const VIEWPORT_SIZE = { width: 1400, height: 1000 };
+const SCREENSHOT_DIR = 'screenshots/oauth';
+
+// Helper functions
+async function setupPage(page) {
+  await page.setViewportSize(VIEWPORT_SIZE);
+}
+
+async function openToolsPanel(page) {
+  await page.getByRole('button', { name: 'Toggle Tools' }).click();
+  await expect(page.locator('h2:has-text("Tools & Integrations")')).toBeVisible();
+}
+
+async function navigateToMarketplace(page) {
+  await openToolsPanel(page);
+  await page.getByRole('button', { name: 'Marketplace', exact: true }).click();
+  await expect(page).toHaveURL('/marketplace');
+  await expect(page.locator('h1:has-text("MCP Marketplace")')).toBeVisible();
+}
+
 test.describe('OAuth 2.1 Authentication E2E Tests', () => {
   
   test.beforeEach(async ({ page }) => {
@@ -12,50 +33,29 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
   });
 
   test('should load MCP HTTP mock server with authentication configured', async ({ page }) => {
-    // Resize browser for consistent testing
-    await page.setViewportSize({ width: 1400, height: 1000 });
-    
-    // Open the tools panel
-    await page.getByRole('button', { name: 'Toggle Tools' }).click();
-    
-    // Wait for tools panel to be visible
-    await expect(page.locator('h2:has-text("Tools & Integrations")')).toBeVisible();
+    await setupPage(page);
+    await openToolsPanel(page);
     
     // Check if any authenticated MCP servers are listed
-    // The MCP HTTP mock server should be available if configured
     const toolsPanel = page.locator('[class*="tools"]');
     await expect(toolsPanel).toBeVisible();
     
-    console.log('Tools panel is visible and MCP servers should be loaded');
+    test.info().annotations.push({ type: 'info', description: 'Tools panel is visible and MCP servers should be loaded' });
   });
 
   test('should display authentication status for MCP servers', async ({ page }) => {
-    // Resize browser for consistent testing
-    await page.setViewportSize({ width: 1400, height: 1000 });
-    
-    // Open tools panel
-    await page.getByRole('button', { name: 'Toggle Tools' }).click();
-    
-    // Navigate to marketplace to see all servers
-    await page.getByRole('button', { name: 'Marketplace', exact: true }).click();
-    
-    // Verify we're on the marketplace page
-    await expect(page).toHaveURL('/marketplace');
+    await setupPage(page);
+    await navigateToMarketplace(page);
     
     // Take a screenshot of the marketplace
     await page.screenshot({ 
-      path: 'screenshots/oauth-marketplace.png', 
+      path: `${SCREENSHOT_DIR}/marketplace.png`, 
       fullPage: true 
     });
-    
-    // The marketplace should display available servers
-    // Even if mcp-http-mock is not in the marketplace, other servers should be visible
-    await expect(page.locator('h1:has-text("MCP Marketplace")')).toBeVisible();
   });
 
   test('should handle authenticated tool calls through WebSocket', async ({ page }) => {
-    // Resize browser for consistent testing
-    await page.setViewportSize({ width: 1400, height: 1000 });
+    await setupPage(page);
     
     // Set up WebSocket message listener before interactions
     const wsMessages = [];
@@ -70,16 +70,10 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
       });
     });
     
-    // Open tools panel
-    await page.getByRole('button', { name: 'Toggle Tools' }).click();
-    
-    // Wait for tools to load
+    await openToolsPanel(page);
     await page.waitForTimeout(1000);
     
-    // Check that the tools panel is visible
-    await expect(page.locator('h2:has-text("Tools & Integrations")')).toBeVisible();
-    
-    console.log('WebSocket listener set up for authenticated communication');
+    test.info().annotations.push({ type: 'info', description: 'WebSocket listener set up for authenticated communication' });
   });
 
   test('should verify environment variable resolution for auth tokens', async ({ page }) => {
@@ -101,73 +95,50 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
     expect(config).toHaveProperty('user');
     expect(config).toHaveProperty('models');
     
-    console.log('Backend configuration loaded successfully');
+    test.info().annotations.push({ type: 'info', description: 'Backend configuration loaded successfully' });
   });
 
   test('should handle tool execution with Bearer token authentication', async ({ page }) => {
-    // Resize browser for consistent testing
-    await page.setViewportSize({ width: 1400, height: 1000 });
-    
-    // Open the tools panel
-    await page.getByRole('button', { name: 'Toggle Tools' }).click();
-    
-    // Wait for the tools panel to be visible
-    await expect(page.locator('h2:has-text("Tools & Integrations")')).toBeVisible();
+    await setupPage(page);
+    await openToolsPanel(page);
     
     // Take screenshot of tools panel
     await page.screenshot({ 
-      path: 'screenshots/oauth-tools-panel.png', 
+      path: `${SCREENSHOT_DIR}/tools-panel.png`, 
       fullPage: true 
     });
     
     // Verify that tools are listed in the panel
-    // The panel should show available tools from configured MCP servers
     const toolsContent = page.locator('[class*="tools"]');
     await expect(toolsContent).toBeVisible();
     
-    console.log('Tools panel displays available authenticated tools');
+    test.info().annotations.push({ type: 'info', description: 'Tools panel displays available authenticated tools' });
   });
 
   test('should verify MCP server connection with proper authentication headers', async ({ page }) => {
-    // This test verifies that when MCP servers are configured with auth_token,
-    // the backend properly includes Bearer tokens in requests
-    
-    // Navigate to the application
-    await page.setViewportSize({ width: 1400, height: 1000 });
-    
-    // Open tools panel to trigger MCP server connections
-    await page.getByRole('button', { name: 'Toggle Tools' }).click();
-    
+    await setupPage(page);
+    await openToolsPanel(page);
     await page.waitForTimeout(2000); // Wait for connections to establish
     
     // Check for any error messages that might indicate authentication failures
     const errorElements = page.locator('[class*="error"]');
     const errorCount = await errorElements.count();
     
-    // Log error count for debugging
-    console.log(`Found ${errorCount} error elements on page`);
-    
-    // The page should not have critical authentication errors
-    // Note: Some errors might be expected if servers are not running
-    
     // Take a screenshot for verification
     await page.screenshot({ 
-      path: 'screenshots/oauth-connection-status.png', 
+      path: `${SCREENSHOT_DIR}/connection-status.png`, 
       fullPage: true 
+    });
+    
+    test.info().annotations.push({ 
+      type: 'info', 
+      description: `Found ${errorCount} error elements on page` 
     });
   });
 
   test('should test calculator tool with OAuth-like authentication flow', async ({ page }) => {
-    // Test using the calculator tool which uses STDIO (no OAuth)
-    // but demonstrates the full tool execution flow
-    
-    await page.setViewportSize({ width: 1400, height: 1000 });
-    
-    // Open tools panel
-    await page.getByRole('button', { name: 'Toggle Tools' }).click();
-    
-    // Wait for tools panel
-    await expect(page.locator('h2:has-text("Tools & Integrations")')).toBeVisible();
+    await setupPage(page);
+    await openToolsPanel(page);
     
     // Look for calculator or other available tools
     const toolsPanel = page.locator('[class*="tools"]');
@@ -175,11 +146,11 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
     
     // Take screenshot showing available tools
     await page.screenshot({ 
-      path: 'screenshots/oauth-available-tools.png', 
+      path: `${SCREENSHOT_DIR}/available-tools.png`, 
       fullPage: true 
     });
     
-    console.log('Tool execution flow verified');
+    test.info().annotations.push({ type: 'info', description: 'Tool execution flow verified' });
   });
 
   test('should verify auth_token configuration in backend', async ({ page }) => {
@@ -199,22 +170,17 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
     expect(config.user).toBeDefined();
     
     // Check if tools/data sources are configured
-    if (config.tools) {
-      console.log(`Found ${Object.keys(config.tools).length} tools configured`);
-    }
+    const toolsCount = config.tools ? Object.keys(config.tools).length : 0;
+    const dataSourcesCount = config.data_sources ? Object.keys(config.data_sources).length : 0;
     
-    if (config.data_sources) {
-      console.log(`Found ${Object.keys(config.data_sources).length} data sources configured`);
-    }
-    
-    console.log('Backend auth configuration verified');
+    test.info().annotations.push({ 
+      type: 'info', 
+      description: `Backend has ${toolsCount} tools and ${dataSourcesCount} data sources configured` 
+    });
   });
 
   test('should handle token resolution from environment variables', async ({ page }) => {
-    // This test verifies the ${ENV_VAR} resolution pattern used in mcp.json
-    // The backend should resolve ${MCP_MOCK_TOKEN_1} to the actual token value
-    
-    await page.setViewportSize({ width: 1400, height: 1000 });
+    await setupPage(page);
     
     // Navigate to the app
     await page.goto('/');
@@ -229,46 +195,41 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
     
     expect(response.status()).toBe(200);
     
-    // The backend should have successfully resolved any ${ENV_VAR} patterns
-    // in the auth_token configuration without exposing the actual token values
-    console.log('Environment variable resolution for auth tokens verified');
+    test.info().annotations.push({ 
+      type: 'info', 
+      description: 'Environment variable resolution for auth tokens verified' 
+    });
   });
 
   test('should verify Bearer token authentication flow end-to-end', async ({ page }) => {
-    // This test simulates the full OAuth 2.1 Bearer token flow:
-    // 1. Frontend connects to backend via WebSocket
-    // 2. User requests tool execution
-    // 3. Backend makes authenticated request to MCP server with Bearer token
-    // 4. MCP server validates token and returns result
-    // 5. Backend streams result back to frontend
-    
-    await page.setViewportSize({ width: 1400, height: 1000 });
+    await setupPage(page);
     
     // Set up console logging to capture any auth-related messages
+    const authMessages = [];
     page.on('console', msg => {
       const text = msg.text();
       if (text.includes('auth') || text.includes('token') || text.includes('Bearer')) {
-        console.log('Console log:', text);
+        authMessages.push(text);
       }
     });
     
     // Navigate and open tools panel
     await page.goto('/');
     await page.waitForSelector('h1:has-text("Chat UI")');
-    await page.getByRole('button', { name: 'Toggle Tools' }).click();
+    await openToolsPanel(page);
     
     // Wait for tools to load
     await page.waitForTimeout(2000);
     
-    // Verify tools panel is functional
-    await expect(page.locator('h2:has-text("Tools & Integrations")')).toBeVisible();
-    
     // Take final screenshot
     await page.screenshot({ 
-      path: 'screenshots/oauth-e2e-flow.png', 
+      path: `${SCREENSHOT_DIR}/e2e-flow.png`, 
       fullPage: true 
     });
     
-    console.log('Bearer token authentication flow verified end-to-end');
+    test.info().annotations.push({ 
+      type: 'info', 
+      description: `Bearer token authentication flow verified (captured ${authMessages.length} auth-related messages)` 
+    });
   });
 });
