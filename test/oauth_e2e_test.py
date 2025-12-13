@@ -204,7 +204,7 @@ def test_mcp_http_server_with_valid_auth() -> bool:
             # Try to parse response
             try:
                 result = response.json()
-                print_info(f"Response: {json.dumps(result, indent=2)[:200]}...")
+                print_info(f"Response received: {len(json.dumps(result))} bytes")
             except:
                 pass
             
@@ -270,12 +270,12 @@ def test_environment_variable_resolution() -> bool:
         token2 = os.environ.get("MCP_MOCK_TOKEN_2")
         
         if token1:
-            print_success(f"MCP_MOCK_TOKEN_1 is set: {token1[:10]}...")
+            print_success("MCP_MOCK_TOKEN_1 is set: [REDACTED]")
         else:
             print_warning("MCP_MOCK_TOKEN_1 not set - using default")
         
         if token2:
-            print_success(f"MCP_MOCK_TOKEN_2 is set: {token2[:10]}...")
+            print_success("MCP_MOCK_TOKEN_2 is set: [REDACTED]")
         else:
             print_warning("MCP_MOCK_TOKEN_2 not set - using default")
         

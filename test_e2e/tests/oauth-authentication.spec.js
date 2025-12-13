@@ -27,9 +27,10 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
     // Navigate to the Chat UI application
     await page.goto('/');
     
-    // Wait for the page to load and websocket to connect
+    // Wait for the page to load - websocket connects automatically
     await page.waitForSelector('h1:has-text("Chat UI")');
-    await page.waitForTimeout(2000); // Give websocket time to connect
+    // Wait for network to settle
+    await page.waitForLoadState('networkidle');
   });
 
   test('should load MCP HTTP mock server with authentication configured', async ({ page }) => {
@@ -71,7 +72,8 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
     });
     
     await openToolsPanel(page);
-    await page.waitForTimeout(1000);
+    // Wait for tools to be loaded (network idle after panel opens)
+    await page.waitForLoadState('networkidle');
     
     test.info().annotations.push({ type: 'info', description: 'WebSocket listener set up for authenticated communication' });
   });
@@ -118,7 +120,8 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
   test('should verify MCP server connection with proper authentication headers', async ({ page }) => {
     await setupPage(page);
     await openToolsPanel(page);
-    await page.waitForTimeout(2000); // Wait for connections to establish
+    // Wait for network activity to complete after opening tools panel
+    await page.waitForLoadState('networkidle');
     
     // Check for any error messages that might indicate authentication failures
     const errorElements = page.locator('[class*="error"]');
@@ -218,8 +221,8 @@ test.describe('OAuth 2.1 Authentication E2E Tests', () => {
     await page.waitForSelector('h1:has-text("Chat UI")');
     await openToolsPanel(page);
     
-    // Wait for tools to load
-    await page.waitForTimeout(2000);
+    // Wait for tools to load completely
+    await page.waitForLoadState('networkidle');
     
     // Take final screenshot
     await page.screenshot({ 
