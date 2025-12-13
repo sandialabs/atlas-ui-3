@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2024-12-10
+### PR #166 - 2024-12-10
 - Add OAuth 2.1 authentication support for MCP servers using FastMCP OAuth helper
 - Add secure JWT storage with Fernet encryption for user-uploaded tokens
 - Add admin API endpoints for JWT management (upload, check, delete, list)
@@ -16,6 +16,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Update authentication priority: OAuth > Manual JWT > Bearer Token > None
 - Add comprehensive OAuth documentation in docs/admin/mcp-oauth.md
 - Update requirements.txt to include FastMCP 2.6.0+ and key-value library
+### PR #173 - 2025-12-13
+- Increase unit test coverage across backend and frontend; add useSettings localStorage error-handling tests and harden the hook against localStorage failures.
+### PR #169 - 2025-12-11
+- Implement MCP server logging infrastructure with FastMCP log_handler
+- Add log level filtering based on environment LOG_LEVEL configuration
+- Forward MCP server logs to chat UI via intermediate_update websocket messages
+- Add visual indicators (badges and colors) for different log levels (debug, info, warning, error, alert)
+- Create comprehensive test suite for MCP logging functionality
+- Add demo MCP server (logging_demo) for testing log output
+
+### PR #172 - 2025-12-13
+- Resolve all frontend ESLint errors and warnings; update ESLint config and tests for consistency.
+### PR #170 - 2025-12-12
+- Improve LogViewer performance by memoizing expensive computations with `useMemo`
+
+
+### PR  163 - 2024-12-09
+- **SECURITY FIX**: Fixed edit args security bug that allowed bypassing username override security through approval argument editing
+- Added username-override-demo MCP server to demonstrate the username security feature
+- Server includes tools showing how Atlas UI prevents LLM user impersonation
+- Added comprehensive documentation and example configuration
+
+### PR #158 - 2025-12-10
+- Add explicit "Save Changes" and "Cancel" buttons to Tools & Integration Panel (ToolsPanel)
+- Add explicit "Save Changes" and "Cancel" buttons to Data Sources Panel (RagPanel)
+- Implement pending state pattern to track unsaved changes
+- Save button is disabled when no changes are made, enabled when changes are pending
+- Changes only persist to localStorage when user clicks "Save Changes"
+- Cancel button reverts all pending changes and closes panel
+- Updated tests to verify save/cancel functionality
+
 
 ### PR #156 - 2024-12-07
 - Add CHANGELOG.md to track changes across PRs

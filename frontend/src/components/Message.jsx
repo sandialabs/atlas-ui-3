@@ -94,7 +94,7 @@ renderer.code = function(code, language) {
       try {
         codeString = JSON.stringify(code, null, 2)
         actualLanguage = 'json'
-      } catch (e) {
+      } catch {
         codeString = String(code || '')
       }
     }
@@ -210,7 +210,6 @@ const copyCodeBlock = (button) => {
 
 // Show copy success feedback
 const showCopySuccess = (button) => {
-  const originalText = button.textContent
   const originalHTML = button.innerHTML
   
   // Update button to show success state
@@ -344,7 +343,7 @@ const processMessageContent = (content) => {
       // Fallback to JSON for other objects
       try {
         processedContent = JSON.stringify(content, null, 2)
-      } catch (e) {
+      } catch {
         processedContent = String(content || '')
       }
     }
@@ -383,7 +382,7 @@ const processToolResult = (result) => {
       // Try to parse as JSON to check for returned files
       const parsed = JSON.parse(result)
       return processToolResult(parsed)
-    } catch (e) {
+    } catch {
       // Not JSON, return as is
       return result
     }
@@ -887,7 +886,7 @@ const renderContent = () => {
                   if (typeof message.result === 'string') {
                     try {
                       parsedResult = JSON.parse(message.result)
-                    } catch (e) {
+                    } catch {
                       parsedResult = message.result
                     }
                   }
@@ -998,6 +997,55 @@ const renderContent = () => {
     }
 
     if (isUser || isSystem) {
+      // Handle tool log messages with badges and colors
+      if (message.type === 'tool_log') {
+        const logLevel = message.log_level || message.subtype || 'info'
+        let badgeColor
+        let textColor
+        
+        // Apply colors based on log level
+        switch (logLevel.toLowerCase()) {
+          case 'error':
+          case 'critical':
+          case 'emergency':
+            badgeColor = 'bg-red-500 text-white'
+            textColor = 'text-red-300'
+            break
+          case 'warning':
+          case 'warn':
+            badgeColor = 'bg-yellow-500 text-black'
+            textColor = 'text-yellow-300'
+            break
+          case 'alert':
+            badgeColor = 'bg-orange-500 text-white'
+            textColor = 'text-orange-300'
+            break
+          case 'info':
+          case 'notice':
+            badgeColor = 'bg-blue-500 text-white'
+            textColor = 'text-blue-300'
+            break
+          case 'debug':
+            badgeColor = 'bg-gray-500 text-white'
+            textColor = 'text-gray-400'
+            break
+          default:
+            badgeColor = 'bg-blue-500 text-white'
+            textColor = 'text-gray-200'
+        }
+        
+        return (
+          <div className="flex items-start gap-2">
+            <span className={`px-2 py-0.5 rounded text-xs font-medium ${badgeColor} uppercase flex-shrink-0`}>
+              {logLevel}
+            </span>
+            <div className={`${textColor} text-sm font-mono`}>
+              {message.content}
+            </div>
+          </div>
+        )
+      }
+      
       // Handle file attachment system events
       if (message.type === 'system' && message.subtype) {
         switch (message.subtype) {

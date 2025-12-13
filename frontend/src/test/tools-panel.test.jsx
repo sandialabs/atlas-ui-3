@@ -81,10 +81,12 @@ describe('ToolsPanel - Tool Selection', () => {
       prompt_count: 0
     }]
 
+    const mockAddTools = vi.fn()
+
     useChat.mockReturnValue({
       ...defaultChatContext,
       tools: testTools,
-      toggleTool: mockToggleTool
+      addTools: mockAddTools
     })
 
     useMarketplace.mockReturnValue({
@@ -102,8 +104,12 @@ describe('ToolsPanel - Tool Selection', () => {
     const fetchButton = screen.getByRole('button', { name: 'fetch' })
     fireEvent.click(fetchButton)
 
-    // Verify toggleTool was called with correct key
-    expect(mockToggleTool).toHaveBeenCalledWith('test_server_fetch')
+    // Click save button to persist the change
+    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    fireEvent.click(saveButton)
+
+    // Verify addTools was called with correct key
+    expect(mockAddTools).toHaveBeenCalledWith(['test_server_fetch'])
   })
 
   it('should filter tools based on search input', () => {
@@ -158,26 +164,31 @@ describe('ToolsPanel - Tool Selection', () => {
   })
 
   it('should clear all tools and prompts when Clear All button is clicked', () => {
+    const mockRemoveTools = vi.fn()
+    const mockRemovePrompts = vi.fn()
     const testTools = [{
       server: 'test_server',
       description: 'Test server',
       tools: ['tool1', 'tool2'],
       tools_detailed: [],
       tool_count: 2,
-      prompts: [],
-      prompt_count: 0
+      prompts: [{name: 'prompt1', description: 'Test prompt'}],
+      prompt_count: 1
     }]
 
     useChat.mockReturnValue({
       ...defaultChatContext,
       tools: testTools,
-      selectedTools: new Set(['test_server_tool1']),
-      clearToolsAndPrompts: mockClearToolsAndPrompts
+      selectedTools: new Set(['test_server_tool1', 'test_server_tool2']),
+      selectedPrompts: new Set(['test_server_prompt1']),
+      removeTools: mockRemoveTools,
+      removePrompts: mockRemovePrompts
     })
 
     useMarketplace.mockReturnValue({
       ...defaultMarketplaceContext,
-      getFilteredTools: vi.fn(() => testTools)
+      getFilteredTools: vi.fn(() => testTools),
+      getFilteredPrompts: vi.fn(() => [])
     })
 
     render(
@@ -186,12 +197,23 @@ describe('ToolsPanel - Tool Selection', () => {
       </BrowserRouter>
     )
 
+    // Initially save button should be disabled
+    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    expect(saveButton).toBeDisabled()
+
     // Find and click the Clear All button
     const clearButton = screen.getByRole('button', { name: 'Clear All' })
     fireEvent.click(clearButton)
 
-    // Verify clearToolsAndPrompts was called
-    expect(mockClearToolsAndPrompts).toHaveBeenCalled()
+    // Save button should now be enabled since we made changes
+    expect(saveButton).not.toBeDisabled()
+    
+    // Click save to persist the changes
+    fireEvent.click(saveButton)
+
+    // Verify removeTools and removePrompts were called with all selected items
+    expect(mockRemoveTools).toHaveBeenCalledWith(['test_server_tool1', 'test_server_tool2'])
+    expect(mockRemovePrompts).toHaveBeenCalledWith(['test_server_prompt1'])
   })
 
   it('should toggle Required Tool Usage setting', () => {
@@ -231,6 +253,10 @@ describe('ToolsPanel - Tool Selection', () => {
 
     expect(toggleSwitch).toBeDefined()
     fireEvent.click(toggleSwitch)
+
+    // Click save button to persist the change
+    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    fireEvent.click(saveButton)
 
     // Verify setToolChoiceRequired was called with true
     expect(mockSetToolChoiceRequired).toHaveBeenCalledWith(true)
@@ -278,6 +304,10 @@ describe('ToolsPanel - Tool Selection', () => {
     // Find and click the Enable All button
     const enableAllButton = screen.getByRole('button', { name: 'Enable All' })
     fireEvent.click(enableAllButton)
+
+    // Click save button to persist the changes
+    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    fireEvent.click(saveButton)
 
     // Verify all tools were added
     expect(mockAddTools).toHaveBeenCalledWith([
@@ -340,6 +370,10 @@ describe('ToolsPanel - Tool Selection', () => {
     const allOnButton = screen.getByRole('button', { name: 'All On' })
     fireEvent.click(allOnButton)
 
+    // Click save button to persist the changes
+    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    fireEvent.click(saveButton)
+
     // Verify all tools were removed
     expect(mockRemoveTools).toHaveBeenCalledWith([
       'test_server_tool1',
@@ -351,5 +385,172 @@ describe('ToolsPanel - Tool Selection', () => {
       'test_server_prompt1',
       'test_server_prompt2'
     ])
+  })
+
+  it('should show save button disabled when no changes are made', () => {
+    const testTools = [{
+      server: 'test_server',
+      description: 'Test server',
+      tools: ['tool1'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Find the Save Changes button
+    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    
+    // Should be disabled initially
+    expect(saveButton).toBeDisabled()
+  })
+
+  it('should enable save button when changes are made', () => {
+    const testTools = [{
+      server: 'test_server',
+      description: 'Test server',
+      tools: ['tool1'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools,
+      selectedTools: new Set()
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Initially save button should be disabled
+    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    expect(saveButton).toBeDisabled()
+
+    // Click a tool to make a change
+    const toolButton = screen.getByRole('button', { name: 'tool1' })
+    fireEvent.click(toolButton)
+
+    // Save button should now be enabled
+    expect(saveButton).not.toBeDisabled()
+  })
+
+  it('should save changes when save button is clicked', () => {
+    const mockAddTools = vi.fn()
+    const mockOnClose = vi.fn()
+
+    const testTools = [{
+      server: 'test_server',
+      description: 'Test server',
+      tools: ['tool1'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools,
+      selectedTools: new Set(),
+      addTools: mockAddTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={mockOnClose} />
+      </BrowserRouter>
+    )
+
+    // Click a tool to make a change
+    const toolButton = screen.getByRole('button', { name: 'tool1' })
+    fireEvent.click(toolButton)
+
+    // Click save button
+    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    fireEvent.click(saveButton)
+
+    // Verify addTools was called with the selected tool
+    expect(mockAddTools).toHaveBeenCalledWith(['test_server_tool1'])
+    
+    // Verify onClose was called
+    expect(mockOnClose).toHaveBeenCalled()
+  })
+
+  it('should cancel changes when cancel button is clicked', () => {
+    const mockAddTools = vi.fn()
+    const mockOnClose = vi.fn()
+
+    const testTools = [{
+      server: 'test_server',
+      description: 'Test server',
+      tools: ['tool1'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools,
+      selectedTools: new Set()
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={mockOnClose} />
+      </BrowserRouter>
+    )
+
+    // Click a tool to make a change
+    const toolButton = screen.getByRole('button', { name: 'tool1' })
+    fireEvent.click(toolButton)
+
+    // Click cancel button
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' })
+    fireEvent.click(cancelButton)
+
+    // Verify addTools was NOT called (changes were cancelled)
+    expect(mockAddTools).not.toHaveBeenCalled()
+    
+    // Verify onClose was called
+    expect(mockOnClose).toHaveBeenCalled()
   })
 })

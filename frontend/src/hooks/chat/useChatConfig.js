@@ -69,7 +69,7 @@ export function useChatConfig() {
             localStorage.setItem('chatui-current-model', defaultModel)
           }
         }
-      } catch (e) {
+      } catch {
         // Fallback demo data
         setAppName('Chat UI (Demo)')
         setModels([{name: 'gpt-4o'}, {name: 'gpt-4o-mini'}])
