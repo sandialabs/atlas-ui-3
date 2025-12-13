@@ -332,6 +332,9 @@ Before committing:
 4. **Manual**: Test in browser at http://localhost:8000
 5. **Exercise**: Test specific modified functionality
 
+Before creating or accepting a PR:
+- Run `cd frontend && npm run lint` to ensure no frontend syntax errors or style issues
+
 ## Key File References
 
 When referencing code locations, use `file_path:line_number` format for easy navigation.

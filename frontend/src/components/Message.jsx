@@ -94,7 +94,7 @@ renderer.code = function(code, language) {
       try {
         codeString = JSON.stringify(code, null, 2)
         actualLanguage = 'json'
-      } catch (e) {
+      } catch {
         codeString = String(code || '')
       }
     }
@@ -210,7 +210,6 @@ const copyCodeBlock = (button) => {
 
 // Show copy success feedback
 const showCopySuccess = (button) => {
-  const originalText = button.textContent
   const originalHTML = button.innerHTML
   
   // Update button to show success state
@@ -344,7 +343,7 @@ const processMessageContent = (content) => {
       // Fallback to JSON for other objects
       try {
         processedContent = JSON.stringify(content, null, 2)
-      } catch (e) {
+      } catch {
         processedContent = String(content || '')
       }
     }
@@ -383,7 +382,7 @@ const processToolResult = (result) => {
       // Try to parse as JSON to check for returned files
       const parsed = JSON.parse(result)
       return processToolResult(parsed)
-    } catch (e) {
+    } catch {
       // Not JSON, return as is
       return result
     }
@@ -887,7 +886,7 @@ const renderContent = () => {
                   if (typeof message.result === 'string') {
                     try {
                       parsedResult = JSON.parse(message.result)
-                    } catch (e) {
+                    } catch {
                       parsedResult = message.result
                     }
                   }

@@ -89,7 +89,7 @@ const AdminDashboard = () => {
     setCurrentEndpoint(null)
   }
 
-  const manageLLM = async () => {
+  const _manageLLM = async () => {
     try {
       const response = await fetch('/admin/llm-config')
       const data = await response.json()
@@ -106,7 +106,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const manageHelp = async () => {
+  const _manageHelp = async () => {
     try {
       const response = await fetch('/admin/help-config')
       const data = await response.json()
@@ -138,7 +138,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const checkHealth = async () => {
+  const _checkHealth = async () => {
     try {
       const response = await fetch('/admin/system-status')
       const data = await response.json()
@@ -154,7 +154,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const triggerHealthCheck = async () => {
+  const _triggerHealthCheck = async () => {
     try {
       const response = await fetch('/admin/trigger-health-check', { method: 'POST' })
       const data = await response.json()
@@ -171,7 +171,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const viewMCPHealth = async () => {
+  const _viewMCPHealth = async () => {
     try {
       const response = await fetch('/admin/mcp-health')
       const data = await response.json()
@@ -186,7 +186,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const reloadConfiguration = async () => {
+  const _reloadConfiguration = async () => {
     try {
       const response = await fetch('/admin/reload-config', { method: 'POST' })
       const data = await response.json()
@@ -205,7 +205,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const viewFeedback = async () => {
+  const _viewFeedback = async () => {
     try {
       const response = await fetch('/api/feedback?limit=100')
       const data = await response.json()

@@ -63,6 +63,7 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
 
     document.addEventListener('keydown', handleKeyDown, true) // Use capture phase
     return () => document.removeEventListener('keydown', handleKeyDown, true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearChat])
 
   return (

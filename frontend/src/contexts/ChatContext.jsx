@@ -18,6 +18,7 @@ const generateSecureRandomString = (length = 9) => {
 
 const ChatContext = createContext(null)
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useChat = () => {
 	const ctx = useContext(ChatContext)
 	if (!ctx) throw new Error('useChat must be used within a ChatProvider')
@@ -38,7 +39,7 @@ export const ChatProvider = ({ children }) => {
 	const [isThinking, setIsThinking] = useState(false)
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
-	const [pendingFileEvents, setPendingFileEvents] = useState(new Map())
+	const [, setPendingFileEvents] = useState(new Map())
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {
@@ -105,6 +106,7 @@ export const ChatProvider = ({ children }) => {
 			resolvePendingFileEvent
 		})
 		return addMessageHandler(handler)
+	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent])
 
 	const selectAllServerTools = useCallback((server) => {
@@ -150,7 +152,7 @@ export const ChatProvider = ({ children }) => {
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
 			compliance_level_filter: selections.complianceLevelFilter,
 		})
-	}, [addMessage, currentModel, selectedTools, selectedPrompts, selectedDataSources, config, selections.toolChoiceRequired, selections, agent, files, isWelcomeVisible, sendMessage, settings])
+	}, [addMessage, currentModel, selectedTools, selectedPrompts, selectedDataSources, config, selections, agent, files, isWelcomeVisible, sendMessage, settings])
 
 	const clearChat = useCallback(() => {
 		resetMessages()

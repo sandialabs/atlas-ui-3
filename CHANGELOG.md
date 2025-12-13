@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Create comprehensive test suite for MCP logging functionality
 - Add demo MCP server (logging_demo) for testing log output
 
+### PR #172 - 2025-12-13
+- Resolve all frontend ESLint errors and warnings; update ESLint config and tests for consistency.
 ### PR #170 - 2025-12-12
 - Improve LogViewer performance by memoizing expensive computations with `useMemo`
 
