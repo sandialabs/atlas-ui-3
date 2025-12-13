@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #173 - 2025-12-13
 - Increase unit test coverage across backend and frontend; add useSettings localStorage error-handling tests and harden the hook against localStorage failures.
+### PR #169 - 2025-12-11
+- Implement MCP server logging infrastructure with FastMCP log_handler
+- Add log level filtering based on environment LOG_LEVEL configuration
+- Forward MCP server logs to chat UI via intermediate_update websocket messages
+- Add visual indicators (badges and colors) for different log levels (debug, info, warning, error, alert)
+- Create comprehensive test suite for MCP logging functionality
+- Add demo MCP server (logging_demo) for testing log output
 
 ### PR #172 - 2025-12-13
 - Resolve all frontend ESLint errors and warnings; update ESLint config and tests for consistency.
