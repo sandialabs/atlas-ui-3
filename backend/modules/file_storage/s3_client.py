@@ -85,8 +85,12 @@ class S3StorageClient:
             return f"users/{user_email}/uploads/{timestamp}_{unique_id}_{safe_filename}"
 
     def _calculate_etag(self, content_bytes: bytes) -> str:
-        """Calculate ETag for file content."""
-        return hashlib.md5(content_bytes).hexdigest()
+        """Calculate ETag for file content.
+        
+        Note: Using MD5 for S3 ETag compatibility, but marked as not for security use.
+        S3 ETags are traditionally MD5-based for single-part uploads.
+        """
+        return hashlib.md5(content_bytes, usedforsecurity=False).hexdigest()
 
     async def upload_file(
         self,
