@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Update MCP client initialization to support OAuth flow with automatic token refresh
 - Add encrypted token storage using key-value library with Fernet encryption
 - Update authentication priority: OAuth > Manual JWT > Bearer Token > None
+- Add request-level (non-Playwright) E2E coverage for JWT upload/list and backend MCP auth injection
 - Add comprehensive OAuth documentation in docs/admin/mcp-oauth.md
 - Update requirements.txt to include FastMCP 2.6.0+ and key-value library
 ### PR #173 - 2025-12-13

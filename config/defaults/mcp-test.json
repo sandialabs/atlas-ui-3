@@ -1,0 +1,11 @@
+{
+  "mcp-http-mock": {
+    "url": "http://127.0.0.1:8005/mcp",
+    "transport": "http",
+    "groups": ["users"],
+    "description": "E2E test MCP server (FastMCP HTTP mock). Requires Bearer token auth; tests validate JWT upload + auth injection.",
+    "author": "Atlas UI Team",
+    "short_description": "E2E test server",
+    "help_email": "support@chatui.example.com"
+  }
+}

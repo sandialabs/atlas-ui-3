@@ -603,21 +603,35 @@ async def list_user_servers_with_jwt(current_user: str = Depends(get_current_use
         List of server names with stored JWTs
     """
     try:
+        # NOTE: JWTStorage sanitizes server names when writing filenames.
+        # Listing by filename prefix is therefore unreliable for user identifiers
+        # like emails (e.g., test@test.com). Instead, enumerate configured MCP
+        # servers and query `has_jwt()` for each user+server key.
+
+        from modules.config import config_manager
+
         jwt_storage = get_jwt_storage()
-        all_servers = jwt_storage.list_servers_with_jwt()
-        
-        # Filter to only this user's JWTs
-        user_prefix = f"{current_user}_"
-        user_servers = [
-            s.replace(user_prefix, "") 
-            for s in all_servers 
-            if s.startswith(user_prefix)
-        ]
-        
+        mcp_config = config_manager.mcp_config
+
+        servers_with_jwt = []
+        for server_name, server_cfg in mcp_config.servers.items():
+            # Enforce the same access control used by upload_user_jwt.
+            user_has_access = False
+            for group in server_cfg.groups:
+                if await is_user_in_group(current_user, group):
+                    user_has_access = True
+                    break
+            if not user_has_access and server_cfg.groups:
+                continue
+
+            user_server_name = f"{current_user}_{server_name}"
+            if jwt_storage.has_jwt(user_server_name):
+                servers_with_jwt.append(server_name)
+
         return {
-            "servers": user_servers,
-            "count": len(user_servers),
-            "user": current_user
+            "servers": servers_with_jwt,
+            "count": len(servers_with_jwt),
+            "user": current_user,
         }
     
     except Exception as e:
