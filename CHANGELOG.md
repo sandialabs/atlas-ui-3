@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2025-12-15
+- Add Quay.io container registry CI/CD workflow for automated container publishing
+- Add comprehensive Quay.io setup documentation with robot account configuration
+
 ### PR #173 - 2025-12-13
 - Increase unit test coverage across backend and frontend; add useSettings localStorage error-handling tests and harden the hook against localStorage failures.
 ### PR #169 - 2025-12-11
