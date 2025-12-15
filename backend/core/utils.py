@@ -12,16 +12,18 @@ logger = logging.getLogger(__name__)
 _CONTROL_CHARS_RE = re.compile(r'[\x00-\x1f\x7f-\x9f]')
 # Matches Unicode line separators (LINE SEPARATOR and PARAGRAPH SEPARATOR)
 _UNICODE_NEWLINES_RE = re.compile(r'[\u2028\u2029]')
+# Matches explicit CR, LF, and CRLF for maximal coverage
+_STANDARD_NEWLINES_RE = re.compile(r'(\r\n|\r|\n)')
 
 def sanitize_for_logging(value: Any) -> str:
     """
-    Sanitize a value for safe logging by removing control characters and Unicode newlines.
+    Sanitize a value for safe logging by removing ALL newlines (including Unicode and CRLF) 
+    and control characters, to defend against log injection.
 
-    Removes ASCII control characters (C0 and C1 ranges) and Unicode line separators
-    to prevent log injection attacks and log corruption. This includes characters
-    like newlines, tabs, escape sequences, and other non-printable characters that
-    could be used to manipulate log output or inject fake log entries. Additionally,
-    removes Unicode line/paragraph separators such as U+2028 and U+2029.
+    Removes ASCII control characters (C0 and C1 ranges), CR/LF in any combination, 
+    and Unicode line/paragraph separators. This includes characters
+    like newlines (\\n, \\r, \\r\\n, U+2028, U+2029), tabs, escape sequences, and other 
+    non-printable characters that could be used to manipulate log output or inject fake log entries.
 
     Args:
         value: Any value to sanitize. If not a string, it will be converted
@@ -37,6 +39,10 @@ def sanitize_for_logging(value: Any) -> str:
         'TestRed'
         >>> sanitize_for_logging("Fake\u2028Log")
         'FakeLog'
+        >>> sanitize_for_logging("line1\\r\\nline2\\rline3\\nline4")
+        'line1line2line3line4'
+        >>> sanitize_for_logging("A\u2028B\u2029C")
+        'ABC'
         >>> sanitize_for_logging(123)
         '123'
     """
@@ -46,6 +52,7 @@ def sanitize_for_logging(value: Any) -> str:
         value = str(value)
     value = _CONTROL_CHARS_RE.sub('', value)
     value = _UNICODE_NEWLINES_RE.sub('', value)
+    value = _STANDARD_NEWLINES_RE.sub('', value)
     return value
 
 

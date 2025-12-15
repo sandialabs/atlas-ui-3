@@ -84,13 +84,7 @@ class S3StorageClient:
             # User-uploaded files
             return f"users/{user_email}/uploads/{timestamp}_{unique_id}_{safe_filename}"
 
-    def _calculate_etag(self, content_bytes: bytes) -> str:
-        """Calculate ETag for file content.
-        
-        Note: Using MD5 for S3 ETag compatibility, but marked as not for security use.
-        S3 ETags are traditionally MD5-based for single-part uploads.
-        """
-        return hashlib.md5(content_bytes, usedforsecurity=False).hexdigest()
+
 
     async def upload_file(
         self,
@@ -280,7 +274,7 @@ class S3StorageClient:
                         Key=obj['Key']
                     )
                     tags = {tag['Key']: tag['Value'] for tag in tags_response.get('TagSet', [])}
-                except:
+                except Exception:
                     tags = {}
 
                 # Get metadata
@@ -292,7 +286,7 @@ class S3StorageClient:
                     metadata = head_response.get('Metadata', {})
                     content_type = head_response.get('ContentType', 'application/octet-stream')
                     filename = metadata.get('original_filename', obj['Key'].split('/')[-1])
-                except:
+                except Exception:
                     content_type = 'application/octet-stream'
                     filename = obj['Key'].split('/')[-1]
 
