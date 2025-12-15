@@ -26,6 +26,7 @@
     "short_description": "Manual JWT upload demo",
     "help_email": "support@example.com",
     "compliance_level": "Internal",
+    "user_jwt_upload_enabled": true,
     "oauth_config": {
       "enabled": false
     }

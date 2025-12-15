@@ -676,17 +676,19 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                             </button>
                             
                             {/* JWT Upload Button */}
-                            <button
-                              onClick={() => {
-                                setSelectedServerForJWT(server.server)
-                                setJwtDialogOpen(true)
-                              }}
-                              className="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5"
-                              title="Upload JWT token for authentication"
-                            >
-                              <Key className="w-3 h-3" />
-                              JWT
-                            </button>
+                            {server.user_jwt_upload_enabled && (
+                              <button
+                                onClick={() => {
+                                  setSelectedServerForJWT(server.server)
+                                  setJwtDialogOpen(true)
+                                }}
+                                className="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5"
+                                title="Upload JWT token for authentication"
+                              >
+                                <Key className="w-3 h-3" />
+                                JWT
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>

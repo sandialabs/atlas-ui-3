@@ -181,7 +181,9 @@ async def get_config(
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', server_config.get('description', f'{server_name} tools')),
                         'help_email': server_config.get('help_email', ''),
-                        'compliance_level': server_config.get('compliance_level')
+                        'compliance_level': server_config.get('compliance_level'),
+                        # Default off; only show user JWT upload UI when explicitly enabled per server in mcp.json.
+                        'user_jwt_upload_enabled': bool(server_config.get('user_jwt_upload_enabled', False)),
                     })
             
             # Collect prompts from this server if available
@@ -197,7 +199,8 @@ async def get_config(
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', f'{server_name} custom prompts'),
                         'help_email': server_config.get('help_email', ''),
-                        'compliance_level': server_config.get('compliance_level')
+                        'compliance_level': server_config.get('compliance_level'),
+                        'user_jwt_upload_enabled': bool(server_config.get('user_jwt_upload_enabled', False)),
                     })
     
     # Read help page configuration (supports new config directory layout + legacy paths)
@@ -484,6 +487,16 @@ async def upload_user_jwt(
         
         # Check if user has access to this server (via groups)
         server_config = mcp_config.servers[jwt_upload.server_name]
+
+        # User JWT upload is opt-in per server.
+        if not getattr(server_config, "user_jwt_upload_enabled", False):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"User JWT upload is not enabled for server '{jwt_upload.server_name}'. "
+                    "Set 'user_jwt_upload_enabled: true' in mcp.json to allow this."
+                )
+            )
         user_has_access = False
         
         for group in server_config.groups:
@@ -535,6 +548,25 @@ async def get_user_jwt_status(
         JWT status information
     """
     try:
+        from modules.config import config_manager
+
+        # Enforce opt-in: do not expose JWT status for servers that didn't enable it.
+        mcp_config = config_manager.mcp_config
+        if server_name not in mcp_config.servers:
+            raise HTTPException(
+                status_code=404,
+                detail=f"MCP server '{server_name}' not found in configuration",
+            )
+        server_config = mcp_config.servers[server_name]
+        if not getattr(server_config, "user_jwt_upload_enabled", False):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"User JWT upload is not enabled for server '{server_name}'. "
+                    "Set 'user_jwt_upload_enabled: true' in mcp.json to allow this."
+                )
+            )
+
         jwt_storage = get_jwt_storage()
         user_server_name = f"{current_user}_{server_name}"
         has_jwt = jwt_storage.has_jwt(user_server_name)
@@ -566,6 +598,25 @@ async def delete_user_jwt(
         Success message
     """
     try:
+        from modules.config import config_manager
+
+        # Enforce opt-in: do not allow deletion for servers that didn't enable it.
+        mcp_config = config_manager.mcp_config
+        if server_name not in mcp_config.servers:
+            raise HTTPException(
+                status_code=404,
+                detail=f"MCP server '{server_name}' not found in configuration",
+            )
+        server_config = mcp_config.servers[server_name]
+        if not getattr(server_config, "user_jwt_upload_enabled", False):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"User JWT upload is not enabled for server '{server_name}'. "
+                    "Set 'user_jwt_upload_enabled: true' in mcp.json to allow this."
+                )
+            )
+
         jwt_storage = get_jwt_storage()
         user_server_name = f"{current_user}_{server_name}"
         deleted = jwt_storage.delete_jwt(user_server_name)
@@ -615,6 +666,10 @@ async def list_user_servers_with_jwt(current_user: str = Depends(get_current_use
 
         servers_with_jwt = []
         for server_name, server_cfg in mcp_config.servers.items():
+            # Only return results for servers that explicitly enabled user JWT upload.
+            if not getattr(server_cfg, "user_jwt_upload_enabled", False):
+                continue
+
             # Enforce the same access control used by upload_user_jwt.
             user_has_access = False
             for group in server_cfg.groups:

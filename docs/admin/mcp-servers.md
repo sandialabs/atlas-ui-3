@@ -47,6 +47,7 @@ Here is an example of a server configuration that uses all available options.
 *   **`url`**: (string) For servers using `http` or `sse` transport, this is the URL of the server's endpoint.
 *   **`transport`**: (string) The communication protocol to use. Can be `stdio`, `http`, or `sse`. This takes priority over auto-detection.
 *   **`auth_token`**: (string) For HTTP/SSE servers, the bearer token used for authentication. Use environment variable substitution (e.g., `"${MCP_SERVER_TOKEN}"`) to avoid storing secrets in config files. Stdio servers ignore this field.
+*   **`user_jwt_upload_enabled`**: (boolean) If `true`, the Tools & Integrations UI will show a JWT upload button for this server and regular users may upload a per-user JWT via `/api/user/mcp/jwt`. Default is `false` (opt-in) because most MCP servers do not support/require user-managed JWTs.
 *   **`compliance_level`**: (string) The security compliance level of this server (e.g., "Public", "Internal", "SOC2"). This is used for data segregation and access control.
 *   **`require_approval`**: (list of strings) A list of tool names (without the server prefix) that will always require user approval before execution.
 *   **`allow_edit`**: (list of strings) A list of tool names for which the user is allowed to edit the arguments before approving. (Note: This is a legacy field and may be deprecated; the UI may allow editing for all approval requests).
@@ -129,7 +130,25 @@ When Atlas UI connects to this server, it will:
 
 ### Manual JWT Upload
 
-For service accounts or pre-issued JWT tokens, administrators can manually upload JWTs via the admin API:
+For service accounts or pre-issued JWT tokens:
+
+- **Admins** can always upload JWTs via the admin API.
+- **Regular users** can upload a per-user JWT only when the server explicitly opts in with `user_jwt_upload_enabled: true`.
+
+Example opt-in configuration:
+
+```json
+{
+  "my-server": {
+    "url": "https://api.example.com/mcp",
+    "transport": "http",
+    "groups": ["users"],
+    "user_jwt_upload_enabled": true
+  }
+}
+```
+
+Admin upload example:
 
 ```bash
 curl -X POST "http://localhost:8000/admin/mcp/my-server/jwt" \

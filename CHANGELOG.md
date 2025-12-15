@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add OAuth 2.1 authentication support for MCP servers using FastMCP OAuth helper
 - Add secure JWT storage with Fernet encryption for user-uploaded tokens
 - Add admin API endpoints for JWT management (upload, check, delete, list)
+- Make user JWT upload UI opt-in per server via `user_jwt_upload_enabled` (default off)
 - Add oauth_config field to MCPServerConfig for OAuth settings (scopes, client name, callback port, token storage)
 - Update MCP client initialization to support OAuth flow with automatic token refresh
 - Add encrypted token storage using key-value library with Fernet encryption
