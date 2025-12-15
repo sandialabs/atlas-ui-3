@@ -72,7 +72,8 @@ RUN echo "appuser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
 # Set up uv for appuser
 RUN mkdir -p /home/appuser/.local/bin && \
-    if [ -f "/root/.local/bin/uv" ]; then cp /root/.local/bin/uv /home/appuser/.local/bin/; fi && \
+    cp /root/.local/bin/uv /home/appuser/.local/bin/uv && \
+    cp /root/.local/bin/uvx /home/appuser/.local/bin/uvx && \
     mkdir -p /home/appuser/.cache && \
     chown -R appuser:appuser /home/appuser/.local /home/appuser/.cache
 
@@ -85,9 +86,9 @@ USER appuser
 # Set up Python environment as appuser
 ENV PATH="/home/appuser/.local/bin:$PATH"
 RUN /home/appuser/.local/bin/uv python install 3.12
-RUN /home/appuser/.local/bin/uv venv venv --python 3.12
-ENV VIRTUAL_ENV=/app/venv
-ENV PATH="/app/venv/bin:$PATH"
+RUN /home/appuser/.local/bin/uv venv .venv --python 3.12
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Install Python dependencies using uv
 RUN /home/appuser/.local/bin/uv pip install -r requirements.txt
