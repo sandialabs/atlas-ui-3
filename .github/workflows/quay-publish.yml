@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: quay.io
-  IMAGE_NAME: ${{ secrets.QUAY_NAMESPACE }}/atlas-ui-3
+  IMAGE_NAME: ${{ vars.QUAY_NAMESPACE }}/atlas-ui-3
 
 jobs:
   build-and-push-quay:
