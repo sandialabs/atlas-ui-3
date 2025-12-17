@@ -18,6 +18,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add request-level (non-Playwright) E2E coverage for JWT upload/list and backend MCP auth injection
 - Add comprehensive OAuth documentation in docs/admin/mcp-oauth.md
 - Update requirements.txt to include FastMCP 2.6.0+ and key-value library
+
+### PR 177 Security Fixes - 2025-12-13
+- **SECURITY FIX**: Fixed MD5 hash usage in S3 client by adding `usedforsecurity=False` parameter to address cryptographic security warnings while maintaining S3 ETag compatibility
+- **SECURITY FIX**: Enhanced network binding security by making host binding configurable via `ATLAS_HOST` environment variable, defaulting to localhost (127.0.0.1) for secure development while allowing 0.0.0.0 for production deployments
+- Updated Docker configuration to properly handle new host binding environment variable
+### PR #176 - 2025-12-15
+- Add Quay.io container registry CI/CD workflow for automated container publishing from main and develop branches
+- Update README and Getting Started guide with Quay.io pre-built image information
+
 ### PR #173 - 2025-12-13
 - Increase unit test coverage across backend and frontend; add useSettings localStorage error-handling tests and harden the hook against localStorage failures.
 ### PR #169 - 2025-12-11
