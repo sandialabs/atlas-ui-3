@@ -23,25 +23,31 @@ class TestMCPAuthenticationIntegration:
         with patch('backend.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"mcp-http-mock": Mock()}
             mock_config_manager.mcp_config.servers["mcp-http-mock"].model_dump.return_value = server_config
-            
-            manager = MCPToolManager()
-            manager.servers_config = {"mcp-http-mock": server_config}
-            
-            # Mock the fastmcp.Client to avoid actual network call for now
-            with patch('backend.modules.mcp_tools.client.Client') as MockFastMCPClient:
-                mock_client_instance = MockFastMCPClient.return_value
-                mock_client_instance.__aenter__.return_value = mock_client_instance
-                mock_client_instance.list_tools.return_value = [] # Mock an empty list of tools
 
-                await manager.initialize_clients()
-                
-                # Assert that the client was initialized and added to manager.clients
-                assert "mcp-http-mock" in manager.clients
-                MockFastMCPClient.assert_called_once_with(
-                    "http://localhost:8001/mcp",
-                    auth="test-api-key-123",
-                    log_handler=ANY
-                )
+            # Mock JWT storage to ensure no persisted JWTs interfere with this test
+            with patch('backend.modules.mcp_tools.client.get_jwt_storage') as mock_storage:
+                mock_jwt_storage = Mock()
+                mock_jwt_storage.has_jwt.return_value = False
+                mock_storage.return_value = mock_jwt_storage
+
+                manager = MCPToolManager()
+                manager.servers_config = {"mcp-http-mock": server_config}
+
+                # Mock the fastmcp.Client to avoid actual network call for now
+                with patch('backend.modules.mcp_tools.client.Client') as MockFastMCPClient:
+                    mock_client_instance = MockFastMCPClient.return_value
+                    mock_client_instance.__aenter__.return_value = mock_client_instance
+                    mock_client_instance.list_tools.return_value = [] # Mock an empty list of tools
+
+                    await manager.initialize_clients()
+
+                    # Assert that the client was initialized and added to manager.clients
+                    assert "mcp-http-mock" in manager.clients
+                    MockFastMCPClient.assert_called_once_with(
+                        "http://localhost:8001/mcp",
+                        auth="test-api-key-123",
+                        log_handler=ANY
+                    )
 
     @pytest.mark.asyncio
     async def test_authenticated_connection_failure_invalid_token(self, monkeypatch):
@@ -58,32 +64,38 @@ class TestMCPAuthenticationIntegration:
             mock_config_manager.mcp_config.servers = {"mcp-http-mock": Mock()}
             mock_config_manager.mcp_config.servers["mcp-http-mock"].model_dump.return_value = server_config
 
-            manager = MCPToolManager()
-            manager.servers_config = {"mcp-http-mock": server_config}
+            # Mock JWT storage to ensure no persisted JWTs interfere with this test
+            with patch('backend.modules.mcp_tools.client.get_jwt_storage') as mock_storage:
+                mock_jwt_storage = Mock()
+                mock_jwt_storage.has_jwt.return_value = False
+                mock_storage.return_value = mock_jwt_storage
 
-            # Mock the fastmcp.Client to simulate an authentication error
-            with patch('backend.modules.mcp_tools.client.Client') as MockFastMCPClient:
-                mock_client_instance = MockFastMCPClient.return_value
-                mock_client_instance.__aenter__.side_effect = Exception("Authentication failed: 401 Unauthorized")
+                manager = MCPToolManager()
+                manager.servers_config = {"mcp-http-mock": server_config}
 
-                await manager.initialize_clients()
+                # Mock the fastmcp.Client to simulate an authentication error
+                with patch('backend.modules.mcp_tools.client.Client') as MockFastMCPClient:
+                    mock_client_instance = MockFastMCPClient.return_value
+                    mock_client_instance.__aenter__.side_effect = Exception("Authentication failed: 401 Unauthorized")
 
-                # Client object is created successfully (not connected yet)
-                assert "mcp-http-mock" in manager.clients
-                # Verify auth token was passed correctly
-                MockFastMCPClient.assert_called_once_with(
-                    "http://localhost:8001/mcp",
-                    auth="invalid-token",
-                    log_handler=ANY
-                )
+                    await manager.initialize_clients()
 
-                # Now try to discover tools - this should fail due to auth error
-                await manager.discover_tools()
+                    # Client object is created successfully (not connected yet)
+                    assert "mcp-http-mock" in manager.clients
+                    # Verify auth token was passed correctly
+                    MockFastMCPClient.assert_called_once_with(
+                        "http://localhost:8001/mcp",
+                        auth="invalid-token",
+                        log_handler=ANY
+                    )
 
-                # After failed connection, tools should not be discovered
-                if not hasattr(manager, '_tool_index'):
-                    manager._tool_index = {}
-                assert len([k for k in manager._tool_index.keys() if k.startswith("mcp-http-mock_")]) == 0
+                    # Now try to discover tools - this should fail due to auth error
+                    await manager.discover_tools()
+
+                    # After failed connection, tools should not be discovered
+                    if not hasattr(manager, '_tool_index'):
+                        manager._tool_index = {}
+                    assert len([k for k in manager._tool_index.keys() if k.startswith("mcp-http-mock_")]) == 0
 
     @pytest.mark.asyncio
     async def test_authenticated_tool_execution(self, monkeypatch):
@@ -100,41 +112,47 @@ class TestMCPAuthenticationIntegration:
             mock_config_manager.mcp_config.servers = {"mcp-http-mock": Mock()}
             mock_config_manager.mcp_config.servers["mcp-http-mock"].model_dump.return_value = server_config
 
-            manager = MCPToolManager()
-            manager.servers_config = {"mcp-http-mock": server_config}
+            # Mock JWT storage to ensure no persisted JWTs interfere with this test
+            with patch('backend.modules.mcp_tools.client.get_jwt_storage') as mock_storage:
+                mock_jwt_storage = Mock()
+                mock_jwt_storage.has_jwt.return_value = False
+                mock_storage.return_value = mock_jwt_storage
 
-            # Mock the fastmcp.Client and its call_tool method
-            with patch('backend.modules.mcp_tools.client.Client') as MockFastMCPClient:
-                mock_client_instance = MockFastMCPClient.return_value
-                mock_client_instance.__aenter__.return_value = mock_client_instance
-                mock_client_instance.list_tools.return_value = [] # Mock an empty list of tools
+                manager = MCPToolManager()
+                manager.servers_config = {"mcp-http-mock": server_config}
 
-                # Make call_tool return an async result
-                class MockResult:
-                    data = {"results": "tool_result"}
-                mock_client_instance.call_tool = AsyncMock(return_value=MockResult())
+                # Mock the fastmcp.Client and its call_tool method
+                with patch('backend.modules.mcp_tools.client.Client') as MockFastMCPClient:
+                    mock_client_instance = MockFastMCPClient.return_value
+                    mock_client_instance.__aenter__.return_value = mock_client_instance
+                    mock_client_instance.list_tools.return_value = [] # Mock an empty list of tools
 
-                await manager.initialize_clients()
-                
-                # Simulate tool call
-                from domain.messages.models import ToolCall
-                tool_call = ToolCall(id="call_1", name="mcp-http-mock_test_tool", arguments={})
-                
-                # Need to mock the _tool_index for execute_tool to find the server
-                mock_tool = Mock()
-                mock_tool.name = "test_tool"
-                manager._tool_index = {
-                    "mcp-http-mock_test_tool": {
-                        'server': 'mcp-http-mock',
-                        'tool': mock_tool
+                    # Make call_tool return an async result
+                    class MockResult:
+                        data = {"results": "tool_result"}
+                    mock_client_instance.call_tool = AsyncMock(return_value=MockResult())
+
+                    await manager.initialize_clients()
+
+                    # Simulate tool call
+                    from domain.messages.models import ToolCall
+                    tool_call = ToolCall(id="call_1", name="mcp-http-mock_test_tool", arguments={})
+
+                    # Need to mock the _tool_index for execute_tool to find the server
+                    mock_tool = Mock()
+                    mock_tool.name = "test_tool"
+                    manager._tool_index = {
+                        "mcp-http-mock_test_tool": {
+                            'server': 'mcp-http-mock',
+                            'tool': mock_tool
+                        }
                     }
-                }
 
-                result = await manager.execute_tool(tool_call)
-                
-                assert result.success is True
-                assert "tool_result" in result.content
-                mock_client_instance.call_tool.assert_called_once()
-                call_args = mock_client_instance.call_tool.call_args
-                assert call_args[0] == ("test_tool", {})
-                assert "progress_handler" in call_args[1]
+                    result = await manager.execute_tool(tool_call)
+
+                    assert result.success is True
+                    assert "tool_result" in result.content
+                    mock_client_instance.call_tool.assert_called_once()
+                    call_args = mock_client_instance.call_tool.call_args
+                    assert call_args[0] == ("test_tool", {})
+                    assert "progress_handler" in call_args[1]

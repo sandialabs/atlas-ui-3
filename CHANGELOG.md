@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #166 - 2024-12-10
+- Add OAuth 2.1 authentication support for MCP servers using FastMCP OAuth helper
+- Add secure JWT storage with Fernet encryption for user-uploaded tokens
+- Add admin API endpoints for JWT management (upload, check, delete, list)
+- Make user JWT upload UI opt-in per server via `user_jwt_upload_enabled` (default off)
+- Add oauth_config field to MCPServerConfig for OAuth settings (scopes, client name, callback port, token storage)
+- Update MCP client initialization to support OAuth flow with automatic token refresh
+- Add encrypted token storage using key-value library with Fernet encryption
+- Update authentication priority: OAuth > Manual JWT > Bearer Token > None
+- Add request-level (non-Playwright) E2E coverage for JWT upload/list and backend MCP auth injection
+- Add comprehensive OAuth documentation in docs/admin/mcp-oauth.md
+- Update requirements.txt to include FastMCP 2.6.0+ and key-value library
+
 ### PR 177 Security Fixes - 2025-12-13
 - **SECURITY FIX**: Fixed MD5 hash usage in S3 client by adding `usedforsecurity=False` parameter to address cryptographic security warnings while maintaining S3 ETag compatibility
 - **SECURITY FIX**: Enhanced network binding security by making host binding configurable via `ATLAS_HOST` environment variable, defaulting to localhost (127.0.0.1) for secure development while allowing 0.0.0.0 for production deployments

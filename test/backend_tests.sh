@@ -38,7 +38,7 @@ fi
 cd "$BACKEND_DIR"
 
 echo ""
-echo "\n🧪 Running Backend Tests..."
+echo "\nRunning Backend Tests..."
 echo "BACKEND_DIR full path: $(pwd)"
 echo "=============================="
 
@@ -53,4 +53,4 @@ fi
 echo "Running pytest on backend/tests directory"
 timeout 300 python -m pytest tests -v --tb=short
 
-echo "\n✅ Backend tests completed"
+echo "\nBackend tests completed"
