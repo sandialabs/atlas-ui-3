@@ -35,6 +35,8 @@ logViteEnv()
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: true,
+    allowedHosts: ['work-1-sqhvmzpzdebnvryp.prod-runtime.all-hands.dev', 'work-2-sqhvmzpzdebnvryp.prod-runtime.all-hands.dev'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
