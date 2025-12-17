@@ -511,7 +511,7 @@ async def get_enhanced_logs(
                     "module": "admin",
                     "logger": "admin",
                     "function": "get_enhanced_logs",
-                    "message": f"Error reading log file: {e}",
+                    "message": "An internal error occurred while reading log file.",
                     "trace_id": "",
                     "span_id": "",
                     "line": "",
@@ -562,7 +562,8 @@ async def clear_app_logs(admin_user: str = Depends(require_admin)):
                     logger.error(f"Failed clearing {f}: {e}")
         if not cleared:
             return {"message": "No log files found to clear", "cleared_by": admin_user, "files_cleared": []}
-        logger.info(f"Log files cleared by {admin_user}: {cleared}")
+        sanitized_admin_user = sanitize_for_logging(admin_user)
+        logger.info(f"Log files cleared by {sanitized_admin_user}: {cleared}")
         return {"message": "Log files cleared successfully", "cleared_by": admin_user, "files_cleared": cleared}
     except Exception as e:  # noqa: BLE001
         logger.error(f"Error clearing logs: {e}")
@@ -765,16 +766,19 @@ async def add_mcp_server(
         # Save the updated configuration
         with mcp_config_path.open("w", encoding="utf-8") as f:
             json.dump(active_config, f, indent=2)
-        
-        logger.info(f"Admin {admin_user} added MCP server '{server_name}' to active configuration")
-        
+
+        sanitized_admin_user = sanitize_for_logging(admin_user)
+        sanitized_server_name = sanitize_for_logging(server_name)
+        logger.info(f"Admin {sanitized_admin_user} added MCP server '{sanitized_server_name}' to active configuration")
+
         # Trigger MCP reload to apply changes
         try:
             mcp_manager = app_factory.get_mcp_manager()
             if mcp_manager:
                 await mcp_manager.reload_servers()
         except Exception as reload_error:
-            logger.warning(f"Failed to reload MCP servers after adding '{server_name}': {reload_error}")
+            sanitized_server_name = sanitize_for_logging(server_name)
+            logger.warning(f"Failed to reload MCP servers after adding '{sanitized_server_name}': {reload_error}")
         
         return {
             "message": f"Server '{server_name}' added successfully",
@@ -785,7 +789,8 @@ async def add_mcp_server(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error adding MCP server '{action.server_name}': {e}")
+        sanitized_server_name = sanitize_for_logging(action.server_name)
+        logger.error(f"Error adding MCP server '{sanitized_server_name}': {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -824,16 +829,19 @@ async def remove_mcp_server(
         # Save the updated configuration
         with mcp_config_path.open("w", encoding="utf-8") as f:
             json.dump(active_config, f, indent=2)
-        
-        logger.info(f"Admin {admin_user} removed MCP server '{server_name}' from active configuration")
-        
+
+        sanitized_admin_user = sanitize_for_logging(admin_user)
+        sanitized_server_name = sanitize_for_logging(server_name)
+        logger.info(f"Admin {sanitized_admin_user} removed MCP server '{sanitized_server_name}' from active configuration")
+
         # Trigger MCP reload to apply changes
         try:
             mcp_manager = app_factory.get_mcp_manager()
             if mcp_manager:
                 await mcp_manager.reload_servers()
         except Exception as reload_error:
-            logger.warning(f"Failed to reload MCP servers after removing '{server_name}': {reload_error}")
+            sanitized_server_name = sanitize_for_logging(server_name)
+            logger.warning(f"Failed to reload MCP servers after removing '{sanitized_server_name}': {reload_error}")
         
         return {
             "message": f"Server '{server_name}' removed successfully",
@@ -844,5 +852,6 @@ async def remove_mcp_server(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error removing MCP server '{action.server_name}': {e}")
+        sanitized_server_name = sanitize_for_logging(action.server_name)
+        logger.error(f"Error removing MCP server '{sanitized_server_name}': {e}")
         raise HTTPException(status_code=500, detail=str(e))

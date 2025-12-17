@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Plus, Minus, RefreshCw, Server, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 
 const MCPServerManager = ({ addNotification }) => {
@@ -7,7 +7,7 @@ const MCPServerManager = ({ addNotification }) => {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState({})
 
-  const loadServers = async () => {
+  const loadServers = useCallback(async () => {
     try {
       setLoading(true)
       
@@ -34,11 +34,11 @@ const MCPServerManager = ({ addNotification }) => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [addNotification])
 
   useEffect(() => {
     loadServers()
-  }, [])
+  }, [loadServers])
 
   const addServer = async (serverName) => {
     try {
