@@ -133,5 +133,20 @@
     "short_description": "Environment variable demonstration",
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
+  },
+  "username-override-demo": {
+    "command": [
+      "python",
+      "mcp/username-override-demo/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates the username override security feature that prevents LLM user impersonation. This server shows how Atlas UI automatically injects the authenticated user's email into tools that accept a 'username' parameter, ensuring tools always run with the correct user context. Try asking it to demonstrate override attempts or check user permissions.",
+    "author": "Atlas UI Team",
+    "short_description": "Username override security demonstration",
+    "help_email": "support@example.com",
+    "compliance_level": "Public"
   }
 }
