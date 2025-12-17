@@ -35,10 +35,23 @@ logViteEnv()
 export default defineConfig({
   plugins: [react()],
   server: {
-    host: true,
-    allowedHosts: ['work-1-sqhvmzpzdebnvryp.prod-runtime.all-hands.dev', 'work-2-sqhvmzpzdebnvryp.prod-runtime.all-hands.dev'],
     proxy: {
       '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            console.log('proxy error', err);
+          });
+          proxy.on('proxyReq', (proxyReq, req) => {
+            console.log('Sending Request to the Target:', req.method, req.url);
+          });
+          proxy.on('proxyRes', (proxyRes, req) => {
+            console.log('Received Response from the Target:', proxyRes.statusCode, req.url);
+          });
+        }
+      },
+      '/admin': {
         target: 'http://localhost:8000',
         changeOrigin: true,
         configure: (proxy) => {
