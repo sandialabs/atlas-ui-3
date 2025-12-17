@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #180 - 2025-12-17
 - Add MCP Server Management admin panel and update Admin Dashboard panel layout.
 
+### PR #181 - 2025-12-17
+- Add unsaved changes confirmation dialog to tools panel
+
 ### PR 177 Security Fixes - 2025-12-13
 - **SECURITY FIX**: Fixed MD5 hash usage in S3 client by adding `usedforsecurity=False` parameter to address cryptographic security warnings while maintaining S3 ETag compatibility
 - **SECURITY FIX**: Enhanced network binding security by making host binding configurable via `ATLAS_HOST` environment variable, defaulting to localhost (127.0.0.1) for secure development while allowing 0.0.0.0 for production deployments
