@@ -18,7 +18,7 @@
       "evaluate"
     ]
   },
-   "ui-demo": {
+  "ui-demo": {
     "command": [
       "python",
       "mcp/ui-demo/main.py"

@@ -35,6 +35,10 @@ class BannerMessageUpdate(BaseModel):
     messages: List[str]
 
 
+class MCPServerAction(BaseModel):
+    server_name: str
+
+
 async def require_admin(current_user: str = Depends(get_current_user)) -> str:
     admin_group = config_manager.app_settings.admin_group
     if not await is_user_in_group(current_user, admin_group):
@@ -641,4 +645,204 @@ async def get_system_status(admin_user: str = Depends(require_admin)):
         }
     except Exception as e:  # noqa: BLE001
         logger.error(f"Error getting system status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- MCP Server Management ---
+
+@admin_router.get("/mcp/available-servers")
+async def get_available_mcp_servers(
+    admin_user: str = Depends(require_admin),  # noqa: ARG001 (enforces auth)
+):
+    """Get all available MCP servers from the example-configs directory."""
+    try:
+        project_root = _project_root()
+        example_configs_dir = project_root / "config" / "mcp-example-configs"
+        
+        if not example_configs_dir.exists():
+            return {"available_servers": {}}
+        
+        available_servers = {}
+        
+        for config_file in example_configs_dir.glob("mcp-*.json"):
+            try:
+                with config_file.open("r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+                
+                # Each file should contain one server config
+                for server_name, server_config in config_data.items():
+                    available_servers[server_name] = {
+                        "config": server_config,
+                        "source_file": config_file.name,
+                        "description": server_config.get("description", ""),
+                        "short_description": server_config.get("short_description", ""),
+                        "author": server_config.get("author", ""),
+                        "compliance_level": server_config.get("compliance_level", "")
+                    }
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"Failed to parse {config_file.name}: {e}")
+                continue
+        
+        return {"available_servers": available_servers}
+    
+    except Exception as e:
+        logger.error(f"Error getting available MCP servers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/mcp/active-servers")
+async def get_active_mcp_servers(
+    admin_user: str = Depends(require_admin),  # noqa: ARG001 (enforces auth)
+):
+    """Get currently active MCP servers from the overrides/mcp.json file."""
+    try:
+        mcp_config_path = get_admin_config_path("mcp.json")
+        
+        if not mcp_config_path.exists():
+            return {"active_servers": {}}
+        
+        with mcp_config_path.open("r", encoding="utf-8") as f:
+            active_config = json.load(f)
+        
+        return {"active_servers": active_config}
+    
+    except Exception as e:
+        logger.error(f"Error getting active MCP servers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/mcp/add-server")
+async def add_mcp_server(
+    action: MCPServerAction,
+    admin_user: str = Depends(require_admin),  # noqa: ARG001 (enforces auth)
+):
+    """Add an MCP server from example-configs to the active configuration."""
+    try:
+        server_name = action.server_name
+        
+        # Get the server config from example-configs
+        project_root = _project_root()
+        example_configs_dir = project_root / "config" / "mcp-example-configs"
+        
+        server_config = None
+        for config_file in example_configs_dir.glob("mcp-*.json"):
+            try:
+                with config_file.open("r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+                
+                if server_name in config_data:
+                    server_config = config_data[server_name]
+                    break
+            except (json.JSONDecodeError, Exception):
+                continue
+        
+        if not server_config:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Server '{server_name}' not found in example configurations"
+            )
+        
+        # Load current active configuration
+        mcp_config_path = get_admin_config_path("mcp.json")
+        
+        if mcp_config_path.exists():
+            with mcp_config_path.open("r", encoding="utf-8") as f:
+                active_config = json.load(f)
+        else:
+            active_config = {}
+        
+        # Check if server is already active
+        if server_name in active_config:
+            return {
+                "message": f"Server '{server_name}' is already active",
+                "server_name": server_name,
+                "already_active": True
+            }
+        
+        # Add the server to active configuration
+        active_config[server_name] = server_config
+        
+        # Save the updated configuration
+        with mcp_config_path.open("w", encoding="utf-8") as f:
+            json.dump(active_config, f, indent=2)
+        
+        logger.info(f"Admin {admin_user} added MCP server '{server_name}' to active configuration")
+        
+        # Trigger MCP reload to apply changes
+        try:
+            mcp_manager = app_factory.get_mcp_manager()
+            if mcp_manager:
+                await mcp_manager.reload_servers()
+        except Exception as reload_error:
+            logger.warning(f"Failed to reload MCP servers after adding '{server_name}': {reload_error}")
+        
+        return {
+            "message": f"Server '{server_name}' added successfully",
+            "server_name": server_name,
+            "config": server_config
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding MCP server '{action.server_name}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/mcp/remove-server")
+async def remove_mcp_server(
+    action: MCPServerAction,
+    admin_user: str = Depends(require_admin),  # noqa: ARG001 (enforces auth)
+):
+    """Remove an MCP server from the active configuration."""
+    try:
+        server_name = action.server_name
+        
+        # Load current active configuration
+        mcp_config_path = get_admin_config_path("mcp.json")
+        
+        if not mcp_config_path.exists():
+            raise HTTPException(
+                status_code=404, 
+                detail="MCP configuration file not found"
+            )
+        
+        with mcp_config_path.open("r", encoding="utf-8") as f:
+            active_config = json.load(f)
+        
+        # Check if server exists in active configuration
+        if server_name not in active_config:
+            return {
+                "message": f"Server '{server_name}' is not currently active",
+                "server_name": server_name,
+                "not_active": True
+            }
+        
+        # Remove the server from active configuration
+        removed_config = active_config.pop(server_name)
+        
+        # Save the updated configuration
+        with mcp_config_path.open("w", encoding="utf-8") as f:
+            json.dump(active_config, f, indent=2)
+        
+        logger.info(f"Admin {admin_user} removed MCP server '{server_name}' from active configuration")
+        
+        # Trigger MCP reload to apply changes
+        try:
+            mcp_manager = app_factory.get_mcp_manager()
+            if mcp_manager:
+                await mcp_manager.reload_servers()
+        except Exception as reload_error:
+            logger.warning(f"Failed to reload MCP servers after removing '{server_name}': {reload_error}")
+        
+        return {
+            "message": f"Server '{server_name}' removed successfully",
+            "server_name": server_name,
+            "removed_config": removed_config
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing MCP server '{action.server_name}': {e}")
         raise HTTPException(status_code=500, detail=str(e))

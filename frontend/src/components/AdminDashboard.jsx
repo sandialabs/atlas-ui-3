@@ -11,6 +11,7 @@ import Notifications from './Notifications' // Import the Notifications componen
 import BannerMessagesCard from './admin/BannerMessagesCard' // Import the BannerMessagesCard component
 import MCPConfigurationCard from './admin/MCPConfigurationCard' // Import the MCPConfigurationCard component
 import ConfigViewerCard from './admin/ConfigViewerCard' // Import the ConfigViewerCard component
+import MCPServerManager from './admin/MCPServerManager' // Import the MCPServerManager component
 
 const AdminDashboard = () => {
   const navigate = useNavigate()
@@ -323,6 +324,11 @@ const AdminDashboard = () => {
 
           {/* Configuration Viewer */}
           <ConfigViewerCard 
+            addNotification={addNotification} 
+          />
+
+          {/* MCP Server Manager */}
+          <MCPServerManager 
             addNotification={addNotification} 
           />
 
