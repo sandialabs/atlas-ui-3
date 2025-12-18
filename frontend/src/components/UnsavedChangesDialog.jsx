@@ -31,23 +31,23 @@ const UnsavedChangesDialog = ({ isOpen, onSave, onDiscard, onCancel }) => {
         </div>
 
         {/* Actions */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-700">
+        <div className="grid grid-cols-3 gap-3 px-6 py-4 border-t border-gray-700">
           <button
             onClick={onCancel}
-            className="px-4 py-2 rounded-lg bg-gray-700/60 hover:bg-gray-700 text-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-800"
+            className="w-full flex items-center justify-center px-4 py-2 rounded-lg bg-gray-700/60 hover:bg-gray-700 text-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-800"
           >
             Cancel
           </button>
           <button
             onClick={onDiscard}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 text-red-200 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-800"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 text-red-200 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-800"
           >
             <X className="w-4 h-4" />
             Discard Changes
           </button>
           <button
             onClick={onSave}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600/80 hover:bg-blue-600 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600/80 hover:bg-blue-600 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800"
           >
             <Save className="w-4 h-4" />
             Save Changes
