@@ -5,27 +5,27 @@ const UnsavedChangesDialog = ({ isOpen, onSave, onDiscard, onCancel }) => {
 
   return (
     <div
-      className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[60]"
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]"
       onClick={(e) => {
         e.stopPropagation()
         onCancel?.()
       }}
     >
       <div
-        className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 border border-gray-600"
+        className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 border border-gray-700"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-700">
-          <div className="p-2 bg-orange-600 rounded-full">
-            <AlertTriangle className="w-5 h-5 text-white" />
+          <div className="p-2 bg-orange-500/15 rounded-full border border-orange-500/20">
+            <AlertTriangle className="w-5 h-5 text-orange-200" />
           </div>
-          <h3 className="text-lg font-semibold text-white">Unsaved Changes</h3>
+          <h3 className="text-lg font-medium text-gray-100">Unsaved Changes</h3>
         </div>
 
         {/* Content */}
         <div className="px-6 py-4">
-          <p className="text-gray-300 mb-4">
+          <p className="text-gray-300/90 mb-4">
             You have unsaved changes to your tools and integrations. What would you like to do?
           </p>
         </div>
@@ -34,20 +34,20 @@ const UnsavedChangesDialog = ({ isOpen, onSave, onDiscard, onCancel }) => {
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-700">
           <button
             onClick={onCancel}
-            className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors font-medium"
+            className="px-4 py-2 rounded-lg bg-gray-700/60 hover:bg-gray-700 text-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-800"
           >
             Cancel
           </button>
           <button
             onClick={onDiscard}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors font-medium"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 text-red-200 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-800"
           >
             <X className="w-4 h-4" />
             Discard Changes
           </button>
           <button
             onClick={onSave}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors font-medium"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600/80 hover:bg-blue-600 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800"
           >
             <Save className="w-4 h-4" />
             Save Changes

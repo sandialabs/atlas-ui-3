@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #181 - 2025-12-17
 - Add unsaved changes confirmation dialog to tools panel
+- Soften styling of the unsaved changes confirmation dialog.
 
 ### PR 177 Security Fixes - 2025-12-13
 - **SECURITY FIX**: Fixed MD5 hash usage in S3 client by adding `usedforsecurity=False` parameter to address cryptographic security warnings while maintaining S3 ETag compatibility
