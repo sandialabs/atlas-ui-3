@@ -4,8 +4,17 @@ const UnsavedChangesDialog = ({ isOpen, onSave, onDiscard, onCancel }) => {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[60]">
-      <div className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 border border-gray-600">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[60]"
+      onClick={(e) => {
+        e.stopPropagation()
+        onCancel?.()
+      }}
+    >
+      <div
+        className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 border border-gray-600"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-700">
           <div className="p-2 bg-orange-600 rounded-full">

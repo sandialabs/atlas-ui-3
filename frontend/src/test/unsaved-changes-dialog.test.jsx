@@ -38,7 +38,6 @@ describe('ToolsPanel - Unsaved Changes Dialog', () => {
   let mockToggleTool
   let mockAddTools
   let mockRemoveTools
-  let mockHandleCancelDialog
 
   const defaultChatContext = {
     selectedTools: new Set(),
