@@ -7,6 +7,7 @@ These tests verify that:
 4. The LOG_LEVEL environment variable controls this behavior
 """
 
+import asyncio
 import logging
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -39,7 +40,6 @@ class TestLogLevelSensitiveData:
         # Set log level to INFO
         with caplog.at_level(logging.INFO):
             # Create test session first
-            import asyncio
             asyncio.run(service.create_session("test-session", "test@test.com"))
             
             # Clear logs from session creation
@@ -93,7 +93,6 @@ class TestLogLevelSensitiveData:
         # Set log level to DEBUG
         with caplog.at_level(logging.DEBUG):
             # Create test session first
-            import asyncio
             asyncio.run(service.create_session("test-session", "test@test.com"))
             
             # Clear logs from session creation
