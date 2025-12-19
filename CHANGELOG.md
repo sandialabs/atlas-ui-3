@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #184 - 2025-12-19
 - Add configurable log levels for controlling sensitive data logging. Set `LOG_LEVEL=INFO` in production to prevent logging user input/output content, or `LOG_LEVEL=DEBUG` for development/testing with verbose logging.
 - Fix logging in error_utils.py to prevent full LLM response objects from being logged at INFO level.
+- Remove unused local variables in test_log_level_sensitive_data.py (code quality improvement).
 
 ### PR #180 - 2025-12-17
 - Add MCP Server Management admin panel and update Admin Dashboard panel layout.

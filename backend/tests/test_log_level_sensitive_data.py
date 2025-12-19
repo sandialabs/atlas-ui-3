@@ -133,7 +133,7 @@ class TestLogLevelSensitiveData:
                 with patch.object(caller, '_get_model_kwargs', return_value={}):
                     # Set log level to INFO
                     with caplog.at_level(logging.INFO):
-                        result = await caller.call_plain(
+                        await caller.call_plain(
                             model_name="test-model",
                             messages=[{"role": "user", "content": "test"}],
                             temperature=0.7
@@ -171,7 +171,7 @@ class TestLogLevelSensitiveData:
                 with patch.object(caller, '_get_model_kwargs', return_value={}):
                     # Set log level to DEBUG
                     with caplog.at_level(logging.DEBUG):
-                        result = await caller.call_plain(
+                        await caller.call_plain(
                             model_name="test-model",
                             messages=[{"role": "user", "content": "test"}],
                             temperature=0.7
