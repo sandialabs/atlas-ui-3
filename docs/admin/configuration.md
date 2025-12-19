@@ -34,6 +34,7 @@ Key settings in the `.env` file include:
 *   **Feature Flags**: Enable or disable major features like `FEATURE_AGENT_MODE_AVAILABLE`.
 *   **Branding Flags**: Control frontend branding such as `VITE_APP_NAME` and the optional `VITE_FEATURE_POWERED_BY_ATLAS` badge on the welcome screen.
 *   **S3 Connection**: Configure the connection to your S3-compatible storage. For local testing, you can set `USE_MOCK_S3=true` to use an in-memory mock instead of a real S3 bucket. **This mock must never be used in production.**
+*   **Log Level**: The `LOG_LEVEL` variable controls logging verbosity and whether sensitive data (user input/output) is logged. Set to `INFO` for production to avoid logging sensitive content, or `DEBUG` for development/testing. See [Logging and Monitoring](logging-monitoring.md) for details.
 *   **Log Directory**: The `APP_LOG_DIR` variable points to the folder where the application log file (`app.jsonl`) will be stored. This path must be updated to a valid directory in your deployment environment.
 *   **Security Headers**: Configure Content Security Policy (CSP) and other security headers. See the Security Configuration section below for details.
 

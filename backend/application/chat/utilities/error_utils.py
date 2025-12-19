@@ -121,7 +121,18 @@ async def safe_call_llm_with_tools(
             llm_response = await llm_caller.call_with_tools(
                 model, messages, tools_schema, tool_choice, temperature=temperature
             )
-            logger.info("LLM response received with tools only, llm_response: %s", llm_response)
+            # Log metadata at INFO level, content only at DEBUG
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("LLM response received with tools only, llm_response: %s", llm_response)
+            else:
+                # Check if llm_response has the expected attributes before logging
+                has_tool_calls = llm_response.has_tool_calls() if hasattr(llm_response, 'has_tool_calls') else False
+                content_length = len(llm_response.content) if hasattr(llm_response, 'content') else 0
+                model_used = getattr(llm_response, 'model_used', 'unknown')
+                logger.info(
+                    f"LLM response received with tools only, has_tool_calls: {has_tool_calls}, "
+                    f"content_length: {content_length}, model: {model_used}"
+                )
         return llm_response
     except Exception as e:
         # Classify the error and raise appropriate error type

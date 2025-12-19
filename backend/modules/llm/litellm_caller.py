@@ -162,7 +162,11 @@ class LiteLLMCaller:
             )
             
             content = response.choices[0].message.content or ""
-            logger.info(f"LLM response preview: '{content[:200]}{'...' if len(content) > 200 else ''}'")
+            # Log response preview only at DEBUG level to avoid logging sensitive data
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"LLM response preview: '{content[:200]}{'...' if len(content) > 200 else ''}'")
+            else:
+                logger.info(f"LLM response length: {len(content)} chars")
             return content
             
         except Exception as exc:
