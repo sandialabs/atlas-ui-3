@@ -3,7 +3,6 @@ import DOMPurify from 'dompurify'
 import { useChat } from '../contexts/ChatContext'
 import { useState, memo, useEffect } from 'react'
 import { Copy } from 'lucide-react'
-import AgentAction from './AgentAction'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 
@@ -95,7 +94,7 @@ renderer.code = function(code, language) {
         codeString = JSON.stringify(code, null, 2)
         actualLanguage = 'json'
       } catch {
-        codeString = String(code || '')
+        codeString = String(code)
       }
     }
   } else {
@@ -344,7 +343,7 @@ const processMessageContent = (content) => {
       try {
         processedContent = JSON.stringify(content, null, 2)
       } catch {
-        processedContent = String(content || '')
+        processedContent = String(content)
       }
     }
   } else {
@@ -878,10 +877,8 @@ const renderContent = () => {
                   {message.status === 'failed' ? 'Error Details' : 'Output Result'} {toolOutputCollapsed ? '(click to expand)' : ''}
                 </button>
 
-                {!toolOutputCollapsed && (
-                  <>
-                    {/* Check for returned file and show download button */}
-                    {(() => {
+                {/* File download buttons - always visible even when output is collapsed */}
+                {(() => {
                   let parsedResult = message.result
                   if (typeof message.result === 'string') {
                     try {
@@ -979,15 +976,16 @@ const renderContent = () => {
                   return null
                 })()}
 
-                <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-64 overflow-y-auto">
-                  <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                    {(() => {
-                      const processedResult = processToolResult(message.result)
-                      return typeof processedResult === 'string' ? processedResult : JSON.stringify(processedResult, null, 2)
-                    })()}
-                  </pre>
-                </div>
-                  </>
+                {/* Output content - collapsible */}
+                {!toolOutputCollapsed && (
+                  <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-64 overflow-y-auto">
+                    <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                      {(() => {
+                        const processedResult = processToolResult(message.result)
+                        return typeof processedResult === 'string' ? processedResult : JSON.stringify(processedResult, null, 2)
+                      })()}
+                    </pre>
+                  </div>
                 )}
               </div>
             </div>
