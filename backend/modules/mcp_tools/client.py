@@ -159,10 +159,15 @@ class MCPToolManager:
                 # Filter based on configured minimum log level
                 if python_log_level < self._min_log_level:
                     return
+
+                # Backend log noise reduction: tool servers can be very chatty at INFO.
+                # Keep their INFO messages available at LOG_LEVEL=DEBUG, but avoid flooding
+                # app logs at LOG_LEVEL=INFO. Warnings/errors still surface at INFO.
+                backend_log_level = python_log_level if python_log_level >= logging.WARNING else logging.DEBUG
                 
                 # Log to backend logger with server context
                 logger.log(
-                    python_log_level,
+                    backend_log_level,
                     f"[MCP:{sanitize_for_logging(server_name)}] {sanitize_for_logging(msg)}",
                     extra={"mcp_server": server_name, "mcp_extra": extra}
                 )
@@ -327,10 +332,13 @@ class MCPToolManager:
 
     async def _initialize_single_client(self, server_name: str, config: Dict[str, Any]) -> Optional[Client]:
         """Initialize a single MCP client. Returns None if initialization fails."""
-        logger.info(f"=== Initializing client for server '{sanitize_for_logging(server_name)}' ===\n\nServer config: {sanitize_for_logging(str(config))}")
+        safe_server_name = sanitize_for_logging(server_name)
+        # Keep INFO logs concise; config/transport details can be very verbose.
+        logger.info("Initializing MCP client for server '%s'", safe_server_name)
+        logger.debug("Server config for '%s': %s", safe_server_name, sanitize_for_logging(str(config)))
         try:
             transport_type = self._determine_transport_type(config)
-            logger.info(f"Determined transport type: {transport_type}")
+            logger.debug("Determined transport type for %s: %s", safe_server_name, transport_type)
             
             if transport_type in ["http", "sse"]:
                 # HTTP/SSE MCP server
@@ -369,12 +377,12 @@ class MCPToolManager:
             elif transport_type == "stdio":
                 # STDIO MCP server
                 command = config.get("command")
-                logger.info(f"STDIO transport - command: {command}")
+                logger.debug("STDIO transport command for %s: %s", safe_server_name, command)
                 if command:
                     # Custom command specified
                     cwd = config.get("cwd")
                     env = config.get("env")
-                    logger.info(f"Working directory specified: {cwd}")
+                    logger.debug("Working directory specified for %s: %s", safe_server_name, cwd)
                     
                     # Resolve environment variables in env dict
                     resolved_env = None
@@ -387,7 +395,7 @@ class MCPToolManager:
                             except ValueError as e:
                                 logger.error(f"Failed to resolve env var {key} for {server_name}: {e}")
                                 return None  # Skip this server if env var resolution fails
-                        logger.info(f"Environment variables specified: {list(resolved_env.keys())}")
+                        logger.debug("Environment variables specified for %s: %s", safe_server_name, list(resolved_env.keys()))
                     
                     # Create log handler for this server
                     log_handler = self._create_log_handler(server_name)
@@ -400,11 +408,11 @@ class MCPToolManager:
                             # project root is: /workspaces/atlas-ui-3-11
                             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
                             cwd = os.path.join(project_root, cwd)
-                            logger.info(f"Converted relative cwd to absolute: {cwd} (project_root: {project_root})")
+                            logger.debug("Converted relative cwd to absolute for %s: %s", safe_server_name, cwd)
                         
                         if os.path.exists(cwd):
-                            logger.info(f"Working directory exists: {cwd}")
-                            logger.info(f"Creating STDIO client for {server_name} with command: {command} in cwd: {cwd}")
+                            logger.debug("Working directory exists for %s: %s", safe_server_name, cwd)
+                            logger.debug("Creating STDIO client for %s with command=%s cwd=%s", safe_server_name, command, cwd)
                             from fastmcp.client.transports import StdioTransport
                             transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd, env=resolved_env)
                             client = Client(transport, log_handler=log_handler)
@@ -414,7 +422,7 @@ class MCPToolManager:
                             logger.error(f"Working directory does not exist: {cwd}")
                             return None
                     else:
-                        logger.info(f"No cwd specified, creating STDIO client for {server_name} with command: {command}")
+                        logger.debug("No cwd specified for %s; creating STDIO client with command=%s", safe_server_name, command)
                         from fastmcp.client.transports import StdioTransport
                         transport = StdioTransport(command=command[0], args=command[1:], env=resolved_env)
                         client = Client(transport, log_handler=log_handler)
@@ -490,7 +498,8 @@ class MCPToolManager:
 
     async def initialize_clients(self):
         """Initialize FastMCP clients for all configured servers in parallel."""
-        logger.info(f"=== CLIENT INITIALIZATION: Starting parallel initialization for {len(self.servers_config)} servers: {list(self.servers_config.keys())} ===")
+        logger.info("Starting MCP client initialization for %d servers", len(self.servers_config))
+        logger.debug("MCP servers to initialize: %s", list(self.servers_config.keys()))
         
         # Create tasks for parallel initialization
         tasks = [
@@ -516,11 +525,15 @@ class MCPToolManager:
                 self._record_server_failure(server_name, "Initialization returned None")
                 logger.warning(f"Failed to initialize client for {server_name}")
         
-        logger.info("=== CLIENT INITIALIZATION COMPLETE ===")
-        logger.info(f"Successfully initialized {len(self.clients)} clients: {list(self.clients.keys())}")
-        failed_servers = set(self.servers_config.keys()) - set(self.clients.keys())
-        logger.info(f"Failed to initialize: {failed_servers}")
-        logger.info("=== END CLIENT INITIALIZATION SUMMARY ===")
+        failed_servers = sorted(set(self.servers_config.keys()) - set(self.clients.keys()))
+        logger.info(
+            "MCP client initialization complete: %d/%d connected (%d failed)",
+            len(self.clients),
+            len(self.servers_config),
+            len(failed_servers),
+        )
+        logger.debug("MCP clients initialized: %s", list(self.clients.keys()))
+        logger.debug("MCP clients failed to initialize: %s", failed_servers)
     
     async def reconnect_failed_servers(self, force: bool = False) -> Dict[str, Any]:
         """Attempt to reconnect to servers that previously failed.
@@ -699,18 +712,18 @@ class MCPToolManager:
         safe_server_name = sanitize_for_logging(server_name)
         server_config = self.servers_config.get(server_name, {})
         safe_config = sanitize_for_logging(str(server_config))
-        logger.info(f"=== TOOL DISCOVERY: Starting discovery for server '{safe_server_name}' ===")
-        logger.debug(f"Server config: {safe_config}")
+        logger.debug("Tool discovery: starting for server '%s'", safe_server_name)
+        logger.debug("Server config (sanitized): %s", safe_config)
         try:
-            logger.info(f"Opening client connection for {safe_server_name}...")
+            logger.debug("Opening client connection for %s", safe_server_name)
             async with client:
-                logger.info(f"Client connected successfully for {safe_server_name}, listing tools...")
+                logger.debug("Client connected for %s; listing tools", safe_server_name)
                 tools = await client.list_tools()
-                logger.info(f"Successfully got {len(tools)} tools from {safe_server_name}: {[tool.name for tool in tools]}")
+                logger.debug("Got %d tools from %s: %s", len(tools), safe_server_name, [tool.name for tool in tools])
 
                 # Log detailed tool information
                 for i, tool in enumerate(tools):
-                    logger.info(
+                    logger.debug(
                         "  Tool %d: name='%s', description='%s'",
                         i + 1,
                         tool.name,
@@ -721,8 +734,7 @@ class MCPToolManager:
                     'tools': tools,
                     'config': self.servers_config[server_name]
                 }
-                logger.info(f"Successfully stored {len(tools)} tools for {safe_server_name} in available_tools")
-                logger.info(f"=== TOOL DISCOVERY: Completed successfully for server '{safe_server_name}' ===")
+                logger.debug("Stored %d tools for %s", len(tools), safe_server_name)
                 return server_data
         except Exception as e:
             error_type = type(e).__name__
@@ -769,13 +781,17 @@ class MCPToolManager:
                 'tools': [],
                 'config': server_config,
             }
-            logger.error(f"Set empty tools list for failed server '{safe_server_name}' (config_present={server_config is not None})")
-            logger.info(f"=== TOOL DISCOVERY: Failed for server '{safe_server_name}' ===")
+            logger.debug(
+                "Set empty tools list for failed server '%s' (config_present=%s)",
+                safe_server_name,
+                server_config is not None,
+            )
             return server_data
 
     async def discover_tools(self):
         """Discover tools from all MCP servers in parallel."""
-        logger.info(f"Starting parallel tool discovery for {len(self.clients)} clients: {list(self.clients.keys())}")
+        logger.info("Starting MCP tool discovery for %d connected servers", len(self.clients))
+        logger.debug("Tool discovery servers: %s", list(self.clients.keys()))
         self.available_tools = {}
 
         # Create tasks for parallel tool discovery
@@ -810,13 +826,15 @@ class MCPToolManager:
                 self._clear_server_failure(server_name)
                 self.available_tools[server_name] = result
         
-        logger.info("=== TOOL DISCOVERY COMPLETE ===")
-        logger.info("Final available_tools summary:")
+        total_tools = sum(len(server_data.get('tools', [])) for server_data in self.available_tools.values())
+        logger.info(
+            "MCP tool discovery complete: %d tools across %d servers",
+            total_tools,
+            len(self.available_tools),
+        )
         for server_name, server_data in self.available_tools.items():
-            tool_count = len(server_data['tools'])
-            tool_names = [tool.name for tool in server_data['tools']]
-            logger.info(f"  {server_name}: {tool_count} tools {tool_names}")
-        logger.info("=== END TOOL DISCOVERY SUMMARY ===")
+            tool_names = [tool.name for tool in server_data.get('tools', [])]
+            logger.debug("Tool discovery summary: %s: %d tools %s", server_name, len(tool_names), tool_names)
 
         # Build tool index for quick lookups
         self._tool_index = {}
@@ -904,7 +922,8 @@ class MCPToolManager:
 
     async def discover_prompts(self):
         """Discover prompts from all MCP servers in parallel."""
-        logger.info(f"Starting parallel prompt discovery for {len(self.clients)} clients: {list(self.clients.keys())}")
+        logger.info("Starting MCP prompt discovery for %d connected servers", len(self.clients))
+        logger.debug("Prompt discovery servers: %s", list(self.clients.keys()))
         self.available_prompts = {}
         
         # Create tasks for parallel prompt discovery
@@ -939,14 +958,15 @@ class MCPToolManager:
                 self._clear_server_failure(server_name)
                 self.available_prompts[server_name] = result
         
-        logger.info("=== PROMPT DISCOVERY COMPLETE ===")
-        total_prompts = sum(len(server_data['prompts']) for server_data in self.available_prompts.values())
-        logger.info(f"Total prompts discovered: {total_prompts}")
+        total_prompts = sum(len(server_data.get('prompts', [])) for server_data in self.available_prompts.values())
+        logger.info(
+            "MCP prompt discovery complete: %d prompts across %d servers",
+            total_prompts,
+            len(self.available_prompts),
+        )
         for server_name, server_data in self.available_prompts.items():
-            prompt_count = len(server_data['prompts'])
-            prompt_names = [prompt.name for prompt in server_data['prompts']]
-            logger.info(f"  {server_name}: {prompt_count} prompts {prompt_names}")
-        logger.info("=== END PROMPT DISCOVERY SUMMARY ===")
+            prompt_names = [prompt.name for prompt in server_data.get('prompts', [])]
+            logger.debug("Prompt discovery summary: %s: %d prompts %s", server_name, len(prompt_names), prompt_names)
     
     def get_server_groups(self, server_name: str) -> List[str]:
         """Get required groups for a server."""
@@ -1285,7 +1305,7 @@ class MCPToolManager:
         context: Optional[Dict[str, Any]] = None
     ) -> ToolResult:
         """Execute a tool call."""
-        logger.info(f"Step 7: Entering ToolManager.execute_tool for tool {tool_call.name}")
+        logger.debug("ToolManager.execute_tool: tool=%s", tool_call.name)
         # Handle canvas pseudo-tool
         if tool_call.name == "canvas_canvas":
             # Canvas tool just returns the content - it's handled by frontend

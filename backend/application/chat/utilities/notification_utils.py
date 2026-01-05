@@ -168,7 +168,7 @@ async def notify_tool_complete(
         arts = getattr(result, "artifacts", None)
         disp = getattr(result, "display_config", None)
         if arts or disp:
-            logger.info(
+            logger.debug(
                 "Tool result has artifacts/display: artifacts=%d, has_display=%s",
                 len(arts) if isinstance(arts, list) else 0,
                 bool(disp),

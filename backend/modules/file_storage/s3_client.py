@@ -156,7 +156,15 @@ class S3StorageClient:
                 "user_email": user_email
             }
 
-            logger.info(f"File uploaded successfully: {sanitize_for_logging(s3_key)} for user {sanitize_for_logging(user_email)}")
+            category = "generated" if "/generated/" in s3_key else ("uploads" if "/uploads/" in s3_key else "other")
+            logger.info(
+                "File uploaded successfully: category=%s, size=%d bytes, content_type=%s, user=%s",
+                category,
+                len(content_bytes),
+                sanitize_for_logging(content_type),
+                sanitize_for_logging(user_email),
+            )
+            logger.debug("Uploaded file key (sanitized): %s", sanitize_for_logging(s3_key))
             return result
 
         except ClientError as e:
@@ -181,7 +189,11 @@ class S3StorageClient:
         try:
             # Verify user has access to this file (check if key starts with user's prefix)
             if not file_key.startswith(f"users/{user_email}/"):
-                logger.warning(f"Access denied: {sanitize_for_logging(user_email)} attempted to access {sanitize_for_logging(file_key)}")
+                logger.warning(
+                    "Access denied: user=%s attempted to access key=%s",
+                    sanitize_for_logging(user_email),
+                    sanitize_for_logging(file_key.split('/')[-1]),
+                )
                 raise Exception("Access denied to file")
 
             # Get object from S3
@@ -219,7 +231,15 @@ class S3StorageClient:
                 "tags": tags
             }
 
-            logger.info(f"File retrieved successfully: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
+            category = "generated" if "/generated/" in file_key else ("uploads" if "/uploads/" in file_key else "other")
+            logger.info(
+                "File retrieved successfully: category=%s, size=%d bytes, content_type=%s, user=%s",
+                category,
+                len(content_bytes),
+                sanitize_for_logging(response['ContentType']),
+                sanitize_for_logging(user_email),
+            )
+            logger.debug("Retrieved file key (sanitized): %s", sanitize_for_logging(file_key))
             return result
 
         except ClientError as e:

@@ -29,7 +29,7 @@ from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
 from core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from core.otel_config import setup_opentelemetry
-from core.utils import sanitize_for_logging
+from core.utils import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from core.auth import get_user_from_header
 
 # Import from infrastructure
@@ -67,9 +67,9 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
         elif mtype == "canvas_content":
             content = message.get("content")
             clen = len(content) if isinstance(content, str) else "obj"
-            logger.info("WS SEND: canvas_content length=%s", clen)
+            logger.debug("WS SEND: canvas_content length=%s", clen)
         else:
-            logger.info("WS SEND: %s", mtype)
+            logger.debug("WS SEND: %s", mtype)
     except Exception:
         # Non-fatal logging error; continue to send
         pass
@@ -308,7 +308,7 @@ async def websocket_endpoint(websocket: WebSocket):
             message_type = data.get("type")
 
             # Debug: Log ALL incoming messages
-            logger.info(
+            logger.debug(
                 "WS RECEIVED message_type=[%s], data keys=%s",
                 sanitize_for_logging(message_type),
                 [f"[{sanitize_for_logging(key)}]" for key in data.keys()]
@@ -410,7 +410,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif message_type == "tool_approval_response":
                 # Handle tool approval response
-                logger.info(f"Received tool approval response: {sanitize_for_logging(str(data))}")
                 from application.chat.approval_manager import get_approval_manager
                 approval_manager = get_approval_manager()
                 
@@ -418,6 +417,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 approved = data.get("approved", False)
                 arguments = data.get("arguments")
                 reason = data.get("reason")
+
+                # SECURITY: Never log tool arguments at INFO level (they may include sensitive user data).
+                # Log a conservative summary instead.
+                logger.info(
+                    "Received tool approval response: %s",
+                    summarize_tool_approval_response_for_logging(data),
+                )
 
                 logger.info(f"Processing approval: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={approved}")
                 

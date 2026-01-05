@@ -56,6 +56,45 @@ def sanitize_for_logging(value: Any) -> str:
     return value
 
 
+def summarize_tool_approval_response_for_logging(data: Any) -> str:
+    """Return a non-sensitive summary of a tool approval response payload.
+
+    This is intentionally conservative: it never logs tool argument values or
+    rejection reasons because these can contain sensitive user content.
+
+    Expected input shape (from websocket):
+        {
+          "type": "tool_approval_response",
+          "tool_call_id": "...",
+          "approved": true/false,
+          "arguments": {...},
+          "reason": "..."
+        }
+    """
+    if not isinstance(data, dict):
+        return f"type=tool_approval_response payload_type={sanitize_for_logging(type(data).__name__)}"
+
+    tool_call_id = sanitize_for_logging(data.get("tool_call_id"))
+    approved_raw = data.get("approved", False)
+    approved = bool(approved_raw)
+
+    arguments = data.get("arguments")
+    has_arguments = arguments is not None
+    arguments_count = len(arguments) if isinstance(arguments, dict) else (1 if has_arguments else 0)
+
+    reason = data.get("reason")
+    has_reason = bool(reason)
+
+    return (
+        "type=tool_approval_response "
+        f"tool_call_id={tool_call_id} "
+        f"approved={approved} "
+        f"has_arguments={has_arguments} "
+        f"arguments_count={arguments_count} "
+        f"has_reason={has_reason}"
+    )
+
+
 
 async def get_current_user(request: Request) -> str:
     """Get current user from request state (set by middleware)."""

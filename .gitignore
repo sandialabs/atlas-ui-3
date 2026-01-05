@@ -85,3 +85,4 @@ backend/minio-data/
 mocks/s3-mock/s3-mock-storage/
 .old.env
 old.env
+backend/bandit_output.txt
