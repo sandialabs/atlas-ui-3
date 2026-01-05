@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #190 - 2026-01-05
+- Add a "Back to Admin Dashboard" navigation button to the admin LogViewer.
+
 ### PR #184 - 2025-12-19
 - Add configurable log levels for controlling sensitive data logging. Set `LOG_LEVEL=INFO` in production to prevent logging user input/output content, or `LOG_LEVEL=DEBUG` for development/testing with verbose logging.
 - Fix logging in error_utils.py to prevent full LLM response objects from being logged at INFO level.
