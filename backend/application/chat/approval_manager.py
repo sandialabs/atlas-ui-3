@@ -108,16 +108,20 @@ class ToolApprovalManager:
         Returns:
             True if request was found and handled, False otherwise
         """
-        logger.info(f"handle_approval_response called: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={sanitize_for_logging(approved)}")
-        logger.info(f"Pending requests: {[sanitize_for_logging(key) for key in self._pending_requests.keys()]}")
+        logger.debug(
+            "handle_approval_response called: tool_call_id=%s, approved=%s",
+            sanitize_for_logging(tool_call_id),
+            sanitize_for_logging(approved),
+        )
+        logger.debug("Pending requests: %s", [sanitize_for_logging(key) for key in self._pending_requests.keys()])
         
         request = self._pending_requests.get(tool_call_id)
         if request is None:
             logger.warning(f"Received approval response for unknown tool call: {sanitize_for_logging(tool_call_id)}")
-            logger.warning(f"Available pending requests: {list(self._pending_requests.keys())}")
+            logger.debug("Available pending requests: %s", list(self._pending_requests.keys()))
             return False
         
-        logger.info(f"Found pending request for {sanitize_for_logging(tool_call_id)}, setting response")
+        logger.debug("Found pending request for %s; setting response", sanitize_for_logging(tool_call_id))
         request.set_response(approved, arguments, reason)
         # Keep the request in the dict for a bit to avoid race conditions
         # It will be cleaned up later

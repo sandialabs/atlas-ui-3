@@ -6,12 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2025-12-13
+### PR #174 - 2025-12-13
 - Add comprehensive OAuth 2.1 / Bearer token authentication e2e tests for MCP HTTP servers
 - Add Python test suite (oauth_e2e_test.py) validating authentication flow, token resolution, and error handling
 - Add Playwright test suite (oauth-authentication.spec.js) for browser-based OAuth workflow testing
 - Update e2e test runner to include OAuth 2.1 tests in the standard test suite
 - Add detailed documentation for OAuth 2.1 e2e tests (test/OAUTH_E2E_TESTS.md)
+
+### PR #190 - 2026-01-05
+- Add a "Back to Admin Dashboard" navigation button to the admin LogViewer.
+
+### PR #184 - 2025-12-19
+- Add configurable log levels for controlling sensitive data logging. Set `LOG_LEVEL=INFO` in production to prevent logging user input/output content, or `LOG_LEVEL=DEBUG` for development/testing with verbose logging.
+- Fix logging in error_utils.py to prevent full LLM response objects from being logged at INFO level.
+- Redact tool approval response logging so tool arguments are never logged at INFO.
+- Remove unused local variables in test_log_level_sensitive_data.py (code quality improvement).
+
+### PR #180 - 2025-12-17
+- Add MCP Server Management admin panel and update Admin Dashboard panel layout.
+
+### PR #181 - 2025-12-17
+- Add unsaved changes confirmation dialog to tools panel
+
+### PR 177 Security Fixes - 2025-12-13
+- **SECURITY FIX**: Fixed MD5 hash usage in S3 client by adding `usedforsecurity=False` parameter to address cryptographic security warnings while maintaining S3 ETag compatibility
+- **SECURITY FIX**: Enhanced network binding security by making host binding configurable via `ATLAS_HOST` environment variable, defaulting to localhost (127.0.0.1) for secure development while allowing 0.0.0.0 for production deployments
+- Updated Docker configuration to properly handle new host binding environment variable
+### PR #176 - 2025-12-15
+- Add Quay.io container registry CI/CD workflow for automated container publishing from main and develop branches
+- Update README and Getting Started guide with Quay.io pre-built image information
 
 ### PR #173 - 2025-12-13
 - Increase unit test coverage across backend and frontend; add useSettings localStorage error-handling tests and harden the hook against localStorage failures.

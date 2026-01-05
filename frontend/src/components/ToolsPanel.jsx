@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
+import UnsavedChangesDialog from './UnsavedChangesDialog'
 
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
@@ -35,6 +36,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [pendingSelectedPrompts, setPendingSelectedPrompts] = useState(new Set())
   const [pendingToolChoiceRequired, setPendingToolChoiceRequired] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
   
   // Initialize pending state from saved state only when panel transitions from closed to open
   useEffect(() => {
@@ -159,6 +161,30 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     setPendingSelectedTools(new Set())
     setPendingSelectedPrompts(new Set())
     setHasChanges(true)
+  }
+
+  // Handle close attempts - check for unsaved changes
+  const handleCloseAttempt = () => {
+    if (hasChanges) {
+      setShowUnsavedDialog(true)
+    } else {
+      onClose()
+    }
+  }
+
+  // Handle confirmation dialog actions
+  const handleSaveAndClose = () => {
+    handleSave() // This already calls onClose()
+    setShowUnsavedDialog(false)
+  }
+
+  const handleDiscardAndClose = () => {
+    handleCancel() // This already calls onClose()
+    setShowUnsavedDialog(false)
+  }
+
+  const handleCancelDialog = () => {
+    setShowUnsavedDialog(false)
   }
   
   // Use compliance-filtered tools and prompts if feature is enabled, otherwise use marketplace filtered
@@ -404,7 +430,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   return (
     <div 
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={onClose}
+      onClick={handleCloseAttempt}
     >
       <div 
         className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] mx-4 flex flex-col"
@@ -414,7 +440,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 flex-shrink-0">
           <h2 className="text-lg font-semibold text-gray-100">Tools & Integrations</h2>
           <button
-            onClick={onClose}
+            onClick={handleCloseAttempt}
             className="p-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -705,6 +731,14 @@ const ToolsPanel = ({ isOpen, onClose }) => {
           </button>
         </div>
       </div>
+
+      {/* Unsaved Changes Confirmation Dialog */}
+      <UnsavedChangesDialog
+        isOpen={showUnsavedDialog}
+        onSave={handleSaveAndClose}
+        onDiscard={handleDiscardAndClose}
+        onCancel={handleCancelDialog}
+      />
     </div>
   )
 }
