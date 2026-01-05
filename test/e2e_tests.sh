@@ -49,7 +49,9 @@ else
 
     echo "Building frontend..."
     # Set VITE_APP_NAME for build (required for index.html template replacement)
-    export VITE_APP_NAME="Chat UI"
+    # export VITE_APP_NAME="Chat UI"
+    export VITE_APP_NAME="ATLAS-3"
+    export VITE_FEATURE_POWERED_BY_ATLAS="false"
     npx vite build
 fi
 
