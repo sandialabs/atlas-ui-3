@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { Filter, ChevronDown, ChevronUp, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Filter, ChevronDown, ChevronUp, ToggleLeft, ToggleRight, ArrowLeft } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useChat } from '../contexts/ChatContext';
 
 const DEFAULT_POLL_INTERVAL = 60000; // 60s refresh
 
 export default function LogViewer() {
+  const navigate = useNavigate();
   const { user } = useChat();
   const [entries, setEntries] = useState([]);
   const [page, setPage] = useState(0);
@@ -224,6 +226,13 @@ export default function LogViewer() {
               {modules.map(m => <option key={m}>{m}</option>)}
             </select>
         </div>
+        <button
+          onClick={() => navigate('/admin')}
+          className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors text-sm font-semibold"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Admin Dashboard
+        </button>
         <button onClick={fetchLogs} className="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded text-sm font-semibold">Refresh</button>
         <button onClick={clearLogs} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded text-sm font-semibold">Clear Logs</button>
         <button onClick={() => window.location.href='/admin/logs/download'} className="bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 px-3 py-2 rounded text-sm font-medium">Download</button>
@@ -376,7 +385,7 @@ export default function LogViewer() {
             {[50,100,250,500].map(s => <option key={s}>{s}</option>)}
           </select>
         </div>
-  <span className="text-gray-600 dark:text-gray-300">Total entries: {entries.length}{filtered.length !== entries.length && ` (showing ${filtered.length})`}</span>
+        <span className="text-gray-600 dark:text-gray-300">Total entries: {entries.length}{filtered.length !== entries.length && ` (showing ${filtered.length})`}</span>
       </div>
       <div ref={tableContainerRef} className="flex-1 overflow-auto border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" onScroll={handleScroll}> {/* Added onScroll handler */}
         <table className="w-full text-sm">
