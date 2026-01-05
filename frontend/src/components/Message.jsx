@@ -3,7 +3,6 @@ import DOMPurify from 'dompurify'
 import { useChat } from '../contexts/ChatContext'
 import { useState, memo, useEffect } from 'react'
 import { Copy } from 'lucide-react'
-import AgentAction from './AgentAction'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 
@@ -95,7 +94,7 @@ renderer.code = function(code, language) {
         codeString = JSON.stringify(code, null, 2)
         actualLanguage = 'json'
       } catch {
-        codeString = String(code || '')
+        codeString = String(code)
       }
     }
   } else {
@@ -344,7 +343,7 @@ const processMessageContent = (content) => {
       try {
         processedContent = JSON.stringify(content, null, 2)
       } catch {
-        processedContent = String(content || '')
+        processedContent = String(content)
       }
     }
   } else {
