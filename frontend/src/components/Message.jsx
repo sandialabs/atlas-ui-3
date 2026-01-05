@@ -878,10 +878,8 @@ const renderContent = () => {
                   {message.status === 'failed' ? 'Error Details' : 'Output Result'} {toolOutputCollapsed ? '(click to expand)' : ''}
                 </button>
 
-                {!toolOutputCollapsed && (
-                  <>
-                    {/* Check for returned file and show download button */}
-                    {(() => {
+                {/* File download buttons - always visible even when output is collapsed */}
+                {(() => {
                   let parsedResult = message.result
                   if (typeof message.result === 'string') {
                     try {
@@ -979,15 +977,16 @@ const renderContent = () => {
                   return null
                 })()}
 
-                <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-64 overflow-y-auto">
-                  <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                    {(() => {
-                      const processedResult = processToolResult(message.result)
-                      return typeof processedResult === 'string' ? processedResult : JSON.stringify(processedResult, null, 2)
-                    })()}
-                  </pre>
-                </div>
-                  </>
+                {/* Output content - collapsible */}
+                {!toolOutputCollapsed && (
+                  <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-64 overflow-y-auto">
+                    <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                      {(() => {
+                        const processedResult = processToolResult(message.result)
+                        return typeof processedResult === 'string' ? processedResult : JSON.stringify(processedResult, null, 2)
+                      })()}
+                    </pre>
+                  </div>
                 )}
               </div>
             </div>
