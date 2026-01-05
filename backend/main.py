@@ -67,9 +67,9 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
         elif mtype == "canvas_content":
             content = message.get("content")
             clen = len(content) if isinstance(content, str) else "obj"
-            logger.info("WS SEND: canvas_content length=%s", clen)
+            logger.debug("WS SEND: canvas_content length=%s", clen)
         else:
-            logger.info("WS SEND: %s", mtype)
+            logger.debug("WS SEND: %s", mtype)
     except Exception:
         # Non-fatal logging error; continue to send
         pass
@@ -308,7 +308,7 @@ async def websocket_endpoint(websocket: WebSocket):
             message_type = data.get("type")
 
             # Debug: Log ALL incoming messages
-            logger.info(
+            logger.debug(
                 "WS RECEIVED message_type=[%s], data keys=%s",
                 sanitize_for_logging(message_type),
                 [f"[{sanitize_for_logging(key)}]" for key in data.keys()]

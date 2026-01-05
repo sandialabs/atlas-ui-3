@@ -60,10 +60,10 @@ async def handle_session_files(
         if uploaded_refs and update_callback:
             organized = file_manager.organize_files_metadata(uploaded_refs)
             logger.info(
-                "Emitting files_update for user uploads: total=%d, names=%s",
+                "Emitting files_update for user uploads: total=%d",
                 len(organized.get('files', [])),
-                list(uploaded_refs.keys()),
             )
+            logger.debug("files_update details (user uploads): names=%s", list(uploaded_refs.keys()))
             await update_callback({
                 "type": "intermediate_update",
                 "update_type": "files_update",
@@ -193,10 +193,10 @@ async def ingest_tool_files(
         try:
             organized = file_manager.organize_files_metadata(uploaded_refs)
             logger.info(
-                "Emitting files_update for tool uploads: total=%d, names=%s",
+                "Emitting files_update for tool uploads: total=%d",
                 len(organized.get('files', [])),
-                list(uploaded_refs.keys()),
             )
+            logger.debug("files_update details (tool uploads): names=%s", list(uploaded_refs.keys()))
             await update_callback({
                 "type": "intermediate_update",
                 "update_type": "files_update",
@@ -355,8 +355,11 @@ async def ingest_v2_artifacts(
         if uploaded_refs and update_callback:
             organized = file_manager.organize_files_metadata(uploaded_refs)
             logger.info(
-                "Emitting files_update for v2 artifacts: total=%d, names=%s",
+                "Emitting files_update for v2 artifacts: total=%d",
                 len(organized.get('files', [])),
+            )
+            logger.debug(
+                "files_update details (v2 artifacts): names=%s",
                 list(uploaded_refs.keys()),
             )
             await update_callback({
@@ -412,8 +415,9 @@ async def notify_canvas_files_v2(
                     "display": tool_result.display_config
                 }
             }
-            logger.info(
-                "Emitting canvas_files event for iframe display: url=%s, title=%s",
+            logger.info("Emitting canvas_files event for iframe display")
+            logger.debug(
+                "canvas_files iframe display details: url=%s, title=%s",
                 tool_result.display_config.get("url"),
                 tool_result.display_config.get("title", "Embedded Content"),
             )
@@ -451,9 +455,9 @@ async def notify_canvas_files_v2(
                     )
 
                 # Build canvas update with v2 display configuration
-                logger.info(
-                    "Emitting canvas_files event: count=%d, files=%s, display=%s",
-                    len(canvas_files),
+                logger.info("Emitting canvas_files event: count=%d", len(canvas_files))
+                logger.debug(
+                    "canvas_files details: files=%s, display=%s",
                     [f.get("filename") for f in canvas_files],
                     tool_result.display_config,
                 )
@@ -469,10 +473,7 @@ async def notify_canvas_files_v2(
                     
                 await update_callback(canvas_update)
             else:
-                logger.info(
-                    "No canvas-displayable artifacts found. artifact_names=%s",
-                    artifact_names,
-                )
+                logger.debug("No canvas-displayable artifacts found. artifact_names=%s", artifact_names)
                 
     except Exception as emit_err:
         logger.warning(f"Non-fatal: failed to emit v2 canvas_files update: {emit_err}")
