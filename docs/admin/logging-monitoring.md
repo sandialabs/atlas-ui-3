@@ -42,7 +42,7 @@ The application supports the following log levels (in order of increasing severi
     - User email addresses (sanitized)
     - Response lengths and timing
     
-    **Does not include:** User message content, LLM response previews, or other potentially sensitive data.
+    **Does not include:** User message content, LLM response previews, tool argument values (including tool approval payloads), or other potentially sensitive data.
 
 *   **`WARNING`**: Logs only warnings and errors. Use for production environments where minimal logging is required.
 

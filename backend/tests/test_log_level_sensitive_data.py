@@ -18,6 +18,33 @@ from backend.modules.llm.litellm_caller import LiteLLMCaller
 class TestLogLevelSensitiveData:
     """Tests for log level control of sensitive data."""
 
+    def test_tool_approval_response_summary_excludes_argument_values(self):
+        """Tool approval payloads must never log raw tool arguments at INFO."""
+        from backend.core.utils import summarize_tool_approval_response_for_logging
+
+        payload = {
+            "type": "tool_approval_response",
+            "tool_call_id": "fc_07785773-7583-4e97-bb7d-a24f1f8a0c4b",
+            "approved": True,
+            "arguments": {
+                "file_name": "New_Mexico_Snakes",
+                "markdown_content": "# Snakes of New Mexico\n- secret stuff"
+            },
+            "reason": "User approved"
+        }
+
+        summary = summarize_tool_approval_response_for_logging(payload)
+
+        # Must include safe metadata
+        assert "type=tool_approval_response" in summary
+        assert "tool_call_id=fc_07785773-7583-4e97-bb7d-a24f1f8a0c4b" in summary
+        assert "approved=True" in summary
+
+        # Must not include argument values or reason contents
+        assert "New_Mexico_Snakes" not in summary
+        assert "Snakes of New Mexico" not in summary
+        assert "User approved" not in summary
+
     def test_chat_service_info_level_excludes_content(self, caplog):
         """Test that INFO level logging excludes user message content."""
         # Create mock dependencies
