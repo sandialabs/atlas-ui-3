@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #174 - 2025-12-13
+- Add comprehensive OAuth 2.1 / Bearer token authentication e2e tests for MCP HTTP servers
+- Add Python test suite (oauth_e2e_test.py) validating authentication flow, token resolution, and error handling
+- Add Playwright test suite (oauth-authentication.spec.js) for browser-based OAuth workflow testing
+- Update e2e test runner to include OAuth 2.1 tests in the standard test suite
+- Add detailed documentation for OAuth 2.1 e2e tests (test/OAUTH_E2E_TESTS.md)
+
 ### PR #190 - 2026-01-05
 - Add a "Back to Admin Dashboard" navigation button to the admin LogViewer.
 
