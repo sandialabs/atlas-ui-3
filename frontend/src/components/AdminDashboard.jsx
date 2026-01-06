@@ -471,15 +471,6 @@ const AdminDashboard = () => {
           </div>
           */}
         </div>
-
-        {/* MCP Configuration & Controls (separate row) */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <MCPConfigurationCard 
-            openModal={openModal} 
-            addNotification={addNotification} 
-            systemStatus={systemStatus} 
-          />
-        </div>
       </div>
 
       {/* Modal */}
