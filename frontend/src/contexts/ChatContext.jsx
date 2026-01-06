@@ -106,13 +106,6 @@ export const ChatProvider = ({ children }) => {
 			resolvePendingFileEvent,
 			setPendingElicitation
 		})
-			setSessionFiles: files.setSessionFiles,
-			getFileType: files.getFileType,
-				triggerFileDownload,
-			addAttachment,
-			addPendingFileEvent,
-			resolvePendingFileEvent
-		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent])
