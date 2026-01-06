@@ -437,6 +437,29 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
 
+            elif message_type == "elicitation_response":
+                # Handle elicitation response
+                from application.chat.elicitation_manager import get_elicitation_manager
+                elicitation_manager = get_elicitation_manager()
+                
+                elicitation_id = data.get("elicitation_id")
+                action = data.get("action", "cancel")
+                response_data = data.get("data")
+                
+                logger.info(
+                    f"Received elicitation response: id={sanitize_for_logging(elicitation_id)}, "
+                    f"action={action}"
+                )
+                
+                result = elicitation_manager.handle_elicitation_response(
+                    elicitation_id=elicitation_id,
+                    action=action,
+                    data=response_data
+                )
+                
+                logger.info(f"Elicitation response handled: result={sanitize_for_logging(result)}")
+                # No response needed - the elicitation will unblock the waiting tool execution
+
             else:
                 logger.warning(f"Unknown message type: {sanitize_for_logging(message_type)}")
                 await websocket.send_json({

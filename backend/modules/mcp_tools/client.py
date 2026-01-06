@@ -1040,18 +1040,29 @@ class MCPToolManager:
         arguments: Dict[str, Any],
         *,
         progress_handler: Optional[Any] = None,
+        elicitation_handler: Optional[Any] = None,
     ) -> Any:
-        """Call a specific tool on an MCP server."""
+        """Call a specific tool on an MCP server.
+        
+        Args:
+            server_name: Name of the MCP server
+            tool_name: Name of the tool to call
+            arguments: Tool arguments
+            progress_handler: Optional progress callback handler
+            elicitation_handler: Optional elicitation callback handler for ctx.elicit() support
+        """
         if server_name not in self.clients:
             raise ValueError(f"No client available for server: {server_name}")
         
         client = self.clients[server_name]
         try:
             async with client:
-                # Pass through per-call progress handler if provided (fastmcp >= 2.3.5)
+                # Pass through handlers if provided (fastmcp >= 2.3.5 for progress, >= 2.10.0 for elicitation)
                 kwargs = {}
                 if progress_handler is not None:
                     kwargs["progress_handler"] = progress_handler
+                if elicitation_handler is not None:
+                    kwargs["elicitation_handler"] = elicitation_handler
                 result = await client.call_tool(tool_name, arguments, **kwargs)
                 logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
                 return result
@@ -1393,6 +1404,71 @@ class MCPToolManager:
                 except Exception:
                     logger.debug("Progress handler forwarding failed", exc_info=True)
 
+            # Build elicitation handler that interacts with frontend via WebSocket
+            async def _elicitation_handler(message: str, response_schema: Dict[str, Any]) -> Dict[str, Any]:
+                """
+                Handle elicitation request from MCP server tool.
+                
+                This handler:
+                1. Generates a unique elicitation ID
+                2. Sends the elicitation request to the frontend via WebSocket
+                3. Waits for the user's response
+                4. Returns the response to the MCP tool
+                
+                Args:
+                    message: Prompt message to display to the user
+                    response_schema: JSON schema defining expected response structure
+                    
+                Returns:
+                    Dict with 'action' and optionally 'data' keys matching MCP elicitation protocol
+                """
+                try:
+                    if update_cb is None:
+                        # No callback available - cannot request user input
+                        logger.warning("Elicitation requested but no update callback available")
+                        return {"action": "cancel", "data": None}
+                    
+                    # Generate unique ID for this elicitation
+                    import uuid
+                    elicitation_id = str(uuid.uuid4())
+                    
+                    # Import elicitation manager
+                    from application.chat.elicitation_manager import get_elicitation_manager
+                    elicitation_manager = get_elicitation_manager()
+                    
+                    # Create elicitation request
+                    request = elicitation_manager.create_elicitation_request(
+                        elicitation_id=elicitation_id,
+                        tool_call_id=tool_call.id,
+                        tool_name=tool_call.name,
+                        message=message,
+                        response_schema=response_schema
+                    )
+                    
+                    # Send elicitation request to frontend
+                    await update_cb({
+                        "type": "elicitation_request",
+                        "elicitation_id": elicitation_id,
+                        "tool_call_id": tool_call.id,
+                        "tool_name": tool_call.name,
+                        "message": message,
+                        "response_schema": response_schema
+                    })
+                    
+                    # Wait for user response (with 5 minute timeout)
+                    try:
+                        response = await request.wait_for_response(timeout=300.0)
+                        elicitation_manager.cleanup_request(elicitation_id)
+                        return response
+                    except asyncio.TimeoutError:
+                        elicitation_manager.cleanup_request(elicitation_id)
+                        logger.warning(f"Elicitation timeout for tool {tool_call.name}")
+                        return {"action": "cancel", "data": None}
+                        
+                except Exception as e:
+                    logger.error(f"Error handling elicitation: {e}", exc_info=True)
+                    return {"action": "cancel", "data": None}
+
             if update_cb is not None:
                 async with self._use_log_callback(_tool_log_callback):
                     raw_result = await self.call_tool(
@@ -1400,6 +1476,7 @@ class MCPToolManager:
                         actual_tool_name,
                         tool_call.arguments,
                         progress_handler=_progress_handler,
+                        elicitation_handler=_elicitation_handler,
                     )
             else:
                 raw_result = await self.call_tool(
@@ -1407,6 +1484,7 @@ class MCPToolManager:
                     actual_tool_name,
                     tool_call.arguments,
                     progress_handler=_progress_handler,
+                    elicitation_handler=_elicitation_handler,
                 )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
