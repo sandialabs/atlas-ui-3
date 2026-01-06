@@ -19,6 +19,7 @@ import FeedbackButton from './components/FeedbackButton'
 import FileManagerPanel from './components/FileManagerPanel'
 import FilesPage from './components/FilesPage'
 import SplashScreen from './components/SplashScreen'
+import ElicitationDialog from './components/ElicitationDialog'
 
 function ChatInterface() {
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
@@ -27,7 +28,7 @@ function ChatInterface() {
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false)
   const [, setCanvasPanelWidth] = useState(0)
   const [filesPanelOpen, setFilesPanelOpen] = useState(false)
-  const { canvasContent, customUIContent, canvasFiles, features } = useChat()
+  const { canvasContent, customUIContent, canvasFiles, features, pendingElicitation } = useChat()
 
   // Auto-open tools panel when returning from marketplace
   useEffect(() => {
@@ -155,6 +156,11 @@ function ChatInterface() {
 
       {/* Feedback Button */}
       <FeedbackButton />
+
+      {/* Elicitation Dialog */}
+      {pendingElicitation && (
+        <ElicitationDialog elicitation={pendingElicitation} />
+      )}
     </div>
   )
 }

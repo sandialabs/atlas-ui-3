@@ -40,6 +40,7 @@ export const ChatProvider = ({ children }) => {
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
 	const [, setPendingFileEvents] = useState(new Map())
+	const [pendingElicitation, setPendingElicitation] = useState(null)
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {
@@ -98,6 +99,13 @@ export const ChatProvider = ({ children }) => {
 			setCurrentCanvasFileIndex: files.setCurrentCanvasFileIndex,
 			setCustomUIContent: files.setCustomUIContent,
 			setIsCanvasOpen: config.setIsCanvasOpen,
+			setSessionFiles: files.setSessionFiles,
+			getFileType: files.getFileType,
+			triggerFileDownload,
+			addAttachment,
+			resolvePendingFileEvent,
+			setPendingElicitation
+		})
 			setSessionFiles: files.setSessionFiles,
 			getFileType: files.getFileType,
 				triggerFileDownload,
@@ -398,6 +406,8 @@ export const ChatProvider = ({ children }) => {
 		settings,
 		updateSettings,
 		sendApprovalResponse: sendMessage,
+		pendingElicitation,
+		setPendingElicitation
 	}
 
 	return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

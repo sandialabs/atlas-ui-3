@@ -426,6 +426,19 @@ export function createWebSocketHandler(deps) {
             timestamp: new Date().toISOString()
           })
           break
+        case 'elicitation_request':
+          // Handle elicitation request - set pending elicitation state
+          try { setIsThinking(false) } catch { /* no-op */ }
+          if (typeof setPendingElicitation === 'function') {
+            setPendingElicitation({
+              elicitation_id: data.elicitation_id,
+              tool_call_id: data.tool_call_id,
+              tool_name: data.tool_name,
+              message: data.message,
+              response_schema: data.response_schema
+            })
+          }
+          break
         case 'intermediate_update':
           handleIntermediateUpdate(data)
           break
