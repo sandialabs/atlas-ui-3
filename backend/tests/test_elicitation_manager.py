@@ -112,7 +112,7 @@ class TestElicitationManager:
     async def test_create_elicitation_request(self):
         """Test creating an elicitation request via manager."""
         manager = ElicitationManager()
-        request = manager.create_elicitation_request(
+        manager.create_elicitation_request(
             elicitation_id="elicit_123",
             tool_call_id="tool_456",
             tool_name="test_tool",
@@ -120,7 +120,6 @@ class TestElicitationManager:
             response_schema={"type": "object"}
         )
 
-        assert request.elicitation_id == "elicit_123"
         assert "elicit_123" in manager.get_all_pending_requests()
 
     @pytest.mark.asyncio

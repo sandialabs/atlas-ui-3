@@ -16,7 +16,7 @@ const ElicitationDialog = ({ elicitation }) => {
   const [formData, setFormData] = useState({})
   const [isValid, setIsValid] = useState(false)
 
-  const { elicitation_id, tool_call_id, tool_name, message, response_schema } = elicitation
+  const { elicitation_id, tool_name, message, response_schema } = elicitation
 
   // Parse the response schema to determine field types
   const fields = parseResponseSchema(response_schema)

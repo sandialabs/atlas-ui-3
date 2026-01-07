@@ -14,7 +14,7 @@ Supports:
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal, Dict, Any
+from typing import Literal
 from fastmcp import FastMCP, Context
 
 # Initialize the MCP server
