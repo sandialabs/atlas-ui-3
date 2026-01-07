@@ -6,11 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### 2026-01-07 - Elicitation Routing Fix
+### 2026-01-07 - Elicitation Routing Fix and Testing
 - **Fix**: Resolve elicitation dialog not appearing by switching from `contextvars.ContextVar` to dictionary-based routing. The MCP receive loop runs in a separate asyncio task that cannot access context variables set in the tool execution task. Now uses per-server routing with proper cross-task visibility.
+- **Fix**: Add `setPendingElicitation` to WebSocket handler destructuring so dialog state updates work correctly.
+- **Fix**: Add `sendMessage` to ChatContext exports so ElicitationDialog can send responses.
+- **Fix**: Close elicitation dialog after user responds (accept/decline/cancel).
 - Add comprehensive logging to trace `update_callback` flow from WebSocket to MCP tool execution.
 - Add validation and fallback mechanism in `ToolsModeRunner` to ensure update_callback is never None during tool execution.
 - Create per-server elicitation handlers using closures to capture server_name for proper routing.
+- **Tests**: Add comprehensive unit tests for elicitation routing (8 backend tests, 7 frontend tests) to prevent regression.
 
 ### PR #191 - 2026-01-06
 - **MCP Tool Elicitation Support**: Implemented full support for MCP tool elicitation (FastMCP 2.10.0+), allowing tools to request structured user input during execution via `ctx.elicit()`. Includes backend elicitation manager, WebSocket message handling, and a modal dialog UI supporting string, number, boolean, enum, and structured multi-field forms.
