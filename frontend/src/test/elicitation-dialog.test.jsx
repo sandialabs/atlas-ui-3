@@ -168,8 +168,9 @@ describe('ElicitationDialog - User Actions', () => {
 
     render(<ElicitationDialog elicitation={elicitation} />)
 
-    // Click Cancel
-    const cancelButton = screen.getByRole('button', { name: /cancel/i })
+    // Click Cancel (the main action button in footer, not the header X button)
+    const cancelButtons = screen.getAllByRole('button', { name: /cancel/i })
+    const cancelButton = cancelButtons[1] // The footer cancel button
     fireEvent.click(cancelButton)
 
     // Verify message sent
