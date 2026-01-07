@@ -26,9 +26,11 @@ LogCallback = Callable[[str, str, str, Dict[str, Any]], Awaitable[None]]
 class _ElicitationRoutingContext:
     def __init__(
         self,
+        server_name: str,
         tool_call: ToolCall,
         update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
     ):
+        self.server_name = server_name
         self.tool_call = tool_call
         self.update_cb = update_cb
 
@@ -39,12 +41,11 @@ _ACTIVE_LOG_CALLBACK: contextvars.ContextVar[Optional[LogCallback]] = contextvar
     default=None,
 )
 
-# Context-local routing for elicitation so a shared Client can still deliver
+# Dictionary-based routing for elicitation so a shared Client can still deliver
 # elicitation requests to the correct user's WebSocket.
-_ACTIVE_ELICITATION_CONTEXT: contextvars.ContextVar[Optional[_ElicitationRoutingContext]] = contextvars.ContextVar(
-    "mcp_active_elicitation_context",
-    default=None,
-)
+# Key: tool_call_id, Value: _ElicitationRoutingContext
+# Note: Cannot use contextvars.ContextVar because MCP receive loop runs in a different task
+_ELICITATION_ROUTING: Dict[str, _ElicitationRoutingContext] = {}
 
 # Mapping from MCP log levels to Python logging levels
 MCP_TO_PYTHON_LOG_LEVEL = {
@@ -225,90 +226,112 @@ class MCPToolManager:
     @asynccontextmanager
     async def _use_elicitation_context(
         self,
+        server_name: str,
         tool_call: ToolCall,
         update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
     ) -> AsyncIterator[None]:
-        token = _ACTIVE_ELICITATION_CONTEXT.set(_ElicitationRoutingContext(tool_call, update_cb))
+        """
+        Set up elicitation routing for a tool call.
+        Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
+        """
+        routing = _ElicitationRoutingContext(server_name, tool_call, update_cb)
+        _ELICITATION_ROUTING[server_name] = routing
         try:
             yield
         finally:
-            _ACTIVE_ELICITATION_CONTEXT.reset(token)
+            _ELICITATION_ROUTING.pop(server_name, None)
 
-    async def _global_elicitation_handler(self, message, response_type, params, _context):
-        """Stable FastMCP elicitation handler.
-
-        This is registered on each Client at initialization time so sessions always
-        support elicitation. Per-request routing is handled via the
-        _ACTIVE_ELICITATION_CONTEXT contextvar.
+    def _create_elicitation_handler(self, server_name: str):
         """
-        from fastmcp.client.elicitation import ElicitResult
-        from mcp.types import ElicitRequestFormParams
+        Create an elicitation handler for a specific MCP server.
 
-        routing = _ACTIVE_ELICITATION_CONTEXT.get()
-        if routing is None or routing.update_cb is None:
-            return ElicitResult(action="cancel", content=None)
+        Returns a handler function that captures the server_name,
+        allowing dictionary-based routing that works across async tasks.
+        """
+        async def handler(message, response_type, params, _context):
+            """Per-server elicitation handler with captured server_name."""
+            from fastmcp.client.elicitation import ElicitResult
+            from mcp.types import ElicitRequestFormParams
 
-        response_schema: Dict[str, Any] = {}
-        if isinstance(params, ElicitRequestFormParams):
-            response_schema = params.requestedSchema or {}
+            routing = _ELICITATION_ROUTING.get(server_name)
+            if routing is None:
+                logger.warning(
+                    f"Elicitation request for server '{server_name}' but no routing context - "
+                    f"elicitation cancelled. Message: {message[:50]}..."
+                )
+                return ElicitResult(action="cancel", content=None)
+            if routing.update_cb is None:
+                logger.warning(
+                    f"Elicitation request for server '{server_name}', tool '{routing.tool_call.name}' "
+                    f"but update_cb is None - elicitation cancelled. Message: {message[:50]}..."
+                )
+                return ElicitResult(action="cancel", content=None)
 
-        try:
-            import uuid
-            from application.chat.elicitation_manager import get_elicitation_manager
-
-            elicitation_id = str(uuid.uuid4())
-            elicitation_manager = get_elicitation_manager()
-
-            request = elicitation_manager.create_elicitation_request(
-                elicitation_id=elicitation_id,
-                tool_call_id=routing.tool_call.id,
-                tool_name=routing.tool_call.name,
-                message=message,
-                response_schema=response_schema,
-            )
-
-            await routing.update_cb(
-                {
-                    "type": "elicitation_request",
-                    "elicitation_id": elicitation_id,
-                    "tool_call_id": routing.tool_call.id,
-                    "tool_name": routing.tool_call.name,
-                    "message": message,
-                    "response_schema": response_schema,
-                }
-            )
+            response_schema: Dict[str, Any] = {}
+            if isinstance(params, ElicitRequestFormParams):
+                response_schema = params.requestedSchema or {}
 
             try:
-                response = await request.wait_for_response(timeout=300.0)
-            finally:
-                elicitation_manager.cleanup_request(elicitation_id)
+                import uuid
+                from application.chat.elicitation_manager import get_elicitation_manager
 
-            action = response.get("action", "cancel")
-            data = response.get("data")
+                elicitation_id = str(uuid.uuid4())
+                elicitation_manager = get_elicitation_manager()
 
-            if action != "accept":
-                return ElicitResult(action=action, content=None)
+                request = elicitation_manager.create_elicitation_request(
+                    elicitation_id=elicitation_id,
+                    tool_call_id=routing.tool_call.id,
+                    tool_name=routing.tool_call.name,
+                    message=message,
+                    response_schema=response_schema,
+                )
 
-            if data is None:
-                return ElicitResult(action="accept", content=None)
+                logger.debug(f"Sending elicitation_request to frontend for server '{server_name}'")
+                await routing.update_cb(
+                    {
+                        "type": "elicitation_request",
+                        "elicitation_id": elicitation_id,
+                        "tool_call_id": routing.tool_call.id,
+                        "tool_name": routing.tool_call.name,
+                        "message": message,
+                        "response_schema": response_schema,
+                    }
+                )
 
-            # FastMCP requires elicitation response content to be a JSON object.
-            if not isinstance(data, dict):
-                props: Dict[str, Any] = {}
-                if isinstance(response_schema, dict):
-                    props = response_schema.get("properties") or {}
-                if list(props.keys()) == ["value"]:
-                    data = {"value": data}
-                else:
-                    data = {"value": data}
+                try:
+                    response = await request.wait_for_response(timeout=300.0)
+                finally:
+                    elicitation_manager.cleanup_request(elicitation_id)
 
-            return ElicitResult(action="accept", content=data)
+                action = response.get("action", "cancel")
+                data = response.get("data")
 
-        except asyncio.TimeoutError:
-            return ElicitResult(action="cancel", content=None)
-        except Exception as e:
-            logger.error(f"Error handling elicitation: {e}", exc_info=True)
-            return ElicitResult(action="cancel", content=None)
+                if action != "accept":
+                    return ElicitResult(action=action, content=None)
+
+                if data is None:
+                    return ElicitResult(action="accept", content=None)
+
+                # FastMCP requires elicitation response content to be a JSON object.
+                if not isinstance(data, dict):
+                    props: Dict[str, Any] = {}
+                    if isinstance(response_schema, dict):
+                        props = response_schema.get("properties") or {}
+                    if list(props.keys()) == ["value"]:
+                        data = {"value": data}
+                    else:
+                        data = {"value": data}
+
+                return ElicitResult(action="accept", content=data)
+
+            except asyncio.TimeoutError:
+                logger.warning(f"Elicitation timeout for server '{server_name}'")
+                return ElicitResult(action="cancel", content=None)
+            except Exception as e:
+                logger.error(f"Error handling elicitation for server '{server_name}': {e}", exc_info=True)
+                return ElicitResult(action="cancel", content=None)
+
+        return handler
     
     def reload_config(self) -> Dict[str, Any]:
         """Reload MCP server configuration from disk.
@@ -471,11 +494,11 @@ class MCPToolManager:
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
-                    client = Client(url, auth=token, log_handler=log_handler, elicitation_handler=self._global_elicitation_handler)
+                    client = Client(url, auth=token, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
                 else:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
-                    client = Client(url, auth=token, log_handler=log_handler, elicitation_handler=self._global_elicitation_handler)
+                    client = Client(url, auth=token, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
                 
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
                 return client
@@ -526,7 +549,7 @@ class MCPToolManager:
                             logger.debug("Creating STDIO client for %s with command=%s cwd=%s", safe_server_name, command, cwd)
                             from fastmcp.client.transports import StdioTransport
                             transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd, env=resolved_env)
-                            client = Client(transport, log_handler=log_handler, elicitation_handler=self._global_elicitation_handler)
+                            client = Client(transport, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
                             logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command and cwd")
                             return client
                         else:
@@ -536,7 +559,7 @@ class MCPToolManager:
                         logger.debug("No cwd specified for %s; creating STDIO client with command=%s", safe_server_name, command)
                         from fastmcp.client.transports import StdioTransport
                         transport = StdioTransport(command=command[0], args=command[1:], env=resolved_env)
-                        client = Client(transport, log_handler=log_handler, elicitation_handler=self._global_elicitation_handler)
+                        client = Client(transport, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
                         logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command")
                         return client
                 else:
@@ -546,7 +569,7 @@ class MCPToolManager:
                     if os.path.exists(server_path):
                         logger.debug(f"Server script exists for {server_name}, creating client...")
                         log_handler = self._create_log_handler(server_name)
-                        client = Client(server_path, log_handler=log_handler, elicitation_handler=self._global_elicitation_handler)  # Client auto-detects STDIO transport from .py file
+                        client = Client(server_path, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))  # Client auto-detects STDIO transport from .py file
                         logger.info(f"Created MCP client for {server_name}")
                         logger.debug(f"Successfully created client for {server_name}")
                         return client
@@ -1480,6 +1503,14 @@ class MCPToolManager:
             if isinstance(context, dict):
                 update_cb = context.get("update_callback")
 
+            if update_cb is None:
+                logger.warning(
+                    f"Executing tool '{tool_call.name}' without update_callback - "
+                    f"elicitation will not work. Context type: {type(context)}"
+                )
+            else:
+                logger.debug(f"Executing tool '{tool_call.name}' with update_callback present")
+
             async def _tool_log_callback(
                 log_server_name: str,
                 level: str,
@@ -1522,7 +1553,7 @@ class MCPToolManager:
 
             if update_cb is not None:
                 async with self._use_log_callback(_tool_log_callback):
-                    async with self._use_elicitation_context(tool_call, update_cb):
+                    async with self._use_elicitation_context(server_name, tool_call, update_cb):
                         raw_result = await self.call_tool(
                             server_name,
                             actual_tool_name,
@@ -1530,7 +1561,7 @@ class MCPToolManager:
                             progress_handler=_progress_handler,
                         )
             else:
-                async with self._use_elicitation_context(tool_call, update_cb):
+                async with self._use_elicitation_context(server_name, tool_call, update_cb):
                     raw_result = await self.call_tool(
                         server_name,
                         actual_tool_name,
