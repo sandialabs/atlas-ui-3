@@ -145,21 +145,7 @@ const ElicitationDialog = ({ elicitation }) => {
         </div>
 
         {/* Actions */}
-        <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-700 bg-gray-750">
-          <button
-            onClick={handleCancel}
-            className="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-white transition-colors flex items-center gap-2"
-          >
-            <X size={16} />
-            Cancel
-          </button>
-          <button
-            onClick={handleDecline}
-            className="px-4 py-2 rounded-md bg-yellow-600 hover:bg-yellow-500 text-white transition-colors flex items-center gap-2"
-          >
-            <Ban size={16} />
-            Decline
-          </button>
+        <div className="flex flex-row-reverse items-center justify-start gap-3 p-6 border-t border-gray-700 bg-gray-750">
           <button
             onClick={handleAccept}
             disabled={!isValid && fields.length > 0}
@@ -171,6 +157,20 @@ const ElicitationDialog = ({ elicitation }) => {
           >
             <Check size={16} />
             Accept
+          </button>
+          <button
+            onClick={handleDecline}
+            className="px-4 py-2 rounded-md bg-yellow-600 hover:bg-yellow-500 text-white transition-colors flex items-center gap-2"
+          >
+            <Ban size={16} />
+            Decline
+          </button>
+          <button
+            onClick={handleCancel}
+            className="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-white transition-colors flex items-center gap-2"
+          >
+            <X size={16} />
+            Cancel
           </button>
         </div>
       </div>

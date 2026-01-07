@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import ElicitationDialog from '../components/ElicitationDialog'
 import { useChat } from '../contexts/ChatContext'
 
@@ -249,5 +250,38 @@ describe('ElicitationDialog - Input Validation', () => {
 
     // Now enabled
     expect(acceptButton).toBeEnabled()
+  })
+
+  it('should tab from input to Accept button first', async () => {
+    const elicitation = {
+      elicitation_id: 'test-123',
+      tool_call_id: 'call-456',
+      tool_name: 'pick_a_number',
+      message: 'Pick a number between 1 and 100',
+      response_schema: {
+        type: 'object',
+        properties: {
+          value: { type: 'number' }
+        },
+        required: ['value']
+      }
+    }
+
+    const user = userEvent.setup()
+    render(<ElicitationDialog elicitation={elicitation} />)
+
+    const input = screen.getByRole('spinbutton')
+    const acceptButton = screen.getByRole('button', { name: /accept/i })
+
+    // Fill required field so Accept is tabbable (enabled)
+    await user.clear(input)
+    await user.type(input, '42')
+    expect(acceptButton).toBeEnabled()
+
+    input.focus()
+    expect(input).toHaveFocus()
+
+    await user.tab()
+    expect(acceptButton).toHaveFocus()
   })
 })
