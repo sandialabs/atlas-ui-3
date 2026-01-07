@@ -159,8 +159,12 @@ function ChatInterface() {
 
       {/* Elicitation Dialog */}
       {pendingElicitation && (
-        <ElicitationDialog elicitation={pendingElicitation} />
+        <>
+          {console.log('[ELICITATION] Rendering dialog with:', pendingElicitation)}
+          <ElicitationDialog elicitation={pendingElicitation} />
+        </>
       )}
+      {!pendingElicitation && console.log('[ELICITATION] No pendingElicitation, dialog hidden')}
     </div>
   )
 }
