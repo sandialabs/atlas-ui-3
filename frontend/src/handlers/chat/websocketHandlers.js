@@ -20,7 +20,8 @@ export function createWebSocketHandler(deps) {
     getFileType,
     triggerFileDownload,
     addAttachment,
-    resolvePendingFileEvent
+    resolvePendingFileEvent,
+    setPendingElicitation
   } = deps
 
   const handleAgentUpdate = (data) => {
@@ -425,6 +426,28 @@ export function createWebSocketHandler(deps) {
             status: 'pending',
             timestamp: new Date().toISOString()
           })
+          break
+        case 'elicitation_request':
+          // Handle elicitation request - set pending elicitation state
+          console.log('[ELICITATION] Received elicitation_request:', {
+            elicitation_id: data.elicitation_id,
+            tool_name: data.tool_name,
+            message: data.message,
+            has_setPendingElicitation: typeof setPendingElicitation === 'function'
+          })
+          try { setIsThinking(false) } catch { /* no-op */ }
+          if (typeof setPendingElicitation === 'function') {
+            setPendingElicitation({
+              elicitation_id: data.elicitation_id,
+              tool_call_id: data.tool_call_id,
+              tool_name: data.tool_name,
+              message: data.message,
+              response_schema: data.response_schema
+            })
+            console.log('[ELICITATION] setPendingElicitation called successfully')
+          } else {
+            console.error('[ELICITATION] setPendingElicitation is not a function!', typeof setPendingElicitation)
+          }
           break
         case 'intermediate_update':
           handleIntermediateUpdate(data)

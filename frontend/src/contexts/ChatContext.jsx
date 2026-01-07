@@ -40,6 +40,7 @@ export const ChatProvider = ({ children }) => {
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
 	const [, setPendingFileEvents] = useState(new Map())
+	const [pendingElicitation, setPendingElicitation] = useState(null)
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {
@@ -100,10 +101,10 @@ export const ChatProvider = ({ children }) => {
 			setIsCanvasOpen: config.setIsCanvasOpen,
 			setSessionFiles: files.setSessionFiles,
 			getFileType: files.getFileType,
-				triggerFileDownload,
+			triggerFileDownload,
 			addAttachment,
-			addPendingFileEvent,
-			resolvePendingFileEvent
+			resolvePendingFileEvent,
+			setPendingElicitation
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -397,7 +398,10 @@ export const ChatProvider = ({ children }) => {
 		addSystemEvent,
 		settings,
 		updateSettings,
+		sendMessage,
 		sendApprovalResponse: sendMessage,
+		pendingElicitation,
+		setPendingElicitation
 	}
 
 	return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>
