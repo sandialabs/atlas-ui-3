@@ -398,6 +398,7 @@ export const ChatProvider = ({ children }) => {
 		addSystemEvent,
 		settings,
 		updateSettings,
+		sendMessage,
 		sendApprovalResponse: sendMessage,
 		pendingElicitation,
 		setPendingElicitation

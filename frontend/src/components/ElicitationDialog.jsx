@@ -12,7 +12,7 @@ import { useChat } from '../contexts/ChatContext'
  * - Accept/Decline/Cancel actions
  */
 const ElicitationDialog = ({ elicitation }) => {
-  const { sendMessage } = useChat()
+  const { sendMessage, setPendingElicitation } = useChat()
   const [formData, setFormData] = useState({})
   const [isValid, setIsValid] = useState(false)
 
@@ -76,6 +76,9 @@ const ElicitationDialog = ({ elicitation }) => {
       action: 'accept',
       data: responseData
     })
+
+    // Close the dialog
+    setPendingElicitation(null)
   }
 
   const handleDecline = () => {
@@ -85,6 +88,9 @@ const ElicitationDialog = ({ elicitation }) => {
       action: 'decline',
       data: null
     })
+
+    // Close the dialog
+    setPendingElicitation(null)
   }
 
   const handleCancel = () => {
@@ -94,6 +100,9 @@ const ElicitationDialog = ({ elicitation }) => {
       action: 'cancel',
       data: null
     })
+
+    // Close the dialog
+    setPendingElicitation(null)
   }
 
   return (
