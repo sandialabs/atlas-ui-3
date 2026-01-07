@@ -12,7 +12,8 @@ from application.chat.elicitation_manager import (
 class TestElicitationRequest:
     """Test ElicitationRequest class."""
 
-    def test_create_elicitation_request(self):
+    @pytest.mark.asyncio
+    async def test_create_elicitation_request(self):
         """Test creating an elicitation request."""
         request = ElicitationRequest(
             elicitation_id="elicit_123",
@@ -107,7 +108,8 @@ class TestElicitationRequest:
 class TestElicitationManager:
     """Test ElicitationManager class."""
 
-    def test_create_elicitation_request(self):
+    @pytest.mark.asyncio
+    async def test_create_elicitation_request(self):
         """Test creating an elicitation request via manager."""
         manager = ElicitationManager()
         request = manager.create_elicitation_request(
@@ -117,11 +119,12 @@ class TestElicitationManager:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         assert request.elicitation_id == "elicit_123"
         assert "elicit_123" in manager.get_all_pending_requests()
 
-    def test_handle_elicitation_response_accept(self):
+    @pytest.mark.asyncio
+    async def test_handle_elicitation_response_accept(self):
         """Test handling an accept response."""
         manager = ElicitationManager()
         manager.create_elicitation_request(
@@ -131,17 +134,18 @@ class TestElicitationManager:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         # Handle the response
         result = manager.handle_elicitation_response(
             elicitation_id="elicit_123",
             action="accept",
             data={"name": "John"}
         )
-        
+
         assert result is True
 
-    def test_handle_elicitation_response_decline(self):
+    @pytest.mark.asyncio
+    async def test_handle_elicitation_response_decline(self):
         """Test handling a decline response."""
         manager = ElicitationManager()
         manager.create_elicitation_request(
@@ -151,17 +155,18 @@ class TestElicitationManager:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         # Handle decline response
         result = manager.handle_elicitation_response(
             elicitation_id="elicit_123",
             action="decline",
             data=None
         )
-        
+
         assert result is True
 
-    def test_handle_elicitation_response_cancel(self):
+    @pytest.mark.asyncio
+    async def test_handle_elicitation_response_cancel(self):
         """Test handling a cancel response."""
         manager = ElicitationManager()
         manager.create_elicitation_request(
@@ -171,14 +176,14 @@ class TestElicitationManager:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         # Handle cancel response
         result = manager.handle_elicitation_response(
             elicitation_id="elicit_123",
             action="cancel",
             data=None
         )
-        
+
         assert result is True
 
     def test_handle_unknown_elicitation(self):
@@ -215,7 +220,8 @@ class TestElicitationManager:
         # Verify request is removed
         assert "elicit_123" not in manager.get_all_pending_requests()
 
-    def test_get_pending_request(self):
+    @pytest.mark.asyncio
+    async def test_get_pending_request(self):
         """Test retrieving a pending request."""
         manager = ElicitationManager()
         request = manager.create_elicitation_request(
@@ -225,27 +231,29 @@ class TestElicitationManager:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         # Retrieve the request
         retrieved = manager.get_pending_request("elicit_123")
-        
+
         assert retrieved is not None
         assert retrieved.elicitation_id == "elicit_123"
         assert retrieved.tool_call_id == "tool_456"
 
-    def test_get_pending_request_not_found(self):
+    @pytest.mark.asyncio
+    async def test_get_pending_request_not_found(self):
         """Test retrieving non-existent request."""
         manager = ElicitationManager()
-        
+
         # Try to get non-existent request
         retrieved = manager.get_pending_request("unknown_123")
-        
+
         assert retrieved is None
 
-    def test_cancel_all_requests(self):
+    @pytest.mark.asyncio
+    async def test_cancel_all_requests(self):
         """Test cancelling all pending requests."""
         manager = ElicitationManager()
-        
+
         # Create multiple requests
         manager.create_elicitation_request(
             elicitation_id="elicit_1",
@@ -261,13 +269,13 @@ class TestElicitationManager:
             message="Request 2",
             response_schema={"type": "object"}
         )
-        
+
         # Verify both exist
         assert len(manager.get_all_pending_requests()) == 2
-        
+
         # Cancel all requests
         manager.cancel_all_requests()
-        
+
         # Verify all are removed
         assert len(manager.get_all_pending_requests()) == 0
 

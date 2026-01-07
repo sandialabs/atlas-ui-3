@@ -24,7 +24,7 @@ class ElicitationRequest:
     message: str
     response_schema: Dict[str, Any]
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    future: asyncio.Future = field(default_factory=asyncio.Future)
+    future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
     
     async def wait_for_response(self, timeout: float = 300.0) -> Dict[str, Any]:
         """
