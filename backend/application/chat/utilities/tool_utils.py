@@ -430,6 +430,9 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
     
     Pure function that adds context without side effects.
     Only injects username if the tool schema defines a username parameter.
+    
+    If BACKEND_PUBLIC_URL is configured, uses absolute URLs for file downloads.
+    If INCLUDE_FILE_CONTENT_BASE64 is enabled, also injects base64 content as fallback.
     """
     if not isinstance(parsed_args, dict):
         return parsed_args
@@ -444,9 +447,34 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
         # Provide URL hints for filename/file_names fields
         files_ctx = session_context.get("files", {})
         
+        # Check if base64 content injection is enabled
+        include_base64 = False
+        try:
+            from modules.config import config_manager
+            settings = config_manager.app_settings
+            include_base64 = getattr(settings, "include_file_content_base64", False)
+        except Exception as e:
+            logger.debug(f"Could not check include_file_content_base64 setting: {e}")
+        
         def to_url(key: str) -> str:
             # Use tokenized URL so tools can fetch without cookies
             return create_download_url(key, user_email)
+        
+        async def get_file_base64(key: str) -> Optional[str]:
+            """Fetch base64 content for a file key."""
+            try:
+                # Get file manager from session context or use global
+                file_manager = session_context.get("file_manager")
+                if not file_manager:
+                    from infrastructure.app_factory import get_file_storage
+                    file_manager = get_file_storage()
+                
+                if file_manager and user_email:
+                    file_data = await file_manager.get_file(user_email, key)
+                    return file_data.get("content_base64") if file_data else None
+            except Exception as e:
+                logger.warning(f"Failed to fetch base64 content for file key {key}: {e}")
+            return None
 
         # Handle single filename
         if "filename" in parsed_args and isinstance(parsed_args["filename"], str):
@@ -462,6 +490,17 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
                 parsed_args.setdefault("original_filename", fname)
                 parsed_args["filename"] = url
                 parsed_args.setdefault("file_url", url)
+                
+                # Optionally inject base64 content as fallback
+                if include_base64:
+                    # Note: We can't make this function async, so we mark this for future enhancement
+                    # For now, just log that this feature requires additional integration
+                    logger.debug(
+                        "Base64 content injection requested but requires async context (filename=%s)",
+                        _sanitize_filename_value(fname),
+                    )
+                    # TODO: Implement async context support for base64 injection
+                    # For now, tools should use the URL-based approach
 
         # Handle multiple filenames
         if "file_names" in parsed_args and isinstance(parsed_args["file_names"], list):

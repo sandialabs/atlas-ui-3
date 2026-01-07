@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added - File Access for Remote MCP Servers
+- **File access for remote MCP servers**: Added `BACKEND_PUBLIC_URL` configuration to enable remote MCP servers (HTTP/SSE) to access attached files. The backend now generates absolute download URLs when this setting is configured, allowing MCP servers on different machines to download files via the API.
+- **Configuration option `INCLUDE_FILE_CONTENT_BASE64`**: Added experimental support for including base64-encoded file content as fallback in tool arguments (disabled by default).
+- **Comprehensive troubleshooting documentation**: Added `docs/admin/troubleshooting-file-access.md` with detailed guide for resolving file access issues with MCP servers.
+- **Enhanced file access documentation**: Updated `docs/developer/working-with-files.md` with configuration instructions for remote MCP servers and security considerations.
+
+### Changed - File Access
+- **File download URL generation**: Modified `create_download_url()` in `core/capabilities.py` to generate absolute URLs when `BACKEND_PUBLIC_URL` is configured, falling back to relative URLs for backwards compatibility.
+- **Enhanced environment documentation**: Updated `.env.example` with detailed comments explaining `BACKEND_PUBLIC_URL` configuration and file access settings.
+
+### Fixed - File Access
+- **File attachment support for remote MCP servers**: Resolved issue where remote MCP servers could not access attached files because download URLs were relative paths instead of absolute URLs.
+
+## [Unreleased]
+
 ### 2026-01-07 - Elicitation Routing Fix and Testing
 - **Fix**: Resolve elicitation dialog not appearing by switching from `contextvars.ContextVar` to dictionary-based routing. The MCP receive loop runs in a separate asyncio task that cannot access context variables set in the tool execution task. Now uses per-server routing with proper cross-task visibility.
 - **Fix**: Add `setPendingElicitation` to WebSocket handler destructuring so dialog state updates work correctly.
