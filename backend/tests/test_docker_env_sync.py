@@ -41,26 +41,37 @@ def parse_docker_compose_env(docker_compose_path: Path) -> dict[str, str]:
     """
     docker_env_vars = {}
     with open(docker_compose_path, 'r') as f:
-        in_atlas_ui_env = False
+        in_atlas_ui_service = False
+        in_environment_section = False
+        
         for line in f:
-            # Check if we've moved to a different service
+            # Detect when we enter the atlas-ui service block
             if 'atlas-ui:' in line:
-                in_atlas_ui_env = False
-            
-            # Check if we're entering the environment section
-            if 'environment:' in line and not in_atlas_ui_env:
-                in_atlas_ui_env = True
+                in_atlas_ui_service = True
+                in_environment_section = False
                 continue
             
-            # Check if we've exited the environment section
-            if in_atlas_ui_env and line.strip() and not line.strip().startswith('-') and not line.strip().startswith('#'):
+            # Detect when we enter another service block (exits atlas-ui)
+            if in_atlas_ui_service and line and not line[0].isspace() and ':' in line:
+                # We've reached a new top-level section
+                in_atlas_ui_service = False
+                in_environment_section = False
+                continue
+            
+            # Check if we're entering the environment section within atlas-ui
+            if in_atlas_ui_service and 'environment:' in line:
+                in_environment_section = True
+                continue
+            
+            # Check if we've exited the environment section (e.g., volumes:, depends_on:)
+            if in_environment_section and line.strip() and not line.strip().startswith('-') and not line.strip().startswith('#'):
                 if ':' in line and not line.strip().startswith('- '):
-                    # We've reached a new section (like volumes:)
-                    in_atlas_ui_env = False
+                    # We've reached a new subsection (like volumes:)
+                    in_environment_section = False
                     continue
             
             # Parse environment variables
-            if in_atlas_ui_env and line.strip().startswith('- '):
+            if in_environment_section and line.strip().startswith('- '):
                 # Extract env var, handling quoted values
                 env_line = line.strip()[2:]  # Remove "- "
                 
