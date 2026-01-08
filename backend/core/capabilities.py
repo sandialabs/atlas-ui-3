@@ -88,9 +88,36 @@ def verify_file_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 def create_download_url(file_key: str, user_email: Optional[str]) -> str:
-    """Create a relative download URL for a given file key, optionally with a token."""
+    """Create a download URL for a given file key, optionally with a token.
+    
+    If BACKEND_PUBLIC_URL is configured, returns an absolute URL that remote MCP servers
+    can access. Otherwise, returns a relative URL (only works for local/stdio servers).
+    
+    Args:
+        file_key: S3 key of the file to download
+        user_email: User email for token generation
+        
+    Returns:
+        Download URL (absolute if BACKEND_PUBLIC_URL configured, relative otherwise)
+    """
+    # Build relative path with token
     if user_email:
         token = generate_file_token(user_email, file_key)
-        return f"/api/files/download/{file_key}?token={token}"
-    # Fallback: no user context available
-    return f"/api/files/download/{file_key}"
+        relative_path = f"/api/files/download/{file_key}?token={token}"
+    else:
+        # Fallback: no user context available
+        relative_path = f"/api/files/download/{file_key}"
+    
+    # Check if we should use absolute URLs for remote MCP server access
+    try:
+        settings = config_manager.app_settings
+        backend_public_url = getattr(settings, "backend_public_url", None)
+        if backend_public_url:
+            # Strip trailing slash from base URL and combine with relative path
+            base = backend_public_url.rstrip("/")
+            return f"{base}{relative_path}"
+    except Exception as e:
+        logger.debug(f"Could not check backend_public_url config: {e}")
+    
+    # Return relative URL as default
+    return relative_path
