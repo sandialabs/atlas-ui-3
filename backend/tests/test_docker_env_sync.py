@@ -52,7 +52,8 @@ def parse_docker_compose_env(docker_compose_path: Path) -> dict[str, str]:
                 continue
             
             # Detect when we enter another service block (exits atlas-ui)
-            if in_atlas_ui_service and line and not line[0].isspace() and ':' in line:
+            stripped = line.strip()
+            if in_atlas_ui_service and line and stripped and not line[0].isspace() and ':' in line:
                 # We've reached a new top-level section
                 in_atlas_ui_service = False
                 in_environment_section = False
@@ -64,16 +65,16 @@ def parse_docker_compose_env(docker_compose_path: Path) -> dict[str, str]:
                 continue
             
             # Check if we've exited the environment section (e.g., volumes:, depends_on:)
-            if in_environment_section and line.strip() and not line.strip().startswith('-') and not line.strip().startswith('#'):
-                if ':' in line and not line.strip().startswith('- '):
+            if in_environment_section and stripped and not stripped.startswith('-') and not stripped.startswith('#'):
+                if ':' in line and not stripped.startswith('- '):
                     # We've reached a new subsection (like volumes:)
                     in_environment_section = False
                     continue
             
             # Parse environment variables
-            if in_environment_section and line.strip().startswith('- '):
+            if in_environment_section and stripped.startswith('- '):
                 # Extract env var, handling quoted values
-                env_line = line.strip()[2:]  # Remove "- "
+                env_line = stripped[2:]  # Remove "- "
                 
                 # Handle quoted environment variables
                 if env_line.startswith('"'):
