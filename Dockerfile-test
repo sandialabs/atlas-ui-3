@@ -35,6 +35,10 @@ ENV PATH="/root/.local/bin:$PATH"
 # Copy requirements first
 COPY requirements.txt .
 
+# Files needed by env-sync tests
+COPY .env.example .
+COPY docker-compose.yml .
+
 # Copy and install frontend dependencies (keep all dependencies for testing)
 COPY frontend/package*.json ./frontend/
 WORKDIR /app/frontend
