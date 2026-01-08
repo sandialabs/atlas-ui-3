@@ -19,7 +19,7 @@ def parse_env_example(env_file_path: Path) -> dict[str, str]:
         Dictionary of environment variable names to values
     """
     env_vars = {}
-    with open(env_file_path, 'r') as f:
+    with open(env_file_path, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith('#'):
@@ -40,7 +40,7 @@ def parse_docker_compose_env(docker_compose_path: Path) -> dict[str, str]:
         Dictionary of environment variable names to values
     """
     docker_env_vars = {}
-    with open(docker_compose_path, 'r') as f:
+    with open(docker_compose_path, 'r', encoding='utf-8') as f:
         in_atlas_ui_service = False
         in_environment_section = False
         
