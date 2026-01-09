@@ -35,8 +35,8 @@ fi
 export PATH="$PWD/node_modules/.bin:$PATH"
 
 # Set VITE_APP_NAME for build (required for index.html template replacement)
-export VITE_APP_NAME="Chat UI"
-
+export VITE_APP_NAME="ATLAS-3"
+export VITE_FEATURE_POWERED_BY_ATLAS="false"
 # Run tests with proper configuration
 timeout 300 npm test -- --run
 

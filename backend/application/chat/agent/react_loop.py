@@ -183,6 +183,7 @@ class ReActAgentLoop(AgentLoopProtocol):
                     if m:
                         req_input = {"question": m.group(1)}
                 except Exception:
+                    # Regex parsing failed, continue with JSON fallback
                     pass
 
             if req_input and isinstance(req_input, dict) and req_input.get("question"):

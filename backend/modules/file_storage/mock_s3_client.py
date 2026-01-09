@@ -151,7 +151,15 @@ class MockS3StorageClient:
                 "user_email": user_email
             }
 
-            logger.info(f"File uploaded successfully: {sanitize_for_logging(s3_key)} for user {sanitize_for_logging(user_email)}")
+            category = "generated" if "/generated/" in s3_key else ("uploads" if "/uploads/" in s3_key else "other")
+            logger.info(
+                "File uploaded successfully: category=%s, size=%d bytes, content_type=%s, user=%s",
+                category,
+                len(content_bytes),
+                sanitize_for_logging(content_type),
+                sanitize_for_logging(user_email),
+            )
+            logger.debug("Uploaded file key (sanitized): %s", sanitize_for_logging(s3_key))
             return result
 
         except Exception as e:
@@ -220,7 +228,15 @@ class MockS3StorageClient:
                 "tags": tags
             }
 
-            logger.info(f"File retrieved successfully: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
+            category = "generated" if "/generated/" in file_key else ("uploads" if "/uploads/" in file_key else "other")
+            logger.info(
+                "File retrieved successfully: category=%s, size=%d bytes, content_type=%s, user=%s",
+                category,
+                len(content_bytes),
+                sanitize_for_logging(response.headers.get("Content-Type", "application/octet-stream")),
+                sanitize_for_logging(user_email),
+            )
+            logger.debug("Retrieved file key (sanitized): %s", sanitize_for_logging(file_key))
             return result
 
         except Exception as e:

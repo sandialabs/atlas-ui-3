@@ -60,8 +60,6 @@ def mock_mcp_manager(monkeypatch):
 def test_tools_detailed_includes_description_and_schema(mock_mcp_manager):
     """Test that tools_detailed field contains description and inputSchema."""
     server_tools = mock_mcp_manager.available_tools["test_server"]["tools"]
-    server_config = mock_mcp_manager.available_tools["test_server"]["config"]
-    
     # Simulate what the config endpoint does
     tools_detailed = []
     for tool in server_tools:

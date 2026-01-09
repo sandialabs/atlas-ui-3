@@ -6,6 +6,15 @@ This guide provides everything you need to get Atlas UI 3 running, whether you p
 
 Using Docker is the fastest way to get the application running.
 
+### Option 1: Use Pre-built Image from Quay.io
+
+```bash
+docker pull quay.io/agarlan-snl/atlas-ui-3:latest
+docker run -p 8000:8000 quay.io/agarlan-snl/atlas-ui-3:latest
+```
+
+### Option 2: Build Locally
+
 1.  **Build the Docker Image:**
     From the root of the project, run the build command:
     ```bash

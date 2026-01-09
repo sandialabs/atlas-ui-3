@@ -31,10 +31,12 @@ const AllFilesView = () => {
 
   useEffect(() => {
     fetchAllFiles()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     applyFiltersAndSort()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allFiles, searchQuery, sortBy, sortOrder, typeFilter])
 
   const fetchAllFiles = async () => {

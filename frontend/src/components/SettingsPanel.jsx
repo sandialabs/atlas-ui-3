@@ -29,6 +29,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
         setSettings(defaultSettings)
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Save settings to localStorage whenever they change
@@ -60,7 +61,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
       try {
         const parsed = JSON.parse(savedSettings)
         setSettings({ ...defaultSettings, ...parsed })
-      } catch (error) {
+      } catch {
         setSettings(defaultSettings)
       }
     } else {

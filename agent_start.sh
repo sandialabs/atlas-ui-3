@@ -9,6 +9,8 @@ MCP_PID=""
 ONLY_FRONTEND=false
 ONLY_BACKEND=false
 START_MCP_MOCK=false
+CONTAINER_CMD=""
+COMPOSE_CMD=""
 
 # =============================================================================
 # CLEANUP FUNCTIONS
@@ -37,6 +39,51 @@ cleanup_logs() {
 }
 
 # =============================================================================
+# CONTAINER RUNTIME DETECTION
+# =============================================================================
+
+setup_container_runtime() {
+    # Detect if podman or docker is available
+    CONTAINER_CMD=""
+    COMPOSE_CMD=""
+
+    # Check for podman first
+    if command -v podman &> /dev/null; then
+        CONTAINER_CMD="podman"
+
+        # Check for podman-compose or podman compose
+        if command -v podman-compose &> /dev/null; then
+            COMPOSE_CMD="podman-compose"
+        else
+            # Use podman compose (newer versions)
+            COMPOSE_CMD="podman compose"
+        fi
+
+        echo "Using Podman as container runtime"
+        return
+    fi
+
+    # Check for docker
+    if command -v docker &> /dev/null; then
+        CONTAINER_CMD="docker"
+
+        # Check if docker compose (v2) is available
+        if docker compose version &> /dev/null; then
+            COMPOSE_CMD="docker compose"
+        else
+            # Fall back to docker-compose v1
+            COMPOSE_CMD="docker-compose"
+        fi
+
+        echo "Using Docker as container runtime"
+        return
+    fi
+
+    # Neither found
+    echo "Warning: Neither Docker nor Podman found. Container operations will be skipped."
+}
+
+# =============================================================================
 # INFRASTRUCTURE FUNCTIONS
 # =============================================================================
 
@@ -49,12 +96,17 @@ setup_minio() {
     fi
     
     if [ "$use_mock_s3" = "true" ]; then
-        echo "Using Mock S3 (no Docker required)"
+        echo "Using Mock S3 (no Docker/Podman required)"
     else
-        if ! docker ps | grep -q atlas-minio; then
-            echo "MinIO is not running. Starting MinIO with docker-compose..."
+        if [ -z "$CONTAINER_CMD" ]; then
+            echo "Error: Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in .env"
+            exit 1
+        fi
+
+        if ! $CONTAINER_CMD ps | grep -q atlas-minio; then
+            echo "MinIO is not running. Starting MinIO with $COMPOSE_CMD..."
             cd "$PROJECT_ROOT"
-            docker-compose up -d minio minio-init
+            $COMPOSE_CMD up -d minio minio-init
             echo "MinIO started successfully"
             sleep 3
         else
@@ -66,7 +118,29 @@ setup_minio() {
 
 setup_environment() {
     cd "$PROJECT_ROOT"
+    
+    # Check if .venv exists
+    if [ ! -d "$PROJECT_ROOT/.venv" ]; then
+        echo "Error: Virtual environment not found at $PROJECT_ROOT/.venv"
+        echo "Please run: uv venv && uv pip install -r requirements.txt"
+        exit 1
+    fi
+    
+    # Check if uvicorn is installed
+    if [ ! -f "$PROJECT_ROOT/.venv/bin/uvicorn" ]; then
+        echo "Error: uvicorn not found in virtual environment"
+        echo "Please run: uv pip install -r requirements.txt"
+        exit 1
+    fi
+    
     . .venv/bin/activate
+    
+    # Load environment variables from .env if present
+    if [ -f "$PROJECT_ROOT/.env" ]; then
+        set -a
+        . "$PROJECT_ROOT/.env"
+        set +a
+    fi
     
     echo "Setting MCP_EXTERNAL_API_TOKEN for testing purposes."
     if [ -z "$MCP_EXTERNAL_API_TOKEN" ]; then
@@ -100,7 +174,11 @@ build_frontend() {
     echo "Building frontend..."
     cd "$PROJECT_ROOT/frontend"
     npm install
-    export VITE_APP_NAME="Chat UI"
+    # Use VITE_* values from the environment / .env instead of hardcoding.
+    # If VITE_APP_NAME is not already set, fall back to the example default.
+    if [ -z "$VITE_APP_NAME" ]; then
+        export VITE_APP_NAME="Chat UI 13"
+    fi
     npm run build
     cd "$PROJECT_ROOT"
 }
@@ -114,7 +192,7 @@ start_backend() {
     local host="${2:-127.0.0.1}"
     
     cd "$PROJECT_ROOT/backend"
-    uvicorn main:app --host "$host" --port "$port" &
+    "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" &
     echo "Backend server started on $host:$port"
     cd "$PROJECT_ROOT"
 }
@@ -149,11 +227,12 @@ parse_arguments() {
 main() {
     # Set trap to cleanup MCP on script exit
     trap cleanup_mcp EXIT
-    
+
     # Parse command line arguments
     parse_arguments "$@"
-    
+
     # Setup infrastructure
+    setup_container_runtime
     setup_minio
     setup_environment
     

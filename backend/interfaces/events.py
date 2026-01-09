@@ -112,3 +112,23 @@ class EventPublisher(Protocol):
             data: Dictionary to send as JSON
         """
         pass
+
+    async def publish_elicitation_request(
+        self,
+        elicitation_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        message: str,
+        response_schema: Dict[str, Any]
+    ) -> None:
+        """
+        Publish an elicitation request to the user.
+
+        Args:
+            elicitation_id: Unique identifier for this elicitation
+            tool_call_id: ID of the tool call that requested elicitation
+            tool_name: Name of the tool requesting input
+            message: Prompt message to display to the user
+            response_schema: JSON schema defining expected response structure
+        """
+        pass

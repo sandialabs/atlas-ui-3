@@ -1,6 +1,9 @@
 # Test-specific Dockerfile with simple E2E testing dependencies
 FROM fedora:latest
 
+# Build argument for debug mode (default: true for backward compatibility)
+ARG DEBUG_MODE=true
+
 # Set working directory
 WORKDIR /app
 
@@ -31,6 +34,10 @@ ENV PATH="/root/.local/bin:$PATH"
 
 # Copy requirements first
 COPY requirements.txt .
+
+# Files needed by env-sync tests
+COPY .env.example .
+COPY docker-compose.yml .
 
 # Copy and install frontend dependencies (keep all dependencies for testing)
 COPY frontend/package*.json ./frontend/
@@ -85,7 +92,7 @@ RUN mkdir -p \
 
 # Create .env file for test environment (skip authentication and configure paths)
 RUN echo "# Development mode - skip authentication when true" > /app/.env && \
-    echo "DEBUG_MODE=true" >> /app/.env && \
+    echo "DEBUG_MODE=${DEBUG_MODE}" >> /app/.env && \
     echo "# CI/CD mode - skip static file serving checks" >> /app/.env && \
     echo "CICD_MODE=true" >> /app/.env && \
     echo "# Use correct frontend path in container" >> /app/.env && \

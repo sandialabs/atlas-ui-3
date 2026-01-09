@@ -20,7 +20,8 @@ export function createWebSocketHandler(deps) {
     getFileType,
     triggerFileDownload,
     addAttachment,
-    resolvePendingFileEvent
+    resolvePendingFileEvent,
+    setPendingElicitation
   } = deps
 
   const handleAgentUpdate = (data) => {
@@ -88,8 +89,8 @@ export function createWebSocketHandler(deps) {
           // ignore unknown
           break
       }
-    } catch (e) {
-      console.error('Error handling agent update', e, data)
+    } catch (err) {
+      console.error('Error handling agent update', err, data)
     }
   }
 
@@ -114,6 +115,32 @@ export function createWebSocketHandler(deps) {
           break
         case 'tool_result':
           mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === updateData.tool_call_id ? { ...msg, content: `**Tool: ${updateData.tool_name}** - ${updateData.success ? 'Success' : 'Failed'}`, status: updateData.success ? 'completed' : 'failed', result: updateData.result || updateData.error || null } : msg))
+          break
+        case 'tool_log':
+          // Log message from MCP server
+          if (updateData && updateData.message) {
+            const logLevel = updateData.level || 'info'
+            const serverName = updateData.server_name || 'unknown'
+            const toolName = updateData.tool_name
+            
+            // Create prefix based on context
+            let prefix = `[${serverName}]`
+            if (toolName) {
+              prefix = `[${serverName}:${toolName}]`
+            }
+            
+            addMessage({
+              role: 'system',
+              content: `${prefix} ${updateData.message}`,
+              type: 'tool_log',
+              subtype: logLevel,
+              log_level: logLevel,
+              server_name: serverName,
+              tool_name: toolName,
+              tool_call_id: updateData.tool_call_id,
+              timestamp: new Date().toISOString()
+            })
+          }
           break
         case 'system_message':
           // Rich system message from MCP server during tool execution
@@ -386,7 +413,7 @@ export function createWebSocketHandler(deps) {
           break
         case 'tool_approval_request':
             // Handle tool approval request - stop thinking and add as a message in the chat
-            try { setIsThinking(false) } catch (e) { /* no-op */ }
+            try { setIsThinking(false) } catch { /* no-op */ }
           addMessage({
             role: 'system',
             content: `Tool Approval Required: ${data.tool_name}`,
@@ -399,6 +426,28 @@ export function createWebSocketHandler(deps) {
             status: 'pending',
             timestamp: new Date().toISOString()
           })
+          break
+        case 'elicitation_request':
+          // Handle elicitation request - set pending elicitation state
+          console.log('[ELICITATION] Received elicitation_request:', {
+            elicitation_id: data.elicitation_id,
+            tool_name: data.tool_name,
+            message: data.message,
+            has_setPendingElicitation: typeof setPendingElicitation === 'function'
+          })
+          try { setIsThinking(false) } catch { /* no-op */ }
+          if (typeof setPendingElicitation === 'function') {
+            setPendingElicitation({
+              elicitation_id: data.elicitation_id,
+              tool_call_id: data.tool_call_id,
+              tool_name: data.tool_name,
+              message: data.message,
+              response_schema: data.response_schema
+            })
+            console.log('[ELICITATION] setPendingElicitation called successfully')
+          } else {
+            console.error('[ELICITATION] setPendingElicitation is not a function!', typeof setPendingElicitation)
+          }
           break
         case 'intermediate_update':
           handleIntermediateUpdate(data)

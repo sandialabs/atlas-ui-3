@@ -30,6 +30,7 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
     if (isOpen && !configs) {
       loadConfigs()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
 
   // Handle click outside to close
@@ -69,7 +70,7 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
     }))
   }
 
-  const renderValue = (value, key = '') => {
+  const renderValue = (value) => {
     if (value === null || value === undefined) {
       return <span className="text-gray-500 italic">null</span>
     }
@@ -125,7 +126,7 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
             <div key={objKey} className="ml-4">
               <span className="text-cyan-400">"{objKey}"</span>
               <span className="text-gray-400">: </span>
-              {renderValue(objValue, objKey)}
+              {renderValue(objValue)}
               {index < entries.length - 1 && <span className="text-gray-400">,</span>}
             </div>
           ))}

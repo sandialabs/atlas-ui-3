@@ -523,12 +523,7 @@ def execute_python_code_with_file(
                 "mode": "replace",
                 "viewer_hint": "code"
             }
-        }
-    
-    # finally:
-    #     # Clean up execution environment
-    #     if exec_dir:
-    #         cleanup_execution_environment(exec_dir)
+            }
 
 if __name__ == "__main__":
     mcp.run()

@@ -256,6 +256,7 @@ def _search_score(query: str, c: Car) -> Tuple[float, str]:
         age_min = max(0.0, (NOW - last).total_seconds() / 60.0)
         score += max(0.0, 0.5 - min(0.5, age_min / 120.0))  # up to +0.5 if < 0 min old
     except Exception:
+        # Ignore datetime parsing errors
         pass
     return score, ", ".join(reasons) or "heuristic"
 

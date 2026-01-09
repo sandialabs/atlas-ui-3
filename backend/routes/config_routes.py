@@ -242,10 +242,17 @@ async def get_config(
         logger.warning(f"Error loading help config: {e}")
         help_config = {"title": "Help & Documentation", "sections": []}
     
-# Log what the user can see for debugging
+    # Keep INFO logging concise; server lists can be very long.
     logger.info(
-        f"User {sanitize_for_logging(current_user)} has access to {len(authorized_servers)} servers: {authorized_servers}\n"
-        f"Returning {len(tools_info)} server tool groups to frontend for user {sanitize_for_logging(current_user)}"
+        "Config for user %s: %d authorized servers, %d tool groups",
+        sanitize_for_logging(current_user),
+        len(authorized_servers),
+        len(tools_info),
+    )
+    logger.debug(
+        "Authorized servers for user %s: %s",
+        sanitize_for_logging(current_user),
+        authorized_servers,
     )
     # Build models list with compliance levels
     models_list = []

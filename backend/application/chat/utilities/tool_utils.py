@@ -38,7 +38,7 @@ async def execute_tools_workflow(
     
     Pure function that coordinates tool execution without maintaining state.
     """
-    logger.info("Step 4: Entering execute_tools_workflow")
+    logger.debug("Entering execute_tools_workflow")
     # Add assistant message with tool calls
     messages.append({
         "role": "assistant",
@@ -174,7 +174,7 @@ async def execute_single_tool(
     
     Pure function that doesn't maintain state - all context passed as parameters.
     """
-    logger.info("Step 5: Entering execute_single_tool")
+    logger.debug("Entering execute_single_tool")
     from . import notification_utils
     
     try:
@@ -249,8 +249,23 @@ async def execute_single_tool(
                     # Use json comparison to avoid false positives from dict ordering
                     if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
                         arguments_were_edited = True
-                        filtered_args = edited_args
                         logger.info(f"User edited arguments for tool {tool_call.function.name}")
+
+                        # SECURITY: Re-apply security injections after user edits
+                        # This ensures username and other security-critical parameters cannot be tampered with
+                        re_injected_args = inject_context_into_args(
+                            edited_args,
+                            session_context,
+                            tool_call.function.name,
+                            tool_manager
+                        )
+
+                        # Re-filter to schema to ensure only valid parameters
+                        filtered_args = _filter_args_to_schema(
+                            re_injected_args,
+                            tool_call.function.name,
+                            tool_manager
+                        )
                     else:
                         # No actual changes, but response included arguments - keep original filtered_args
                         logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
@@ -289,9 +304,9 @@ async def execute_single_tool(
         if arguments_were_edited:
             edit_note = (
                 f"[IMPORTANT: The user manually edited the tool arguments before execution. "
-                f"Disregard your original arguments. The ACTUAL arguments executed were: {json.dumps(filtered_args)}. "
-                f"Your response must reflect these edited arguments as the user's true intent. "
-                # f"Do NOT reference the original arguments: {json.dumps(original_filtered_args)}]\n\n"
+                f"Security-critical parameters (like username) were re-injected by the system and cannot be modified. "
+                f"The ACTUAL arguments executed were: {json.dumps(filtered_args)}. "
+                f"Your response must reflect these arguments as the user's true intent.]\\n\\n"
             )
             if isinstance(result.content, str):
                 result.content = edit_note + result.content
@@ -385,7 +400,7 @@ def prepare_tool_arguments(tool_call, session_context: Dict[str, Any], tool_mana
     
     Pure function that transforms arguments based on context and tool schema.
     """
-    logger.info("Step 6: Entering prepare_tool_arguments")
+    logger.debug("Entering prepare_tool_arguments")
     # Parse raw arguments
     raw_args = getattr(tool_call.function, "arguments", {})
     if isinstance(raw_args, dict):
@@ -439,7 +454,11 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
             ref = files_ctx.get(fname)
             if ref and ref.get("key"):
                 url = to_url(ref["key"])
-                logger.info(f"Step 6.1: Rewriting filename to URL: {url}")
+                # SECURITY: tokenized URLs can contain secrets; do not log them.
+                logger.debug(
+                    "Rewriting filename argument to tokenized URL (filename=%s)",
+                    _sanitize_filename_value(fname),
+                )
                 parsed_args.setdefault("original_filename", fname)
                 parsed_args["filename"] = url
                 parsed_args.setdefault("file_url", url)
@@ -458,7 +477,7 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
                 else:
                     urls.append(fname)
             if urls:
-                logger.info(f"Step 6.1: Rewriting filenames to URLs: {urls}")
+                logger.debug("Rewriting file_names arguments to tokenized URLs (count=%d)", len(urls))
                 parsed_args.setdefault("original_file_names", originals)
                 parsed_args["file_names"] = urls
                 parsed_args.setdefault("file_urls", urls)

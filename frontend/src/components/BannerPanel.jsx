@@ -56,7 +56,7 @@ function BannerPanel() {
 
   return (
     <div className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 text-white">
-      {visibleMessages.map((message, originalIndex) => {
+      {visibleMessages.map((message) => {
         // Find the original index in the full array
         const actualIndex = bannerMessages.findIndex((msg, idx) => 
           msg === message && !dismissedMessages.has(idx)

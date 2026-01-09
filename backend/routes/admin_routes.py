@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -16,9 +17,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.auth import is_user_in_group
-from core.utils import get_current_user
+from core.utils import get_current_user, sanitize_for_logging
 from modules.config import config_manager
-from core.otel_config import get_otel_config  # noqa: F401 (may be used later)
 from infrastructure.app_factory import app_factory
 
 logger = logging.getLogger(__name__)
@@ -35,10 +35,8 @@ class BannerMessageUpdate(BaseModel):
     messages: List[str]
 
 
-class SystemStatus(BaseModel):  # noqa: F841 (kept for future use)
-    component: str
-    status: str
-    details: Optional[Dict[str, Any]] = None
+class MCPServerAction(BaseModel):
+    server_name: str
 
 
 async def require_admin(current_user: str = Depends(get_current_user)) -> str:
@@ -204,6 +202,9 @@ async def admin_dashboard(admin_user: str = Depends(require_admin)):
             "/admin/logs/viewer",
             "/admin/logs/clear",
             "/admin/logs/download",
+            "/admin/mcp/reload",
+            "/admin/mcp/reconnect",
+            "/admin/mcp/status",
         ],
     }
 
@@ -249,16 +250,32 @@ async def update_banner_config(
 
 @admin_router.post("/mcp/reload")
 async def reload_mcp_servers(admin_user: str = Depends(require_admin)):
-    """Reload MCP servers (clients, tools, prompts)."""
+    """Reload MCP servers from disk configuration and reinitialize connections.
+    
+    This endpoint:
+    1. Reloads the mcp.json configuration from disk (hot-reload)
+    2. Reinitializes all MCP client connections
+    3. Rediscovers tools and prompts from all servers
+    
+    Use this after modifying the mcp.json configuration file to apply changes
+    without restarting the application.
+    """
     try:
         mcp = app_factory.get_mcp_manager()
+        
+        # Reload config from disk first
+        config_changes = mcp.reload_config()
+        
         # Re-initialize clients and rediscover
         await mcp.initialize_clients()
         await mcp.discover_tools()
         await mcp.discover_prompts()
+        
         return {
-            "message": "MCP servers reloaded",
+            "message": "MCP servers reloaded from disk configuration",
+            "config_changes": config_changes,
             "servers": list(mcp.clients.keys()),
+            "failed_servers": list(mcp.get_failed_servers().keys()),
             "tool_counts": {k: len(v.get("tools", [])) for k, v in mcp.available_tools.items()},
             "prompt_counts": {k: len(v.get("prompts", [])) for k, v in mcp.available_prompts.items()},
             "reloaded_by": admin_user,
@@ -268,128 +285,96 @@ async def reload_mcp_servers(admin_user: str = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# # --- MCP Configuration ---
-
-# @admin_router.get("/mcp-config")
-# async def get_mcp_config(admin_user: str = Depends(require_admin)):
-#     """Get current MCP server configuration."""
-#     try:
-#         mcp_file = get_admin_config_path("mcp.json")
-#         content = get_file_content(mcp_file)
+@admin_router.post("/mcp/reconnect")
+async def reconnect_failed_mcp_servers(admin_user: str = Depends(require_admin)):
+    """Attempt to reconnect to MCP servers that previously failed.
+    
+    This endpoint manually triggers reconnection attempts for servers that failed
+    to connect during initialization or previous reconnection attempts.
+    Respects exponential backoff unless force=true is specified.
+    """
+    try:
+        mcp = app_factory.get_mcp_manager()
+        # Admin-triggered reconnect should bypass backoff and try immediately
+        result = await mcp.reconnect_failed_servers(force=True)
         
-#         return {
-#             "content": content,
-#             "parsed": json.loads(content),
-#             "file_path": str(mcp_file),
-#             "last_modified": mcp_file.stat().st_mtime
-#         }
-#     except Exception as e:
-#         logger.error(f"Error getting MCP config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "message": "Reconnection attempt completed",
+            "result": result,
+            "current_servers": list(mcp.clients.keys()),
+            "failed_servers": mcp.get_failed_servers(),
+            "triggered_by": admin_user,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error reconnecting MCP servers: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# @admin_router.post("/mcp-config")
-# async def update_mcp_config(
-#     update: AdminConfigUpdate,
-#     admin_user: str = Depends(require_admin)
-# ):
-#     """Update MCP server configuration."""
-#     try:
-#         mcp_file = get_admin_config_path("mcp.json")
-#         write_file_content(mcp_file, update.content, "json")
+@admin_router.get("/mcp/status")
+async def get_mcp_status(admin_user: str = Depends(require_admin)):
+    """Get current MCP server connection status.
+    
+    Returns information about:
+    - Currently connected servers
+    - Failed servers with error details and backoff info
+    - Auto-reconnect feature status
+    """
+    try:
+        mcp = app_factory.get_mcp_manager()
+        app_settings = config_manager.app_settings
         
-#         logger.info(f"MCP configuration updated by {admin_user}")
-#         return {
-#             "message": "MCP configuration updated successfully",
-#             "updated_by": admin_user
-#         }
-#     except Exception as e:
-#         logger.error(f"Error updating MCP config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# # --- LLM Configuration ---
-
-# @admin_router.get("/llm-config")
-# async def get_llm_config(admin_user: str = Depends(require_admin)):
-#     """Get current LLM configuration."""
-#     try:
-#         llm_file = get_admin_config_path("llmconfig.yml")
-#         content = get_file_content(llm_file)
+        failed_servers = mcp.get_failed_servers()
         
-#         return {
-#             "content": content,
-#             "parsed": yaml.safe_load(content),
-#             "file_path": str(llm_file),
-#             "last_modified": llm_file.stat().st_mtime
-#         }
-#     except Exception as e:
-#         logger.error(f"Error getting LLM config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# @admin_router.post("/llm-config")
-# async def update_llm_config(
-#     update: AdminConfigUpdate,
-#     admin_user: str = Depends(require_admin)
-# ):
-#     """Update LLM configuration."""
-#     try:
-#         llm_file = get_admin_config_path("llmconfig.yml")
-#         write_file_content(llm_file, update.content, "yaml")
+        # Calculate next retry time for each failed server
+        current_time = time.time()
+        failed_servers_with_timing = {}
+        for server_name, failure_info in failed_servers.items():
+            backoff_delay = mcp._calculate_backoff_delay(failure_info["attempt_count"])
+            time_since_last = current_time - failure_info["last_attempt"]
+            next_retry_in = max(0, backoff_delay - time_since_last)
+            
+            failed_servers_with_timing[server_name] = {
+                **failure_info,
+                "backoff_delay": backoff_delay,
+                "next_retry_in_seconds": next_retry_in,
+            }
         
-#         logger.info(f"LLM configuration updated by {admin_user}")
-#         return {
-#             "message": "LLM configuration updated successfully", 
-#             "updated_by": admin_user
-#         }
-#     except Exception as e:
-#         logger.error(f"Error updating LLM config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
+        # A server is considered "connected" only if it has a client AND
+        # at least one tool or prompt discovered (or explicitly marked as
+        # having zero tools/prompts but no recorded failure). This prevents
+        # HTTP/SSE/SSL discovery failures from showing as connected.
+        connected_servers: List[str] = []
+        for server_name in mcp.clients.keys():
+            tools = mcp.available_tools.get(server_name, {}).get("tools", [])
+            prompts = mcp.available_prompts.get(server_name, {}).get("prompts", [])
+            if tools or prompts:
+                connected_servers.append(server_name)
+            elif server_name not in failed_servers_with_timing:
+                # No tools/prompts but also no recorded failure; treat as connected
+                # to preserve behavior for servers that legitimately expose nothing.
+                connected_servers.append(server_name)
 
+        return {
+            "connected_servers": connected_servers,
+            "configured_servers": list(mcp.servers_config.keys()),
+            "failed_servers": failed_servers_with_timing,
+            "auto_reconnect": {
+                "enabled": app_settings.feature_mcp_auto_reconnect_enabled,
+                "base_interval": app_settings.mcp_reconnect_interval,
+                "max_interval": app_settings.mcp_reconnect_max_interval,
+                "backoff_multiplier": app_settings.mcp_reconnect_backoff_multiplier,
+                "running": mcp._reconnect_running,
+            },
+            "tool_counts": {k: len(v.get("tools", [])) for k, v in mcp.available_tools.items()},
+            "prompt_counts": {k: len(v.get("prompts", [])) for k, v in mcp.available_prompts.items()},
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error getting MCP status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
-# # --- Help Configuration ---
-
-# @admin_router.get("/help-config")
-# async def get_help_config(admin_user: str = Depends(require_admin)):
-#     """Get current help configuration."""
-#     try:
-#         help_file = get_admin_config_path("help-config.json")
-#         content = get_file_content(help_file)
-        
-#         return {
-#             "content": content,
-#             "parsed": json.loads(content),
-#             "file_path": str(help_file),
-#             "last_modified": help_file.stat().st_mtime
-#         }
-#     except Exception as e:
-#         logger.error(f"Error getting help config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# @admin_router.post("/help-config")
-# async def update_help_config(
-#     update: AdminConfigUpdate,
-#     admin_user: str = Depends(require_admin)
-# ):
-#     """Update help configuration."""
-#     try:
-#         help_file = get_admin_config_path("help-config.json")
-#         write_file_content(help_file, update.content, "json")
-        
-#         logger.info(f"Help configuration updated by {admin_user}")
-#         return {
-#             "message": "Help configuration updated successfully",
-#             "updated_by": admin_user
-#         }
-#     except Exception as e:
-#         logger.error(f"Error updating help config: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- Config Viewer ---
-
 @admin_router.get("/config/view")
 async def get_all_configs(admin_user: str = Depends(require_admin)):
     """Get all configuration values for admin viewing."""
@@ -526,7 +511,7 @@ async def get_enhanced_logs(
                     "module": "admin",
                     "logger": "admin",
                     "function": "get_enhanced_logs",
-                    "message": f"Error reading log file: {e}",
+                    "message": "An internal error occurred while reading log file.",
                     "trace_id": "",
                     "span_id": "",
                     "line": "",
@@ -577,7 +562,8 @@ async def clear_app_logs(admin_user: str = Depends(require_admin)):
                     logger.error(f"Failed clearing {f}: {e}")
         if not cleared:
             return {"message": "No log files found to clear", "cleared_by": admin_user, "files_cleared": []}
-        logger.info(f"Log files cleared by {admin_user}: {cleared}")
+        sanitized_admin_user = sanitize_for_logging(admin_user)
+        logger.info(f"Log files cleared by {sanitized_admin_user}: {cleared}")
         return {"message": "Log files cleared successfully", "cleared_by": admin_user, "files_cleared": cleared}
     except Exception as e:  # noqa: BLE001
         logger.error(f"Error clearing logs: {e}")
@@ -660,4 +646,212 @@ async def get_system_status(admin_user: str = Depends(require_admin)):
         }
     except Exception as e:  # noqa: BLE001
         logger.error(f"Error getting system status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- MCP Server Management ---
+
+@admin_router.get("/mcp/available-servers")
+async def get_available_mcp_servers(
+    admin_user: str = Depends(require_admin),  # noqa: ARG001 (enforces auth)
+):
+    """Get all available MCP servers from the example-configs directory."""
+    try:
+        project_root = _project_root()
+        example_configs_dir = project_root / "config" / "mcp-example-configs"
+        
+        if not example_configs_dir.exists():
+            return {"available_servers": {}}
+        
+        available_servers = {}
+        
+        for config_file in example_configs_dir.glob("mcp-*.json"):
+            try:
+                with config_file.open("r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+                
+                # Each file should contain one server config
+                for server_name, server_config in config_data.items():
+                    available_servers[server_name] = {
+                        "config": server_config,
+                        "source_file": config_file.name,
+                        "description": server_config.get("description", ""),
+                        "short_description": server_config.get("short_description", ""),
+                        "author": server_config.get("author", ""),
+                        "compliance_level": server_config.get("compliance_level", "")
+                    }
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"Failed to parse {config_file.name}: {e}")
+                continue
+        
+        return {"available_servers": available_servers}
+    
+    except Exception as e:
+        logger.error(f"Error getting available MCP servers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/mcp/active-servers")
+async def get_active_mcp_servers(
+    admin_user: str = Depends(require_admin),  # noqa: ARG001 (enforces auth)
+):
+    """Get currently active MCP servers from the overrides/mcp.json file."""
+    try:
+        mcp_config_path = get_admin_config_path("mcp.json")
+        
+        if not mcp_config_path.exists():
+            return {"active_servers": {}}
+        
+        with mcp_config_path.open("r", encoding="utf-8") as f:
+            active_config = json.load(f)
+        
+        return {"active_servers": active_config}
+    
+    except Exception as e:
+        logger.error(f"Error getting active MCP servers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/mcp/add-server")
+async def add_mcp_server(
+    action: MCPServerAction,
+    admin_user: str = Depends(require_admin),  # noqa: ARG001 (enforces auth)
+):
+    """Add an MCP server from example-configs to the active configuration."""
+    try:
+        server_name = action.server_name
+        
+        # Get the server config from example-configs
+        project_root = _project_root()
+        example_configs_dir = project_root / "config" / "mcp-example-configs"
+        
+        server_config = None
+        for config_file in example_configs_dir.glob("mcp-*.json"):
+            try:
+                with config_file.open("r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+                
+                if server_name in config_data:
+                    server_config = config_data[server_name]
+                    break
+            except (json.JSONDecodeError, Exception):
+                continue
+        
+        if not server_config:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Server '{server_name}' not found in example configurations"
+            )
+        
+        # Load current active configuration
+        mcp_config_path = get_admin_config_path("mcp.json")
+        
+        if mcp_config_path.exists():
+            with mcp_config_path.open("r", encoding="utf-8") as f:
+                active_config = json.load(f)
+        else:
+            active_config = {}
+        
+        # Check if server is already active
+        if server_name in active_config:
+            return {
+                "message": f"Server '{server_name}' is already active",
+                "server_name": server_name,
+                "already_active": True
+            }
+        
+        # Add the server to active configuration
+        active_config[server_name] = server_config
+        
+        # Save the updated configuration
+        with mcp_config_path.open("w", encoding="utf-8") as f:
+            json.dump(active_config, f, indent=2)
+
+        sanitized_admin_user = sanitize_for_logging(admin_user)
+        sanitized_server_name = sanitize_for_logging(server_name)
+        logger.info(f"Admin {sanitized_admin_user} added MCP server '{sanitized_server_name}' to active configuration")
+
+        # Trigger MCP reload to apply changes
+        try:
+            mcp_manager = app_factory.get_mcp_manager()
+            if mcp_manager:
+                await mcp_manager.reload_servers()
+        except Exception as reload_error:
+            sanitized_server_name = sanitize_for_logging(server_name)
+            logger.warning(f"Failed to reload MCP servers after adding '{sanitized_server_name}': {reload_error}")
+        
+        return {
+            "message": f"Server '{server_name}' added successfully",
+            "server_name": server_name,
+            "config": server_config
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        sanitized_server_name = sanitize_for_logging(action.server_name)
+        logger.error(f"Error adding MCP server '{sanitized_server_name}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/mcp/remove-server")
+async def remove_mcp_server(
+    action: MCPServerAction,
+    admin_user: str = Depends(require_admin),  # noqa: ARG001 (enforces auth)
+):
+    """Remove an MCP server from the active configuration."""
+    try:
+        server_name = action.server_name
+        
+        # Load current active configuration
+        mcp_config_path = get_admin_config_path("mcp.json")
+        
+        if not mcp_config_path.exists():
+            raise HTTPException(
+                status_code=404, 
+                detail="MCP configuration file not found"
+            )
+        
+        with mcp_config_path.open("r", encoding="utf-8") as f:
+            active_config = json.load(f)
+        
+        # Check if server exists in active configuration
+        if server_name not in active_config:
+            return {
+                "message": f"Server '{server_name}' is not currently active",
+                "server_name": server_name,
+                "not_active": True
+            }
+        
+        # Remove the server from active configuration
+        removed_config = active_config.pop(server_name)
+        
+        # Save the updated configuration
+        with mcp_config_path.open("w", encoding="utf-8") as f:
+            json.dump(active_config, f, indent=2)
+
+        sanitized_admin_user = sanitize_for_logging(admin_user)
+        sanitized_server_name = sanitize_for_logging(server_name)
+        logger.info(f"Admin {sanitized_admin_user} removed MCP server '{sanitized_server_name}' from active configuration")
+
+        # Trigger MCP reload to apply changes
+        try:
+            mcp_manager = app_factory.get_mcp_manager()
+            if mcp_manager:
+                await mcp_manager.reload_servers()
+        except Exception as reload_error:
+            sanitized_server_name = sanitize_for_logging(server_name)
+            logger.warning(f"Failed to reload MCP servers after removing '{sanitized_server_name}': {reload_error}")
+        
+        return {
+            "message": f"Server '{server_name}' removed successfully",
+            "server_name": server_name,
+            "removed_config": removed_config
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        sanitized_server_name = sanitize_for_logging(action.server_name)
+        logger.error(f"Error removing MCP server '{sanitized_server_name}': {e}")
         raise HTTPException(status_code=500, detail=str(e))

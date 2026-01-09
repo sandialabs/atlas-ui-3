@@ -1,0 +1,11 @@
+name: "atlas-ui-3 CodeQL config"
+
+queries:
+  # Use the standard GitHub query packs for Python and JavaScript
+  - uses: github/codeql/python-queries@latest
+  - uses: github/codeql/javascript-queries@latest
+
+query-filters:
+  # Suppress "statement has no effect" findings for Python, e.g. ellipsis in Protocols
+  - exclude:
+      id: py/unnecessary-statement

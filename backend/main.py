@@ -27,8 +27,9 @@ from domain.errors import (
 from core.middleware import AuthMiddleware
 from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
+from core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from core.otel_config import setup_opentelemetry
-from core.utils import sanitize_for_logging
+from core.utils import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from core.auth import get_user_from_header
 
 # Import from infrastructure
@@ -66,9 +67,9 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
         elif mtype == "canvas_content":
             content = message.get("content")
             clen = len(content) if isinstance(content, str) else "obj"
-            logger.info("WS SEND: canvas_content length=%s", clen)
+            logger.debug("WS SEND: canvas_content length=%s", clen)
         else:
-            logger.info("WS SEND: %s", mtype)
+            logger.debug("WS SEND: %s", mtype)
     except Exception:
         # Non-fatal logging error; continue to send
         pass
@@ -104,6 +105,12 @@ async def lifespan(app: FastAPI):
         logger.info("Step 3 complete: Prompt discovery finished")
         
         logger.info("MCP tools manager initialization complete")
+        
+        # Start auto-reconnect background task if enabled
+        logger.info("Step 4: Starting MCP auto-reconnect (if enabled)...")
+        await mcp_manager.start_auto_reconnect()
+        logger.info("Step 4 complete: Auto-reconnect task started (if enabled)")
+        
     except Exception as e:
         logger.error(f"Error during MCP initialization: {e}", exc_info=True)
         # Continue startup even if MCP fails
@@ -112,6 +119,8 @@ async def lifespan(app: FastAPI):
     yield
     
     logger.info("Shutting down Chat UI Backend")
+    # Stop auto-reconnect task
+    await mcp_manager.stop_auto_reconnect()
     # Cleanup MCP clients
     await mcp_manager.cleanup()
 
@@ -132,6 +141,12 @@ RateLimit first to cheaply throttle abusive traffic before heavier logic.
 """
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
+# Domain whitelist check (if enabled) - add before Auth so it runs after
+if config.app_settings.feature_domain_whitelist_enabled:
+    app.add_middleware(
+        DomainWhitelistMiddleware,
+        auth_redirect_url=config.app_settings.auth_redirect_url
+    )
 app.add_middleware(
     AuthMiddleware, 
     debug_mode=config.app_settings.debug_mode,
@@ -190,6 +205,12 @@ if static_dir.exists():
     async def logo_png():
         path = static_dir / "logo.png"
         return FileResponse(str(path))
+
+    @app.get("/sandia-powered-by-atlas.png")
+    async def logo2_png():
+        path = static_dir / "sandia-powered-by-atlas.png"
+        return FileResponse(str(path))
+
 
 # WebSocket endpoint for chat
 @app.websocket("/ws")
@@ -287,7 +308,7 @@ async def websocket_endpoint(websocket: WebSocket):
             message_type = data.get("type")
 
             # Debug: Log ALL incoming messages
-            logger.info(
+            logger.debug(
                 "WS RECEIVED message_type=[%s], data keys=%s",
                 sanitize_for_logging(message_type),
                 [f"[{sanitize_for_logging(key)}]" for key in data.keys()]
@@ -389,7 +410,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif message_type == "tool_approval_response":
                 # Handle tool approval response
-                logger.info(f"Received tool approval response: {sanitize_for_logging(str(data))}")
                 from application.chat.approval_manager import get_approval_manager
                 approval_manager = get_approval_manager()
                 
@@ -397,6 +417,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 approved = data.get("approved", False)
                 arguments = data.get("arguments")
                 reason = data.get("reason")
+
+                # SECURITY: Never log tool arguments at INFO level (they may include sensitive user data).
+                # Log a conservative summary instead.
+                logger.info(
+                    "Received tool approval response: %s",
+                    summarize_tool_approval_response_for_logging(data),
+                )
 
                 logger.info(f"Processing approval: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={approved}")
                 
@@ -409,6 +436,29 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
+
+            elif message_type == "elicitation_response":
+                # Handle elicitation response
+                from application.chat.elicitation_manager import get_elicitation_manager
+                elicitation_manager = get_elicitation_manager()
+                
+                elicitation_id = data.get("elicitation_id")
+                action = data.get("action", "cancel")
+                response_data = data.get("data")
+                
+                logger.info(
+                    f"Received elicitation response: id={sanitize_for_logging(elicitation_id)}, "
+                    f"action={action}"
+                )
+                
+                result = elicitation_manager.handle_elicitation_response(
+                    elicitation_id=elicitation_id,
+                    action=action,
+                    data=response_data
+                )
+                
+                logger.info(f"Elicitation response handled: result={sanitize_for_logging(result)}")
+                # No response needed - the elicitation will unblock the waiting tool execution
 
             else:
                 logger.warning(f"Unknown message type: {sanitize_for_logging(message_type)}")
@@ -424,4 +474,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import os
+    
+    # Use environment variable for host binding, default to localhost for security
+    # Set ATLAS_HOST=0.0.0.0 in production environments where needed
+    host = os.getenv("ATLAS_HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", 8000))
+    
+    uvicorn.run(app, host=host, port=port)

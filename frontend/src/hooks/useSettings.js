@@ -13,15 +13,20 @@ export function useSettings() {
 
   // Load settings from localStorage on mount
   useEffect(() => {
-    const savedSettings = localStorage.getItem('chatui-settings')
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings)
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed })
-      } catch (error) {
-        console.error('Failed to parse saved settings:', error)
-        setSettings(DEFAULT_SETTINGS)
+    try {
+      const savedSettings = localStorage.getItem('chatui-settings')
+      if (savedSettings) {
+        try {
+          const parsed = JSON.parse(savedSettings)
+          setSettings({ ...DEFAULT_SETTINGS, ...parsed })
+        } catch (error) {
+          console.error('Failed to parse saved settings:', error)
+          setSettings(DEFAULT_SETTINGS)
+        }
       }
+    } catch (error) {
+      console.error('Failed to access localStorage:', error)
+      setSettings(DEFAULT_SETTINGS)
     }
     setIsLoaded(true)
   }, [])
@@ -30,14 +35,22 @@ export function useSettings() {
   const updateSettings = (newSettings) => {
     const updatedSettings = { ...settings, ...newSettings }
     setSettings(updatedSettings)
-    localStorage.setItem('chatui-settings', JSON.stringify(updatedSettings))
+    try {
+      localStorage.setItem('chatui-settings', JSON.stringify(updatedSettings))
+    } catch (error) {
+      console.error('Failed to save settings to localStorage:', error)
+    }
     return updatedSettings
   }
 
   // Function to reset settings to defaults
   const resetSettings = () => {
     setSettings(DEFAULT_SETTINGS)
-    localStorage.setItem('chatui-settings', JSON.stringify(DEFAULT_SETTINGS))
+    try {
+      localStorage.setItem('chatui-settings', JSON.stringify(DEFAULT_SETTINGS))
+    } catch (error) {
+      console.error('Failed to save default settings to localStorage:', error)
+    }
     return DEFAULT_SETTINGS
   }
 

@@ -1,5 +1,4 @@
 # main.py
-import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, Body, Path
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional

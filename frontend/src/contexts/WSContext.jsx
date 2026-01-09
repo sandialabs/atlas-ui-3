@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 
 const WSContext = createContext()
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useWS = () => {
   const context = useContext(WSContext)
   if (!context) {
@@ -72,12 +73,12 @@ export const WSProvider = ({ children }) => {
         // Don't attempt to reconnect in demo mode to avoid spam
       }
 
-      wsRef.current.onerror = (error) => {
+      wsRef.current.onerror = () => {
         console.log('WebSocket connection failed - running in demo mode')
         setIsConnected(false)
         setConnectionStatus('Demo Mode')
       }
-    } catch (error) {
+    } catch {
       console.log('WebSocket not available - running in demo mode')
       setIsConnected(false)
       setConnectionStatus('Demo Mode')
@@ -125,7 +126,7 @@ export const WSProvider = ({ children }) => {
             console.log('Backend is alive but WebSocket is disconnected, attempting reconnection...')
             reconnectWebSocket()
           }
-        } catch (error) {
+        } catch {
           // Backend is down, don't attempt reconnection
           console.log('Backend health check failed, not attempting WebSocket reconnection')
         }
@@ -138,6 +139,7 @@ export const WSProvider = ({ children }) => {
     return () => {
       clearInterval(healthCheckInterval)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const reconnectWebSocket = () => {

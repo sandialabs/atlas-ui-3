@@ -17,10 +17,6 @@ echo "Frontend directory: $FRONTEND_DIR"
 echo "Backend directory: $BACKEND_DIR"
 echo "E2E test directory: $E2E_DIR"
 
-# Use minimal MCP config for faster startup (same as backend tests)
-export MCP_CONFIG_FILE="mcp-test.json"
-echo "Using minimal MCP config: $MCP_CONFIG_FILE"
-
 # Handle frontend build based on environment
 cd "$FRONTEND_DIR"
 
@@ -53,13 +49,24 @@ else
 
     echo "Building frontend..."
     # Set VITE_APP_NAME for build (required for index.html template replacement)
-    export VITE_APP_NAME="Chat UI"
+    # export VITE_APP_NAME="Chat UI"
+    export VITE_APP_NAME="ATLAS-3"
+    export VITE_FEATURE_POWERED_BY_ATLAS="false"
     npx vite build
 fi
 
 # Start backend with startup validation
 echo "Starting backend server..."
 cd "$BACKEND_DIR"
+
+# Ensure Python virtual environment is activated so uvicorn is available
+if [ -d "$PROJECT_ROOT/.venv" ]; then
+    echo "Activating Python virtual environment at $PROJECT_ROOT/.venv"
+    # shellcheck disable=SC1090
+    source "$PROJECT_ROOT/.venv/bin/activate"
+else
+    echo "WARNING: .venv directory not found at $PROJECT_ROOT/.venv; proceeding without virtualenv"
+fi
 
 # Check if port 8000 is already in use
 if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
@@ -90,7 +97,12 @@ MAX_RETRIES=15
 RETRY_INTERVAL=2
 SUCCESS=false
 for i in $(seq 1 $MAX_RETRIES); do
-    if curl --silent --fail http://127.0.0.1:8000/api/config >/dev/null 2>&1; then
+    # /api/config is protected by AuthMiddleware in production mode.
+    # Use the configured test user header so readiness works in both
+    # DEBUG_MODE=true and DEBUG_MODE=false environments.
+    if curl --silent --fail \
+        -H "X-User-Email: test@test.com" \
+        http://127.0.0.1:8000/api/config >/dev/null 2>&1; then
         echo "Backend is up (after $i attempt(s))"
         SUCCESS=true
         break

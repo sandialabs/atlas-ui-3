@@ -7,6 +7,7 @@ This document explains how to configure the application name that appears in the
 The app name can be configured in two places:
 - **Frontend (Browser Title)**: Set at build time using `VITE_APP_NAME`
 - **Backend (API Response)**: Set at runtime using `APP_NAME`
+ - **Optional Powered-By Badge**: Controlled via `VITE_FEATURE_POWERED_BY_ATLAS`
 
 ## Frontend Configuration (Browser Title)
 
@@ -24,6 +25,14 @@ VITE_APP_NAME=My Custom Chat App
 cd frontend
 npm run build
 ```
+
+You can also control whether the "Powered By Sandia ATLAS" badge appears on the welcome screen:
+
+```bash
+VITE_FEATURE_POWERED_BY_ATLAS=true  # show powered-by badge
+```
+
+Other deployments can set this flag to `false` (or omit it) to hide the badge while still customizing the primary logo and app name.
 
 ### Docker Builds
 

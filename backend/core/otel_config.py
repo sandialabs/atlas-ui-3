@@ -143,6 +143,18 @@ class OpenTelemetryConfig:
         root.addHandler(file_handler)
         root.setLevel(self.log_level)
 
+        # Reduce noise from third-party libraries at INFO.
+        # We still want their warnings/errors, and their debug output remains available
+        # when LOG_LEVEL=DEBUG.
+        if self.log_level > logging.DEBUG:
+            for noisy in (
+                "httpx",
+                "httpcore",
+                "LiteLLM",
+                "litellm",
+            ):
+                logging.getLogger(noisy).setLevel(logging.WARNING)
+
         if self.is_development:
             console = logging.StreamHandler()
             console.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))

@@ -6,7 +6,7 @@ python-multipart
 pydantic
 pyyaml
 python-dotenv
-fastmcp>=2.3.5
+fastmcp>=2.10.0
 requests
 PyJWT
 httpx

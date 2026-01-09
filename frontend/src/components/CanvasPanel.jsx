@@ -378,7 +378,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
     // Fallback to legacy canvas content
     if (canvasContent) {
       const content = processCanvasContent(canvasContent)
-      
+
       try {
         const markdownHtml = marked.parse(content)
         const sanitizedHtml = DOMPurify.sanitize(markdownHtml, IFRAME_SANITIZE_CONFIG)

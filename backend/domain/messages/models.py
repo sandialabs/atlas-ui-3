@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 from uuid import UUID, uuid4
 
 
@@ -121,3 +121,40 @@ class ConversationHistory:
     def to_dict(self) -> List[Dict[str, Any]]:
         """Convert to dictionary list."""
         return [msg.to_dict() for msg in self.messages]
+
+
+@dataclass
+class ElicitationRequest:
+    """Domain model for an elicitation request from MCP server."""
+    elicitation_id: str
+    tool_call_id: str
+    tool_name: str
+    message: str
+    response_schema: Dict[str, Any]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for WebSocket transmission."""
+        return {
+            "type": "elicitation_request",
+            "elicitation_id": self.elicitation_id,
+            "tool_call_id": self.tool_call_id,
+            "tool_name": self.tool_name,
+            "message": self.message,
+            "response_schema": self.response_schema
+        }
+
+
+@dataclass
+class ElicitationResponse:
+    """Domain model for an elicitation response from user."""
+    elicitation_id: str
+    action: Literal["accept", "decline", "cancel"]
+    data: Optional[Dict[str, Any]] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "elicitation_id": self.elicitation_id,
+            "action": self.action,
+            "data": self.data
+        }
