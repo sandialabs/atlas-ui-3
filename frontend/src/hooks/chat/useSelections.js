@@ -54,6 +54,15 @@ export function useSelections() {
     setPromptsRaw([promptKey])
   }, [setPromptsRaw])
 
+  const addPrompts = useCallback(keys => {
+    if (!Array.isArray(keys) || keys.length === 0) return
+    setPromptsRaw(prev => {
+      const next = new Set(prev)
+      keys.forEach(k => next.add(k))
+      return toArray(next)
+    })
+  }, [setPromptsRaw])
+
   const removePrompts = useCallback(keys => {
     if (!Array.isArray(keys) || keys.length === 0) return
     setPromptsRaw(prev => {
@@ -88,6 +97,7 @@ export function useSelections() {
     toggleDataSource,
   addTools,
   removeTools,
+  addPrompts,
   setSinglePrompt,
   removePrompts,
   makePromptActive,

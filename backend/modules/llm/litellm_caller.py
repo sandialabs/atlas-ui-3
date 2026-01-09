@@ -27,7 +27,14 @@ litellm.drop_params = True  # Drop unsupported params instead of erroring
 
 
 class LiteLLMCaller:
-    """Clean interface for all LLM calling patterns using LiteLLM."""
+    """Clean interface for all LLM calling patterns using LiteLLM.
+
+    Note: this class may set provider-specific LLM API key environment
+    variables (for example ``OPENAI_API_KEY``) to maintain compatibility
+    with LiteLLM's internal provider detection. These mutations are
+    best-effort only and are not intended to provide strong isolation
+    guarantees in multi-tenant or highly concurrent environments.
+    """
     
     def __init__(self, llm_config=None, debug_mode: bool = False):
         """Initialize with optional config dependency injection."""
@@ -85,20 +92,40 @@ class LiteLLMCaller:
         except ValueError as e:
             logger.error(f"Failed to resolve API key for model {model_name}: {e}")
             raise
-        
+
         if api_key:
+            # Always pass api_key to LiteLLM for all providers
+            kwargs["api_key"] = api_key
+
+            # Additionally set provider-specific env vars for LiteLLM's internal logic
+            def _set_env_var_if_needed(env_key: str, value: str) -> None:
+                existing = os.environ.get(env_key)
+                if existing is None:
+                    os.environ[env_key] = value
+                elif existing != value:
+                    logger.warning(
+                        "Overwriting existing environment variable %s for model %s", 
+                        env_key,
+                        model_name,
+                    )
+                    os.environ[env_key] = value
+
             if "openrouter" in model_config.model_url:
-                kwargs["api_key"] = api_key
-                # LiteLLM will automatically set the correct env var
-                os.environ["OPENROUTER_API_KEY"] = api_key
+                _set_env_var_if_needed("OPENROUTER_API_KEY", api_key)
             elif "openai" in model_config.model_url:
-                os.environ["OPENAI_API_KEY"] = api_key
+                _set_env_var_if_needed("OPENAI_API_KEY", api_key)
             elif "anthropic" in model_config.model_url:
-                os.environ["ANTHROPIC_API_KEY"] = api_key
+                _set_env_var_if_needed("ANTHROPIC_API_KEY", api_key)
             elif "google" in model_config.model_url:
-                os.environ["GOOGLE_API_KEY"] = api_key
+                _set_env_var_if_needed("GOOGLE_API_KEY", api_key)
             elif "cerebras" in model_config.model_url:
-                os.environ["CEREBRAS_API_KEY"] = api_key
+                _set_env_var_if_needed("CEREBRAS_API_KEY", api_key)
+            else:
+                # Custom endpoint - set OPENAI_API_KEY as fallback for
+                # OpenAI-compatible endpoints. This is a heuristic and
+                # only updates the env var if it is unset or already
+                # matches the same value.
+                _set_env_var_if_needed("OPENAI_API_KEY", api_key)
         
         # Set custom API base for non-standard endpoints
         if hasattr(model_config, 'model_url') and model_config.model_url:
@@ -135,7 +162,11 @@ class LiteLLMCaller:
             )
             
             content = response.choices[0].message.content or ""
-            logger.info(f"LLM response preview: '{content[:200]}{'...' if len(content) > 200 else ''}'")
+            # Log response preview only at DEBUG level to avoid logging sensitive data
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"LLM response preview: '{content[:200]}{'...' if len(content) > 200 else ''}'")
+            else:
+                logger.info(f"LLM response length: {len(content)} chars")
             return content
             
         except Exception as exc:

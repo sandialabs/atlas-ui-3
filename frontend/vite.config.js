@@ -13,6 +13,24 @@ crypto.createHash = function (algorithm, options) {
   return originalCreateHash.call(this, algorithm, options)
 }
 
+// Log key VITE environment variables when the config is evaluated
+// so that `npm run build` and other commands clearly show which
+// branding-related settings are in effect.
+const logViteEnv = () => {
+  const varsToLog = {
+    VITE_APP_NAME: process.env.VITE_APP_NAME,
+    VITE_FEATURE_POWERED_BY_ATLAS: process.env.VITE_FEATURE_POWERED_BY_ATLAS,
+  }
+
+  console.log('\n[atlas-ui-3] Vite build-time environment:')
+  for (const [key, value] of Object.entries(varsToLog)) {
+    console.log(`  ${key}=${value ?? '<undefined>'}`)
+  }
+  console.log('')
+}
+
+logViteEnv()
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -21,14 +39,29 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
-        configure: (proxy, options) => {
-          proxy.on('error', (err, req, res) => {
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
             console.log('proxy error', err);
           });
-          proxy.on('proxyReq', (proxyReq, req, res) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
             console.log('Sending Request to the Target:', req.method, req.url);
           });
-          proxy.on('proxyRes', (proxyRes, req, res) => {
+          proxy.on('proxyRes', (proxyRes, req) => {
+            console.log('Received Response from the Target:', proxyRes.statusCode, req.url);
+          });
+        }
+      },
+      '/admin': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            console.log('proxy error', err);
+          });
+          proxy.on('proxyReq', (proxyReq, req) => {
+            console.log('Sending Request to the Target:', req.method, req.url);
+          });
+          proxy.on('proxyRes', (proxyRes, req) => {
             console.log('Received Response from the Target:', proxyRes.statusCode, req.url);
           });
         }

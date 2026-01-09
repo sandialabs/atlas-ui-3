@@ -55,8 +55,16 @@ python main.py  # NEVER use uvicorn --reload (causes problems)
 - **Frontend Development**: **NEVER use `npm run dev`**, it has WebSocket connection problems. Always use `npm run build`.
 - **Backend Development**: **NEVER use `uvicorn --reload`**, it causes problems.
 - **File Naming**: Do not use generic names like `utils.py` or `helpers.py`. Use descriptive names that reflect the file's purpose.
-- **No Emojis**: No emojis should ever be added in this repo.
+- **No Emojis**: No emojis should ever be added anywhere in this codebase (code, comments, docs, commit messages). If you find one, remove it.
 - **Linting**: Run `ruff check backend/` for Python and `npm run lint` for the frontend before committing.
+- **Documentation Requirements**: Every PR or feature implementation MUST include updates to relevant documentation in the `/docs` folder. This includes:
+  - Architecture changes: Update architecture docs
+  - New features: Add feature documentation with usage examples
+  - API changes: Update API documentation
+  - Configuration changes: Update configuration guides
+  - Bug fixes: Update troubleshooting docs if applicable
+- **Changelog Maintenance**: For every PR, add an entry to CHANGELOG.md in the root directory. Each entry should be 1-2 lines describing the core features or changes. Format: "### PR #<number> - YYYY-MM-DD" followed by a bullet point list of changes.
+- **PR Validation**: Before creating or accepting a PR, run `cd frontend && npm run lint` to ensure no frontend syntax errors or style issues.
 
 When testing or developing MCP-related features, example configurations can be found in config/mcp-example-configs/ with individual mcp-{servername}.json files for testing individual servers.
 

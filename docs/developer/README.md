@@ -11,3 +11,6 @@ This guide provides technical details for developers contributing to the Atlas U
 ### Frontend Development
 - [Error Handling Improvements](error_handling_improvements.md) - LLM error classification and surfacing
 - [Error Flow Diagram](error_flow_diagram.md) - End-to-end error flow diagram
+
+### Documentation
+- [Documentation Bundling](documentation-bundling.md) - Automated documentation bundling for CI/CD

@@ -52,7 +52,13 @@ class ToolsModeRunner:
         self.prompt_provider = prompt_provider
         self.artifact_processor = artifact_processor
         self.config_manager = config_manager
-    
+
+        # Verify event_publisher has send_json for elicitation support
+        if hasattr(event_publisher, 'send_json'):
+            logger.debug(f"ToolsModeRunner initialized with event_publisher that has send_json: {type(event_publisher)}")
+        else:
+            logger.warning(f"ToolsModeRunner initialized with event_publisher WITHOUT send_json: {type(event_publisher)}")
+
     async def run(
         self,
         session: Session,
@@ -113,6 +119,16 @@ class ToolsModeRunner:
 
         # Execute tool workflow
         session_context = build_session_context(session)
+
+        # Ensure update_callback is never None (critical for elicitation)
+        effective_callback = update_callback
+        if effective_callback is None:
+            effective_callback = self._get_send_json()
+            logger.debug("Tools mode: update_callback was None, using event_publisher.send_json fallback")
+
+        if effective_callback is None:
+            logger.warning("Tools mode: No update callback available - elicitation will not work!")
+
         final_response, tool_results = await tool_utils.execute_tools_workflow(
             llm_response=llm_response,
             messages=messages,
@@ -121,13 +137,13 @@ class ToolsModeRunner:
             tool_manager=self.tool_manager,
             llm_caller=self.llm,
             prompt_provider=self.prompt_provider,
-            update_callback=update_callback or self._get_send_json(),
+            update_callback=effective_callback,
             config_manager=self.config_manager,
         )
 
         # Process artifacts if handler provided
         if self.artifact_processor:
-            await self.artifact_processor(session, tool_results, update_callback or self._get_send_json())
+            await self.artifact_processor(session, tool_results, effective_callback)
 
         # Add final assistant message to history
         assistant_message = Message(
@@ -152,5 +168,8 @@ class ToolsModeRunner:
     def _get_send_json(self) -> Optional[UpdateCallback]:
         """Get send_json callback from event publisher if available."""
         if hasattr(self.event_publisher, 'send_json'):
-            return self.event_publisher.send_json
+            callback = self.event_publisher.send_json
+            logger.debug(f"_get_send_json: event_publisher.send_json = {callback is not None}")
+            return callback
+        logger.warning(f"_get_send_json: event_publisher does not have send_json method. Type: {type(self.event_publisher)}")
         return None

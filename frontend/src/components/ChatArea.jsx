@@ -33,7 +33,6 @@ const ChatArea = () => {
     tools,
     selectedTools,
     toggleTool,
-    toolChoiceRequired,
     setToolChoiceRequired,
   sessionFiles,
   agentModeEnabled,
@@ -509,10 +508,29 @@ const ChatArea = () => {
   const canSend = inputValue.trim().length > 0 && currentModel && isConnected
   const [agentAnswer, setAgentAnswer] = useState('')
 
+  const showPoweredByAtlas =
+    import.meta.env.VITE_FEATURE_POWERED_BY_ATLAS === 'true'
+
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden relative">
       {/* Welcome Screen */}
       {isWelcomeVisible && <WelcomeScreen />}
+      
+      {/* Powered by ATLAS logo - only shown on welcome screen */}
+      {isWelcomeVisible && showPoweredByAtlas && (
+        <div className="absolute bottom-32 left-0 right-0 sm:bottom-36 md:bottom-40 z-10 px-4">
+          <div className="max-w-4xl mx-auto flex justify-end">
+            <img
+              src="/sandia-powered-by-atlas.png"
+              alt="Powered By SNL ATLAS Logo"
+              className="w-36 sm:w-44 md:w-52 lg:w-60 object-contain"
+              onError={(e) => {
+                e.target.style.display = 'none'
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <main

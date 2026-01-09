@@ -119,3 +119,22 @@ class WebSocketEventPublisher:
         """Send raw JSON message."""
         if self.connection:
             await self.connection.send_json(data)
+
+    async def publish_elicitation_request(
+        self,
+        elicitation_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        message: str,
+        response_schema: Dict[str, Any]
+    ) -> None:
+        """Publish an elicitation request to the user."""
+        if self.connection:
+            await self.connection.send_json({
+                "type": "elicitation_request",
+                "elicitation_id": elicitation_id,
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "message": message,
+                "response_schema": response_schema
+            })

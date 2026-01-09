@@ -17,7 +17,7 @@ jobs:
       contents: read
       packages: write
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     
     - name: Log in to Container Registry
       uses: docker/login-action@v3
@@ -39,21 +39,35 @@ jobs:
           type=sha,enable=${{ github.event_name == 'pull_request' }},prefix=pr-
           type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
     
-    - name: Build test Docker image
+    - name: Build test Docker image (debug mode)
       uses: docker/build-push-action@v6
       with:
         context: .
         file: ./Dockerfile-test
         load: true
-        tags: test-image:latest
+        tags: test-image-debug:latest
         labels: ${{ steps.meta.outputs.labels }}
     
-    - name: Run tests in container
+    - name: Run tests in debug mode
       run: |
-        echo "Running tests in test container: test-image:latest"
-        
-        # Run the master test script in the test container
-        docker run --rm --workdir /app test-image:latest bash /app/test/run_tests.sh all
+        echo "Running tests in debug mode (DEBUG_MODE=true)"
+        docker run --rm --workdir /app test-image-debug:latest bash /app/test/run_tests.sh all
+    
+    - name: Build test Docker image (production mode)
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ./Dockerfile-test
+        build-args: |
+          DEBUG_MODE=false
+        load: true
+        tags: test-image-prod:latest
+        labels: ${{ steps.meta.outputs.labels }}
+    
+    - name: Run tests in production mode
+      run: |
+        echo "Running tests in production mode (DEBUG_MODE=false)"
+        docker run --rm --workdir /app test-image-prod:latest bash /app/test/run_tests.sh all
 
     - name: Build production Docker image
       uses: docker/build-push-action@v6

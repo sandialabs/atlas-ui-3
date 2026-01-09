@@ -58,6 +58,14 @@ The system can connect to different types of MCP servers:
 *   **HTTP (`http`)**: Servers that expose a standard HTTP endpoint.
 *   **Server-Sent Events (`sse`)**: Servers that stream responses over an HTTP connection.
 
+## Hot Reload Note
+
+After editing `config/overrides/mcp.json`, you do **not** need to restart the backend. Admins can:
+
+- Call `POST /admin/mcp/reload` to reload `mcp.json`, reinitialize MCP clients, and rediscover tools/prompts.
+- Use `GET /admin/mcp/status` to see which servers are connected or failing.
+- Use `POST /admin/mcp/reconnect` (plus the auto-reconnect feature flag) to retry failed servers with exponential backoff.
+
 ## MCP Server Authentication
 
 For MCP servers that require authentication, you can configure bearer token authentication using the `auth_token` field.

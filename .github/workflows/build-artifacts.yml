@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Set up Node.js
       uses: actions/setup-node@v6
@@ -77,9 +77,20 @@ jobs:
         zip -r ../atlas-ui-3-built-${{ github.sha }}.zip .
         cd ..
 
+    - name: Bundle documentation
+      run: |
+        bash scripts/bundle-docs.sh .
+
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: atlas-ui-3-built-${{ github.sha }}
         path: atlas-ui-3-built-${{ github.sha }}.zip
+        retention-days: 30
+
+    - name: Upload documentation bundle
+      uses: actions/upload-artifact@v6
+      with:
+        name: atlas-ui-3-docs
+        path: atlas-ui-3-docs.zip
         retention-days: 30

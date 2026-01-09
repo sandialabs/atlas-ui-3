@@ -33,8 +33,11 @@ RUN npm ci --include=dev
 # Build frontend
 COPY frontend/ .
 # Set default app name for build (can be overridden via build arg)
-ARG VITE_APP_NAME="Chat UI"
+ARG VITE_APP_NAME="ATLAS"
 ENV VITE_APP_NAME=${VITE_APP_NAME}
+# Set default whether to display powered by atlas logo on welcome screen (can be overridden via build arg)
+ARG VITE_FEATURE_POWERED_BY_ATLAS="false"
+ENV VITE_FEATURE_POWERED_BY_ATLAS=${VITE_FEATURE_POWERED_BY_ATLAS}
 # build and delete the node_modules
 RUN  npm run build && rm -rf node_modules
 
@@ -69,7 +72,8 @@ RUN echo "appuser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
 # Set up uv for appuser
 RUN mkdir -p /home/appuser/.local/bin && \
-    if [ -f "/root/.local/bin/uv" ]; then cp /root/.local/bin/uv /home/appuser/.local/bin/; fi && \
+    cp /root/.local/bin/uv /home/appuser/.local/bin/uv && \
+    cp /root/.local/bin/uvx /home/appuser/.local/bin/uvx && \
     mkdir -p /home/appuser/.cache && \
     chown -R appuser:appuser /home/appuser/.local /home/appuser/.cache
 
@@ -82,9 +86,9 @@ USER appuser
 # Set up Python environment as appuser
 ENV PATH="/home/appuser/.local/bin:$PATH"
 RUN /home/appuser/.local/bin/uv python install 3.12
-RUN /home/appuser/.local/bin/uv venv venv --python 3.12
-ENV VIRTUAL_ENV=/app/venv
-ENV PATH="/app/venv/bin:$PATH"
+RUN /home/appuser/.local/bin/uv venv .venv --python 3.12
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Install Python dependencies using uv
 RUN /home/appuser/.local/bin/uv pip install -r requirements.txt
@@ -102,4 +106,8 @@ ENV PYTHONPATH=/app \
 
 # Start the application
 WORKDIR /app/backend
-CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use environment variables for host/port configuration
+# Default to 0.0.0.0 for container environments, can be overridden
+ENV ATLAS_HOST=0.0.0.0
+ENV PORT=8000
+CMD ["python3", "main.py"]

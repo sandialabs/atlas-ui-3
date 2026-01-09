@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { 
-  ArrowLeft, MessageSquare, Settings, Database, Store, Key, Zap, Code, 
+  ArrowLeft, MessageSquare, Settings, Database, Store, Zap, Code, 
   FileText, AlertTriangle, Bot 
 } from 'lucide-react'
 

@@ -47,7 +47,7 @@ async def demo_custom_prompting():
     mock_session.mcp_manager = Mock()
     
     # Simulate the prompts server being available
-    mock_session.mcp_manager.get_available_prompts_for_servers.return_value = {
+    available_prompts = {
         "prompts_financial_tech_wizard": {
             "server": "prompts",
             "name": "financial_tech_wizard", 
@@ -55,6 +55,7 @@ async def demo_custom_prompting():
             "arguments": {}
         }
     }
+    mock_session.mcp_manager.get_available_prompts_for_servers.return_value = available_prompts
     
     # Mock the prompt result with actual content from our prompts server
     mock_prompt_message = Mock()

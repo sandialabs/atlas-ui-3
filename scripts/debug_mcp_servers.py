@@ -8,7 +8,6 @@ import asyncio
 import json
 import logging
 import sys
-import os
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -17,7 +16,6 @@ backend_path = Path(__file__).parent.parent / "backend"
 sys.path.insert(0, str(backend_path))
 
 from modules.mcp_tools.client import MCPToolManager
-from modules.config.manager import config_manager
 
 # Setup logging for debugging
 logging.basicConfig(level=logging.WARNING)  # Reduce noise

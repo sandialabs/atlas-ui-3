@@ -1,0 +1,52 @@
+# Generated or built files that should be excluded from CodeQL analysis
+**/node_modules/
+**/dist/
+**/build/
+**/.next/
+**/coverage/
+**/docs/build/
+**/*.min.js
+**/*.min.css
+**/frontend/playwright-report/
+**/test_e2e/playwright-report/
+**/logs/
+**/minio-data/
+**/data/minio/
+
+# Generated protobuf files
+**/*pb2.py
+**/*_pb2.py
+
+# Test coverage reports
+**/.coverage
+**/.nyc_output
+**/coverage.xml
+
+# Virtual environment directories
+**/venv/
+**/env/
+**/.venv/
+**/.env/
+
+# IDE files
+**/.vscode/
+**/.idea/
+
+# OS generated files
+**/.DS_Store
+**/Thumbs.db
+
+# Temporary and cache files
+**/*.tmp
+**/*.temp
+**/*.cache
+**/__pycache__/
+**/*.pyc
+**/*.pyd
+**/*.pyo
+
+# Mock and test files that may have intentionally problematic code
+mocks/*/main.py
+test/**/*.py
+**/*test*.py
+**/*mock*.py

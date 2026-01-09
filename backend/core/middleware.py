@@ -44,7 +44,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         
     async def dispatch(self, request: Request, call_next) -> Response:
         # Log request
-        logger.info(f"Request: {request.method} {request.url.path}")
+        logger.debug("Request: %s %s", request.method, request.url.path)
 
         # Skip auth for static files, health check, and configured auth endpoint
         if (request.url.path.startswith('/static') or
@@ -80,7 +80,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     # on authentication while route handlers handle resource-specific authorization.
                     user_email = claims.get('u')
                     if user_email:
-                        logger.info(f"Authenticated via capability token for user: {user_email}")
+                        logger.debug("Authenticated via capability token for user: %s", user_email)
                         request.state.user_email = user_email
                         return await call_next(request)
                     else:
