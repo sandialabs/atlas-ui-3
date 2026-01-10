@@ -16,6 +16,8 @@ The feedback system allows users to submit ratings and comments about their expe
 
 Users see a floating chat bubble icon in the bottom-right corner of the screen. Clicking it opens a feedback dialog where they can:
 
+![User Feedback Form](../readme_img/feedback-user-form.png)
+
 1. **Select a rating**: Positive (thumbs up), Neutral (dash), or Negative (thumbs down)
 2. **Add optional comments**: Up to 500 characters describing their experience
 3. **Submit**: The feedback is saved along with session metadata
@@ -32,6 +34,8 @@ Session metadata captured automatically includes:
 ### Viewing Feedback
 
 Administrators can access feedback through the Admin Panel by clicking "View Feedback" in the dashboard. The feedback view displays:
+
+![Admin Feedback Panel](../readme_img/feedback-panel-admin.png)
 
 - **Statistics Summary**: Total count, rating distribution (positive/neutral/negative), and average rating
 - **Feedback List**: Individual entries with timestamp, user, rating, and comments
