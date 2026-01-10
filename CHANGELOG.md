@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #202 - 2026-01-10
+### PR #203 - 2026-01-10
 - **Admin Panel**: Add User Feedback viewer card to admin dashboard with statistics display (positive/neutral/negative counts)
 - **Admin Panel**: Add feedback download functionality supporting CSV and JSON export formats
 - **Backend**: Add `/api/feedback/download` endpoint for exporting feedback data

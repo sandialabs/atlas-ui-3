@@ -112,6 +112,32 @@ Deletes a specific feedback entry by ID.
 }
 ```
 
+#### `GET /api/feedback/download`
+
+Downloads all feedback data as CSV or JSON file.
+
+**Query Parameters:**
+- `format` (string, default: "csv") - Download format, either "csv" or "json"
+
+**Response:**
+Returns a file download with the appropriate content type:
+- CSV format: `text/csv` with filename `feedback_export_{timestamp}.csv`
+- JSON format: `application/json` with filename `feedback_export_{timestamp}.json`
+
+CSV columns: `id`, `timestamp`, `user`, `rating`, `comment` (missing fields exported as empty strings)
+
+**Examples:**
+
+Download as CSV:
+```
+GET /api/feedback/download?format=csv
+```
+
+Download as JSON:
+```
+GET /api/feedback/download?format=json
+```
+
 #### `POST /api/feedback`
 
 Submits new feedback. This endpoint is available to all authenticated users (not admin-only).

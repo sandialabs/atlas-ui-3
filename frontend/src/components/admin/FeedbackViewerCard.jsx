@@ -13,9 +13,12 @@ const FeedbackViewerCard = ({ openModal, addNotification }) => {
       if (response.ok) {
         const data = await response.json()
         setStats(data)
+      } else {
+        addNotification('Failed to load feedback statistics: ' + response.statusText, 'error')
       }
     } catch (err) {
       console.error('Error loading feedback stats:', err)
+      addNotification('Error loading feedback statistics: ' + err.message, 'error')
     } finally {
       setLoading(false)
     }

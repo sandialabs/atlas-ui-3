@@ -7,6 +7,7 @@ Verifies that:
 - DELETE /api/feedback/{id} requires admin group membership
 """
 
+import csv
 import json
 import tempfile
 from pathlib import Path
@@ -199,3 +200,137 @@ class TestFeedbackDeletion:
         client = TestClient(app)
         resp = client.delete("/api/feedback/nonexistent", headers=ADMIN_HEADERS)
         assert resp.status_code == 404
+
+
+class TestFeedbackDownload:
+    """Test feedback download functionality."""
+
+    def test_download_feedback_requires_admin(self, mock_feedback_dir, mock_admin_check):
+        """GET /api/feedback/download returns 403 for non-admin users."""
+        client = TestClient(app)
+        resp = client.get("/api/feedback/download", headers=AUTH_HEADERS)
+        assert resp.status_code == 403
+
+    def test_download_feedback_csv_format(self, mock_feedback_dir, mock_admin_check):
+        """Admin users can download feedback as CSV."""
+        client = TestClient(app)
+
+        # Create some test feedback
+        client.post(
+            "/api/feedback",
+            json={"rating": 1, "comment": "Great service!", "session": {"model": "gpt-4"}},
+            headers=AUTH_HEADERS
+        )
+        client.post(
+            "/api/feedback",
+            json={"rating": -1, "comment": "Poor experience", "session": {"model": "gpt-3"}},
+            headers=AUTH_HEADERS
+        )
+
+        # Download as CSV
+        resp = client.get("/api/feedback/download?format=csv", headers=ADMIN_HEADERS)
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "text/csv; charset=utf-8"
+        assert "attachment; filename=" in resp.headers["content-disposition"]
+        assert "feedback_export_" in resp.headers["content-disposition"]
+
+        # Verify CSV content
+        csv_content = resp.text
+        lines = [line.strip() for line in csv_content.strip().split('\n') if line.strip()]
+        assert len(lines) >= 3  # Header + 2 data rows
+
+        # Check header
+        assert lines[0] == "id,timestamp,user,rating,comment"
+
+        # Check that feedback appears in CSV (order may vary)
+        found_positive = any("1" in line and "Great service!" in line for line in lines[1:])
+        found_negative = any("-1" in line and "Poor experience" in line for line in lines[1:])
+        assert found_positive, "Positive feedback not found in CSV"
+        assert found_negative, "Negative feedback not found in CSV"
+
+    def test_download_feedback_json_format(self, mock_feedback_dir, mock_admin_check):
+        """Admin users can download feedback as JSON."""
+        client = TestClient(app)
+
+        # Create test feedback
+        resp1 = client.post(
+            "/api/feedback",
+            json={"rating": 1, "comment": "JSON test", "session": {"model": "gpt-4"}},
+            headers=AUTH_HEADERS
+        )
+        feedback_id = resp1.json()["feedback_id"]
+
+        # Download as JSON
+        resp = client.get("/api/feedback/download?format=json", headers=ADMIN_HEADERS)
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/json"
+        assert "attachment; filename=" in resp.headers["content-disposition"]
+        assert "feedback_export_" in resp.headers["content-disposition"]
+
+        # Verify JSON content
+        json_data = resp.json()
+        assert isinstance(json_data, list)
+        assert len(json_data) == 1
+
+        feedback = json_data[0]
+        assert feedback["id"] == feedback_id
+        assert feedback["rating"] == 1
+        assert feedback["comment"] == "JSON test"
+        assert feedback["user"] == "test@test.com"
+        assert "timestamp" in feedback
+        assert "session_info" in feedback
+        assert "server_context" in feedback
+
+    def test_download_feedback_empty_csv(self, mock_feedback_dir, mock_admin_check):
+        """Downloading empty feedback as CSV returns header-only file."""
+        client = TestClient(app)
+
+        resp = client.get("/api/feedback/download?format=csv", headers=ADMIN_HEADERS)
+        assert resp.status_code == 200
+
+        csv_content = resp.text
+        lines = csv_content.strip().split('\n')
+        assert len(lines) == 1  # Only header row
+        assert lines[0] == "id,timestamp,user,rating,comment"
+
+    def test_download_feedback_empty_json(self, mock_feedback_dir, mock_admin_check):
+        """Downloading empty feedback as JSON returns empty array."""
+        client = TestClient(app)
+
+        resp = client.get("/api/feedback/download?format=json", headers=ADMIN_HEADERS)
+        assert resp.status_code == 200
+
+        json_data = resp.json()
+        assert json_data == []
+
+    def test_download_feedback_csv_sanitizes_fields(self, mock_feedback_dir, mock_admin_check):
+        """CSV download properly handles missing fields with defaults."""
+        client = TestClient(app)
+
+        # Clear any existing feedback files
+        for f in mock_feedback_dir.glob("feedback_*.json"):
+            f.unlink()
+
+        # Manually create feedback file with missing fields (using correct naming pattern)
+        import json
+        feedback_file = mock_feedback_dir / "feedback_manual_test123.json"
+        manual_feedback = {
+            "id": "test123",
+            "timestamp": "2026-01-10T12:00:00",
+            "user": "test@example.com"
+            # Missing rating, comment, session_info, server_context
+        }
+        with open(feedback_file, 'w') as f:
+            json.dump(manual_feedback, f)
+
+        resp = client.get("/api/feedback/download?format=csv", headers=ADMIN_HEADERS)
+        assert resp.status_code == 200
+
+        csv_content = resp.text
+        lines = csv_content.strip().split('\n')
+        assert len(lines) == 2  # Header + 1 data row
+
+        data_line = lines[1]
+        assert "test123" in data_line
+        assert "test@example.com" in data_line
+        # Missing fields should be empty strings

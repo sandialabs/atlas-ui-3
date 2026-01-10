@@ -333,18 +333,17 @@ async def download_feedback(
             media_type = "application/json"
         else:
             output = io.StringIO()
-            if all_feedback:
-                fieldnames = ["id", "timestamp", "user", "rating", "comment"]
-                writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
-                writer.writeheader()
-                for fb in all_feedback:
-                    writer.writerow({
-                        "id": fb.get("id", ""),
-                        "timestamp": fb.get("timestamp", ""),
-                        "user": fb.get("user", ""),
-                        "rating": fb.get("rating", ""),
-                        "comment": fb.get("comment", "")
-                    })
+            fieldnames = ["id", "timestamp", "user", "rating", "comment"]
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
+            for fb in all_feedback:
+                writer.writerow({
+                    "id": fb.get("id", ""),
+                    "timestamp": fb.get("timestamp", ""),
+                    "user": fb.get("user", ""),
+                    "rating": fb.get("rating", ""),
+                    "comment": fb.get("comment", "")
+                })
             content = output.getvalue()
             filename = f"feedback_export_{timestamp}.csv"
             media_type = "text/csv"
