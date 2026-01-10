@@ -12,6 +12,7 @@ import BannerMessagesCard from './admin/BannerMessagesCard' // Import the Banner
 import MCPConfigurationCard from './admin/MCPConfigurationCard' // Import the MCPConfigurationCard component
 import ConfigViewerCard from './admin/ConfigViewerCard' // Import the ConfigViewerCard component
 import MCPServerManager from './admin/MCPServerManager' // Import the MCPServerManager component
+import FeedbackViewerCard from './admin/FeedbackViewerCard' // Import the FeedbackViewerCard component
 
 const AdminDashboard = () => {
   const navigate = useNavigate()
@@ -354,6 +355,12 @@ const AdminDashboard = () => {
 
           {/* MCP Server Manager */}
           <MCPServerManager 
+            addNotification={addNotification} 
+          />
+
+          {/* User Feedback */}
+          <FeedbackViewerCard 
+            openModal={openModal} 
             addNotification={addNotification} 
           />
 
