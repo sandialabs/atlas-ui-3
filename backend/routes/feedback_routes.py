@@ -105,7 +105,16 @@ async def submit_feedback(
             json.dump(feedback_data, f, indent=2, ensure_ascii=False)
         
         rating_label = {1: "positive", 0: "neutral", -1: "negative"}.get(feedback.rating, "unknown")
-        logger.info(f"Feedback submitted: user={sanitize_for_logging(current_user)}, rating={rating_label}, id={feedback_id}, file={feedback_file}")
+        safe_current_user = sanitize_for_logging(current_user)
+        logger.info(
+            "Feedback submitted",
+            extra={
+                "user": safe_current_user,
+                "rating": rating_label,
+                "id": feedback_id,
+                "file": str(feedback_file)
+            }
+        )
         
         return {
             "message": "Feedback submitted successfully",
@@ -266,7 +275,13 @@ async def delete_feedback(
         
         # Delete the file
         feedback_file.unlink()
-        logger.info(f"Feedback {sanitize_for_logging(feedback_id)} deleted by {sanitize_for_logging(admin_user)}")
+        safe_feedback_id = sanitize_for_logging(feedback_id)
+        safe_admin_user = sanitize_for_logging(admin_user)
+        logger.info(
+            "Feedback deleted feedback_id=%s deleted_by=%s",
+            safe_feedback_id,
+            safe_admin_user,
+        )
         
         return {
             "message": "Feedback deleted successfully",
