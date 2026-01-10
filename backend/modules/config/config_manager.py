@@ -368,8 +368,8 @@ class AppSettings(BaseSettings):
     pi_threshold_medium: int = Field(default=50, validation_alias="PI_THRESHOLD_MEDIUM")
     pi_threshold_high: int = Field(default=80, validation_alias="PI_THRESHOLD_HIGH")
     
-    # Runtime directories
-    runtime_feedback_dir: str = Field(default="runtime/feedback", validation_alias="RUNTIME_FEEDBACK_DIR")
+    # Runtime directories (relative to project root, not backend/)
+    runtime_feedback_dir: str = Field(default="../runtime/feedback", validation_alias="RUNTIME_FEEDBACK_DIR")
     
     @model_validator(mode='after')
     def validate_aws_alb_config(self):

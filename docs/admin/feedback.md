@@ -141,8 +141,12 @@ Submits new feedback. This endpoint is available to all authenticated users (not
 Feedback files are stored in the directory specified by:
 
 ```
-RUNTIME_FEEDBACK_DIR=runtime/feedback
+RUNTIME_FEEDBACK_DIR=../runtime/feedback
 ```
+
+The default path is relative to the `backend/` directory, so `../runtime/feedback` resolves to `runtime/feedback` at the project root level.
+
+In Docker deployments, the absolute path `/app/runtime/feedback` is used.
 
 Each feedback entry is saved as a separate JSON file with the naming pattern:
 ```
