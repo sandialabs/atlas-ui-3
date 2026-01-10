@@ -48,6 +48,7 @@ Thumbs.db
 # Logs / runtime artifacts
 *.log
 backend/logs/
+backend/runtime/
 runtime/logs/
 runtime/feedback/
 runtime/uploads/
