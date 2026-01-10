@@ -77,6 +77,18 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
     await websocket.send_json(message)
 
 
+def _ensure_feedback_directory():
+    """Ensure feedback storage directory exists at startup."""
+    from pathlib import Path
+    config = app_factory.get_config_manager()
+    feedback_dir = Path(config.app_settings.runtime_feedback_dir)
+    try:
+        feedback_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Feedback directory ready: {feedback_dir}")
+    except Exception as e:
+        logger.warning(f"Could not create feedback directory {feedback_dir}: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -87,6 +99,9 @@ async def lifespan(app: FastAPI):
     
     logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
     logger.info(f"MCP servers configured: {len(config.mcp_config.servers)}")
+    
+    # Ensure feedback directory exists
+    _ensure_feedback_directory()
     
     # Initialize MCP tools manager
     logger.info("Initializing MCP tools manager...")

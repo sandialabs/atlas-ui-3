@@ -6,7 +6,6 @@ This module provides endpoints for:
 """
 
 import json
-import os
 import logging
 import uuid
 from datetime import datetime
@@ -105,7 +104,8 @@ async def submit_feedback(
         with open(feedback_file, 'w', encoding='utf-8') as f:
             json.dump(feedback_data, f, indent=2, ensure_ascii=False)
         
-        logger.info(f"Feedback submitted by {sanitize_for_logging(current_user)}: rating={feedback.rating}, file={sanitize_for_logging(filename)}")
+        rating_label = {1: "positive", 0: "neutral", -1: "negative"}.get(feedback.rating, "unknown")
+        logger.info(f"Feedback submitted: user={sanitize_for_logging(current_user)}, rating={rating_label}, id={feedback_id}")
         
         return {
             "message": "Feedback submitted successfully",
