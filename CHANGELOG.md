@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #202 - 2026-01-10
+- **Admin Panel**: Add User Feedback viewer card to admin dashboard with statistics display (positive/neutral/negative counts)
+- **Admin Panel**: Add feedback download functionality supporting CSV and JSON export formats
+- **Backend**: Add `/api/feedback/download` endpoint for exporting feedback data
+
 ### PR #197 - 2026-01-08
 - **Configuration**: Synchronized docker-compose.yml environment variables with .env.example. Added all missing feature flags, API keys, agent configuration, and other application settings to ensure Docker deployments have the same configuration options as local development.
 - **CI**: Updated test container build to include `.env.example` and `docker-compose.yml` so docker env sync tests can run.
