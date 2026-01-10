@@ -105,7 +105,7 @@ async def submit_feedback(
             json.dump(feedback_data, f, indent=2, ensure_ascii=False)
         
         rating_label = {1: "positive", 0: "neutral", -1: "negative"}.get(feedback.rating, "unknown")
-        logger.info(f"Feedback submitted: user={sanitize_for_logging(current_user)}, rating={rating_label}, id={feedback_id}")
+        logger.info(f"Feedback submitted: user={sanitize_for_logging(current_user)}, rating={rating_label}, id={feedback_id}, file={feedback_file}")
         
         return {
             "message": "Feedback submitted successfully",
