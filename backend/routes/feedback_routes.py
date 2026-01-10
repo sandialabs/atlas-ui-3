@@ -3,16 +3,20 @@
 This module provides endpoints for:
 - Submitting user feedback with ratings and comments
 - Admin viewing of collected feedback data
+- Downloading feedback data as CSV or JSON
 """
 
+import csv
+import io
 import json
 import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.auth import is_user_in_group
@@ -294,3 +298,64 @@ async def delete_feedback(
     except Exception as e:
         logger.error(f"Error deleting feedback: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to delete feedback")
+
+
+@feedback_router.get("/feedback/download")
+async def download_feedback(
+    format: Literal["csv", "json"] = Query(default="csv", description="Download format"),
+    admin_user: str = Depends(require_admin_for_feedback)
+) -> StreamingResponse:
+    """Download all feedback data as CSV or JSON (admin only)."""
+    try:
+        feedback_dir = get_feedback_directory()
+        
+        feedback_files = sorted(
+            feedback_dir.glob("feedback_*.json"),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True
+        )
+        
+        all_feedback = []
+        for feedback_file in feedback_files:
+            try:
+                with open(feedback_file, 'r', encoding='utf-8') as f:
+                    feedback_data = json.load(f)
+                    all_feedback.append(feedback_data)
+            except Exception as e:
+                logger.error(f"Error reading feedback file {feedback_file}: {e}")
+                continue
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        if format == "json":
+            content = json.dumps(all_feedback, indent=2, ensure_ascii=False)
+            filename = f"feedback_export_{timestamp}.json"
+            media_type = "application/json"
+        else:
+            output = io.StringIO()
+            fieldnames = ["id", "timestamp", "user", "rating", "comment"]
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
+            for fb in all_feedback:
+                writer.writerow({
+                    "id": fb.get("id", ""),
+                    "timestamp": fb.get("timestamp", ""),
+                    "user": fb.get("user", ""),
+                    "rating": fb.get("rating", ""),
+                    "comment": fb.get("comment", "")
+                })
+            content = output.getvalue()
+            filename = f"feedback_export_{timestamp}.csv"
+            media_type = "text/csv"
+        
+        logger.info(f"Feedback downloaded by {sanitize_for_logging(admin_user)} as {format}")
+        
+        return StreamingResponse(
+            iter([content]),
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading feedback: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to download feedback")
