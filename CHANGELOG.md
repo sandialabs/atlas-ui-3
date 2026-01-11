@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #207 - 2026-01-11
+- **Fix**: Keep loaded custom prompts available when switching back to the default prompt by separating loaded prompts from the active prompt selection.
+- **Tests**: Add frontend regression coverage for prompt persistence when clearing the active prompt.
+
 ### PR #203 - 2026-01-10
 - **Admin Panel**: Add User Feedback viewer card to admin dashboard with statistics display (positive/neutral/negative counts)
 - **Admin Panel**: Add feedback download functionality supporting CSV and JSON export formats
