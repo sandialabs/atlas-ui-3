@@ -17,12 +17,14 @@ const ChatArea = () => {
   const [showFileAutocomplete, setShowFileAutocomplete] = useState(false)
   const [filteredFiles, setFilteredFiles] = useState([])
   const [selectedFileIndex, setSelectedFileIndex] = useState(0)
+  const [isDragOver, setIsDragOver] = useState(false)
   const textareaRef = useRef(null)
   const messagesRef = useRef(null)
   const endRef = useRef(null)
   const userScrolledRef = useRef(false)
   const prevMessageCountRef = useRef(0)
   const fileInputRef = useRef(null)
+  const dragCounterRef = useRef(0)
   
   const { 
     messages, 
@@ -505,6 +507,51 @@ const ChatArea = () => {
     fileInputRef.current?.click()
   }
 
+  const handleDragEnter = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current++
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragOver(true)
+    }
+  }
+
+  const handleDragLeave = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current--
+    if (dragCounterRef.current === 0) {
+      setIsDragOver(false)
+    }
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+    dragCounterRef.current = 0
+
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length === 0) return
+
+    files.forEach(file => {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const base64Data = event.target.result.split(',')[1]
+        setUploadedFiles(prev => ({
+          ...prev,
+          [file.name]: base64Data
+        }))
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
   const canSend = inputValue.trim().length > 0 && currentModel && isConnected
   const [agentAnswer, setAgentAnswer] = useState('')
 
@@ -512,7 +559,27 @@ const ChatArea = () => {
     import.meta.env.VITE_FEATURE_POWERED_BY_ATLAS === 'true'
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden relative">
+    <div 
+      className="flex flex-col flex-1 min-h-0 overflow-hidden relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Drag and Drop Overlay */}
+      {isDragOver && (
+        <div 
+          className="absolute inset-0 bg-blue-500/20 border-2 border-dashed border-blue-500 z-50 flex items-center justify-center"
+          data-testid="drag-overlay"
+        >
+          <div className="bg-gray-800 rounded-lg p-6 text-center shadow-xl">
+            <Paperclip className="w-12 h-12 text-blue-400 mx-auto mb-3" />
+            <p className="text-lg font-medium text-gray-200">Drop files to attach</p>
+            <p className="text-sm text-gray-400 mt-1">Files will be added to your message</p>
+          </div>
+        </div>
+      )}
+      
       {/* Welcome Screen */}
       {isWelcomeVisible && <WelcomeScreen />}
       
