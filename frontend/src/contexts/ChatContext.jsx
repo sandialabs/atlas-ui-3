@@ -153,7 +153,7 @@ export const ChatProvider = ({ children }) => {
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
 			compliance_level_filter: selections.complianceLevelFilter,
 		})
-	}, [addMessage, currentModel, selectedTools, selectedPrompts, selectedDataSources, config, selections, agent, files, isWelcomeVisible, sendMessage, settings])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, config, selections, agent, files, isWelcomeVisible, sendMessage, settings])
 
 	const clearChat = useCallback(() => {
 		resetMessages()
