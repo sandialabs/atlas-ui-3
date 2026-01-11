@@ -11,6 +11,8 @@ import Notifications from './Notifications' // Import the Notifications componen
 import BannerMessagesCard from './admin/BannerMessagesCard' // Import the BannerMessagesCard component
 import MCPConfigurationCard from './admin/MCPConfigurationCard' // Import the MCPConfigurationCard component
 import ConfigViewerCard from './admin/ConfigViewerCard' // Import the ConfigViewerCard component
+import MCPServerManager from './admin/MCPServerManager' // Import the MCPServerManager component
+import FeedbackViewerCard from './admin/FeedbackViewerCard' // Import the FeedbackViewerCard component
 
 const AdminDashboard = () => {
   const navigate = useNavigate()
@@ -89,7 +91,7 @@ const AdminDashboard = () => {
     setCurrentEndpoint(null)
   }
 
-  const manageLLM = async () => {
+  const _manageLLM = async () => {
     try {
       const response = await fetch('/admin/llm-config')
       const data = await response.json()
@@ -106,7 +108,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const manageHelp = async () => {
+  const _manageHelp = async () => {
     try {
       const response = await fetch('/admin/help-config')
       const data = await response.json()
@@ -138,7 +140,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const checkHealth = async () => {
+  const _checkHealth = async () => {
     try {
       const response = await fetch('/admin/system-status')
       const data = await response.json()
@@ -154,7 +156,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const triggerHealthCheck = async () => {
+  const _triggerHealthCheck = async () => {
     try {
       const response = await fetch('/admin/trigger-health-check', { method: 'POST' })
       const data = await response.json()
@@ -171,7 +173,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const viewMCPHealth = async () => {
+  const _viewMCPHealth = async () => {
     try {
       const response = await fetch('/admin/mcp-health')
       const data = await response.json()
@@ -186,7 +188,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const reloadConfiguration = async () => {
+  const _reloadConfiguration = async () => {
     try {
       const response = await fetch('/admin/reload-config', { method: 'POST' })
       const data = await response.json()
@@ -205,7 +207,7 @@ const AdminDashboard = () => {
     }
   }
 
-  const viewFeedback = async () => {
+  const _viewFeedback = async () => {
     try {
       const response = await fetch('/api/feedback?limit=100')
       const data = await response.json()
@@ -326,14 +328,41 @@ const AdminDashboard = () => {
             addNotification={addNotification} 
           />
 
-          {/* MCP Configuration */}
-          {/*
+          {/* System Logs */}
+          <div className="bg-gray-800 rounded-lg p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Eye className="w-6 h-6 text-cyan-400" />
+              <h2 className="text-lg font-semibold">System Logs</h2>
+            </div>
+            <p className="text-gray-400 mb-4">View application logs with enhanced filtering and better UX.</p>
+            <div className={`px-3 py-1 rounded text-sm font-medium mb-4 ${getStatusColor('healthy')}`}>
+              Ready
+            </div>
+            <button
+              onClick={() => navigate('/admin/logview')}
+              className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg transition-colors"
+            >
+              View Logs
+            </button>
+          </div>
+
+          {/* MCP Configuration & Controls */}
           <MCPConfigurationCard 
             openModal={openModal} 
             addNotification={addNotification} 
             systemStatus={systemStatus} 
           />
-          */}
+
+          {/* MCP Server Manager */}
+          <MCPServerManager 
+            addNotification={addNotification} 
+          />
+
+          {/* User Feedback */}
+          <FeedbackViewerCard 
+            openModal={openModal} 
+            addNotification={addNotification} 
+          />
 
           {/* LLM Configuration */}
           {/*
@@ -374,25 +403,6 @@ const AdminDashboard = () => {
             </button>
           </div>
           */}
-
-          {/* System Logs */}
-          <div className="bg-gray-800 rounded-lg p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <Eye className="w-6 h-6 text-cyan-400" />
-              <h2 className="text-lg font-semibold">System Logs</h2>
-            </div>
-            <p className="text-gray-400 mb-4">View application logs with enhanced filtering and better UX.</p>
-            <div className={`px-3 py-1 rounded text-sm font-medium mb-4 ${getStatusColor('healthy')}`}>
-              Ready
-            </div>
-            {/* Link to the new LogViewer page */}
-            <button
-              onClick={() => navigate('/admin/logview')}
-              className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg transition-colors"
-            >
-              View Logs
-            </button>
-          </div>
 
           {/* System Health */}
           {/*
@@ -467,15 +477,6 @@ const AdminDashboard = () => {
             </button>
           </div>
           */}
-        </div>
-
-        {/* MCP Configuration & Controls (separate row) */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <MCPConfigurationCard 
-            openModal={openModal} 
-            addNotification={addNotification} 
-            systemStatus={systemStatus} 
-          />
         </div>
       </div>
 

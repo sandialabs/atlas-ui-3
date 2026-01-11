@@ -1,8 +1,9 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
+import UnsavedChangesDialog from './UnsavedChangesDialog'
 
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
@@ -11,18 +12,18 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
   const [collapsedServers, setCollapsedServers] = useState(new Set())
+  const [expandedDescriptions, setExpandedDescriptions] = useState(new Set())
   const navigate = useNavigate()
+  const prevOpenRef = useRef(false)
   const {
-    selectedTools,
-    toggleTool,
-    selectedPrompts,
-    togglePrompt,
-    addTools,
-    removeTools,
-    addPrompts,
-    removePrompts,
-    toolChoiceRequired,
-    setToolChoiceRequired,
+    selectedTools: savedSelectedTools,
+    selectedPrompts: savedSelectedPrompts,
+    addTools: saveAddTools,
+    removeTools: saveRemoveTools,
+    addPrompts: saveAddPrompts,
+    removePrompts: saveRemovePrompts,
+    toolChoiceRequired: savedToolChoiceRequired,
+    setToolChoiceRequired: saveSetToolChoiceRequired,
     clearToolsAndPrompts,
     complianceLevelFilter,
     tools: allTools,
@@ -30,6 +31,162 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     features
   } = useChat()
   const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts } = useMarketplace()
+  
+  // Local state for pending changes
+  const [pendingSelectedTools, setPendingSelectedTools] = useState(new Set())
+  const [pendingSelectedPrompts, setPendingSelectedPrompts] = useState(new Set())
+  const [pendingToolChoiceRequired, setPendingToolChoiceRequired] = useState(false)
+  const [hasChanges, setHasChanges] = useState(false)
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
+  
+  // Initialize pending state from saved state only when panel transitions from closed to open
+  useEffect(() => {
+    if (isOpen && !prevOpenRef.current) {
+      setPendingSelectedTools(new Set(savedSelectedTools))
+      setPendingSelectedPrompts(new Set(savedSelectedPrompts))
+      setPendingToolChoiceRequired(savedToolChoiceRequired)
+      setHasChanges(false)
+    }
+    prevOpenRef.current = isOpen
+  }, [isOpen, savedSelectedTools, savedSelectedPrompts, savedToolChoiceRequired])
+  
+  // Use pending state while editing
+  const selectedTools = pendingSelectedTools
+  const selectedPrompts = pendingSelectedPrompts
+  const toolChoiceRequired = pendingToolChoiceRequired
+  
+  // Toggle functions that work with pending state
+  const toggleTool = (toolKey) => {
+    setPendingSelectedTools(prev => {
+      const next = new Set(prev)
+      if (next.has(toolKey)) {
+        next.delete(toolKey)
+      } else {
+        next.add(toolKey)
+      }
+      setHasChanges(true)
+      return next
+    })
+  }
+  
+  const togglePrompt = (promptKey) => {
+    setPendingSelectedPrompts(prev => {
+      const next = new Set(prev)
+      if (next.has(promptKey)) {
+        next.delete(promptKey)
+      } else {
+        next.add(promptKey)
+      }
+      setHasChanges(true)
+      return next
+    })
+  }
+  
+  const addTools = (toolKeys) => {
+    setPendingSelectedTools(prev => {
+      const next = new Set(prev)
+      toolKeys.forEach(k => next.add(k))
+      setHasChanges(true)
+      return next
+    })
+  }
+  
+  const removeTools = (toolKeys) => {
+    setPendingSelectedTools(prev => {
+      const next = new Set(prev)
+      toolKeys.forEach(k => next.delete(k))
+      setHasChanges(true)
+      return next
+    })
+  }
+  
+  const addPrompts = (promptKeys) => {
+    setPendingSelectedPrompts(prev => {
+      const next = new Set(prev)
+      promptKeys.forEach(k => next.add(k))
+      setHasChanges(true)
+      return next
+    })
+  }
+  
+  const removePrompts = (promptKeys) => {
+    setPendingSelectedPrompts(prev => {
+      const next = new Set(prev)
+      promptKeys.forEach(k => next.delete(k))
+      setHasChanges(true)
+      return next
+    })
+  }
+  
+  const setToolChoiceRequired = (value) => {
+    setPendingToolChoiceRequired(value)
+    setHasChanges(true)
+  }
+  
+  // Save handler - commits pending changes to context
+  const handleSave = () => {
+    // Determine what tools to add or remove
+    const toolsToAdd = Array.from(pendingSelectedTools).filter(t => !savedSelectedTools.has(t))
+    const toolsToRemove = Array.from(savedSelectedTools).filter(t => !pendingSelectedTools.has(t))
+    
+    if (toolsToAdd.length > 0) saveAddTools(toolsToAdd)
+    if (toolsToRemove.length > 0) saveRemoveTools(toolsToRemove)
+    
+    // Determine what prompts to add or remove
+    const promptsToAdd = Array.from(pendingSelectedPrompts).filter(p => !savedSelectedPrompts.has(p))
+    const promptsToRemove = Array.from(savedSelectedPrompts).filter(p => !pendingSelectedPrompts.has(p))
+    
+    if (promptsToAdd.length > 0) saveAddPrompts(promptsToAdd)
+    if (promptsToRemove.length > 0) saveRemovePrompts(promptsToRemove)
+    
+    // Update tool choice required if changed
+    if (pendingToolChoiceRequired !== savedToolChoiceRequired) {
+      saveSetToolChoiceRequired(pendingToolChoiceRequired)
+    }
+    
+    setHasChanges(false)
+    onClose()
+  }
+  
+  // Cancel handler - reverts pending changes
+  const handleCancel = () => {
+    setPendingSelectedTools(new Set(savedSelectedTools))
+    setPendingSelectedPrompts(new Set(savedSelectedPrompts))
+    setPendingToolChoiceRequired(savedToolChoiceRequired)
+    setHasChanges(false)
+    onClose()
+  }
+  
+  // Clear all tools and prompts in pending state
+  const handleClearAll = () => {
+    setPendingSelectedTools(new Set())
+    setPendingSelectedPrompts(new Set())
+    setHasChanges(true)
+  }
+
+  // Handle close attempts - check for unsaved changes
+  const handleCloseAttempt = () => {
+    if (hasChanges) {
+      setShowUnsavedDialog(true)
+    } else {
+      onClose()
+    }
+  }
+
+  // Handle confirmation dialog actions
+  const handleSaveAndClose = () => {
+    handleSave() // This already calls onClose()
+    setShowUnsavedDialog(false)
+  }
+
+  const handleDiscardAndClose = () => {
+    handleCancel() // This already calls onClose()
+    setShowUnsavedDialog(false)
+  }
+
+  const handleCancelDialog = () => {
+    setShowUnsavedDialog(false)
+  }
   
   // Use compliance-filtered tools and prompts if feature is enabled, otherwise use marketplace filtered
   const complianceEnabled = features?.compliance_levels
@@ -59,6 +216,9 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       allServers[toolServer.server] = {
         server: toolServer.server,
         description: toolServer.description,
+        short_description: toolServer.short_description,
+        author: toolServer.author,
+        help_email: toolServer.help_email,
         is_exclusive: toolServer.is_exclusive,
         compliance_level: toolServer.compliance_level,
         tools: toolServer.tools || [],
@@ -76,6 +236,9 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       allServers[promptServer.server] = {
         server: promptServer.server,
         description: promptServer.description,
+        short_description: promptServer.short_description,
+        author: promptServer.author,
+        help_email: promptServer.help_email,
         is_exclusive: false,
         tools: [],
         tools_detailed: [],
@@ -234,6 +397,16 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     setCollapsedServers(newCollapsed)
   }
 
+  const toggleDescriptionExpansion = (serverName) => {
+    const newExpanded = new Set(expandedDescriptions)
+    if (newExpanded.has(serverName)) {
+      newExpanded.delete(serverName)
+    } else {
+      newExpanded.add(serverName)
+    }
+    setExpandedDescriptions(newExpanded)
+  }
+
   /**
    * Renders the input schema parameters for a tool.
    * @param {Object} schema - The JSON schema object containing properties and required fields
@@ -274,7 +447,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   return (
     <div 
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={onClose}
+      onClick={handleCloseAttempt}
     >
       <div 
         className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] mx-4 flex flex-col"
@@ -284,7 +457,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 flex-shrink-0">
           <h2 className="text-lg font-semibold text-gray-100">Tools & Integrations</h2>
           <button
-            onClick={onClose}
+            onClick={handleCloseAttempt}
             className="p-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -303,7 +476,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
               Add from Marketplace
             </button>
             <button
-              onClick={clearToolsAndPrompts}
+              onClick={handleClearAll}
               className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
               title="Clear all tool and prompt selections"
             >
@@ -401,7 +574,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                           
                           {/* Server Icon */}
                           <div className="bg-gray-600 rounded p-1.5 flex-shrink-0">
-                            <Wrench className="w-3 h-3 text-gray-300" />
+                            <Server className="w-3 h-3 text-gray-300" />
                           </div>
                           
                           {/* Server Content */}
@@ -425,7 +598,74 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                 </span>
                               )}
                             </div>
-                            <p className="text-xs text-gray-400 mb-2 line-clamp-1">{server.description}</p>
+                            
+                            {/* Short description - always shown (compact) */}
+                            {server.short_description && (
+                              <p className="text-xs text-gray-400 mb-1 line-clamp-1">
+                                {server.short_description}
+                              </p>
+                            )}
+                            
+                            {/* If no short_description but has description, show description (compact) */}
+                            {!server.short_description && server.description && (
+                              <p className="text-xs text-gray-400 mb-1 line-clamp-1">
+                                {server.description}
+                              </p>
+                            )}
+                            
+                            {/* Expandable full description - only if different from short_description */}
+                            {server.description && server.description !== server.short_description && (
+                              <div className="mb-1">
+                                {expandedDescriptions.has(server.server) ? (
+                                  <>
+                                    <p className="text-xs text-gray-400 mb-1">
+                                      {server.description}
+                                    </p>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        toggleDescriptionExpansion(server.server)
+                                      }}
+                                      className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                                    >
+                                      Show less
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      toggleDescriptionExpansion(server.server)
+                                    }}
+                                    className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                                  >
+                                    Show more details...
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            
+                            {/* Author and help email info */}
+                            <div className="flex items-center gap-3 mb-2 text-xs text-gray-500">
+                              {server.author && (
+                                <div className="flex items-center gap-1">
+                                  <User className="w-3 h-3" />
+                                  <span>{server.author}</span>
+                                </div>
+                              )}
+                              {server.help_email && (
+                                <div className="flex items-center gap-1">
+                                  <Mail className="w-3 h-3" />
+                                  <a 
+                                    href={`mailto:${server.help_email}`}
+                                    className="hover:text-blue-400 transition-colors"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {server.help_email}
+                                  </a>
+                                </div>
+                              )}
+                            </div>
                             
                             {/* Tools and Prompts - only show when not collapsed */}
                             {!isCollapsed && (
@@ -552,7 +792,37 @@ const ToolsPanel = ({ isOpen, onClose }) => {
             </>
           )}
         </div>
+        
+        {/* Footer with Save/Cancel buttons */}
+        <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-gray-700 flex-shrink-0">
+          <button
+            onClick={handleCancel}
+            className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!hasChanges}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium ${
+              hasChanges
+                ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            <Save className="w-4 h-4" />
+            Save Changes
+          </button>
+        </div>
       </div>
+
+      {/* Unsaved Changes Confirmation Dialog */}
+      <UnsavedChangesDialog
+        isOpen={showUnsavedDialog}
+        onSave={handleSaveAndClose}
+        onDiscard={handleDiscardAndClose}
+        onCancel={handleCancelDialog}
+      />
     </div>
   )
 }

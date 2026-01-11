@@ -202,6 +202,7 @@ class ChatOrchestrator:
         
         # Handle file ingestion
         update_callback = kwargs.get("update_callback")
+        logger.debug(f"Orchestrator.execute: update_callback present = {update_callback is not None}")
         session.context = await file_utils.handle_session_files(
             session_context=session.context,
             user_email=user_email,

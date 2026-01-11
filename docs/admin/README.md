@@ -21,6 +21,7 @@ This guide is for administrators responsible for deploying, configuring, and man
 ### Operations
 - [Logging & Monitoring](logging-monitoring.md) - Application logs and health monitoring
 - [Admin Panel](admin-panel.md) - Using the administrative interface
+- [User Feedback](feedback.md) - Collecting and reviewing user feedback
 
 ### UI Customization
 - [Help Modal](help-config.md) - Customizing the Help/About modal

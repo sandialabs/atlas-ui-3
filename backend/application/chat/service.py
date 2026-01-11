@@ -168,7 +168,7 @@ class ChatService:
         
         # Initialize orchestrator
         self.orchestrator = None  # Will be initialized lazily to avoid circular dependency
-
+    
     def _get_orchestrator(self):
         """Lazy initialization of orchestrator."""
         if self.orchestrator is None:
@@ -235,18 +235,23 @@ class ChatService:
         Returns:
             Response dictionary to send to client
         """
-        # Log input arguments with content trimmed
-        content_preview = content[:100] + "..." if len(content) > 100 else content
-        sanitized_kwargs = error_utils.sanitize_kwargs_for_logging(kwargs)
-
+        # Log non-sensitive metadata at INFO level for production monitoring
         logger.info(
             f"handle_chat_message called - session_id: {session_id}, "
-            f"content: '{sanitize_for_logging(content_preview)}', model: {model}, "
+            f"model: {model}, content_length: {len(content)}, "
             f"selected_tools: {selected_tools}, selected_prompts: {selected_prompts}, selected_data_sources: {selected_data_sources}, "
             f"only_rag: {only_rag}, tool_choice_required: {tool_choice_required}, "
-            f"user_email: {sanitize_for_logging(user_email)}, agent_mode: {agent_mode}, "
-            f"kwargs: {sanitized_kwargs}"
+            f"user_email: {sanitize_for_logging(user_email)}, agent_mode: {agent_mode}"
         )
+        
+        # Log sensitive content only at DEBUG level for development/testing
+        if logger.isEnabledFor(logging.DEBUG):
+            content_preview = content[:100] + "..." if len(content) > 100 else content
+            sanitized_kwargs = error_utils.sanitize_kwargs_for_logging(kwargs)
+            logger.debug(
+                f"handle_chat_message content preview: '{sanitize_for_logging(content_preview)}', "
+                f"kwargs: {sanitized_kwargs}"
+            )
 
         # Get or create session
         session = self.sessions.get(session_id)

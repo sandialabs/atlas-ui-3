@@ -43,7 +43,7 @@ export const MarketplaceProvider = ({ children }) => {
     // Initialize known servers store if missing
     const known = localStorage.getItem('mcp-known-servers')
     if (known) {
-      try { knownServersRef.current = new Set(JSON.parse(known)) } catch {}
+      try { knownServersRef.current = new Set(JSON.parse(known)) } catch { /* ignore parse errors */ }
     } else {
       localStorage.setItem('mcp-known-servers', JSON.stringify([]))
       knownServersRef.current = new Set()
@@ -202,6 +202,7 @@ export const MarketplaceProvider = ({ children }) => {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useMarketplace = () => {
   const context = useContext(MarketplaceContext)
   if (!context) {

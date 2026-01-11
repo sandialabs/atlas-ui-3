@@ -1,6 +1,6 @@
 import pytest
 from backend.modules.mcp_tools.client import MCPToolManager
-from unittest.mock import patch, AsyncMock, Mock
+from unittest.mock import patch, AsyncMock, Mock, ANY
 
 
 @pytest.mark.integration
@@ -39,7 +39,9 @@ class TestMCPAuthenticationIntegration:
                 assert "mcp-http-mock" in manager.clients
                 MockFastMCPClient.assert_called_once_with(
                     "http://localhost:8001/mcp",
-                    auth="test-api-key-123"
+                    auth="test-api-key-123",
+                    log_handler=ANY,
+                    elicitation_handler=ANY
                 )
 
     @pytest.mark.asyncio
@@ -72,7 +74,9 @@ class TestMCPAuthenticationIntegration:
                 # Verify auth token was passed correctly
                 MockFastMCPClient.assert_called_once_with(
                     "http://localhost:8001/mcp",
-                    auth="invalid-token"
+                    auth="invalid-token",
+                    log_handler=ANY,
+                    elicitation_handler=ANY
                 )
 
                 # Now try to discover tools - this should fail due to auth error

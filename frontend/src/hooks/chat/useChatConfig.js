@@ -69,13 +69,15 @@ export function useChatConfig() {
             localStorage.setItem('chatui-current-model', defaultModel)
           }
         }
-      } catch (e) {
+      } catch {
         // Fallback demo data
         setAppName('Chat UI (Demo)')
         setModels([{name: 'gpt-4o'}, {name: 'gpt-4o-mini'}])
         setTools([{ server: 'canvas', tools: ['canvas'], description: 'Create and display visual content', tool_count: 1 }])
         setDataSources(['demo_documents'])
         setUser('Demo User')
+        // Enable tools feature for demo mode
+        setFeatures({ ...DEFAULT_FEATURES, tools: true })
         // Set demo model if no saved model
         if (!currentModel) {
           setCurrentModel('gpt-4o')

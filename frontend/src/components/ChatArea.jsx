@@ -33,7 +33,6 @@ const ChatArea = () => {
     tools,
     selectedTools,
     toggleTool,
-    toolChoiceRequired,
     setToolChoiceRequired,
   sessionFiles,
   agentModeEnabled,

@@ -1,12 +1,15 @@
 """FastMCP client for connecting to MCP servers and managing tools."""
 
 import asyncio
+import contextvars
 import logging
 import os
 import json
 import time
+import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Callable, Awaitable, AsyncIterator
 
 from fastmcp import Client
 from modules.config import config_manager
@@ -15,6 +18,47 @@ from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
+
+# Type alias for log callback function
+LogCallback = Callable[[str, str, str, Dict[str, Any]], Awaitable[None]]
+
+
+class _ElicitationRoutingContext:
+    def __init__(
+        self,
+        server_name: str,
+        tool_call: ToolCall,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+    ):
+        self.server_name = server_name
+        self.tool_call = tool_call
+        self.update_cb = update_cb
+
+# Context-local override used to route MCP logs to the *current* request/session.
+# This prevents cross-user log leakage when MCPToolManager is shared across connections.
+_ACTIVE_LOG_CALLBACK: contextvars.ContextVar[Optional[LogCallback]] = contextvars.ContextVar(
+    "mcp_active_log_callback",
+    default=None,
+)
+
+# Dictionary-based routing for elicitation so a shared Client can still deliver
+# elicitation requests to the correct user's WebSocket.
+# Key: tool_call_id, Value: _ElicitationRoutingContext
+# Note: Cannot use contextvars.ContextVar because MCP receive loop runs in a different task
+_ELICITATION_ROUTING: Dict[str, _ElicitationRoutingContext] = {}
+
+# Mapping from MCP log levels to Python logging levels
+MCP_TO_PYTHON_LOG_LEVEL = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "notice": logging.INFO,
+    "warning": logging.WARNING,
+    "warn": logging.WARNING,
+    "error": logging.ERROR,
+    "alert": logging.CRITICAL,
+    "critical": logging.CRITICAL,
+    "emergency": logging.CRITICAL,
+}
 
 
 class MCPToolManager:
@@ -28,7 +72,7 @@ class MCPToolManager:
     - Auto-reconnect with exponential backoff (when feature flag is enabled)
     """
     
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None, log_callback: Optional[LogCallback] = None):
         if config_path is None:
             # Use config manager to get config path
             app_settings = config_manager.app_settings
@@ -76,6 +120,218 @@ class MCPToolManager:
         # Reconnect task reference (used by auto-reconnect background task)
         self._reconnect_task: Optional[asyncio.Task] = None
         self._reconnect_running = False
+        
+        # Default log callback (used when no request-scoped callback is active).
+        # Signature: (server_name, level, message, extra_data) -> None
+        self._default_log_callback = log_callback
+        
+        # Get configured log level for filtering
+        self._min_log_level = self._get_min_log_level()
+    
+    def _get_min_log_level(self) -> int:
+        """Get the minimum log level from environment or config."""
+        try:
+            app_settings = config_manager.app_settings
+            raw_level_name = getattr(app_settings, "log_level", None)
+            if not isinstance(raw_level_name, str):
+                raise TypeError("log_level must be a string")
+            level_name = raw_level_name.upper()
+        except Exception:
+            level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+        
+        level = getattr(logging, level_name, None)
+        return level if isinstance(level, int) else logging.INFO
+    
+    def _create_log_handler(self, server_name: str):
+        """Create a log handler for an MCP server.
+        
+        This handler forwards MCP server logs to the backend logger and optionally to the UI.
+        Logs are filtered based on the configured LOG_LEVEL.
+        
+        Args:
+            server_name: Name of the MCP server
+            
+        Returns:
+            An async function that handles LogMessage objects from fastmcp
+        """
+        async def log_handler(message) -> None:
+            """Handle log messages from MCP server."""
+            try:
+                # Import here to avoid circular dependency
+                from fastmcp.client.logging import LogMessage
+                
+                # Handle both LogMessage objects and dict-like structures
+                if hasattr(message, 'level'):
+                    log_level_str = message.level.lower()
+                    log_data = message.data if hasattr(message, 'data') else {}
+                else:
+                    # Fallback for dict-like messages
+                    log_level_str = message.get('level', 'info').lower()
+                    log_data = message.get('data', {})
+                
+                msg = log_data.get('msg', '') if isinstance(log_data, dict) else str(log_data)
+                extra = log_data.get('extra', {}) if isinstance(log_data, dict) else {}
+                
+                # Convert MCP log level to Python logging level
+                python_log_level = MCP_TO_PYTHON_LOG_LEVEL.get(log_level_str, logging.INFO)
+                
+                # Filter based on configured minimum log level
+                if python_log_level < self._min_log_level:
+                    return
+
+                # Backend log noise reduction: tool servers can be very chatty at INFO.
+                # Keep their INFO messages available at LOG_LEVEL=DEBUG, but avoid flooding
+                # app logs at LOG_LEVEL=INFO. Warnings/errors still surface at INFO.
+                backend_log_level = python_log_level if python_log_level >= logging.WARNING else logging.DEBUG
+                
+                # Log to backend logger with server context
+                logger.log(
+                    backend_log_level,
+                    f"[MCP:{sanitize_for_logging(server_name)}] {sanitize_for_logging(msg)}",
+                    extra={"mcp_server": server_name, "mcp_extra": extra}
+                )
+                
+                # Forward to the active (request-scoped) callback when present,
+                # otherwise fall back to the default callback.
+                callback = _ACTIVE_LOG_CALLBACK.get() or self._default_log_callback
+                if callback is not None:
+                    await callback(server_name, log_level_str, msg, extra)
+                    
+            except Exception as e:
+                logger.warning(f"Error handling log from MCP server {server_name}: {e}")
+        
+        return log_handler
+    
+    def set_log_callback(self, callback: Optional[LogCallback]) -> None:
+        """Set or update the log callback for forwarding MCP server logs to UI.
+        
+        Args:
+            callback: Async function that receives (server_name, level, message, extra_data)
+        """
+        self._default_log_callback = callback
+
+    @asynccontextmanager
+    async def _use_log_callback(self, callback: Optional[LogCallback]) -> AsyncIterator[None]:
+        """Temporarily set a request-scoped log callback.
+
+        This is used to bind MCP server logs to the current tool execution so they
+        are forwarded only to the correct user's WebSocket connection.
+        """
+        token = _ACTIVE_LOG_CALLBACK.set(callback)
+        try:
+            yield
+        finally:
+            _ACTIVE_LOG_CALLBACK.reset(token)
+
+    @asynccontextmanager
+    async def _use_elicitation_context(
+        self,
+        server_name: str,
+        tool_call: ToolCall,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+    ) -> AsyncIterator[None]:
+        """
+        Set up elicitation routing for a tool call.
+        Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
+        """
+        routing = _ElicitationRoutingContext(server_name, tool_call, update_cb)
+        _ELICITATION_ROUTING[server_name] = routing
+        try:
+            yield
+        finally:
+            _ELICITATION_ROUTING.pop(server_name, None)
+
+    def _create_elicitation_handler(self, server_name: str):
+        """
+        Create an elicitation handler for a specific MCP server.
+
+        Returns a handler function that captures the server_name,
+        allowing dictionary-based routing that works across async tasks.
+        """
+        async def handler(message, response_type, params, _context):
+            """Per-server elicitation handler with captured server_name."""
+            from fastmcp.client.elicitation import ElicitResult
+            from mcp.types import ElicitRequestFormParams
+
+            routing = _ELICITATION_ROUTING.get(server_name)
+            if routing is None:
+                logger.warning(
+                    f"Elicitation request for server '{server_name}' but no routing context - "
+                    f"elicitation cancelled. Message: {message[:50]}..."
+                )
+                return ElicitResult(action="cancel", content=None)
+            if routing.update_cb is None:
+                logger.warning(
+                    f"Elicitation request for server '{server_name}', tool '{routing.tool_call.name}' "
+                    f"but update_cb is None - elicitation cancelled. Message: {message[:50]}..."
+                )
+                return ElicitResult(action="cancel", content=None)
+
+            response_schema: Dict[str, Any] = {}
+            if isinstance(params, ElicitRequestFormParams):
+                response_schema = params.requestedSchema or {}
+
+            try:
+                import uuid
+                from application.chat.elicitation_manager import get_elicitation_manager
+
+                elicitation_id = str(uuid.uuid4())
+                elicitation_manager = get_elicitation_manager()
+
+                request = elicitation_manager.create_elicitation_request(
+                    elicitation_id=elicitation_id,
+                    tool_call_id=routing.tool_call.id,
+                    tool_name=routing.tool_call.name,
+                    message=message,
+                    response_schema=response_schema,
+                )
+
+                logger.debug(f"Sending elicitation_request to frontend for server '{server_name}'")
+                await routing.update_cb(
+                    {
+                        "type": "elicitation_request",
+                        "elicitation_id": elicitation_id,
+                        "tool_call_id": routing.tool_call.id,
+                        "tool_name": routing.tool_call.name,
+                        "message": message,
+                        "response_schema": response_schema,
+                    }
+                )
+
+                try:
+                    response = await request.wait_for_response(timeout=300.0)
+                finally:
+                    elicitation_manager.cleanup_request(elicitation_id)
+
+                action = response.get("action", "cancel")
+                data = response.get("data")
+
+                if action != "accept":
+                    return ElicitResult(action=action, content=None)
+
+                if data is None:
+                    return ElicitResult(action="accept", content=None)
+
+                # FastMCP requires elicitation response content to be a JSON object.
+                if not isinstance(data, dict):
+                    props: Dict[str, Any] = {}
+                    if isinstance(response_schema, dict):
+                        props = response_schema.get("properties") or {}
+                    if list(props.keys()) == ["value"]:
+                        data = {"value": data}
+                    else:
+                        data = {"value": data}
+
+                return ElicitResult(action="accept", content=data)
+
+            except asyncio.TimeoutError:
+                logger.warning(f"Elicitation timeout for server '{server_name}'")
+                return ElicitResult(action="cancel", content=None)
+            except Exception as e:
+                logger.error(f"Error handling elicitation for server '{server_name}': {e}", exc_info=True)
+                return ElicitResult(action="cancel", content=None)
+
+        return handler
     
     def reload_config(self) -> Dict[str, Any]:
         """Reload MCP server configuration from disk.
@@ -205,10 +461,13 @@ class MCPToolManager:
 
     async def _initialize_single_client(self, server_name: str, config: Dict[str, Any]) -> Optional[Client]:
         """Initialize a single MCP client. Returns None if initialization fails."""
-        logger.info(f"=== Initializing client for server '{sanitize_for_logging(server_name)}' ===\n\nServer config: {sanitize_for_logging(str(config))}")
+        safe_server_name = sanitize_for_logging(server_name)
+        # Keep INFO logs concise; config/transport details can be very verbose.
+        logger.info("Initializing MCP client for server '%s'", safe_server_name)
+        logger.debug("Server config for '%s': %s", safe_server_name, sanitize_for_logging(str(config)))
         try:
             transport_type = self._determine_transport_type(config)
-            logger.info(f"Determined transport type: {transport_type}")
+            logger.debug("Determined transport type for %s: %s", safe_server_name, transport_type)
             
             if transport_type in ["http", "sse"]:
                 # HTTP/SSE MCP server
@@ -229,14 +488,17 @@ class MCPToolManager:
                     logger.error(f"Failed to resolve auth_token for {server_name}: {e}")
                     return None  # Skip this server
                 
+                # Create log handler for this server
+                log_handler = self._create_log_handler(server_name)
+                
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
-                    client = Client(url, auth=token)
+                    client = Client(url, auth=token, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
                 else:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
-                    client = Client(url, auth=token)
+                    client = Client(url, auth=token, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
                 
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
                 return client
@@ -244,12 +506,17 @@ class MCPToolManager:
             elif transport_type == "stdio":
                 # STDIO MCP server
                 command = config.get("command")
-                logger.info(f"STDIO transport - command: {command}")
+                logger.debug("STDIO transport command for %s: %s", safe_server_name, command)
                 if command:
+                    # Ensure MCP stdio servers run under the same interpreter as the backend.
+                    # In dev containers, PATH `python` may not have required deps.
+                    if command[0] in {"python", "python3"}:
+                        command = [sys.executable, *command[1:]]
+
                     # Custom command specified
                     cwd = config.get("cwd")
                     env = config.get("env")
-                    logger.info(f"Working directory specified: {cwd}")
+                    logger.debug("Working directory specified for %s: %s", safe_server_name, cwd)
                     
                     # Resolve environment variables in env dict
                     resolved_env = None
@@ -262,7 +529,10 @@ class MCPToolManager:
                             except ValueError as e:
                                 logger.error(f"Failed to resolve env var {key} for {server_name}: {e}")
                                 return None  # Skip this server if env var resolution fails
-                        logger.info(f"Environment variables specified: {list(resolved_env.keys())}")
+                        logger.debug("Environment variables specified for %s: %s", safe_server_name, list(resolved_env.keys()))
+                    
+                    # Create log handler for this server
+                    log_handler = self._create_log_handler(server_name)
                     
                     if cwd:
                         # Convert relative path to absolute path from project root
@@ -272,24 +542,24 @@ class MCPToolManager:
                             # project root is: /workspaces/atlas-ui-3-11
                             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
                             cwd = os.path.join(project_root, cwd)
-                            logger.info(f"Converted relative cwd to absolute: {cwd} (project_root: {project_root})")
+                            logger.debug("Converted relative cwd to absolute for %s: %s", safe_server_name, cwd)
                         
                         if os.path.exists(cwd):
-                            logger.info(f"Working directory exists: {cwd}")
-                            logger.info(f"Creating STDIO client for {server_name} with command: {command} in cwd: {cwd}")
+                            logger.debug("Working directory exists for %s: %s", safe_server_name, cwd)
+                            logger.debug("Creating STDIO client for %s with command=%s cwd=%s", safe_server_name, command, cwd)
                             from fastmcp.client.transports import StdioTransport
                             transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd, env=resolved_env)
-                            client = Client(transport)
+                            client = Client(transport, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
                             logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command and cwd")
                             return client
                         else:
                             logger.error(f"Working directory does not exist: {cwd}")
                             return None
                     else:
-                        logger.info(f"No cwd specified, creating STDIO client for {server_name} with command: {command}")
+                        logger.debug("No cwd specified for %s; creating STDIO client with command=%s", safe_server_name, command)
                         from fastmcp.client.transports import StdioTransport
                         transport = StdioTransport(command=command[0], args=command[1:], env=resolved_env)
-                        client = Client(transport)
+                        client = Client(transport, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
                         logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command")
                         return client
                 else:
@@ -298,7 +568,8 @@ class MCPToolManager:
                     logger.debug(f"Attempting to initialize {server_name} at path: {server_path}")
                     if os.path.exists(server_path):
                         logger.debug(f"Server script exists for {server_name}, creating client...")
-                        client = Client(server_path)  # Client auto-detects STDIO transport from .py file
+                        log_handler = self._create_log_handler(server_name)
+                        client = Client(server_path, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))  # Client auto-detects STDIO transport from .py file
                         logger.info(f"Created MCP client for {server_name}")
                         logger.debug(f"Successfully created client for {server_name}")
                         return client
@@ -361,7 +632,8 @@ class MCPToolManager:
 
     async def initialize_clients(self):
         """Initialize FastMCP clients for all configured servers in parallel."""
-        logger.info(f"=== CLIENT INITIALIZATION: Starting parallel initialization for {len(self.servers_config)} servers: {list(self.servers_config.keys())} ===")
+        logger.info("Starting MCP client initialization for %d servers", len(self.servers_config))
+        logger.debug("MCP servers to initialize: %s", list(self.servers_config.keys()))
         
         # Create tasks for parallel initialization
         tasks = [
@@ -387,11 +659,15 @@ class MCPToolManager:
                 self._record_server_failure(server_name, "Initialization returned None")
                 logger.warning(f"Failed to initialize client for {server_name}")
         
-        logger.info("=== CLIENT INITIALIZATION COMPLETE ===")
-        logger.info(f"Successfully initialized {len(self.clients)} clients: {list(self.clients.keys())}")
-        failed_servers = set(self.servers_config.keys()) - set(self.clients.keys())
-        logger.info(f"Failed to initialize: {failed_servers}")
-        logger.info("=== END CLIENT INITIALIZATION SUMMARY ===")
+        failed_servers = sorted(set(self.servers_config.keys()) - set(self.clients.keys()))
+        logger.info(
+            "MCP client initialization complete: %d/%d connected (%d failed)",
+            len(self.clients),
+            len(self.servers_config),
+            len(failed_servers),
+        )
+        logger.debug("MCP clients initialized: %s", list(self.clients.keys()))
+        logger.debug("MCP clients failed to initialize: %s", failed_servers)
     
     async def reconnect_failed_servers(self, force: bool = False) -> Dict[str, Any]:
         """Attempt to reconnect to servers that previously failed.
@@ -570,18 +846,18 @@ class MCPToolManager:
         safe_server_name = sanitize_for_logging(server_name)
         server_config = self.servers_config.get(server_name, {})
         safe_config = sanitize_for_logging(str(server_config))
-        logger.info(f"=== TOOL DISCOVERY: Starting discovery for server '{safe_server_name}' ===")
-        logger.debug(f"Server config: {safe_config}")
+        logger.debug("Tool discovery: starting for server '%s'", safe_server_name)
+        logger.debug("Server config (sanitized): %s", safe_config)
         try:
-            logger.info(f"Opening client connection for {safe_server_name}...")
+            logger.debug("Opening client connection for %s", safe_server_name)
             async with client:
-                logger.info(f"Client connected successfully for {safe_server_name}, listing tools...")
+                logger.debug("Client connected for %s; listing tools", safe_server_name)
                 tools = await client.list_tools()
-                logger.info(f"Successfully got {len(tools)} tools from {safe_server_name}: {[tool.name for tool in tools]}")
+                logger.debug("Got %d tools from %s: %s", len(tools), safe_server_name, [tool.name for tool in tools])
 
                 # Log detailed tool information
                 for i, tool in enumerate(tools):
-                    logger.info(
+                    logger.debug(
                         "  Tool %d: name='%s', description='%s'",
                         i + 1,
                         tool.name,
@@ -592,8 +868,7 @@ class MCPToolManager:
                     'tools': tools,
                     'config': self.servers_config[server_name]
                 }
-                logger.info(f"Successfully stored {len(tools)} tools for {safe_server_name} in available_tools")
-                logger.info(f"=== TOOL DISCOVERY: Completed successfully for server '{safe_server_name}' ===")
+                logger.debug("Stored %d tools for %s", len(tools), safe_server_name)
                 return server_data
         except Exception as e:
             error_type = type(e).__name__
@@ -640,13 +915,17 @@ class MCPToolManager:
                 'tools': [],
                 'config': server_config,
             }
-            logger.error(f"Set empty tools list for failed server '{safe_server_name}' (config_present={server_config is not None})")
-            logger.info(f"=== TOOL DISCOVERY: Failed for server '{safe_server_name}' ===")
+            logger.debug(
+                "Set empty tools list for failed server '%s' (config_present=%s)",
+                safe_server_name,
+                server_config is not None,
+            )
             return server_data
 
     async def discover_tools(self):
         """Discover tools from all MCP servers in parallel."""
-        logger.info(f"Starting parallel tool discovery for {len(self.clients)} clients: {list(self.clients.keys())}")
+        logger.info("Starting MCP tool discovery for %d connected servers", len(self.clients))
+        logger.debug("Tool discovery servers: %s", list(self.clients.keys()))
         self.available_tools = {}
 
         # Create tasks for parallel tool discovery
@@ -681,13 +960,15 @@ class MCPToolManager:
                 self._clear_server_failure(server_name)
                 self.available_tools[server_name] = result
         
-        logger.info("=== TOOL DISCOVERY COMPLETE ===")
-        logger.info("Final available_tools summary:")
+        total_tools = sum(len(server_data.get('tools', [])) for server_data in self.available_tools.values())
+        logger.info(
+            "MCP tool discovery complete: %d tools across %d servers",
+            total_tools,
+            len(self.available_tools),
+        )
         for server_name, server_data in self.available_tools.items():
-            tool_count = len(server_data['tools'])
-            tool_names = [tool.name for tool in server_data['tools']]
-            logger.info(f"  {server_name}: {tool_count} tools {tool_names}")
-        logger.info("=== END TOOL DISCOVERY SUMMARY ===")
+            tool_names = [tool.name for tool in server_data.get('tools', [])]
+            logger.debug("Tool discovery summary: %s: %d tools %s", server_name, len(tool_names), tool_names)
 
         # Build tool index for quick lookups
         self._tool_index = {}
@@ -775,7 +1056,8 @@ class MCPToolManager:
 
     async def discover_prompts(self):
         """Discover prompts from all MCP servers in parallel."""
-        logger.info(f"Starting parallel prompt discovery for {len(self.clients)} clients: {list(self.clients.keys())}")
+        logger.info("Starting MCP prompt discovery for %d connected servers", len(self.clients))
+        logger.debug("Prompt discovery servers: %s", list(self.clients.keys()))
         self.available_prompts = {}
         
         # Create tasks for parallel prompt discovery
@@ -810,14 +1092,15 @@ class MCPToolManager:
                 self._clear_server_failure(server_name)
                 self.available_prompts[server_name] = result
         
-        logger.info("=== PROMPT DISCOVERY COMPLETE ===")
-        total_prompts = sum(len(server_data['prompts']) for server_data in self.available_prompts.values())
-        logger.info(f"Total prompts discovered: {total_prompts}")
+        total_prompts = sum(len(server_data.get('prompts', [])) for server_data in self.available_prompts.values())
+        logger.info(
+            "MCP prompt discovery complete: %d prompts across %d servers",
+            total_prompts,
+            len(self.available_prompts),
+        )
         for server_name, server_data in self.available_prompts.items():
-            prompt_count = len(server_data['prompts'])
-            prompt_names = [prompt.name for prompt in server_data['prompts']]
-            logger.info(f"  {server_name}: {prompt_count} prompts {prompt_names}")
-        logger.info("=== END PROMPT DISCOVERY SUMMARY ===")
+            prompt_names = [prompt.name for prompt in server_data.get('prompts', [])]
+            logger.debug("Prompt discovery summary: %s: %d prompts %s", server_name, len(prompt_names), prompt_names)
     
     def get_server_groups(self, server_name: str) -> List[str]:
         """Get required groups for a server."""
@@ -891,18 +1174,34 @@ class MCPToolManager:
         arguments: Dict[str, Any],
         *,
         progress_handler: Optional[Any] = None,
+        elicitation_handler: Optional[Any] = None,
     ) -> Any:
-        """Call a specific tool on an MCP server."""
+        """Call a specific tool on an MCP server.
+
+        Args:
+            server_name: Name of the MCP server
+            tool_name: Name of the tool to call
+            arguments: Tool arguments
+            progress_handler: Optional progress callback handler
+            elicitation_handler: Optional elicitation callback handler. Prefer the built-in
+                elicitation routing (registered at client creation time) for shared clients.
+        """
         if server_name not in self.clients:
             raise ValueError(f"No client available for server: {server_name}")
-        
+
         client = self.clients[server_name]
         try:
+            # Set elicitation callback before opening the client context.
+            # FastMCP negotiates supported capabilities during session init.
+            if elicitation_handler is not None:
+                client.set_elicitation_callback(elicitation_handler)
+
             async with client:
-                # Pass through per-call progress handler if provided (fastmcp >= 2.3.5)
+                # Pass progress handler if provided (fastmcp >= 2.3.5)
                 kwargs = {}
                 if progress_handler is not None:
                     kwargs["progress_handler"] = progress_handler
+
                 result = await client.call_tool(tool_name, arguments, **kwargs)
                 logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
                 return result
@@ -1156,7 +1455,7 @@ class MCPToolManager:
         context: Optional[Dict[str, Any]] = None
     ) -> ToolResult:
         """Execute a tool call."""
-        logger.info(f"Step 7: Entering ToolManager.execute_tool for tool {tool_call.name}")
+        logger.debug("ToolManager.execute_tool: tool=%s", tool_call.name)
         # Handle canvas pseudo-tool
         if tool_call.name == "canvas_canvas":
             # Canvas tool just returns the content - it's handled by frontend
@@ -1200,12 +1499,44 @@ class MCPToolManager:
         actual_tool_name = tool_entry['tool'].name if tool_entry['tool'] else tool_call.name
         
         try:
+            update_cb = None
+            if isinstance(context, dict):
+                update_cb = context.get("update_callback")
+
+            if update_cb is None:
+                logger.warning(
+                    f"Executing tool '{tool_call.name}' without update_callback - "
+                    f"elicitation will not work. Context type: {type(context)}"
+                )
+            else:
+                logger.debug(f"Executing tool '{tool_call.name}' with update_callback present")
+
+            async def _tool_log_callback(
+                log_server_name: str,
+                level: str,
+                message: str,
+                extra: Dict[str, Any],
+            ) -> None:
+                if update_cb is None:
+                    return
+                try:
+                    # Deferred import to avoid cycles
+                    from application.chat.utilities.notification_utils import notify_tool_log
+                    await notify_tool_log(
+                        server_name=log_server_name,
+                        tool_name=tool_call.name,
+                        tool_call_id=tool_call.id,
+                        level=level,
+                        message=sanitize_for_logging(message),
+                        extra=extra,
+                        update_callback=update_cb,
+                    )
+                except Exception:
+                    logger.debug("Tool log forwarding failed", exc_info=True)
+
             # Build a progress handler that forwards to UI if provided via context
             async def _progress_handler(progress: float, total: Optional[float], message: Optional[str]) -> None:
                 try:
-                    update_cb = None
-                    if isinstance(context, dict):
-                        update_cb = context.get("update_callback")
                     if update_cb is not None:
                         # Deferred import to avoid cycles
                         from application.chat.utilities.notification_utils import notify_tool_progress
@@ -1220,12 +1551,23 @@ class MCPToolManager:
                 except Exception:
                     logger.debug("Progress handler forwarding failed", exc_info=True)
 
-            raw_result = await self.call_tool(
-                server_name,
-                actual_tool_name,
-                tool_call.arguments,
-                progress_handler=_progress_handler,
-            )
+            if update_cb is not None:
+                async with self._use_log_callback(_tool_log_callback):
+                    async with self._use_elicitation_context(server_name, tool_call, update_cb):
+                        raw_result = await self.call_tool(
+                            server_name,
+                            actual_tool_name,
+                            tool_call.arguments,
+                            progress_handler=_progress_handler,
+                        )
+            else:
+                async with self._use_elicitation_context(server_name, tool_call, update_cb):
+                    raw_result = await self.call_tool(
+                        server_name,
+                        actual_tool_name,
+                        tool_call.arguments,
+                        progress_handler=_progress_handler,
+                    )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
             

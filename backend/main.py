@@ -29,7 +29,7 @@ from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
 from core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from core.otel_config import setup_opentelemetry
-from core.utils import sanitize_for_logging
+from core.utils import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from core.auth import get_user_from_header
 
 # Import from infrastructure
@@ -41,6 +41,7 @@ from routes.config_routes import router as config_router
 from routes.admin_routes import admin_router
 from routes.files_routes import router as files_router
 from routes.health_routes import router as health_router
+from routes.feedback_routes import feedback_router
 from version import VERSION
 
 # Load environment variables from the parent directory
@@ -67,13 +68,25 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
         elif mtype == "canvas_content":
             content = message.get("content")
             clen = len(content) if isinstance(content, str) else "obj"
-            logger.info("WS SEND: canvas_content length=%s", clen)
+            logger.debug("WS SEND: canvas_content length=%s", clen)
         else:
-            logger.info("WS SEND: %s", mtype)
+            logger.debug("WS SEND: %s", mtype)
     except Exception:
         # Non-fatal logging error; continue to send
         pass
     await websocket.send_json(message)
+
+
+def _ensure_feedback_directory():
+    """Ensure feedback storage directory exists at startup."""
+    from pathlib import Path
+    config = app_factory.get_config_manager()
+    feedback_dir = Path(config.app_settings.runtime_feedback_dir)
+    try:
+        feedback_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Feedback directory ready: {feedback_dir}")
+    except Exception as e:
+        logger.warning(f"Could not create feedback directory {feedback_dir}: {e}")
 
 
 @asynccontextmanager
@@ -86,6 +99,9 @@ async def lifespan(app: FastAPI):
     
     logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
     logger.info(f"MCP servers configured: {len(config.mcp_config.servers)}")
+    
+    # Ensure feedback directory exists
+    _ensure_feedback_directory()
     
     # Initialize MCP tools manager
     logger.info("Initializing MCP tools manager...")
@@ -165,6 +181,7 @@ app.include_router(config_router)
 app.include_router(admin_router)
 app.include_router(files_router)
 app.include_router(health_router)
+app.include_router(feedback_router)
 
 # Serve frontend build (Vite)
 project_root = Path(__file__).resolve().parents[1]
@@ -308,7 +325,7 @@ async def websocket_endpoint(websocket: WebSocket):
             message_type = data.get("type")
 
             # Debug: Log ALL incoming messages
-            logger.info(
+            logger.debug(
                 "WS RECEIVED message_type=[%s], data keys=%s",
                 sanitize_for_logging(message_type),
                 [f"[{sanitize_for_logging(key)}]" for key in data.keys()]
@@ -410,7 +427,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif message_type == "tool_approval_response":
                 # Handle tool approval response
-                logger.info(f"Received tool approval response: {sanitize_for_logging(str(data))}")
                 from application.chat.approval_manager import get_approval_manager
                 approval_manager = get_approval_manager()
                 
@@ -418,6 +434,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 approved = data.get("approved", False)
                 arguments = data.get("arguments")
                 reason = data.get("reason")
+
+                # SECURITY: Never log tool arguments at INFO level (they may include sensitive user data).
+                # Log a conservative summary instead.
+                logger.info(
+                    "Received tool approval response: %s",
+                    summarize_tool_approval_response_for_logging(data),
+                )
 
                 logger.info(f"Processing approval: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={approved}")
                 
@@ -430,6 +453,29 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
+
+            elif message_type == "elicitation_response":
+                # Handle elicitation response
+                from application.chat.elicitation_manager import get_elicitation_manager
+                elicitation_manager = get_elicitation_manager()
+                
+                elicitation_id = data.get("elicitation_id")
+                action = data.get("action", "cancel")
+                response_data = data.get("data")
+                
+                logger.info(
+                    f"Received elicitation response: id={sanitize_for_logging(elicitation_id)}, "
+                    f"action={action}"
+                )
+                
+                result = elicitation_manager.handle_elicitation_response(
+                    elicitation_id=elicitation_id,
+                    action=action,
+                    data=response_data
+                )
+                
+                logger.info(f"Elicitation response handled: result={sanitize_for_logging(result)}")
+                # No response needed - the elicitation will unblock the waiting tool execution
 
             else:
                 logger.warning(f"Unknown message type: {sanitize_for_logging(message_type)}")
@@ -445,4 +491,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import os
+    
+    # Use environment variable for host binding, default to localhost for security
+    # Set ATLAS_HOST=0.0.0.0 in production environments where needed
+    host = os.getenv("ATLAS_HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", 8000))
+    
+    uvicorn.run(app, host=host, port=port)

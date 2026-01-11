@@ -3,17 +3,20 @@
 This module provides endpoints for:
 - Submitting user feedback with ratings and comments
 - Admin viewing of collected feedback data
+- Downloading feedback data as CSV or JSON
 """
 
+import csv
+import io
 import json
-import os
 import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.auth import is_user_in_group
@@ -105,7 +108,17 @@ async def submit_feedback(
         with open(feedback_file, 'w', encoding='utf-8') as f:
             json.dump(feedback_data, f, indent=2, ensure_ascii=False)
         
-        logger.info(f"Feedback submitted by {sanitize_for_logging(current_user)}: rating={feedback.rating}, file={sanitize_for_logging(filename)}")
+        rating_label = {1: "positive", 0: "neutral", -1: "negative"}.get(feedback.rating, "unknown")
+        safe_current_user = sanitize_for_logging(current_user)
+        logger.info(
+            "Feedback submitted",
+            extra={
+                "user": safe_current_user,
+                "rating": rating_label,
+                "id": feedback_id,
+                "file": str(feedback_file)
+            }
+        )
         
         return {
             "message": "Feedback submitted successfully",
@@ -266,7 +279,13 @@ async def delete_feedback(
         
         # Delete the file
         feedback_file.unlink()
-        logger.info(f"Feedback {sanitize_for_logging(feedback_id)} deleted by {sanitize_for_logging(admin_user)}")
+        safe_feedback_id = sanitize_for_logging(feedback_id)
+        safe_admin_user = sanitize_for_logging(admin_user)
+        logger.info(
+            "Feedback deleted feedback_id=%s deleted_by=%s",
+            safe_feedback_id,
+            safe_admin_user,
+        )
         
         return {
             "message": "Feedback deleted successfully",
@@ -279,3 +298,64 @@ async def delete_feedback(
     except Exception as e:
         logger.error(f"Error deleting feedback: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to delete feedback")
+
+
+@feedback_router.get("/feedback/download")
+async def download_feedback(
+    format: Literal["csv", "json"] = Query(default="csv", description="Download format"),
+    admin_user: str = Depends(require_admin_for_feedback)
+) -> StreamingResponse:
+    """Download all feedback data as CSV or JSON (admin only)."""
+    try:
+        feedback_dir = get_feedback_directory()
+        
+        feedback_files = sorted(
+            feedback_dir.glob("feedback_*.json"),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True
+        )
+        
+        all_feedback = []
+        for feedback_file in feedback_files:
+            try:
+                with open(feedback_file, 'r', encoding='utf-8') as f:
+                    feedback_data = json.load(f)
+                    all_feedback.append(feedback_data)
+            except Exception as e:
+                logger.error(f"Error reading feedback file {feedback_file}: {e}")
+                continue
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        if format == "json":
+            content = json.dumps(all_feedback, indent=2, ensure_ascii=False)
+            filename = f"feedback_export_{timestamp}.json"
+            media_type = "application/json"
+        else:
+            output = io.StringIO()
+            fieldnames = ["id", "timestamp", "user", "rating", "comment"]
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
+            for fb in all_feedback:
+                writer.writerow({
+                    "id": fb.get("id", ""),
+                    "timestamp": fb.get("timestamp", ""),
+                    "user": fb.get("user", ""),
+                    "rating": fb.get("rating", ""),
+                    "comment": fb.get("comment", "")
+                })
+            content = output.getvalue()
+            filename = f"feedback_export_{timestamp}.csv"
+            media_type = "text/csv"
+        
+        logger.info(f"Feedback downloaded by {sanitize_for_logging(admin_user)} as {format}")
+        
+        return StreamingResponse(
+            iter([content]),
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading feedback: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to download feedback")

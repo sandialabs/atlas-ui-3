@@ -1,0 +1,14 @@
+{
+  "mcp-http-mock-with-files": {
+    "enabled": true,
+    "description": "HTTP MCP Mock Server with file analysis - demonstrates remote file access",
+    "short_description": "Mock database server with file analysis tool",
+    "author": "Atlas UI Team",
+    "help_email": "support@example.com",
+    "groups": ["users"],
+    "url": "http://localhost:8005/mcp",
+    "transport": "http",
+    "auth_token": "test-api-key-123",
+    "compliance_level": "Internal"
+  }
+}

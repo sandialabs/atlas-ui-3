@@ -51,6 +51,10 @@ We have created a set of comprehensive guides to help you get the most out of At
 
 *   **[Developer's Guide](./docs/developer/README.md)**: For developers who want to contribute to the project. It provides an overview of the architecture and instructions for creating new MCP servers.
 
+## Container Images
+
+Pre-built container images are available at `quay.io/agarlan-snl/atlas-ui-3:latest` (pushes automatically from main branch).
+
 ## For AI Agent Contributors
 
 If you are an AI agent working on this repository, please refer to the following documents for the most current and concise guidance:
@@ -64,3 +68,4 @@ If you are an AI agent working on this repository, please refer to the following
 Copyright 2025 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
 
 MIT License
+
