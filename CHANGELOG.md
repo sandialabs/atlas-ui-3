@@ -11,6 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **File Access**: Add optional `INCLUDE_FILE_CONTENT_BASE64` fallback to include base64 file content in tool arguments (disabled by default).
 - **Docs**: Add troubleshooting and developer documentation for remote MCP file access configuration.
 - **Tests**: Add coverage for absolute/relative download URL generation.
+### PR #206 - 2026-01-11
+- **Tools & Integrations Panel**: Display custom MCP server metadata (author, short_description, help_email) in the Tools & Integrations panel. Previously these fields from mcp.json were returned by the backend but not displayed in the UI.
+- **UI Enhancement**: Add expandable description with "Show more details..." / "Show less" toggle to keep the UI compact while making full descriptions available on demand.
+- **Tests**: Add 8 comprehensive unit tests for custom information display and description expansion functionality.
+### PR #207 - 2026-01-11
+- **Fix**: Keep loaded custom prompts available when switching back to the default prompt by separating loaded prompts from the active prompt selection.
+- **Tests**: Add frontend regression coverage for prompt persistence when clearing the active prompt.
 
 ### PR #203 - 2026-01-10
 - **Admin Panel**: Add User Feedback viewer card to admin dashboard with statistics display (positive/neutral/negative counts)
