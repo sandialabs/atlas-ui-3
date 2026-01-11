@@ -31,6 +31,31 @@ For detailed Docker and Kubernetes deployment instructions, see **[DOCKER_K8S_DE
 3. **select_products** - Query products table with filtering and sorting
 4. **execute_custom_query** - Execute custom SQL-like queries
 5. **get_database_schema** - Get database schema information
+6. **analyze_file** - Analyze uploaded files (demonstrates remote file access)
+
+### File Analysis Tool
+
+The `analyze_file` tool demonstrates how remote MCP servers can access files attached in Atlas UI:
+
+```python
+# User attaches "document.txt" in Atlas UI
+# LLM calls: analyze_file(filename="document.txt")
+# Backend rewrites to: analyze_file(filename="https://atlas.example.com/api/files/download/key?token=...")
+# Tool downloads and analyzes the file
+```
+
+This works when `BACKEND_PUBLIC_URL` is configured in the Atlas UI backend:
+
+```bash
+# In Atlas UI .env file
+BACKEND_PUBLIC_URL=https://atlas.example.com
+```
+
+The tool returns:
+- File size and content type
+- Text preview (for text files)
+- Line count (for text files)
+- Access method used (URL download or base64)
 
 ## Usage
 
