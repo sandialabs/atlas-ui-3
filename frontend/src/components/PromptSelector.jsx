@@ -3,22 +3,22 @@ import { ChevronDown, Sparkles } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 
 const PromptSelector = () => {
-  const { prompts, selectedPrompts, makePromptActive, removePrompts } = useChat()
+  const { prompts, selectedPrompts, activePromptKey, makePromptActive, clearActivePrompt, removePrompts } = useChat()
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef(null)
 
-  // Get all selected prompt keys as an array
+  // Get all selected prompt keys as an array (these are the "loaded" prompts)
   const selectedPromptKeys = selectedPrompts && selectedPrompts.size > 0
     ? Array.from(selectedPrompts)
     : []
 
-  // Get only the prompts that are actually selected (enabled)
+  // Get only the prompts that are actually selected (loaded from Tools panel)
   const allPrompts = []
   prompts.forEach(server => {
     if (server.prompts && server.prompts.length > 0) {
       server.prompts.forEach(prompt => {
         const promptKey = `${server.server}_${prompt.name}`
-        // Only include prompts that are actually selected
+        // Only include prompts that are loaded (in selectedPrompts)
         if (selectedPromptKeys.includes(promptKey)) {
           allPrompts.push({
             key: promptKey,
@@ -32,8 +32,8 @@ const PromptSelector = () => {
     }
   })
 
-  // The first selected prompt is the active one (used by backend)
-  const activePromptKey = selectedPromptKeys.length > 0 ? selectedPromptKeys[0] : null
+  // Check if default prompt is active (no active prompt key)
+  const isDefaultActive = !activePromptKey
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -56,13 +56,12 @@ const PromptSelector = () => {
     }
   }
 
-  // Get display text for the button - show the active (first) prompt name
+  // Get display text for the button - show the active prompt name or "Default Prompt"
   const getButtonText = () => {
-    if (selectedPromptKeys.length === 0) return 'Default Prompt'
-    // Always show the active (first) prompt name
-    const key = selectedPromptKeys[0]
-    const idx = key.indexOf('_')
-    return idx === -1 ? key : key.slice(idx + 1)
+    if (!activePromptKey) return 'Default Prompt'
+    // Extract prompt name from the key (format: "server_promptname")
+    const idx = activePromptKey.indexOf('_')
+    return idx === -1 ? activePromptKey : activePromptKey.slice(idx + 1)
   }
 
   return (
@@ -95,22 +94,22 @@ const PromptSelector = () => {
           {/* Default Prompt option - always available */}
           <button
             onClick={() => {
-              // Clear all selected prompts to use default
-              if (selectedPromptKeys.length > 0 && removePrompts) {
-                removePrompts(selectedPromptKeys)
+              // Clear the active prompt to use default (but keep prompts loaded)
+              if (clearActivePrompt) {
+                clearActivePrompt()
               }
               setIsOpen(false)
             }}
             className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 ${
-              selectedPromptKeys.length === 0 ? 'bg-blue-900/30' : ''
+              isDefaultActive ? 'bg-blue-900/30' : ''
             }`}
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-gray-200 flex items-center gap-2">
-                  {selectedPromptKeys.length === 0 && <span className="text-blue-400">✓</span>}
+                  {isDefaultActive && <span className="text-blue-400">✓</span>}
                   <span className="truncate">Default Prompt</span>
-                  {selectedPromptKeys.length === 0 && <span className="text-xs text-blue-400">(active)</span>}
+                  {isDefaultActive && <span className="text-xs text-blue-400">(active)</span>}
                 </div>
                 <div className="text-xs text-gray-400 mt-1">
                   Use the standard system prompt without customization

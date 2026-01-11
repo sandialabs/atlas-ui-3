@@ -11,10 +11,19 @@ export function useSelections() {
   const [dataSourcesRaw, setDataSourcesRaw] = usePersistentState('chatui-selected-data-sources', [])
   const [toolChoiceRequired, setToolChoiceRequired] = usePersistentState('chatui-tool-choice-required', false)
   const [complianceLevelFilter, setComplianceLevelFilter] = usePersistentState('chatui-compliance-level-filter', null)
+  
+  // New state: activePromptKey stores which prompt is currently active (null = use default)
+  const [activePromptKey, setActivePromptKey] = usePersistentState('chatui-active-prompt', null)
 
   const selectedTools = useMemo(() => toSet(toolsRaw), [toolsRaw])
   const selectedPrompts = useMemo(() => toSet(promptsRaw), [promptsRaw])
   const selectedDataSources = useMemo(() => toSet(dataSourcesRaw), [dataSourcesRaw])
+  
+  // activePrompts: array to send to backend (empty array for default, or array with active prompt)
+  const activePrompts = useMemo(() => {
+    if (!activePromptKey) return []
+    return [activePromptKey]
+  }, [activePromptKey])
 
   const toggleSetItem = (currentSet, setUpdater, key) => {
     const next = new Set(currentSet)
@@ -73,13 +82,18 @@ export function useSelections() {
   }, [setPromptsRaw])
 
   const makePromptActive = useCallback(promptKey => {
-    // Move the specified prompt to the front of the array (making it active)
-    // If it's not in the list, add it to the front
-    setPromptsRaw(prev => {
-      const filtered = prev.filter(k => k !== promptKey)
-      return [promptKey, ...filtered]
-    })
-  }, [setPromptsRaw])
+    // Set the active prompt key (null for default)
+    setActivePromptKey(promptKey)
+    // Ensure the prompt is in the selectedPrompts set if it's not null
+    if (promptKey && !promptsRaw.includes(promptKey)) {
+      setPromptsRaw(prev => [...prev, promptKey])
+    }
+  }, [setActivePromptKey, promptsRaw, setPromptsRaw])
+  
+  const clearActivePrompt = useCallback(() => {
+    // Clear the active prompt to use default (but keep prompts loaded)
+    setActivePromptKey(null)
+  }, [setActivePromptKey])
 
   const clearToolsAndPrompts = useCallback(() => {
     setToolsRaw([])
@@ -91,6 +105,8 @@ export function useSelections() {
   return {
     selectedTools,
     selectedPrompts,
+    activePrompts,
+    activePromptKey,
     selectedDataSources,
     toggleTool,
     togglePrompt,
@@ -101,6 +117,7 @@ export function useSelections() {
   setSinglePrompt,
   removePrompts,
   makePromptActive,
+  clearActivePrompt,
     toolChoiceRequired,
     setToolChoiceRequired,
     clearToolsAndPrompts,
