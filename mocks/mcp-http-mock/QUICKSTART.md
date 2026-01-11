@@ -2,6 +2,13 @@
 
 This is a quick reference guide for deploying the MCP HTTP Mock Server.
 
+## File Analysis Tool
+
+**NEW:** This server now includes a file analysis tool that demonstrates remote MCP server file access. See **[QUICKSTART_FILE_ANALYSIS.md](QUICKSTART_FILE_ANALYSIS.md)** for a complete guide on:
+- Setting up `BACKEND_PUBLIC_URL` for remote file access
+- Testing file uploads with the analyze_file tool
+- Troubleshooting common issues
+
 ## Docker Quick Start
 
 ### Build the Image
