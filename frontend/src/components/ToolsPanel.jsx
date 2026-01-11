@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -12,6 +12,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
   const [collapsedServers, setCollapsedServers] = useState(new Set())
+  const [expandedDescriptions, setExpandedDescriptions] = useState(new Set())
   const navigate = useNavigate()
   const prevOpenRef = useRef(false)
   const {
@@ -215,6 +216,9 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       allServers[toolServer.server] = {
         server: toolServer.server,
         description: toolServer.description,
+        short_description: toolServer.short_description,
+        author: toolServer.author,
+        help_email: toolServer.help_email,
         is_exclusive: toolServer.is_exclusive,
         compliance_level: toolServer.compliance_level,
         tools: toolServer.tools || [],
@@ -232,6 +236,9 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       allServers[promptServer.server] = {
         server: promptServer.server,
         description: promptServer.description,
+        short_description: promptServer.short_description,
+        author: promptServer.author,
+        help_email: promptServer.help_email,
         is_exclusive: false,
         tools: [],
         tools_detailed: [],
@@ -388,6 +395,16 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       newCollapsed.add(serverName)
     }
     setCollapsedServers(newCollapsed)
+  }
+
+  const toggleDescriptionExpansion = (serverName) => {
+    const newExpanded = new Set(expandedDescriptions)
+    if (newExpanded.has(serverName)) {
+      newExpanded.delete(serverName)
+    } else {
+      newExpanded.add(serverName)
+    }
+    setExpandedDescriptions(newExpanded)
   }
 
   /**
@@ -581,7 +598,74 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                 </span>
                               )}
                             </div>
-                            <p className="text-xs text-gray-400 mb-2 line-clamp-1">{server.description}</p>
+                            
+                            {/* Short description - always shown (compact) */}
+                            {server.short_description && (
+                              <p className="text-xs text-gray-400 mb-1 line-clamp-1">
+                                {server.short_description}
+                              </p>
+                            )}
+                            
+                            {/* If no short_description but has description, show description (compact) */}
+                            {!server.short_description && server.description && (
+                              <p className="text-xs text-gray-400 mb-1 line-clamp-1">
+                                {server.description}
+                              </p>
+                            )}
+                            
+                            {/* Expandable full description - only if different from short_description */}
+                            {server.description && server.description !== server.short_description && (
+                              <div className="mb-1">
+                                {expandedDescriptions.has(server.server) ? (
+                                  <>
+                                    <p className="text-xs text-gray-400 mb-1">
+                                      {server.description}
+                                    </p>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        toggleDescriptionExpansion(server.server)
+                                      }}
+                                      className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                                    >
+                                      Show less
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      toggleDescriptionExpansion(server.server)
+                                    }}
+                                    className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                                  >
+                                    Show more details...
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            
+                            {/* Author and help email info */}
+                            <div className="flex items-center gap-3 mb-2 text-xs text-gray-500">
+                              {server.author && (
+                                <div className="flex items-center gap-1">
+                                  <User className="w-3 h-3" />
+                                  <span>{server.author}</span>
+                                </div>
+                              )}
+                              {server.help_email && (
+                                <div className="flex items-center gap-1">
+                                  <Mail className="w-3 h-3" />
+                                  <a 
+                                    href={`mailto:${server.help_email}`}
+                                    className="hover:text-blue-400 transition-colors"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {server.help_email}
+                                  </a>
+                                </div>
+                              )}
+                            </div>
                             
                             {/* Tools and Prompts - only show when not collapsed */}
                             {!isCollapsed && (
