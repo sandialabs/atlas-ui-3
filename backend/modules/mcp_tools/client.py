@@ -309,6 +309,11 @@ class MCPToolManager:
                 if action != "accept":
                     return ElicitResult(action=action, content=None)
 
+                # Approval-only elicitation (response_type=None) must return an empty object.
+                # Some UIs send placeholder payloads like {'none': ''}; don't forward them.
+                if response_type is None:
+                    return ElicitResult(action="accept", content={})
+
                 if data is None:
                     return ElicitResult(action="accept", content=None)
 
