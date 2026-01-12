@@ -238,3 +238,48 @@ class TestElicitationIntegration:
             # Verify result
             assert result.action == "accept"
             assert result.content == {"value": "test_value"}
+
+    @pytest.mark.asyncio
+    async def test_elicitation_accept_no_data_returns_empty_object(self, manager):
+        """Test approval-only elicitation returns empty object on accept.
+
+        FastMCP validation for response_type=None expects an empty response object.
+        Some UIs send placeholder payloads like {'none': ''}; we must not forward them.
+        """
+        from modules.mcp_tools.client import _ELICITATION_ROUTING, _ElicitationRoutingContext
+        from domain.messages.models import ToolCall
+
+        _ELICITATION_ROUTING.clear()
+
+        server_name = "test_server"
+        tool_call = ToolCall(id="call_123", name="test_tool", arguments={})
+        mock_callback = AsyncMock()
+
+        _ELICITATION_ROUTING[server_name] = _ElicitationRoutingContext(
+            server_name=server_name,
+            tool_call=tool_call,
+            update_cb=mock_callback,
+        )
+
+        handler = manager._create_elicitation_handler(server_name)
+
+        with patch('application.chat.elicitation_manager.get_elicitation_manager') as mock_get_mgr:
+            mock_elicit_mgr = Mock()
+            mock_request = AsyncMock()
+            mock_request.wait_for_response = AsyncMock(return_value={
+                "action": "accept",
+                "data": {"none": ""},
+            })
+            mock_elicit_mgr.create_elicitation_request = Mock(return_value=mock_request)
+            mock_elicit_mgr.cleanup_request = Mock()
+            mock_get_mgr.return_value = mock_elicit_mgr
+
+            result = await handler(
+                "Are you sure you want to delete this item?",
+                None,
+                None,
+                None,
+            )
+
+            assert result.action == "accept"
+            assert result.content == {}

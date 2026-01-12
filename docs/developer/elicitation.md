@@ -100,6 +100,7 @@ Elicitation is powered by FastMCP 2.10.0+. When building MCP tools:
 
 - Elicitation requests timeout after 5 minutes
 - Tools receive structured responses indicating accept/decline/cancel
+- Approval-only elicitations (e.g., `response_type=None`) expect an empty response object on accept
 - Dialog state persists during the elicitation session
 - Multiple concurrent elicitations are not supported
 
