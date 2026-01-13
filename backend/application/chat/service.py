@@ -342,6 +342,7 @@ class ChatService:
 
             sanitized_s3_key = s3_key.replace('\r', '').replace('\n', '')
             logger.info(f"Attached file ({sanitized_s3_key}) to session {session_id}")
+            logger.debug(f"After attach: session object id={id(session)}, files in context: {list(session.context.get('files', {}).keys())}")
 
             # Emit files_update to notify UI
             if update_callback:
