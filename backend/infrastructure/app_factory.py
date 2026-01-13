@@ -13,6 +13,7 @@ from modules.mcp_tools import MCPToolManager
 from modules.rag import RAGClient
 from domain.rag_mcp_service import RAGMCPService
 from core.auth import is_user_in_group
+from infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,9 @@ class AppFactory:
             self.file_storage = S3StorageClient()
         self.file_manager = FileManager(self.file_storage)
 
+        # Shared session repository for all ChatService instances
+        self.session_repository = InMemorySessionRepository()
+
         logger.info("AppFactory initialized")
 
     def create_chat_service(
@@ -57,6 +61,7 @@ class AppFactory:
             connection=connection,
             config_manager=self.config_manager,
             file_manager=self.file_manager,
+            session_repository=self.session_repository,
         )
 
     # Accessors
