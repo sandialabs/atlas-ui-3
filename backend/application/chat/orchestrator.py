@@ -134,8 +134,6 @@ class ChatOrchestrator:
         if not session:
             raise SessionNotFoundError(f"Session {session_id} not found")
         
-        logger.debug(f"Orchestrator: session object id={id(session)}, files in context: {list(session.context.get('files', {}).keys())}")
-        
         # Add user message to history
         user_message = Message(
             role=MessageRole.USER,

@@ -80,7 +80,6 @@ class MessageBuilder:
         if include_files_manifest:
             session_context = build_session_context(session)
             files_in_context = session_context.get("files", {})
-            logger.debug(f"MessageBuilder: session object id={id(session)}, session.context files: {list(session.context.get('files', {}).keys())}")
             logger.debug(f"Session has {len(files_in_context)} files: {list(files_in_context.keys())}")
             files_manifest = file_utils.build_files_manifest(session_context)
             if files_manifest:
