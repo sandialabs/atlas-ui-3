@@ -22,13 +22,16 @@ vi.mock('lucide-react', () => ({
 describe('PromptSelector', () => {
   const mockTogglePrompt = vi.fn()
   const mockMakePromptActive = vi.fn()
+  const mockClearActivePrompt = vi.fn()
   const mockRemovePrompts = vi.fn()
 
   const defaultChatContext = {
     prompts: [],
     selectedPrompts: new Set(),
+    activePromptKey: null,
     togglePrompt: mockTogglePrompt,
     makePromptActive: mockMakePromptActive,
+    clearActivePrompt: mockClearActivePrompt,
     removePrompts: mockRemovePrompts
   }
 
@@ -38,7 +41,7 @@ describe('PromptSelector', () => {
   })
 
   describe('Default Prompt Behavior', () => {
-    it('should display "Default Prompt" when no prompts are selected', () => {
+    it('should display "Default Prompt" when no active prompt', () => {
       render(<PromptSelector />)
       expect(screen.getByText('Default Prompt')).toBeInTheDocument()
     })
@@ -84,7 +87,8 @@ describe('PromptSelector', () => {
           description: 'A test prompt'
         }]
       }],
-      selectedPrompts: new Set(['test-server_test_prompt'])
+      selectedPrompts: new Set(['test-server_test_prompt']),
+      activePromptKey: 'test-server_test_prompt'
     }
 
     beforeEach(() => {
@@ -136,7 +140,7 @@ describe('PromptSelector', () => {
       expect(screen.getByText('from test-server')).toBeInTheDocument()
     })
 
-    it('should call removePrompts when clicking Default Prompt', () => {
+    it('should call clearActivePrompt when clicking Default Prompt', () => {
       render(<PromptSelector />)
       
       const button = screen.getByRole('button')
@@ -145,7 +149,25 @@ describe('PromptSelector', () => {
       const defaultButton = screen.getByText('Use the standard system prompt without customization').closest('button')
       fireEvent.click(defaultButton)
 
-      expect(mockRemovePrompts).toHaveBeenCalledWith(['test-server_test_prompt'])
+      expect(mockClearActivePrompt).toHaveBeenCalled()
+    })
+    
+    it('should keep prompts loaded when switching to Default Prompt', () => {
+      render(<PromptSelector />)
+      
+      const button = screen.getByRole('button')
+      fireEvent.click(button)
+
+      // Verify prompt is visible before switching to default
+      expect(screen.getByText('A test prompt')).toBeInTheDocument()
+
+      // Click Default Prompt
+      const defaultButton = screen.getByText('Use the standard system prompt without customization').closest('button')
+      fireEvent.click(defaultButton)
+
+      // The clearActivePrompt should be called (not removePrompts)
+      expect(mockClearActivePrompt).toHaveBeenCalled()
+      expect(mockRemovePrompts).not.toHaveBeenCalled()
     })
   })
 
@@ -164,7 +186,8 @@ describe('PromptSelector', () => {
         'test-server_prompt_one',
         'test-server_prompt_two',
         'test-server_prompt_three'
-      ])
+      ]),
+      activePromptKey: 'test-server_prompt_one'
     }
 
     beforeEach(() => {
@@ -296,7 +319,8 @@ describe('PromptSelector', () => {
           server: 'test',
           prompts: [{ name: 'no_desc_prompt' }]
         }],
-        selectedPrompts: new Set(['test_no_desc_prompt'])
+        selectedPrompts: new Set(['test_no_desc_prompt']),
+        activePromptKey: 'test_no_desc_prompt'
       })
 
       render(<PromptSelector />)
@@ -316,7 +340,8 @@ describe('PromptSelector', () => {
           server: 'test',
           prompts: [{ name: 'single', description: 'Single prompt' }]
         }],
-        selectedPrompts: new Set(['test_single'])
+        selectedPrompts: new Set(['test_single']),
+        activePromptKey: 'test_single'
       })
 
       render(<PromptSelector />)
@@ -335,6 +360,7 @@ describe('PromptSelector', () => {
           prompts: [{ name: 'test', description: 'Test' }]
         }],
         selectedPrompts: new Set(['test_test']),
+        activePromptKey: 'test_test',
         makePromptActive: undefined
       })
 
@@ -349,7 +375,7 @@ describe('PromptSelector', () => {
       expect(() => fireEvent.click(promptButton)).not.toThrow()
     })
 
-    it('should handle missing removePrompts function', () => {
+    it('should handle missing clearActivePrompt function', () => {
       useChat.mockReturnValue({
         ...defaultChatContext,
         prompts: [{
@@ -357,7 +383,8 @@ describe('PromptSelector', () => {
           prompts: [{ name: 'test', description: 'Test' }]
         }],
         selectedPrompts: new Set(['test_test']),
-        removePrompts: undefined
+        activePromptKey: 'test_test',
+        clearActivePrompt: undefined
       })
 
       render(<PromptSelector />)

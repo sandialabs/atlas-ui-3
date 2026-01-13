@@ -554,3 +554,342 @@ describe('ToolsPanel - Tool Selection', () => {
     expect(mockOnClose).toHaveBeenCalled()
   })
 })
+
+describe('ToolsPanel - Custom Information Display', () => {
+  const defaultChatContext = {
+    selectedTools: new Set(),
+    selectedPrompts: new Set(),
+    toggleTool: vi.fn(),
+    togglePrompt: vi.fn(),
+    addTools: vi.fn(),
+    addPrompts: vi.fn(),
+    removeTools: vi.fn(),
+    removePrompts: vi.fn(),
+    clearToolsAndPrompts: vi.fn(),
+    toolChoiceRequired: false,
+    setToolChoiceRequired: vi.fn(),
+    complianceLevelFilter: 'all',
+    tools: [],
+    prompts: [],
+    features: {}
+  }
+
+  const defaultMarketplaceContext = {
+    getComplianceFilteredTools: vi.fn(() => []),
+    getComplianceFilteredPrompts: vi.fn(() => []),
+    getFilteredTools: vi.fn(() => []),
+    getFilteredPrompts: vi.fn(() => [])
+  }
+
+  beforeEach(() => {
+    useChat.mockReturnValue(defaultChatContext)
+    useMarketplace.mockReturnValue(defaultMarketplaceContext)
+  })
+
+  it('should display author information when present', () => {
+    const testTools = [{
+      server: 'calculator',
+      description: 'Mathematical calculator',
+      short_description: 'Math operations',
+      author: 'Chat UI Team',
+      help_email: 'support@example.com',
+      tools: ['evaluate'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Verify author is displayed
+    expect(screen.getByText('Chat UI Team')).toBeInTheDocument()
+  })
+
+  it('should display help email as a mailto link when present', () => {
+    const testTools = [{
+      server: 'calculator',
+      description: 'Mathematical calculator',
+      short_description: 'Math operations',
+      author: 'Chat UI Team',
+      help_email: 'support@example.com',
+      tools: ['evaluate'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Verify help email is displayed as a link
+    const emailLink = screen.getByText('support@example.com')
+    expect(emailLink).toBeInTheDocument()
+    expect(emailLink.tagName).toBe('A')
+    expect(emailLink).toHaveAttribute('href', 'mailto:support@example.com')
+  })
+
+  it('should display short description by default', () => {
+    const testTools = [{
+      server: 'calculator',
+      description: 'Evaluate mathematical expressions, perform calculations with basic arithmetic, trigonometry, and logarithms',
+      short_description: 'Mathematical calculator',
+      author: 'Chat UI Team',
+      help_email: 'support@example.com',
+      tools: ['evaluate'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Verify short description is displayed
+    expect(screen.getByText('Mathematical calculator')).toBeInTheDocument()
+    
+    // Verify full description is not initially displayed
+    expect(screen.queryByText(/Evaluate mathematical expressions, perform calculations/)).not.toBeInTheDocument()
+  })
+
+  it('should show expandable description button when description differs from short_description', () => {
+    const testTools = [{
+      server: 'calculator',
+      description: 'Evaluate mathematical expressions, perform calculations with basic arithmetic, trigonometry, and logarithms',
+      short_description: 'Mathematical calculator',
+      author: 'Chat UI Team',
+      help_email: 'support@example.com',
+      tools: ['evaluate'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Verify "Show more details..." button is present
+    expect(screen.getByRole('button', { name: 'Show more details...' })).toBeInTheDocument()
+  })
+
+  it('should expand and collapse full description when toggle button is clicked', () => {
+    const testTools = [{
+      server: 'calculator',
+      description: 'Evaluate mathematical expressions, perform calculations with basic arithmetic, trigonometry, and logarithms',
+      short_description: 'Mathematical calculator',
+      author: 'Chat UI Team',
+      help_email: 'support@example.com',
+      tools: ['evaluate'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Click "Show more details..." button
+    const showMoreButton = screen.getByRole('button', { name: 'Show more details...' })
+    fireEvent.click(showMoreButton)
+
+    // Verify full description is now displayed
+    expect(screen.getByText(/Evaluate mathematical expressions, perform calculations/)).toBeInTheDocument()
+    
+    // Verify button text changed to "Show less"
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show more details...' })).not.toBeInTheDocument()
+
+    // Click "Show less" button
+    const showLessButton = screen.getByRole('button', { name: 'Show less' })
+    fireEvent.click(showLessButton)
+
+    // Verify full description is hidden again
+    expect(screen.queryByText(/Evaluate mathematical expressions, perform calculations/)).not.toBeInTheDocument()
+    
+    // Verify button text changed back to "Show more details..."
+    expect(screen.getByRole('button', { name: 'Show more details...' })).toBeInTheDocument()
+  })
+
+  it('should not show expand button when description equals short_description', () => {
+    const testTools = [{
+      server: 'simple',
+      description: 'Simple tool',
+      short_description: 'Simple tool',
+      author: 'Test Team',
+      help_email: 'test@example.com',
+      tools: ['tool1'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Verify no "Show more details..." button when descriptions match
+    expect(screen.queryByRole('button', { name: 'Show more details...' })).not.toBeInTheDocument()
+  })
+
+  it('should handle tools with only description (no short_description)', () => {
+    const testTools = [{
+      server: 'legacy',
+      description: 'Legacy tool description',
+      tools: ['tool1'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Verify description is displayed when short_description is missing
+    expect(screen.getByText('Legacy tool description')).toBeInTheDocument()
+  })
+
+  it('should preserve custom fields when merging tools and prompts', () => {
+    const testTools = [{
+      server: 'shared_server',
+      description: 'Server with tools',
+      short_description: 'Shared server',
+      author: 'Tool Team',
+      help_email: 'tools@example.com',
+      tools: ['tool1'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0
+    }]
+
+    const testPrompts = [{
+      server: 'shared_server',
+      description: 'Server with prompts',
+      short_description: 'Shared server',
+      author: 'Tool Team',
+      help_email: 'tools@example.com',
+      prompts: [{ name: 'prompt1', description: 'Test prompt' }],
+      prompt_count: 1
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools,
+      prompts: testPrompts
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools),
+      getFilteredPrompts: vi.fn(() => testPrompts)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Verify custom fields are displayed (should only appear once since server is merged)
+    expect(screen.getByText('Tool Team')).toBeInTheDocument()
+    expect(screen.getByText('tools@example.com')).toBeInTheDocument()
+    expect(screen.getByText('Shared server')).toBeInTheDocument()
+  })
+})

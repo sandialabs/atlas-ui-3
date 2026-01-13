@@ -29,7 +29,7 @@ const WelcomeScreen = () => {
       
       <div className="max-w-md">
         <p className="text-gray-400 text-lg">
-          Select a model and start chatting. You can also explore available tools in the side panel.
+          Select a model and start chatting. To explore available tools, click the Wrench icon or to view files, click the Folder icon in the top right.
         </p>
       </div>
     </div>
