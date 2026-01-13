@@ -11,46 +11,24 @@ import uuid
 import os
 import random
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 import uvicorn
+
+from models import (
+    ChatMessage,
+    ChatCompletionRequest,
+    ChatCompletionChoice,
+    ChatCompletionUsage,
+    ChatCompletionResponse
+)
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Mock LLM Server (Rate Limit & Error Simulation)", description="Mock LLM service with reliability testing features")
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-class ChatCompletionRequest(BaseModel):
-    model: str
-    messages: List[ChatMessage]
-    max_tokens: Optional[int] = 1000
-    temperature: Optional[float] = 0.7
-    stream: Optional[bool] = False
-
-class ChatCompletionChoice(BaseModel):
-    index: int
-    message: ChatMessage
-    finish_reason: str
-
-class ChatCompletionUsage(BaseModel):
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-
-class ChatCompletionResponse(BaseModel):
-    id: str
-    object: str
-    created: int
-    model: str
-    choices: List[ChatCompletionChoice]
-    usage: ChatCompletionUsage
 
 # Rate limiting (test-only; not production-grade, no locking for concurrency).
 class RateLimiter:
@@ -80,7 +58,6 @@ class RateLimiter:
         logger.warning("Rate limit exceeded, locking out for 30 seconds")
         return False
 
-from datetime import timedelta
 rate_limiter = RateLimiter(requests_per_minute=5)  # More restrictive for testing
 
 # Mock responses for different scenarios

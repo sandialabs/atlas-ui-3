@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
+# Message shown when content is blocked and history is cleared
+BLOCKED_HISTORY_CLEARED_MESSAGE = "Tool output violated our content policy. The conversation history has been cleared. Please start a new conversation."
+
 
 class ToolsModeRunner:
     """
@@ -34,6 +37,7 @@ class ToolsModeRunner:
         prompt_provider: Optional[PromptProvider] = None,
         artifact_processor: Optional[Callable[[Session, List[ToolResult], Optional[UpdateCallback]], Awaitable[None]]] = None,
         config_manager=None,
+        security_check_service=None,
     ):
         """
         Initialize tools mode runner.
@@ -45,6 +49,7 @@ class ToolsModeRunner:
             prompt_provider: Optional prompt provider
             artifact_processor: Optional callback for processing tool artifacts
             config_manager: Optional config manager for approval settings
+            security_check_service: Optional security check service for tool output validation
         """
         self.llm = llm
         self.tool_manager = tool_manager
@@ -52,6 +57,7 @@ class ToolsModeRunner:
         self.prompt_provider = prompt_provider
         self.artifact_processor = artifact_processor
         self.config_manager = config_manager
+        self.security_check_service = security_check_service
 
         # Verify event_publisher has send_json for elicitation support
         if hasattr(event_publisher, 'send_json'):
@@ -108,13 +114,10 @@ class ToolsModeRunner:
             content = llm_response.content if llm_response else ""
             assistant_message = Message(role=MessageRole.ASSISTANT, content=content)
             session.history.add_message(assistant_message)
-            
-            await self.event_publisher.publish_chat_response(
-                message=content,
-                has_pending_tools=False,
-            )
-            await self.event_publisher.publish_response_complete()
-            
+
+            # NOTE: Do NOT publish the response here - orchestrator will publish
+            # after security check passes. This prevents showing blocked content to users.
+
             return notification_utils.create_chat_response(content)
 
         # Execute tool workflow
@@ -140,6 +143,57 @@ class ToolsModeRunner:
             update_callback=effective_callback,
             config_manager=self.config_manager,
         )
+        
+        # Security check tool outputs before they go to LLM
+        if self.security_check_service:
+            for tool_result in tool_results:
+                # Convert message history to list of dicts for API
+                message_history = [
+                    {"role": msg.role.value, "content": msg.content}
+                    for msg in session.history.messages
+                ]
+                
+                tool_check = await self.security_check_service.check_tool_rag_output(
+                    content=tool_result.content,
+                    source_type="tool",
+                    message_history=message_history,
+                    user_email=user_email
+                )
+                
+                if tool_check.is_blocked():
+                    # Tool output is blocked
+                    logger.warning(
+                        f"Tool output blocked by security check for {user_email}: {tool_check.message}"
+                    )
+
+                    # CLEAR ALL CONVERSATION HISTORY
+                    session.history.messages.clear()
+
+                    # Note: session_repository not available here, orchestrator will save
+
+                    await self.event_publisher.send_json({
+                        "type": "security_warning",
+                        "status": "blocked",
+                        "message": BLOCKED_HISTORY_CLEARED_MESSAGE
+                    })
+
+                    return {
+                        "type": "error",
+                        "error": "Tool output blocked",
+                        "blocked": True
+                    }
+
+                elif tool_check.has_warnings():
+                    # Tool output has warnings - notify user
+                    logger.info(
+                        f"Tool output has warnings from security check for {user_email}: {tool_check.message}"
+                    )
+
+                    await self.event_publisher.send_json({
+                        "type": "security_warning",
+                        "status": "warning",
+                        "message": "The response has been flagged for review."
+                    })
 
         # Process artifacts if handler provided
         if self.artifact_processor:
@@ -156,12 +210,8 @@ class ToolsModeRunner:
         )
         session.history.add_message(assistant_message)
 
-        # Emit final chat response
-        await self.event_publisher.publish_chat_response(
-            message=final_response,
-            has_pending_tools=False,
-        )
-        await self.event_publisher.publish_response_complete()
+        # NOTE: Do NOT publish the response here - orchestrator will publish
+        # after security check passes. This prevents showing blocked content to users.
 
         return notification_utils.create_chat_response(final_response)
     

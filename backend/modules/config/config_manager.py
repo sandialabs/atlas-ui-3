@@ -158,7 +158,11 @@ class AppSettings(BaseSettings):
     
     # RAG settings
     mock_rag: bool = False
-    rag_mock_url: str = "http://localhost:8001"
+    # Base URL for external RAG HTTP server
+    rag_url: str = Field(
+        default="http://localhost:8001",
+        validation_alias=AliasChoices("RAG_URL"),
+    )
     
     # Banner settings
     banner_enabled: bool = False
@@ -313,29 +317,44 @@ class AppSettings(BaseSettings):
         description="Enable email domain whitelist restriction (configured in domain-whitelist.json)",
         validation_alias=AliasChoices("FEATURE_DOMAIN_WHITELIST_ENABLED", "FEATURE_DOE_LAB_CHECK_ENABLED"),
     )
+    
+    # Content security check feature gates
+    feature_security_check_input_enabled: bool = Field(
+        False,
+        description="Enable pre-check security moderation for user input",
+        validation_alias=AliasChoices("FEATURE_SECURITY_CHECK_INPUT_ENABLED"),
+    )
+    feature_security_check_output_enabled: bool = Field(
+        False,
+        description="Enable post-check security moderation for LLM output",
+        validation_alias=AliasChoices("FEATURE_SECURITY_CHECK_OUTPUT_ENABLED"),
+    )
+    feature_security_check_tool_rag_enabled: bool = Field(
+        False,
+        description="Enable security check for tool and RAG outputs before sending to LLM",
+        validation_alias=AliasChoices("FEATURE_SECURITY_CHECK_TOOL_RAG_ENABLED"),
+    )
+    
+    # Security check API configuration
+    security_check_api_url: Optional[str] = Field(
+        default=None,
+        description="API endpoint for content security checks",
+        validation_alias="SECURITY_CHECK_API_URL",
+    )
+    security_check_api_key: Optional[str] = Field(
+        default=None,
+        description="API key for security check endpoint",
+        validation_alias="SECURITY_CHECK_API_KEY",
+    )
+    security_check_timeout: int = Field(
+        default=10,
+        description="Timeout in seconds for security check API calls",
+        validation_alias="SECURITY_CHECK_TIMEOUT",
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
     capability_token_ttl_seconds: int = 3600
-
-    # Backend URL configuration for MCP server file access
-    # This should be the publicly accessible URL of the backend API
-    # Example: "https://atlas-ui.example.com" or "http://localhost:8000"
-    # If not set, relative URLs will be used (only works for local/stdio servers)
-    backend_public_url: Optional[str] = Field(
-        default=None,
-        description="Public URL of the backend API for file downloads by remote MCP servers",
-        validation_alias="BACKEND_PUBLIC_URL",
-    )
-
-    # Whether to include base64 file content as fallback in tool arguments
-    # This allows MCP servers to access files even if they cannot reach the backend URL
-    # WARNING: Enabling this can significantly increase message sizes for large files
-    include_file_content_base64: bool = Field(
-        default=False,
-        description="Include base64 encoded file content in tool arguments as fallback",
-        validation_alias="INCLUDE_FILE_CONTENT_BASE64",
-    )
 
     # Rate limiting (global middleware)
     rate_limit_rpm: int = Field(default=600, validation_alias="RATE_LIMIT_RPM")
@@ -387,8 +406,8 @@ class AppSettings(BaseSettings):
     pi_threshold_medium: int = Field(default=50, validation_alias="PI_THRESHOLD_MEDIUM")
     pi_threshold_high: int = Field(default=80, validation_alias="PI_THRESHOLD_HIGH")
     
-    # Runtime directories (relative to project root, not backend/)
-    runtime_feedback_dir: str = Field(default="../runtime/feedback", validation_alias="RUNTIME_FEEDBACK_DIR")
+    # Runtime directories
+    runtime_feedback_dir: str = Field(default="runtime/feedback", validation_alias="RUNTIME_FEEDBACK_DIR")
     
     @model_validator(mode='after')
     def validate_aws_alb_config(self):

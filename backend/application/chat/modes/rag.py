@@ -23,6 +23,7 @@ class RagModeRunner:
         self,
         llm: LLMProtocol,
         event_publisher: EventPublisher,
+        security_check_service=None,
     ):
         """
         Initialize RAG mode runner.
@@ -30,9 +31,11 @@ class RagModeRunner:
         Args:
             llm: LLM protocol implementation
             event_publisher: Event publisher for UI updates
+            security_check_service: Optional security check service for RAG output validation
         """
         self.llm = llm
         self.event_publisher = event_publisher
+        self.security_check_service = security_check_service
     
     async def run(
         self,
@@ -70,11 +73,7 @@ class RagModeRunner:
         )
         session.history.add_message(assistant_message)
 
-        # Publish events
-        await self.event_publisher.publish_chat_response(
-            message=response_content,
-            has_pending_tools=False,
-        )
-        await self.event_publisher.publish_response_complete()
+        # NOTE: Do NOT publish the response here - orchestrator will publish
+        # after security check passes. This prevents showing blocked content to users.
 
         return notification_utils.create_chat_response(response_content)
