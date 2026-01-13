@@ -12,6 +12,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add Playwright test suite (oauth-authentication.spec.js) for browser-based OAuth workflow testing
 - Update e2e test runner to include OAuth 2.1 tests in the standard test suite
 - Add detailed documentation for OAuth 2.1 e2e tests (test/OAUTH_E2E_TESTS.md)
+### PR #210 - 2026-01-12
+- **Fix**: Treat approval-only elicitation (`response_type=None`) as expecting an empty response object on accept, preventing `approve_deletion` from failing when the UI returns placeholder data.
+- **Tests**: Add backend regression coverage for approval-only elicitation accept payload normalization.
+
+### PR #192 - 2026-01-10
+- **File Access**: Add `BACKEND_PUBLIC_URL` configuration so remote MCP servers (HTTP/SSE) can download attached files via absolute URLs.
+- **File Access**: Add optional `INCLUDE_FILE_CONTENT_BASE64` fallback to include base64 file content in tool arguments (disabled by default).
+- **Docs**: Add troubleshooting and developer documentation for remote MCP file access configuration.
+- **Tests**: Add coverage for absolute/relative download URL generation.
+### PR #206 - 2026-01-11
+- **Tools & Integrations Panel**: Display custom MCP server metadata (author, short_description, help_email) in the Tools & Integrations panel. Previously these fields from mcp.json were returned by the backend but not displayed in the UI.
+- **UI Enhancement**: Add expandable description with "Show more details..." / "Show less" toggle to keep the UI compact while making full descriptions available on demand.
+- **Tests**: Add 8 comprehensive unit tests for custom information display and description expansion functionality.
+### PR #207 - 2026-01-11
+- **Fix**: Keep loaded custom prompts available when switching back to the default prompt by separating loaded prompts from the active prompt selection.
+- **Tests**: Add frontend regression coverage for prompt persistence when clearing the active prompt.
+
+### PR #203 - 2026-01-10
+- **Admin Panel**: Add User Feedback viewer card to admin dashboard with statistics display (positive/neutral/negative counts)
+- **Admin Panel**: Add feedback download functionality supporting CSV and JSON export formats
+- **Backend**: Add `/api/feedback/download` endpoint for exporting feedback data
+
+### PR #201 - 2026-01-10
+- **Fix**: Include feedback_router in main.py to fix 404 on /api/feedback endpoint. The feedback routes were defined but never registered with the FastAPI app.
+- **Tests**: Add comprehensive test suite for feedback routes (13 tests) to prevent regression. Tests cover route registration, feedback submission, admin-only access controls, and deletion.
+
+### PR #197 - 2026-01-08
+- **Configuration**: Synchronized docker-compose.yml environment variables with .env.example. Added all missing feature flags, API keys, agent configuration, and other application settings to ensure Docker deployments have the same configuration options as local development.
+- **CI**: Updated test container build to include `.env.example` and `docker-compose.yml` so docker env sync tests can run.
+
+### 2026-01-07 - Elicitation Routing Fix and Testing
+- **Fix**: Resolve elicitation dialog not appearing by switching from `contextvars.ContextVar` to dictionary-based routing. The MCP receive loop runs in a separate asyncio task that cannot access context variables set in the tool execution task. Now uses per-server routing with proper cross-task visibility.
+- **Fix**: Add `setPendingElicitation` to WebSocket handler destructuring so dialog state updates work correctly.
+- **Fix**: Add `sendMessage` to ChatContext exports so ElicitationDialog can send responses.
+- **Fix**: Close elicitation dialog after user responds (accept/decline/cancel).
+- Add comprehensive logging to trace `update_callback` flow from WebSocket to MCP tool execution.
+- Add validation and fallback mechanism in `ToolsModeRunner` to ensure update_callback is never None during tool execution.
+- Create per-server elicitation handlers using closures to capture server_name for proper routing.
+- **Tests**: Add comprehensive unit tests for elicitation routing (8 backend tests, 7 frontend tests) to prevent regression.
+
+### PR #191 - 2026-01-06
+- **MCP Tool Elicitation Support**: Implemented full support for MCP tool elicitation (FastMCP 2.10.0+), allowing tools to request structured user input during execution via `ctx.elicit()`. Includes backend elicitation manager, WebSocket message handling, and a modal dialog UI supporting string, number, boolean, enum, and structured multi-field forms.
+- **Elicitation Demo Server**: Added `elicitation_demo` MCP server showcasing all elicitation types including scalar inputs, enum selections, structured forms, multi-turn flows, and approval-only requests.
+- Fix elicitation handler integration to use `client.set_elicitation_callback()` instead of passing as kwarg (resolves FastMCP API compatibility).
+- Admin UI: Fix duplicate "MCP Configuration & Controls" card rendering.
+- Admin UI: Clarify MCP Server Manager note that available configs are loaded from `config/mcp-example-configs/`.
 
 ### PR #190 - 2026-01-05
 - Add a "Back to Admin Dashboard" navigation button to the admin LogViewer.

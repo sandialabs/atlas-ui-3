@@ -12,6 +12,7 @@ import BannerMessagesCard from './admin/BannerMessagesCard' // Import the Banner
 import MCPConfigurationCard from './admin/MCPConfigurationCard' // Import the MCPConfigurationCard component
 import ConfigViewerCard from './admin/ConfigViewerCard' // Import the ConfigViewerCard component
 import MCPServerManager from './admin/MCPServerManager' // Import the MCPServerManager component
+import FeedbackViewerCard from './admin/FeedbackViewerCard' // Import the FeedbackViewerCard component
 
 const AdminDashboard = () => {
   const navigate = useNavigate()
@@ -357,6 +358,12 @@ const AdminDashboard = () => {
             addNotification={addNotification} 
           />
 
+          {/* User Feedback */}
+          <FeedbackViewerCard 
+            openModal={openModal} 
+            addNotification={addNotification} 
+          />
+
           {/* LLM Configuration */}
           {/*
           <div className="bg-gray-800 rounded-lg p-6">
@@ -470,15 +477,6 @@ const AdminDashboard = () => {
             </button>
           </div>
           */}
-        </div>
-
-        {/* MCP Configuration & Controls (separate row) */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <MCPConfigurationCard 
-            openModal={openModal} 
-            addNotification={addNotification} 
-            systemStatus={systemStatus} 
-          />
         </div>
       </div>
 

@@ -318,6 +318,25 @@ class AppSettings(BaseSettings):
     capability_token_secret: str = ""
     capability_token_ttl_seconds: int = 3600
 
+    # Backend URL configuration for MCP server file access
+    # This should be the publicly accessible URL of the backend API
+    # Example: "https://atlas-ui.example.com" or "http://localhost:8000"
+    # If not set, relative URLs will be used (only works for local/stdio servers)
+    backend_public_url: Optional[str] = Field(
+        default=None,
+        description="Public URL of the backend API for file downloads by remote MCP servers",
+        validation_alias="BACKEND_PUBLIC_URL",
+    )
+
+    # Whether to include base64 file content as fallback in tool arguments
+    # This allows MCP servers to access files even if they cannot reach the backend URL
+    # WARNING: Enabling this can significantly increase message sizes for large files
+    include_file_content_base64: bool = Field(
+        default=False,
+        description="Include base64 encoded file content in tool arguments as fallback",
+        validation_alias="INCLUDE_FILE_CONTENT_BASE64",
+    )
+
     # Rate limiting (global middleware)
     rate_limit_rpm: int = Field(default=600, validation_alias="RATE_LIMIT_RPM")
     rate_limit_window_seconds: int = Field(default=60, validation_alias="RATE_LIMIT_WINDOW_SECONDS")
@@ -368,8 +387,8 @@ class AppSettings(BaseSettings):
     pi_threshold_medium: int = Field(default=50, validation_alias="PI_THRESHOLD_MEDIUM")
     pi_threshold_high: int = Field(default=80, validation_alias="PI_THRESHOLD_HIGH")
     
-    # Runtime directories
-    runtime_feedback_dir: str = Field(default="runtime/feedback", validation_alias="RUNTIME_FEEDBACK_DIR")
+    # Runtime directories (relative to project root, not backend/)
+    runtime_feedback_dir: str = Field(default="../runtime/feedback", validation_alias="RUNTIME_FEEDBACK_DIR")
     
     @model_validator(mode='after')
     def validate_aws_alb_config(self):

@@ -45,15 +45,66 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # Core / Development
       - DEBUG_MODE=true
+      - MOCK_RAG=false
+      - PORT=8000
+      - APP_NAME=ATLAS
       - ATLAS_HOST=0.0.0.0  # Required for Docker container to accept external connections
+      - ENVIRONMENT=development
+      
+      # API Keys for LLM services
+      - OPENAI_API_KEY=sk-pro
+      - ANTHROPIC_API_KEY=your_anthropic_api_key_here
+      - GOOGLE_API_KEY=your_google_api_key_here
+      - OPENROUTER_API_KEY=sk-or
+      - CEREBRAS_API_KEY=your_cerebras_api_key_here
+      - GROQ_API_KEY=your-groq_api_key_here
+      
+      # Banner system configuration
+      - BANNER_ENABLED=true
+      
+      # Log level configuration
+      - LOG_LEVEL=INFO
+      
+      - USE_NEW_FRONTEND=true
+      
+      # Feature Flags
+      - FEATURE_WORKSPACES_ENABLED=false
+      - FEATURE_RAG_ENABLED=false
+      - FEATURE_TOOLS_ENABLED=true
+      - FEATURE_MARKETPLACE_ENABLED=true
+      - FEATURE_FILES_PANEL_ENABLED=true
+      - FEATURE_CHAT_HISTORY_ENABLED=false
+      - FEATURE_COMPLIANCE_LEVELS_ENABLED=false
+      - FEATURE_SPLASH_SCREEN_ENABLED=false
+      - FEATURE_DOMAIN_WHITELIST_ENABLED=false
+      - FEATURE_MCP_AUTO_RECONNECT_ENABLED=false
+      
+      # Agent mode configuration
+      - AGENT_MAX_STEPS=30
+      - AGENT_DEFAULT_ENABLED=true
+      - FEATURE_AGENT_MODE_AVAILABLE=true
+      - AGENT_LOOP_STRATEGY=think-act
+      
+      # Tool approval configuration
+      - REQUIRE_TOOL_APPROVAL_BY_DEFAULT=false
+      - FORCE_TOOL_APPROVAL_GLOBALLY=false
+      
+      - APP_LOG_DIR=/app/logs
+      
+      - CAPABILITY_TOKEN_SECRET=blablah
+      
+      # S3/MinIO Storage Configuration
       - S3_ENDPOINT=http://minio:9000
       - S3_BUCKET_NAME=atlas-files
       - S3_ACCESS_KEY=minioadmin
       - S3_SECRET_KEY=minioadmin
       - S3_REGION=us-east-1
       - S3_USE_SSL=false
-      - APP_LOG_DIR=/app/logs
+      
+      # Content Security Policy (CSP) configuration
+      - "SECURITY_CSP_VALUE=default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' blob: data: https://www.sandia.gov; frame-ancestors 'self'"
     volumes:
       - ./logs:/app/logs
       - ./config/overrides:/app/config/overrides

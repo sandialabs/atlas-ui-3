@@ -41,6 +41,7 @@ from routes.config_routes import router as config_router
 from routes.admin_routes import admin_router
 from routes.files_routes import router as files_router
 from routes.health_routes import router as health_router
+from routes.feedback_routes import feedback_router
 from version import VERSION
 
 # Load environment variables from the parent directory
@@ -76,6 +77,18 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
     await websocket.send_json(message)
 
 
+def _ensure_feedback_directory():
+    """Ensure feedback storage directory exists at startup."""
+    from pathlib import Path
+    config = app_factory.get_config_manager()
+    feedback_dir = Path(config.app_settings.runtime_feedback_dir)
+    try:
+        feedback_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Feedback directory ready: {feedback_dir}")
+    except Exception as e:
+        logger.warning(f"Could not create feedback directory {feedback_dir}: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -86,6 +99,9 @@ async def lifespan(app: FastAPI):
     
     logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
     logger.info(f"MCP servers configured: {len(config.mcp_config.servers)}")
+    
+    # Ensure feedback directory exists
+    _ensure_feedback_directory()
     
     # Initialize MCP tools manager
     logger.info("Initializing MCP tools manager...")
@@ -165,6 +181,7 @@ app.include_router(config_router)
 app.include_router(admin_router)
 app.include_router(files_router)
 app.include_router(health_router)
+app.include_router(feedback_router)
 
 # Serve frontend build (Vite)
 project_root = Path(__file__).resolve().parents[1]
@@ -436,6 +453,29 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
+
+            elif message_type == "elicitation_response":
+                # Handle elicitation response
+                from application.chat.elicitation_manager import get_elicitation_manager
+                elicitation_manager = get_elicitation_manager()
+                
+                elicitation_id = data.get("elicitation_id")
+                action = data.get("action", "cancel")
+                response_data = data.get("data")
+                
+                logger.info(
+                    f"Received elicitation response: id={sanitize_for_logging(elicitation_id)}, "
+                    f"action={action}"
+                )
+                
+                result = elicitation_manager.handle_elicitation_response(
+                    elicitation_id=elicitation_id,
+                    action=action,
+                    data=response_data
+                )
+                
+                logger.info(f"Elicitation response handled: result={sanitize_for_logging(result)}")
+                # No response needed - the elicitation will unblock the waiting tool execution
 
             else:
                 logger.warning(f"Unknown message type: {sanitize_for_logging(message_type)}")

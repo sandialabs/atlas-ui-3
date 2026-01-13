@@ -40,6 +40,7 @@ export const ChatProvider = ({ children }) => {
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
 	const [, setPendingFileEvents] = useState(new Map())
+	const [pendingElicitation, setPendingElicitation] = useState(null)
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {
@@ -72,7 +73,7 @@ export const ChatProvider = ({ children }) => {
 
 		const { sendMessage, addMessageHandler } = useWS()
 	const { currentModel } = config
-	const { selectedTools, selectedPrompts, selectedDataSources } = selections
+	const { selectedTools, selectedPrompts, activePrompts, selectedDataSources } = selections
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -100,10 +101,10 @@ export const ChatProvider = ({ children }) => {
 			setIsCanvasOpen: config.setIsCanvasOpen,
 			setSessionFiles: files.setSessionFiles,
 			getFileType: files.getFileType,
-				triggerFileDownload,
+			triggerFileDownload,
 			addAttachment,
-			addPendingFileEvent,
-			resolvePendingFileEvent
+			resolvePendingFileEvent,
+			setPendingElicitation
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -140,7 +141,7 @@ export const ChatProvider = ({ children }) => {
 			content,
 			model: currentModel,
 			selected_tools: [...selectedTools],
-			selected_prompts: [...selectedPrompts],
+			selected_prompts: activePrompts,
 			selected_data_sources: [...selectedDataSources],
 			only_rag: config.onlyRag,
 			tool_choice_required: selections.toolChoiceRequired,
@@ -152,7 +153,7 @@ export const ChatProvider = ({ children }) => {
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
 			compliance_level_filter: selections.complianceLevelFilter,
 		})
-	}, [addMessage, currentModel, selectedTools, selectedPrompts, selectedDataSources, config, selections, agent, files, isWelcomeVisible, sendMessage, settings])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, config, selections, agent, files, isWelcomeVisible, sendMessage, settings])
 
 	const clearChat = useCallback(() => {
 		resetMessages()
@@ -347,6 +348,8 @@ export const ChatProvider = ({ children }) => {
 		setSinglePrompt: selections.setSinglePrompt,
 		removePrompts: selections.removePrompts,
 		makePromptActive: selections.makePromptActive,
+		clearActivePrompt: selections.clearActivePrompt,
+		activePromptKey: selections.activePromptKey,
 		selectAllServerPrompts,
 		deselectAllServerPrompts,
 		selectedDataSources: selections.selectedDataSources,
@@ -397,7 +400,10 @@ export const ChatProvider = ({ children }) => {
 		addSystemEvent,
 		settings,
 		updateSettings,
+		sendMessage,
 		sendApprovalResponse: sendMessage,
+		pendingElicitation,
+		setPendingElicitation
 	}
 
 	return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

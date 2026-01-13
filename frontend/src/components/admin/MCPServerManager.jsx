@@ -161,7 +161,7 @@ const MCPServerManager = ({ addNotification }) => {
       </div>
       
       <p className="text-gray-400 mb-4">
-        Manage MCP servers by adding them from available configurations or removing them from active use.
+        Manage MCP servers by adding them from available configurations (loaded from the <code className="text-gray-300">config/mcp-example-configs/</code> folder) or removing them from active use.
       </p>
 
       <div className="space-y-3 max-h-96 overflow-y-auto">

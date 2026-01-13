@@ -4,11 +4,15 @@ FastMCP HTTP Server - Database Simulation Example
 
 This MCP server simulates database select statement retrieval using FastMCP.
 It provides tools for querying simulated tables and retrieving data.
+It also includes a file analysis tool to demonstrate remote file access.
 """
 
 import json
 import re
-from typing import Dict, List, Any, Optional
+import requests
+import base64
+from datetime import datetime
+from typing import Dict, List, Any, Optional, Annotated
 from dataclasses import dataclass
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
@@ -435,6 +439,150 @@ def get_database_schema() -> str:
             }
     
     return json.dumps({"results": schema}, indent=2)
+
+
+@mcp.tool
+def analyze_file(
+    filename: Annotated[str, "File URL or path. Backend rewrites to a downloadable URL with token."],
+    username: Annotated[str, "User identity, automatically injected by backend"] = "",
+) -> str:
+    """
+    Analyze a file and return information about its contents.
+    
+    This tool demonstrates remote MCP server file access using the BACKEND_PUBLIC_URL
+    configuration. When a file is attached in Atlas UI and this tool is called,
+    the backend rewrites the filename to an absolute URL (if BACKEND_PUBLIC_URL is set)
+    or relative URL (for local servers).
+    
+    The tool works with any file type and returns:
+    - File size in bytes
+    - Content type (detected from content)
+    - First 500 characters of text content (if text file)
+    - Basic statistics about the file
+    
+    Args:
+        filename: File URL provided by the backend (automatically rewritten from filename)
+        username: User who uploaded the file (automatically injected by backend)
+    
+    Returns:
+        JSON formatted file analysis results
+    
+    Example usage:
+        1. User attaches a file in Atlas UI
+        2. LLM calls: analyze_file(filename="myfile.txt")
+        3. Backend rewrites to: analyze_file(filename="https://atlas.com/api/files/download/key?token=...")
+        4. This tool downloads and analyzes the file
+    """
+    try:
+        # Check if filename is a URL (from backend rewriting)
+        is_url = (
+            filename.startswith("http://") or
+            filename.startswith("https://") or
+            filename.startswith("/api/") or
+            filename.startswith("/")
+        )
+        
+        if is_url:
+            # Handle URL-based file access (the expected path for remote servers)
+            if filename.startswith("/"):
+                # Relative URL - need to construct absolute URL
+                # This should work when BACKEND_PUBLIC_URL is set
+                import os
+                backend_url = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000")
+                url = f"{backend_url}{filename}"
+            else:
+                url = filename
+            
+            # Download the file
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            content = response.content
+            
+            # Detect content type from response headers
+            content_type = response.headers.get('content-type', 'application/octet-stream')
+        else:
+            # Handle base64 encoded content (fallback)
+            try:
+                content = base64.b64decode(filename)
+                content_type = "application/octet-stream"
+            except Exception:
+                return json.dumps({
+                    "results": {
+                        "error": "Invalid filename format. Expected URL or base64 content."
+                    }
+                }, indent=2)
+        
+        # Analyze the file
+        file_size = len(content)
+        
+        # Try to decode as text
+        text_preview = None
+        is_text = False
+        try:
+            text_content = content.decode('utf-8')
+            is_text = True
+            # Get first 500 characters
+            text_preview = text_content[:500]
+            if len(text_content) > 500:
+                text_preview += "... (truncated)"
+        except UnicodeDecodeError:
+            text_preview = "<Binary content, cannot display as text>"
+        
+        # Count lines if text
+        line_count = None
+        if is_text:
+            line_count = text_content.count('\n') + 1
+        
+        # Build analysis results
+        analysis = {
+            "success": True,
+            "filename": filename.split('/')[-1].split('?')[0],  # Extract just the filename
+            "analyzed_by": username or "unknown",
+            "file_size_bytes": file_size,
+            "file_size_kb": round(file_size / 1024, 2),
+            "content_type": content_type,
+            "is_text_file": is_text,
+        }
+        
+        if text_preview:
+            analysis["text_preview"] = text_preview
+        
+        if line_count:
+            analysis["line_count"] = line_count
+        
+        # Add message about how the file was accessed
+        if is_url and not filename.startswith("data:"):
+            analysis["access_method"] = "URL download (remote MCP server compatible)"
+            analysis["note"] = "File was successfully downloaded from backend using tokenized URL"
+        else:
+            analysis["access_method"] = "Base64 decode"
+        
+        return json.dumps({"results": analysis}, indent=2)
+        
+    except requests.HTTPError as e:
+        return json.dumps({
+            "results": {
+                "error": f"HTTP error downloading file: {e.response.status_code}",
+                "message": "This may indicate the BACKEND_PUBLIC_URL is not configured or the file token has expired",
+                "filename": filename
+            }
+        }, indent=2)
+    except requests.RequestException as e:
+        return json.dumps({
+            "results": {
+                "error": f"Network error accessing file: {str(e)}",
+                "message": "This may indicate network connectivity issues or incorrect BACKEND_PUBLIC_URL",
+                "filename": filename
+            }
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({
+            "results": {
+                "error": f"Failed to analyze file: {str(e)}",
+                "filename": filename
+            }
+        }, indent=2)
+
 
 # Resource to provide database information
 @mcp.resource("database://info")

@@ -40,7 +40,8 @@ class TestMCPAuthenticationIntegration:
                 MockFastMCPClient.assert_called_once_with(
                     "http://localhost:8001/mcp",
                     auth="test-api-key-123",
-                    log_handler=ANY
+                    log_handler=ANY,
+                    elicitation_handler=ANY
                 )
 
     @pytest.mark.asyncio
@@ -74,7 +75,8 @@ class TestMCPAuthenticationIntegration:
                 MockFastMCPClient.assert_called_once_with(
                     "http://localhost:8001/mcp",
                     auth="invalid-token",
-                    log_handler=ANY
+                    log_handler=ANY,
+                    elicitation_handler=ANY
                 )
 
                 # Now try to discover tools - this should fail due to auth error
