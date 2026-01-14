@@ -469,9 +469,9 @@ class MCPToolManager:
                         if model_name:
                             break
                 
-                # Fall back to default model if no preference matched
+                # Fall back to first available model if no preference matched
                 if not model_name:
-                    model_name = llm_config.default_model
+                    model_name = next(iter(llm_config.models.keys()))
                 
                 logger.debug(
                     f"Using model '{model_name}' for sampling "
