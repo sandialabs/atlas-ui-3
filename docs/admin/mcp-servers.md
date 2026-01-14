@@ -155,3 +155,19 @@ You can restrict access to MCP servers based on user groups. This is a critical 
 ## A Note on the `username` Argument
 
 As a security measure, if a tool is designed to accept a `username` argument, the Atlas UI backend will **always** overwrite this argument with the authenticated user's identity before calling the tool. This ensures that a tool always runs with the correct user context and prevents the LLM from impersonating another user.
+
+
+## Advanced MCP Features
+
+### User Elicitation
+
+MCP tools can request structured input from users during tool execution. See the [Elicitation Documentation](../developer/elicitation.md) for details.
+
+### LLM Sampling
+
+MCP tools can request LLM text generation during tool execution, enabling agentic workflows. See the [Sampling Documentation](../developer/sampling.md) for details.
+
+### Progress Updates
+
+MCP tools can send real-time progress updates during long-running operations. See the [Progress Updates Documentation](../developer/progress-updates.md) for details.
+
