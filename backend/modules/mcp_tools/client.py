@@ -379,7 +379,7 @@ class MCPToolManager:
         Returns a handler function that captures the server_name,
         allowing dictionary-based routing that works across async tasks.
         """
-        async def handler(messages, params):
+        async def handler(messages, params, context):
             """Per-server sampling handler with captured server_name."""
             from mcp.types import SamplingMessage, TextContent
             
@@ -491,10 +491,13 @@ class MCPToolManager:
                     f"response_length={len(response) if response else 0}"
                 )
                 
-                # Return a result object that FastMCP expects
-                # FastMCP expects a result with a 'text' attribute
-                from types import SimpleNamespace
-                return SimpleNamespace(text=response)
+                # Return a CreateMessageResult that FastMCP expects
+                from mcp.types import CreateMessageResult, TextContent
+                return CreateMessageResult(
+                    role="assistant",
+                    content=TextContent(type="text", text=response),
+                    model=model_name
+                )
 
             except Exception as e:
                 logger.error(f"Error handling sampling for server '{server_name}': {e}", exc_info=True)
