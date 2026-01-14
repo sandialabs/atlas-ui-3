@@ -163,5 +163,20 @@
     "short_description": "User elicitation demonstration",
     "help_email": "support@example.com",
     "compliance_level": "Public"
+  },
+  "sampling_demo": {
+    "command": [
+      "python",
+      "mcp/sampling_demo/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates MCP LLM sampling capabilities - requesting LLM text generation during tool execution. Shows examples of basic sampling, system prompts, temperature control, model preferences, multi-turn conversations, and agentic workflows.",
+    "author": "Atlas UI Team",
+    "short_description": "LLM sampling demonstration",
+    "help_email": "support@example.com",
+    "compliance_level": "Public"
   }
 }

@@ -477,6 +477,29 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.info(f"Elicitation response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the elicitation will unblock the waiting tool execution
 
+            elif message_type == "sampling_response":
+                # Handle sampling response from LLM
+                from application.chat.sampling_manager import get_sampling_manager
+                sampling_manager = get_sampling_manager()
+                
+                sampling_id = data.get("sampling_id")
+                text = data.get("text", "")
+                error = data.get("error")
+                
+                logger.info(
+                    f"Received sampling response: id={sanitize_for_logging(sampling_id)}, "
+                    f"text_length={len(text) if text else 0}, has_error={error is not None}"
+                )
+                
+                result = sampling_manager.handle_sampling_response(
+                    sampling_id=sampling_id,
+                    text=text,
+                    error=error
+                )
+                
+                logger.info(f"Sampling response handled: result={sanitize_for_logging(result)}")
+                # No response needed - the sampling will unblock the waiting tool execution
+
             else:
                 logger.warning(f"Unknown message type: {sanitize_for_logging(message_type)}")
                 await websocket.send_json({

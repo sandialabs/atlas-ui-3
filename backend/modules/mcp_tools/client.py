@@ -47,6 +47,22 @@ _ACTIVE_LOG_CALLBACK: contextvars.ContextVar[Optional[LogCallback]] = contextvar
 # Note: Cannot use contextvars.ContextVar because MCP receive loop runs in a different task
 _ELICITATION_ROUTING: Dict[str, _ElicitationRoutingContext] = {}
 
+# Dictionary-based routing for sampling requests (similar to elicitation)
+# Key: server_name, Value: _SamplingRoutingContext
+_SAMPLING_ROUTING: Dict[str, "_SamplingRoutingContext"] = {}
+
+
+class _SamplingRoutingContext:
+    def __init__(
+        self,
+        server_name: str,
+        tool_call: ToolCall,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+    ):
+        self.server_name = server_name
+        self.tool_call = tool_call
+        self.update_cb = update_cb
+
 # Mapping from MCP log levels to Python logging levels
 MCP_TO_PYTHON_LOG_LEVEL = {
     "debug": logging.DEBUG,
@@ -338,6 +354,154 @@ class MCPToolManager:
 
         return handler
     
+    @asynccontextmanager
+    async def _use_sampling_context(
+        self,
+        server_name: str,
+        tool_call: ToolCall,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+    ) -> AsyncIterator[None]:
+        """
+        Set up sampling routing for a tool call.
+        Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
+        """
+        routing = _SamplingRoutingContext(server_name, tool_call, update_cb)
+        _SAMPLING_ROUTING[server_name] = routing
+        try:
+            yield
+        finally:
+            _SAMPLING_ROUTING.pop(server_name, None)
+
+    def _create_sampling_handler(self, server_name: str):
+        """
+        Create a sampling handler for a specific MCP server.
+
+        Returns a handler function that captures the server_name,
+        allowing dictionary-based routing that works across async tasks.
+        """
+        async def handler(messages, params):
+            """Per-server sampling handler with captured server_name."""
+            from mcp.types import SamplingMessage, TextContent
+            
+            routing = _SAMPLING_ROUTING.get(server_name)
+            if routing is None:
+                logger.warning(
+                    f"Sampling request for server '{server_name}' but no routing context - "
+                    f"sampling cancelled."
+                )
+                raise Exception("No routing context for sampling request")
+
+            try:
+                # Convert MCP SamplingMessage objects to plain dicts for easier handling
+                message_dicts = []
+                for msg in messages:
+                    if isinstance(msg, SamplingMessage):
+                        # Extract text from content
+                        text = ""
+                        if isinstance(msg.content, TextContent):
+                            text = msg.content.text
+                        elif isinstance(msg.content, list):
+                            for item in msg.content:
+                                if isinstance(item, TextContent):
+                                    text += item.text
+                        else:
+                            text = str(msg.content)
+                        message_dicts.append({
+                            "role": msg.role,
+                            "content": text
+                        })
+                    elif isinstance(msg, str):
+                        message_dicts.append({
+                            "role": "user",
+                            "content": msg
+                        })
+                    else:
+                        message_dicts.append(msg)
+
+                # Extract sampling parameters
+                system_prompt = getattr(params, 'systemPrompt', None) if params else None
+                temperature = getattr(params, 'temperature', None) if params else None
+                max_tokens = getattr(params, 'maxTokens', 512) if params else 512
+                model_preferences_raw = getattr(params, 'modelPreferences', None) if params else None
+                
+                # Normalize model_preferences to list
+                model_preferences = None
+                if model_preferences_raw:
+                    if isinstance(model_preferences_raw, str):
+                        model_preferences = [model_preferences_raw]
+                    elif isinstance(model_preferences_raw, list):
+                        model_preferences = model_preferences_raw
+
+                # Add system prompt to messages if provided
+                if system_prompt:
+                    message_dicts.insert(0, {
+                        "role": "system",
+                        "content": system_prompt
+                    })
+
+                logger.info(
+                    f"Sampling request from server '{server_name}' tool '{routing.tool_call.name}': "
+                    f"{len(message_dicts)} messages, temperature={temperature}, max_tokens={max_tokens}"
+                )
+
+                # Call the LLM directly using LiteLLM
+                from modules.llm.litellm_caller import LiteLLMCaller
+                from modules.config import config_manager
+                
+                llm_caller = LiteLLMCaller()
+                
+                # Determine which model to use based on preferences or default
+                llm_config = config_manager.llm_config
+                model_name = None
+                
+                if model_preferences:
+                    # Try to find a matching model from preferences
+                    for pref in model_preferences:
+                        # Check if preference matches any configured model
+                        if pref in llm_config.models:
+                            model_name = pref
+                            break
+                        # Check if preference matches model_name field
+                        for name, model_config in llm_config.models.items():
+                            if model_config.model_name == pref:
+                                model_name = name
+                                break
+                        if model_name:
+                            break
+                
+                # Fall back to default model if no preference matched
+                if not model_name:
+                    model_name = llm_config.default_model
+                
+                logger.debug(
+                    f"Using model '{model_name}' for sampling "
+                    f"(preferences: {model_preferences})"
+                )
+
+                # Call the LLM
+                response = await llm_caller.call_plain(
+                    model_name=model_name,
+                    messages=message_dicts,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+                
+                logger.info(
+                    f"Sampling completed for server '{server_name}': "
+                    f"response_length={len(response) if response else 0}"
+                )
+                
+                # Return a result object that FastMCP expects
+                # FastMCP expects a result with a 'text' attribute
+                from types import SimpleNamespace
+                return SimpleNamespace(text=response)
+
+            except Exception as e:
+                logger.error(f"Error handling sampling for server '{server_name}': {e}", exc_info=True)
+                raise
+
+        return handler
+    
     def reload_config(self) -> Dict[str, Any]:
         """Reload MCP server configuration from disk.
         
@@ -499,11 +663,23 @@ class MCPToolManager:
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
-                    client = Client(url, auth=token, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
+                    client = Client(
+                        url, 
+                        auth=token, 
+                        log_handler=log_handler, 
+                        elicitation_handler=self._create_elicitation_handler(server_name),
+                        sampling_handler=self._create_sampling_handler(server_name)
+                    )
                 else:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
-                    client = Client(url, auth=token, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
+                    client = Client(
+                        url, 
+                        auth=token, 
+                        log_handler=log_handler, 
+                        elicitation_handler=self._create_elicitation_handler(server_name),
+                        sampling_handler=self._create_sampling_handler(server_name)
+                    )
                 
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
                 return client
@@ -554,7 +730,12 @@ class MCPToolManager:
                             logger.debug("Creating STDIO client for %s with command=%s cwd=%s", safe_server_name, command, cwd)
                             from fastmcp.client.transports import StdioTransport
                             transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd, env=resolved_env)
-                            client = Client(transport, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
+                            client = Client(
+                                transport, 
+                                log_handler=log_handler, 
+                                elicitation_handler=self._create_elicitation_handler(server_name),
+                                sampling_handler=self._create_sampling_handler(server_name)
+                            )
                             logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command and cwd")
                             return client
                         else:
@@ -564,7 +745,12 @@ class MCPToolManager:
                         logger.debug("No cwd specified for %s; creating STDIO client with command=%s", safe_server_name, command)
                         from fastmcp.client.transports import StdioTransport
                         transport = StdioTransport(command=command[0], args=command[1:], env=resolved_env)
-                        client = Client(transport, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
+                        client = Client(
+                            transport, 
+                            log_handler=log_handler, 
+                            elicitation_handler=self._create_elicitation_handler(server_name),
+                            sampling_handler=self._create_sampling_handler(server_name)
+                        )
                         logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command")
                         return client
                 else:
@@ -574,7 +760,12 @@ class MCPToolManager:
                     if os.path.exists(server_path):
                         logger.debug(f"Server script exists for {server_name}, creating client...")
                         log_handler = self._create_log_handler(server_name)
-                        client = Client(server_path, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))  # Client auto-detects STDIO transport from .py file
+                        client = Client(
+                            server_path, 
+                            log_handler=log_handler, 
+                            elicitation_handler=self._create_elicitation_handler(server_name),
+                            sampling_handler=self._create_sampling_handler(server_name)
+                        )  # Client auto-detects STDIO transport from .py file
                         logger.info(f"Created MCP client for {server_name}")
                         logger.debug(f"Successfully created client for {server_name}")
                         return client
@@ -1559,20 +1750,22 @@ class MCPToolManager:
             if update_cb is not None:
                 async with self._use_log_callback(_tool_log_callback):
                     async with self._use_elicitation_context(server_name, tool_call, update_cb):
+                        async with self._use_sampling_context(server_name, tool_call, update_cb):
+                            raw_result = await self.call_tool(
+                                server_name,
+                                actual_tool_name,
+                                tool_call.arguments,
+                                progress_handler=_progress_handler,
+                            )
+            else:
+                async with self._use_elicitation_context(server_name, tool_call, update_cb):
+                    async with self._use_sampling_context(server_name, tool_call, update_cb):
                         raw_result = await self.call_tool(
                             server_name,
                             actual_tool_name,
                             tool_call.arguments,
                             progress_handler=_progress_handler,
                         )
-            else:
-                async with self._use_elicitation_context(server_name, tool_call, update_cb):
-                    raw_result = await self.call_tool(
-                        server_name,
-                        actual_tool_name,
-                        tool_call.arguments,
-                        progress_handler=_progress_handler,
-                    )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
             
