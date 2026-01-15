@@ -65,6 +65,27 @@ When `FEATURE_MCP_AUTO_RECONNECT_ENABLED=true`, the backend starts a background 
 - This avoids hammering flaky or down MCP servers while still ensuring they are retried over time.
 - You can monitor this behavior via `GET /admin/mcp/status`, which reports per-server backoff details and whether the auto-reconnect loop is currently running.
 
+### MCP Tool Timeout Settings
+
+To prevent the UI from appearing to hang when MCP tool calls take a long time to execute, Atlas UI includes a configurable timeout mechanism. If a tool call exceeds the configured timeout duration, it will be cancelled and an error will be returned to the user.
+
+```bash
+# Maximum time in seconds to wait for an MCP tool call to complete (default: 300, set to 0 to disable timeout)
+MCP_TOOL_TIMEOUT_SECONDS=300
+```
+
+**Behavior:**
+- When set to a positive value (e.g., `300`), any MCP tool call that takes longer than this duration will be automatically cancelled
+- When set to `0`, timeouts are disabled and tools can run indefinitely (not recommended for production)
+- When a timeout occurs, the user receives a clear error message indicating the tool exceeded the timeout limit
+- The error message includes instructions on how to increase the timeout if needed
+
+**Recommendations:**
+- **Default (300 seconds / 5 minutes)**: Suitable for most use cases
+- **Shorter timeout (60-120 seconds)**: For environments where quick feedback is critical
+- **Longer timeout (600-900 seconds)**: For tools that perform complex computations or large data processing
+- **No timeout (0)**: Only for development/testing environments, never in production
+
 ## Security Configuration (CSP and Headers)
 
 The application includes security headers middleware that sets browser security policies. These are configured via environment variables in `.env`.

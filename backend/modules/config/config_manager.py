@@ -222,6 +222,13 @@ class AppSettings(BaseSettings):
         validation_alias="MCP_RECONNECT_BACKOFF_MULTIPLIER"
     )
     
+    # MCP Tool Timeout settings
+    mcp_tool_timeout_seconds: int = Field(
+        default=300,
+        description="Maximum time in seconds to wait for an MCP tool call to complete (0 = no timeout)",
+        validation_alias="MCP_TOOL_TIMEOUT_SECONDS"
+    )
+    
     # Admin settings
     admin_group: str = "admin"
     test_user: str = "test@test.com"  # Test user for development

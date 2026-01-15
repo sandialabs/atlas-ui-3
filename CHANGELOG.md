@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - MCP Tool Timeout Configuration
+- **Feature**: Add configurable timeout for MCP tool execution to prevent UI hangs when tools take too long. Configure via `MCP_TOOL_TIMEOUT_SECONDS` environment variable (default: 300 seconds). Set to 0 to disable timeouts. When a tool exceeds the timeout, users receive a clear error message with instructions on how to adjust the timeout setting.
+- **Tests**: Add comprehensive test suite for timeout functionality (4 tests) covering timeout triggering, successful completion within timeout, disabled timeout behavior, and error message validation.
+- **Docs**: Update admin configuration documentation with MCP tool timeout settings and recommendations.
+
 ### PR #TBD - 2026-01-13
 - **Fix**: Fix file upload registration issue where files attached in one WebSocket connection were not visible in subsequent chat messages. The issue was caused by each ChatService instance creating its own session repository, preventing session sharing across connections.
 - **Architecture**: Created a shared InMemorySessionRepository in AppFactory that is passed to all ChatService instances, ensuring sessions and attached files are properly shared across WebSocket connections.
