@@ -1459,7 +1459,11 @@ class MCPToolManager:
         tool_call: ToolCall,
         context: Optional[Dict[str, Any]] = None
     ) -> ToolResult:
-        """Execute a tool call."""
+        """Execute a tool call with optional timeout.
+        
+        If MCP_TOOL_TIMEOUT_SECONDS is configured (and > 0), the tool call will
+        be cancelled and return an error if it exceeds the timeout duration.
+        """
         logger.debug("ToolManager.execute_tool: tool=%s", tool_call.name)
         # Handle canvas pseudo-tool
         if tool_call.name == "canvas_canvas":
@@ -1556,23 +1560,52 @@ class MCPToolManager:
                 except Exception:
                     logger.debug("Progress handler forwarding failed", exc_info=True)
 
-            if update_cb is not None:
-                async with self._use_log_callback(_tool_log_callback):
+            # Get timeout configuration
+            app_settings = config_manager.app_settings
+            timeout_seconds = app_settings.mcp_tool_timeout_seconds
+            
+            # Execute tool call with optional timeout
+            async def _execute_call():
+                if update_cb is not None:
+                    async with self._use_log_callback(_tool_log_callback):
+                        async with self._use_elicitation_context(server_name, tool_call, update_cb):
+                            return await self.call_tool(
+                                server_name,
+                                actual_tool_name,
+                                tool_call.arguments,
+                                progress_handler=_progress_handler,
+                            )
+                else:
                     async with self._use_elicitation_context(server_name, tool_call, update_cb):
-                        raw_result = await self.call_tool(
+                        return await self.call_tool(
                             server_name,
                             actual_tool_name,
                             tool_call.arguments,
                             progress_handler=_progress_handler,
                         )
-            else:
-                async with self._use_elicitation_context(server_name, tool_call, update_cb):
-                    raw_result = await self.call_tool(
-                        server_name,
-                        actual_tool_name,
-                        tool_call.arguments,
-                        progress_handler=_progress_handler,
+            
+            # Apply timeout if configured (0 means no timeout)
+            if timeout_seconds > 0:
+                try:
+                    raw_result = await asyncio.wait_for(_execute_call(), timeout=timeout_seconds)
+                except asyncio.TimeoutError:
+                    error_msg = (
+                        f"Tool call timed out after {timeout_seconds} seconds. "
+                        f"The tool '{tool_call.name}' exceeded the configured timeout limit. "
+                        f"You can increase the timeout by setting MCP_TOOL_TIMEOUT_SECONDS "
+                        f"environment variable or contact your administrator."
                     )
+                    logger.warning(
+                        f"Tool call timeout: {tool_call.name} exceeded {timeout_seconds}s limit"
+                    )
+                    return ToolResult(
+                        tool_call_id=tool_call.id,
+                        content=error_msg,
+                        success=False,
+                        error=error_msg
+                    )
+            else:
+                raw_result = await _execute_call()
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
             
