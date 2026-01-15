@@ -8,6 +8,9 @@ import UnsavedChangesDialog from './UnsavedChangesDialog'
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
 
+// Truncation message constant for better maintainability
+const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start and end of content.'
+
 const ToolsPanel = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
@@ -779,8 +782,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                     const promptKey = `${server.server}_${prompt.name}`
                                     const isSelected = selectedPrompts.has(promptKey)
                                     const isPromptExpanded = expandedPrompts.has(promptKey)
-                                    const { text: truncatedDescription, isTruncated } = truncatePromptDescription(prompt.description)
-                                    
+
                                     return (
                                       <div key={prompt.name} className="flex flex-col gap-1 w-full">
                                         <div className="flex items-center gap-1">
@@ -803,19 +805,22 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                             </button>
                                           )}
                                         </div>
-                                        {isPromptExpanded && prompt.description && (
-                                          <div className="bg-gray-800 rounded p-2 text-xs space-y-2 border border-gray-600">
-                                            <div>
-                                              <p className="font-semibold text-gray-300 mb-1">Description:</p>
-                                              <p className="text-gray-400 whitespace-pre-wrap">{truncatedDescription}</p>
-                                              {isTruncated && (
-                                                <p className="text-xs text-yellow-400 mt-2 italic">
-                                                  This description has been truncated. Showing start and end of content.
-                                                </p>
-                                              )}
+                                        {isPromptExpanded && prompt.description && (() => {
+                                          const { text: truncatedDescription, isTruncated } = truncatePromptDescription(prompt.description)
+                                          return (
+                                            <div className="bg-gray-800 rounded p-2 text-xs space-y-2 border border-gray-600">
+                                              <div>
+                                                <p className="font-semibold text-gray-300 mb-1">Description:</p>
+                                                <p className="text-gray-400 whitespace-pre-wrap">{truncatedDescription}</p>
+                                                {isTruncated && (
+                                                  <p className="text-xs text-yellow-400 mt-2 italic">
+                                                    {TRUNCATION_MESSAGE}
+                                                  </p>
+                                                )}
+                                              </div>
                                             </div>
-                                          </div>
-                                        )}
+                                          )
+                                        })()}
                                       </div>
                                     )
                                   })}
