@@ -120,6 +120,8 @@ class TestMCPToolResultParsing:
         with patch('backend.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
+            # Mock the timeout setting to avoid comparison error
+            mock_config_manager.app_settings.mcp_tool_timeout_seconds = 300
 
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
@@ -170,6 +172,8 @@ class TestMCPToolResultParsing:
         with patch('backend.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
+            # Mock the timeout setting to avoid comparison error
+            mock_config_manager.app_settings.mcp_tool_timeout_seconds = 300
 
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
@@ -219,6 +223,8 @@ class TestMCPToolResultParsing:
         with patch('backend.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
+            # Mock the timeout setting to avoid comparison error
+            mock_config_manager.app_settings.mcp_tool_timeout_seconds = 300
 
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
@@ -260,6 +266,8 @@ class TestMCPToolResultParsing:
         with patch('backend.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
+            # Mock the timeout setting to avoid comparison error
+            mock_config_manager.app_settings.mcp_tool_timeout_seconds = 300
 
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
