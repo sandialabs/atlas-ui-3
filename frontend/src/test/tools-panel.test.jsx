@@ -892,4 +892,218 @@ describe('ToolsPanel - Custom Information Display', () => {
     expect(screen.getByText('tools@example.com')).toBeInTheDocument()
     expect(screen.getByText('Shared server')).toBeInTheDocument()
   })
+
+  it('should display info icon for prompts with descriptions', () => {
+    const testTools = [{
+      server: 'test_server',
+      description: 'Test server',
+      tools: [],
+      tools_detailed: [],
+      tool_count: 0,
+      prompts: [
+        { name: 'prompt1', description: 'This is a test prompt description' },
+        { name: 'prompt2' } // No description
+      ],
+      prompt_count: 2
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools,
+      prompts: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools),
+      getFilteredPrompts: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Find all info icon buttons
+    const infoButtons = screen.getAllByTitle('Show prompt description')
+    
+    // Should have exactly one info button (only for prompt1 which has a description)
+    expect(infoButtons.length).toBe(1)
+  })
+
+  it('should expand and show prompt description when info icon is clicked', () => {
+    const testTools = [{
+      server: 'test_server',
+      description: 'Test server',
+      tools: [],
+      tools_detailed: [],
+      tool_count: 0,
+      prompts: [
+        { name: 'test_prompt', description: 'This is a detailed test prompt description that explains what the prompt does.' }
+      ],
+      prompt_count: 1
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools,
+      prompts: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools),
+      getFilteredPrompts: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Description should not be visible initially
+    expect(screen.queryByText('This is a detailed test prompt description that explains what the prompt does.')).not.toBeInTheDocument()
+
+    // Click the info button
+    const infoButton = screen.getByTitle('Show prompt description')
+    fireEvent.click(infoButton)
+
+    // Description should now be visible
+    expect(screen.getByText('This is a detailed test prompt description that explains what the prompt does.')).toBeInTheDocument()
+    expect(screen.getByText('Description:')).toBeInTheDocument()
+  })
+
+  it('should truncate very long prompt descriptions', () => {
+    const longDescription = 'A'.repeat(600) // Create a 600 character description
+    
+    const testTools = [{
+      server: 'test_server',
+      description: 'Test server',
+      short_description: 'Test server', // Make them the same so "Show more details..." button doesn't appear
+      tools: [],
+      tools_detailed: [],
+      tool_count: 0,
+      prompts: [
+        { name: 'long_prompt', description: longDescription }
+      ],
+      prompt_count: 1
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools,
+      prompts: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools),
+      getFilteredPrompts: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Click the info button to expand
+    const infoButton = screen.getByTitle('Show prompt description')
+    fireEvent.click(infoButton)
+
+    // Should show truncation message
+    expect(screen.getByText(/This description has been truncated/i)).toBeInTheDocument()
+    
+    // Verify the description contains the expected pattern (start + ... + end)
+    const descriptionText = screen.getByText(/AAAA.*\.\.\..* AAAA/)
+    expect(descriptionText).toBeInTheDocument()
+  })
+
+  it('should not truncate short prompt descriptions', () => {
+    const shortDescription = 'This is a short description'
+    
+    const testTools = [{
+      server: 'test_server',
+      description: 'Test server',
+      tools: [],
+      tools_detailed: [],
+      tool_count: 0,
+      prompts: [
+        { name: 'short_prompt', description: shortDescription }
+      ],
+      prompt_count: 1
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools,
+      prompts: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools),
+      getFilteredPrompts: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    // Click the info button to expand
+    const infoButton = screen.getByTitle('Show prompt description')
+    fireEvent.click(infoButton)
+
+    // Should NOT show truncation message
+    expect(screen.queryByText(/This description has been truncated/i)).not.toBeInTheDocument()
+    
+    // Should show full description
+    expect(screen.getByText(shortDescription)).toBeInTheDocument()
+  })
+
+  it('should collapse prompt description when info icon is clicked again', () => {
+    const testTools = [{
+      server: 'test_server',
+      description: 'Test server',
+      tools: [],
+      tools_detailed: [],
+      tool_count: 0,
+      prompts: [
+        { name: 'test_prompt', description: 'Test description for collapse functionality' }
+      ],
+      prompt_count: 1
+    }]
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      tools: testTools,
+      prompts: testTools
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => testTools),
+      getFilteredPrompts: vi.fn(() => testTools)
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    const infoButton = screen.getByTitle('Show prompt description')
+    
+    // Click to expand
+    fireEvent.click(infoButton)
+    expect(screen.getByText('Test description for collapse functionality')).toBeInTheDocument()
+
+    // Click again to collapse
+    fireEvent.click(infoButton)
+    expect(screen.queryByText('Test description for collapse functionality')).not.toBeInTheDocument()
+  })
 })
