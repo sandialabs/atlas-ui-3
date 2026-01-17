@@ -222,6 +222,7 @@ async def get_banner_config(admin_user: str = Depends(require_admin)):
             "messages": messages,
             "file_path": str(messages_file),
             "last_modified": messages_file.stat().st_mtime,
+            "banner_enabled": config_manager.app_settings.banner_enabled,
         }
     except Exception as e:  # noqa: BLE001
         logger.error(f"Error getting banner config: {e}")
