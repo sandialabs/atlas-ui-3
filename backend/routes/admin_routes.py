@@ -237,14 +237,19 @@ async def update_banner_config(
         messages_file = get_admin_config_path("messages.txt")
         content = ("\n".join(update.messages) + "\n") if update.messages else ""
         write_file_content(messages_file, content)
-        logger.info(f"Banner messages updated by {sanitize_for_logging(admin_user)}")
+        logger.info(
+            f"Banner messages successfully saved to disk at {sanitize_for_logging(str(messages_file))} "
+            f"by {sanitize_for_logging(admin_user)}"
+        )
         return {
             "message": "Banner messages updated successfully",
             "messages": update.messages,
             "updated_by": admin_user,
         }
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Error updating banner config: {e}")
+        logger.error(
+            f"Failed to save banner messages to disk at {sanitize_for_logging(str(messages_file)) if 'messages_file' in locals() else 'unknown path'}: {e}"
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
