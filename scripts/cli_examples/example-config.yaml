@@ -1,0 +1,17 @@
+# Example Atlas UI 3 CLI configuration
+# Last updated: 2025-11-10
+
+chat:
+  # Default model to use (can be overridden with --model)
+  model: "gpt-4"
+
+  # User email for session tracking
+  user_email: "example@company.com"
+
+  # Enable agent mode (allows tool usage and multi-step reasoning)
+  agent_mode: true
+
+  # Pre-selected tools (can be augmented with --tool flags)
+  selected_tools:
+    - "filesystem"
+    - "web-search"
