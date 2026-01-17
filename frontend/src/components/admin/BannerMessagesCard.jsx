@@ -2,27 +2,34 @@ import React, { useState, useEffect } from 'react'
 import { MessageSquare, AlertCircle } from 'lucide-react'
 
 const BannerMessagesCard = ({ openModal, addNotification }) => {
-  const [bannerEnabled, setBannerEnabled] = useState(true)
+  const [bannerEnabled, setBannerEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetchBannerStatus = async () => {
       try {
         const response = await fetch('/admin/banners')
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
         const data = await response.json()
         setBannerEnabled(data.banner_enabled)
       } catch (err) {
         console.error('Error fetching banner status:', err)
+        addNotification('Error loading banner status: ' + err.message, 'error')
       } finally {
         setLoading(false)
       }
     }
     fetchBannerStatus()
-  }, [])
+  }, [addNotification])
 
   const manageBanners = async () => {
     try {
       const response = await fetch('/admin/banners')
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
       const data = await response.json()
       
       openModal('Manage Banner Messages', {
