@@ -1,8 +1,5 @@
 """Tests for banner message save logging functionality."""
-import json
 import logging
-from pathlib import Path
-from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
