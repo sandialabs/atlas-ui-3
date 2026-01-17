@@ -232,19 +232,26 @@ async def get_banner_config(admin_user: str = Depends(require_admin)):
 async def update_banner_config(
     update: BannerMessageUpdate, admin_user: str = Depends(require_admin)
 ):
+    messages_file = None
     try:
         setup_config_overrides()
         messages_file = get_admin_config_path("messages.txt")
         content = ("\n".join(update.messages) + "\n") if update.messages else ""
         write_file_content(messages_file, content)
-        logger.info(f"Banner messages updated by {sanitize_for_logging(admin_user)}")
+        logger.info(
+            f"Banner messages successfully saved to disk at {sanitize_for_logging(str(messages_file))} "
+            f"by {sanitize_for_logging(admin_user)}"
+        )
         return {
             "message": "Banner messages updated successfully",
             "messages": update.messages,
             "updated_by": admin_user,
         }
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Error updating banner config: {e}")
+        file_path_str = sanitize_for_logging(str(messages_file)) if messages_file else "unknown path"
+        logger.error(
+            f"Failed to save banner messages to disk at {file_path_str}: {e}"
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
