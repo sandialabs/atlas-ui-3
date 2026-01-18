@@ -4,6 +4,7 @@ import logging
 from starlette.testclient import TestClient
 
 from main import app
+from modules.config import config_manager
 
 
 def test_banner_save_success_logging(caplog, tmp_path, monkeypatch):
@@ -157,3 +158,130 @@ def test_banner_save_logs_sanitized_paths(caplog, tmp_path, monkeypatch):
     # Verify no newlines in the log message
     assert "\n" not in log_message
     assert "\r" not in log_message
+
+
+def test_banner_get_includes_enabled_status(tmp_path, monkeypatch):
+    """Test that GET /admin/banners includes banner_enabled status."""
+    client = TestClient(app)
+    
+    # Setup temp config directory
+    config_dir = tmp_path / "config" / "overrides"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    messages_file = config_dir / "messages.txt"
+    messages_file.write_text("Test message\n")
+    
+    # Mock config path to use temp directory
+    def mock_get_admin_config_path(filename):
+        return config_dir / filename
+    
+    monkeypatch.setattr(
+        "routes.admin_routes.get_admin_config_path",
+        mock_get_admin_config_path
+    )
+    
+    # Mock setup_config_overrides to avoid side effects
+    monkeypatch.setattr("routes.admin_routes.setup_config_overrides", lambda: None)
+    
+    # Make request to get banner config
+    response = client.get(
+        "/admin/banners",
+        headers={"X-User-Email": "admin@example.com"}
+    )
+    
+    # Verify request succeeded
+    assert response.status_code == 200
+    
+    # Check response contains banner_enabled field
+    data = response.json()
+    assert "banner_enabled" in data
+    assert isinstance(data["banner_enabled"], bool)
+    # The field should match the current config setting
+    assert data["banner_enabled"] == config_manager.app_settings.banner_enabled
+
+
+def test_banner_get_with_feature_disabled(tmp_path, monkeypatch):
+    """Test that GET /admin/banners returns banner_enabled: false when feature is disabled."""
+    client = TestClient(app)
+    
+    # Setup temp config directory
+    config_dir = tmp_path / "config" / "overrides"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    messages_file = config_dir / "messages.txt"
+    messages_file.write_text("Test message\n")
+    
+    # Mock config path
+    def mock_get_admin_config_path(filename):
+        return config_dir / filename
+    
+    monkeypatch.setattr(
+        "routes.admin_routes.get_admin_config_path",
+        mock_get_admin_config_path
+    )
+    
+    # Mock setup_config_overrides
+    monkeypatch.setattr("routes.admin_routes.setup_config_overrides", lambda: None)
+    
+    # Mock banner_enabled to be false
+    monkeypatch.setattr(
+        "routes.admin_routes.config_manager.app_settings.banner_enabled",
+        False
+    )
+    
+    # Make request to get banner config
+    response = client.get(
+        "/admin/banners",
+        headers={"X-User-Email": "admin@example.com"}
+    )
+    
+    # Verify request succeeded
+    assert response.status_code == 200
+    
+    # Check response contains banner_enabled field set to false
+    data = response.json()
+    assert "banner_enabled" in data
+    assert data["banner_enabled"] is False
+
+
+def test_banner_get_with_feature_enabled(tmp_path, monkeypatch):
+    """Test that GET /admin/banners returns banner_enabled: true when feature is enabled."""
+    client = TestClient(app)
+    
+    # Setup temp config directory
+    config_dir = tmp_path / "config" / "overrides"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    messages_file = config_dir / "messages.txt"
+    messages_file.write_text("Test message\n")
+    
+    # Mock config path
+    def mock_get_admin_config_path(filename):
+        return config_dir / filename
+    
+    monkeypatch.setattr(
+        "routes.admin_routes.get_admin_config_path",
+        mock_get_admin_config_path
+    )
+    
+    # Mock setup_config_overrides
+    monkeypatch.setattr("routes.admin_routes.setup_config_overrides", lambda: None)
+    
+    # Mock banner_enabled to be true
+    monkeypatch.setattr(
+        "routes.admin_routes.config_manager.app_settings.banner_enabled",
+        True
+    )
+    
+    # Make request to get banner config
+    response = client.get(
+        "/admin/banners",
+        headers={"X-User-Email": "admin@example.com"}
+    )
+    
+    # Verify request succeeded
+    assert response.status_code == 200
+    
+    # Check response contains banner_enabled field set to true
+    data = response.json()
+    assert "banner_enabled" in data
+    assert data["banner_enabled"] is True
+
+

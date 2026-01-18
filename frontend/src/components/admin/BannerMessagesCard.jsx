@@ -1,10 +1,35 @@
-import React from 'react'
-import { MessageSquare } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { MessageSquare, AlertCircle } from 'lucide-react'
 
 const BannerMessagesCard = ({ openModal, addNotification }) => {
+  const [bannerEnabled, setBannerEnabled] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchBannerStatus = async () => {
+      try {
+        const response = await fetch('/admin/banners')
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        const data = await response.json()
+        setBannerEnabled(typeof data.banner_enabled === 'boolean' ? data.banner_enabled : false)
+      } catch (err) {
+        console.error('Error fetching banner status:', err)
+        addNotification('Error loading banner status: ' + err.message, 'error')
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchBannerStatus()
+  }, [addNotification])
+
   const manageBanners = async () => {
     try {
       const response = await fetch('/admin/banners')
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
       const data = await response.json()
       
       openModal('Manage Banner Messages', {
@@ -33,12 +58,27 @@ const BannerMessagesCard = ({ openModal, addNotification }) => {
         <h2 className="text-lg font-semibold">Banner Messages</h2>
       </div>
       <p className="text-gray-400 mb-4">Manage messages displayed at the top of the chat interface.</p>
-      <div className={`px-3 py-1 rounded text-sm font-medium mb-4 ${getStatusColor('healthy')}`}>
-        Ready
+      
+      {!loading && !bannerEnabled && (
+        <div id="banner-disabled-warning" className="flex items-start gap-2 px-3 py-2 mb-4 bg-yellow-900/20 border border-yellow-600/30 rounded text-sm text-yellow-400">
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>Banner feature is currently disabled. Enable BANNER_ENABLED in configuration to use this feature.</span>
+        </div>
+      )}
+      
+      <div className={`px-3 py-1 rounded text-sm font-medium mb-4 ${bannerEnabled ? getStatusColor('healthy') : getStatusColor('warning')}`}>
+        {bannerEnabled ? 'Ready' : 'Feature Disabled'}
       </div>
       <button 
         onClick={manageBanners}
-        className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+        disabled={!bannerEnabled || loading}
+        aria-describedby={!bannerEnabled && !loading ? 'banner-disabled-warning' : undefined}
+        aria-label={!bannerEnabled && !loading ? 'Manage Banners - Feature is disabled' : undefined}
+        className={`w-full px-4 py-2 rounded-lg transition-colors ${
+          bannerEnabled && !loading
+            ? 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
+            : 'bg-gray-600 cursor-not-allowed opacity-50'
+        }`}
       >
         Manage Banners
       </button>
