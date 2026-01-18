@@ -93,7 +93,7 @@ class TestSamplingIntegration:
                 )
                 
                 # Verify result
-                assert result.text == "Mocked LLM response"
+                assert result.content.text == "Mocked LLM response"
                 
                 # Verify LLM was called correctly
                 mock_llm_instance.call_plain.assert_called_once()

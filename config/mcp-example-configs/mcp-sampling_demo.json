@@ -1,0 +1,17 @@
+{
+  "sampling_demo": {
+    "command": [
+      "python",
+      "mcp/sampling_demo/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates MCP LLM sampling capabilities - tools can request text generation from the LLM during execution for AI-powered analysis, code generation, sentiment analysis, creative writing, multi-turn conversations, and agentic research workflows. Includes 7 example tools showing basic sampling (summarize, sentiment analysis, code generation, creative writing) and advanced patterns (multi-turn conversations, research workflows, translation chains).",
+    "author": "Atlas UI Team",
+    "short_description": "LLM sampling demonstration with 7 example tools",
+    "help_email": "support@example.com",
+    "compliance_level": "Public"
+  }
+}

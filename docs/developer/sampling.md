@@ -61,6 +61,12 @@ async def analyze_sentiment(text: str, ctx: Context) -> str:
     return result.text
 ```
 
+**Example in action:**
+
+![Sampling Sentiment Analysis](../readme_img/sampling-sentiment-analysis.png)
+
+This example shows how the tool uses a system prompt and lower temperature for consistent sentiment classification.
+
 ### Code Generation
 ```python
 @mcp.tool
@@ -109,6 +115,14 @@ To experience sampling features:
    - "Generate Python code that calculates fibonacci numbers"
    - "Write a creative story about artificial intelligence"
    - "Research this question: What are renewable energy benefits?"
+
+### Example: Summarization in Action
+
+Here's what the sampling demo looks like when summarizing text:
+
+![Sampling Demo Summarization](../readme_img/sampling-demo-suuarmization.png)
+
+The tool uses LLM sampling to generate a concise summary, demonstrating how MCP tools can leverage AI capabilities during execution.
 
 ### Available Demo Tools
 
