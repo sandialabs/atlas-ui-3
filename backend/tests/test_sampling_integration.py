@@ -1,9 +1,8 @@
 """Integration test for MCP sampling functionality."""
 
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from modules.mcp_tools.client import MCPToolManager, _SamplingRoutingContext
+from modules.mcp_tools.client import MCPToolManager
 from domain.messages.models import ToolCall
 
 
@@ -14,17 +13,10 @@ class TestSamplingIntegration:
     async def test_sampling_handler_basic(self):
         """Test that sampling handler can be created and configured."""
         manager = MCPToolManager()
-        
-        # Create a mock tool call
-        tool_call = ToolCall(
-            id="test_tool_call_1",
-            name="test_tool",
-            arguments={}
-        )
-        
+
         # Create a sampling handler
         handler = manager._create_sampling_handler("test_server")
-        
+
         # Verify handler is callable
         assert callable(handler)
 
@@ -32,28 +24,29 @@ class TestSamplingIntegration:
     async def test_sampling_context_manager(self):
         """Test the sampling context manager."""
         manager = MCPToolManager()
-        
+
         # Create a mock tool call and update callback
         tool_call = ToolCall(
             id="test_tool_call_1",
             name="test_tool",
             arguments={}
         )
-        
+
         update_cb = AsyncMock()
-        
+
         # Use the context manager
         async with manager._use_sampling_context("test_server", tool_call, update_cb):
-            # Verify routing is set up
+            # Verify routing is set up with composite key (server_name, tool_call.id)
             from modules.mcp_tools.client import _SAMPLING_ROUTING
-            assert "test_server" in _SAMPLING_ROUTING
-            routing = _SAMPLING_ROUTING["test_server"]
+            routing_key = ("test_server", "test_tool_call_1")
+            assert routing_key in _SAMPLING_ROUTING
+            routing = _SAMPLING_ROUTING[routing_key]
             assert routing.server_name == "test_server"
             assert routing.tool_call == tool_call
             assert routing.update_cb == update_cb
-        
+
         # Verify routing is cleaned up
-        assert "test_server" not in _SAMPLING_ROUTING
+        assert routing_key not in _SAMPLING_ROUTING
 
     @pytest.mark.asyncio
     async def test_sampling_handler_with_routing(self):

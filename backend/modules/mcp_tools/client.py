@@ -43,13 +43,13 @@ _ACTIVE_LOG_CALLBACK: contextvars.ContextVar[Optional[LogCallback]] = contextvar
 
 # Dictionary-based routing for elicitation so a shared Client can still deliver
 # elicitation requests to the correct user's WebSocket.
-# Key: tool_call_id, Value: _ElicitationRoutingContext
+# Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
 # Note: Cannot use contextvars.ContextVar because MCP receive loop runs in a different task
-_ELICITATION_ROUTING: Dict[str, _ElicitationRoutingContext] = {}
+_ELICITATION_ROUTING: Dict[tuple, _ElicitationRoutingContext] = {}
 
 # Dictionary-based routing for sampling requests (similar to elicitation)
-# Key: server_name, Value: _SamplingRoutingContext
-_SAMPLING_ROUTING: Dict[str, "_SamplingRoutingContext"] = {}
+# Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
+_SAMPLING_ROUTING: Dict[tuple, "_SamplingRoutingContext"] = {}
 
 
 class _SamplingRoutingContext:
@@ -250,13 +250,15 @@ class MCPToolManager:
         """
         Set up elicitation routing for a tool call.
         Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
+        Key is (server_name, tool_call.id) to avoid collisions with concurrent tool calls.
         """
         routing = _ElicitationRoutingContext(server_name, tool_call, update_cb)
-        _ELICITATION_ROUTING[server_name] = routing
+        routing_key = (server_name, tool_call.id)
+        _ELICITATION_ROUTING[routing_key] = routing
         try:
             yield
         finally:
-            _ELICITATION_ROUTING.pop(server_name, None)
+            _ELICITATION_ROUTING.pop(routing_key, None)
 
     def _create_elicitation_handler(self, server_name: str):
         """
@@ -270,7 +272,12 @@ class MCPToolManager:
             from fastmcp.client.elicitation import ElicitResult
             from mcp.types import ElicitRequestFormParams
 
-            routing = _ELICITATION_ROUTING.get(server_name)
+            # Find routing context for this server (keyed by (server_name, tool_call_id))
+            routing = None
+            for (srv, _tcid), ctx in _ELICITATION_ROUTING.items():
+                if srv == server_name:
+                    routing = ctx
+                    break
             if routing is None:
                 logger.warning(
                     f"Elicitation request for server '{server_name}' but no routing context - "
@@ -365,13 +372,15 @@ class MCPToolManager:
         """
         Set up sampling routing for a tool call.
         Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
+        Key is (server_name, tool_call.id) to avoid collisions with concurrent tool calls.
         """
         routing = _SamplingRoutingContext(server_name, tool_call, update_cb)
-        _SAMPLING_ROUTING[server_name] = routing
+        routing_key = (server_name, tool_call.id)
+        _SAMPLING_ROUTING[routing_key] = routing
         try:
             yield
         finally:
-            _SAMPLING_ROUTING.pop(server_name, None)
+            _SAMPLING_ROUTING.pop(routing_key, None)
 
     def _create_sampling_handler(self, server_name: str):
         """
@@ -384,7 +393,12 @@ class MCPToolManager:
             """Per-server sampling handler with captured server_name."""
             from mcp.types import SamplingMessage, TextContent, CreateMessageResult
 
-            routing = _SAMPLING_ROUTING.get(server_name)
+            # Find routing context for this server (keyed by (server_name, tool_call_id))
+            routing = None
+            for (srv, _tcid), ctx in _SAMPLING_ROUTING.items():
+                if srv == server_name:
+                    routing = ctx
+                    break
             if routing is None:
                 logger.warning(
                     f"Sampling request for server '{server_name}' but no routing context - "
