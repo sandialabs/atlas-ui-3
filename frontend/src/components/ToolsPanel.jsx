@@ -8,9 +8,13 @@ import UnsavedChangesDialog from './UnsavedChangesDialog'
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
 
+// Truncation message constant for better maintainability
+const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start and end of content.'
+
 const ToolsPanel = ({ isOpen, onClose }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
+  const [expandedPrompts, setExpandedPrompts] = useState(new Set())
   const [collapsedServers, setCollapsedServers] = useState(new Set())
   const [expandedDescriptions, setExpandedDescriptions] = useState(new Set())
   const navigate = useNavigate()
@@ -407,6 +411,36 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     setExpandedDescriptions(newExpanded)
   }
 
+  const togglePromptExpansion = (promptKey) => {
+    const newExpanded = new Set(expandedPrompts)
+    if (newExpanded.has(promptKey)) {
+      newExpanded.delete(promptKey)
+    } else {
+      newExpanded.add(promptKey)
+    }
+    setExpandedPrompts(newExpanded)
+  }
+
+  /**
+   * Truncates long prompt descriptions by showing start and end with ellipsis in the middle
+   * @param {string} description - The full description text
+   * @param {number} maxLength - Maximum length before truncation (default: 500)
+   * @param {number} edgeLength - Number of characters to show at start and end (default: 200)
+   * @returns {Object} Object with truncated text and isTruncated flag
+   */
+  const truncatePromptDescription = (description, maxLength = 500, edgeLength = 200) => {
+    if (!description || description.length <= maxLength) {
+      return { text: description, isTruncated: false }
+    }
+    
+    const start = description.substring(0, edgeLength)
+    const end = description.substring(description.length - edgeLength)
+    return { 
+      text: `${start}\n\n...\n\n${end}`,
+      isTruncated: true
+    }
+  }
+
   /**
    * Renders the input schema parameters for a tool.
    * @param {Object} schema - The JSON schema object containing properties and required fields
@@ -747,17 +781,47 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                   {server.prompts.map(prompt => {
                                     const promptKey = `${server.server}_${prompt.name}`
                                     const isSelected = selectedPrompts.has(promptKey)
+                                    const isPromptExpanded = expandedPrompts.has(promptKey)
+
                                     return (
-                                      <button
-                                        key={prompt.name}
-                                        onClick={() => togglePrompt(promptKey)}
-                                        className={`px-2 py-0.5 text-xs rounded text-white transition-colors hover:opacity-80 ${
-                                          isSelected ? 'bg-green-600' : 'bg-gray-600 hover:bg-green-600'
-                                        }`}
-                                        title={`${prompt.description}\n\nClick to ${isSelected ? 'disable' : 'enable'} ${prompt.name}`}
-                                      >
-                                        {prompt.name}
-                                      </button>
+                                      <div key={prompt.name} className="flex flex-col gap-1 w-full">
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            onClick={() => togglePrompt(promptKey)}
+                                            className={`px-2 py-0.5 text-xs rounded text-white transition-colors hover:opacity-80 ${
+                                              isSelected ? 'bg-green-600' : 'bg-gray-600 hover:bg-green-600'
+                                            }`}
+                                            title={`Click to ${isSelected ? 'disable' : 'enable'} ${prompt.name}`}
+                                          >
+                                            {prompt.name}
+                                          </button>
+                                          {prompt.description && (
+                                            <button
+                                              onClick={() => togglePromptExpansion(promptKey)}
+                                              className="p-0.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors"
+                                              title="Show prompt description"
+                                            >
+                                              <Info className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                        </div>
+                                        {isPromptExpanded && prompt.description && (() => {
+                                          const { text: truncatedDescription, isTruncated } = truncatePromptDescription(prompt.description)
+                                          return (
+                                            <div className="bg-gray-800 rounded p-2 text-xs space-y-2 border border-gray-600">
+                                              <div>
+                                                <p className="font-semibold text-gray-300 mb-1">Description:</p>
+                                                <p className="text-gray-400 whitespace-pre-wrap">{truncatedDescription}</p>
+                                                {isTruncated && (
+                                                  <p className="text-xs text-yellow-400 mt-2 italic">
+                                                    {TRUNCATION_MESSAGE}
+                                                  </p>
+                                                )}
+                                              </div>
+                                            </div>
+                                          )
+                                        })()}
+                                      </div>
                                     )
                                   })}
                                 </div>
