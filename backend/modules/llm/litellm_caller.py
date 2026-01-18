@@ -146,10 +146,27 @@ class LiteLLMCaller:
         
         return kwargs
 
-    async def call_plain(self, model_name: str, messages: List[Dict[str, str]], temperature: float = 0.7) -> str:
-        """Plain LLM call - no tools, no RAG."""
+    async def call_plain(
+        self, 
+        model_name: str, 
+        messages: List[Dict[str, str]], 
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None
+    ) -> str:
+        """Plain LLM call - no tools, no RAG.
+        
+        Args:
+            model_name: Name of the model to use
+            messages: List of message dicts with 'role' and 'content'
+            temperature: Optional temperature override (uses config default if None)
+            max_tokens: Optional max_tokens override (uses config default if None)
+        """
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature)
+        
+        # Override max_tokens if provided
+        if max_tokens is not None:
+            model_kwargs["max_tokens"] = max_tokens
         
         try:
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
