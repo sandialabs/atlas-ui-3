@@ -13,7 +13,7 @@ const BannerMessagesCard = ({ openModal, addNotification }) => {
           throw new Error(`HTTP ${response.status}`)
         }
         const data = await response.json()
-        setBannerEnabled(data.banner_enabled)
+        setBannerEnabled(typeof data.banner_enabled === 'boolean' ? data.banner_enabled : false)
       } catch (err) {
         console.error('Error fetching banner status:', err)
         addNotification('Error loading banner status: ' + err.message, 'error')
@@ -60,7 +60,7 @@ const BannerMessagesCard = ({ openModal, addNotification }) => {
       <p className="text-gray-400 mb-4">Manage messages displayed at the top of the chat interface.</p>
       
       {!loading && !bannerEnabled && (
-        <div className="flex items-start gap-2 px-3 py-2 mb-4 bg-yellow-900/20 border border-yellow-600/30 rounded text-sm text-yellow-400">
+        <div id="banner-disabled-warning" className="flex items-start gap-2 px-3 py-2 mb-4 bg-yellow-900/20 border border-yellow-600/30 rounded text-sm text-yellow-400">
           <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <span>Banner feature is currently disabled. Enable BANNER_ENABLED in configuration to use this feature.</span>
         </div>
@@ -72,6 +72,8 @@ const BannerMessagesCard = ({ openModal, addNotification }) => {
       <button 
         onClick={manageBanners}
         disabled={!bannerEnabled || loading}
+        aria-describedby={!bannerEnabled && !loading ? 'banner-disabled-warning' : undefined}
+        aria-label={!bannerEnabled && !loading ? 'Manage Banners - Feature is disabled' : undefined}
         className={`w-full px-4 py-2 rounded-lg transition-colors ${
           bannerEnabled && !loading
             ? 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
