@@ -43,9 +43,26 @@ _ACTIVE_LOG_CALLBACK: contextvars.ContextVar[Optional[LogCallback]] = contextvar
 
 # Dictionary-based routing for elicitation so a shared Client can still deliver
 # elicitation requests to the correct user's WebSocket.
-# Key: tool_call_id, Value: _ElicitationRoutingContext
+# Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
 # Note: Cannot use contextvars.ContextVar because MCP receive loop runs in a different task
-_ELICITATION_ROUTING: Dict[str, _ElicitationRoutingContext] = {}
+_ELICITATION_ROUTING: Dict[tuple, _ElicitationRoutingContext] = {}
+
+# Dictionary-based routing for sampling requests (similar to elicitation)
+# Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
+_SAMPLING_ROUTING: Dict[tuple, "_SamplingRoutingContext"] = {}
+
+
+class _SamplingRoutingContext:
+    """Context for routing sampling requests to the correct tool execution."""
+    def __init__(
+        self,
+        server_name: str,
+        tool_call: ToolCall,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+    ):
+        self.server_name = server_name
+        self.tool_call = tool_call
+        self.update_cb = update_cb
 
 # Mapping from MCP log levels to Python logging levels
 MCP_TO_PYTHON_LOG_LEVEL = {
@@ -233,13 +250,15 @@ class MCPToolManager:
         """
         Set up elicitation routing for a tool call.
         Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
+        Key is (server_name, tool_call.id) to avoid collisions with concurrent tool calls.
         """
         routing = _ElicitationRoutingContext(server_name, tool_call, update_cb)
-        _ELICITATION_ROUTING[server_name] = routing
+        routing_key = (server_name, tool_call.id)
+        _ELICITATION_ROUTING[routing_key] = routing
         try:
             yield
         finally:
-            _ELICITATION_ROUTING.pop(server_name, None)
+            _ELICITATION_ROUTING.pop(routing_key, None)
 
     def _create_elicitation_handler(self, server_name: str):
         """
@@ -253,7 +272,12 @@ class MCPToolManager:
             from fastmcp.client.elicitation import ElicitResult
             from mcp.types import ElicitRequestFormParams
 
-            routing = _ELICITATION_ROUTING.get(server_name)
+            # Find routing context for this server (keyed by (server_name, tool_call_id))
+            routing = None
+            for (srv, _tcid), ctx in _ELICITATION_ROUTING.items():
+                if srv == server_name:
+                    routing = ctx
+                    break
             if routing is None:
                 logger.warning(
                     f"Elicitation request for server '{server_name}' but no routing context - "
@@ -335,6 +359,150 @@ class MCPToolManager:
             except Exception as e:
                 logger.error(f"Error handling elicitation for server '{server_name}': {e}", exc_info=True)
                 return ElicitResult(action="cancel", content=None)
+
+        return handler
+
+    @asynccontextmanager
+    async def _use_sampling_context(
+        self,
+        server_name: str,
+        tool_call: ToolCall,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+    ) -> AsyncIterator[None]:
+        """
+        Set up sampling routing for a tool call.
+        Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
+        Key is (server_name, tool_call.id) to avoid collisions with concurrent tool calls.
+        """
+        routing = _SamplingRoutingContext(server_name, tool_call, update_cb)
+        routing_key = (server_name, tool_call.id)
+        _SAMPLING_ROUTING[routing_key] = routing
+        try:
+            yield
+        finally:
+            _SAMPLING_ROUTING.pop(routing_key, None)
+
+    def _create_sampling_handler(self, server_name: str):
+        """
+        Create a sampling handler for a specific MCP server.
+
+        This handler intercepts MCP sampling requests and routes them to the LLM.
+        Returns a handler function that captures the server_name for routing.
+        """
+        async def handler(messages, params=None, context=None):
+            """Per-server sampling handler with captured server_name."""
+            from mcp.types import SamplingMessage, TextContent, CreateMessageResult
+
+            # Find routing context for this server (keyed by (server_name, tool_call_id))
+            routing = None
+            for (srv, _tcid), ctx in _SAMPLING_ROUTING.items():
+                if srv == server_name:
+                    routing = ctx
+                    break
+            if routing is None:
+                logger.warning(
+                    f"Sampling request for server '{server_name}' but no routing context - "
+                    f"sampling cancelled."
+                )
+                raise Exception("No routing context for sampling request")
+
+            try:
+                message_dicts = []
+                for msg in messages:
+                    if isinstance(msg, SamplingMessage):
+                        text = ""
+                        if isinstance(msg.content, TextContent):
+                            text = msg.content.text
+                        elif isinstance(msg.content, list):
+                            for item in msg.content:
+                                if isinstance(item, TextContent):
+                                    text += item.text
+                        else:
+                            text = str(msg.content)
+                        message_dicts.append({
+                            "role": msg.role,
+                            "content": text
+                        })
+                    elif isinstance(msg, str):
+                        message_dicts.append({
+                            "role": "user",
+                            "content": msg
+                        })
+                    else:
+                        message_dicts.append(msg)
+
+                system_prompt = getattr(params, 'systemPrompt', None) if params else None
+                temperature = getattr(params, 'temperature', None) if params else None
+                max_tokens = getattr(params, 'maxTokens', 512) if params else 512
+                model_preferences_raw = getattr(params, 'modelPreferences', None) if params else None
+
+                model_preferences = None
+                if model_preferences_raw:
+                    if isinstance(model_preferences_raw, str):
+                        model_preferences = [model_preferences_raw]
+                    elif isinstance(model_preferences_raw, list):
+                        model_preferences = model_preferences_raw
+
+                if system_prompt:
+                    message_dicts.insert(0, {
+                        "role": "system",
+                        "content": system_prompt
+                    })
+
+                logger.info(
+                    f"Sampling request from server '{server_name}' tool '{routing.tool_call.name}': "
+                    f"{len(message_dicts)} messages, temperature={temperature}, max_tokens={max_tokens}"
+                )
+
+                from modules.llm.litellm_caller import LiteLLMCaller
+                from modules.config import config_manager
+
+                llm_caller = LiteLLMCaller()
+
+                llm_config = config_manager.llm_config
+                model_name = None
+
+                if model_preferences:
+                    for pref in model_preferences:
+                        if pref in llm_config.models:
+                            model_name = pref
+                            break
+                        for name, model_config in llm_config.models.items():
+                            if model_config.model_name == pref:
+                                model_name = name
+                                break
+                        if model_name:
+                            break
+
+                if not model_name:
+                    model_name = next(iter(llm_config.models.keys()))
+
+                logger.debug(
+                    f"Using model '{model_name}' for sampling "
+                    f"(preferences: {model_preferences})"
+                )
+
+                response = await llm_caller.call_plain(
+                    model_name=model_name,
+                    messages=message_dicts,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+
+                logger.info(
+                    f"Sampling completed for server '{server_name}': "
+                    f"response_length={len(response) if response else 0}"
+                )
+
+                return CreateMessageResult(
+                    role="assistant",
+                    content=TextContent(type="text", text=response),
+                    model=model_name
+                )
+
+            except Exception as e:
+                logger.error(f"Error handling sampling for server '{server_name}': {e}", exc_info=True)
+                raise
 
         return handler
     
@@ -499,11 +667,23 @@ class MCPToolManager:
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
-                    client = Client(url, auth=token, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
+                    client = Client(
+                        url,
+                        auth=token,
+                        log_handler=log_handler,
+                        elicitation_handler=self._create_elicitation_handler(server_name),
+                        sampling_handler=self._create_sampling_handler(server_name),
+                    )
                 else:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
-                    client = Client(url, auth=token, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
+                    client = Client(
+                        url,
+                        auth=token,
+                        log_handler=log_handler,
+                        elicitation_handler=self._create_elicitation_handler(server_name),
+                        sampling_handler=self._create_sampling_handler(server_name),
+                    )
                 
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
                 return client
@@ -554,7 +734,12 @@ class MCPToolManager:
                             logger.debug("Creating STDIO client for %s with command=%s cwd=%s", safe_server_name, command, cwd)
                             from fastmcp.client.transports import StdioTransport
                             transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd, env=resolved_env)
-                            client = Client(transport, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
+                            client = Client(
+                                transport,
+                                log_handler=log_handler,
+                                elicitation_handler=self._create_elicitation_handler(server_name),
+                                sampling_handler=self._create_sampling_handler(server_name),
+                            )
                             logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command and cwd")
                             return client
                         else:
@@ -564,7 +749,12 @@ class MCPToolManager:
                         logger.debug("No cwd specified for %s; creating STDIO client with command=%s", safe_server_name, command)
                         from fastmcp.client.transports import StdioTransport
                         transport = StdioTransport(command=command[0], args=command[1:], env=resolved_env)
-                        client = Client(transport, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))
+                        client = Client(
+                            transport,
+                            log_handler=log_handler,
+                            elicitation_handler=self._create_elicitation_handler(server_name),
+                            sampling_handler=self._create_sampling_handler(server_name),
+                        )
                         logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command")
                         return client
                 else:
@@ -574,7 +764,12 @@ class MCPToolManager:
                     if os.path.exists(server_path):
                         logger.debug(f"Server script exists for {server_name}, creating client...")
                         log_handler = self._create_log_handler(server_name)
-                        client = Client(server_path, log_handler=log_handler, elicitation_handler=self._create_elicitation_handler(server_name))  # Client auto-detects STDIO transport from .py file
+                        client = Client(
+                            server_path,
+                            log_handler=log_handler,
+                            elicitation_handler=self._create_elicitation_handler(server_name),
+                            sampling_handler=self._create_sampling_handler(server_name),
+                        )  # Client auto-detects STDIO transport from .py file
                         logger.info(f"Created MCP client for {server_name}")
                         logger.debug(f"Successfully created client for {server_name}")
                         return client
@@ -1559,20 +1754,22 @@ class MCPToolManager:
             if update_cb is not None:
                 async with self._use_log_callback(_tool_log_callback):
                     async with self._use_elicitation_context(server_name, tool_call, update_cb):
+                        async with self._use_sampling_context(server_name, tool_call, update_cb):
+                            raw_result = await self.call_tool(
+                                server_name,
+                                actual_tool_name,
+                                tool_call.arguments,
+                                progress_handler=_progress_handler,
+                            )
+            else:
+                async with self._use_elicitation_context(server_name, tool_call, update_cb):
+                    async with self._use_sampling_context(server_name, tool_call, update_cb):
                         raw_result = await self.call_tool(
                             server_name,
                             actual_tool_name,
                             tool_call.arguments,
                             progress_handler=_progress_handler,
                         )
-            else:
-                async with self._use_elicitation_context(server_name, tool_call, update_cb):
-                    raw_result = await self.call_tool(
-                        server_name,
-                        actual_tool_name,
-                        tool_call.arguments,
-                        progress_handler=_progress_handler,
-                    )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
             

@@ -43,18 +43,19 @@ class TestElicitationRouting:
         _ELICITATION_ROUTING.clear()
 
         server_name = "test_server"
+        routing_key = (server_name, mock_tool_call.id)
 
         # Use the context manager
         async with manager._use_elicitation_context(server_name, mock_tool_call, mock_update_callback):
-            # Inside context: routing should exist
-            assert server_name in _ELICITATION_ROUTING
-            routing = _ELICITATION_ROUTING[server_name]
+            # Inside context: routing should exist with composite key
+            assert routing_key in _ELICITATION_ROUTING
+            routing = _ELICITATION_ROUTING[routing_key]
             assert routing.server_name == server_name
             assert routing.tool_call == mock_tool_call
             assert routing.update_cb == mock_update_callback
 
         # After context: routing should be cleaned up
-        assert server_name not in _ELICITATION_ROUTING
+        assert routing_key not in _ELICITATION_ROUTING
 
     @pytest.mark.asyncio
     async def test_elicitation_routing_cleanup_on_error(self, manager, mock_tool_call, mock_update_callback):
@@ -64,15 +65,16 @@ class TestElicitationRouting:
         _ELICITATION_ROUTING.clear()
 
         server_name = "test_server"
+        routing_key = (server_name, mock_tool_call.id)
 
         # Simulate an error inside the context
         with pytest.raises(RuntimeError):
             async with manager._use_elicitation_context(server_name, mock_tool_call, mock_update_callback):
-                assert server_name in _ELICITATION_ROUTING
+                assert routing_key in _ELICITATION_ROUTING
                 raise RuntimeError("Simulated error")
 
         # Routing should still be cleaned up
-        assert server_name not in _ELICITATION_ROUTING
+        assert routing_key not in _ELICITATION_ROUTING
 
     @pytest.mark.asyncio
     async def test_multiple_servers_routing(self, manager, mock_update_callback):
@@ -83,23 +85,25 @@ class TestElicitationRouting:
 
         tool_call_1 = ToolCall(id="call_1", name="tool_1", arguments={})
         tool_call_2 = ToolCall(id="call_2", name="tool_2", arguments={})
+        routing_key_1 = ("server_1", "call_1")
+        routing_key_2 = ("server_2", "call_2")
 
         # Create contexts for two different servers
         async with manager._use_elicitation_context("server_1", tool_call_1, mock_update_callback):
             async with manager._use_elicitation_context("server_2", tool_call_2, mock_update_callback):
                 # Both should exist simultaneously
-                assert "server_1" in _ELICITATION_ROUTING
-                assert "server_2" in _ELICITATION_ROUTING
-                assert _ELICITATION_ROUTING["server_1"].tool_call == tool_call_1
-                assert _ELICITATION_ROUTING["server_2"].tool_call == tool_call_2
+                assert routing_key_1 in _ELICITATION_ROUTING
+                assert routing_key_2 in _ELICITATION_ROUTING
+                assert _ELICITATION_ROUTING[routing_key_1].tool_call == tool_call_1
+                assert _ELICITATION_ROUTING[routing_key_2].tool_call == tool_call_2
 
             # server_2 cleaned up, server_1 still exists
-            assert "server_1" in _ELICITATION_ROUTING
-            assert "server_2" not in _ELICITATION_ROUTING
+            assert routing_key_1 in _ELICITATION_ROUTING
+            assert routing_key_2 not in _ELICITATION_ROUTING
 
         # Both cleaned up
-        assert "server_1" not in _ELICITATION_ROUTING
-        assert "server_2" not in _ELICITATION_ROUTING
+        assert routing_key_1 not in _ELICITATION_ROUTING
+        assert routing_key_2 not in _ELICITATION_ROUTING
 
     @pytest.mark.asyncio
     async def test_elicitation_with_none_callback(self, manager, mock_tool_call):
@@ -109,13 +113,14 @@ class TestElicitationRouting:
         _ELICITATION_ROUTING.clear()
 
         server_name = "test_server"
+        routing_key = (server_name, mock_tool_call.id)
 
         # Use context with None callback
         async with manager._use_elicitation_context(server_name, mock_tool_call, None):
-            routing = _ELICITATION_ROUTING[server_name]
+            routing = _ELICITATION_ROUTING[routing_key]
             assert routing.update_cb is None
 
-        assert server_name not in _ELICITATION_ROUTING
+        assert routing_key not in _ELICITATION_ROUTING
 
 
 class TestElicitationHandler:
@@ -168,9 +173,10 @@ class TestElicitationHandler:
 
         server_name = "test_server"
         tool_call = ToolCall(id="call_123", name="test_tool", arguments={})
+        routing_key = (server_name, tool_call.id)
 
-        # Set routing with None callback
-        _ELICITATION_ROUTING[server_name] = _ElicitationRoutingContext(
+        # Set routing with None callback using composite key
+        _ELICITATION_ROUTING[routing_key] = _ElicitationRoutingContext(
             server_name=server_name,
             tool_call=tool_call,
             update_cb=None
@@ -204,9 +210,10 @@ class TestElicitationIntegration:
         server_name = "test_server"
         tool_call = ToolCall(id="call_123", name="test_tool", arguments={})
         mock_callback = AsyncMock()
+        routing_key = (server_name, tool_call.id)
 
-        # Set routing with mock callback
-        _ELICITATION_ROUTING[server_name] = _ElicitationRoutingContext(
+        # Set routing with mock callback using composite key
+        _ELICITATION_ROUTING[routing_key] = _ElicitationRoutingContext(
             server_name=server_name,
             tool_call=tool_call,
             update_cb=mock_callback
@@ -254,8 +261,9 @@ class TestElicitationIntegration:
         server_name = "test_server"
         tool_call = ToolCall(id="call_123", name="test_tool", arguments={})
         mock_callback = AsyncMock()
+        routing_key = (server_name, tool_call.id)
 
-        _ELICITATION_ROUTING[server_name] = _ElicitationRoutingContext(
+        _ELICITATION_ROUTING[routing_key] = _ElicitationRoutingContext(
             server_name=server_name,
             tool_call=tool_call,
             update_cb=mock_callback,
