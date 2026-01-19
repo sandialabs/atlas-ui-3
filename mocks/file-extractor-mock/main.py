@@ -15,13 +15,26 @@ import base64
 import io
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_filename_for_log(filename: str) -> str:
+    """Sanitize filename to prevent log injection attacks."""
+    if not filename:
+        return "<empty>"
+    # Remove newlines, carriage returns, and other control characters
+    sanitized = "".join(c if c.isprintable() and c not in "\n\r\t" else "_" for c in filename)
+    # Limit length to prevent log flooding
+    if len(sanitized) > 255:
+        sanitized = sanitized[:252] + "..."
+    return sanitized
+
 
 app = FastAPI(
     title="Mock File Extractor Service",
@@ -133,7 +146,7 @@ async def extract_pdf(request: ExtractionRequest):
                 error=str(e)
             )
         except Exception as e:
-            logger.exception(f"PDF extraction failed for {request.filename}")
+            logger.exception(f"PDF extraction failed for {sanitize_filename_for_log(request.filename)}")
             return ExtractionResponse(
                 success=False,
                 error=f"PDF extraction failed: {str(e)}"
@@ -160,7 +173,7 @@ async def extract_pdf(request: ExtractionRequest):
         )
 
     except Exception as e:
-        logger.exception(f"Unexpected error processing {request.filename}")
+        logger.exception(f"Unexpected error processing {sanitize_filename_for_log(request.filename)}")
         return ExtractionResponse(
             success=False,
             error=f"Unexpected error: {str(e)}"
@@ -269,7 +282,7 @@ async def analyze_image(request: ExtractionRequest):
         )
 
     except Exception as e:
-        logger.exception(f"Unexpected error analyzing {request.filename}")
+        logger.exception(f"Unexpected error analyzing {sanitize_filename_for_log(request.filename)}")
         return ExtractionResponse(
             success=False,
             error=f"Unexpected error: {str(e)}"
@@ -374,7 +387,7 @@ async def ocr_extract(request: ExtractionRequest):
         )
 
     except Exception as e:
-        logger.exception(f"Unexpected error OCR processing {request.filename}")
+        logger.exception(f"Unexpected error OCR processing {sanitize_filename_for_log(request.filename)}")
         return ExtractionResponse(
             success=False,
             error=f"Unexpected error: {str(e)}"

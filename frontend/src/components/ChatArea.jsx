@@ -481,8 +481,13 @@ const ChatArea = () => {
 
   // Check if a file extension supports extraction
   const canExtractFile = useCallback((filename) => {
-    if (!fileExtraction?.enabled) return false
-    const ext = '.' + filename.split('.').pop().toLowerCase()
+    if (!fileExtraction?.enabled || !filename) return false
+    const lastDotIndex = filename.lastIndexOf('.')
+    // No extension, hidden file (dot at start), or trailing dot
+    if (lastDotIndex <= 0 || lastDotIndex === filename.length - 1) {
+      return false
+    }
+    const ext = filename.slice(lastDotIndex).toLowerCase()
     return fileExtraction.supported_extensions?.includes(ext) || false
   }, [fileExtraction])
 

@@ -1,6 +1,6 @@
 """Tests for file extraction config exposure in /api/config endpoint."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from starlette.testclient import TestClient
 

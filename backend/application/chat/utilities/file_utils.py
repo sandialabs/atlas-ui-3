@@ -551,8 +551,11 @@ def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, 
         # Include extracted preview if available
         preview = file_info.get("extracted_preview")
         if preview:
-            # Indent the preview content
-            indented_preview = "\n    ".join(preview.split("\n")[:10])  # Limit to 10 lines
+            # Limit to 10 lines and 2000 characters to prevent excessive token usage
+            lines = preview.split("\n")[:10]
+            indented_preview = "\n    ".join(lines)
+            if len(indented_preview) > 2000:
+                indented_preview = indented_preview[:1997] + "..."
             entry += f"\n    Content preview:\n    {indented_preview}"
 
         file_entries.append(entry)

@@ -7,10 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #225 - 2026-01-19
-- **Feature**: Add API key and custom headers support to file extractors configuration. Extractors can now authenticate with external services using `api_key` (sent as Bearer token) and custom `headers` fields.
+- **Feature**: Implement automatic file content extraction for uploaded PDFs and images. When enabled, files are processed by configurable HTTP extractor services and their content is included in the LLM context.
+- **Feature**: Add mock file extractor service (`mocks/file-extractor-mock/`) supporting PDF text extraction, image analysis, and OCR endpoints for development and testing.
+- **Feature**: Add API key and custom headers support to file extractor configuration for authenticating with external extraction services.
 - **Feature**: Support `${ENV_VAR}` syntax in file extractor configuration for `api_key`, `headers`, and `url` fields, matching the pattern used by LLM and MCP configs.
-- **Fix**: File extraction toggle now appears in UI when uploading files (added `fileExtraction` to ChatContext).
-- **Tests**: Add 12 comprehensive tests for file extractor API key and headers functionality.
+- **Feature**: Add per-file extraction toggle in the UI, allowing users to control which files are extracted.
+- **Config**: Add `file-extractors.json` configuration with extension-to-extractor mapping and service definitions.
+- **Tests**: Add comprehensive tests for file extraction routes, content extractor, and API key/headers functionality.
 
 ### PR #215 - 2026-01-18
 - **Fix**: Restored MCP sampling implementation, re-adding per-server sampling handlers and routing context so sampling tests can import `_SamplingRoutingContext` again.
