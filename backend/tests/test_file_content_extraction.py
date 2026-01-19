@@ -606,7 +606,7 @@ class TestFileExtractorApiKeyAndHeaders:
 
     def test_file_extractor_env_var_resolution_api_key(self, monkeypatch):
         """ConfigManager should resolve ${ENV_VAR} in api_key."""
-        from modules.config.config_manager import ConfigManager, resolve_env_var
+        from modules.config.config_manager import resolve_env_var
 
         monkeypatch.setenv("TEST_EXTRACTOR_API_KEY", "sk-resolved-key-456")
 
