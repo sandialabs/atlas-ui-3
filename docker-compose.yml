@@ -80,7 +80,8 @@ services:
       - FEATURE_SPLASH_SCREEN_ENABLED=false
       - FEATURE_DOMAIN_WHITELIST_ENABLED=false
       - FEATURE_MCP_AUTO_RECONNECT_ENABLED=false
-      
+      - FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=false
+
       # Agent mode configuration
       - AGENT_MAX_STEPS=30
       - AGENT_DEFAULT_ENABLED=true

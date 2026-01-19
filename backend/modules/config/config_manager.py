@@ -22,7 +22,7 @@ from pydantic_settings import BaseSettings
 logger = logging.getLogger(__name__)
 
 
-def resolve_env_var(value: Optional[str]) -> Optional[str]:
+def resolve_env_var(value: Optional[str], required: bool = True) -> Optional[str]:
     """
     Resolve environment variables in config values.
 
@@ -33,12 +33,15 @@ def resolve_env_var(value: Optional[str]) -> Optional[str]:
 
     Args:
         value: Config value that may contain env var pattern
+        required: If True (default), raises ValueError if env var is not set.
+                  If False, returns None when env var is not set.
 
     Returns:
         Resolved value with env vars substituted, or None if value is None
+        or if env var is not set and required=False
 
     Raises:
-        ValueError: If env var pattern is found but variable is not set
+        ValueError: If env var pattern is found but variable is not set and required=True
     """
     if value is None:
         return None
@@ -53,9 +56,11 @@ def resolve_env_var(value: Optional[str]) -> Optional[str]:
         env_value = os.environ.get(env_var_name)
 
         if env_value is None:
-            raise ValueError(
-                f"Environment variable '{env_var_name}' is not set but required in config"
-            )
+            if required:
+                raise ValueError(
+                    f"Environment variable '{env_var_name}' is not set but required in config"
+                )
+            return None
 
         return env_value
 
@@ -135,13 +140,47 @@ class ToolApprovalsConfig(BaseModel):
     """Configuration for tool approvals."""
     require_approval_by_default: bool = False
     tools: Dict[str, ToolApprovalConfig] = Field(default_factory=dict)
-    
+
     @field_validator('tools', mode='before')
     @classmethod
     def validate_tools(cls, v):
         """Convert dict values to ToolApprovalConfig objects."""
         if isinstance(v, dict):
-            return {name: ToolApprovalConfig(**config) if isinstance(config, dict) else config 
+            return {name: ToolApprovalConfig(**config) if isinstance(config, dict) else config
+                   for name, config in v.items()}
+        return v
+
+
+class FileExtractorConfig(BaseModel):
+    """Configuration for a single file content extractor service."""
+    url: str
+    method: str = "POST"
+    timeout_seconds: int = 30
+    max_file_size_mb: int = 50
+    preview_chars: Optional[int] = 2000
+    request_format: str = "base64"  # "base64" or "url"
+    response_field: str = "text"
+    enabled: bool = True
+    # API key for authentication (supports ${ENV_VAR} syntax)
+    api_key: Optional[str] = None
+    # Additional HTTP headers (values support ${ENV_VAR} syntax)
+    headers: Optional[Dict[str, str]] = None
+
+
+class FileExtractorsConfig(BaseModel):
+    """Configuration for file content extraction services."""
+    enabled: bool = True
+    default_behavior: str = "extract"  # "extract" or "attach_only"
+    extractors: Dict[str, FileExtractorConfig] = Field(default_factory=dict)
+    extension_mapping: Dict[str, str] = Field(default_factory=dict)
+    mime_mapping: Dict[str, str] = Field(default_factory=dict)
+
+    @field_validator('extractors', mode='before')
+    @classmethod
+    def validate_extractors(cls, v):
+        """Convert dict values to FileExtractorConfig objects."""
+        if isinstance(v, dict):
+            return {name: FileExtractorConfig(**config) if isinstance(config, dict) else config
                    for name, config in v.items()}
         return v
 
@@ -313,6 +352,12 @@ class AppSettings(BaseSettings):
         description="Enable email domain whitelist restriction (configured in domain-whitelist.json)",
         validation_alias=AliasChoices("FEATURE_DOMAIN_WHITELIST_ENABLED", "FEATURE_DOE_LAB_CHECK_ENABLED"),
     )
+    # File content extraction feature gate
+    feature_file_content_extraction_enabled: bool = Field(
+        False,
+        description="Enable automatic content extraction from uploaded files (PDFs, images)",
+        validation_alias=AliasChoices("FEATURE_FILE_CONTENT_EXTRACTION_ENABLED"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
@@ -370,6 +415,7 @@ class AppSettings(BaseSettings):
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
     tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
     splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
+    file_extractors_config_file: str = Field(default="file-extractors.json", validation_alias="FILE_EXTRACTORS_CONFIG_FILE")
     
     # Config directory paths
     app_config_overrides: str = Field(default="config/overrides", validation_alias="APP_CONFIG_OVERRIDES")
@@ -420,6 +466,7 @@ class ConfigManager:
         self._mcp_config: Optional[MCPConfig] = None
         self._rag_mcp_config: Optional[MCPConfig] = None
         self._tool_approvals_config: Optional[ToolApprovalsConfig] = None
+        self._file_extractors_config: Optional[FileExtractorsConfig] = None
     
     def _search_paths(self, file_name: str) -> List[Path]:
         """Generate common search paths for a configuration file.
@@ -663,7 +710,83 @@ class ConfigManager:
                 self._tool_approvals_config = ToolApprovalsConfig()
 
         return self._tool_approvals_config
-    
+
+    @property
+    def file_extractors_config(self) -> FileExtractorsConfig:
+        """Get file extractors configuration (cached)."""
+        if self._file_extractors_config is None:
+            try:
+                extractors_filename = self.app_settings.file_extractors_config_file
+                file_paths = self._search_paths(extractors_filename)
+                data = self._load_file_with_error_handling(file_paths, "JSON")
+
+                if data:
+                    self._file_extractors_config = FileExtractorsConfig(**data)
+                    # Resolve environment variables in extractor configs
+                    self._resolve_file_extractor_env_vars()
+                    logger.info(
+                        f"Loaded file extractors config with {len(self._file_extractors_config.extractors)} extractors"
+                    )
+                else:
+                    # Return disabled config if file not found
+                    self._file_extractors_config = FileExtractorsConfig(enabled=False)
+                    logger.info("File extractors config not found, using disabled defaults")
+
+            except Exception as e:
+                logger.error(f"Failed to parse file extractors configuration: {e}", exc_info=True)
+                self._file_extractors_config = FileExtractorsConfig(enabled=False)
+
+        return self._file_extractors_config
+
+    def _resolve_file_extractor_env_vars(self) -> None:
+        """Resolve environment variables in file extractor configurations.
+
+        Supports ${ENV_VAR} syntax for:
+        - url: Extractor service URL (required - extractor disabled if not set)
+        - api_key: Authentication API key (optional - None if not set)
+        - headers: Header values (optional - omitted if not set)
+        """
+        if self._file_extractors_config is None:
+            return
+
+        for extractor_name, extractor in self._file_extractors_config.extractors.items():
+            try:
+                # Resolve URL if it contains env var pattern (required)
+                if extractor.url:
+                    resolved_url = resolve_env_var(extractor.url, required=True)
+                    if resolved_url != extractor.url:
+                        extractor.url = resolved_url
+                        logger.debug(f"Resolved URL env var for extractor '{extractor_name}'")
+
+            except ValueError as e:
+                logger.error(f"Failed to resolve URL env var for extractor '{extractor_name}': {e}")
+                # Disable the extractor if URL env var resolution fails
+                extractor.enabled = False
+                continue
+
+            # Resolve API key if it contains env var pattern (optional)
+            if extractor.api_key:
+                resolved_key = resolve_env_var(extractor.api_key, required=False)
+                if resolved_key is None:
+                    logger.debug(f"API key env var not set for extractor '{extractor_name}', will make unauthenticated requests")
+                    extractor.api_key = None
+                elif resolved_key != extractor.api_key:
+                    extractor.api_key = resolved_key
+                    logger.debug(f"Resolved API key env var for extractor '{extractor_name}'")
+
+            # Resolve header values if they contain env var patterns (optional)
+            if extractor.headers:
+                resolved_headers = {}
+                for header_name, header_value in extractor.headers.items():
+                    resolved_value = resolve_env_var(header_value, required=False)
+                    if resolved_value is not None:
+                        resolved_headers[header_name] = resolved_value
+                        if resolved_value != header_value:
+                            logger.debug(f"Resolved header '{header_name}' env var for extractor '{extractor_name}'")
+                    else:
+                        logger.debug(f"Header '{header_name}' env var not set for extractor '{extractor_name}', omitting header")
+                extractor.headers = resolved_headers if resolved_headers else None
+
     def _validate_mcp_compliance_levels(self, config: MCPConfig, config_type: str):
         """Validate compliance levels for all MCP servers."""
         try:
@@ -689,6 +812,7 @@ class ConfigManager:
         self._mcp_config = None
         self._rag_mcp_config = None
         self._tool_approvals_config = None
+        self._file_extractors_config = None
         logger.info("Configuration cache cleared, will reload on next access")
     
     def reload_mcp_config(self) -> MCPConfig:
@@ -755,3 +879,8 @@ def get_llm_config() -> LLMConfig:
 def get_mcp_config() -> MCPConfig:
     """Get MCP configuration."""
     return config_manager.mcp_config
+
+
+def get_file_extractors_config() -> FileExtractorsConfig:
+    """Get file extractors configuration."""
+    return config_manager.file_extractors_config

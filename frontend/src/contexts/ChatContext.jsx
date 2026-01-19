@@ -368,6 +368,7 @@ export const ChatProvider = ({ children }) => {
 		agentPendingQuestion: agent.agentPendingQuestion,
 		setAgentPendingQuestion: agent.setAgentPendingQuestion,
 		isInAdminGroup: config.isInAdminGroup,
+		fileExtraction: config.fileExtraction,
 		messages,
 		isWelcomeVisible,
 		isThinking,

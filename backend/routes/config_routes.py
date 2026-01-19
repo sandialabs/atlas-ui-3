@@ -314,9 +314,46 @@ async def get_config(
             "files_panel": app_settings.feature_files_panel_enabled,
             "chat_history": app_settings.feature_chat_history_enabled,
             "compliance_levels": app_settings.feature_compliance_levels_enabled,
-            "splash_screen": app_settings.feature_splash_screen_enabled
-        }
+            "splash_screen": app_settings.feature_splash_screen_enabled,
+            "file_content_extraction": app_settings.feature_file_content_extraction_enabled
+        },
+        "file_extraction": _get_file_extraction_config(config_manager)
     }
+
+
+def _get_file_extraction_config(config_manager) -> dict:
+    """Build file extraction config for frontend."""
+    app_settings = config_manager.app_settings
+
+    if not app_settings.feature_file_content_extraction_enabled:
+        return {
+            "enabled": False,
+            "default_behavior": "attach_only",
+            "supported_extensions": []
+        }
+
+    try:
+        extractors_config = config_manager.file_extractors_config
+
+        # Get list of extensions with enabled extractors
+        supported_extensions = []
+        for ext, extractor_name in extractors_config.extension_mapping.items():
+            extractor = extractors_config.extractors.get(extractor_name)
+            if extractor and extractor.enabled:
+                supported_extensions.append(ext)
+
+        return {
+            "enabled": extractors_config.enabled,
+            "default_behavior": extractors_config.default_behavior,
+            "supported_extensions": sorted(supported_extensions)
+        }
+    except Exception as e:
+        logger.warning(f"Error building file extraction config: {e}")
+        return {
+            "enabled": False,
+            "default_behavior": "attach_only",
+            "supported_extensions": []
+        }
 
 
 @router.get("/compliance-levels")

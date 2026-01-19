@@ -8,6 +8,8 @@ chat sessions, including user uploads and tool-generated artifacts.
 import logging
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 
+from modules.file_storage.content_extractor import get_content_extractor
+
 logger = logging.getLogger(__name__)
 
 # Type hint for update callback
@@ -17,14 +19,26 @@ UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 async def handle_session_files(
     session_context: Dict[str, Any],
     user_email: Optional[str],
-    files_map: Optional[Dict[str, str]],
+    files_map: Optional[Dict[str, Any]],
     file_manager,
     update_callback: Optional[UpdateCallback] = None
 ) -> Dict[str, Any]:
     """
     Handle user file ingestion and return updated session context.
-    
+
     Pure function that processes files and returns new context without mutations.
+
+    Args:
+        session_context: Current session context
+        user_email: User email for file storage
+        files_map: Map of filename to file data. Can be:
+            - str: base64 content (legacy format)
+            - dict: {"content": base64, "extract": bool} (new format with extraction flag)
+        file_manager: File manager instance
+        update_callback: Optional callback for emitting updates
+
+    Returns:
+        Updated session context with file references
     """
     if not files_map or not file_manager or not user_email:
         return session_context
@@ -32,11 +46,24 @@ async def handle_session_files(
     # Work with a copy to avoid mutations
     updated_context = dict(session_context)
     session_files_ctx = updated_context.setdefault("files", {})
-    
+
+    # Get content extractor
+    extractor = get_content_extractor()
+    default_extract = extractor.get_default_behavior() == "extract" if extractor.is_enabled() else False
+
     try:
         uploaded_refs: Dict[str, Dict[str, Any]] = {}
-        for filename, b64 in files_map.items():
+        for filename, file_data in files_map.items():
             try:
+                # Handle both legacy (string) and new (dict) formats
+                if isinstance(file_data, str):
+                    b64 = file_data
+                    should_extract = default_extract
+                else:
+                    b64 = file_data.get("content", "")
+                    # Per-file extract flag overrides default
+                    should_extract = file_data.get("extract", default_extract)
+
                 meta = await file_manager.upload_file(
                     user_email=user_email,
                     filename=filename,
@@ -44,14 +71,33 @@ async def handle_session_files(
                     source_type="user",
                     tags={"source": "user"}
                 )
+
                 # Store minimal reference in session context
-                session_files_ctx[filename] = {
+                file_ref = {
                     "key": meta.get("key"),
                     "content_type": meta.get("content_type"),
                     "size": meta.get("size"),
                     "source": "user",
                     "last_modified": meta.get("last_modified"),
                 }
+
+                # Attempt content extraction if enabled and requested
+                if should_extract and extractor.is_enabled():
+                    extraction_result = await extractor.extract_content(
+                        filename=filename,
+                        content_base64=b64,
+                        mime_type=meta.get("content_type"),
+                    )
+                    if extraction_result.success:
+                        file_ref["extracted_content"] = extraction_result.content
+                        file_ref["extracted_preview"] = extraction_result.preview
+                        if extraction_result.metadata:
+                            file_ref["extraction_metadata"] = extraction_result.metadata
+                        logger.info(f"Extracted content from {filename}: {len(extraction_result.preview or '')} chars preview")
+                    else:
+                        logger.debug(f"Content extraction skipped for {filename}: {extraction_result.error}")
+
+                session_files_ctx[filename] = file_ref
                 uploaded_refs[filename] = meta
             except Exception as e:
                 logger.error(f"Failed uploading user file {filename}: {e}")
@@ -482,21 +528,63 @@ async def notify_canvas_files_v2(
 def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, str]]:
     """
     Build ephemeral files manifest for LLM context.
-    
+
     Pure function that creates manifest from session context.
+    Includes extracted content previews when available.
     """
     files_ctx = session_context.get("files", {})
     if not files_ctx:
         return None
 
-    file_list = "\n".join(f"- {name}" for name in sorted(files_ctx.keys()))
+    # Build file list with extracted content previews
+    file_entries = []
+    for name in sorted(files_ctx.keys()):
+        file_info = files_ctx[name]
+        entry = f"- {name}"
+
+        # Include extraction metadata if available
+        if file_info.get("extraction_metadata"):
+            meta = file_info["extraction_metadata"]
+            if meta.get("pages"):
+                entry += f" ({meta['pages']} pages)"
+
+        # Include extracted preview if available
+        preview = file_info.get("extracted_preview")
+        if preview:
+            # Limit to 10 lines and 2000 characters to prevent excessive token usage
+            lines = preview.split("\n")[:10]
+            indented_preview = "\n    ".join(lines)
+            if len(indented_preview) > 2000:
+                indented_preview = indented_preview[:1997] + "..."
+            entry += f"\n    Content preview:\n    {indented_preview}"
+
+        file_entries.append(entry)
+
+    file_list = "\n".join(file_entries)
+
+    # Determine if any files have extracted content
+    has_extractions = any(
+        files_ctx[name].get("extracted_preview") for name in files_ctx
+    )
+
+    if has_extractions:
+        context_note = (
+            "(Files with content previews shown above have been analyzed. "
+            "You can reference this content directly. For files without previews, "
+            "you can ask to open or analyze them by name.)"
+        )
+    else:
+        context_note = (
+            "(You can ask to open or analyze any of these by name. "
+            "Large contents are not fully in this prompt unless user or tools provided excerpts.)"
+        )
+
     return {
         "role": "system",
         "content": (
             "Available session files:\n"
             f"{file_list}\n\n"
-            "(You can ask to open or analyze any of these by name. "
-            "Large contents are not fully in this prompt unless user or tools provided excerpts.)"
+            f"{context_note} "
             "The user may refer to these files in their requests as session files or attachments."
         )
     }

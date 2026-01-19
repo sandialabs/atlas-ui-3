@@ -32,9 +32,17 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 - Section header: `## Implementation Plan (2025-11-02)`
 - Status update: `Last updated: 2025-11-02 14:30`
 
+# Claude Code Agents
+
+This project uses Claude Code agents to ensure quality and completeness. Use these agents frequently:
+
+**test-report-runner**: Use this agent frequently after making code changes to run tests and verify correctness. Invoke proactively after each logical chunk of work: implementing a feature, fixing a bug, or refactoring code.
+
+**final-checklist-reviewer**: Use this agent once at the end of a PR, feature, or bug fix to validate that all project requirements, coding standards, and quality gates have been met. This is a final validation step, not something to run after every change. Invoke when work is complete and you hear phrases like "I think I'm done", "ready to merge", "let's create a PR", or "branch is finished".
+
 # Tests
 
-Before you mark a job as finished, be sure to run the unit test script. 
+Before you mark a job as finished, be sure to run the unit test script.
 
 `bash run_test_shortcut.sh`
 
@@ -350,3 +358,14 @@ When referencing code locations, use `file_path:line_number` format for easy nav
 - `backend/interfaces/llm.py:LLMProtocol`
 - `backend/interfaces/tools.py:ToolManagerProtocol`
 - `backend/interfaces/transport.py:ChatConnectionProtocol`
+
+
+## Repo conventions (important)
+- Use uv; do not use npm run dev; do not use uvicorn --reload.
+- File naming: avoid generic names (utils.py, helpers.py). Prefer descriptive names; backend/main.py is the entry-point exception.
+- No emojis anywhere in codebase (code, comments, docs, commit messages). If you find one, remove it.
+- Prefer files ≤ ~400 lines when practical.
+- Auth assumption: in prod, reverse proxy injects X-User-Email (after stripping client headers); dev falls back to test user.
+- Documentation requirements: Every PR or feature MUST include updates to relevant docs in /docs folder (architecture, features, API, config, troubleshooting).
+- Changelog maintenance: For every PR, add an entry to CHANGELOG.md in the root directory. Each entry should be 1-2 lines describing the core features or changes. Format: "### PR #<number> - YYYY-MM-DD" followed by a bullet point list of changes.
+- PR validation: Before creating or accepting a PR, run `cd frontend && npm run lint` to ensure no frontend syntax errors or style issues.
