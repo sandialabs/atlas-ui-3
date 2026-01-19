@@ -14,7 +14,7 @@
       "enabled": true
     },
     "image-vision": {
-      "url": "http://localhost:8011/analyze",
+      "url": "http://localhost:8010/analyze",
       "method": "POST",
       "timeout_seconds": 60,
       "max_file_size_mb": 20,
@@ -24,7 +24,7 @@
       "enabled": false
     },
     "ocr": {
-      "url": "http://localhost:8012/ocr",
+      "url": "http://localhost:8010/ocr",
       "method": "POST",
       "timeout_seconds": 45,
       "max_file_size_mb": 20,
