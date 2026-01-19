@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #XXX - 2026-01-19
+- **Feature**: Add API key and custom headers support to file extractors configuration. Extractors can now authenticate with external services using `api_key` (sent as Bearer token) and custom `headers` fields.
+- **Feature**: Support `${ENV_VAR}` syntax in file extractor configuration for `api_key`, `headers`, and `url` fields, matching the pattern used by LLM and MCP configs.
+- **Fix**: File extraction toggle now appears in UI when uploading files (added `fileExtraction` to ChatContext).
+- **Tests**: Add 12 comprehensive tests for file extractor API key and headers functionality.
+
 ### PR #215 - 2026-01-18
 - **Fix**: Restored MCP sampling implementation, re-adding per-server sampling handlers and routing context so sampling tests can import `_SamplingRoutingContext` again.
 - **Fix**: Re-enabled backend sampling workflows, ensuring the restored sampling handler uses LiteLLM preferences and the MCP client initializes with sampling support.

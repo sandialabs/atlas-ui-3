@@ -350,3 +350,14 @@ When referencing code locations, use `file_path:line_number` format for easy nav
 - `backend/interfaces/llm.py:LLMProtocol`
 - `backend/interfaces/tools.py:ToolManagerProtocol`
 - `backend/interfaces/transport.py:ChatConnectionProtocol`
+
+
+## Repo conventions (important)
+- Use uv; do not use npm run dev; do not use uvicorn --reload.
+- File naming: avoid generic names (utils.py, helpers.py). Prefer descriptive names; backend/main.py is the entry-point exception.
+- No emojis anywhere in codebase (code, comments, docs, commit messages). If you find one, remove it.
+- Prefer files ≤ ~400 lines when practical.
+- Auth assumption: in prod, reverse proxy injects X-User-Email (after stripping client headers); dev falls back to test user.
+- Documentation requirements: Every PR or feature MUST include updates to relevant docs in /docs folder (architecture, features, API, config, troubleshooting).
+- Changelog maintenance: For every PR, add an entry to CHANGELOG.md in the root directory. Each entry should be 1-2 lines describing the core features or changes. Format: "### PR #<number> - YYYY-MM-DD" followed by a bullet point list of changes.
+- PR validation: Before creating or accepting a PR, run `cd frontend && npm run lint` to ensure no frontend syntax errors or style issues.

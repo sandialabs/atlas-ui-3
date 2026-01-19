@@ -576,6 +576,215 @@ class TestExtractionResult:
         assert result.metadata is None
 
 
+class TestFileExtractorApiKeyAndHeaders:
+    """Test FileExtractorConfig api_key and headers functionality."""
+
+    def test_file_extractor_config_with_api_key(self):
+        """FileExtractorConfig should accept api_key field."""
+        config = FileExtractorConfig(
+            url="http://localhost:8010/extract",
+            api_key="sk-test-key-123"
+        )
+
+        assert config.api_key == "sk-test-key-123"
+
+    def test_file_extractor_config_with_headers(self):
+        """FileExtractorConfig should accept headers field."""
+        config = FileExtractorConfig(
+            url="http://localhost:8010/extract",
+            headers={"X-Client-ID": "client-123", "X-Custom-Header": "value"}
+        )
+
+        assert config.headers == {"X-Client-ID": "client-123", "X-Custom-Header": "value"}
+
+    def test_file_extractor_config_api_key_and_headers_optional(self):
+        """api_key and headers should be optional (None by default)."""
+        config = FileExtractorConfig(url="http://localhost:8010/extract")
+
+        assert config.api_key is None
+        assert config.headers is None
+
+    def test_file_extractor_env_var_resolution_api_key(self, monkeypatch):
+        """ConfigManager should resolve ${ENV_VAR} in api_key."""
+        from modules.config.config_manager import ConfigManager, resolve_env_var
+
+        monkeypatch.setenv("TEST_EXTRACTOR_API_KEY", "sk-resolved-key-456")
+
+        # Test resolve_env_var directly
+        resolved = resolve_env_var("${TEST_EXTRACTOR_API_KEY}")
+        assert resolved == "sk-resolved-key-456"
+
+    def test_file_extractor_env_var_resolution_headers(self, monkeypatch):
+        """ConfigManager should resolve ${ENV_VAR} in header values."""
+        from modules.config.config_manager import resolve_env_var
+
+        monkeypatch.setenv("TEST_CLIENT_ID", "client-resolved-789")
+
+        resolved = resolve_env_var("${TEST_CLIENT_ID}")
+        assert resolved == "client-resolved-789"
+
+    def test_file_extractor_env_var_optional_returns_none(self):
+        """resolve_env_var with required=False should return None for missing vars."""
+        from modules.config.config_manager import resolve_env_var
+
+        # Missing env var with required=False should return None
+        result = resolve_env_var("${MISSING_OPTIONAL_KEY}", required=False)
+        assert result is None
+
+    def test_file_extractor_env_var_required_raises(self):
+        """resolve_env_var with required=True should raise for missing vars."""
+        from modules.config.config_manager import resolve_env_var
+
+        with pytest.raises(ValueError) as exc_info:
+            resolve_env_var("${MISSING_REQUIRED_KEY}", required=True)
+
+        assert "MISSING_REQUIRED_KEY" in str(exc_info.value)
+
+    def test_file_extractor_literal_value_unchanged(self):
+        """resolve_env_var should return literal values unchanged."""
+        from modules.config.config_manager import resolve_env_var
+
+        result = resolve_env_var("sk-literal-key")
+        assert result == "sk-literal-key"
+
+    @pytest.mark.asyncio
+    async def test_extract_content_includes_api_key_header(self):
+        """extract_content should include api_key as Authorization header."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            extractors={
+                "pdf-text": FileExtractorConfig(
+                    url="http://localhost:8010/extract",
+                    enabled=True,
+                    api_key="sk-test-api-key",
+                    response_field="text"
+                )
+            },
+            extension_mapping={".pdf": "pdf-text"}
+        )
+        extractor = FileContentExtractor(config=config)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True, "text": "Extracted content"}
+
+        captured_headers = {}
+
+        async def capture_request(*args, **kwargs):
+            nonlocal captured_headers
+            captured_headers = kwargs.get("headers", {})
+            return mock_response
+
+        with patch('modules.file_storage.content_extractor.get_app_settings') as mock_settings:
+            mock_settings.return_value.feature_file_content_extraction_enabled = True
+
+            with patch('httpx.AsyncClient') as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.request = AsyncMock(side_effect=capture_request)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client_class.return_value = mock_client
+
+                await extractor.extract_content(
+                    filename="document.pdf",
+                    content_base64="dGVzdA=="
+                )
+
+                assert "Authorization" in captured_headers
+                assert captured_headers["Authorization"] == "Bearer sk-test-api-key"
+
+    @pytest.mark.asyncio
+    async def test_extract_content_includes_custom_headers(self):
+        """extract_content should include custom headers from config."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            extractors={
+                "pdf-text": FileExtractorConfig(
+                    url="http://localhost:8010/extract",
+                    enabled=True,
+                    headers={"X-Client-ID": "my-client", "X-Request-Source": "atlas-ui"},
+                    response_field="text"
+                )
+            },
+            extension_mapping={".pdf": "pdf-text"}
+        )
+        extractor = FileContentExtractor(config=config)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True, "text": "Extracted content"}
+
+        captured_headers = {}
+
+        async def capture_request(*args, **kwargs):
+            nonlocal captured_headers
+            captured_headers = kwargs.get("headers", {})
+            return mock_response
+
+        with patch('modules.file_storage.content_extractor.get_app_settings') as mock_settings:
+            mock_settings.return_value.feature_file_content_extraction_enabled = True
+
+            with patch('httpx.AsyncClient') as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.request = AsyncMock(side_effect=capture_request)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client_class.return_value = mock_client
+
+                await extractor.extract_content(
+                    filename="document.pdf",
+                    content_base64="dGVzdA=="
+                )
+
+                assert captured_headers.get("X-Client-ID") == "my-client"
+                assert captured_headers.get("X-Request-Source") == "atlas-ui"
+
+    @pytest.mark.asyncio
+    async def test_extract_content_no_headers_when_not_configured(self):
+        """extract_content should pass None headers when not configured."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            extractors={
+                "pdf-text": FileExtractorConfig(
+                    url="http://localhost:8010/extract",
+                    enabled=True,
+                    response_field="text"
+                    # No api_key or headers
+                )
+            },
+            extension_mapping={".pdf": "pdf-text"}
+        )
+        extractor = FileContentExtractor(config=config)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True, "text": "Extracted content"}
+
+        captured_headers = "NOT_SET"
+
+        async def capture_request(*args, **kwargs):
+            nonlocal captured_headers
+            captured_headers = kwargs.get("headers")
+            return mock_response
+
+        with patch('modules.file_storage.content_extractor.get_app_settings') as mock_settings:
+            mock_settings.return_value.feature_file_content_extraction_enabled = True
+
+            with patch('httpx.AsyncClient') as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.request = AsyncMock(side_effect=capture_request)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client_class.return_value = mock_client
+
+                await extractor.extract_content(
+                    filename="document.pdf",
+                    content_base64="dGVzdA=="
+                )
+
+                assert captured_headers is None
+
+
 class TestConfigManagerFileExtractors:
     """Test ConfigManager loading of file extractors config."""
 
