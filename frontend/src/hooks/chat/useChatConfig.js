@@ -7,7 +7,14 @@ const DEFAULT_FEATURES = {
   marketplace: false,
   files_panel: false,
   chat_history: false,
-  compliance_levels: false
+  compliance_levels: false,
+  file_content_extraction: false
+}
+
+const DEFAULT_FILE_EXTRACTION = {
+  enabled: false,
+  default_behavior: 'attach_only',
+  supported_extensions: []
 }
 
 export function useChatConfig() {
@@ -19,6 +26,7 @@ export function useChatConfig() {
   const [dataSources, setDataSources] = useState([])
   const [ragServers, setRagServers] = useState([]) // New state for rich RAG server data
   const [features, setFeatures] = useState(DEFAULT_FEATURES)
+  const [fileExtraction, setFileExtraction] = useState(DEFAULT_FILE_EXTRACTION)
   const [isCanvasOpen, setIsCanvasOpen] = useState(false)
   // Load saved model from localStorage
   const [currentModel, setCurrentModel] = useState(() => {
@@ -50,6 +58,7 @@ export function useChatConfig() {
         setRagServers(cfg.rag_servers || []) // Capture rich RAG server data
         setUser(cfg.user || 'Unknown')
   setFeatures({ ...DEFAULT_FEATURES, ...(cfg.features || {}) })
+  setFileExtraction({ ...DEFAULT_FILE_EXTRACTION, ...(cfg.file_extraction || {}) })
   // Agent mode availability flag from backend
   setAgentModeAvailable(!!cfg.agent_mode_available)
         // Admin group membership flag from backend
@@ -112,6 +121,7 @@ export function useChatConfig() {
     onlyRag,
   setOnlyRag,
   agentModeAvailable,
-  isInAdminGroup
+  isInAdminGroup,
+  fileExtraction
   }
 }

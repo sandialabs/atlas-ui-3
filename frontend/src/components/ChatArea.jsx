@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileSearch, FileX } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
@@ -10,7 +10,9 @@ import PromptSelector from './PromptSelector'
 const ChatArea = () => {
   const [inputValue, setInputValue] = useState('')
   const [isMobile, setIsMobile] = useState(false)
+  // uploadedFiles: { filename: { content: base64, extract: boolean } }
   const [uploadedFiles, setUploadedFiles] = useState({})
+  const [globalExtractEnabled, setGlobalExtractEnabled] = useState(true)
   const [showToolAutocomplete, setShowToolAutocomplete] = useState(false)
   const [filteredTools, setFilteredTools] = useState([])
   const [selectedToolIndex, setSelectedToolIndex] = useState(0)
@@ -26,11 +28,11 @@ const ChatArea = () => {
   const fileInputRef = useRef(null)
   const dragCounterRef = useRef(0)
   
-  const { 
-    messages, 
-    isWelcomeVisible, 
-    isThinking, 
-    sendChatMessage, 
+  const {
+    messages,
+    isWelcomeVisible,
+    isThinking,
+    sendChatMessage,
     currentModel,
     tools,
     selectedTools,
@@ -41,7 +43,8 @@ const ChatArea = () => {
   agentPendingQuestion,
   setAgentPendingQuestion,
   stopAgent,
-  answerAgentQuestion
+  answerAgentQuestion,
+  fileExtraction
   } = useChat()
   const { isConnected } = useWS()
 
@@ -476,15 +479,27 @@ const ChatArea = () => {
     }
   }
 
+  // Check if a file extension supports extraction
+  const canExtractFile = useCallback((filename) => {
+    if (!fileExtraction?.enabled) return false
+    const ext = '.' + filename.split('.').pop().toLowerCase()
+    return fileExtraction.supported_extensions?.includes(ext) || false
+  }, [fileExtraction])
+
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files)
     files.forEach(file => {
       const reader = new FileReader()
       reader.onload = (e) => {
         const base64Data = e.target.result.split(',')[1] // Remove data URL prefix
+        // Determine if extraction should be enabled for this file
+        const shouldExtract = globalExtractEnabled && canExtractFile(file.name)
         setUploadedFiles(prev => ({
           ...prev,
-          [file.name]: base64Data
+          [file.name]: {
+            content: base64Data,
+            extract: shouldExtract
+          }
         }))
       }
       reader.readAsDataURL(file)
@@ -500,6 +515,20 @@ const ChatArea = () => {
       const newFiles = { ...prev }
       delete newFiles[filename]
       return newFiles
+    })
+  }
+
+  // Toggle extraction for a specific file
+  const toggleFileExtraction = (filename) => {
+    setUploadedFiles(prev => {
+      if (!prev[filename]) return prev
+      return {
+        ...prev,
+        [filename]: {
+          ...prev[filename],
+          extract: !prev[filename].extract
+        }
+      }
     })
   }
 
@@ -543,9 +572,14 @@ const ChatArea = () => {
       const reader = new FileReader()
       reader.onload = (event) => {
         const base64Data = event.target.result.split(',')[1]
+        // Determine if extraction should be enabled for this file
+        const shouldExtract = globalExtractEnabled && canExtractFile(file.name)
         setUploadedFiles(prev => ({
           ...prev,
-          [file.name]: base64Data
+          [file.name]: {
+            content: base64Data,
+            extract: shouldExtract
+          }
         }))
       }
       reader.readAsDataURL(file)
@@ -666,19 +700,59 @@ const ChatArea = () => {
           {/* Uploaded Files Display */}
           {Object.keys(uploadedFiles).length > 0 && (
             <div className="mb-3 p-3 bg-gray-800 rounded-lg border border-gray-600">
-              <div className="text-sm text-gray-300 mb-2">Uploaded Files:</div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm text-gray-300">Uploaded Files:</div>
+                {/* Global extraction toggle - only show if feature is enabled */}
+                {fileExtraction?.enabled && (
+                  <button
+                    onClick={() => setGlobalExtractEnabled(!globalExtractEnabled)}
+                    className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+                      globalExtractEnabled
+                        ? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30'
+                        : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                    }`}
+                    title={globalExtractEnabled ? 'Content extraction enabled for new files' : 'Content extraction disabled'}
+                  >
+                    {globalExtractEnabled ? <FileSearch className="w-3 h-3" /> : <FileX className="w-3 h-3" />}
+                    <span>{globalExtractEnabled ? 'Extract On' : 'Extract Off'}</span>
+                  </button>
+                )}
+              </div>
               <div className="flex flex-wrap gap-2">
-                {Object.keys(uploadedFiles).map(filename => (
-                  <div key={filename} className="flex items-center gap-2 bg-gray-700 px-3 py-1 rounded-full text-sm">
-                    <span className="text-gray-200">{filename}</span>
-                    <button
-                      onClick={() => removeFile(filename)}
-                      className="text-gray-400 hover:text-red-400 transition-colors"
+                {Object.entries(uploadedFiles).map(([filename, fileData]) => {
+                  const supportsExtraction = canExtractFile(filename)
+                  const extractEnabled = fileData.extract
+                  return (
+                    <div
+                      key={filename}
+                      className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
+                        extractEnabled && supportsExtraction
+                          ? 'bg-blue-900/30 border border-blue-600/50'
+                          : 'bg-gray-700'
+                      }`}
                     >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+                      {/* Extraction toggle for individual file */}
+                      {fileExtraction?.enabled && supportsExtraction && (
+                        <button
+                          onClick={() => toggleFileExtraction(filename)}
+                          className={`transition-colors ${
+                            extractEnabled ? 'text-blue-400 hover:text-blue-300' : 'text-gray-500 hover:text-gray-400'
+                          }`}
+                          title={extractEnabled ? 'Content will be extracted' : 'Click to enable extraction'}
+                        >
+                          {extractEnabled ? <FileSearch className="w-3 h-3" /> : <FileX className="w-3 h-3" />}
+                        </button>
+                      )}
+                      <span className="text-gray-200">{filename}</span>
+                      <button
+                        onClick={() => removeFile(filename)}
+                        className="text-gray-400 hover:text-red-400 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
