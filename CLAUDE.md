@@ -32,9 +32,17 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 - Section header: `## Implementation Plan (2025-11-02)`
 - Status update: `Last updated: 2025-11-02 14:30`
 
+# Claude Code Agents
+
+This project uses Claude Code agents to ensure quality and completeness. Use these agents frequently:
+
+**test-report-runner**: Use this agent frequently after making code changes to run tests and verify correctness. Invoke proactively after each logical chunk of work: implementing a feature, fixing a bug, or refactoring code.
+
+**final-checklist-reviewer**: Use this agent once at the end of a PR, feature, or bug fix to validate that all project requirements, coding standards, and quality gates have been met. This is a final validation step, not something to run after every change. Invoke when work is complete and you hear phrases like "I think I'm done", "ready to merge", "let's create a PR", or "branch is finished".
+
 # Tests
 
-Before you mark a job as finished, be sure to run the unit test script. 
+Before you mark a job as finished, be sure to run the unit test script.
 
 `bash run_test_shortcut.sh`
 
