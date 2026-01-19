@@ -11,7 +11,11 @@
       "preview_chars": 2000,
       "request_format": "base64",
       "response_field": "text",
-      "enabled": true
+      "enabled": true,
+      "api_key": "${PDF_EXTRACTOR_API_KEY}",
+      "headers": {
+        "X-Client-ID": "${PDF_EXTRACTOR_CLIENT_ID}"
+      }
     },
     "image-vision": {
       "url": "http://localhost:8010/analyze",
@@ -21,7 +25,8 @@
       "preview_chars": 1000,
       "request_format": "base64",
       "response_field": "description",
-      "enabled": false
+      "enabled": false,
+      "api_key": "${IMAGE_EXTRACTOR_API_KEY}"
     },
     "ocr": {
       "url": "http://localhost:8010/ocr",
@@ -31,7 +36,8 @@
       "preview_chars": 2000,
       "request_format": "base64",
       "response_field": "text",
-      "enabled": false
+      "enabled": false,
+      "api_key": "${OCR_EXTRACTOR_API_KEY}"
     }
   },
 

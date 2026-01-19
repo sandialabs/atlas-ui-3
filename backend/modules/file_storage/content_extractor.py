@@ -174,11 +174,23 @@ class FileContentExtractor:
                 }
             }
 
+            # Build request headers
+            request_headers = {}
+
+            # Add API key as Authorization header if configured
+            if extractor.api_key:
+                request_headers["Authorization"] = f"Bearer {extractor.api_key}"
+
+            # Add any custom headers from config
+            if extractor.headers:
+                request_headers.update(extractor.headers)
+
             async with httpx.AsyncClient(timeout=extractor.timeout_seconds) as client:
                 response = await client.request(
                     method=extractor.method,
                     url=extractor.url,
                     json=payload,
+                    headers=request_headers if request_headers else None,
                 )
 
                 if response.status_code != 200:

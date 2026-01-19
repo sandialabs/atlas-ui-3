@@ -22,7 +22,7 @@ from pydantic_settings import BaseSettings
 logger = logging.getLogger(__name__)
 
 
-def resolve_env_var(value: Optional[str]) -> Optional[str]:
+def resolve_env_var(value: Optional[str], required: bool = True) -> Optional[str]:
     """
     Resolve environment variables in config values.
 
@@ -33,12 +33,15 @@ def resolve_env_var(value: Optional[str]) -> Optional[str]:
 
     Args:
         value: Config value that may contain env var pattern
+        required: If True (default), raises ValueError if env var is not set.
+                  If False, returns None when env var is not set.
 
     Returns:
         Resolved value with env vars substituted, or None if value is None
+        or if env var is not set and required=False
 
     Raises:
-        ValueError: If env var pattern is found but variable is not set
+        ValueError: If env var pattern is found but variable is not set and required=True
     """
     if value is None:
         return None
@@ -53,9 +56,11 @@ def resolve_env_var(value: Optional[str]) -> Optional[str]:
         env_value = os.environ.get(env_var_name)
 
         if env_value is None:
-            raise ValueError(
-                f"Environment variable '{env_var_name}' is not set but required in config"
-            )
+            if required:
+                raise ValueError(
+                    f"Environment variable '{env_var_name}' is not set but required in config"
+                )
+            return None
 
         return env_value
 
@@ -156,6 +161,10 @@ class FileExtractorConfig(BaseModel):
     request_format: str = "base64"  # "base64" or "url"
     response_field: str = "text"
     enabled: bool = True
+    # API key for authentication (supports ${ENV_VAR} syntax)
+    api_key: Optional[str] = None
+    # Additional HTTP headers (values support ${ENV_VAR} syntax)
+    headers: Optional[Dict[str, str]] = None
 
 
 class FileExtractorsConfig(BaseModel):
@@ -713,6 +722,8 @@ class ConfigManager:
 
                 if data:
                     self._file_extractors_config = FileExtractorsConfig(**data)
+                    # Resolve environment variables in extractor configs
+                    self._resolve_file_extractor_env_vars()
                     logger.info(
                         f"Loaded file extractors config with {len(self._file_extractors_config.extractors)} extractors"
                     )
@@ -726,6 +737,55 @@ class ConfigManager:
                 self._file_extractors_config = FileExtractorsConfig(enabled=False)
 
         return self._file_extractors_config
+
+    def _resolve_file_extractor_env_vars(self) -> None:
+        """Resolve environment variables in file extractor configurations.
+
+        Supports ${ENV_VAR} syntax for:
+        - url: Extractor service URL (required - extractor disabled if not set)
+        - api_key: Authentication API key (optional - None if not set)
+        - headers: Header values (optional - omitted if not set)
+        """
+        if self._file_extractors_config is None:
+            return
+
+        for extractor_name, extractor in self._file_extractors_config.extractors.items():
+            try:
+                # Resolve URL if it contains env var pattern (required)
+                if extractor.url:
+                    resolved_url = resolve_env_var(extractor.url, required=True)
+                    if resolved_url != extractor.url:
+                        extractor.url = resolved_url
+                        logger.debug(f"Resolved URL env var for extractor '{extractor_name}'")
+
+            except ValueError as e:
+                logger.error(f"Failed to resolve URL env var for extractor '{extractor_name}': {e}")
+                # Disable the extractor if URL env var resolution fails
+                extractor.enabled = False
+                continue
+
+            # Resolve API key if it contains env var pattern (optional)
+            if extractor.api_key:
+                resolved_key = resolve_env_var(extractor.api_key, required=False)
+                if resolved_key is None:
+                    logger.debug(f"API key env var not set for extractor '{extractor_name}', will make unauthenticated requests")
+                    extractor.api_key = None
+                elif resolved_key != extractor.api_key:
+                    extractor.api_key = resolved_key
+                    logger.debug(f"Resolved API key env var for extractor '{extractor_name}'")
+
+            # Resolve header values if they contain env var patterns (optional)
+            if extractor.headers:
+                resolved_headers = {}
+                for header_name, header_value in extractor.headers.items():
+                    resolved_value = resolve_env_var(header_value, required=False)
+                    if resolved_value is not None:
+                        resolved_headers[header_name] = resolved_value
+                        if resolved_value != header_value:
+                            logger.debug(f"Resolved header '{header_name}' env var for extractor '{extractor_name}'")
+                    else:
+                        logger.debug(f"Header '{header_name}' env var not set for extractor '{extractor_name}', omitting header")
+                extractor.headers = resolved_headers if resolved_headers else None
 
     def _validate_mcp_compliance_levels(self, config: MCPConfig, config_type: str):
         """Validate compliance levels for all MCP servers."""
