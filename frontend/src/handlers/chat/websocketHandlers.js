@@ -427,6 +427,64 @@ export function createWebSocketHandler(deps) {
             timestamp: new Date().toISOString()
           })
           break
+        case 'auth_required': {
+          // Handle authentication required - auto-trigger OAuth or show JWT prompt
+          try { setIsThinking(false) } catch { /* no-op */ }
+
+          const { server_name, auth_type, oauth_start_url } = data
+
+          if (auth_type === 'oauth' && oauth_start_url) {
+            // Automatically start OAuth flow
+            addMessage({
+              role: 'system',
+              content: `Authentication required for "${server_name}". Opening login window...`,
+              type: 'auth_required',
+              server_name,
+              auth_type,
+              timestamp: new Date().toISOString()
+            })
+
+            // Start OAuth flow automatically
+            fetch(oauth_start_url)
+              .then(response => {
+                if (!response.ok) throw new Error(`OAuth start failed: ${response.status}`)
+                return response.json()
+              })
+              .then(oauthData => {
+                // Open authorization URL in a popup window
+                const width = 600
+                const height = 700
+                const left = window.screenX + (window.outerWidth - width) / 2
+                const top = window.screenY + (window.outerHeight - height) / 2
+
+                window.open(
+                  oauthData.authorization_url,
+                  `oauth_${server_name}`,
+                  `width=${width},height=${height},left=${left},top=${top},popup=yes`
+                )
+              })
+              .catch(err => {
+                console.error('Failed to start OAuth:', err)
+                addMessage({
+                  role: 'system',
+                  content: `Failed to start authentication for "${server_name}": ${err.message}. Click the key icon in the header to authenticate manually.`,
+                  type: 'auth_error',
+                  timestamp: new Date().toISOString()
+                })
+              })
+          } else {
+            // JWT authentication - prompt user to add token manually
+            addMessage({
+              role: 'system',
+              content: `Authentication required for "${server_name}". Click the key icon in the header to add your token.`,
+              type: 'auth_required',
+              server_name,
+              auth_type,
+              timestamp: new Date().toISOString()
+            })
+          }
+          break
+        }
         case 'elicitation_request':
           // Handle elicitation request - set pending elicitation state
           console.log('[ELICITATION] Received elicitation_request:', {

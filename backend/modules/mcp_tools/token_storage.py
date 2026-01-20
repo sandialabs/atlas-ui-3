@@ -31,6 +31,36 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 logger = logging.getLogger(__name__)
 
 
+class AuthenticationRequiredException(Exception):
+    """Exception raised when a user needs to authenticate with an MCP server.
+
+    This exception carries information needed to initiate the OAuth flow
+    so the frontend can automatically redirect the user to authenticate.
+    """
+
+    def __init__(
+        self,
+        server_name: str,
+        auth_type: str,
+        message: str = "Authentication required",
+        oauth_start_url: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.server_name = server_name
+        self.auth_type = auth_type  # "oauth" or "jwt"
+        self.oauth_start_url = oauth_start_url  # URL to start OAuth flow (if oauth)
+        self.message = message
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert exception info to a dict for frontend consumption."""
+        return {
+            "server_name": self.server_name,
+            "auth_type": self.auth_type,
+            "message": self.message,
+            "oauth_start_url": self.oauth_start_url,
+        }
+
+
 def _make_token_key(user_email: str, server_name: str) -> str:
     """Create a storage key from user email and server name.
 

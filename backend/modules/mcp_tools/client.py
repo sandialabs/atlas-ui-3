@@ -16,6 +16,7 @@ from modules.config import config_manager
 from core.log_sanitizer import sanitize_for_logging
 from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
+from modules.mcp_tools.token_storage import AuthenticationRequiredException
 
 logger = logging.getLogger(__name__)
 
@@ -1491,14 +1492,27 @@ class MCPToolManager:
             if user_email:
                 client = await self._get_user_client(server_name, user_email)
                 if client is None:
-                    raise ValueError(
-                        f"Server '{server_name}' requires authentication. "
-                        f"Please authenticate with this server first."
+                    # Get auth type and build OAuth URL if applicable
+                    server_config = self.servers_config.get(server_name, {})
+                    auth_type = server_config.get("auth_type", "oauth")
+                    oauth_start_url = None
+                    if auth_type == "oauth":
+                        # Build OAuth start URL for automatic redirect
+                        oauth_start_url = f"/api/mcp/auth/{server_name}/oauth/start"
+                    raise AuthenticationRequiredException(
+                        server_name=server_name,
+                        auth_type=auth_type,
+                        message=f"Server '{server_name}' requires authentication.",
+                        oauth_start_url=oauth_start_url,
                     )
             else:
-                raise ValueError(
-                    f"Server '{server_name}' requires per-user authentication "
-                    f"but no user_email was provided in the call context."
+                server_config = self.servers_config.get(server_name, {})
+                auth_type = server_config.get("auth_type", "oauth")
+                raise AuthenticationRequiredException(
+                    server_name=server_name,
+                    auth_type=auth_type,
+                    message=f"Server '{server_name}' requires authentication but no user context.",
+                    oauth_start_url=f"/api/mcp/auth/{server_name}/oauth/start" if auth_type == "oauth" else None,
                 )
         else:
             # Use shared client for servers without per-user auth
