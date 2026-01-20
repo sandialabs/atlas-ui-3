@@ -303,7 +303,7 @@ const AdminDashboard = () => {
         {/* Header */}
         <div className="bg-gray-800 rounded-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h1 className="text-2xl font-bold">Chat UI Admin Dashboard</h1>
+            <h1 className="text-2xl font-bold">ATLAS Admin Dashboard</h1>
             <button 
               onClick={() => navigate('/')}
               className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
