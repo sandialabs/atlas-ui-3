@@ -1,6 +1,6 @@
 services:
   minio:
-    image: minio/minio:latest
+    image: docker.io/minio/minio:latest
     container_name: atlas-minio
     ports:
       - "9000:9000"  # S3 API
@@ -20,7 +20,7 @@ services:
       - atlas-network
 
   minio-init:
-    image: minio/mc:latest
+    image: docker.io/minio/mc:latest
     container_name: atlas-minio-init
     depends_on:
       minio:
