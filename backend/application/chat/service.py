@@ -19,9 +19,9 @@ from interfaces.tools import ToolManagerProtocol
 from interfaces.transport import ChatConnectionProtocol
 
 # Import utilities
-from .utilities import file_utils, error_utils
+from .utilities import file_processor, error_handler
 from .agent import AgentLoopFactory
-from core.utils import sanitize_for_logging
+from core.log_sanitizer import sanitize_for_logging
 
 # Import new refactored modules
 from .policies.tool_authorization import ToolAuthorizationService
@@ -227,7 +227,7 @@ class ChatService:
         # Log sensitive content only at DEBUG level for development/testing
         if logger.isEnabledFor(logging.DEBUG):
             content_preview = content[:100] + "..." if len(content) > 100 else content
-            sanitized_kwargs = error_utils.sanitize_kwargs_for_logging(kwargs)
+            sanitized_kwargs = error_handler.sanitize_kwargs_for_logging(kwargs)
             logger.debug(
                 f"handle_chat_message content preview: '{sanitize_for_logging(content_preview)}', "
                 f"kwargs: {sanitized_kwargs}"
@@ -268,7 +268,7 @@ class ChatService:
             raise
         except Exception as e:
             # Fallback for unexpected errors in HTTP-style callers
-            return error_utils.handle_chat_message_error(e, "chat message handling")
+            return error_handler.handle_chat_message_error(e, "chat message handling")
             
     async def handle_reset_session(
         self,
@@ -345,7 +345,7 @@ class ChatService:
 
             # Emit files_update to notify UI
             if update_callback:
-                await file_utils.emit_files_update_from_context(
+                await file_processor.emit_files_update_from_context(
                     session_context=session.context,
                     file_manager=self.file_manager,
                     update_callback=update_callback
@@ -434,7 +434,7 @@ class ChatService:
         try:
             for result in tool_results:
                 # Ingest v2 artifacts and emit files_update + canvas_files (with display hints)
-                session_context = await file_utils.process_tool_artifacts(
+                session_context = await file_processor.process_tool_artifacts(
                     session_context=session_context,
                     tool_result=result,
                     file_manager=self.file_manager,

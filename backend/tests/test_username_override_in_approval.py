@@ -3,7 +3,7 @@
 
 from unittest.mock import Mock
 
-from application.chat.utilities.tool_utils import inject_context_into_args, _filter_args_to_schema
+from application.chat.utilities.tool_executor import inject_context_into_args, _filter_args_to_schema
 
 
 class TestUsernameOverrideInApproval:

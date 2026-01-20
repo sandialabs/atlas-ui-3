@@ -11,7 +11,7 @@ class TestErrorFlowIntegration:
     @pytest.mark.asyncio
     async def test_rate_limit_error_flow(self):
         """Test that rate limit errors result in proper user-friendly messages."""
-        from application.chat.utilities.error_utils import safe_call_llm_with_tools
+        from application.chat.utilities.error_handler import safe_call_llm_with_tools
         
         # Mock LLM caller that raises a rate limit error
         mock_llm = MagicMock()
@@ -38,7 +38,7 @@ class TestErrorFlowIntegration:
     @pytest.mark.asyncio
     async def test_timeout_error_flow(self):
         """Test that timeout errors result in proper user-friendly messages."""
-        from application.chat.utilities.error_utils import safe_call_llm_with_tools
+        from application.chat.utilities.error_handler import safe_call_llm_with_tools
         
         # Mock LLM caller that raises a timeout error
         mock_llm = MagicMock()
@@ -63,7 +63,7 @@ class TestErrorFlowIntegration:
     @pytest.mark.asyncio
     async def test_authentication_error_flow(self):
         """Test that authentication errors result in proper user-friendly messages."""
-        from application.chat.utilities.error_utils import safe_call_llm_with_tools
+        from application.chat.utilities.error_handler import safe_call_llm_with_tools
         
         # Mock LLM caller that raises an auth error
         mock_llm = MagicMock()
@@ -90,7 +90,7 @@ class TestErrorFlowIntegration:
     @pytest.mark.asyncio
     async def test_successful_llm_call(self):
         """Test that successful LLM calls work normally."""
-        from application.chat.utilities.error_utils import safe_call_llm_with_tools
+        from application.chat.utilities.error_handler import safe_call_llm_with_tools
         from interfaces.llm import LLMResponse
         
         # Mock successful LLM response

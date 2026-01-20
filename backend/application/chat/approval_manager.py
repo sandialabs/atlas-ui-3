@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional
 
-from core.utils import sanitize_for_logging
+from core.log_sanitizer import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 

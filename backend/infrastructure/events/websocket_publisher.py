@@ -4,7 +4,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from interfaces.transport import ChatConnectionProtocol
-from application.chat.utilities import notification_utils
+from application.chat.utilities import event_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ class WebSocketEventPublisher:
     """
     WebSocket implementation of EventPublisher.
     
-    Wraps notification_utils and ChatConnectionProtocol to publish
+    Wraps event_notifier and ChatConnectionProtocol to publish
     events to connected WebSocket clients.
     """
 
@@ -33,7 +33,7 @@ class WebSocketEventPublisher:
     ) -> None:
         """Publish a chat response message."""
         if self.connection:
-            await notification_utils.notify_chat_response(
+            await event_notifier.notify_chat_response(
                 message=message,
                 has_pending_tools=has_pending_tools,
                 update_callback=self.connection.send_json,
@@ -42,7 +42,7 @@ class WebSocketEventPublisher:
     async def publish_response_complete(self) -> None:
         """Signal that the response is complete."""
         if self.connection:
-            await notification_utils.notify_response_complete(
+            await event_notifier.notify_response_complete(
                 self.connection.send_json
             )
 
@@ -53,7 +53,7 @@ class WebSocketEventPublisher:
     ) -> None:
         """Publish an agent-specific update."""
         if self.connection:
-            await notification_utils.notify_agent_update(
+            await event_notifier.notify_agent_update(
                 update_type=update_type,
                 connection=self.connection,
                 **kwargs
@@ -66,7 +66,7 @@ class WebSocketEventPublisher:
     ) -> None:
         """Publish notification that a tool is starting."""
         if self.connection:
-            await notification_utils.notify_agent_update(
+            await event_notifier.notify_agent_update(
                 update_type="tool_start",
                 connection=self.connection,
                 tool=tool_name,
@@ -81,7 +81,7 @@ class WebSocketEventPublisher:
     ) -> None:
         """Publish notification that a tool has completed."""
         if self.connection:
-            await notification_utils.notify_agent_update(
+            await event_notifier.notify_agent_update(
                 update_type="tool_complete",
                 connection=self.connection,
                 tool=tool_name,

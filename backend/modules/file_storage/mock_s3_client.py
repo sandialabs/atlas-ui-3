@@ -12,7 +12,7 @@ import time
 import uuid
 from typing import Dict, List, Optional, Any
 
-from core.utils import sanitize_for_logging
+from core.log_sanitizer import sanitize_for_logging
 
 
 logger = logging.getLogger(__name__)

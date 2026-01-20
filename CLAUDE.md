@@ -12,11 +12,31 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 - Python Package Manager: **uv** (NOT pip!)
 - Configuration: Pydantic with YAML/JSON configs
 
-# Style note
+## Do This First
+
+```bash
+# Install uv (one-time)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Setup and run
+uv venv && source .venv/bin/activate
+uv pip install -r requirements.txt
+bash agent_start.sh   # builds frontend, starts backend, seeds/mocks
+```
+
+Manual quick run (alternative):
+```bash
+(frontend) cd frontend && npm install && npm run build
+(backend)  cd backend && python main.py  # don't use uvicorn --reload
+```
+
+## Style and Conventions
 
 **No Emojis**: No emojis should ever be added anywhere in this codebase (code, comments, docs, commit messages). If you find one, remove it.
 
 **File Naming**: Do not use generic names like `main.py`, `cli.py`, `utils.py`, or `helpers.py`. Use descriptive names that reflect the file's purpose (e.g., `chat_service.py`, `mcp_tool_manager.py`, `websocket_handler.py`). Exception: top-level entry points like `backend/main.py` are acceptable.
+
+**File Size**: Prefer files with 400 lines or fewer when practical.
 
 **Documentation Requirements**: Every PR or feature implementation MUST include updates to relevant documentation in the `/docs` folder. This includes:
 - Architecture changes: Update architecture docs
@@ -32,7 +52,7 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 - Section header: `## Implementation Plan (2025-11-02)`
 - Status update: `Last updated: 2025-11-02 14:30`
 
-# Claude Code Agents
+## Claude Code Agents
 
 This project uses Claude Code agents to ensure quality and completeness. Use these agents frequently:
 
@@ -40,37 +60,150 @@ This project uses Claude Code agents to ensure quality and completeness. Use the
 
 **final-checklist-reviewer**: Use this agent once at the end of a PR, feature, or bug fix to validate that all project requirements, coding standards, and quality gates have been met. This is a final validation step, not something to run after every change. Invoke when work is complete and you hear phrases like "I think I'm done", "ready to merge", "let's create a PR", or "branch is finished".
 
-# Tests
+## Tests
 
-Before you mark a job as finished, be sure to run the unit test script.
+Before you mark a job as finished, be sure to run the unit test script:
 
-`bash run_test_shortcut.sh`
-
-All test must pass before a feature is pushed. 
-
-## Critical Setup Requirements
-
-### Python Package Manager
-**ALWAYS use `uv`**, never pip or conda:
 ```bash
-# Install uv first
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Create venv and install dependencies
-uv venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
+bash run_test_shortcut.sh
 ```
 
-### Environment Setup
-```bash
-# Copy and configure environment
-cp .env.example .env
-# Set DEBUG_MODE=true for development
+All tests must pass before a feature is pushed.
 
-# Create required directories
-mkdir -p logs
+## Architecture Overview
+
+### Backend: Clean Architecture Pattern
+
 ```
+backend/
+   main.py              # FastAPI app + WebSocket endpoint at /ws, serves frontend/dist
+   infrastructure/
+      app_factory.py    # Dependency injection - wires LLM (LiteLLM), MCP, RAG, files, config
+   application/
+      chat/
+         service.py     # ChatService - main orchestrator and streaming
+         agent/         # ReAct, Think-Act, and Act agent loops
+         utilities/     # Helper functions
+   domain/
+      messages/         # Message and conversation models
+      sessions/         # Session models
+      rag_mcp_service.py # RAG over MCP discovery/search/synthesis
+   interfaces/          # Protocol definitions (abstractions)
+      llm.py            # LLMProtocol
+      tools.py          # ToolManagerProtocol
+      transport.py      # ChatConnectionProtocol
+   modules/
+      llm/              # LiteLLM integration
+      mcp_tools/        # FastMCP client, tool/prompt discovery, auth filtering
+      rag/              # RAG client
+      file_storage/     # S3 storage (mock and MinIO)
+      prompts/          # Prompt provider
+      config/
+         config_manager.py  # Pydantic configs + layered search
+   core/
+      middleware.py     # Auth, logging
+      auth.py           # Authorization
+      compliance.py     # Compliance-levels load/validate/allowlist
+      otel_config.py    # OpenTelemetry
+   routes/              # HTTP endpoints
+```
+
+### Frontend: Context-Based State Management
+
+```
+frontend/src/
+   contexts/         # React Context API (no Redux)
+      ChatContext    # Chat state (messages, selections, canvas)
+      WSContext      # WebSocket lifecycle
+      MarketplaceContext  # MCP server discovery
+   components/       # UI components
+   hooks/            # Custom hooks (useMessages, useSelections, etc.)
+   handlers/         # WebSocket message handlers
+```
+
+**Event Flow:**
+```
+User Input -> ChatContext -> WebSocket -> Backend ChatService
+  <- Streaming Updates <- tool_use/canvas_content/files_update <-
+```
+
+### Key Architectural Patterns
+
+1. **Protocol-Based Dependency Injection**: Uses Python `Protocol` (structural subtyping) instead of ABC inheritance for loose coupling
+
+2. **Agent Loop Strategy Pattern**: Three implementations selectable via `APP_AGENT_LOOP_STRATEGY`:
+   - `react`: Reason-Act-Observe cycle (structured reasoning)
+   - `think-act`: Extended thinking (slower, complex reasoning)
+   - `act`: Pure action loop (fastest, minimal overhead)
+
+3. **MCP Transport Auto-Detection**: Automatically detects stdio, HTTP, or SSE based on config
+
+4. **Configuration Layering** (in priority order):
+   - Environment variables (highest priority)
+   - `config/overrides/` (not in repo)
+   - `config/defaults/` (versioned)
+   - Code defaults (Pydantic models)
+
+## Configuration and Feature Flags
+
+### Configuration Files
+- **LLM Config**: `config/defaults/llmconfig.yml` and `config/overrides/llmconfig.yml`
+- **MCP Servers**: `config/defaults/mcp.json` and `config/overrides/mcp.json`
+- **MCP RAG Servers**: `config/defaults/mcp-rag.json` and `config/overrides/mcp-rag.json`
+- **Help Config**: `config/defaults/help-config.json`
+- **Compliance Levels**: `config/defaults/compliance-levels.json`
+- **Environment**: `.env` (copy from `.env.example`)
+
+### Feature Flags (AppSettings)
+- `FEATURE_TOOLS_ENABLED` - Enable/disable MCP tools
+- `FEATURE_RAG_MCP_ENABLED` - Enable/disable RAG over MCP
+- `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Enable/disable compliance level enforcement
+- `FEATURE_AGENT_MODE_AVAILABLE` - Enable/disable agent mode UI toggle
+
+## MCP and RAG Conventions
+
+### MCP Servers
+- MCP servers live in `mcp.json` (tools/prompts) and `mcp-rag.json` (RAG-only inventory)
+- Fields: `groups`, `transport|type`, `url|command/cwd`, `compliance_level`
+- Transport detection order: explicit transport -> command (stdio) -> URL protocol (http/sse) -> type fallback
+- Tool names exposed to LLM are fully-qualified: `server_toolName`. `canvas_canvas` is a pseudo-tool always available
+
+### RAG Over MCP
+- RAG MCP tools expected: `rag_discover_resources`, `rag_get_raw_results`, optional `rag_get_synthesized_results`
+- RAG resources and servers may include `complianceLevel`
+- `domain/rag_mcp_service.py` handles RAG discovery/search/synthesis
+
+### Testing MCP Features
+When testing or developing MCP-related features, example configurations can be found in `config/mcp-example-configs/` with individual `mcp-{servername}.json` files for testing individual servers.
+
+## Compliance Levels
+
+Definitions in `config/(overrides|defaults)/compliance-levels.json`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
+
+When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
+- `/api/config` includes model and server `compliance_level`
+- `domain/rag_mcp_service` filters servers and per-resource `complianceLevel` using `ComplianceLevelManager.is_accessible(user, resource)`
+- Validated on load for LLM models, MCP servers, and RAG MCP servers
+
+## Key APIs and Contracts
+
+### WebSocket API (`/ws`)
+**Client Messages:**
+- `chat` - User sends message
+- `download_file` - Request file from S3
+- `reset_session` - Clear conversation history
+- `attach_file` - Attach file to conversation
+
+**Server Messages:**
+- `token_stream` - Text chunks
+- `tool_use` - Tool execution events
+- `canvas_content` - HTML/markdown for canvas
+- `intermediate_update` - Files, images, etc.
+
+### REST API
+- `/api/config` - Models, tools, prompts, data_sources, rag_servers, features
+- `/api/compliance-levels` - Compliance level definitions
+- `/admin/*` - Configs and logs (admin group required)
 
 ## Development Commands
 
@@ -84,26 +217,7 @@ This script handles: killing old processes, clearing logs, building frontend, st
 - `bash agent_start.sh -f` - Only rebuild frontend
 - `bash agent_start.sh -b` - Only restart backend
 
-**Note:** The script automatically reads `USE_MOCK_S3` from `.env`:
-- If `true`: Uses in-process Mock S3 (no Docker)
-- If `false`: Starts MinIO via docker-compose
-
-### Manual Development Workflow
-
-**Frontend Build (CRITICAL):**
-```bash
-cd frontend
-npm install
-npm run build  # Use build, NOT npm run dev (WebSocket issues)
-```
-
-**Backend Start:**
-```bash
-cd backend
-python main.py  # NEVER use uvicorn --reload (causes problems)
-```
-
-**S3 Storage (Mock vs MinIO):**
+### S3 Storage (Mock vs MinIO)
 
 The project supports two S3 storage backends:
 
@@ -111,16 +225,12 @@ The project supports two S3 storage backends:
    - Set `USE_MOCK_S3=true` in `.env`
    - Uses in-process FastAPI TestClient (no Docker required)
    - Files stored in `minio-data/chatui/` on disk
-   - No external server needed - integrated directly into backend
    - Faster startup, simpler development workflow
 
 2. **MinIO (Production-like)**
    - Set `USE_MOCK_S3=false` in `.env`
    - Requires Docker: `docker-compose up -d minio minio-init`
    - Full S3 compatibility with all features
-   - Use for testing production-like scenarios
-
-The mock automatically activates when the backend starts if `USE_MOCK_S3=true`.
 
 ### Testing
 
@@ -149,7 +259,6 @@ npm run test:ui       # Interactive UI
 
 **Python:**
 ```bash
-# This command auto-installs ruff if not present, then runs the check
 ruff check backend/ || (uv pip install ruff && ruff check backend/)
 ```
 
@@ -160,7 +269,6 @@ cd frontend && npm run lint
 
 ### Docker
 
-**Build and run:**
 ```bash
 docker build -t atlas-ui-3 .
 docker run -p 8000:8000 atlas-ui-3
@@ -168,93 +276,18 @@ docker run -p 8000:8000 atlas-ui-3
 
 **Container uses Fedora latest** (note: GitHub Actions use Ubuntu runners).
 
-## Architecture Overview
+## Agent Modes
 
-### Backend: Clean Architecture Pattern
+Three agent loop strategies implement different reasoning patterns:
 
-```
-backend/
-├── application/          # Use cases and business logic orchestration
-│   └── chat/
-│       ├── service.py   # ChatService - main orchestrator
-│       ├── agent/       # ReAct and Think-Act agent loops
-│       └── utilities/   # Helper functions
-├── domain/              # Pure business logic (framework-agnostic)
-│   ├── messages/        # Message and conversation models
-│   └── sessions/        # Session models
-├── infrastructure/      # Framework/external dependencies
-│   ├── app_factory.py  # Dependency injection container
-│   └── transport/      # WebSocket adapter
-├── interfaces/          # Protocol definitions (abstractions)
-│   ├── llm.py          # LLMProtocol
-│   ├── tools.py        # ToolManagerProtocol
-│   └── transport.py    # ChatConnectionProtocol
-├── modules/             # Technical implementations
-│   ├── llm/            # LiteLLM integration
-│   ├── mcp_tools/      # MCP client and tool manager
-│   ├── rag/            # RAG client
-│   ├── file_storage/   # S3 storage
-│   └── prompts/        # Prompt provider
-├── core/                # Cross-cutting concerns
-│   ├── middleware.py   # Auth, logging
-│   ├── auth.py         # Authorization
-│   └── otel_config.py  # OpenTelemetry
-├── routes/              # HTTP endpoints
-└── main.py              # FastAPI app + WebSocket endpoint
-```
+- **ReAct** (`backend/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
+- **Think-Act** (`backend/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
+- **Act** (`backend/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
 
-**Key Architectural Patterns:**
+Change agent loop: set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.
 
-1. **Protocol-Based Dependency Injection**: Uses Python `Protocol` (structural subtyping) instead of ABC inheritance for loose coupling
+## Prompt System
 
-2. **Agent Loop Strategy Pattern**: Three implementations selectable via `APP_AGENT_LOOP_STRATEGY`:
-   - `react`: Reason-Act-Observe cycle (structured reasoning)
-   - `think-act`: Extended thinking (slower, complex reasoning)
-   - `act`: Pure action loop (fastest, minimal overhead)
-
-3. **MCP Transport Auto-Detection**: Automatically detects stdio, HTTP, or SSE based on config
-
-4. **Configuration Layering**:
-   - Code defaults (Pydantic models)
-   - `config/defaults/` (versioned)
-   - `config/overrides/` (not in repo)
-   - Environment variables (highest priority)
-
-### Frontend: Context-Based State Management
-
-```
-frontend/src/
-├── contexts/         # React Context API (no Redux)
-│   ├── ChatContext  # Chat state (messages, selections, canvas)
-│   ├── WSContext    # WebSocket lifecycle
-│   └── MarketplaceContext  # MCP server discovery
-├── components/       # UI components
-├── hooks/            # Custom hooks (useMessages, useSelections, etc.)
-└── handlers/         # WebSocket message handlers
-```
-
-**Event Flow:**
-```
-User Input → ChatContext → WebSocket → Backend ChatService
-  ← Streaming Updates ← tool_use/canvas_content/files_update ←
-```
-
-## Important Development Notes
-
-### Critical Restrictions
-- **NEVER use `uvicorn --reload`** - causes development issues
-- **NEVER use `npm run dev`** - has WebSocket connection problems
-- **ALWAYS use `npm run build`** for frontend development
-- **NEVER use pip** - this project requires `uv`
-- **NEVER CANCEL builds or tests** - they may take time but must complete
-- **File limit: 400 lines max** per file for maintainability
-
-### Configuration Files
-- **LLM Config**: `config/defaults/llmconfig.yml` and `config/overrides/llmconfig.yml`
-- **MCP Servers**: `config/defaults/mcp.json` and `config/overrides/mcp.json`
-- **Environment**: `.env` (copy from `.env.example`)
-
-### Prompt System (Updated 2025-11-24)
 The application uses a prompt system to manage various LLM prompts:
 
 - **System Prompt**: `prompts/system_prompt.md` - Default system prompt prepended to all conversations
@@ -272,62 +305,39 @@ The application uses a prompt system to manage various LLM prompts:
 
 All prompts are loaded from the directory specified by `prompt_base_path` (default: `prompts/`). The system caches loaded prompts for performance.
 
-### WebSocket Communication
-Backend serves WebSocket at `/ws` with message types:
-- `chat` - User sends message
-- `download_file` - Request file from S3
-- `reset_session` - Clear conversation history
+## Security
 
-Backend streams responses:
-- `token_stream` - Text chunks
-- `tool_use` - Tool execution events
-- `canvas_content` - HTML/markdown for canvas
-- `intermediate_update` - Files, images, etc.
-
-### MCP Integration
-MCP servers defined in `config/defaults/mcp.json`. The backend:
-1. Auto-detects transport type (stdio/HTTP/SSE)
-2. Connects on startup via `MCPToolManager`
-3. Exposes tools to LLM via `ToolManagerProtocol`
-4. Supports group-based access control
-
-When testing or developing MCP-related features, example configurations can be found in config/mcp-example-configs/ with individual mcp-{servername}.json files for testing individual servers.
-
-### Agent Modes
-Three agent loop strategies implement different reasoning patterns:
-- **ReAct** (`backend/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
-- **Think-Act** (`backend/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
-- **Act** (`backend/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
-
-### File Storage
-S3-compatible storage via `backend/modules/file_storage/`:
-- Production/MinIO: `s3_client.py` - boto3-based client for real S3/MinIO
-- Development: `mock_s3_client.py` - TestClient-based in-process mock (no Docker)
-- Controlled by `USE_MOCK_S3` env var (default: true)
-- Both implementations share the same interface
-
-### Security Middleware Stack
+### Middleware Stack
 ```
-Request → SecurityHeaders → RateLimit → Auth → Route
+Request -> SecurityHeaders -> RateLimit -> Auth -> Route
 ```
 - Rate limiting before auth to prevent abuse
 - Prompt injection risk detection in `backend/core/prompt_risk.py`
 - Group-based MCP server access control
 
-### Testing Expectations
-- Backend tests: ~5 seconds
-- Frontend tests: ~6 seconds
-- E2E tests: ~70 seconds (may fail without auth)
-- Full suite: ~2 minutes
-- Always set adequate timeouts (120-180 seconds for full suite)
+### Auth Assumption
+In production, reverse proxy injects `X-User-Email` (after stripping client headers); dev falls back to test user.
 
-### Common Issues
+## Extend by Example
+
+**Add a tool server:**
+Edit `config/overrides/mcp.json` (set `groups`, `transport`, `url/command`, `compliance_level`). Restart or call discovery on startup.
+
+**Add a RAG provider:**
+Edit `config/overrides/mcp-rag.json`; ensure it exposes `rag_*` tools; UI consumes `/api/config.rag_servers`.
+
+**Change agent loop:**
+Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.
+
+## Common Issues
 
 1. **"uv not found"**: Install uv package manager (most common)
 2. **WebSocket fails**: Use `npm run build` instead of `npm run dev`
 3. **Backend won't start**: Check `.env` exists and `APP_LOG_DIR` is valid
 4. **Frontend not loading**: Verify `npm run build` completed
 5. **Container build SSL errors**: Use local development instead
+6. **Missing tools**: Check MCP transport/URL and server logs
+7. **Empty lists**: Check auth groups and compliance filtering
 
 ## Validation Workflow
 
@@ -359,13 +369,10 @@ When referencing code locations, use `file_path:line_number` format for easy nav
 - `backend/interfaces/tools.py:ToolManagerProtocol`
 - `backend/interfaces/transport.py:ChatConnectionProtocol`
 
+## Critical Restrictions
 
-## Repo conventions (important)
-- Use uv; do not use npm run dev; do not use uvicorn --reload.
-- File naming: avoid generic names (utils.py, helpers.py). Prefer descriptive names; backend/main.py is the entry-point exception.
-- No emojis anywhere in codebase (code, comments, docs, commit messages). If you find one, remove it.
-- Prefer files ≤ ~400 lines when practical.
-- Auth assumption: in prod, reverse proxy injects X-User-Email (after stripping client headers); dev falls back to test user.
-- Documentation requirements: Every PR or feature MUST include updates to relevant docs in /docs folder (architecture, features, API, config, troubleshooting).
-- Changelog maintenance: For every PR, add an entry to CHANGELOG.md in the root directory. Each entry should be 1-2 lines describing the core features or changes. Format: "### PR #<number> - YYYY-MM-DD" followed by a bullet point list of changes.
-- PR validation: Before creating or accepting a PR, run `cd frontend && npm run lint` to ensure no frontend syntax errors or style issues.
+- **NEVER use `uvicorn --reload`** - causes development issues
+- **NEVER use `npm run dev`** - has WebSocket connection problems
+- **ALWAYS use `npm run build`** for frontend development
+- **NEVER use pip** - this project requires `uv`
+- **NEVER CANCEL builds or tests** - they may take time but must complete

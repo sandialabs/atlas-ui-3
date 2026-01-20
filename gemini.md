@@ -1,6 +1,16 @@
-# GitHub Copilot Guide: Atlas UI 3
+# Gemini Guide: Atlas UI 3
 
-Concise rules for getting productive fast in this repo. Prefer these over exploration; fall back to code/docs only if something is missing.
+This file provides guidance to Google Gemini AI assistants when working with code in this repository.
+
+## Project Overview
+
+Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) integration, supporting multiple LLM providers (OpenAI, Anthropic Claude, Google Gemini), RAG, and agentic capabilities.
+
+**Tech Stack:**
+- Backend: FastAPI + WebSockets, LiteLLM, FastMCP
+- Frontend: React 19 + Vite 7 + Tailwind CSS
+- Python Package Manager: **uv** (NOT pip!)
+- Configuration: Pydantic with YAML/JSON configs
 
 ## Do This First
 
@@ -28,11 +38,16 @@ Manual quick run (alternative):
 
 **File Size**: Prefer files with 400 lines or fewer when practical.
 
-**Documentation**: Every PR or feature MUST include updates to relevant docs in `/docs` folder.
+**Documentation Requirements**: Every PR or feature MUST include updates to relevant docs in `/docs` folder:
+- Architecture changes: Update architecture docs
+- New features: Add feature documentation with usage examples
+- API changes: Update API documentation
+- Configuration changes: Update configuration guides
+- Bug fixes: Update troubleshooting docs if applicable
 
-**Changelog**: For every PR, add an entry to CHANGELOG.md. Format: "### PR #<number> - YYYY-MM-DD" followed by bullet points.
+**Changelog Maintenance**: For every PR, add an entry to CHANGELOG.md. Format: "### PR #<number> - YYYY-MM-DD" followed by bullet points.
 
-**Date Stamps**: Include date-time stamps in markdown files (filename or section header). Format: `YYYY-MM-DD`.
+**Documentation Date Stamps**: Include date-time stamps in markdown files (filename or section header). Format: `YYYY-MM-DD`.
 
 ## Architecture Overview
 
@@ -70,11 +85,17 @@ frontend/src/
    handlers/            # WebSocket message handlers
 ```
 
+**Event Flow:**
+```
+User Input -> ChatContext -> WebSocket -> Backend ChatService
+  <- Streaming Updates <- tool_use/canvas_content/files_update <-
+```
+
 ## Configuration and Feature Flags
 
 **Layering** (in priority order): env vars -> `config/overrides/` -> `config/defaults/` -> code defaults (Pydantic models).
 
-**Files:**
+**Configuration Files:**
 - `llmconfig.yml` - LLM model configurations
 - `mcp.json` - MCP tool servers
 - `mcp-rag.json` - RAG-only MCP servers
@@ -99,8 +120,9 @@ frontend/src/
 **RAG Over MCP:**
 - Expected tools: `rag_discover_resources`, `rag_get_raw_results`, optional `rag_get_synthesized_results`
 - Resources and servers may include `complianceLevel`
+- `domain/rag_mcp_service.py` handles RAG discovery/search/synthesis
 
-**Testing MCP:**
+**Testing MCP Features:**
 Example configurations in `config/mcp-example-configs/` with individual `mcp-{servername}.json` files.
 
 ## Compliance Levels
@@ -110,10 +132,11 @@ Definitions in `config/(overrides|defaults)/compliance-levels.json`. `core/compl
 When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 - `/api/config` includes model and server `compliance_level`
 - `domain/rag_mcp_service` filters using `ComplianceLevelManager.is_accessible(user, resource)`
+- Validated on load for LLM models, MCP servers, and RAG MCP servers
 
 ## Key APIs and Contracts
 
-**WebSocket (`/ws`):**
+**WebSocket API (`/ws`):**
 - Client messages: `chat`, `download_file`, `reset_session`, `attach_file`
 - Server messages: `token_stream`, `tool_use`, `canvas_content`, `intermediate_update`
 
@@ -135,6 +158,7 @@ Three agent loop strategies selectable via `APP_AGENT_LOOP_STRATEGY`:
 - **System Prompt**: `prompts/system_prompt.md` - Prepended to all conversations
   - Supports `{user_email}` template variable
   - Can be overridden by MCP-provided prompts
+  - Loaded by `PromptProvider.get_system_prompt()`
 - **Agent Prompts**: `prompts/agent_reason_prompt.md`, `prompts/agent_observe_prompt.md`
 - **Tool Synthesis**: `prompts/tool_synthesis_prompt.md`
 
@@ -154,7 +178,17 @@ Request -> SecurityHeaders -> RateLimit -> Auth -> Route
 
 ## Development Commands
 
-**Testing (don't cancel):**
+### Quick Start
+```bash
+bash agent_start.sh
+```
+Options: `-f` (frontend only), `-b` (backend only)
+
+### S3 Storage
+- **Mock S3** (default): `USE_MOCK_S3=true` in `.env` - no Docker needed
+- **MinIO**: `USE_MOCK_S3=false` - requires `docker-compose up -d minio minio-init`
+
+### Testing (don't cancel)
 ```bash
 ./test/run_tests.sh all      # ~2 minutes
 ./test/run_tests.sh backend  # ~5 seconds
@@ -162,13 +196,17 @@ Request -> SecurityHeaders -> RateLimit -> Auth -> Route
 ./test/run_tests.sh e2e      # ~70 seconds
 ```
 
-**Linting:**
+### Linting
 ```bash
 ruff check backend/ || (uv pip install ruff && ruff check backend/)
 cd frontend && npm run lint
 ```
 
-**Logs:** `project_root/logs/app.jsonl` (override with `APP_LOG_DIR`). Use `/admin/logs/*`.
+### Docker
+```bash
+docker build -t atlas-ui-3 .
+docker run -p 8000:8000 atlas-ui-3
+```
 
 ## Validation Workflow
 
@@ -214,8 +252,9 @@ Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.
 2. **WebSocket fails**: Use `npm run build` instead of `npm run dev`
 3. **Backend won't start**: Check `.env` exists and `APP_LOG_DIR` is valid
 4. **Frontend not loading**: Verify `npm run build` completed
-5. **Missing tools**: Check MCP transport/URL and server logs
-6. **Empty lists**: Check auth groups and compliance filtering
+5. **Container build SSL errors**: Use local development instead
+6. **Missing tools**: Check MCP transport/URL and server logs
+7. **Empty lists**: Check auth groups and compliance filtering
 
 ## Critical Restrictions
 

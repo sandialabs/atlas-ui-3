@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 
 from domain.sessions.models import Session
 from modules.prompts.prompt_provider import PromptProvider
-from ..utilities import file_utils
+from ..utilities import file_processor
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ class MessageBuilder:
             session_context = build_session_context(session)
             files_in_context = session_context.get("files", {})
             logger.debug(f"Session has {len(files_in_context)} files: {list(files_in_context.keys())}")
-            files_manifest = file_utils.build_files_manifest(session_context)
+            files_manifest = file_processor.build_files_manifest(session_context)
             if files_manifest:
                 logger.debug(f"Adding files manifest to messages: {files_manifest['content'][:100]}")
                 messages.append(files_manifest)

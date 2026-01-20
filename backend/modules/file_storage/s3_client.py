@@ -16,7 +16,7 @@ import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
-from core.utils import sanitize_for_logging
+from core.log_sanitizer import sanitize_for_logging
 
 
 logger = logging.getLogger(__name__)

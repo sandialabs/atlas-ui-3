@@ -29,7 +29,7 @@ from core.rate_limit_middleware import RateLimitMiddleware
 from core.security_headers_middleware import SecurityHeadersMiddleware
 from core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from core.otel_config import setup_opentelemetry
-from core.utils import sanitize_for_logging, summarize_tool_approval_response_for_logging
+from core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from core.auth import get_user_from_header
 
 # Import from infrastructure

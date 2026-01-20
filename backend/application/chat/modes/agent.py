@@ -10,7 +10,7 @@ from interfaces.events import EventPublisher
 from ..agent import AgentLoopFactory
 from ..agent.protocols import AgentContext
 from ..events.agent_event_relay import AgentEventRelay
-from ..utilities import notification_utils
+from ..utilities import event_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -122,4 +122,4 @@ class AgentModeRunner:
             steps=result.steps
         )
 
-        return notification_utils.create_chat_response(result.final_answer)
+        return event_notifier.create_chat_response(result.final_answer)

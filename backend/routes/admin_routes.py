@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.auth import is_user_in_group
-from core.utils import get_current_user, sanitize_for_logging
+from core.log_sanitizer import get_current_user, sanitize_for_logging
 from modules.config import config_manager
 from infrastructure.app_factory import app_factory
 
