@@ -7,7 +7,7 @@ from domain.sessions.models import Session
 from domain.messages.models import Message, MessageRole
 from interfaces.llm import LLMProtocol
 from interfaces.events import EventPublisher
-from ..utilities import notification_utils
+from ..utilities import event_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -77,4 +77,4 @@ class RagModeRunner:
         )
         await self.event_publisher.publish_response_complete()
 
-        return notification_utils.create_chat_response(response_content)
+        return event_notifier.create_chat_response(response_content)

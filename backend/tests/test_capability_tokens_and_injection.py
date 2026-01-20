@@ -154,7 +154,7 @@ def test_download_without_auth_fails_in_production_mode(client):
 
 def test_injection_produces_tokenized_urls(client, monkeypatch):
     """Verify that tool argument injection replaces filename with tokenized URL."""
-    from application.chat.utilities.tool_utils import inject_context_into_args  # type: ignore
+    from application.chat.utilities.tool_executor import inject_context_into_args  # type: ignore
 
     # Create a fake session context with a file mapping
     session_context = {

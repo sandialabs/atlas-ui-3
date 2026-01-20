@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.utils import get_current_user, sanitize_for_logging
+from core.log_sanitizer import get_current_user, sanitize_for_logging
 
 
 @pytest.mark.asyncio

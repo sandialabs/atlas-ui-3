@@ -20,7 +20,7 @@ class TestLogLevelSensitiveData:
 
     def test_tool_approval_response_summary_excludes_argument_values(self):
         """Tool approval payloads must never log raw tool arguments at INFO."""
-        from backend.core.utils import summarize_tool_approval_response_for_logging
+        from backend.core.log_sanitizer import summarize_tool_approval_response_for_logging
 
         payload = {
             "type": "tool_approval_response",

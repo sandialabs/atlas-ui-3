@@ -7,7 +7,7 @@ from interfaces.tools import ToolManagerProtocol
 from modules.prompts.prompt_provider import PromptProvider
 
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
-from ..utilities import error_utils, tool_utils
+from ..utilities import error_handler, tool_executor
 
 
 class ThinkActAgentLoop(AgentLoopProtocol):
@@ -113,7 +113,7 @@ class ThinkActAgentLoop(AgentLoopProtocol):
             # Act: single tool selection and execution
             tools_schema: List[Dict[str, Any]] = []
             if selected_tools and self.tool_manager:
-                tools_schema = await error_utils.safe_get_tools_schema(self.tool_manager, selected_tools)
+                tools_schema = await error_handler.safe_get_tools_schema(self.tool_manager, selected_tools)
 
             # Use "required" to force tool calling during Act phase
             # The LiteLLM caller has fallback logic to "auto" if "required" is not supported
@@ -133,7 +133,7 @@ class ThinkActAgentLoop(AgentLoopProtocol):
                         final_answer = llm_response.content or ""
                         break
                     messages.append({"role": "assistant", "content": llm_response.content, "tool_calls": [first_call]})
-                    result = await tool_utils.execute_single_tool(
+                    result = await tool_executor.execute_single_tool(
                         tool_call=first_call,
                         session_context={
                             "session_id": context.session_id,

@@ -9,7 +9,7 @@ from interfaces.llm import LLMProtocol
 from interfaces.tools import ToolManagerProtocol
 from interfaces.events import EventPublisher
 from modules.prompts.prompt_provider import PromptProvider
-from ..utilities import tool_utils, notification_utils, error_utils
+from ..utilities import tool_executor, event_notifier, error_handler
 from ..preprocessors.message_builder import build_session_context
 
 logger = logging.getLogger(__name__)
@@ -89,10 +89,10 @@ class ToolsModeRunner:
             Response dictionary
         """
         # Resolve tool schemas
-        tools_schema = await error_utils.safe_get_tools_schema(self.tool_manager, selected_tools)
+        tools_schema = await error_handler.safe_get_tools_schema(self.tool_manager, selected_tools)
 
         # Call LLM with tools (and RAG if provided)
-        llm_response = await error_utils.safe_call_llm_with_tools(
+        llm_response = await error_handler.safe_call_llm_with_tools(
             llm_caller=self.llm,
             model=model,
             messages=messages,
@@ -115,7 +115,7 @@ class ToolsModeRunner:
             )
             await self.event_publisher.publish_response_complete()
             
-            return notification_utils.create_chat_response(content)
+            return event_notifier.create_chat_response(content)
 
         # Execute tool workflow
         session_context = build_session_context(session)
@@ -129,7 +129,7 @@ class ToolsModeRunner:
         if effective_callback is None:
             logger.warning("Tools mode: No update callback available - elicitation will not work!")
 
-        final_response, tool_results = await tool_utils.execute_tools_workflow(
+        final_response, tool_results = await tool_executor.execute_tools_workflow(
             llm_response=llm_response,
             messages=messages,
             model=model,
@@ -163,7 +163,7 @@ class ToolsModeRunner:
         )
         await self.event_publisher.publish_response_complete()
 
-        return notification_utils.create_chat_response(final_response)
+        return event_notifier.create_chat_response(final_response)
     
     def _get_send_json(self) -> Optional[UpdateCallback]:
         """Get send_json callback from event publisher if available."""

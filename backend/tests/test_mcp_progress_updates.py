@@ -4,7 +4,7 @@ import pytest
 import json
 from unittest.mock import AsyncMock
 
-from application.chat.utilities.notification_utils import (
+from application.chat.utilities.event_notifier import (
     notify_tool_progress,
     _handle_structured_progress_update
 )

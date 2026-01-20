@@ -19,7 +19,7 @@ from .modes.plain import PlainModeRunner
 from .modes.rag import RagModeRunner
 from .modes.tools import ToolsModeRunner
 from .modes.agent import AgentModeRunner
-from .utilities import file_utils
+from .utilities import file_processor
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ class ChatOrchestrator:
         # Handle file ingestion
         update_callback = kwargs.get("update_callback")
         logger.debug(f"Orchestrator.execute: update_callback present = {update_callback is not None}")
-        session.context = await file_utils.handle_session_files(
+        session.context = await file_processor.handle_session_files(
             session_context=session.context,
             user_email=user_email,
             files_map=files,

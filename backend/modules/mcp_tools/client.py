@@ -13,7 +13,7 @@ from typing import Dict, List, Any, Optional, Callable, Awaitable, AsyncIterator
 
 from fastmcp import Client
 from modules.config import config_manager
-from core.utils import sanitize_for_logging
+from core.log_sanitizer import sanitize_for_logging
 from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
 
@@ -1721,7 +1721,7 @@ class MCPToolManager:
                     return
                 try:
                     # Deferred import to avoid cycles
-                    from application.chat.utilities.notification_utils import notify_tool_log
+                    from application.chat.utilities.event_notifier import notify_tool_log
                     await notify_tool_log(
                         server_name=log_server_name,
                         tool_name=tool_call.name,
@@ -1739,7 +1739,7 @@ class MCPToolManager:
                 try:
                     if update_cb is not None:
                         # Deferred import to avoid cycles
-                        from application.chat.utilities.notification_utils import notify_tool_progress
+                        from application.chat.utilities.event_notifier import notify_tool_progress
                         await notify_tool_progress(
                             tool_call_id=tool_call.id,
                             tool_name=tool_call.name,

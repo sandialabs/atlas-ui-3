@@ -8,7 +8,7 @@ from interfaces.tools import ToolManagerProtocol
 from modules.prompts.prompt_provider import PromptProvider
 
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
-from ..utilities import error_utils, tool_utils
+from ..utilities import error_handler, tool_executor
 
 
 class ActAgentLoop(AgentLoopProtocol):
@@ -101,7 +101,7 @@ class ActAgentLoop(AgentLoopProtocol):
             # Build tools schema: user tools + finished tool
             tools_schema: List[Dict[str, Any]] = [finished_tool_schema]
             if selected_tools and self.tool_manager:
-                user_tools = await error_utils.safe_get_tools_schema(self.tool_manager, selected_tools)
+                user_tools = await error_handler.safe_get_tools_schema(self.tool_manager, selected_tools)
                 tools_schema.extend(user_tools)
 
             # Call LLM with tools - using "required" to force tool calling during Act phase
@@ -144,7 +144,7 @@ class ActAgentLoop(AgentLoopProtocol):
                     "tool_calls": [first_call],
                 })
 
-                result = await tool_utils.execute_single_tool(
+                result = await tool_executor.execute_single_tool(
                     tool_call=first_call,
                     session_context={
                         "session_id": context.session_id,
