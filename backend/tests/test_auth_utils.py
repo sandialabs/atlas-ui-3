@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.auth_utils import AuthorizationManager, create_authorization_manager
+from core.authorization_manager import AuthorizationManager, create_authorization_manager
 
 
 class TestAuthorizationManager:
@@ -24,7 +24,7 @@ class TestAuthorizationManager:
     @pytest.fixture
     def auth_manager(self, mock_auth_check_func, mock_app_settings):
         """Create an AuthorizationManager instance with mocked dependencies."""
-        with patch('core.auth_utils.get_app_settings', return_value=mock_app_settings):
+        with patch('core.authorization_manager.get_app_settings', return_value=mock_app_settings):
             return AuthorizationManager(mock_auth_check_func)
 
     @pytest.mark.asyncio
@@ -63,7 +63,7 @@ class TestAuthorizationManager:
         mock_settings = MagicMock()
         mock_settings.admin_group = custom_admin_group
         
-        with patch('core.auth_utils.get_app_settings', return_value=mock_settings):
+        with patch('core.authorization_manager.get_app_settings', return_value=mock_settings):
             auth_manager = AuthorizationManager(mock_auth_check_func)
         
         user_email = "admin@example.com"
@@ -124,7 +124,7 @@ class TestCreateAuthorizationManager:
         mock_auth_check_func = AsyncMock()
 
         # Act
-        with patch('core.auth_utils.get_app_settings'):
+        with patch('core.authorization_manager.get_app_settings'):
             result = create_authorization_manager(mock_auth_check_func)
 
         # Assert
@@ -139,7 +139,7 @@ class TestCreateAuthorizationManager:
         mock_settings.admin_group = "test_admin"
 
         # Act
-        with patch('core.auth_utils.get_app_settings', return_value=mock_settings) as mock_get_settings:
+        with patch('core.authorization_manager.get_app_settings', return_value=mock_settings) as mock_get_settings:
             result = create_authorization_manager(mock_auth_check_func)
 
         # Assert
@@ -155,7 +155,7 @@ class TestCreateAuthorizationManager:
         mock_settings.admin_group = "admin"
 
         # Act
-        with patch('core.auth_utils.get_app_settings', return_value=mock_settings):
+        with patch('core.authorization_manager.get_app_settings', return_value=mock_settings):
             manager = create_authorization_manager(mock_auth_check_func)
             result = await manager.is_admin("test@example.com")
 

@@ -9,7 +9,7 @@ from interfaces.tools import ToolManagerProtocol
 from modules.prompts.prompt_provider import PromptProvider
 
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
-from ..utilities import file_utils, error_utils, tool_utils
+from ..utilities import file_processor, error_handler, tool_executor
 from domain.messages.models import ToolResult
 
 
@@ -108,7 +108,7 @@ class ReActAgentLoop(AgentLoopProtocol):
         final_response: Optional[str] = None
         last_observation: Optional[str] = None
         user_question = self._latest_user_question(messages)
-        files_manifest_obj = file_utils.build_files_manifest({
+        files_manifest_obj = file_processor.build_files_manifest({
             "session_id": str(context.session_id),
             "user_email": context.user_email,
             "files": context.files,
@@ -210,7 +210,7 @@ class ReActAgentLoop(AgentLoopProtocol):
             # ----- Act -----
             tools_schema: List[Dict[str, Any]] = []
             if selected_tools and self.tool_manager:
-                tools_schema = await error_utils.safe_get_tools_schema(self.tool_manager, selected_tools)
+                tools_schema = await error_handler.safe_get_tools_schema(self.tool_manager, selected_tools)
 
             tool_results: List[ToolResult] = []
             # Use "required" to force tool calling during Act phase
@@ -237,7 +237,7 @@ class ReActAgentLoop(AgentLoopProtocol):
                         "content": llm_response.content,
                         "tool_calls": [first_call],
                     })
-                    result = await tool_utils.execute_single_tool(
+                    result = await tool_executor.execute_single_tool(
                         tool_call=first_call,
                         session_context={
                             "session_id": context.session_id,

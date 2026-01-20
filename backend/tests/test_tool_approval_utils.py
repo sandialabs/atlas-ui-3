@@ -1,7 +1,7 @@
-"""Tests for tool approval utilities in tool_utils.py"""
+"""Tests for tool approval utilities in tool_executor.py"""
 
 from unittest.mock import Mock
-from application.chat.utilities.tool_utils import (
+from application.chat.utilities.tool_executor import (
     requires_approval,
     tool_accepts_username,
     _sanitize_args_for_ui,

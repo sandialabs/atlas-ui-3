@@ -13,7 +13,7 @@ from fastapi import Query
 import base64
 from pydantic import BaseModel, Field
 
-from core.utils import get_current_user
+from core.log_sanitizer import get_current_user
 from infrastructure.app_factory import app_factory
 from core.capabilities import verify_file_token
 

@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 from core.compliance import get_compliance_manager
 from core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
-from core.utils import sanitize_for_logging
+from core.log_sanitizer import sanitize_for_logging
 
 
 class RAGMCPService:

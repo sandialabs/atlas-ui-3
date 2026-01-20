@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Callable, Awaitable
 from domain.messages.models import ToolCall, ToolResult
 from interfaces.llm import LLMResponse
 from core.capabilities import create_download_url
-from .notification_utils import _sanitize_filename_value  # reuse same filename sanitizer for UI args
+from .event_notifier import _sanitize_filename_value  # reuse same filename sanitizer for UI args
 from ..approval_manager import get_approval_manager
 
 logger = logging.getLogger(__name__)
@@ -175,7 +175,7 @@ async def execute_single_tool(
     Pure function that doesn't maintain state - all context passed as parameters.
     """
     logger.debug("Entering execute_single_tool")
-    from . import notification_utils
+    from . import event_notifier
     
     try:
         # Prepare arguments with injections (username, filename URL mapping)
@@ -281,7 +281,7 @@ async def execute_single_tool(
                 )
 
         # Send tool start notification with sanitized args
-        await notification_utils.notify_tool_start(tool_call, display_args, update_callback)
+        await event_notifier.notify_tool_start(tool_call, display_args, update_callback)
 
         # Create tool call object and execute with filtered args only
         tool_call_obj = ToolCall(
@@ -315,7 +315,7 @@ async def execute_single_tool(
                 result.content = edit_note + str(result.content)
 
         # Send tool complete notification
-        await notification_utils.notify_tool_complete(tool_call, result, parsed_args, update_callback)
+        await event_notifier.notify_tool_complete(tool_call, result, parsed_args, update_callback)
 
         return result
 
@@ -323,7 +323,7 @@ async def execute_single_tool(
         logger.error(f"Error executing tool {tool_call.function.name}: {e}")
         
         # Send tool error notification
-        await notification_utils.notify_tool_error(tool_call, str(e), update_callback)
+        await event_notifier.notify_tool_error(tool_call, str(e), update_callback)
         
         # Return error result instead of raising
         return ToolResult(
