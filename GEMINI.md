@@ -1,6 +1,6 @@
-# GEMINI.md
+# Gemini Guide: Atlas UI 3
 
-This file provides guidance to the Gemini AI agent when working with code in this repository.
+This file provides guidance to Google Gemini AI assistants when working with code in this repository.
 
 ## Project Overview
 
@@ -12,64 +12,254 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 - Python Package Manager: **uv** (NOT pip!)
 - Configuration: Pydantic with YAML/JSON configs
 
-## Building and Running
+## Do This First
 
-### Quick Start (Recommended)
+```bash
+# Install uv (one-time)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Setup and run
+uv venv && source .venv/bin/activate
+uv pip install -r requirements.txt
+bash agent_start.sh   # builds frontend, starts backend, seeds/mocks
+```
+
+Manual quick run (alternative):
+```bash
+(frontend) cd frontend && npm install && npm run build
+(backend)  cd backend && python main.py  # don't use uvicorn --reload
+```
+
+## Style and Conventions
+
+**No Emojis**: No emojis anywhere in codebase (code, comments, docs, commit messages). If you find one, remove it.
+
+**File Naming**: Avoid generic names (`utils.py`, `helpers.py`). Prefer descriptive names; `backend/main.py` is the entry-point exception.
+
+**File Size**: Prefer files with 400 lines or fewer when practical.
+
+**Documentation Requirements**: Every PR or feature MUST include updates to relevant docs in `/docs` folder:
+- Architecture changes: Update architecture docs
+- New features: Add feature documentation with usage examples
+- API changes: Update API documentation
+- Configuration changes: Update configuration guides
+- Bug fixes: Update troubleshooting docs if applicable
+
+**Changelog Maintenance**: For every PR, add an entry to CHANGELOG.md. Format: "### PR #<number> - YYYY-MM-DD" followed by bullet points.
+
+**Documentation Date Stamps**: Include date-time stamps in markdown files (filename or section header). Format: `YYYY-MM-DD`.
+
+## Architecture Overview
+
+```
+backend/
+   main.py              # FastAPI app + WebSocket endpoint at /ws, serves frontend/dist
+   infrastructure/
+      app_factory.py    # Dependency injection - wires LLM (LiteLLM), MCP, RAG, files, config
+   application/
+      chat/
+         service.py     # ChatService - main orchestrator and streaming
+         agent/         # ReAct, Think-Act, and Act agent loops
+   domain/
+      messages/         # Message and conversation models
+      sessions/         # Session models
+      rag_mcp_service.py # RAG over MCP discovery/search/synthesis
+   interfaces/          # Protocol definitions (LLMProtocol, ToolManagerProtocol, ChatConnectionProtocol)
+   modules/
+      llm/              # LiteLLM integration
+      mcp_tools/        # FastMCP client, tool/prompt discovery, auth filtering
+      rag/              # RAG client
+      file_storage/     # S3 storage (mock and MinIO)
+      config/
+         config_manager.py  # Pydantic configs + layered search
+   core/
+      middleware.py     # Auth, logging
+      compliance.py     # Compliance-levels load/validate/allowlist
+      prompt_risk.py    # Prompt injection risk detection
+   routes/              # HTTP endpoints
+
+frontend/src/
+   contexts/            # React Context API (no Redux) - ChatContext, WSContext, MarketplaceContext
+   components/          # UI components
+   hooks/               # Custom hooks (useMessages, useSelections, etc.)
+   handlers/            # WebSocket message handlers
+```
+
+**Event Flow:**
+```
+User Input -> ChatContext -> WebSocket -> Backend ChatService
+  <- Streaming Updates <- tool_use/canvas_content/files_update <-
+```
+
+## Configuration and Feature Flags
+
+**Layering** (in priority order): env vars -> `config/overrides/` -> `config/defaults/` -> code defaults (Pydantic models).
+
+**Configuration Files:**
+- `llmconfig.yml` - LLM model configurations
+- `mcp.json` - MCP tool servers
+- `mcp-rag.json` - RAG-only MCP servers
+- `help-config.json` - Help system configuration
+- `compliance-levels.json` - Compliance level definitions
+- `.env` - Environment variables (copy from `.env.example`)
+
+**Feature Flags (AppSettings):**
+- `FEATURE_TOOLS_ENABLED` - Enable/disable MCP tools
+- `FEATURE_RAG_MCP_ENABLED` - Enable/disable RAG over MCP
+- `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Enable/disable compliance level enforcement
+- `FEATURE_AGENT_MODE_AVAILABLE` - Enable/disable agent mode UI toggle
+
+## MCP and RAG Conventions
+
+**MCP Servers:**
+- Live in `mcp.json` (tools/prompts) and `mcp-rag.json` (RAG-only inventory)
+- Fields: `groups`, `transport|type`, `url|command/cwd`, `compliance_level`
+- Transport detection: explicit transport -> command (stdio) -> URL protocol (http/sse) -> type fallback
+- Tool names are fully-qualified: `server_toolName`. `canvas_canvas` is a pseudo-tool always available
+
+**RAG Over MCP:**
+- Expected tools: `rag_discover_resources`, `rag_get_raw_results`, optional `rag_get_synthesized_results`
+- Resources and servers may include `complianceLevel`
+- `domain/rag_mcp_service.py` handles RAG discovery/search/synthesis
+
+**Testing MCP Features:**
+Example configurations in `config/mcp-example-configs/` with individual `mcp-{servername}.json` files.
+
+## Compliance Levels
+
+Definitions in `config/(overrides|defaults)/compliance-levels.json`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
+
+When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
+- `/api/config` includes model and server `compliance_level`
+- `domain/rag_mcp_service` filters using `ComplianceLevelManager.is_accessible(user, resource)`
+- Validated on load for LLM models, MCP servers, and RAG MCP servers
+
+## Key APIs and Contracts
+
+**WebSocket API (`/ws`):**
+- Client messages: `chat`, `download_file`, `reset_session`, `attach_file`
+- Server messages: `token_stream`, `tool_use`, `canvas_content`, `intermediate_update`
+
+**REST API:**
+- `/api/config` - Models, tools, prompts, data_sources, rag_servers, features
+- `/api/compliance-levels` - Compliance level definitions
+- `/admin/*` - Configs and logs (admin group required)
+
+## Agent Modes
+
+Three agent loop strategies selectable via `APP_AGENT_LOOP_STRATEGY`:
+
+- **ReAct** (`backend/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
+- **Think-Act** (`backend/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
+- **Act** (`backend/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
+
+## Prompt System
+
+- **System Prompt**: `prompts/system_prompt.md` - Prepended to all conversations
+  - Supports `{user_email}` template variable
+  - Can be overridden by MCP-provided prompts
+  - Loaded by `PromptProvider.get_system_prompt()`
+- **Agent Prompts**: `prompts/agent_reason_prompt.md`, `prompts/agent_observe_prompt.md`
+- **Tool Synthesis**: `prompts/tool_synthesis_prompt.md`
+
+Prompts loaded from `prompt_base_path` (default: `prompts/`) and cached.
+
+## Security
+
+**Middleware Stack:**
+```
+Request -> SecurityHeaders -> RateLimit -> Auth -> Route
+```
+
+- Rate limiting before auth to prevent abuse
+- Prompt injection risk detection in `backend/core/prompt_risk.py`
+- Group-based MCP server access control
+- Auth: In prod, reverse proxy injects `X-User-Email`; dev falls back to test user
+
+## Development Commands
+
+### Quick Start
 ```bash
 bash agent_start.sh
 ```
-This script handles: killing old processes, clearing logs, building frontend, and starting the backend.
+Options: `-f` (frontend only), `-b` (backend only)
 
-### Manual Development Workflow
+### S3 Storage
+- **Mock S3** (default): `USE_MOCK_S3=true` in `.env` - no Docker needed
+- **MinIO**: `USE_MOCK_S3=false` - requires `docker-compose up -d minio minio-init`
 
-**Frontend Build (CRITICAL):**
+### Testing (don't cancel)
 ```bash
-cd frontend
-npm install
-npm run build  # Use build, NOT npm run dev (WebSocket issues)
+./test/run_tests.sh all      # ~2 minutes
+./test/run_tests.sh backend  # ~5 seconds
+./test/run_tests.sh frontend # ~6 seconds
+./test/run_tests.sh e2e      # ~70 seconds
 ```
 
-**Backend Start:**
+### Linting
 ```bash
-cd backend
-python main.py  # NEVER use uvicorn --reload (causes problems)
+ruff check backend/ || (uv pip install ruff && ruff check backend/)
+cd frontend && npm run lint
 ```
 
-### Testing
-
-**Run all tests:**
+### Docker
 ```bash
-./test/run_tests.sh all
+docker build -t atlas-ui-3 .
+docker run -p 8000:8000 atlas-ui-3
 ```
 
-**Individual test suites:**
-```bash
-./test/run_tests.sh backend
-./test/run_tests.sh frontend
-./test/run_tests.sh e2e
-```
+## Validation Workflow
 
-## Development Conventions
+Before committing:
+1. **Lint**: Python and frontend
+2. **Test**: `./test/run_tests.sh all`
+3. **Build**: Frontend and backend build successfully
+4. **Manual**: Test in browser at http://localhost:8000
 
-- **Python Package Manager**: **ALWAYS use `uv`**, never pip or conda.
-- **Frontend Development**: **NEVER use `npm run dev`**, it has WebSocket connection problems. Always use `npm run build`.
-- **Backend Development**: **NEVER use `uvicorn --reload`**, it causes problems.
-- **File Naming**: Do not use generic names like `utils.py` or `helpers.py`. Use descriptive names that reflect the file's purpose.
-- **No Emojis**: No emojis should ever be added anywhere in this codebase (code, comments, docs, commit messages). If you find one, remove it.
-- **Linting**: Run `ruff check backend/` for Python and `npm run lint` for the frontend before committing.
-- **Documentation Requirements**: Every PR or feature implementation MUST include updates to relevant documentation in the `/docs` folder. This includes:
-  - Architecture changes: Update architecture docs
-  - New features: Add feature documentation with usage examples
-  - API changes: Update API documentation
-  - Configuration changes: Update configuration guides
-  - Bug fixes: Update troubleshooting docs if applicable
-- **Changelog Maintenance**: For every PR, add an entry to CHANGELOG.md in the root directory. Each entry should be 1-2 lines describing the core features or changes. Format: "### PR #<number> - YYYY-MM-DD" followed by a bullet point list of changes.
-- **PR Validation**: Before creating or accepting a PR, run `cd frontend && npm run lint` to ensure no frontend syntax errors or style issues.
+Before PR:
+- Run `cd frontend && npm run lint` to ensure no frontend syntax errors
 
-When testing or developing MCP-related features, example configurations can be found in config/mcp-example-configs/ with individual mcp-{servername}.json files for testing individual servers.
+## Key File References
 
+Use `file_path:line_number` format for easy navigation.
 
-Also read.
-/workspaces/atlas-ui-3/.github/copilot-instructions.md
+**Core Entry Points:**
+- Backend: `backend/main.py` - FastAPI app + WebSocket
+- Frontend: `frontend/src/main.jsx` - React app entry
+- Chat Service: `backend/application/chat/service.py:ChatService`
+- Config: `backend/modules/config/config_manager.py`
+- MCP: `backend/modules/mcp_tools/mcp_tool_manager.py`
 
-and CLAUDE.md
+**Protocol Definitions:**
+- `backend/interfaces/llm.py:LLMProtocol`
+- `backend/interfaces/tools.py:ToolManagerProtocol`
+- `backend/interfaces/transport.py:ChatConnectionProtocol`
+
+## Extend by Example
+
+**Add a tool server:**
+Edit `config/overrides/mcp.json` (set `groups`, `transport`, `url/command`, `compliance_level`). Restart backend.
+
+**Add a RAG provider:**
+Edit `config/overrides/mcp-rag.json`; ensure it exposes `rag_*` tools; UI consumes `/api/config.rag_servers`.
+
+**Change agent loop:**
+Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.
+
+## Common Issues
+
+1. **"uv not found"**: Install uv package manager
+2. **WebSocket fails**: Use `npm run build` instead of `npm run dev`
+3. **Backend won't start**: Check `.env` exists and `APP_LOG_DIR` is valid
+4. **Frontend not loading**: Verify `npm run build` completed
+5. **Container build SSL errors**: Use local development instead
+6. **Missing tools**: Check MCP transport/URL and server logs
+7. **Empty lists**: Check auth groups and compliance filtering
+
+## Critical Restrictions
+
+- **NEVER use `uvicorn --reload`** - causes development issues
+- **NEVER use `npm run dev`** - has WebSocket connection problems
+- **ALWAYS use `npm run build`** for frontend development
+- **NEVER use pip** - this project requires `uv`
+- **NEVER CANCEL builds or tests** - they may take time but must complete
