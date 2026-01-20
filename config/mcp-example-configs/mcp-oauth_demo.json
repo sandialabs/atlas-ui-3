@@ -1,0 +1,22 @@
+{
+  "oauth_demo": {
+    "command": [
+      "python",
+      "mcp/oauth_demo/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates OAuth 2.1 authentication for MCP servers. Users must authenticate via OAuth before using tools.",
+    "author": "Chat UI Team",
+    "short_description": "OAuth 2.1 authentication demo",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Internal",
+    "auth_type": "oauth",
+    "oauth_config": {
+      "scopes": ["read", "write"],
+      "client_name": "Atlas UI"
+    }
+  }
+}
