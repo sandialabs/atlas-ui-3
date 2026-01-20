@@ -8,6 +8,15 @@ This MCP server demonstrates OAuth 2.1 and JWT authentication for MCP servers.
 
 This server provides simple tools that require authentication to access. It demonstrates how Atlas UI handles per-user authentication for MCP servers.
 
+## Important: Transport Types and Auth Flows
+
+| Transport | Auth Types Supported | User Experience |
+|-----------|---------------------|-----------------|
+| `stdio` | `jwt` only | User manually uploads JWT via "Add Token" |
+| `http`/`sse` | `oauth`, `jwt` | OAuth: automatic redirect to login. JWT: manual upload |
+
+**OAuth requires HTTP transport** because the OAuth flow needs HTTP endpoints for discovery and token exchange. Stdio servers can only use manual JWT upload.
+
 ## Tools
 
 | Tool | Description |

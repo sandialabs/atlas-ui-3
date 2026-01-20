@@ -1,0 +1,19 @@
+{
+  "oauth_http_demo": {
+    "url": "http://localhost:8001/mcp",
+    "transport": "http",
+    "groups": [
+      "users"
+    ],
+    "description": "OAuth 2.1 demo using HTTP transport. Requires the mock OAuth server to be running (mocks/oauth-mcp-mock). Click 'Connect' to be redirected to authenticate.",
+    "author": "Chat UI Team",
+    "short_description": "OAuth 2.1 HTTP demo",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Internal",
+    "auth_type": "oauth",
+    "oauth_config": {
+      "scopes": ["read", "write"],
+      "client_name": "Atlas UI"
+    }
+  }
+}
