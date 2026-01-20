@@ -20,12 +20,10 @@ import FileManagerPanel from './components/FileManagerPanel'
 import FilesPage from './components/FilesPage'
 import SplashScreen from './components/SplashScreen'
 import ElicitationDialog from './components/ElicitationDialog'
-import MCPAuthPanel from './components/MCPAuthPanel'
 
 function ChatInterface() {
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false)
-  const [mcpAuthPanelOpen, setMcpAuthPanelOpen] = useState(false)
   const [ragPanelOpen, setRagPanelOpen] = useState(false)
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false)
   const [, setCanvasPanelWidth] = useState(0)
@@ -114,7 +112,6 @@ function ChatInterface() {
             setCanvasPanelOpen(!canvasPanelOpen)
           }}
           onToggleSettings={() => setSettingsPanelOpen(!settingsPanelOpen)}
-          onToggleMcpAuth={() => setMcpAuthPanelOpen(!mcpAuthPanelOpen)}
           onCloseCanvas={() => setCanvasPanelOpen(false)}
         />
 
@@ -144,12 +141,6 @@ function ChatInterface() {
       <SettingsPanel
         isOpen={settingsPanelOpen}
         onClose={() => setSettingsPanelOpen(false)}
-      />
-
-      {/* MCP Authentication Panel Overlay */}
-      <MCPAuthPanel
-        isOpen={mcpAuthPanelOpen}
-        onClose={() => setMcpAuthPanelOpen(false)}
       />
 
       {/* Right Side Panels Container */}

@@ -172,6 +172,10 @@ async def get_config(
                         }
                         tools_detailed.append(tool_detail)
                     
+                    # Determine auth_type from server config
+                    auth_type = server_config.get('auth_type', 'none')
+                    auth_required = auth_type in ('jwt', 'bearer', 'oauth')
+
                     tools_info.append({
                         'server': server_name,
                         'tools': [tool.name for tool in server_tools],
@@ -181,7 +185,9 @@ async def get_config(
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', server_config.get('description', f'{server_name} tools')),
                         'help_email': server_config.get('help_email', ''),
-                        'compliance_level': server_config.get('compliance_level')
+                        'compliance_level': server_config.get('compliance_level'),
+                        'auth_type': auth_type,
+                        'auth_required': auth_required
                     })
             
             # Collect prompts from this server if available

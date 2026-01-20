@@ -467,7 +467,7 @@ export function createWebSocketHandler(deps) {
                 console.error('Failed to start OAuth:', err)
                 addMessage({
                   role: 'system',
-                  content: `Failed to start authentication for "${server_name}": ${err.message}. Click the key icon in the header to authenticate manually.`,
+                  content: `Failed to start authentication for "${server_name}": ${err.message}. Open the Tools panel to authenticate manually.`,
                   type: 'auth_error',
                   timestamp: new Date().toISOString()
                 })
@@ -476,7 +476,7 @@ export function createWebSocketHandler(deps) {
             // JWT authentication - prompt user to add token manually
             addMessage({
               role: 'system',
-              content: `Authentication required for "${server_name}". Click the key icon in the header to add your token.`,
+              content: `Authentication required for "${server_name}". Open the Tools panel and click the key icon next to this server to add your token.`,
               type: 'auth_required',
               server_name,
               auth_type,
