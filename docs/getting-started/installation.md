@@ -1,5 +1,7 @@
 # Installation
 
+Last updated: 2026-01-19
+
 This guide provides everything you need to get Atlas UI 3 running, whether you prefer using Docker for a quick setup or setting up a local development environment.
 
 ## Quick Start with Docker (Recommended)

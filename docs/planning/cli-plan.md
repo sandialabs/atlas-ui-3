@@ -1,5 +1,7 @@
 # Plan for Creating a Headless CLI (v2)
 
+Last updated: 2026-01-19
+
 This document outlines the plan to create a headless CLI for the application, allowing interaction with the core chat functionality without a frontend. This version incorporates feedback to add resource discovery and configuration file support.
 
 ## 1. High-Level Strategy

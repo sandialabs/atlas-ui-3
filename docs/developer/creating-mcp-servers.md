@@ -1,5 +1,7 @@
 # Creating an MCP Server
 
+Last updated: 2026-01-19
+
 MCP servers are the backbone of the tool system. They are independent processes that expose functions (tools) that the LLM can call.
 
 ## 1. Server Structure

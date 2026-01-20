@@ -1,5 +1,7 @@
 # Documentation Bundling
 
+Last updated: 2026-01-19
+
 ## Overview
 
 The Atlas UI 3 project includes an automated documentation bundling system that creates a standalone archive of recent documentation. This bundle is designed to help AI agents and other tools understand how to interact with Atlas UI 3.

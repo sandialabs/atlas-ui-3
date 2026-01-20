@@ -1,5 +1,7 @@
 # Decoupling Tool Execution with a Message Broker
 
+Last updated: 2026-01-19
+
 This document outlines a plan to refactor the application's tool execution workflow by introducing a message broker (RabbitMQ). The goal is to decouple long-running tool calls from the main web server process, making the UI more responsive and the backend more scalable and resilient.
 
 ## Analysis of the Current Synchronous Workflow

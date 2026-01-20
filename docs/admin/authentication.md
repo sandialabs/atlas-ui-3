@@ -1,5 +1,7 @@
 # Authentication & Authorization
 
+Last updated: 2026-01-19
+
 The application is designed with the expectation that it operates behind a reverse proxy in a production environment. It does **not** handle user authentication (i.e., logging users in) by itself. Instead, it trusts a header that is injected by an upstream authentication service.
 
 ## Production Authentication Flow

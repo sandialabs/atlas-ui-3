@@ -1,5 +1,7 @@
 # MCP Sampling Implementation Summary
 
+Last updated: 2026-01-19
+
 ## Overview
 This PR adds support for MCP LLM sampling, allowing MCP tools to request text generation from the LLM during execution. This enables powerful agentic workflows where tools can leverage AI capabilities for analysis, generation, and reasoning.
 

@@ -1,5 +1,7 @@
 # Working with Files (S3 Storage)
 
+Last updated: 2026-01-19
+
 When a user uploads a file, it is stored in an S3-compatible object store. As a tool developer, you do not need to interact with S3 directly. The backend provides a secure mechanism for your tools to access file content.
 
 ## The File Access Workflow

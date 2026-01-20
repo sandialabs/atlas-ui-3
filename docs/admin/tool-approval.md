@@ -1,5 +1,7 @@
 # Tool Approval System
 
+Last updated: 2026-01-19
+
 The tool approval system provides a safety layer by requiring user confirmation before a tool is executed. This gives administrators and users fine-grained control over tool usage.
 
 ## Admin-Forced Approvals

@@ -1,5 +1,7 @@
 # File Upload Issue Fix - Technical Summary
 
+Last updated: 2026-01-19
+
 ## Problem
 When users uploaded a file and immediately tried to interact with it via chat, the LLM could not see the file on the first attempt. On the second attempt ("try again"), the file was visible and the LLM responded correctly.
 

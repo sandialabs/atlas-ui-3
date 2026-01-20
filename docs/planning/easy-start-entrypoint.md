@@ -1,5 +1,7 @@
 # Easy Start Entrypoint Plan
 
+Last updated: 2026-01-19
+
 This document outlines a proposal to make "git clone → run" dramatically easier for Atlas UI 3 users, while keeping the existing `agent_start.sh` script focused on development use.
 
 ## Goals

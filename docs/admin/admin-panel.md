@@ -1,5 +1,7 @@
 # Admin Panel
 
+Last updated: 2026-01-19
+
 The application includes an admin panel that provides access to configuration values, MCP server controls, application logs, and user feedback.
 
 *   **Access**: To access the admin panel, a user must be in the `admin` group. This requires a correctly configured `is_user_in_group` function.
