@@ -1,5 +1,7 @@
 # Getting Started with Atlas UI 3
 
+Last updated: 2026-01-19
+
 Welcome to Atlas UI 3! This guide will help you get the application up and running.
 
 ## Quick Links

@@ -1,5 +1,7 @@
 # Administrator's Guide
 
+Last updated: 2026-01-19
+
 This guide is for administrators responsible for deploying, configuring, and managing the Atlas UI 3 application.
 
 ## Topics

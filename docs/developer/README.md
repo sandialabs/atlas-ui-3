@@ -1,5 +1,7 @@
 # Developer's Guide
 
+Last updated: 2026-01-19
+
 This guide provides technical details for developers contributing to the Atlas UI 3 project.
 
 ## Topics

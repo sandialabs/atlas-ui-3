@@ -1,6 +1,7 @@
 # Elicitation Dialog Not Showing - Issue Analysis
 
-**Date**: 2025-01-07
+Last updated: 2026-01-19
+
 **Branch**: copilot/allow-mcp-servers-tool-elicitation
 **Status**: IDENTIFIED - Root cause found
 

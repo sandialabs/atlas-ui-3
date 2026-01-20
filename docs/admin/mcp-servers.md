@@ -1,5 +1,7 @@
 # MCP Server Configuration
 
+Last updated: 2026-01-19
+
 The `mcp.json` file defines the MCP (Model Context Protocol) servers that the application can connect to. These servers provide the tools and capabilities available to the LLM.
 
 *   **Location**: The default configuration is at `config/defaults/mcp.json`. You should place your instance-specific configuration in `config/overrides/mcp.json`.

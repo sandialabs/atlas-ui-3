@@ -1,6 +1,6 @@
 # Reverse Proxy Configuration Examples
 
-**Last Updated: 2025-11-10**
+Last updated: 2026-01-19
 
 This document provides secure configuration examples for deploying Atlas UI 3 behind a reverse proxy with proper authentication header handling.
 

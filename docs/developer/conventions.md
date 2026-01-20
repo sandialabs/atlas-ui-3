@@ -1,5 +1,7 @@
 # Development Conventions
 
+Last updated: 2026-01-19
+
 To ensure code quality and consistency, please adhere to the following conventions.
 
 *   **Python Package Manager**: **Always** use `uv`. Do not use `pip` or `conda` directly for package management.

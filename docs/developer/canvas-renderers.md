@@ -1,5 +1,7 @@
 # Adding Custom Canvas Renderers
 
+Last updated: 2026-01-19
+
 The canvas panel displays tool-generated files (PDFs, images, HTML, iframes). To add support for new file types (e.g., `.stl`, `.obj`, `.ipynb`):
 
 ## Canvas Architecture Flow

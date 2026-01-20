@@ -1,5 +1,7 @@
 # Progress Updates and Intermediate Results
 
+Last updated: 2026-01-19
+
 Long-running MCP tools can now send intermediate updates to the frontend during execution, providing users with real-time feedback. This includes:
 
 - **Canvas Updates**: Display HTML visualizations, plots, or images in the canvas panel as the tool progresses

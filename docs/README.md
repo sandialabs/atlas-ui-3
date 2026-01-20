@@ -1,5 +1,7 @@
 # Atlas UI 3 Documentation Overview
 
+Last updated: 2026-01-19
+
 This directory contains the main documentation for Atlas UI 3. Use this guide to quickly find the right area when developing or operating the system.
 
 - `admin/`: Operational and admin-focused docs such as configuration, logs, health checks, and admin APIs or workflows.

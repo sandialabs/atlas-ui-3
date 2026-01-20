@@ -1,5 +1,7 @@
 # MCP Server Logging
 
+Last updated: 2026-01-19
+
 Atlas UI 3 supports capturing and displaying log messages emitted by MCP servers during tool execution. This feature allows MCP servers to provide real-time feedback and debugging information to users through the chat interface.
 
 ## Overview

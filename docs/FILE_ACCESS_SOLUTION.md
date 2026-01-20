@@ -1,5 +1,7 @@
 # File Access for Remote MCP Servers - Solution Summary
 
+Last updated: 2026-01-19
+
 ## Problem
 
 Remote MCP servers (HTTP/SSE) could not access files attached by users in Atlas UI because download URLs were generated as relative paths (e.g., `/api/files/download/key?token=...`) which only work for local/stdio servers running on the same machine as the backend.

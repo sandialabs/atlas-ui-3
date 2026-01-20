@@ -1,5 +1,7 @@
 # Architecture Overview
 
+Last updated: 2026-01-19
+
 The application is composed of a React frontend and a FastAPI backend, communicating via WebSockets.
 
 ## Backend

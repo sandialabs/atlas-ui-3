@@ -1,5 +1,7 @@
 # Configuration Architecture
 
+Last updated: 2026-01-19
+
 The application uses a layered configuration system that loads settings from three primary sources in the following order of precedence:
 
 1.  **Environment Variables (`.env`)**: Highest priority. These override any settings from files.

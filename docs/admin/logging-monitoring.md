@@ -1,5 +1,7 @@
 # Logging and Monitoring
 
+Last updated: 2026-01-19
+
 The application produces structured logs in JSON Lines format (`.jsonl`), which makes them easy to parse and analyze.
 
 ## The `app.jsonl` File

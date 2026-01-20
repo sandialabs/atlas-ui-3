@@ -1,5 +1,7 @@
 # File Storage and Tool Integration
 
+Last updated: 2026-01-19
+
 The application uses S3-compatible object storage for handling all user-uploaded files. This system is designed to be secure and flexible, allowing tools to access files without ever needing direct S3 credentials.
 
 ## Configuration Modes

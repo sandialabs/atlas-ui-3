@@ -1,5 +1,7 @@
 # Compliance and Data Security
 
+Last updated: 2026-01-19
+
 The compliance system is designed to prevent the unintentional mixing of data from different security environments. This is essential for organizations that handle sensitive information.
 
 ## Compliance Levels

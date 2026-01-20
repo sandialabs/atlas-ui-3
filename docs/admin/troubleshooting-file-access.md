@@ -1,5 +1,7 @@
 # Troubleshooting File Access for MCP Servers
 
+Last updated: 2026-01-19
+
 This guide helps resolve issues with MCP servers accessing attached files in Atlas UI.
 
 ## Overview

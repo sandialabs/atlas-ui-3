@@ -1,5 +1,7 @@
 # Customizing the Help Modal
 
+Last updated: 2026-01-19
+
 You can customize the content that appears in the "Help" or "About" modal in the UI by creating a `help-config.json` file.
 
 *   **Location**: Place your custom file at `config/overrides/help-config.json`.

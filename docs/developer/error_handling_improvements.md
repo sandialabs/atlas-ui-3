@@ -1,6 +1,8 @@
 ```markdown
 # Error Handling Improvements
 
+Last updated: 2026-01-19
+
 ## Problem
 When backend errors occurred (especially rate limiting from services like Cerebras), users were left staring at a non-responsive UI with no indication of what went wrong. Errors were only visible in backend logs.
 

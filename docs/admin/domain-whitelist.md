@@ -1,5 +1,7 @@
 # Email Domain Whitelist Configuration
 
+Last updated: 2026-01-19
+
 This configuration controls which email domains are allowed to access the application.
 
 ## Overview
