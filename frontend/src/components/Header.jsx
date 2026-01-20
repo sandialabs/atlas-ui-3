@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
-import { Menu, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings } from 'lucide-react'
+import { Menu, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Key } from 'lucide-react'
 
-const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
+const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings, onToggleMcpAuth }) => {
   const navigate = useNavigate()
   const { 
     user, 
@@ -247,6 +247,17 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
             title="Admin Dashboard"
           >
             <Shield className="w-5 h-5" />
+          </button>
+        )}
+
+        {/* MCP Authentication Button */}
+        {features?.tools && onToggleMcpAuth && (
+          <button
+            onClick={onToggleMcpAuth}
+            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            title="MCP Server Authentication"
+          >
+            <Key className="w-5 h-5" />
           </button>
         )}
 

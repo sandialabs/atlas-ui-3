@@ -137,13 +137,18 @@ class MCPToolManager:
         # Reconnect task reference (used by auto-reconnect background task)
         self._reconnect_task: Optional[asyncio.Task] = None
         self._reconnect_running = False
-        
+
         # Default log callback (used when no request-scoped callback is active).
         # Signature: (server_name, level, message, extra_data) -> None
         self._default_log_callback = log_callback
-        
+
         # Get configured log level for filtering
         self._min_log_level = self._get_min_log_level()
+
+        # Per-user client cache for servers requiring user-specific authentication
+        # Key: (user_email, server_name), Value: FastMCP Client instance
+        self._user_clients: Dict[tuple, Client] = {}
+        self._user_clients_lock = asyncio.Lock()
     
     def _get_min_log_level(self) -> int:
         """Get the minimum log level from environment or config."""
@@ -1366,7 +1371,97 @@ class MCPToolManager:
             'tools': tools_schema,
             'mapping': server_tool_mapping
         }
-    
+
+    def _requires_user_auth(self, server_name: str) -> bool:
+        """Check if a server requires per-user authentication.
+
+        Returns True for servers with auth_type 'oauth' or 'jwt'.
+        These servers need user-specific tokens rather than shared/admin tokens.
+        """
+        config = self.servers_config.get(server_name, {})
+        auth_type = config.get("auth_type", "none")
+        return auth_type in ("oauth", "jwt")
+
+    async def _get_user_client(
+        self,
+        server_name: str,
+        user_email: str,
+    ) -> Optional[Client]:
+        """Get or create a user-specific client for servers requiring per-user auth.
+
+        Args:
+            server_name: Name of the MCP server
+            user_email: User's email address
+
+        Returns:
+            FastMCP Client configured with user's token, or None if no token available
+        """
+        from modules.mcp_tools.token_storage import get_token_storage
+
+        # Check cache first
+        cache_key = (user_email.lower(), server_name)
+        async with self._user_clients_lock:
+            if cache_key in self._user_clients:
+                # TODO: Check if cached client's token is still valid
+                return self._user_clients[cache_key]
+
+        # Get user's token from storage
+        token_storage = get_token_storage()
+        stored_token = token_storage.get_valid_token(user_email, server_name)
+
+        if stored_token is None:
+            logger.debug(
+                f"No valid token for user on server '{server_name}' - "
+                f"user needs to authenticate"
+            )
+            return None
+
+        # Get server config
+        config = self.servers_config.get(server_name, {})
+        url = config.get("url")
+
+        if not url:
+            logger.error(f"No URL configured for server '{server_name}'")
+            return None
+
+        # Ensure URL has protocol
+        if not url.startswith(("http://", "https://")):
+            url = f"http://{url}"
+
+        # Create client with user's token
+        try:
+            log_handler = self._create_log_handler(server_name)
+            client = Client(
+                url,
+                auth=stored_token.token_value,
+                log_handler=log_handler,
+                elicitation_handler=self._create_elicitation_handler(server_name),
+                sampling_handler=self._create_sampling_handler(server_name),
+            )
+
+            # Cache the client
+            async with self._user_clients_lock:
+                self._user_clients[cache_key] = client
+
+            logger.info(
+                f"Created user-specific client for server '{server_name}'"
+            )
+            return client
+
+        except Exception as e:
+            logger.error(
+                f"Failed to create user client for server '{server_name}': {e}"
+            )
+            return None
+
+    async def _invalidate_user_client(self, user_email: str, server_name: str) -> None:
+        """Remove a user's cached client (e.g., when token is revoked)."""
+        cache_key = (user_email.lower(), server_name)
+        async with self._user_clients_lock:
+            if cache_key in self._user_clients:
+                del self._user_clients[cache_key]
+                logger.debug(f"Invalidated user client cache for server '{server_name}'")
+
     async def call_tool(
         self,
         server_name: str,
@@ -1375,6 +1470,7 @@ class MCPToolManager:
         *,
         progress_handler: Optional[Any] = None,
         elicitation_handler: Optional[Any] = None,
+        user_email: Optional[str] = None,
     ) -> Any:
         """Call a specific tool on an MCP server.
 
@@ -1385,11 +1481,31 @@ class MCPToolManager:
             progress_handler: Optional progress callback handler
             elicitation_handler: Optional elicitation callback handler. Prefer the built-in
                 elicitation routing (registered at client creation time) for shared clients.
+            user_email: User's email for per-user authentication (required for oauth/jwt servers)
         """
-        if server_name not in self.clients:
-            raise ValueError(f"No client available for server: {server_name}")
+        # Determine which client to use
+        client = None
 
-        client = self.clients[server_name]
+        # Check if this server requires per-user authentication
+        if self._requires_user_auth(server_name):
+            if user_email:
+                client = await self._get_user_client(server_name, user_email)
+                if client is None:
+                    raise ValueError(
+                        f"Server '{server_name}' requires authentication. "
+                        f"Please authenticate with this server first."
+                    )
+            else:
+                raise ValueError(
+                    f"Server '{server_name}' requires per-user authentication "
+                    f"but no user_email was provided in the call context."
+                )
+        else:
+            # Use shared client for servers without per-user auth
+            if server_name not in self.clients:
+                raise ValueError(f"No client available for server: {server_name}")
+            client = self.clients[server_name]
+
         try:
             # Set elicitation callback before opening the client context.
             # FastMCP negotiates supported capabilities during session init.
@@ -1700,8 +1816,10 @@ class MCPToolManager:
         
         try:
             update_cb = None
+            user_email = None
             if isinstance(context, dict):
                 update_cb = context.get("update_callback")
+                user_email = context.get("user_email")
 
             if update_cb is None:
                 logger.warning(
@@ -1760,6 +1878,7 @@ class MCPToolManager:
                                 actual_tool_name,
                                 tool_call.arguments,
                                 progress_handler=_progress_handler,
+                                user_email=user_email,
                             )
             else:
                 async with self._use_elicitation_context(server_name, tool_call, update_cb):
@@ -1769,6 +1888,7 @@ class MCPToolManager:
                             actual_tool_name,
                             tool_call.arguments,
                             progress_handler=_progress_handler,
+                            user_email=user_email,
                         )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)

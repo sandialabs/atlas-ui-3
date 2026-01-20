@@ -1,0 +1,16 @@
+{
+  "test-oauth-server": {
+    "description": "Test OAuth 2.1 Protected MCP Server",
+    "short_description": "OAuth test server for development",
+    "author": "Atlas UI Team",
+    "url": "http://localhost:8001/mcp",
+    "transport": "http",
+    "auth_type": "oauth",
+    "oauth_config": {
+      "scopes": ["read", "write"],
+      "client_name": "Atlas UI"
+    },
+    "enabled": true,
+    "groups": []
+  }
+}
