@@ -2,13 +2,13 @@
   "jwt_demo": {
     "command": [
       "python",
-      "mcp/oauth_demo/main.py"
+      "mcp/jwt_demo/main.py"
     ],
     "cwd": "backend",
     "groups": [
       "users"
     ],
-    "description": "Demonstrates JWT authentication for MCP servers. Users must upload a JWT token before using tools.",
+    "description": "Demonstrates JWT/bearer token authentication for MCP servers. Users must click the key icon and upload a JWT token before using tools. Shows user identity, protected data access, and token validation.",
     "author": "Chat UI Team",
     "short_description": "JWT authentication demo",
     "help_email": "support@chatui.example.com",

@@ -179,7 +179,39 @@
     "help_email": "support@example.com",
     "compliance_level": "Public"
   },
+  "public_demo": {
+    "command": [
+      "python",
+      "mcp/public_demo/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Public demo server with no authentication required. Provides simple utility tools (time, UUID, hashing, random numbers) that anyone can use. This demonstrates a server that requires no authentication.",
+    "author": "Chat UI Team",
+    "short_description": "Public tools (no auth required)",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Public",
+    "auth_type": "none"
+  },
   "jwt_demo": {
+    "command": [
+      "python",
+      "mcp/jwt_demo/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates JWT/bearer token authentication for MCP servers. Users must click the key icon and upload a JWT token before using tools. Shows user identity, protected data access, and token validation.",
+    "author": "Chat UI Team",
+    "short_description": "JWT authentication demo",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Internal",
+    "auth_type": "jwt"
+  },
+  "oauth_demo": {
     "command": [
       "python",
       "mcp/oauth_demo/main.py"
@@ -188,11 +220,15 @@
     "groups": [
       "users"
     ],
-    "description": "Demonstrates JWT authentication for MCP servers. Users must upload a JWT token before using tools.",
+    "description": "Demonstrates OAuth 2.1 authentication for MCP servers. When you use a tool from this server, you will be automatically redirected to login. Requires the mock OAuth server to be running (see mocks/oauth-mcp-mock).",
     "author": "Chat UI Team",
-    "short_description": "JWT authentication demo",
+    "short_description": "OAuth 2.1 authentication demo",
     "help_email": "support@chatui.example.com",
     "compliance_level": "Internal",
-    "auth_type": "jwt"
+    "auth_type": "oauth",
+    "oauth_config": {
+      "scopes": ["read", "write"],
+      "client_name": "Atlas UI"
+    }
   }
 }
