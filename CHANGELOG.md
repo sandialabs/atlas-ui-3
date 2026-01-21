@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-01-21
+- **Fix**: Add exponential backoff to admin dashboard MCP status polling to prevent toast notification spam when backend is disconnected. Polling now backs off from 1s to 30s max delay between retries, then continues at 30s intervals.
+
 ### PR #TBD - 2026-01-20
 - **UI Enhancement**: Renamed "Chat UI Admin Dashboard" to "ATLAS Admin Dashboard" for consistency with branding.
 - **UI Fix**: Moved toast notifications from top-right to top-center to prevent covering the "Back to Chat" button.

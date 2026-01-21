@@ -10,6 +10,10 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   const [reloadLoading, setReloadLoading] = useState(false)
   const [reconnectLoading, setReconnectLoading] = useState(false)
 
+  // Exponential backoff state
+  const [failureCount, setFailureCount] = useState(0)
+  const [currentDelay, setCurrentDelay] = useState(15000) // Start with 15 seconds (normal polling)
+
   const loadMCPStatus = async () => {
     try {
       setStatusLoading(true)
@@ -31,9 +35,16 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         connected_servers: freshConnected,
         failed_servers: Object.fromEntries(freshFailedEntries),
       })
+      
+      // Reset backoff on success
+      setFailureCount(0)
+      setCurrentDelay(15000) // Reset to normal 15-second polling
     } catch (err) {
       // Keep this quiet in the UI but log to console for debugging
       console.error('Error loading MCP status for card:', err)
+      
+      // Increment failure count and apply exponential backoff
+      setFailureCount(prev => prev + 1)
     } finally {
       setStatusLoading(false)
     }
@@ -42,13 +53,23 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   useEffect(() => {
     loadMCPStatus()
 
-    // Poll MCP status periodically to keep inline view fresh
-    const intervalId = setInterval(() => {
+    // Poll MCP status periodically with exponential backoff on failures
+    const timeoutId = setTimeout(() => {
       loadMCPStatus()
-    }, 15000) // 15 seconds
+    }, currentDelay)
 
-    return () => clearInterval(intervalId)
-  }, [])
+    return () => clearTimeout(timeoutId)
+  }, [currentDelay])
+  
+  // Calculate delay with exponential backoff capped at 30 seconds
+  useEffect(() => {
+    if (failureCount > 0) {
+      // Start with 1 second, double each time: 1s, 2s, 4s, 8s, 16s, 30s (capped)
+      const newDelay = Math.min(1000 * Math.pow(2, failureCount - 1), 30000)
+      setCurrentDelay(newDelay)
+      console.log(`MCP status polling: ${failureCount} consecutive failures, next retry in ${newDelay / 1000}s`)
+    }
+  }, [failureCount])
   const manageMCP = async () => {
     try {
       const response = await fetch('/admin/config/view')
