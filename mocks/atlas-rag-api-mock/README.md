@@ -7,6 +7,9 @@ Mock service for testing the `AtlasRAGClient` integration without requiring acce
 ```bash
 # From the project root
 cd mocks/atlas-rag-api-mock
+./run.sh
+
+# Or directly with Python
 python main.py
 ```
 
@@ -104,7 +107,20 @@ curl -X POST \
 }
 ```
 
-## Test Data
+## Authentication
+
+The mock uses a `StaticTokenVerifier` pattern with Bearer token authentication.
+
+### Token Configuration
+
+Set the token via environment variable (any of these):
+```bash
+export ATLAS_RAG_SHARED_KEY=your-token-here
+# or
+export atlas_rag_shared_key=your-token-here
+```
+
+If no environment variable is set, defaults to: `test-atlas-rag-token`
 
 ### Test Bearer Token
 ```

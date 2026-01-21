@@ -16,17 +16,74 @@ API Format:
 """
 
 import logging
+import os
 import time
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional, Any
 
-from fastapi import FastAPI, HTTPException, Header, Query
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------------------
+# Static Token Verifier (similar to FastMCP pattern)
+# ------------------------------------------------------------------------------
+
+class StaticTokenVerifier:
+    """
+    Static token verifier for development/testing.
+
+    WARNING: This is for DEVELOPMENT/TESTING ONLY.
+    Never use in production - use proper JWT/OAuth providers instead.
+    """
+
+    def __init__(self, tokens: Dict[str, Dict[str, Any]]):
+        """
+        Initialize with a dictionary of valid tokens.
+
+        Args:
+            tokens: Dict mapping token strings to their metadata
+                    e.g., {"my-token": {"user_id": "test", "scopes": ["read"]}}
+        """
+        self.tokens = tokens
+
+    def verify(self, token: str) -> Optional[Dict[str, Any]]:
+        """Verify a token and return its metadata, or None if invalid."""
+        return self.tokens.get(token)
+
+    def get_valid_tokens(self) -> List[str]:
+        """Return list of valid token values (for debugging)."""
+        return list(self.tokens.keys())
+
+
+# ------------------------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------------------------
+
+# Read shared key from environment variable (with fallback for testing)
+shared_key = (
+    os.getenv("atlas_rag_shared_key")
+    or os.getenv("atlas-rag-shared-key")
+    or os.getenv("ATLAS_RAG_SHARED_KEY")
+    or "test-atlas-rag-token"  # Default for local testing
+)
+
+# Initialize token verifier with the shared key
+verifier = StaticTokenVerifier(
+    tokens={
+        shared_key: {
+            "user_id": "atlas-ui",
+            "client_id": "atlas-ui-backend",
+            "scopes": ["read", "write"],
+        }
+    }
+)
 
 # ------------------------------------------------------------------------------
 # Initialize FastAPI App
@@ -38,12 +95,49 @@ app = FastAPI(
     version="1.0.0",
 )
 
+
 # ------------------------------------------------------------------------------
-# Configuration
+# Authentication Middleware
 # ------------------------------------------------------------------------------
 
-# Expected bearer token for authentication (None means no auth required)
-EXPECTED_BEARER_TOKEN = "test-atlas-rag-token"
+# Paths that don't require authentication
+PUBLIC_PATHS = {"/", "/health", "/docs", "/redoc", "/openapi.json"}
+
+
+@app.middleware("http")
+async def verify_token_middleware(request, call_next):
+    """Middleware to verify Bearer token on protected endpoints."""
+    # Skip auth for public paths
+    if request.url.path in PUBLIC_PATHS:
+        return await call_next(request)
+
+    # Get Authorization header
+    auth_header = request.headers.get("Authorization")
+
+    if not auth_header:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Missing Authorization header"},
+        )
+
+    if not auth_header.startswith("Bearer "):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid Authorization header format. Expected 'Bearer <token>'"},
+        )
+
+    token = auth_header[7:]  # Remove "Bearer " prefix
+    token_info = verifier.verify(token)
+
+    if token_info is None:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid bearer token"},
+        )
+
+    # Token valid - proceed with request
+    logger.debug(f"Authenticated request from client: {token_info.get('client_id')}")
+    return await call_next(request)
 
 # ------------------------------------------------------------------------------
 # Mock Data Structures
@@ -303,33 +397,6 @@ class RagResponse(BaseModel):
 # Authorization Helpers
 # ------------------------------------------------------------------------------
 
-def verify_bearer_token(authorization: Optional[str] = Header(None)) -> bool:
-    """Verify the Bearer token in the Authorization header."""
-    if EXPECTED_BEARER_TOKEN is None:
-        return True
-
-    if not authorization:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing Authorization header",
-        )
-
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid Authorization header format. Expected 'Bearer <token>'",
-        )
-
-    token = authorization[7:]  # Remove "Bearer " prefix
-    if token != EXPECTED_BEARER_TOKEN:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid bearer token",
-        )
-
-    return True
-
-
 def get_user_groups(user_name: str) -> List[str]:
     """Get the groups a user belongs to."""
     return USERS_GROUPS_DB.get(user_name, [])
@@ -378,18 +445,15 @@ def get_accessible_corpora(user_name: str) -> List[DataSourceInfo]:
 @app.get("/discover/datasources", response_model=DataSourceDiscoveryResponse)
 async def discover_data_sources(
     as_user: str = Query(..., description="User to discover data sources for"),
-    authorization: Optional[str] = Header(None),
 ):
     """
     Discover data sources accessible by a user.
 
-    Authentication: Bearer token in Authorization header
+    Authentication: Bearer token in Authorization header (handled by middleware)
     User impersonation: as_user query parameter
 
     Returns list of data sources with name and compliance_level.
     """
-    verify_bearer_token(authorization)
-
     logger.info(f"Discovery request for user: {as_user}")
 
     # Check if user exists
@@ -415,19 +479,16 @@ async def discover_data_sources(
 async def rag_completions(
     request: RagRequest,
     as_user: str = Query(..., description="User making the request"),
-    authorization: Optional[str] = Header(None),
 ):
     """
     Query RAG for completions.
 
-    Authentication: Bearer token in Authorization header
+    Authentication: Bearer token in Authorization header (handled by middleware)
     User impersonation: as_user query parameter
 
     Returns OpenAI ChatCompletion format with rag_metadata extension.
     """
     start_time = time.time()
-
-    verify_bearer_token(authorization)
 
     logger.info(
         f"RAG query from user: {as_user}, corpora: {request.corpora}, "
@@ -553,9 +614,9 @@ async def health_check():
 async def root():
     """Root endpoint with service information."""
     return {
-        "service": "External ATLAS RAG API Mock",
+        "service": "ATLAS RAG API Mock",
         "version": "1.0.0",
-        "description": "Mock API for testing ExternalRAGClient integration",
+        "description": "Mock API for testing AtlasRAGClient integration",
         "endpoints": {
             "GET /discover/datasources": "Discover accessible data sources",
             "POST /rag/completions": "Query RAG for completions",
@@ -564,7 +625,8 @@ async def root():
         "authentication": {
             "type": "Bearer token",
             "header": "Authorization: Bearer <token>",
-            "test_token": EXPECTED_BEARER_TOKEN,
+            "env_var": "ATLAS_RAG_SHARED_KEY (or atlas_rag_shared_key)",
+            "default_test_token": "test-atlas-rag-token",
         },
         "test_users": list(USERS_GROUPS_DB.keys()),
         "available_corpora": list(CORPORA_PERMISSIONS_DB.keys()),
@@ -576,17 +638,20 @@ async def root():
 # ------------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    print("Starting External ATLAS RAG API Mock Service...")
+    port = int(os.getenv("ATLAS_RAG_MOCK_PORT", "8002"))
+
+    print("Starting ATLAS RAG API Mock Service...")
     print()
     print("Available endpoints:")
     print("  - GET  /discover/datasources?as_user=<user>  - Discover data sources")
     print("  - POST /rag/completions?as_user=<user>       - Query RAG")
     print("  - GET  /health                               - Health check")
     print()
-    print(f"Test bearer token: {EXPECTED_BEARER_TOKEN}")
+    print(f"Bearer token: {shared_key}")
+    print(f"  (set via ATLAS_RAG_SHARED_KEY env var)")
     print(f"Test users: {', '.join(USERS_GROUPS_DB.keys())}")
     print()
-    print("Default port: 8002")
+    print(f"Port: {port}")
     print()
 
-    uvicorn.run(app, host="127.0.0.1", port=8002)
+    uvicorn.run(app, host="127.0.0.1", port=port)
