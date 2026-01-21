@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-01-21
+- **Feature**: Add External ATLAS RAG API integration. When `EXTERNAL_RAG_ENABLED=true`, RAG queries are sent to an external ATLAS RAG API instead of the mock service.
+- **Architecture**: Add `RAGClientProtocol` interface in `backend/interfaces/rag.py` for protocol-based RAG client abstraction.
+- **Architecture**: Add `ExternalRAGClient` in `backend/modules/rag/external_rag_client.py` that implements Bearer token auth with `as_user` impersonation.
+- **Config**: Add `EXTERNAL_RAG_*` environment variables for configuring the external RAG API connection (URL, bearer token, model, top_k).
+- **Testing**: Add `mocks/external-rag-mock/` mock service for testing ExternalRAGClient without a real ATLAS RAG API.
+- **Tests**: Add 20 unit tests for ExternalRAGClient and integration tests with the mock service.
+
 ### PR #TBD - 2026-01-20
 - **UI Enhancement**: Renamed "Chat UI Admin Dashboard" to "ATLAS Admin Dashboard" for consistency with branding.
 - **UI Fix**: Moved toast notifications from top-right to top-center to prevent covering the "Back to Chat" button.

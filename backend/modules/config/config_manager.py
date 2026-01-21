@@ -198,6 +198,33 @@ class AppSettings(BaseSettings):
     # RAG settings
     mock_rag: bool = False
     rag_mock_url: str = "http://localhost:8001"
+
+    # External ATLAS RAG API settings
+    external_rag_enabled: bool = Field(
+        False,
+        description="Use external ATLAS RAG API instead of mock/internal RAG",
+        validation_alias=AliasChoices("EXTERNAL_RAG_ENABLED"),
+    )
+    external_rag_url: str = Field(
+        "http://localhost:8001",
+        description="Base URL for external ATLAS RAG API",
+        validation_alias=AliasChoices("EXTERNAL_RAG_URL"),
+    )
+    external_rag_bearer_token: Optional[str] = Field(
+        None,
+        description="Bearer token for external RAG API authentication",
+        validation_alias=AliasChoices("EXTERNAL_RAG_BEARER_TOKEN"),
+    )
+    external_rag_default_model: str = Field(
+        "openai/gpt-oss-120b",
+        description="Default model for external RAG queries",
+        validation_alias=AliasChoices("EXTERNAL_RAG_DEFAULT_MODEL"),
+    )
+    external_rag_top_k: int = Field(
+        4,
+        description="Default top_k for external RAG searches",
+        validation_alias=AliasChoices("EXTERNAL_RAG_TOP_K"),
+    )
     
     # Banner settings
     banner_enabled: bool = False

@@ -2,18 +2,22 @@
 
 This module provides:
 - RAG query processing and context retrieval
-- Document metadata and search capabilities  
-- Integration with external RAG services
+- Document metadata and search capabilities
+- Integration with external RAG services (ATLAS RAG API)
 """
 
-from .client import RAGClient, DocumentMetadata, RAGMetadata, RAGResponse
+from .client import RAGClient, DataSource, DocumentMetadata, RAGMetadata, RAGResponse
+from .external_rag_client import ExternalRAGClient, create_external_rag_client_from_config
 
 # Create default instance
 rag_client = RAGClient()
 
 __all__ = [
     "RAGClient",
-    "DocumentMetadata", 
+    "ExternalRAGClient",
+    "create_external_rag_client_from_config",
+    "DataSource",
+    "DocumentMetadata",
     "RAGMetadata",
     "RAGResponse",
     "rag_client",

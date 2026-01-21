@@ -1,7 +1,7 @@
 """Application factory for dependency injection and wiring."""
 
 import logging
-from typing import Optional
+from typing import Optional, Union
 
 from application.chat.service import ChatService
 from interfaces.transport import ChatConnectionProtocol
@@ -11,6 +11,10 @@ from modules.file_storage.mock_s3_client import MockS3StorageClient
 from modules.llm.litellm_caller import LiteLLMCaller
 from modules.mcp_tools import MCPToolManager
 from modules.rag import RAGClient
+from modules.rag.external_rag_client import (
+    ExternalRAGClient,
+    create_external_rag_client_from_config,
+)
 from domain.rag_mcp_service import RAGMCPService
 from core.auth import is_user_in_group
 from infrastructure.sessions.in_memory_repository import InMemorySessionRepository
@@ -31,7 +35,7 @@ class AppFactory:
             debug_mode=self.config_manager.app_settings.debug_mode,
         )
         self.mcp_tools = MCPToolManager()
-        self.rag_client = RAGClient()
+        self.rag_client = self._create_rag_client()
         self.rag_mcp_service = RAGMCPService(
             mcp_manager=self.mcp_tools,
             config_manager=self.config_manager,
@@ -51,6 +55,20 @@ class AppFactory:
         self.session_repository = InMemorySessionRepository()
 
         logger.info("AppFactory initialized")
+
+    def _create_rag_client(self) -> Union[RAGClient, ExternalRAGClient]:
+        """Create the appropriate RAG client based on configuration.
+
+        Returns:
+            ExternalRAGClient if external_rag_enabled is True,
+            otherwise returns the standard RAGClient.
+        """
+        if self.config_manager.app_settings.external_rag_enabled:
+            logger.info("Using ExternalRAGClient (ATLAS RAG API)")
+            return create_external_rag_client_from_config(self.config_manager)
+        else:
+            logger.info("Using RAGClient (mock/internal)")
+            return RAGClient()
 
     def create_chat_service(
         self, connection: Optional[ChatConnectionProtocol] = None
@@ -74,7 +92,7 @@ class AppFactory:
     def get_mcp_manager(self) -> MCPToolManager:  # noqa: D401
         return self.mcp_tools
 
-    def get_rag_client(self) -> RAGClient:  # noqa: D401
+    def get_rag_client(self) -> Union[RAGClient, ExternalRAGClient]:  # noqa: D401
         return self.rag_client
 
     def get_rag_mcp_service(self) -> RAGMCPService:  # noqa: D401
