@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #TBD - 2026-01-20
+- **UI Enhancement**: Renamed "Chat UI Admin Dashboard" to "ATLAS Admin Dashboard" for consistency with branding.
+- **UI Fix**: Moved toast notifications from top-right to top-center to prevent covering the "Back to Chat" button.
+
+### PR #TBD - 2026-01-20
 - **Fix**: Merged duplicate GEMINI.md and gemini.md files into a single GEMINI.md file to resolve case-insensitive filesystem conflicts on macOS.
 
 ### PR #225 - 2026-01-19
