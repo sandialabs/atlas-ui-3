@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { Settings, RefreshCw, RotateCcw, Activity } from 'lucide-react'
 
+// Polling configuration
+const NORMAL_POLLING_INTERVAL = 15000 // 15 seconds
+const MAX_BACKOFF_DELAY = 30000 // 30 seconds
+
 const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   const [mcpStatus, setMcpStatus] = useState({
     connected_servers: [],
@@ -12,7 +16,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
 
   // Exponential backoff state
   const [failureCount, setFailureCount] = useState(0)
-  const [currentDelay, setCurrentDelay] = useState(15000) // Start with 15 seconds (normal polling)
+  const [currentDelay, setCurrentDelay] = useState(NORMAL_POLLING_INTERVAL)
 
   const loadMCPStatus = async () => {
     try {
@@ -38,38 +42,40 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
       
       // Reset backoff on success
       setFailureCount(0)
-      setCurrentDelay(15000) // Reset to normal 15-second polling
+      setCurrentDelay(NORMAL_POLLING_INTERVAL)
     } catch (err) {
       // Keep this quiet in the UI but log to console for debugging
       console.error('Error loading MCP status for card:', err)
       
-      // Increment failure count and apply exponential backoff
+      // Increment failure count for exponential backoff calculation
       setFailureCount(prev => prev + 1)
     } finally {
       setStatusLoading(false)
     }
   }
 
-  useEffect(() => {
-    loadMCPStatus()
-
-    // Poll MCP status periodically with exponential backoff on failures
-    const timeoutId = setTimeout(() => {
-      loadMCPStatus()
-    }, currentDelay)
-
-    return () => clearTimeout(timeoutId)
-  }, [currentDelay])
-  
-  // Calculate delay with exponential backoff capped at 30 seconds
+  // Calculate delay with exponential backoff when failures occur
   useEffect(() => {
     if (failureCount > 0) {
       // Start with 1 second, double each time: 1s, 2s, 4s, 8s, 16s, 30s (capped)
-      const newDelay = Math.min(1000 * Math.pow(2, failureCount - 1), 30000)
+      const newDelay = Math.min(1000 * Math.pow(2, failureCount - 1), MAX_BACKOFF_DELAY)
       setCurrentDelay(newDelay)
       console.log(`MCP status polling: ${failureCount} consecutive failures, next retry in ${newDelay / 1000}s`)
     }
   }, [failureCount])
+
+  useEffect(() => {
+    // Initial load
+    loadMCPStatus()
+
+    // Set up polling with current delay
+    const timeoutId = setTimeout(() => {
+      loadMCPStatus()
+    }, currentDelay)
+
+    // Cleanup timeout on unmount or when delay changes
+    return () => clearTimeout(timeoutId)
+  }, [currentDelay])
   const manageMCP = async () => {
     try {
       const response = await fetch('/admin/config/view')
