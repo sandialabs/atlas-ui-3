@@ -68,7 +68,7 @@ MOCK_USERS = {
 # --- OAuth Server Endpoints ---
 
 
-app = FastAPI(title="Mock OAuth 2.1 Server")
+app = FastAPI(title="Mock OAuth 2.1 Server", redirect_slashes=False)
 
 
 @app.get("/.well-known/oauth-authorization-server")

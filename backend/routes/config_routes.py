@@ -195,6 +195,8 @@ async def get_config(
                 server_prompts = mcp_manager.available_prompts[server_name]['prompts']
                 server_config = mcp_manager.available_prompts[server_name]['config']
                 if server_prompts:  # Only show servers with actual prompts
+                    prompt_auth_type = server_config.get('auth_type', 'none')
+                    prompt_auth_required = prompt_auth_type in ('jwt', 'bearer', 'oauth')
                     prompts_info.append({
                         'server': server_name,
                         'prompts': [{'name': prompt.name, 'description': prompt.description} for prompt in server_prompts],
@@ -203,7 +205,9 @@ async def get_config(
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', f'{server_name} custom prompts'),
                         'help_email': server_config.get('help_email', ''),
-                        'compliance_level': server_config.get('compliance_level')
+                        'compliance_level': server_config.get('compliance_level'),
+                        'auth_type': prompt_auth_type,
+                        'auth_required': prompt_auth_required
                     })
     
     # Read help page configuration (supports new config directory layout + legacy paths)
