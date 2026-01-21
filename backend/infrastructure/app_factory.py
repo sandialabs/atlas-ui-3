@@ -11,9 +11,9 @@ from modules.file_storage.mock_s3_client import MockS3StorageClient
 from modules.llm.litellm_caller import LiteLLMCaller
 from modules.mcp_tools import MCPToolManager
 from modules.rag import RAGClient
-from modules.rag.external_rag_client import (
-    ExternalRAGClient,
-    create_external_rag_client_from_config,
+from modules.rag.atlas_rag_client import (
+    AtlasRAGClient,
+    create_atlas_rag_client_from_config,
 )
 from domain.rag_mcp_service import RAGMCPService
 from core.auth import is_user_in_group
@@ -56,16 +56,16 @@ class AppFactory:
 
         logger.info("AppFactory initialized")
 
-    def _create_rag_client(self) -> Union[RAGClient, ExternalRAGClient]:
+    def _create_rag_client(self) -> Union[RAGClient, AtlasRAGClient]:
         """Create the appropriate RAG client based on configuration.
 
         Returns:
-            ExternalRAGClient if external_rag_enabled is True,
+            AtlasRAGClient if external_rag_enabled is True,
             otherwise returns the standard RAGClient.
         """
         if self.config_manager.app_settings.external_rag_enabled:
-            logger.info("Using ExternalRAGClient (ATLAS RAG API)")
-            return create_external_rag_client_from_config(self.config_manager)
+            logger.info("Using AtlasRAGClient (ATLAS RAG API)")
+            return create_atlas_rag_client_from_config(self.config_manager)
         else:
             logger.info("Using RAGClient (mock/internal)")
             return RAGClient()
@@ -92,7 +92,7 @@ class AppFactory:
     def get_mcp_manager(self) -> MCPToolManager:  # noqa: D401
         return self.mcp_tools
 
-    def get_rag_client(self) -> Union[RAGClient, ExternalRAGClient]:  # noqa: D401
+    def get_rag_client(self) -> Union[RAGClient, AtlasRAGClient]:  # noqa: D401
         return self.rag_client
 
     def get_rag_mcp_service(self) -> RAGMCPService:  # noqa: D401

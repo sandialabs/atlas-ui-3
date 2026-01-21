@@ -1,18 +1,18 @@
-"""Unit tests for ExternalRAGClient."""
+"""Unit tests for AtlasRAGClient."""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
-from modules.rag.external_rag_client import ExternalRAGClient
+from modules.rag.atlas_rag_client import AtlasRAGClient
 from modules.rag.client import DataSource, RAGResponse
 
 
 @pytest.fixture
 def client():
-    """Create an ExternalRAGClient instance for testing."""
-    return ExternalRAGClient(
+    """Create an AtlasRAGClient instance for testing."""
+    return AtlasRAGClient(
         base_url="https://rag-api.example.com",
         bearer_token="test-token",
         default_model="test-model",
@@ -23,15 +23,15 @@ def client():
 
 @pytest.fixture
 def client_no_auth():
-    """Create an ExternalRAGClient without authentication."""
-    return ExternalRAGClient(
+    """Create an AtlasRAGClient without authentication."""
+    return AtlasRAGClient(
         base_url="https://rag-api.example.com",
         bearer_token=None,
     )
 
 
-class TestExternalRAGClientInit:
-    """Tests for ExternalRAGClient initialization."""
+class TestAtlasRAGClientInit:
+    """Tests for AtlasRAGClient initialization."""
 
     def test_init_with_all_params(self, client):
         """Test initialization with all parameters."""
@@ -43,12 +43,12 @@ class TestExternalRAGClientInit:
 
     def test_init_strips_trailing_slash(self):
         """Test that trailing slash is stripped from base_url."""
-        client = ExternalRAGClient(base_url="https://rag-api.example.com/")
+        client = AtlasRAGClient(base_url="https://rag-api.example.com/")
         assert client.base_url == "https://rag-api.example.com"
 
     def test_init_defaults(self):
         """Test initialization with default values."""
-        client = ExternalRAGClient(base_url="https://rag-api.example.com")
+        client = AtlasRAGClient(base_url="https://rag-api.example.com")
         assert client.bearer_token is None
         assert client.default_model == "openai/gpt-oss-120b"
         assert client.top_k == 4
@@ -421,11 +421,11 @@ class TestParseRagMetadata:
 
 
 class TestFactoryFunction:
-    """Tests for create_external_rag_client_from_config factory."""
+    """Tests for create_atlas_rag_client_from_config factory."""
 
     def test_factory_creates_client_from_config(self):
         """Test factory function creates properly configured client."""
-        from modules.rag.external_rag_client import create_external_rag_client_from_config
+        from modules.rag.atlas_rag_client import create_atlas_rag_client_from_config
 
         mock_settings = MagicMock()
         mock_settings.external_rag_url = "https://test-api.example.com"
@@ -436,9 +436,9 @@ class TestFactoryFunction:
         mock_config_manager = MagicMock()
         mock_config_manager.app_settings = mock_settings
 
-        client = create_external_rag_client_from_config(mock_config_manager)
+        client = create_atlas_rag_client_from_config(mock_config_manager)
 
-        assert isinstance(client, ExternalRAGClient)
+        assert isinstance(client, AtlasRAGClient)
         assert client.base_url == "https://test-api.example.com"
         assert client.bearer_token == "factory-token"
         assert client.default_model == "factory-model"

@@ -1,12 +1,12 @@
 # External ATLAS RAG API Mock
 
-Mock service for testing the `ExternalRAGClient` integration without requiring access to the real ATLAS RAG API.
+Mock service for testing the `AtlasRAGClient` integration without requiring access to the real ATLAS RAG API.
 
 ## Quick Start
 
 ```bash
 # From the project root
-cd mocks/external-rag-mock
+cd mocks/atlas-rag-api-mock
 python main.py
 ```
 
@@ -147,7 +147,7 @@ test-atlas-rag-token
 
 2. Start the mock service:
    ```bash
-   cd mocks/external-rag-mock
+   cd mocks/atlas-rag-api-mock
    python main.py
    ```
 

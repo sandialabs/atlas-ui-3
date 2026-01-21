@@ -1,9 +1,9 @@
-"""External RAG Client for integrating with the ATLAS RAG API.
+"""ATLAS RAG Client for integrating with the ATLAS RAG API.
 
 This client implements the same interface as RAGClient but translates
-requests to the external ATLAS RAG API format.
+requests to the ATLAS RAG API format.
 
-External API:
+ATLAS RAG API:
 - Discovery: GET /discover/datasources?as_user={user}
 - Query: POST /rag/completions?as_user={user}
 """
@@ -20,7 +20,7 @@ from modules.rag.client import DataSource, DocumentMetadata, RAGMetadata, RAGRes
 logger = logging.getLogger(__name__)
 
 
-class ExternalRAGClient:
+class AtlasRAGClient:
     """Client for communicating with external ATLAS RAG API.
 
     Implements the same interface as RAGClient for seamless substitution.
@@ -51,7 +51,7 @@ class ExternalRAGClient:
         self.timeout = timeout
 
         logger.info(
-            "ExternalRAGClient initialized: url=%s, model=%s, top_k=%d",
+            "AtlasRAGClient initialized: url=%s, model=%s, top_k=%d",
             self.base_url,
             self.default_model,
             self.top_k,
@@ -281,17 +281,17 @@ class ExternalRAGClient:
             return None
 
 
-def create_external_rag_client_from_config(config_manager) -> ExternalRAGClient:
-    """Factory function to create ExternalRAGClient from ConfigManager.
+def create_atlas_rag_client_from_config(config_manager) -> AtlasRAGClient:
+    """Factory function to create AtlasRAGClient from ConfigManager.
 
     Args:
         config_manager: ConfigManager instance with app_settings.
 
     Returns:
-        Configured ExternalRAGClient instance.
+        Configured AtlasRAGClient instance.
     """
     settings = config_manager.app_settings
-    return ExternalRAGClient(
+    return AtlasRAGClient(
         base_url=settings.external_rag_url,
         bearer_token=settings.external_rag_bearer_token,
         default_model=settings.external_rag_default_model,

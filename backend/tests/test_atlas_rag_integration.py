@@ -1,10 +1,9 @@
-"""Integration tests for ExternalRAGClient with the mock service.
+"""Integration tests for AtlasRAGClient with the mock service.
 
-These tests require the external-rag-mock service to be running.
+These tests require the atlas-rag-api-mock service to be running.
 They can be skipped if the mock service is not available.
 """
 
-import asyncio
 import subprocess
 import time
 import sys
@@ -16,7 +15,7 @@ import httpx
 # Add paths for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from modules.rag.external_rag_client import ExternalRAGClient
+from modules.rag.atlas_rag_client import AtlasRAGClient
 
 
 MOCK_URL = "http://localhost:8002"
@@ -42,7 +41,7 @@ def mock_service():
 
     # Try to start the mock service
     mock_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "mocks", "external-rag-mock", "main.py"
+        os.path.dirname(__file__), "..", "..", "mocks", "atlas-rag-api-mock", "main.py"
     )
     mock_path = os.path.abspath(mock_path)
 
@@ -74,8 +73,8 @@ def mock_service():
 
 @pytest.fixture
 def client():
-    """Create an ExternalRAGClient configured for the mock service."""
-    return ExternalRAGClient(
+    """Create an AtlasRAGClient configured for the mock service."""
+    return AtlasRAGClient(
         base_url=MOCK_URL,
         bearer_token=MOCK_TOKEN,
         default_model="test-model",
@@ -83,8 +82,8 @@ def client():
     )
 
 
-class TestExternalRAGIntegration:
-    """Integration tests for ExternalRAGClient with the mock service."""
+class TestAtlasRAGIntegration:
+    """Integration tests for AtlasRAGClient with the mock service."""
 
     @pytest.mark.asyncio
     async def test_discover_data_sources_success(self, mock_service, client):
@@ -194,13 +193,13 @@ class TestExternalRAGIntegration:
         assert "404" in str(exc_info.value) or "not found" in str(exc_info.value).lower()
 
 
-class TestExternalRAGAuthFailures:
+class TestAtlasRAGAuthFailures:
     """Test authentication failure scenarios."""
 
     @pytest.mark.asyncio
     async def test_missing_token(self, mock_service):
         """Test that requests without token fail with 401."""
-        client = ExternalRAGClient(
+        client = AtlasRAGClient(
             base_url=MOCK_URL,
             bearer_token=None,  # No token
         )
@@ -212,7 +211,7 @@ class TestExternalRAGAuthFailures:
     @pytest.mark.asyncio
     async def test_invalid_token(self, mock_service):
         """Test that requests with invalid token fail with 401."""
-        client = ExternalRAGClient(
+        client = AtlasRAGClient(
             base_url=MOCK_URL,
             bearer_token="invalid-token",
         )
