@@ -96,6 +96,17 @@ class LLMConfig(BaseModel):
         return v
 
 
+class OAuthConfig(BaseModel):
+    """OAuth 2.1 configuration for MCP server authentication.
+
+    Supports the OAuth 2.1 Authorization Code Grant with PKCE as implemented
+    by FastMCP. See https://gofastmcp.com/clients/auth/oauth for details.
+    """
+    scopes: Optional[List[str]] = None  # OAuth scopes to request (e.g., ["read", "write"])
+    client_name: str = "Atlas UI"  # Client name for dynamic registration
+    callback_port: Optional[int] = None  # Fixed port for OAuth callback (default: random)
+
+
 class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server."""
     description: Optional[str] = None
@@ -110,7 +121,10 @@ class MCPServerConfig(BaseModel):
     url: Optional[str] = None            # URL for HTTP servers
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
-    auth_token: Optional[str] = None     # Bearer token for MCP server authentication
+    # Authentication configuration
+    auth_type: str = "none"  # Authentication type: "none", "api_key", "bearer", "jwt", "oauth"
+    auth_token: Optional[str] = None     # Bearer token for MCP server authentication (supports ${ENV_VAR})
+    oauth_config: Optional[OAuthConfig] = None  # OAuth 2.1 configuration (when auth_type="oauth")
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
     require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
     allow_edit: List[str] = Field(default_factory=list)  # LEGACY. List of tool names (without server prefix) allowing argument editing

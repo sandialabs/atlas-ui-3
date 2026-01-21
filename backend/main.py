@@ -42,6 +42,7 @@ from routes.admin_routes import admin_router
 from routes.files_routes import router as files_router
 from routes.health_routes import router as health_router
 from routes.feedback_routes import feedback_router
+from routes.mcp_auth_routes import router as mcp_auth_router
 from version import VERSION
 
 # Load environment variables from the parent directory
@@ -182,6 +183,7 @@ app.include_router(admin_router)
 app.include_router(files_router)
 app.include_router(health_router)
 app.include_router(feedback_router)
+app.include_router(mcp_auth_router)
 
 # Serve frontend build (Vite)
 project_root = Path(__file__).resolve().parents[1]
