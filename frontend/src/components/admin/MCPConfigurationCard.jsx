@@ -40,9 +40,8 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         failed_servers: Object.fromEntries(freshFailedEntries),
       })
       
-      // Reset backoff on success
+      // Reset failure count on success, which will trigger delay reset
       setFailureCount(0)
-      setCurrentDelay(NORMAL_POLLING_INTERVAL)
     } catch (err) {
       // Keep this quiet in the UI but log to console for debugging
       console.error('Error loading MCP status for card:', err)
@@ -61,6 +60,9 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
       const newDelay = Math.min(1000 * Math.pow(2, failureCount - 1), MAX_BACKOFF_DELAY)
       setCurrentDelay(newDelay)
       console.log(`MCP status polling: ${failureCount} consecutive failures, next retry in ${newDelay / 1000}s`)
+    } else {
+      // Reset to normal polling interval when failure count is 0
+      setCurrentDelay(NORMAL_POLLING_INTERVAL)
     }
   }, [failureCount])
 
