@@ -1,9 +1,18 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { Settings, RefreshCw, RotateCcw, Activity } from 'lucide-react'
 
 // Polling configuration
 const NORMAL_POLLING_INTERVAL = 15000 // 15 seconds
 const MAX_BACKOFF_DELAY = 30000 // 30 seconds
+
+// Calculate delay based on failure count
+const calculateDelay = (failures) => {
+  if (failures > 0) {
+    // Start with 1 second, double each time: 1s, 2s, 4s, 8s, 16s, 30s (capped)
+    return Math.min(1000 * Math.pow(2, failures - 1), MAX_BACKOFF_DELAY)
+  }
+  return NORMAL_POLLING_INTERVAL
+}
 
 const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   const [mcpStatus, setMcpStatus] = useState({
@@ -14,10 +23,13 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   const [reloadLoading, setReloadLoading] = useState(false)
   const [reconnectLoading, setReconnectLoading] = useState(false)
 
-  // Exponential backoff state
-  const [failureCount, setFailureCount] = useState(0)
-  const [currentDelay, setCurrentDelay] = useState(NORMAL_POLLING_INTERVAL)
+  // Refs for polling state (avoid re-renders and stale closures)
+  const failureCountRef = useRef(0)
+  const timeoutIdRef = useRef(null)
+  const isMountedRef = useRef(true)
+  const pollFnRef = useRef(null)
 
+  // Manual refresh function for button clicks (doesn't affect polling schedule)
   const loadMCPStatus = async () => {
     try {
       setStatusLoading(true)
@@ -26,58 +38,94 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         throw new Error(`HTTP ${response.status}`)
       }
       const data = await response.json()
-      // Normalize status so we don't show stale servers that no longer exist
       const configured = new Set(data.configured_servers || [])
-
       const freshConnected = (data.connected_servers || []).filter((name) => configured.has(name))
-
       const freshFailedEntries = Object.entries(data.failed_servers || {}).filter(
         ([name]) => configured.has(name)
       )
-
       setMcpStatus({
         connected_servers: freshConnected,
         failed_servers: Object.fromEntries(freshFailedEntries),
       })
-      
-      // Reset failure count on success, which will trigger delay reset
-      setFailureCount(0)
     } catch (err) {
-      // Keep this quiet in the UI but log to console for debugging
       console.error('Error loading MCP status for card:', err)
-      
-      // Increment failure count for exponential backoff calculation
-      setFailureCount(prev => prev + 1)
     } finally {
       setStatusLoading(false)
     }
   }
 
-  // Calculate delay with exponential backoff when failures occur
   useEffect(() => {
-    if (failureCount > 0) {
-      // Start with 1 second, double each time: 1s, 2s, 4s, 8s, 16s, 30s (capped)
-      const newDelay = Math.min(1000 * Math.pow(2, failureCount - 1), MAX_BACKOFF_DELAY)
-      setCurrentDelay(newDelay)
-      console.log(`MCP status polling: ${failureCount} consecutive failures, next retry in ${newDelay / 1000}s`)
-    } else {
-      // Reset to normal polling interval when failure count is 0
-      setCurrentDelay(NORMAL_POLLING_INTERVAL)
+    isMountedRef.current = true
+
+    const scheduleNextPoll = (delay) => {
+      if (!isMountedRef.current) return
+
+      // Clear any existing timeout
+      if (timeoutIdRef.current) {
+        clearTimeout(timeoutIdRef.current)
+      }
+
+      timeoutIdRef.current = setTimeout(() => {
+        if (isMountedRef.current && pollFnRef.current) {
+          pollFnRef.current()
+        }
+      }, delay)
     }
-  }, [failureCount])
 
-  useEffect(() => {
+    const pollMCPStatus = async () => {
+      try {
+        setStatusLoading(true)
+        const response = await fetch('/admin/mcp/status')
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        const data = await response.json()
+        // Normalize status so we don't show stale servers that no longer exist
+        const configured = new Set(data.configured_servers || [])
+
+        const freshConnected = (data.connected_servers || []).filter((name) => configured.has(name))
+
+        const freshFailedEntries = Object.entries(data.failed_servers || {}).filter(
+          ([name]) => configured.has(name)
+        )
+
+        setMcpStatus({
+          connected_servers: freshConnected,
+          failed_servers: Object.fromEntries(freshFailedEntries),
+        })
+
+        // Reset failure count on success and schedule next poll at normal interval
+        failureCountRef.current = 0
+        scheduleNextPoll(NORMAL_POLLING_INTERVAL)
+      } catch (err) {
+        // Keep this quiet in the UI but log to console for debugging
+        console.error('Error loading MCP status for card:', err)
+
+        // Increment failure count and schedule next poll with backoff
+        failureCountRef.current += 1
+        const delay = calculateDelay(failureCountRef.current)
+        console.log(`MCP status polling: ${failureCountRef.current} consecutive failures, next retry in ${delay / 1000}s`)
+        scheduleNextPoll(delay)
+      } finally {
+        setStatusLoading(false)
+      }
+    }
+
+    // Store ref so timeout can call the latest version
+    pollFnRef.current = pollMCPStatus
+
     // Initial load
-    loadMCPStatus()
+    pollMCPStatus()
 
-    // Set up polling with current delay
-    const timeoutId = setTimeout(() => {
-      loadMCPStatus()
-    }, currentDelay)
+    // Cleanup on unmount
+    return () => {
+      isMountedRef.current = false
+      if (timeoutIdRef.current) {
+        clearTimeout(timeoutIdRef.current)
+      }
+    }
+  }, [])
 
-    // Cleanup timeout on unmount or when delay changes
-    return () => clearTimeout(timeoutId)
-  }, [currentDelay])
   const manageMCP = async () => {
     try {
       const response = await fetch('/admin/config/view')
