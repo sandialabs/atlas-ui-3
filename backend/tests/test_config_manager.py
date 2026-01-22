@@ -399,7 +399,7 @@ class TestLLMConfigEnvExpansion:
     def test_llm_model_config_with_missing_env_var_in_extra_headers(self):
         """resolve_env_var should raise ValueError for missing env vars in extra_headers."""
         from backend.modules.config.config_manager import ModelConfig
-        
+
         config = ModelConfig(
             model_name="test-model",
             model_url="https://api.openai.com/v1",
@@ -408,8 +408,319 @@ class TestLLMConfigEnvExpansion:
                 "X-Custom-Header": "${MISSING_HEADER_VAR}"
             }
         )
-        
+
         with pytest.raises(ValueError, match="Environment variable 'MISSING_HEADER_VAR' is not set"):
             resolve_env_var(config.extra_headers["X-Custom-Header"])
+
+
+class TestAppSettingsRAGProvider:
+    """Test AppSettings RAG provider configuration and feature flags.
+
+    Note: AppSettings uses Pydantic BaseSettings which reads from environment
+    variables. Tests must use monkeypatch to set env vars for proper testing.
+    """
+
+    def test_rag_provider_valid_options(self, monkeypatch):
+        """RAG provider should accept valid literal values: none, mock, atlas, mcp."""
+        # Test that 'none' provider results in RAG being disabled
+        monkeypatch.setenv("RAG_PROVIDER", "none")
+        settings = AppSettings()
+        assert settings.rag_provider == "none"
+        assert settings.feature_rag_enabled is False
+
+    def test_rag_provider_accepts_valid_values(self, monkeypatch):
+        """RAG provider should accept all valid literal values via environment."""
+        for provider in ["none", "mock", "atlas", "mcp"]:
+            monkeypatch.setenv("RAG_PROVIDER", provider)
+            settings = AppSettings()
+            assert settings.rag_provider == provider
+
+    def test_feature_rag_enabled_when_provider_not_none(self, monkeypatch):
+        """feature_rag_enabled should be True when provider is not 'none'."""
+        # Disabled when provider is "none"
+        monkeypatch.setenv("RAG_PROVIDER", "none")
+        settings_none = AppSettings()
+        assert settings_none.feature_rag_enabled is False
+
+        # Enabled for all other providers
+        for provider in ["mock", "atlas", "mcp"]:
+            monkeypatch.setenv("RAG_PROVIDER", provider)
+            settings = AppSettings()
+            assert settings.feature_rag_enabled is True, f"Expected True for provider={provider}"
+
+    def test_external_rag_enabled_only_for_atlas(self, monkeypatch):
+        """external_rag_enabled should be True only when provider is 'atlas'."""
+        monkeypatch.setenv("RAG_PROVIDER", "atlas")
+        settings_atlas = AppSettings()
+        assert settings_atlas.external_rag_enabled is True
+
+        for provider in ["none", "mock", "mcp"]:
+            monkeypatch.setenv("RAG_PROVIDER", provider)
+            settings = AppSettings()
+            assert settings.external_rag_enabled is False, f"Expected False for provider={provider}"
+
+    def test_feature_rag_mcp_enabled_only_for_mcp(self, monkeypatch):
+        """feature_rag_mcp_enabled should be True only when provider is 'mcp'."""
+        monkeypatch.setenv("RAG_PROVIDER", "mcp")
+        settings_mcp = AppSettings()
+        assert settings_mcp.feature_rag_mcp_enabled is True
+
+        for provider in ["none", "mock", "atlas"]:
+            monkeypatch.setenv("RAG_PROVIDER", provider)
+            settings = AppSettings()
+            assert settings.feature_rag_mcp_enabled is False, f"Expected False for provider={provider}"
+
+    def test_mock_rag_only_for_mock_provider(self, monkeypatch):
+        """mock_rag should be True only when provider is 'mock'."""
+        monkeypatch.setenv("RAG_PROVIDER", "mock")
+        settings_mock = AppSettings()
+        assert settings_mock.mock_rag is True
+
+        for provider in ["none", "atlas", "mcp"]:
+            monkeypatch.setenv("RAG_PROVIDER", provider)
+            settings = AppSettings()
+            assert settings.mock_rag is False, f"Expected False for provider={provider}"
+
+    def test_atlas_rag_settings_have_expected_types(self):
+        """ATLAS RAG settings should have the expected types."""
+        settings = AppSettings()
+        # Verify field types and existence (values may vary based on .env)
+        assert isinstance(settings.atlas_rag_url, str)
+        assert settings.atlas_rag_bearer_token is None or isinstance(settings.atlas_rag_bearer_token, str)
+        assert isinstance(settings.atlas_rag_default_model, str)
+        assert isinstance(settings.atlas_rag_top_k, int)
+
+    def test_atlas_rag_settings_can_be_overridden(self, monkeypatch):
+        """ATLAS RAG settings should be configurable via environment variables."""
+        monkeypatch.setenv("ATLAS_RAG_URL", "https://rag.example.com")
+        monkeypatch.setenv("ATLAS_RAG_BEARER_TOKEN", "secret-token")
+        monkeypatch.setenv("ATLAS_RAG_DEFAULT_MODEL", "custom-model")
+        monkeypatch.setenv("ATLAS_RAG_TOP_K", "10")
+
+        settings = AppSettings()
+        assert settings.atlas_rag_url == "https://rag.example.com"
+        assert settings.atlas_rag_bearer_token == "secret-token"
+        assert settings.atlas_rag_default_model == "custom-model"
+        assert settings.atlas_rag_top_k == 10
+
+    def test_external_rag_aliases_point_to_atlas_settings(self, monkeypatch):
+        """Backward compatibility aliases should return atlas_rag_* values."""
+        monkeypatch.setenv("ATLAS_RAG_URL", "https://rag.example.com")
+        monkeypatch.setenv("ATLAS_RAG_BEARER_TOKEN", "my-token")
+        monkeypatch.setenv("ATLAS_RAG_DEFAULT_MODEL", "my-model")
+        monkeypatch.setenv("ATLAS_RAG_TOP_K", "8")
+
+        settings = AppSettings()
+        # Aliases should return the same values
+        assert settings.external_rag_url == settings.atlas_rag_url
+        assert settings.external_rag_bearer_token == settings.atlas_rag_bearer_token
+        assert settings.external_rag_default_model == settings.atlas_rag_default_model
+        assert settings.external_rag_top_k == settings.atlas_rag_top_k
+
+    def test_rag_mock_url_returns_fixed_value(self):
+        """rag_mock_url should return the fixed mock service URL."""
+        settings = AppSettings()
+        assert settings.rag_mock_url == "http://localhost:8001"
+
+    def test_rag_provider_from_environment(self, monkeypatch):
+        """RAG_PROVIDER environment variable should set rag_provider."""
+        monkeypatch.setenv("RAG_PROVIDER", "atlas")
+        settings = AppSettings()
+        assert settings.rag_provider == "atlas"
+
+    def test_atlas_rag_url_from_environment(self, monkeypatch):
+        """ATLAS_RAG_URL environment variable should set atlas_rag_url."""
+        monkeypatch.setenv("ATLAS_RAG_URL", "https://env-rag.example.com")
+        settings = AppSettings()
+        assert settings.atlas_rag_url == "https://env-rag.example.com"
+
+    def test_external_rag_url_alias_from_environment(self, monkeypatch):
+        """EXTERNAL_RAG_URL environment variable should also work (backward compat)."""
+        # Clear ATLAS_RAG_URL so EXTERNAL_RAG_URL alias can be used
+        monkeypatch.delenv("ATLAS_RAG_URL", raising=False)
+        monkeypatch.setenv("EXTERNAL_RAG_URL", "https://external-rag.example.com")
+        settings = AppSettings()
+        assert settings.atlas_rag_url == "https://external-rag.example.com"
+
+    def test_feature_flags_are_derived_not_stored(self):
+        """Feature flags should be derived properties, not stored fields."""
+        # These should be properties that derive from rag_provider
+        assert "feature_rag_enabled" not in AppSettings.model_fields
+        assert "external_rag_enabled" not in AppSettings.model_fields
+        assert "feature_rag_mcp_enabled" not in AppSettings.model_fields
+        assert "mock_rag" not in AppSettings.model_fields
+
+        # The actual stored field is rag_provider
+        assert "rag_provider" in AppSettings.model_fields
+
+
+class TestRAGSourceConfig:
+    """Test RAGSourceConfig model validation."""
+
+    def test_mcp_source_with_command(self):
+        """MCP source should accept command for stdio transport."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="mcp",
+            display_name="Test MCP",
+            command=["python", "server.py"],
+        )
+        assert config.type == "mcp"
+        assert config.command == ["python", "server.py"]
+
+    def test_mcp_source_with_url(self):
+        """MCP source should accept url for HTTP/SSE transport."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="mcp",
+            display_name="Test MCP",
+            url="http://localhost:8080",
+        )
+        assert config.type == "mcp"
+        assert config.url == "http://localhost:8080"
+
+    def test_mcp_source_requires_command_or_url(self):
+        """MCP source should raise error if neither command nor url is provided."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        with pytest.raises(ValueError, match="MCP RAG source requires either 'command' or 'url'"):
+            RAGSourceConfig(
+                type="mcp",
+                display_name="Invalid MCP",
+            )
+
+    def test_http_source_with_url(self):
+        """HTTP source should accept url."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="http",
+            display_name="Test HTTP RAG",
+            url="https://rag-api.example.com",
+            bearer_token="secret-token",
+        )
+        assert config.type == "http"
+        assert config.url == "https://rag-api.example.com"
+        assert config.bearer_token == "secret-token"
+
+    def test_http_source_requires_url(self):
+        """HTTP source should raise error if url is not provided."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        with pytest.raises(ValueError, match="HTTP RAG source requires 'url'"):
+            RAGSourceConfig(
+                type="http",
+                display_name="Invalid HTTP",
+            )
+
+    def test_rag_source_defaults(self):
+        """RAGSourceConfig should have sensible defaults."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="http",
+            url="https://example.com",
+        )
+        assert config.enabled is True
+        assert config.groups == []
+        assert config.compliance_level is None
+        assert config.top_k == 4
+        assert config.timeout == 60.0
+        assert config.discovery_endpoint == "/discover/datasources"
+        assert config.query_endpoint == "/rag/completions"
+
+    def test_rag_source_with_all_fields(self):
+        """RAGSourceConfig should accept all optional fields."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="http",
+            display_name="Full Config RAG",
+            description="A fully configured RAG source",
+            icon="search",
+            groups=["admin", "users"],
+            compliance_level="Internal",
+            enabled=True,
+            url="https://rag.example.com",
+            bearer_token="my-token",
+            default_model="custom-model",
+            top_k=10,
+            timeout=120.0,
+            discovery_endpoint="/custom/discover",
+            query_endpoint="/custom/query",
+        )
+        assert config.display_name == "Full Config RAG"
+        assert config.description == "A fully configured RAG source"
+        assert config.icon == "search"
+        assert config.groups == ["admin", "users"]
+        assert config.compliance_level == "Internal"
+        assert config.default_model == "custom-model"
+        assert config.top_k == 10
+        assert config.timeout == 120.0
+        assert config.discovery_endpoint == "/custom/discover"
+        assert config.query_endpoint == "/custom/query"
+
+    def test_rag_source_disabled(self):
+        """RAGSourceConfig should support disabled state."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="http",
+            url="https://example.com",
+            enabled=False,
+        )
+        assert config.enabled is False
+
+
+class TestRAGSourcesConfig:
+    """Test RAGSourcesConfig model for multiple RAG sources."""
+
+    def test_empty_sources_config(self):
+        """RAGSourcesConfig should accept empty sources dict."""
+        from backend.modules.config.config_manager import RAGSourcesConfig
+
+        config = RAGSourcesConfig()
+        assert config.sources == {}
+
+    def test_sources_config_with_multiple_sources(self):
+        """RAGSourcesConfig should accept multiple source configurations."""
+        from backend.modules.config.config_manager import RAGSourcesConfig, RAGSourceConfig
+
+        config = RAGSourcesConfig(
+            sources={
+                "http_source": RAGSourceConfig(
+                    type="http",
+                    url="https://http-rag.example.com",
+                ),
+                "mcp_source": RAGSourceConfig(
+                    type="mcp",
+                    command=["python", "mcp_server.py"],
+                ),
+            }
+        )
+        assert len(config.sources) == 2
+        assert "http_source" in config.sources
+        assert "mcp_source" in config.sources
+        assert config.sources["http_source"].type == "http"
+        assert config.sources["mcp_source"].type == "mcp"
+
+    def test_sources_config_from_dict(self):
+        """RAGSourcesConfig should convert dict values to RAGSourceConfig."""
+        from backend.modules.config.config_manager import RAGSourcesConfig
+
+        config = RAGSourcesConfig(
+            sources={
+                "test_source": {
+                    "type": "http",
+                    "url": "https://example.com",
+                    "display_name": "Test Source",
+                }
+            }
+        )
+        assert config.sources["test_source"].type == "http"
+        assert config.sources["test_source"].url == "https://example.com"
+        assert config.sources["test_source"].display_name == "Test Source"
 
 
