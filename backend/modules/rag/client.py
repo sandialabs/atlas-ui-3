@@ -193,16 +193,5 @@ class RAGClient:
             # Re-raise HTTPExceptions from the unified client (they already have proper error handling)
             raise
         except Exception as exc:
-            logger.error(f"Unexpected error while querying RAG for {user_name}: {exc}", exc_info=True)
+            logger.error("Unexpected error while querying RAG for %s: %s", user_name, exc, exc_info=True)
             raise HTTPException(status_code=500, detail="Internal server error")
-
-
-def initialize_rag_client():
-    """Initialize the global RAG client after environment variables are loaded."""
-    global rag_client
-    rag_client = RAGClient()
-    return rag_client
-
-
-# Global RAG client instance - will be initialized in main.py after env vars are loaded
-rag_client = None

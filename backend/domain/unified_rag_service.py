@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional, Union
 
+from core.compliance import get_compliance_manager
+from core.log_sanitizer import sanitize_for_logging
 from modules.config.config_manager import ConfigManager, RAGSourceConfig, resolve_env_var
 from modules.rag.atlas_rag_client import AtlasRAGClient
 from modules.rag.client import DataSource, RAGResponse
@@ -101,11 +103,26 @@ class UnifiedRAGService:
             if not await self._is_user_authorized(username, source_config.groups):
                 logger.debug(
                     "User %s not authorized for RAG source %s (groups: %s)",
-                    username, source_name, source_config.groups
+                    sanitize_for_logging(username),
+                    sanitize_for_logging(source_name),
+                    source_config.groups,
                 )
                 continue
 
-            # TODO: Check compliance level filtering
+            # Check compliance level filtering
+            if user_compliance_level and source_config.compliance_level:
+                compliance_mgr = get_compliance_manager()
+                if not compliance_mgr.is_accessible(
+                    user_level=user_compliance_level,
+                    resource_level=source_config.compliance_level,
+                ):
+                    logger.info(
+                        "Skipping RAG source %s due to compliance level mismatch (user: %s, source: %s)",
+                        sanitize_for_logging(source_name),
+                        sanitize_for_logging(user_compliance_level),
+                        sanitize_for_logging(source_config.compliance_level),
+                    )
+                    continue
 
             if source_config.type == "http":
                 # Discover from HTTP RAG API
@@ -232,6 +249,23 @@ class UnifiedRAGService:
             for name, config in rag_config.sources.items()
             if config.type == "mcp" and config.enabled
         }
+
+    def invalidate_cache(self, source_name: Optional[str] = None) -> None:
+        """Invalidate cached HTTP clients.
+
+        Call this when configuration changes to ensure clients are recreated
+        with updated settings (URLs, tokens, etc.).
+
+        Args:
+            source_name: Specific source to invalidate, or None to invalidate all.
+        """
+        if source_name:
+            if source_name in self._http_clients:
+                del self._http_clients[source_name]
+                logger.info("Invalidated HTTP client cache for source: %s", source_name)
+        else:
+            self._http_clients.clear()
+            logger.info("Invalidated all HTTP client caches")
 
 
 __all__ = ["UnifiedRAGService"]

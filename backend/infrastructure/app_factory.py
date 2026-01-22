@@ -1,10 +1,11 @@
 """Application factory for dependency injection and wiring."""
 
 import logging
-from typing import Optional, Union
+from typing import Optional
 
 from application.chat.service import ChatService
 from interfaces.transport import ChatConnectionProtocol
+from interfaces.rag import RAGClientProtocol
 from modules.config import ConfigManager
 from modules.file_storage import S3StorageClient, FileManager
 from modules.file_storage.mock_s3_client import MockS3StorageClient
@@ -65,7 +66,7 @@ class AppFactory:
 
         logger.info("AppFactory initialized")
 
-    def _create_rag_client(self) -> Union[RAGClient, AtlasRAGClient]:
+    def _create_rag_client(self) -> RAGClientProtocol:
         """Create the appropriate RAG client based on rag_provider configuration.
 
         Returns:
@@ -102,7 +103,7 @@ class AppFactory:
     def get_mcp_manager(self) -> MCPToolManager:  # noqa: D401
         return self.mcp_tools
 
-    def get_rag_client(self) -> Union[RAGClient, AtlasRAGClient]:  # noqa: D401
+    def get_rag_client(self) -> RAGClientProtocol:  # noqa: D401
         return self.rag_client
 
     def get_rag_mcp_service(self) -> RAGMCPService:  # noqa: D401

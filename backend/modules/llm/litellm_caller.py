@@ -55,7 +55,27 @@ class LiteLLMCaller:
 
         # Set litellm verbosity based on debug mode
         litellm.set_verbose = debug_mode
-    
+
+    @staticmethod
+    def _parse_qualified_data_source(qualified_data_source: str) -> str:
+        """Extract corpus name from a qualified data source identifier.
+
+        Qualified data sources have format "server:source_id" (e.g., "atlas_rag:technical-docs").
+        The prefix is used for routing in multi-RAG setups, but the RAG API expects just
+        the corpus name.
+
+        Args:
+            qualified_data_source: Data source ID, optionally prefixed with server name.
+
+        Returns:
+            The corpus/source name without the server prefix.
+        """
+        if ":" in qualified_data_source:
+            _, data_source = qualified_data_source.split(":", 1)
+            logger.debug("Stripped RAG server prefix: %s -> %s", qualified_data_source, data_source)
+            return data_source
+        return qualified_data_source
+
     def _get_litellm_model_name(self, model_name: str) -> str:
         """Convert internal model name to LiteLLM compatible format."""
         if model_name not in self.llm_config.models:
@@ -220,15 +240,7 @@ class LiteLLMCaller:
             rag_client = default_rag_client
 
         # Use the first selected data source
-        qualified_data_source = data_sources[0]
-
-        # Strip server prefix if present (e.g., "atlas_rag:technical-docs" -> "technical-docs")
-        # The prefix is used for routing in multi-RAG setups, but the RAG API expects just the corpus name
-        if ":" in qualified_data_source:
-            server_name, data_source = qualified_data_source.split(":", 1)
-            logger.debug("Stripped RAG server prefix: %s -> %s", qualified_data_source, data_source)
-        else:
-            data_source = qualified_data_source
+        data_source = self._parse_qualified_data_source(data_sources[0])
 
         try:
             # Query RAG for context
@@ -237,11 +249,11 @@ class LiteLLMCaller:
                 data_source,
                 messages
             )
-            
+
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()
             rag_context_message = {
-                "role": "system", 
+                "role": "system",
                 "content": f"Retrieved context from {data_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
             }
             messages_with_rag.insert(-1, rag_context_message)
@@ -353,15 +365,7 @@ class LiteLLMCaller:
             rag_client = default_rag_client
 
         # Use the first selected data source
-        qualified_data_source = data_sources[0]
-
-        # Strip server prefix if present (e.g., "atlas_rag:technical-docs" -> "technical-docs")
-        # The prefix is used for routing in multi-RAG setups, but the RAG API expects just the corpus name
-        if ":" in qualified_data_source:
-            server_name, data_source = qualified_data_source.split(":", 1)
-            logger.debug("Stripped RAG server prefix: %s -> %s", qualified_data_source, data_source)
-        else:
-            data_source = qualified_data_source
+        data_source = self._parse_qualified_data_source(data_sources[0])
 
         try:
             # Query RAG for context
@@ -378,7 +382,7 @@ class LiteLLMCaller:
                 "content": f"Retrieved context from {data_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
             }
             messages_with_rag.insert(-1, rag_context_message)
-            
+
             # Call LLM with enriched context and tools
             llm_response = await self.call_with_tools(model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature)
             

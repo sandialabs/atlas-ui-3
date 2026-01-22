@@ -226,6 +226,19 @@ class TestResolveEnvVar:
         # Only exact ${VAR} pattern is supported, not embedded in strings
         assert resolve_env_var("prefix-${VAR}") == "prefix-${VAR}"
 
+    def test_resolve_env_var_with_suffix_pattern(self, monkeypatch):
+        """Should not match patterns with suffix like '${VAR}-suffix'.
+
+        Regression test: Previously re.match() would match '${VAR}' at the start
+        and return just the env value, silently dropping the suffix.
+        Now we use re.fullmatch() to ensure the entire string is a pattern.
+        """
+        monkeypatch.setenv("MY_VAR", "resolved")
+        # Pattern with suffix should be treated as literal, not partially resolved
+        assert resolve_env_var("${MY_VAR}-suffix") == "${MY_VAR}-suffix"
+        # Contrast with exact pattern which should resolve
+        assert resolve_env_var("${MY_VAR}") == "resolved"
+
     def test_resolve_env_var_with_invalid_pattern(self):
         """Should return strings with invalid patterns unchanged."""
         assert resolve_env_var("${123_INVALID}") == "${123_INVALID}"

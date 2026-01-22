@@ -31,6 +31,9 @@ def resolve_env_var(value: Optional[str], required: bool = True) -> Optional[str
     - "literal-string" -> returned as-is
     - None -> returned as-is
 
+    Note: Only complete env var patterns are resolved. Values like "prefix-${VAR}"
+    or "${VAR}-suffix" are treated as literals and returned unchanged.
+
     Args:
         value: Config value that may contain env var pattern
         required: If True (default), raises ValueError if env var is not set.
@@ -47,9 +50,10 @@ def resolve_env_var(value: Optional[str], required: bool = True) -> Optional[str
         return None
 
     # Pattern: ${VAR_NAME}
-    # Uses match() not search() to ensure pattern matches from the beginning of the string
+    # Uses fullmatch() to ensure the entire string is an env var pattern.
+    # Patterns like "${VAR}-suffix" or "prefix-${VAR}" are treated as literals.
     pattern = r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}'
-    match = re.match(pattern, value)
+    match = re.fullmatch(pattern, value)
 
     if match:
         env_var_name = match.group(1)
