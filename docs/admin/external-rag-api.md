@@ -155,11 +155,21 @@ The mock runs on `http://localhost:8002` with token `test-atlas-rag-token`.
 
 ### Test Users
 
-| User | Groups | Accessible Corpora |
-|------|--------|-------------------|
-| `alice@example.com` | engineering, data-science | engineering-docs, research-papers, company-wiki |
-| `bob@example.com` | sales, marketing | sales-playbook, company-wiki |
-| `test@test.com` | engineering, finance, admin | engineering-docs, financial-reports, company-wiki |
+| User | Groups | Accessible Data Sources |
+|------|--------|------------------------|
+| `alice@example.com` | employee, engineering | company-policies, technical-docs, product-knowledge |
+| `bob@example.com` | employee, sales | company-policies, product-knowledge |
+| `charlie@example.com` | employee, engineering, devops | company-policies, technical-docs, product-knowledge |
+| `test@test.com` | employee, engineering, devops, admin | All data sources |
+| `guest@example.com` | (none) | product-knowledge (public only) |
+
+### Data Sources
+
+| Data Source | Compliance | Required Groups | Content |
+|-------------|------------|-----------------|---------|
+| `company-policies` | Internal | employee | Remote work, expenses, code of conduct, PTO policies |
+| `technical-docs` | Internal | engineering, devops | API auth, database schema, deployment, microservices |
+| `product-knowledge` | Public | (none) | Getting started, troubleshooting, pricing, API reference |
 
 ## Troubleshooting
 
