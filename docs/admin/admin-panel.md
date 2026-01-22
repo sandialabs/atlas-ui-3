@@ -1,6 +1,6 @@
 # Admin Panel
 
-Last updated: 2026-01-19
+Last updated: 2026-01-21
 
 The application includes an admin panel that provides access to configuration values, MCP server controls, application logs, and user feedback.
 
@@ -11,6 +11,23 @@ The application includes an admin panel that provides access to configuration va
     *   View the application logs (`app.jsonl`).
     *   Inspect and manage MCP server connections (reload config, reconnect failed servers, view status).
     *   View and download user feedback data.
+
+## Admin Dashboard Polling
+
+The admin dashboard automatically polls the backend to keep the MCP server status up to date. The polling implements exponential backoff to prevent overwhelming the backend when it's disconnected or experiencing issues.
+
+**Polling Behavior:**
+- **Normal polling**: Every 15 seconds when the backend is responsive
+- **Failure handling**: When the backend is unreachable, polling backs off exponentially:
+  - 1st retry: 1 second
+  - 2nd retry: 2 seconds
+  - 3rd retry: 4 seconds
+  - 4th retry: 8 seconds
+  - 5th retry: 16 seconds
+  - 6th+ retries: 30 seconds (max)
+- **Recovery**: When the backend becomes responsive again, polling returns to the normal 15-second interval
+
+This prevents toast notification spam and reduces load on the backend during downtime or connection issues.
 
 ## MCP Admin Endpoints
 
