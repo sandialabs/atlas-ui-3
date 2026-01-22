@@ -119,13 +119,76 @@ class MCPServerConfig(BaseModel):
 class MCPConfig(BaseModel):
     """Configuration for all MCP servers."""
     servers: Dict[str, MCPServerConfig] = Field(default_factory=dict)
-    
+
     @field_validator('servers', mode='before')
     @classmethod
     def validate_servers(cls, v):
         """Convert dict values to MCPServerConfig objects."""
         if isinstance(v, dict):
-            return {name: MCPServerConfig(**config) if isinstance(config, dict) else config 
+            return {name: MCPServerConfig(**config) if isinstance(config, dict) else config
+                   for name, config in v.items()}
+        return v
+
+
+class RAGSourceConfig(BaseModel):
+    """Configuration for a single RAG source (MCP or HTTP-based).
+
+    Supports two types:
+    - "mcp": MCP-based RAG server that exposes rag_discover_resources tool
+    - "http": HTTP REST API RAG server (like ATLAS RAG API)
+    """
+    type: Literal["mcp", "http"] = "mcp"
+
+    # Common fields
+    display_name: Optional[str] = None  # UI display name
+    description: Optional[str] = None
+    icon: Optional[str] = None  # UI icon
+    groups: List[str] = Field(default_factory=list)  # Access groups
+    compliance_level: Optional[str] = None
+    enabled: bool = True
+
+    # MCP-specific fields (type="mcp")
+    command: Optional[List[str]] = None  # Command for stdio MCP servers
+    cwd: Optional[str] = None  # Working directory
+    env: Optional[Dict[str, str]] = None  # Environment variables
+    url: Optional[str] = None  # URL for HTTP/SSE MCP servers
+    transport: Optional[str] = None  # "stdio", "http", "sse"
+    auth_token: Optional[str] = None  # MCP server auth token
+
+    # HTTP REST API fields (type="http")
+    bearer_token: Optional[str] = None  # Bearer token for HTTP RAG API
+    default_model: Optional[str] = None  # Model for RAG queries
+    top_k: int = 4  # Number of documents to retrieve
+    timeout: float = 60.0  # Request timeout in seconds
+
+    # API endpoint customization (HTTP type)
+    discovery_endpoint: str = "/discover/datasources"
+    query_endpoint: str = "/rag/completions"
+
+    @model_validator(mode='after')
+    def validate_type_specific_fields(self):
+        """Validate that required fields are present based on type."""
+        if self.type == "mcp":
+            # MCP type requires either command (stdio) or url (http/sse)
+            if not self.command and not self.url:
+                raise ValueError("MCP RAG source requires either 'command' or 'url'")
+        elif self.type == "http":
+            # HTTP type requires url
+            if not self.url:
+                raise ValueError("HTTP RAG source requires 'url'")
+        return self
+
+
+class RAGSourcesConfig(BaseModel):
+    """Configuration for all RAG sources."""
+    sources: Dict[str, RAGSourceConfig] = Field(default_factory=dict)
+
+    @field_validator('sources', mode='before')
+    @classmethod
+    def validate_sources(cls, v):
+        """Convert dict values to RAGSourceConfig objects."""
+        if isinstance(v, dict):
+            return {name: RAGSourceConfig(**config) if isinstance(config, dict) else config
                    for name, config in v.items()}
         return v
 
@@ -482,6 +545,7 @@ class AppSettings(BaseSettings):
     # Config file names (can be overridden via environment variables)
     mcp_config_file: str = Field(default="mcp.json", validation_alias="MCP_CONFIG_FILE")
     rag_mcp_config_file: str = Field(default="mcp-rag.json", validation_alias="MCP_RAG_CONFIG_FILE")
+    rag_sources_config_file: str = Field(default="rag-sources.json", validation_alias="RAG_SOURCES_CONFIG_FILE")
     llm_config_file: str = Field(default="llmconfig.yml", validation_alias="LLM_CONFIG_FILE")
     help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
@@ -537,6 +601,7 @@ class ConfigManager:
         self._llm_config: Optional[LLMConfig] = None
         self._mcp_config: Optional[MCPConfig] = None
         self._rag_mcp_config: Optional[MCPConfig] = None
+        self._rag_sources_config: Optional[RAGSourcesConfig] = None
         self._tool_approvals_config: Optional[ToolApprovalsConfig] = None
         self._file_extractors_config: Optional[FileExtractorsConfig] = None
     
@@ -747,7 +812,55 @@ class ConfigManager:
                 self._rag_mcp_config = MCPConfig()
 
         return self._rag_mcp_config
-    
+
+    @property
+    def rag_sources_config(self) -> RAGSourcesConfig:
+        """Get unified RAG sources configuration (cached) from rag-sources.json.
+
+        This config supports both MCP-based and HTTP REST API RAG sources.
+        """
+        if self._rag_sources_config is None:
+            try:
+                rag_filename = self.app_settings.rag_sources_config_file
+                file_paths = self._search_paths(rag_filename)
+                data = self._load_file_with_error_handling(file_paths, "JSON")
+
+                if data:
+                    sources_data = {"sources": data}
+                    self._rag_sources_config = RAGSourcesConfig(**sources_data)
+                    # Validate compliance levels
+                    self._validate_rag_sources_compliance_levels(self._rag_sources_config)
+                    logger.info(
+                        "Loaded RAG sources config with %d sources: %s",
+                        len(self._rag_sources_config.sources),
+                        list(self._rag_sources_config.sources.keys())
+                    )
+                else:
+                    self._rag_sources_config = RAGSourcesConfig()
+                    logger.info("Created empty RAG sources config (no configuration file found)")
+
+            except Exception as e:
+                logger.error("Failed to parse RAG sources configuration: %s", e, exc_info=True)
+                self._rag_sources_config = RAGSourcesConfig()
+
+        return self._rag_sources_config
+
+    def _validate_rag_sources_compliance_levels(self, config: RAGSourcesConfig) -> None:
+        """Validate that RAG source compliance levels are defined."""
+        from core.compliance import get_compliance_manager
+        try:
+            compliance_mgr = get_compliance_manager()
+            for source_name, source_config in config.sources.items():
+                level = source_config.compliance_level
+                if level and not compliance_mgr.is_valid_level(level):
+                    logger.warning(
+                        "RAG source '%s' has unknown compliance level: %s",
+                        source_name,
+                        level
+                    )
+        except Exception as e:
+            logger.debug("Compliance validation skipped for RAG sources: %s", e)
+
     @property
     def tool_approvals_config(self) -> ToolApprovalsConfig:
         """Get tool approvals configuration built from mcp.json and env variables (cached)."""
@@ -883,6 +996,7 @@ class ConfigManager:
         self._llm_config = None
         self._mcp_config = None
         self._rag_mcp_config = None
+        self._rag_sources_config = None
         self._tool_approvals_config = None
         self._file_extractors_config = None
         logger.info("Configuration cache cleared, will reload on next access")

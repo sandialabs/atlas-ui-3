@@ -16,6 +16,7 @@ from modules.rag.atlas_rag_client import (
     create_atlas_rag_client_from_config,
 )
 from domain.rag_mcp_service import RAGMCPService
+from domain.unified_rag_service import UnifiedRAGService
 from core.auth import is_user_in_group
 from infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 
@@ -40,6 +41,13 @@ class AppFactory:
         self.rag_mcp_service = RAGMCPService(
             mcp_manager=self.mcp_tools,
             config_manager=self.config_manager,
+            auth_check_func=is_user_in_group,
+        )
+
+        # Unified RAG service for HTTP and MCP RAG sources
+        self.unified_rag_service = UnifiedRAGService(
+            config_manager=self.config_manager,
+            mcp_manager=self.mcp_tools,
             auth_check_func=is_user_in_group,
         )
 
@@ -99,6 +107,9 @@ class AppFactory:
 
     def get_rag_mcp_service(self) -> RAGMCPService:  # noqa: D401
         return self.rag_mcp_service
+
+    def get_unified_rag_service(self) -> UnifiedRAGService:  # noqa: D401
+        return self.unified_rag_service
 
     def get_file_storage(self) -> S3StorageClient:  # noqa: D401
         return self.file_storage

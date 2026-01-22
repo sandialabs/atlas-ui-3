@@ -218,10 +218,18 @@ class LiteLLMCaller:
         if rag_client is None:
             from modules.rag import rag_client as default_rag_client
             rag_client = default_rag_client
-        
+
         # Use the first selected data source
-        data_source = data_sources[0]
-        
+        qualified_data_source = data_sources[0]
+
+        # Strip server prefix if present (e.g., "atlas_rag:technical-docs" -> "technical-docs")
+        # The prefix is used for routing in multi-RAG setups, but the RAG API expects just the corpus name
+        if ":" in qualified_data_source:
+            server_name, data_source = qualified_data_source.split(":", 1)
+            logger.debug("Stripped RAG server prefix: %s -> %s", qualified_data_source, data_source)
+        else:
+            data_source = qualified_data_source
+
         try:
             # Query RAG for context
             rag_response = await rag_client.query_rag(
@@ -343,10 +351,18 @@ class LiteLLMCaller:
         if rag_client is None:
             from modules.rag import rag_client as default_rag_client
             rag_client = default_rag_client
-        
+
         # Use the first selected data source
-        data_source = data_sources[0]
-        
+        qualified_data_source = data_sources[0]
+
+        # Strip server prefix if present (e.g., "atlas_rag:technical-docs" -> "technical-docs")
+        # The prefix is used for routing in multi-RAG setups, but the RAG API expects just the corpus name
+        if ":" in qualified_data_source:
+            server_name, data_source = qualified_data_source.split(":", 1)
+            logger.debug("Stripped RAG server prefix: %s -> %s", qualified_data_source, data_source)
+        else:
+            data_source = qualified_data_source
+
         try:
             # Query RAG for context
             rag_response = await rag_client.query_rag(
@@ -354,11 +370,11 @@ class LiteLLMCaller:
                 data_source,
                 messages
             )
-            
+
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()
             rag_context_message = {
-                "role": "system", 
+                "role": "system",
                 "content": f"Retrieved context from {data_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
             }
             messages_with_rag.insert(-1, rag_context_message)

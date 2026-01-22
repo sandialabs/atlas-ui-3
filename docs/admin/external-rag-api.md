@@ -6,58 +6,135 @@ This guide explains how to configure RAG (Retrieval-Augmented Generation) in Atl
 
 ## Overview
 
-Atlas UI supports multiple RAG backends controlled by a single `RAG_PROVIDER` setting:
+Atlas UI supports multiple RAG backends through a unified configuration file (`rag-sources.json`). This allows you to configure multiple RAG sources of different types in a single place.
 
-| Provider | Description |
-|----------|-------------|
-| `none` | RAG disabled (default) |
-| `mock` | Built-in mock for testing |
-| `atlas` | External ATLAS RAG API |
+**Supported RAG Source Types:**
+
+| Type | Description |
+|------|-------------|
+| `http` | HTTP REST API RAG backends (like ATLAS RAG API) |
 | `mcp` | MCP-based RAG servers |
 
 ## Quick Start
 
-Add one line to your `.env` file:
+1. Enable RAG in your `.env` file:
 
 ```bash
-# Choose your RAG provider: none, mock, atlas, or mcp
-RAG_PROVIDER=atlas
+FEATURE_RAG_ENABLED=true
 ```
 
-## Provider: `atlas` (ATLAS RAG API)
+2. Configure your RAG sources in `config/overrides/rag-sources.json`:
 
-When `RAG_PROVIDER=atlas`, Atlas UI routes RAG queries to an external ATLAS RAG API.
+```json
+{
+  "atlas_rag": {
+    "type": "http",
+    "display_name": "ATLAS RAG",
+    "url": "${ATLAS_RAG_URL}",
+    "bearer_token": "${ATLAS_RAG_BEARER_TOKEN}",
+    "groups": ["users"],
+    "compliance_level": "Internal"
+  }
+}
+```
 
-### Configuration
+3. Set environment variables for secrets:
 
 ```bash
-# Enable ATLAS RAG
-RAG_PROVIDER=atlas
-
-# ATLAS RAG API settings
 ATLAS_RAG_URL=https://rag-api.example.com
 ATLAS_RAG_BEARER_TOKEN=your-secret-token
-
-# Optional settings
-ATLAS_RAG_DEFAULT_MODEL=openai/gpt-oss-120b
-ATLAS_RAG_TOP_K=4
 ```
 
-### Configuration Options
+## Configuration File: rag-sources.json
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `RAG_PROVIDER` | Yes | `none` | Set to `atlas` to use ATLAS RAG API |
-| `ATLAS_RAG_URL` | Yes | `http://localhost:8002` | Base URL of the ATLAS RAG API |
-| `ATLAS_RAG_BEARER_TOKEN` | Recommended | `None` | Bearer token for API authentication |
-| `ATLAS_RAG_DEFAULT_MODEL` | No | `openai/gpt-oss-120b` | Model identifier for RAG queries |
-| `ATLAS_RAG_TOP_K` | No | `4` | Number of documents to retrieve |
+The `rag-sources.json` file defines all RAG backends. It supports environment variable substitution using `${ENV_VAR}` syntax.
 
-### API Contract
+### File Locations
 
-The ATLAS RAG API must implement two endpoints:
+Configuration files are loaded in order of priority:
+1. `config/overrides/rag-sources.json` (highest priority, not in git)
+2. `config/defaults/rag-sources.json` (versioned defaults)
 
-#### Discovery Endpoint
+### HTTP RAG Source Configuration
+
+For external HTTP REST API RAG backends:
+
+```json
+{
+  "atlas_rag": {
+    "type": "http",
+    "display_name": "ATLAS RAG",
+    "description": "External ATLAS RAG API for document retrieval",
+    "icon": "database",
+    "url": "${ATLAS_RAG_URL}",
+    "bearer_token": "${ATLAS_RAG_BEARER_TOKEN}",
+    "default_model": "openai/gpt-oss-120b",
+    "top_k": 4,
+    "timeout": 60.0,
+    "groups": ["users"],
+    "compliance_level": "Internal",
+    "enabled": true
+  }
+}
+```
+
+**HTTP Source Options:**
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `type` | Yes | - | Must be `"http"` for REST API sources |
+| `url` | Yes | - | Base URL of the RAG API (supports `${ENV_VAR}`) |
+| `bearer_token` | No | `null` | Bearer token for authentication (supports `${ENV_VAR}`) |
+| `display_name` | No | source key | Name shown in UI |
+| `description` | No | `null` | Description for the source |
+| `icon` | No | `"database"` | Icon name for UI |
+| `default_model` | No | `"openai/gpt-oss-120b"` | Model for RAG queries |
+| `top_k` | No | `4` | Number of documents to retrieve |
+| `timeout` | No | `60.0` | Request timeout in seconds |
+| `groups` | No | `[]` | Required groups for access |
+| `compliance_level` | No | `null` | Compliance level restriction |
+| `enabled` | No | `true` | Whether this source is active |
+
+### MCP RAG Source Configuration
+
+For MCP-based RAG servers that expose `rag_discover_resources` tool:
+
+```json
+{
+  "corporate_cars": {
+    "type": "mcp",
+    "display_name": "Corporate Cars",
+    "description": "Fleet RAG server for corporate vehicle data",
+    "icon": "car",
+    "command": ["python", "mcp/corporate_cars/main.py"],
+    "cwd": "backend",
+    "groups": ["users"],
+    "compliance_level": "SOC2"
+  }
+}
+```
+
+**MCP Source Options:**
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `type` | Yes | - | Must be `"mcp"` for MCP servers |
+| `command` | * | - | Command to run (for stdio transport) |
+| `url` | * | - | URL for HTTP/SSE transport |
+| `cwd` | No | `null` | Working directory for command |
+| `transport` | No | auto | Transport type: `stdio`, `http`, `sse` |
+| `auth_token` | No | `null` | Auth token for MCP server |
+| `display_name` | No | source key | Name shown in UI |
+| `groups` | No | `[]` | Required groups for access |
+| `compliance_level` | No | `null` | Compliance level restriction |
+
+\* Either `command` or `url` is required for MCP sources.
+
+## API Contract (HTTP Sources)
+
+HTTP RAG sources must implement these endpoints:
+
+### Discovery Endpoint
 
 ```
 GET /discover/datasources?as_user={user_email}
@@ -69,13 +146,13 @@ Authorization: Bearer {token}
 {
   "user_name": "user@example.com",
   "accessible_data_sources": [
-    {"name": "engineering-docs", "compliance_level": "Internal"},
+    {"name": "technical-docs", "compliance_level": "Internal"},
     {"name": "company-wiki", "compliance_level": "Public"}
   ]
 }
 ```
 
-#### Query Endpoint
+### Query Endpoint
 
 ```
 POST /rag/completions?as_user={user_email}
@@ -90,7 +167,7 @@ Content-Type: application/json
   "stream": false,
   "model": "openai/gpt-oss-120b",
   "top_k": 4,
-  "corpora": ["engineering-docs"]
+  "corpora": ["technical-docs"]
 }
 ```
 
@@ -110,39 +187,19 @@ Content-Type: application/json
     "query_processing_time_ms": 150,
     "documents_found": [{
       "id": "doc-001",
-      "corpus_id": "engineering-docs",
+      "corpus_id": "technical-docs",
       "text": "API Gateway handles authentication...",
       "confidence_score": 0.95
     }],
-    "data_sources": ["engineering-docs"],
+    "data_sources": ["technical-docs"],
     "retrieval_method": "similarity"
   }
 }
 ```
 
-## Provider: `mock` (Testing)
-
-For development and testing:
-
-```bash
-RAG_PROVIDER=mock
-```
-
-This uses the built-in mock RAG client with sample data.
-
-## Provider: `mcp` (MCP Servers)
-
-For MCP-based RAG servers configured in `mcp-rag.json`:
-
-```bash
-RAG_PROVIDER=mcp
-```
-
-See [MCP Server Configuration](mcp-servers.md) for details on configuring MCP RAG servers.
-
 ## Testing with the Mock Service
 
-A mock ATLAS RAG API is provided in `mocks/atlas-rag-api-mock/` for testing the `atlas` provider.
+A mock ATLAS RAG API is provided in `mocks/atlas-rag-api-mock/` for testing.
 
 ### Starting the Mock
 
@@ -175,32 +232,33 @@ The mock runs on `http://localhost:8002` with token `test-atlas-rag-token`.
 
 ### RAG panel not showing in UI
 
-- Verify `RAG_PROVIDER` is set to something other than `none`
+- Verify `FEATURE_RAG_ENABLED=true` in `.env`
+- Check that `rag-sources.json` has enabled sources
 - Restart the backend after changing configuration
 
-### Empty results from ATLAS RAG
+### Empty results from RAG
 
-- Verify `ATLAS_RAG_URL` is correct and reachable
-- Check that `ATLAS_RAG_BEARER_TOKEN` is valid
+- Verify the URL is correct and reachable
+- Check that bearer token is valid
 - Confirm the user has access to the requested data sources
+- Enable debug logging: `LOG_LEVEL=DEBUG`
 
 ### 401 Unauthorized errors
 
 - Verify the bearer token is correctly configured
 - Check that the token has not expired
+- Ensure `${ENV_VAR}` syntax is used for secrets in config
 
 ### 403 Forbidden errors
 
-- The impersonated user lacks access to the requested corpus
-- Check user group memberships in the RAG API
+- The user lacks access to the requested corpus
+- Check user group memberships
+- Verify compliance level requirements
 
-### Logging
+### 404 Not Found errors
 
-Enable debug logging to see RAG client activity:
-
-```bash
-LOG_LEVEL=DEBUG
-```
+- Check that the corpus name exists in the RAG backend
+- Verify the discovery endpoint returns the expected sources
 
 ## Architecture
 
@@ -213,29 +271,30 @@ User Request
 |   Backend        |
 +--------+---------+
          |
-         | RAG_PROVIDER decides routing
+         | rag-sources.json
+         | (unified config)
          |
-    +----+----+----+
-    |         |    |
-    v         v    v
-  mock     atlas  mcp
+    +----+----+
+    |         |
+    v         v
+  HTTP      MCP
+  (atlas)  (stdio/sse)
 ```
 
-## Backward Compatibility
+## Legacy Environment Variables
 
-The old environment variables still work as aliases:
+For backward compatibility, these environment variables still work but `rag-sources.json` is the recommended approach:
 
-| Old Variable | New Variable |
-|--------------|--------------|
-| `EXTERNAL_RAG_URL` | `ATLAS_RAG_URL` |
-| `EXTERNAL_RAG_BEARER_TOKEN` | `ATLAS_RAG_BEARER_TOKEN` |
-| `EXTERNAL_RAG_DEFAULT_MODEL` | `ATLAS_RAG_DEFAULT_MODEL` |
-| `EXTERNAL_RAG_TOP_K` | `ATLAS_RAG_TOP_K` |
-
-However, `FEATURE_RAG_ENABLED` and `EXTERNAL_RAG_ENABLED` are deprecated. Use `RAG_PROVIDER` instead.
+| Variable | Description |
+|----------|-------------|
+| `RAG_PROVIDER` | Set to `atlas` to enable ATLAS RAG via env vars |
+| `ATLAS_RAG_URL` | Base URL (also: `EXTERNAL_RAG_URL`) |
+| `ATLAS_RAG_BEARER_TOKEN` | Bearer token (also: `EXTERNAL_RAG_BEARER_TOKEN`) |
+| `ATLAS_RAG_DEFAULT_MODEL` | Model ID (also: `EXTERNAL_RAG_DEFAULT_MODEL`) |
+| `ATLAS_RAG_TOP_K` | Documents to retrieve (also: `EXTERNAL_RAG_TOP_K`) |
 
 ## Related Documentation
 
 - [Configuration Architecture](configuration.md) - General configuration overview
-- [MCP Server Configuration](mcp-servers.md) - Configuring MCP servers including RAG
+- [MCP Server Configuration](mcp-servers.md) - Configuring MCP servers
 - [Compliance Levels](compliance.md) - How compliance levels affect RAG access

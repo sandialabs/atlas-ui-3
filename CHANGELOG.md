@@ -7,12 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #TBD - 2026-01-21
-- **Feature**: Add ATLAS RAG API integration. When `EXTERNAL_RAG_ENABLED=true`, RAG queries are sent to an external ATLAS RAG API instead of the mock service.
-- **Architecture**: Add `RAGClientProtocol` interface in `backend/interfaces/rag.py` for protocol-based RAG client abstraction.
-- **Architecture**: Add `AtlasRAGClient` in `backend/modules/rag/atlas_rag_client.py` that implements Bearer token auth with `as_user` impersonation.
-- **Config**: Add `EXTERNAL_RAG_*` environment variables for configuring the ATLAS RAG API connection (URL, bearer token, model, top_k).
-- **Testing**: Add `mocks/atlas-rag-api-mock/` mock service for testing AtlasRAGClient without a real ATLAS RAG API.
-- **Tests**: Add 20 unit tests for AtlasRAGClient and integration tests with the mock service.
+- **Feature**: Add unified RAG configuration via `rag-sources.json`. Multiple RAG backends (HTTP and MCP) can now be configured in a single file.
+- **Architecture**: Add `UnifiedRAGService` in `backend/domain/unified_rag_service.py` for aggregating RAG discovery and queries across multiple backends.
+- **Architecture**: Add `RAGSourceConfig` and `RAGSourcesConfig` Pydantic models for type-safe configuration.
+- **Fix**: Fix 404 error when querying ATLAS RAG API - server prefix (e.g., `atlas_rag:`) is now properly stripped before calling the RAG API.
+- **Config**: Add `config/defaults/rag-sources.json` and `config/overrides/rag-sources.json` for unified RAG backend configuration.
+- **Config**: Support environment variable substitution (`${ENV_VAR}`) in `rag-sources.json` for secrets like bearer tokens.
+- **Docs**: Update RAG documentation to reflect the new unified configuration approach.
+
+### PR #TBD - 2026-01-21 (earlier)
+- **Feature**: Add ATLAS RAG API integration with `AtlasRAGClient` supporting Bearer token auth with `as_user` impersonation.
+- **Testing**: Add `mocks/atlas-rag-api-mock/` mock service with grep-based search for testing RAG integration.
+- **Tests**: Add integration tests for AtlasRAGClient with the mock service.
 
 ### PR #TBD - 2026-01-20
 - **UI Enhancement**: Renamed "Chat UI Admin Dashboard" to "ATLAS Admin Dashboard" for consistency with branding.
