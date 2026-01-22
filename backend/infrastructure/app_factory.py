@@ -57,17 +57,18 @@ class AppFactory:
         logger.info("AppFactory initialized")
 
     def _create_rag_client(self) -> Union[RAGClient, AtlasRAGClient]:
-        """Create the appropriate RAG client based on configuration.
+        """Create the appropriate RAG client based on rag_provider configuration.
 
         Returns:
-            AtlasRAGClient if external_rag_enabled is True,
-            otherwise returns the standard RAGClient.
+            AtlasRAGClient if rag_provider is "atlas",
+            otherwise returns the standard RAGClient (for "mock" or "none").
         """
-        if self.config_manager.app_settings.external_rag_enabled:
-            logger.info("Using AtlasRAGClient (ATLAS RAG API)")
+        rag_provider = self.config_manager.app_settings.rag_provider
+        if rag_provider == "atlas":
+            logger.info("RAG provider: atlas (ATLAS RAG API)")
             return create_atlas_rag_client_from_config(self.config_manager)
         else:
-            logger.info("Using RAGClient (mock/internal)")
+            logger.info("RAG provider: %s (using mock RAGClient)", rag_provider)
             return RAGClient()
 
     def create_chat_service(

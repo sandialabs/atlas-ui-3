@@ -71,7 +71,7 @@ services:
       
       # Feature Flags
       - FEATURE_WORKSPACES_ENABLED=false
-      - FEATURE_RAG_ENABLED=false
+      - RAG_PROVIDER=none
       - FEATURE_TOOLS_ENABLED=true
       - FEATURE_MARKETPLACE_ENABLED=true
       - FEATURE_FILES_PANEL_ENABLED=true
@@ -81,7 +81,6 @@ services:
       - FEATURE_DOMAIN_WHITELIST_ENABLED=false
       - FEATURE_MCP_AUTO_RECONNECT_ENABLED=false
       - FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=false
-      - EXTERNAL_RAG_ENABLED=false
 
       # Agent mode configuration
       - AGENT_MAX_STEPS=30

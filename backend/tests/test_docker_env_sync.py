@@ -139,9 +139,9 @@ def test_docker_compose_has_required_env_vars():
         'FEATURE_MARKETPLACE_ENABLED',
         'FEATURE_TOOLS_ENABLED',
         'FEATURE_FILES_PANEL_ENABLED',
-        'FEATURE_RAG_ENABLED',
+        'RAG_PROVIDER',  # RAG is now controlled by RAG_PROVIDER instead of FEATURE_RAG_ENABLED
     ]
-    
+
     for flag in key_feature_flags:
         assert flag in docker_compose_vars, (
             f"Key feature flag '{flag}' is missing from docker-compose.yml"

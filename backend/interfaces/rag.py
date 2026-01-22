@@ -22,7 +22,7 @@ class RAGClientProtocol(Protocol):
         Returns:
             List of DataSource objects the user can access.
         """
-        ...
+        pass
 
     async def query_rag(
         self, user_name: str, data_source: str, messages: List[Dict]
@@ -37,4 +37,4 @@ class RAGClientProtocol(Protocol):
         Returns:
             RAGResponse containing content and optional metadata.
         """
-        ...
+        pass

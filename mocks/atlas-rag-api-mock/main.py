@@ -136,7 +136,7 @@ async def verify_token_middleware(request, call_next):
         )
 
     # Token valid - proceed with request
-    logger.debug(f"Authenticated request from client: {token_info.get('client_id')}")
+    logger.debug("Authenticated request from client: %s", token_info.get('client_id'))
     return await call_next(request)
 
 # ------------------------------------------------------------------------------
@@ -454,11 +454,11 @@ async def discover_data_sources(
 
     Returns list of data sources with name and compliance_level.
     """
-    logger.info(f"Discovery request for user: {as_user}")
+    logger.info("Discovery request for user: %s", as_user)
 
     # Check if user exists
     if as_user not in USERS_GROUPS_DB:
-        logger.warning(f"Unknown user: {as_user}")
+        logger.warning("Unknown user: %s", as_user)
         # Return empty list for unknown users (graceful degradation)
         return DataSourceDiscoveryResponse(
             user_name=as_user,
@@ -467,7 +467,7 @@ async def discover_data_sources(
 
     accessible = get_accessible_corpora(as_user)
 
-    logger.info(f"User {as_user} can access {len(accessible)} data sources")
+    logger.info("User %s can access %d data sources", as_user, len(accessible))
 
     return DataSourceDiscoveryResponse(
         user_name=as_user,
@@ -491,8 +491,8 @@ async def rag_completions(
     start_time = time.time()
 
     logger.info(
-        f"RAG query from user: {as_user}, corpora: {request.corpora}, "
-        f"model: {request.model}"
+        "RAG query from user: %s, corpora: %s, model: %s",
+        as_user, request.corpora, request.model
     )
 
     # Validate user exists
