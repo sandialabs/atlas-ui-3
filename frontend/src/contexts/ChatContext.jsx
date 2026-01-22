@@ -197,8 +197,12 @@ export const ChatProvider = ({ children }) => {
 
 	const exportData = useCallback((asText) => {
 		if (!messages.length) { alert('No chat history to download'); return }
+		const ragEnabled = config.features?.rag
+		const ragSourcesDisplay = ragEnabled
+			? ([...selectedDataSources].join(', ') || 'None selected')
+			: 'None (RAG disabled)'
 		if (asText) {
-			let text = `Chat Export - ${config.appName}\nDate: ${new Date().toLocaleString()}\nUser: ${config.user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected Data Sources: ${[...selectedDataSources].join(', ') || 'None'}\nAgent Mode: ${agent.agentModeEnabled ? 'Enabled' : 'Disabled'}\n\n${'='.repeat(50)}\n\n`
+			let text = `Chat Export - ${config.appName}\nDate: ${new Date().toLocaleString()}\nUser: ${config.user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected RAG Sources: ${ragSourcesDisplay}\nAgent Mode: ${agent.agentModeEnabled ? 'Enabled' : 'Disabled'}\n\n${'='.repeat(50)}\n\n`
 			messages.forEach(m => { text += `${m.role.toUpperCase()}:\n${m.content}\n\n` })
 			if (files.canvasContent) text += `${'='.repeat(50)}\nCANVAS CONTENT:\n${files.canvasContent}\n`
 			const blob = new Blob([text], { type: 'text/plain' })
@@ -216,13 +220,14 @@ export const ChatProvider = ({ children }) => {
 					user: config.user,
 					model: currentModel,
 					selectedTools: [...selectedTools],
-					selectedDataSources: [...selectedDataSources],
+					ragEnabled: ragEnabled,
+					selectedRagSources: ragEnabled ? [...selectedDataSources] : null,
 					onlyRag: config.onlyRag,
 					toolChoiceRequired: selections.toolChoiceRequired,
 					agentModeEnabled: agent.agentModeEnabled,
 					agentMaxSteps: agent.agentMaxSteps,
 					messageCount: messages.length,
-					exportVersion: '1.0'
+					exportVersion: '1.1'
 				},
 				conversation: messages,
 				canvasContent: files.canvasContent || null
@@ -235,7 +240,7 @@ export const ChatProvider = ({ children }) => {
 			a.download = `chat-export-${ts}.json`
 			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 		}
-	}, [messages, config.appName, config.user, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, config.onlyRag, selections.toolChoiceRequired, files.canvasContent])
+	}, [messages, config.appName, config.user, config.features, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, config.onlyRag, selections.toolChoiceRequired, files.canvasContent])
 
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
