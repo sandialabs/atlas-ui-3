@@ -36,14 +36,23 @@ class LiteLLMCaller:
     guarantees in multi-tenant or highly concurrent environments.
     """
     
-    def __init__(self, llm_config=None, debug_mode: bool = False):
-        """Initialize with optional config dependency injection."""
+    def __init__(self, llm_config=None, debug_mode: bool = False, rag_client=None):
+        """Initialize with optional config dependency injection.
+
+        Args:
+            llm_config: LLM configuration object
+            debug_mode: Enable verbose LiteLLM logging
+            rag_client: RAG client for RAG-augmented calls (defaults to mock if not provided)
+        """
         if llm_config is None:
             from modules.config import config_manager
             self.llm_config = config_manager.llm_config
         else:
             self.llm_config = llm_config
-        
+
+        # Store RAG client (will fall back to module default if None)
+        self._rag_client = rag_client
+
         # Set litellm verbosity based on debug mode
         litellm.set_verbose = debug_mode
     
@@ -191,9 +200,9 @@ class LiteLLMCaller:
             raise Exception(f"Failed to call LLM: {exc}")
     
     async def call_with_rag(
-        self, 
-        model_name: str, 
-        messages: List[Dict[str, str]], 
+        self,
+        model_name: str,
+        messages: List[Dict[str, str]],
         data_sources: List[str],
         user_email: str,
         rag_client=None,
@@ -202,8 +211,10 @@ class LiteLLMCaller:
         """LLM call with RAG integration."""
         if not data_sources:
             return await self.call_plain(model_name, messages, temperature=temperature)
-        
-        # Import RAG client if not provided
+
+        # Use provided client, instance client, or fall back to module default
+        if rag_client is None:
+            rag_client = self._rag_client
         if rag_client is None:
             from modules.rag import rag_client as default_rag_client
             rag_client = default_rag_client
@@ -325,8 +336,10 @@ class LiteLLMCaller:
         """Full integration: RAG + Tools."""
         if not data_sources:
             return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature)
-        
-        # Import RAG client if not provided
+
+        # Use provided client, instance client, or fall back to module default
+        if rag_client is None:
+            rag_client = self._rag_client
         if rag_client is None:
             from modules.rag import rag_client as default_rag_client
             rag_client = default_rag_client

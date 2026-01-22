@@ -29,13 +29,14 @@ class AppFactory:
         # Configuration
         self.config_manager = ConfigManager()
 
-        # Core modules
+        # Core modules - create RAG client first so LiteLLMCaller can use it
+        self.rag_client = self._create_rag_client()
         self.llm_caller = LiteLLMCaller(
             self.config_manager.llm_config,
             debug_mode=self.config_manager.app_settings.debug_mode,
+            rag_client=self.rag_client,
         )
         self.mcp_tools = MCPToolManager()
-        self.rag_client = self._create_rag_client()
         self.rag_mcp_service = RAGMCPService(
             mcp_manager=self.mcp_tools,
             config_manager=self.config_manager,

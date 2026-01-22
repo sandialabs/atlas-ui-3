@@ -91,65 +91,69 @@ class TestAtlasRAGIntegration:
         sources = await client.discover_data_sources("test@test.com")
 
         assert len(sources) > 0
-        # test@test.com has engineering, finance, admin groups
+        # test@test.com has employee, engineering, devops, admin groups - sees all sources
         source_names = [s.name for s in sources]
-        assert "engineering-docs" in source_names
-        assert "financial-reports" in source_names
-        assert "company-wiki" in source_names  # Public
+        assert "company-policies" in source_names
+        assert "technical-docs" in source_names
+        assert "product-knowledge" in source_names  # Public
 
         # Check compliance levels are returned
         for source in sources:
-            assert source.compliance_level in ["Internal", "CUI", "Public"]
+            assert source.compliance_level in ["Internal", "Public"]
 
     @pytest.mark.asyncio
     async def test_discover_data_sources_unknown_user(self, mock_service, client):
-        """Test discovering data sources for an unknown user returns empty list."""
+        """Test discovering data sources for an unknown user returns only public sources."""
         sources = await client.discover_data_sources("unknown@example.com")
-        assert sources == []
+        # Unknown users get public sources only
+        source_names = [s.name for s in sources]
+        assert "product-knowledge" in source_names
+        assert "company-policies" not in source_names
+        assert "technical-docs" not in source_names
 
     @pytest.mark.asyncio
     async def test_discover_data_sources_limited_access(self, mock_service, client):
         """Test that users only see corpora they have access to."""
-        # bob@example.com only has sales and marketing groups
+        # bob@example.com has employee and sales groups
         sources = await client.discover_data_sources("bob@example.com")
 
         source_names = [s.name for s in sources]
-        assert "sales-playbook" in source_names
-        assert "company-wiki" in source_names  # Public
-        # Should NOT have access to engineering or finance corpora
-        assert "engineering-docs" not in source_names
-        assert "financial-reports" not in source_names
+        assert "company-policies" in source_names  # requires employee
+        assert "product-knowledge" in source_names  # Public
+        # Should NOT have access to technical-docs (requires engineering or devops)
+        assert "technical-docs" not in source_names
 
     @pytest.mark.asyncio
     async def test_query_rag_success(self, mock_service, client):
         """Test successful RAG query."""
-        messages = [{"role": "user", "content": "What is the API Gateway?"}]
+        messages = [{"role": "user", "content": "What is the API authentication?"}]
 
         response = await client.query_rag(
             user_name="test@test.com",
-            data_source="engineering-docs",
+            data_source="technical-docs",
             messages=messages,
         )
 
         assert response.content is not None
         assert len(response.content) > 0
-        assert "API Gateway" in response.content or "engineering" in response.content.lower()
+        # Should contain information about API or authentication
+        assert "API" in response.content or "authentication" in response.content.lower()
 
         # Check metadata
         assert response.metadata is not None
         assert response.metadata.query_processing_time_ms >= 0
-        assert response.metadata.data_source_name == "engineering-docs"
-        assert response.metadata.retrieval_method == "similarity"
+        assert response.metadata.data_source_name == "technical-docs"
+        assert response.metadata.retrieval_method == "keyword-search"
         assert len(response.metadata.documents_found) > 0
 
     @pytest.mark.asyncio
     async def test_query_rag_with_metadata(self, mock_service, client):
         """Test that RAG query returns document metadata."""
-        messages = [{"role": "user", "content": "Tell me about Kubernetes"}]
+        messages = [{"role": "user", "content": "Tell me about deployment pipeline"}]
 
         response = await client.query_rag(
-            user_name="charlie@example.com",  # Has engineering, devops groups
-            data_source="kubernetes-runbooks",
+            user_name="charlie@example.com",  # Has employee, engineering, devops groups
+            data_source="technical-docs",
             messages=messages,
         )
 
@@ -165,12 +169,12 @@ class TestAtlasRAGIntegration:
     @pytest.mark.asyncio
     async def test_query_rag_access_denied(self, mock_service, client):
         """Test that RAG query returns 403 for unauthorized access."""
-        messages = [{"role": "user", "content": "Show me financial data"}]
+        messages = [{"role": "user", "content": "Show me technical docs"}]
 
         with pytest.raises(Exception) as exc_info:
             await client.query_rag(
-                user_name="bob@example.com",  # No finance access
-                data_source="financial-reports",
+                user_name="bob@example.com",  # Has employee, sales - no engineering/devops
+                data_source="technical-docs",  # Requires engineering or devops
                 messages=messages,
             )
 
