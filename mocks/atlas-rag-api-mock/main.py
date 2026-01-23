@@ -329,6 +329,7 @@ async def rag_completions(request: RagRequest, as_user: str = Query(...)):
     """Query RAG with grep-based search."""
     start_time = time.time()
 
+    logger.info("---------- RAG query ----------")
     logger.info("RAG query from user: %s, corpora: %s", as_user, request.corpora)
 
     # Determine corpora to search
@@ -343,6 +344,7 @@ async def rag_completions(request: RagRequest, as_user: str = Query(...)):
 
     # Extract user query
     user_query = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
+    logger.info("RAG user query (exact): %r", user_query)
 
     # Search each corpus
     all_documents = []
