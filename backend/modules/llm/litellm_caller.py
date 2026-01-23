@@ -290,16 +290,28 @@ class LiteLLMCaller:
             # Call LLM with enriched context
             llm_response = await self.call_plain(model_name, messages_with_rag, temperature=temperature)
 
-            # Append metadata if available and useful
-            if rag_response.metadata:
+            # Only append metadata if RAG actually provided useful content
+            # Skip if: no content, empty content, or default fallback messages
+            rag_content_useful = bool(
+                rag_response.content
+                and rag_response.content.strip()
+                and rag_response.content not in (
+                    "No response from RAG system.",
+                    "No response from MCP RAG.",
+                    "No matching vehicles found.",
+                )
+            )
+
+            if rag_content_useful and rag_response.metadata:
                 metadata_summary = self._format_rag_metadata(rag_response.metadata)
                 # Only append if we have actual metadata (not just "Metadata unavailable")
                 if metadata_summary and metadata_summary != "Metadata unavailable":
                     llm_response += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
 
             logger.info(
-                "[LLM+RAG] RAG-integrated query complete: response_length=%d",
+                "[LLM+RAG] RAG-integrated query complete: response_length=%d, rag_content_useful=%s",
                 len(llm_response),
+                rag_content_useful,
             )
             return llm_response
 
@@ -451,17 +463,30 @@ class LiteLLMCaller:
             # Call LLM with enriched context and tools
             llm_response = await self.call_with_tools(model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature)
 
-            # Append metadata to content if available, useful, and no tool calls
-            if rag_response.metadata and not llm_response.has_tool_calls():
+            # Only append metadata if RAG actually provided useful content
+            # Skip if: no content, empty content, or default fallback messages
+            rag_content_useful = bool(
+                rag_response.content
+                and rag_response.content.strip()
+                and rag_response.content not in (
+                    "No response from RAG system.",
+                    "No response from MCP RAG.",
+                    "No matching vehicles found.",
+                )
+            )
+
+            # Append metadata to content if RAG was useful, has metadata, and no tool calls
+            if rag_content_useful and rag_response.metadata and not llm_response.has_tool_calls():
                 metadata_summary = self._format_rag_metadata(rag_response.metadata)
                 # Only append if we have actual metadata (not just "Metadata unavailable")
                 if metadata_summary and metadata_summary != "Metadata unavailable":
                     llm_response.content += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
 
             logger.info(
-                "[LLM+RAG+Tools] RAG+tools query complete: response_length=%d, has_tool_calls=%s",
+                "[LLM+RAG+Tools] RAG+tools query complete: response_length=%d, has_tool_calls=%s, rag_content_useful=%s",
                 len(llm_response.content) if llm_response.content else 0,
                 llm_response.has_tool_calls(),
+                rag_content_useful,
             )
             return llm_response
 
