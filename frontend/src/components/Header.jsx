@@ -284,12 +284,12 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
             if (features?.tools) {
               return (
                 <button
-              onClick={onToggleTools}
-              className="p-2 rounded-lg bg-yellow-500 border border-red-500 block"
-              title="Toggle Tools, Integrations, and Prompts"
-            >
-              <Wrench className="w-5 h-5" />
-            </button>
+                  onClick={onToggleTools}
+                  className="p-2 rounded-lg bg-yellow-500 border border-red-500 block"
+                  title="Toggle Tools, Integrations, and Prompts"
+                >
+                  <Wrench className="w-5 h-5" />
+                </button>
               );
             } else {
               return null; // Render nothing if not showing
