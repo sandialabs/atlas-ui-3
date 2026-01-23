@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { X } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { X, Search } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 
 const RagPanel = ({ isOpen, onClose }) => {
@@ -10,6 +10,8 @@ const RagPanel = ({ isOpen, onClose }) => {
     features,
     complianceLevelFilter
   } = useChat()
+
+  const [searchQuery, setSearchQuery] = useState('')
 
   const complianceLevelsEnabled = features.compliance_levels
 
@@ -23,15 +25,29 @@ const RagPanel = ({ isOpen, onClose }) => {
     }
   }
 
-  // Apply filtering logic based on compliance level from header
+  // Apply filtering logic based on compliance level and search query
   const filteredDataSources = useMemo(() => {
-    if (!complianceLevelsEnabled || !complianceLevelFilter) {
-      return ragSources
+    let sources = ragSources
+
+    // Filter by compliance level
+    if (complianceLevelsEnabled && complianceLevelFilter) {
+      sources = sources.filter(source =>
+        source.complianceLevel && source.complianceLevel === complianceLevelFilter
+      )
     }
-    return ragSources.filter(source =>
-      source.complianceLevel && source.complianceLevel === complianceLevelFilter
-    )
-  }, [ragSources, complianceLevelFilter, complianceLevelsEnabled])
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      sources = sources.filter(source => {
+        const name = (source.name || '').toLowerCase()
+        const serverName = (source.serverDisplayName || source.serverName || '').toLowerCase()
+        return name.includes(query) || serverName.includes(query)
+      })
+    }
+
+    return sources
+  }, [ragSources, complianceLevelFilter, complianceLevelsEnabled, searchQuery])
 
   return (
     <>
@@ -61,11 +77,36 @@ const RagPanel = ({ isOpen, onClose }) => {
           </button>
         </div>
 
+        {/* Search */}
+        <div className="p-4 border-b border-gray-700 flex-shrink-0">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search data sources..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Data Sources List */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 min-h-0">
           {/* Help text */}
           <div className="text-xs text-gray-400 mb-3 pb-3 border-b border-gray-700">
             Click to enable/disable. <span className="text-green-400">Green</span> = enabled.
+            {selectedDataSources.size > 0 && (
+              <span className="ml-2 text-blue-400">({selectedDataSources.size} selected)</span>
+            )}
           </div>
 
           {filteredDataSources.length === 0 ? (
