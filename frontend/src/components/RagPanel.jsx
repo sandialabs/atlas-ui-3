@@ -63,6 +63,11 @@ const RagPanel = ({ isOpen, onClose }) => {
 
         {/* Data Sources List */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 min-h-0">
+          {/* Help text */}
+          <div className="text-xs text-gray-400 mb-3 pb-3 border-b border-gray-700">
+            Click to enable/disable. <span className="text-green-400">Green</span> = enabled.
+          </div>
+
           {filteredDataSources.length === 0 ? (
             <div className="text-gray-400 text-center py-8">No data sources available</div>
           ) : (

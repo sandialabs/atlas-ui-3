@@ -293,9 +293,21 @@ const ChatArea = () => {
     handleAutoComplete(value)
   }
 
-  // Get all available tools as flat list
+  // Get all available tools as flat list (including special commands)
   const getAllAvailableTools = () => {
     const allTools = []
+
+    // Add /search command if RAG is enabled
+    if (features?.rag) {
+      allTools.push({
+        key: '_special_search',
+        name: 'search',
+        server: 'RAG',
+        description: 'Search across all RAG data sources',
+        isSpecialCommand: true
+      })
+    }
+
     tools.forEach(toolServer => {
       toolServer.tools.forEach(toolName => {
         allTools.push({
@@ -447,18 +459,29 @@ const ChatArea = () => {
 
   // Handle tool selection from autocomplete
   const selectTool = (tool) => {
+    // Handle special commands differently
+    if (tool.isSpecialCommand) {
+      // For special commands like /search, just set the input value
+      setInputValue(`/${tool.name} `)
+      setShowToolAutocomplete(false)
+      if (textareaRef.current) {
+        textareaRef.current.focus()
+      }
+      return
+    }
+
     // Enable the tool if not already selected
     if (!selectedTools.has(tool.key)) {
       toggleTool(tool.key)
     }
-    
+
     // Enable required tool call
     setToolChoiceRequired(true)
-    
+
     // Replace the slash command with the tool name and add a space
     setInputValue(`/${tool.name} `)
     setShowToolAutocomplete(false)
-    
+
     // Focus back to textarea
     if (textareaRef.current) {
       textareaRef.current.focus()
@@ -795,11 +818,11 @@ const ChatArea = () => {
                   type="button"
                   onClick={toggleRagEnabled}
                   className={`px-3 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
-                    ragEnabled
+                    ragEnabled || hasSearchCommand
                       ? 'bg-green-600 hover:bg-green-700 text-white'
                       : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                   }`}
-                  title={ragEnabled ? 'RAG enabled - click to disable' : 'RAG disabled - click to enable'}
+                  title={ragEnabled ? 'RAG enabled - click to disable' : hasSearchCommand ? 'RAG active for this search' : 'RAG disabled - click to enable'}
                 >
                   <Search className="w-5 h-5" />
                 </button>

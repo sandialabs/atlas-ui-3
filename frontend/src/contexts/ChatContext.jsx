@@ -130,10 +130,10 @@ export const ChatProvider = ({ children }) => {
 		group.prompts.forEach(p => { const key = `${server}_${p.name}`; if (selectedPrompts.has(key)) selections.togglePrompt(key) })
 	}, [config.prompts, selectedPrompts, selections])
 
-	// Flatten ragServers into a list of all available data source IDs
+	// Flatten ragServers into a list of all available data source IDs (qualified with server name)
 	const getAllRagSourceIds = useCallback(() => {
 		return config.ragServers.flatMap(server =>
-			server.sources.map(source => source.id)
+			server.sources.map(source => `${server.server}:${source.id}`)
 		)
 	}, [config.ragServers])
 
