@@ -143,9 +143,21 @@ class AtlasRAGClient:
             HTTPException: On API errors (403, 404, 500).
         """
         logger.info(
-            "Querying RAG for user %s with data source %s",
+            "[HTTP-RAG] query_rag called: user=%s, data_source=%s, message_count=%d",
             user_name,
             data_source,
+            len(messages),
+        )
+
+        # Extract user query for logging
+        user_query = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                user_query = msg.get("content", "")[:100]
+                break
+        logger.debug(
+            "[HTTP-RAG] Query preview: %s...",
+            user_query,
         )
 
         # Build request payload matching RagRequest format
@@ -159,6 +171,13 @@ class AtlasRAGClient:
             "expanded_window": [0, 0],
         }
 
+        logger.debug(
+            "[HTTP-RAG] Request payload: model=%s, top_k=%d, corpora=%s",
+            payload["model"],
+            payload["top_k"],
+            payload["corpora"],
+        )
+
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
                 response = await client.post(
@@ -170,6 +189,12 @@ class AtlasRAGClient:
                 response.raise_for_status()
                 data = response.json()
 
+                logger.debug(
+                    "[HTTP-RAG] Response received: status=%d, keys=%s",
+                    response.status_code,
+                    list(data.keys()),
+                )
+
                 # Extract content from OpenAI ChatCompletion format
                 content = "No response from RAG system."
                 if "choices" in data and len(data["choices"]) > 0:
@@ -177,13 +202,21 @@ class AtlasRAGClient:
                     if "message" in choice and "content" in choice["message"]:
                         content = choice["message"]["content"]
 
+                logger.debug(
+                    "[HTTP-RAG] Extracted content: length=%d, preview=%s...",
+                    len(content),
+                    content[:300] if content else "(empty)",
+                )
+
                 # Map rag_metadata to RAGMetadata
                 metadata = self._parse_rag_metadata(data, data_source)
 
                 logger.info(
-                    "RAG query successful for user %s, content length: %d",
+                    "[HTTP-RAG] query_rag complete: user=%s, source=%s, content_length=%d, has_metadata=%s",
                     user_name,
+                    data_source,
                     len(content),
+                    metadata is not None,
                 )
                 return RAGResponse(content=content, metadata=metadata)
 

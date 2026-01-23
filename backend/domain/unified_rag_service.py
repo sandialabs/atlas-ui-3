@@ -197,6 +197,13 @@ class UnifiedRAGService:
         Returns:
             RAGResponse with content and metadata.
         """
+        logger.debug(
+            "[RAG] query_rag called: qualified_source=%s, user=%s, message_count=%d",
+            sanitize_for_logging(qualified_data_source),
+            sanitize_for_logging(username),
+            len(messages),
+        )
+
         # Parse the qualified data source
         if ":" in qualified_data_source:
             server_name, source_id = qualified_data_source.split(":", 1)
@@ -205,27 +212,45 @@ class UnifiedRAGService:
             source_id = qualified_data_source
             server_name = self._find_server_for_source(source_id)
             if not server_name:
+                logger.error("[RAG] Could not find server for source: %s", source_id)
                 raise ValueError(f"Could not find server for source: {source_id}")
 
         logger.info(
-            "Routing RAG query: server=%s, source=%s, user=%s",
-            server_name, source_id, username
+            "[RAG] Routing query: server=%s, source=%s, user=%s",
+            server_name, source_id, sanitize_for_logging(username)
         )
 
         rag_config = self.config_manager.rag_sources_config
         source_config = rag_config.sources.get(server_name)
 
         if not source_config:
+            logger.error("[RAG] Source not found in config: %s", server_name)
             raise ValueError(f"RAG source not found: {server_name}")
 
+        logger.debug(
+            "[RAG] Source config: type=%s, enabled=%s, compliance_level=%s",
+            source_config.type,
+            source_config.enabled,
+            source_config.compliance_level,
+        )
+
         if source_config.type == "http":
+            logger.debug("[RAG] Routing to HTTP RAG client for server: %s", server_name)
             client = self._get_http_client(server_name, source_config)
             # Pass the unqualified source_id to the HTTP API
-            return await client.query_rag(username, source_id, messages)
+            response = await client.query_rag(username, source_id, messages)
+            logger.debug(
+                "[RAG] HTTP RAG response received: content_length=%d, has_metadata=%s",
+                len(response.content) if response.content else 0,
+                response.metadata is not None,
+            )
+            return response
 
         elif source_config.type == "mcp":
+            logger.debug("[RAG] Routing to MCP RAG service for server: %s", server_name)
             # Route MCP queries to RAGMCPService
             if not self.rag_mcp_service:
+                logger.error("[RAG] RAGMCPService not configured for MCP RAG queries")
                 raise ValueError("RAGMCPService not configured for MCP RAG queries")
 
             # Extract the query from messages (last user message)
@@ -235,6 +260,13 @@ class UnifiedRAGService:
                     query = msg.get("content", "")
                     break
 
+            logger.debug(
+                "[RAG] MCP RAG query: server=%s, source=%s, query_preview=%s...",
+                server_name,
+                source_id,
+                sanitize_for_logging(query[:100]) if query else "(empty)",
+            )
+
             # Call RAGMCPService.synthesize() for MCP sources
             qualified_sources = [qualified_data_source]  # Format: "server:source_id"
             mcp_response = await self.rag_mcp_service.synthesize(
@@ -243,10 +275,22 @@ class UnifiedRAGService:
                 sources=qualified_sources,
             )
 
+            logger.debug(
+                "[RAG] MCP RAG response received: has_results=%s, meta_data_keys=%s",
+                "results" in mcp_response,
+                list(mcp_response.get("meta_data", {}).keys()),
+            )
+
             # Convert MCP response to RAGResponse format
             results = mcp_response.get("results", {})
             answer = results.get("answer", "No response from MCP RAG.")
             meta_data = mcp_response.get("meta_data", {})
+
+            logger.debug(
+                "[RAG] MCP RAG answer: length=%d, preview=%s...",
+                len(answer) if answer else 0,
+                sanitize_for_logging(answer[:200]) if answer else "(empty)",
+            )
 
             # Build metadata if available
             metadata = None

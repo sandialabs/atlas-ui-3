@@ -312,6 +312,14 @@ class RAGMCPService:
 
         sources are server-qualified (server:id). We group by server.
         """
+        logger.debug(
+            "[MCP-RAG] search_raw called: user=%s, query_preview=%s..., sources=%s, top_k=%d",
+            sanitize_for_logging(username),
+            sanitize_for_logging(query[:100]) if query else "(empty)",
+            sources,
+            top_k,
+        )
+
         filters = filters or {}
         ranking = ranking or {}
         by_server: Dict[str, List[str]] = {}
@@ -320,17 +328,22 @@ class RAGMCPService:
                 srv, rid = s.split(":", 1)
                 by_server.setdefault(srv, []).append(rid)
 
+        logger.debug("[MCP-RAG] search_raw sources grouped by server: %s", by_server)
+
         all_hits: List[Dict[str, Any]] = []
         meta: Dict[str, Any] = {"providers": {}, "top_k": top_k}
 
         for server, rids in by_server.items():
+            logger.debug("[MCP-RAG] search_raw processing server=%s, resource_ids=%s", server, rids)
             try:
                 # Check tool availability
                 server_data = self.mcp_manager.available_tools.get(server) or {}
                 tool_list = server_data.get("tools", [])
                 if not any(getattr(t, "name", None) == "rag_get_raw_results" for t in tool_list):
+                    logger.debug("[MCP-RAG] Server %s lacks rag_get_raw_results tool, skipping", server)
                     continue
 
+                logger.debug("[MCP-RAG] Calling rag_get_raw_results on server %s", server)
                 raw = await self.mcp_manager.call_tool(
                     server_name=server,
                     tool_name="rag_get_raw_results",
@@ -343,9 +356,13 @@ class RAGMCPService:
                         "ranking": ranking,
                     },
                 )
+                logger.debug("[MCP-RAG] Server %s raw response type: %s", server, type(raw).__name__)
+
                 payload = self._extract_structured_result(raw) or {}
                 results = payload.get("results") or {}
                 hits = results.get("hits") or []
+                logger.debug("[MCP-RAG] Server %s returned %d hits", server, len(hits))
+
                 # Annotate with server for provenance
                 for h in hits:
                     if isinstance(h, dict):
@@ -356,6 +373,7 @@ class RAGMCPService:
                     "error": None,
                 }
             except Exception as e:
+                logger.error("[MCP-RAG] Server %s search_raw error: %s", server, e, exc_info=True)
                 meta["providers"][server] = {"returned": 0, "error": str(e)}
 
         # Merge + rerank (simple): sort by score desc if present
@@ -367,6 +385,13 @@ class RAGMCPService:
 
         all_hits.sort(key=score_of, reverse=True)
         merged = all_hits[: top_k or len(all_hits)]
+
+        logger.info(
+            "[MCP-RAG] search_raw complete: total_hits=%d, merged_count=%d, providers=%s",
+            len(all_hits),
+            len(merged),
+            list(meta["providers"].keys()),
+        )
 
         # Prompt-injection risk check on retrieved snippets (observe + log)
         try:
@@ -417,6 +442,14 @@ class RAGMCPService:
 
         If not available, fall back to raw search and concatenate snippets.
         """
+        logger.debug(
+            "[MCP-RAG] synthesize called: user=%s, query_preview=%s..., sources=%s, top_k=%s",
+            sanitize_for_logging(username),
+            sanitize_for_logging(query[:100]) if query else "(empty)",
+            sources,
+            top_k,
+        )
+
         synthesis_params = synthesis_params or {}
         provided_context = provided_context or {}
 
@@ -426,17 +459,28 @@ class RAGMCPService:
                 srv, rid = s.split(":", 1)
                 by_server.setdefault(srv, []).append(rid)
 
+        logger.debug("[MCP-RAG] Sources grouped by server: %s", by_server)
+
         answers: List[str] = []
         citations: List[Dict[str, Any]] = []
         meta: Dict[str, Any] = {"providers": {}}
         used_fallback = False
 
         for server, rids in by_server.items():
+            logger.debug(
+                "[MCP-RAG] Processing server=%s, resource_ids=%s",
+                server,
+                rids,
+            )
             try:
                 server_data = self.mcp_manager.available_tools.get(server) or {}
                 tool_list = server_data.get("tools", [])
+                tool_names = [getattr(t, "name", None) for t in tool_list]
+                logger.debug("[MCP-RAG] Server %s available tools: %s", server, tool_names)
+
                 has_synth = any(getattr(t, "name", None) == "rag_get_synthesized_results" for t in tool_list)
                 if has_synth:
+                    logger.debug("[MCP-RAG] Server %s has rag_get_synthesized_results, calling...", server)
                     raw = await self.mcp_manager.call_tool(
                         server_name=server,
                         tool_name="rag_get_synthesized_results",
@@ -449,10 +493,20 @@ class RAGMCPService:
                             "provided_context": provided_context,
                         },
                     )
+                    logger.debug("[MCP-RAG] Server %s raw response type: %s", server, type(raw).__name__)
+
                     payload = self._extract_structured_result(raw) or {}
+                    logger.debug("[MCP-RAG] Server %s extracted payload keys: %s", server, list(payload.keys()))
+
                     results = payload.get("results") or {}
                     ans = results.get("answer")
                     if isinstance(ans, str) and ans:
+                        logger.debug(
+                            "[MCP-RAG] Server %s answer length=%d, preview=%s...",
+                            server,
+                            len(ans),
+                            sanitize_for_logging(ans[:200]),
+                        )
                         answers.append(ans)
                     cits = results.get("citations") or []
                     if isinstance(cits, list):
@@ -461,19 +515,30 @@ class RAGMCPService:
                                 c.setdefault("server", server)
                         citations.extend([c for c in cits if isinstance(c, dict)])
                     meta["providers"][server] = {"used_synth": True, "error": None}
+                    logger.info("[MCP-RAG] Server %s synthesis complete: answer_length=%d", server, len(ans) if ans else 0)
                 else:
+                    logger.debug("[MCP-RAG] Server %s lacks rag_get_synthesized_results, using fallback search_raw", server)
                     used_fallback = True
                     raw_payload = await self.search_raw(username, query, [f"{server}:{rid}" for rid in rids], top_k=top_k or 8)
                     # Build a rudimentary answer from snippets
                     hits = ((raw_payload.get("results") or {}).get("hits") or [])
+                    logger.debug("[MCP-RAG] Server %s fallback search returned %d hits", server, len(hits))
                     snippet_texts = [h.get("snippet") or h.get("chunk") or "" for h in hits if isinstance(h, dict)]
                     if snippet_texts:
                         answers.append("\n\n".join(snippet_texts[:3]))
                     meta["providers"][server] = {"used_synth": False, "error": None}
             except Exception as e:
+                logger.error("[MCP-RAG] Server %s synthesis error: %s", server, e, exc_info=True)
                 meta["providers"][server] = {"used_synth": False, "error": str(e)}
 
         final_answer = "\n\n---\n\n".join([a for a in answers if a]) if answers else ""
+        logger.info(
+            "[MCP-RAG] synthesize complete: total_answers=%d, final_answer_length=%d, used_fallback=%s",
+            len(answers),
+            len(final_answer),
+            used_fallback,
+        )
+
         return {
             "results": {
                 "answer": final_answer,
