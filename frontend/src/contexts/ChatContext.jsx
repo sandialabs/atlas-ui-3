@@ -367,6 +367,8 @@ export const ChatProvider = ({ children }) => {
 		deselectAllServerPrompts,
 		selectedDataSources: selections.selectedDataSources,
 		toggleDataSource: selections.toggleDataSource,
+		addDataSources: selections.addDataSources,
+		clearDataSources: selections.clearDataSources,
 		ragEnabled,
 		toggleRagEnabled,
 		toolChoiceRequired: selections.toolChoiceRequired,

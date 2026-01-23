@@ -84,6 +84,20 @@ export function useSelections() {
     })
   }, [setPromptsRaw])
 
+  // Batch operations for data sources
+  const addDataSources = useCallback(keys => {
+    if (!Array.isArray(keys) || keys.length === 0) return
+    setDataSourcesRaw(prev => {
+      const next = new Set(prev)
+      keys.forEach(k => next.add(k))
+      return toArray(next)
+    })
+  }, [setDataSourcesRaw])
+
+  const clearDataSources = useCallback(() => {
+    setDataSourcesRaw([])
+  }, [setDataSourcesRaw])
+
   const makePromptActive = useCallback(promptKey => {
     // Set the active prompt key (null for default)
     setActivePromptKey(promptKey)
@@ -118,13 +132,15 @@ export function useSelections() {
     toggleTool,
     togglePrompt,
     toggleDataSource,
-  addTools,
-  removeTools,
-  addPrompts,
-  setSinglePrompt,
-  removePrompts,
-  makePromptActive,
-  clearActivePrompt,
+    addTools,
+    removeTools,
+    addPrompts,
+    setSinglePrompt,
+    removePrompts,
+    makePromptActive,
+    clearActivePrompt,
+    addDataSources,
+    clearDataSources,
     toolChoiceRequired,
     setToolChoiceRequired,
     clearToolsAndPrompts,

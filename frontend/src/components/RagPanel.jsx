@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { X, Search } from 'lucide-react'
+import { useMemo, useState, useCallback } from 'react'
+import { X, Search, CheckSquare, Square } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 
 const RagPanel = ({ isOpen, onClose }) => {
@@ -7,6 +7,8 @@ const RagPanel = ({ isOpen, onClose }) => {
     ragSources,
     selectedDataSources,
     toggleDataSource,
+    addDataSources,
+    clearDataSources,
     features,
     complianceLevelFilter
   } = useChat()
@@ -48,6 +50,17 @@ const RagPanel = ({ isOpen, onClose }) => {
 
     return sources
   }, [ragSources, complianceLevelFilter, complianceLevelsEnabled, searchQuery])
+
+  // Enable all filtered data sources
+  const enableAll = useCallback(() => {
+    const keys = filteredDataSources.map(ds => `${ds.serverName}:${ds.id}`)
+    addDataSources(keys)
+  }, [filteredDataSources, addDataSources])
+
+  // Clear all selected data sources (clears everything, not just filtered)
+  const clearAll = useCallback(() => {
+    clearDataSources()
+  }, [clearDataSources])
 
   return (
     <>
@@ -96,6 +109,26 @@ const RagPanel = ({ isOpen, onClose }) => {
                 <X className="w-4 h-4" />
               </button>
             )}
+          </div>
+
+          {/* Enable All / Clear All buttons */}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={enableAll}
+              disabled={filteredDataSources.length === 0}
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-green-700 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              <CheckSquare className="w-4 h-4" />
+              Enable All
+            </button>
+            <button
+              onClick={clearAll}
+              disabled={selectedDataSources.size === 0}
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              <Square className="w-4 h-4" />
+              Clear All
+            </button>
           </div>
         </div>
 
