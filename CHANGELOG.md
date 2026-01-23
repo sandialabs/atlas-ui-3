@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-01-22
+- **Config**: Simplify RAG configuration to use `FEATURE_RAG_ENABLED=true/false` toggle instead of `RAG_PROVIDER` with multiple values.
+- **Config**: All RAG source configuration now happens in `rag-sources.json` - no more ATLAS RAG env vars in AppSettings.
+- **Architecture**: `LiteLLMCaller` now uses `UnifiedRAGService` for all RAG queries instead of a separate RAG client injection.
+- **Deprecation**: `RAGClient` class is now deprecated; use `UnifiedRAGService` for RAG operations.
+
 ### PR #TBD - 2026-01-21
 - **Feature**: Add unified RAG configuration via `rag-sources.json`. Multiple RAG backends (HTTP and MCP) can now be configured in a single file.
 - **Architecture**: Add `UnifiedRAGService` in `backend/domain/unified_rag_service.py` for aggregating RAG discovery and queries across multiple backends.

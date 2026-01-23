@@ -5,17 +5,11 @@ from typing import Optional
 
 from application.chat.service import ChatService
 from interfaces.transport import ChatConnectionProtocol
-from interfaces.rag import RAGClientProtocol
 from modules.config import ConfigManager
 from modules.file_storage import S3StorageClient, FileManager
 from modules.file_storage.mock_s3_client import MockS3StorageClient
 from modules.llm.litellm_caller import LiteLLMCaller
 from modules.mcp_tools import MCPToolManager
-from modules.rag import RAGClient
-from modules.rag.atlas_rag_client import (
-    AtlasRAGClient,
-    create_atlas_rag_client_from_config,
-)
 from domain.rag_mcp_service import RAGMCPService
 from domain.unified_rag_service import UnifiedRAGService
 from core.auth import is_user_in_group
@@ -31,25 +25,28 @@ class AppFactory:
         # Configuration
         self.config_manager = ConfigManager()
 
-        # Core modules - create RAG client first so LiteLLMCaller can use it
-        self.rag_client = self._create_rag_client()
-        self.llm_caller = LiteLLMCaller(
-            self.config_manager.llm_config,
-            debug_mode=self.config_manager.app_settings.debug_mode,
-            rag_client=self.rag_client,
-        )
+        # MCP tools manager
         self.mcp_tools = MCPToolManager()
+
+        # Unified RAG service for HTTP and MCP RAG sources (configured via rag-sources.json)
+        self.unified_rag_service = UnifiedRAGService(
+            config_manager=self.config_manager,
+            mcp_manager=self.mcp_tools,
+            auth_check_func=is_user_in_group,
+        )
+
+        # RAG MCP service for MCP-based RAG servers
         self.rag_mcp_service = RAGMCPService(
             mcp_manager=self.mcp_tools,
             config_manager=self.config_manager,
             auth_check_func=is_user_in_group,
         )
 
-        # Unified RAG service for HTTP and MCP RAG sources
-        self.unified_rag_service = UnifiedRAGService(
-            config_manager=self.config_manager,
-            mcp_manager=self.mcp_tools,
-            auth_check_func=is_user_in_group,
+        # LLM caller with unified RAG service for RAG queries
+        self.llm_caller = LiteLLMCaller(
+            self.config_manager.llm_config,
+            debug_mode=self.config_manager.app_settings.debug_mode,
+            rag_service=self.unified_rag_service,
         )
 
         # File storage & manager
@@ -65,21 +62,6 @@ class AppFactory:
         self.session_repository = InMemorySessionRepository()
 
         logger.info("AppFactory initialized")
-
-    def _create_rag_client(self) -> RAGClientProtocol:
-        """Create the appropriate RAG client based on rag_provider configuration.
-
-        Returns:
-            AtlasRAGClient if rag_provider is "atlas",
-            otherwise returns the standard RAGClient (for "mock" or "none").
-        """
-        rag_provider = self.config_manager.app_settings.rag_provider
-        if rag_provider == "atlas":
-            logger.info("RAG provider: atlas (ATLAS RAG API)")
-            return create_atlas_rag_client_from_config(self.config_manager)
-        else:
-            logger.info("RAG provider: %s (using mock RAGClient)", rag_provider)
-            return RAGClient()
 
     def create_chat_service(
         self, connection: Optional[ChatConnectionProtocol] = None
@@ -102,9 +84,6 @@ class AppFactory:
 
     def get_mcp_manager(self) -> MCPToolManager:  # noqa: D401
         return self.mcp_tools
-
-    def get_rag_client(self) -> RAGClientProtocol:  # noqa: D401
-        return self.rag_client
 
     def get_rag_mcp_service(self) -> RAGMCPService:  # noqa: D401
         return self.rag_mcp_service

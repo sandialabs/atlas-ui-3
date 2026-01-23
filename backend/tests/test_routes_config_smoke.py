@@ -20,10 +20,10 @@ def test_config_endpoint_smoke(monkeypatch):
 
 
 def test_rag_discovery_skipped_when_feature_disabled(monkeypatch):
-    """Verify RAG discovery is not attempted when rag_provider is 'none'."""
-    # Create mock rag_client to track if discover_data_sources is called
-    mock_rag_client = MagicMock()
-    mock_rag_client.discover_data_sources = AsyncMock(return_value=[])
+    """Verify RAG discovery is not attempted when feature_rag_enabled is False."""
+    # Create mock unified_rag_service to track if discover_data_sources is called
+    mock_unified_rag = MagicMock()
+    mock_unified_rag.discover_data_sources = AsyncMock(return_value=[])
 
     # Create mock rag_mcp_service
     mock_rag_mcp = MagicMock()
@@ -31,12 +31,13 @@ def test_rag_discovery_skipped_when_feature_disabled(monkeypatch):
     mock_rag_mcp.discover_servers = AsyncMock(return_value=[])
 
     # Patch the app_factory methods
-    with patch.object(app_factory, 'get_rag_client', return_value=mock_rag_client):
+    with patch.object(app_factory, 'get_unified_rag_service', return_value=mock_unified_rag):
         with patch.object(app_factory, 'get_rag_mcp_service', return_value=mock_rag_mcp):
-            # Ensure RAG feature is disabled by setting rag_provider to 'none'
+            # Ensure RAG feature is disabled
             config_manager = app_factory.get_config_manager()
-            original_setting = config_manager.app_settings.rag_provider
-            config_manager.app_settings.rag_provider = "none"
+            original_setting = config_manager.app_settings.feature_rag_enabled
+            # Use object.__setattr__ to bypass Pydantic frozen model protection
+            object.__setattr__(config_manager.app_settings, 'feature_rag_enabled', False)
 
             try:
                 client = TestClient(app)
@@ -44,7 +45,7 @@ def test_rag_discovery_skipped_when_feature_disabled(monkeypatch):
                 assert resp.status_code == 200
 
                 # Verify RAG discovery was NOT called when feature is disabled
-                mock_rag_client.discover_data_sources.assert_not_called()
+                mock_unified_rag.discover_data_sources.assert_not_called()
                 mock_rag_mcp.discover_data_sources.assert_not_called()
                 mock_rag_mcp.discover_servers.assert_not_called()
 
@@ -56,4 +57,4 @@ def test_rag_discovery_skipped_when_feature_disabled(monkeypatch):
                 assert data["rag_servers"] == []
             finally:
                 # Restore original setting
-                config_manager.app_settings.rag_provider = original_setting
+                object.__setattr__(config_manager.app_settings, 'feature_rag_enabled', original_setting)

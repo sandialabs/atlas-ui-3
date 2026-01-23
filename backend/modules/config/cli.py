@@ -99,7 +99,6 @@ def inspect_settings(args) -> None:
     categories = {
         "Application": ["app_name", "port", "debug_mode", "log_level"],
         "Features": [attr for attr in dir(settings) if attr.startswith("feature_")],
-        "RAG": ["mock_rag", "rag_mock_url"],
         "Banner": ["banner_enabled"],
         "Agent": ["feature_agent_mode_available", "agent_max_steps"],
         "Health": ["llm_health_check_interval", "mcp_health_check_interval"],

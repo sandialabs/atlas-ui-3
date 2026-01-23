@@ -262,86 +262,14 @@ class AppSettings(BaseSettings):
     # Logging settings
     log_level: str = "INFO"  # Override default logging level (DEBUG, INFO, WARNING, ERROR)
     
-    # RAG Provider Configuration
-    # Single setting to control which RAG backend to use:
-    #   - "none": RAG disabled (default)
-    #   - "mock": Built-in mock for testing
-    #   - "atlas": External ATLAS RAG API
-    #   - "mcp": MCP-based RAG servers
-    rag_provider: Literal["none", "mock", "atlas", "mcp"] = Field(
-        "none",
-        description="RAG provider: none (disabled), mock (testing), atlas (external API), mcp (MCP servers)",
-        validation_alias=AliasChoices("RAG_PROVIDER"),
+    # RAG Feature Flag
+    # When enabled, RAG sources are configured in config/overrides/rag-sources.json
+    # See docs/admin/external-rag-api.md for configuration details
+    feature_rag_enabled: bool = Field(
+        False,
+        description="Enable RAG (Retrieval-Augmented Generation). Configure sources in rag-sources.json",
+        validation_alias=AliasChoices("FEATURE_RAG_ENABLED"),
     )
-
-    # ATLAS RAG API settings (used when rag_provider="atlas")
-    atlas_rag_url: str = Field(
-        "http://localhost:8002",
-        description="Base URL for ATLAS RAG API",
-        validation_alias=AliasChoices("ATLAS_RAG_URL", "EXTERNAL_RAG_URL"),
-    )
-    atlas_rag_bearer_token: Optional[str] = Field(
-        None,
-        description="Bearer token for ATLAS RAG API authentication",
-        validation_alias=AliasChoices("ATLAS_RAG_BEARER_TOKEN", "EXTERNAL_RAG_BEARER_TOKEN"),
-    )
-    atlas_rag_default_model: str = Field(
-        "openai/gpt-oss-120b",
-        description="Default model for ATLAS RAG queries",
-        validation_alias=AliasChoices("ATLAS_RAG_DEFAULT_MODEL", "EXTERNAL_RAG_DEFAULT_MODEL"),
-    )
-    atlas_rag_top_k: int = Field(
-        4,
-        description="Default top_k for ATLAS RAG searches",
-        validation_alias=AliasChoices("ATLAS_RAG_TOP_K", "EXTERNAL_RAG_TOP_K"),
-    )
-
-    # Backward compatibility properties (derived from rag_provider)
-    @property
-    def feature_rag_enabled(self) -> bool:
-        """RAG is enabled if provider is not 'none'."""
-        return self.rag_provider != "none"
-
-    @property
-    def external_rag_enabled(self) -> bool:
-        """External RAG is enabled if provider is 'atlas'."""
-        return self.rag_provider == "atlas"
-
-    @property
-    def feature_rag_mcp_enabled(self) -> bool:
-        """MCP RAG is enabled if provider is 'mcp'."""
-        return self.rag_provider == "mcp"
-
-    @property
-    def mock_rag(self) -> bool:
-        """Mock RAG is enabled if provider is 'mock'."""
-        return self.rag_provider == "mock"
-
-    # Backward compatibility aliases for atlas_rag_* settings
-    @property
-    def external_rag_url(self) -> str:
-        """Alias for atlas_rag_url."""
-        return self.atlas_rag_url
-
-    @property
-    def external_rag_bearer_token(self) -> Optional[str]:
-        """Alias for atlas_rag_bearer_token."""
-        return self.atlas_rag_bearer_token
-
-    @property
-    def external_rag_default_model(self) -> str:
-        """Alias for atlas_rag_default_model."""
-        return self.atlas_rag_default_model
-
-    @property
-    def external_rag_top_k(self) -> int:
-        """Alias for atlas_rag_top_k."""
-        return self.atlas_rag_top_k
-
-    @property
-    def rag_mock_url(self) -> str:
-        """URL for the mock RAG service (used when rag_provider='mock')."""
-        return "http://localhost:8001"
 
     # Banner settings
     banner_enabled: bool = False
@@ -472,8 +400,6 @@ class AppSettings(BaseSettings):
     s3_use_ssl: bool = False
     
     # Feature flags
-    # Note: feature_rag_enabled and feature_rag_mcp_enabled are now derived
-    # from rag_provider (see properties above)
     feature_workspaces_enabled: bool = False
     feature_tools_enabled: bool = False
     feature_marketplace_enabled: bool = False

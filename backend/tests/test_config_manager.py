@@ -413,145 +413,33 @@ class TestLLMConfigEnvExpansion:
             resolve_env_var(config.extra_headers["X-Custom-Header"])
 
 
-class TestAppSettingsRAGProvider:
-    """Test AppSettings RAG provider configuration and feature flags.
+class TestAppSettingsRAGFeature:
+    """Test AppSettings RAG feature flag configuration.
 
-    Note: AppSettings uses Pydantic BaseSettings which reads from environment
-    variables. Tests must use monkeypatch to set env vars for proper testing.
+    RAG is now configured via a simple on/off toggle (FEATURE_RAG_ENABLED).
+    All RAG source configuration is done in rag-sources.json.
     """
 
-    def test_rag_provider_valid_options(self, monkeypatch):
-        """RAG provider should accept valid literal values: none, mock, atlas, mcp."""
-        # Test that 'none' provider results in RAG being disabled
-        monkeypatch.setenv("RAG_PROVIDER", "none")
+    def test_feature_rag_enabled_default_false(self):
+        """feature_rag_enabled should default to False."""
         settings = AppSettings()
-        assert settings.rag_provider == "none"
         assert settings.feature_rag_enabled is False
 
-    def test_rag_provider_accepts_valid_values(self, monkeypatch):
-        """RAG provider should accept all valid literal values via environment."""
-        for provider in ["none", "mock", "atlas", "mcp"]:
-            monkeypatch.setenv("RAG_PROVIDER", provider)
-            settings = AppSettings()
-            assert settings.rag_provider == provider
-
-    def test_feature_rag_enabled_when_provider_not_none(self, monkeypatch):
-        """feature_rag_enabled should be True when provider is not 'none'."""
-        # Disabled when provider is "none"
-        monkeypatch.setenv("RAG_PROVIDER", "none")
-        settings_none = AppSettings()
-        assert settings_none.feature_rag_enabled is False
-
-        # Enabled for all other providers
-        for provider in ["mock", "atlas", "mcp"]:
-            monkeypatch.setenv("RAG_PROVIDER", provider)
-            settings = AppSettings()
-            assert settings.feature_rag_enabled is True, f"Expected True for provider={provider}"
-
-    def test_external_rag_enabled_only_for_atlas(self, monkeypatch):
-        """external_rag_enabled should be True only when provider is 'atlas'."""
-        monkeypatch.setenv("RAG_PROVIDER", "atlas")
-        settings_atlas = AppSettings()
-        assert settings_atlas.external_rag_enabled is True
-
-        for provider in ["none", "mock", "mcp"]:
-            monkeypatch.setenv("RAG_PROVIDER", provider)
-            settings = AppSettings()
-            assert settings.external_rag_enabled is False, f"Expected False for provider={provider}"
-
-    def test_feature_rag_mcp_enabled_only_for_mcp(self, monkeypatch):
-        """feature_rag_mcp_enabled should be True only when provider is 'mcp'."""
-        monkeypatch.setenv("RAG_PROVIDER", "mcp")
-        settings_mcp = AppSettings()
-        assert settings_mcp.feature_rag_mcp_enabled is True
-
-        for provider in ["none", "mock", "atlas"]:
-            monkeypatch.setenv("RAG_PROVIDER", provider)
-            settings = AppSettings()
-            assert settings.feature_rag_mcp_enabled is False, f"Expected False for provider={provider}"
-
-    def test_mock_rag_only_for_mock_provider(self, monkeypatch):
-        """mock_rag should be True only when provider is 'mock'."""
-        monkeypatch.setenv("RAG_PROVIDER", "mock")
-        settings_mock = AppSettings()
-        assert settings_mock.mock_rag is True
-
-        for provider in ["none", "atlas", "mcp"]:
-            monkeypatch.setenv("RAG_PROVIDER", provider)
-            settings = AppSettings()
-            assert settings.mock_rag is False, f"Expected False for provider={provider}"
-
-    def test_atlas_rag_settings_have_expected_types(self):
-        """ATLAS RAG settings should have the expected types."""
+    def test_feature_rag_enabled_from_environment(self, monkeypatch):
+        """FEATURE_RAG_ENABLED environment variable should enable RAG."""
+        monkeypatch.setenv("FEATURE_RAG_ENABLED", "true")
         settings = AppSettings()
-        # Verify field types and existence (values may vary based on .env)
-        assert isinstance(settings.atlas_rag_url, str)
-        assert settings.atlas_rag_bearer_token is None or isinstance(settings.atlas_rag_bearer_token, str)
-        assert isinstance(settings.atlas_rag_default_model, str)
-        assert isinstance(settings.atlas_rag_top_k, int)
+        assert settings.feature_rag_enabled is True
 
-    def test_atlas_rag_settings_can_be_overridden(self, monkeypatch):
-        """ATLAS RAG settings should be configurable via environment variables."""
-        monkeypatch.setenv("ATLAS_RAG_URL", "https://rag.example.com")
-        monkeypatch.setenv("ATLAS_RAG_BEARER_TOKEN", "secret-token")
-        monkeypatch.setenv("ATLAS_RAG_DEFAULT_MODEL", "custom-model")
-        monkeypatch.setenv("ATLAS_RAG_TOP_K", "10")
-
+    def test_feature_rag_disabled_from_environment(self, monkeypatch):
+        """FEATURE_RAG_ENABLED=false should disable RAG."""
+        monkeypatch.setenv("FEATURE_RAG_ENABLED", "false")
         settings = AppSettings()
-        assert settings.atlas_rag_url == "https://rag.example.com"
-        assert settings.atlas_rag_bearer_token == "secret-token"
-        assert settings.atlas_rag_default_model == "custom-model"
-        assert settings.atlas_rag_top_k == 10
+        assert settings.feature_rag_enabled is False
 
-    def test_external_rag_aliases_point_to_atlas_settings(self, monkeypatch):
-        """Backward compatibility aliases should return atlas_rag_* values."""
-        monkeypatch.setenv("ATLAS_RAG_URL", "https://rag.example.com")
-        monkeypatch.setenv("ATLAS_RAG_BEARER_TOKEN", "my-token")
-        monkeypatch.setenv("ATLAS_RAG_DEFAULT_MODEL", "my-model")
-        monkeypatch.setenv("ATLAS_RAG_TOP_K", "8")
-
-        settings = AppSettings()
-        # Aliases should return the same values
-        assert settings.external_rag_url == settings.atlas_rag_url
-        assert settings.external_rag_bearer_token == settings.atlas_rag_bearer_token
-        assert settings.external_rag_default_model == settings.atlas_rag_default_model
-        assert settings.external_rag_top_k == settings.atlas_rag_top_k
-
-    def test_rag_mock_url_returns_fixed_value(self):
-        """rag_mock_url should return the fixed mock service URL."""
-        settings = AppSettings()
-        assert settings.rag_mock_url == "http://localhost:8001"
-
-    def test_rag_provider_from_environment(self, monkeypatch):
-        """RAG_PROVIDER environment variable should set rag_provider."""
-        monkeypatch.setenv("RAG_PROVIDER", "atlas")
-        settings = AppSettings()
-        assert settings.rag_provider == "atlas"
-
-    def test_atlas_rag_url_from_environment(self, monkeypatch):
-        """ATLAS_RAG_URL environment variable should set atlas_rag_url."""
-        monkeypatch.setenv("ATLAS_RAG_URL", "https://env-rag.example.com")
-        settings = AppSettings()
-        assert settings.atlas_rag_url == "https://env-rag.example.com"
-
-    def test_external_rag_url_alias_from_environment(self, monkeypatch):
-        """EXTERNAL_RAG_URL environment variable should also work (backward compat)."""
-        # Clear ATLAS_RAG_URL so EXTERNAL_RAG_URL alias can be used
-        monkeypatch.delenv("ATLAS_RAG_URL", raising=False)
-        monkeypatch.setenv("EXTERNAL_RAG_URL", "https://external-rag.example.com")
-        settings = AppSettings()
-        assert settings.atlas_rag_url == "https://external-rag.example.com"
-
-    def test_feature_flags_are_derived_not_stored(self):
-        """Feature flags should be derived properties, not stored fields."""
-        # These should be properties that derive from rag_provider
-        assert "feature_rag_enabled" not in AppSettings.model_fields
-        assert "external_rag_enabled" not in AppSettings.model_fields
-        assert "feature_rag_mcp_enabled" not in AppSettings.model_fields
-        assert "mock_rag" not in AppSettings.model_fields
-
-        # The actual stored field is rag_provider
-        assert "rag_provider" in AppSettings.model_fields
+    def test_feature_rag_enabled_is_stored_field(self):
+        """feature_rag_enabled should be a stored field, not a derived property."""
+        assert "feature_rag_enabled" in AppSettings.model_fields
 
 
 class TestRAGSourceConfig:

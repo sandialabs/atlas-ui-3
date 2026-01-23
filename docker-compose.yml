@@ -70,7 +70,7 @@ services:
       
       # Feature Flags
       - FEATURE_WORKSPACES_ENABLED=false
-      - RAG_PROVIDER=none
+      - FEATURE_RAG_ENABLED=false
       - FEATURE_TOOLS_ENABLED=true
       - FEATURE_MARKETPLACE_ENABLED=true
       - FEATURE_FILES_PANEL_ENABLED=true

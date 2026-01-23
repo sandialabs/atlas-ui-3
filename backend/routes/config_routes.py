@@ -84,13 +84,12 @@ async def get_config(
             )
             rag_servers.extend(http_rag_servers)
 
-            # Also discover MCP-based RAG sources if enabled
-            if app_settings.feature_rag_mcp_enabled:
-                rag_mcp = app_factory.get_rag_mcp_service()
-                mcp_rag_servers = await rag_mcp.discover_servers(
-                    current_user, user_compliance_level=compliance_level
-                )
-                rag_servers.extend(mcp_rag_servers)
+            # Also discover MCP-based RAG sources (from rag-sources.json type=mcp)
+            rag_mcp = app_factory.get_rag_mcp_service()
+            mcp_rag_servers = await rag_mcp.discover_servers(
+                current_user, user_compliance_level=compliance_level
+            )
+            rag_servers.extend(mcp_rag_servers)
 
             # Build flat list of data sources for backward compatibility
             # Format: "server:source_id" for qualified references
@@ -300,7 +299,6 @@ async def get_config(
         "features": {
             "workspaces": app_settings.feature_workspaces_enabled,
             "rag": app_settings.feature_rag_enabled,
-            "rag_provider": app_settings.rag_provider,  # none, mock, atlas, mcp
             "tools": app_settings.feature_tools_enabled,
             "marketplace": app_settings.feature_marketplace_enabled,
             "files_panel": app_settings.feature_files_panel_enabled,

@@ -1,6 +1,6 @@
 # RAG Configuration
 
-Last updated: 2026-01-21
+Last updated: 2026-01-22
 
 This guide explains how to configure RAG (Retrieval-Augmented Generation) in Atlas UI.
 
@@ -281,17 +281,25 @@ User Request
   (atlas)  (stdio/sse)
 ```
 
-## Legacy Environment Variables
+## Environment Variables for Secrets
 
-For backward compatibility, these environment variables still work but `rag-sources.json` is the recommended approach:
+RAG source secrets should be set as environment variables and referenced in `rag-sources.json` using `${ENV_VAR}` syntax:
 
 | Variable | Description |
 |----------|-------------|
-| `RAG_PROVIDER` | Set to `atlas` to enable ATLAS RAG via env vars |
-| `ATLAS_RAG_URL` | Base URL (also: `EXTERNAL_RAG_URL`) |
-| `ATLAS_RAG_BEARER_TOKEN` | Bearer token (also: `EXTERNAL_RAG_BEARER_TOKEN`) |
-| `ATLAS_RAG_DEFAULT_MODEL` | Model ID (also: `EXTERNAL_RAG_DEFAULT_MODEL`) |
-| `ATLAS_RAG_TOP_K` | Documents to retrieve (also: `EXTERNAL_RAG_TOP_K`) |
+| `ATLAS_RAG_URL` | Base URL for ATLAS RAG API |
+| `ATLAS_RAG_BEARER_TOKEN` | Bearer token for ATLAS RAG API authentication |
+
+Example usage in `rag-sources.json`:
+```json
+{
+  "atlas_rag": {
+    "type": "http",
+    "url": "${ATLAS_RAG_URL}",
+    "bearer_token": "${ATLAS_RAG_BEARER_TOKEN}"
+  }
+}
+```
 
 ## Related Documentation
 
