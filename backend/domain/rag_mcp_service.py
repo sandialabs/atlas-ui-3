@@ -27,6 +27,34 @@ class RAGMCPService:
         self.config_manager = config_manager
         self.auth_check_func = auth_check_func
 
+    async def _get_authorized_rag_servers(self, username: str, rag_servers: dict) -> List[str]:
+        """Get list of RAG servers the user is authorized to access.
+
+        This checks authorization directly against rag_mcp_config servers,
+        independent of mcp_manager.servers_config (which excludes RAG servers
+        to keep them separate from the tools panel).
+        """
+        authorized = []
+        for server_name, server_config in rag_servers.items():
+            if not server_config.enabled:
+                continue
+
+            required_groups = server_config.groups or []
+            if not required_groups:
+                # No group restriction - available to all
+                authorized.append(server_name)
+                continue
+
+            # Check if user is in any of the required groups
+            group_checks = [
+                await self.auth_check_func(username, group)
+                for group in required_groups
+            ]
+            if any(group_checks):
+                authorized.append(server_name)
+
+        return authorized
+
     async def discover_data_sources(self, username: str, user_compliance_level: Optional[str] = None) -> List[str]:
         """Discover data sources across authorized MCP RAG servers.
 
@@ -52,9 +80,11 @@ class RAGMCPService:
             # If anything goes wrong, fallback silently to existing clients
             pass
         try:
-            # Determine servers current user can see
-            authorized_servers: List[str] = await self.mcp_manager.get_authorized_servers(
-                username, self.auth_check_func
+            # Determine RAG servers current user can see
+            # Use rag_mcp_config directly since servers_config was restored above
+            rag_servers = self.config_manager.rag_mcp_config.servers
+            authorized_servers: List[str] = await self._get_authorized_rag_servers(
+                username, rag_servers
             )
 
             if not authorized_servers:
@@ -171,8 +201,10 @@ class RAGMCPService:
         try:
             compliance_mgr = get_compliance_manager() if user_compliance_level else None
 
-            authorized_servers: List[str] = await self.mcp_manager.get_authorized_servers(
-                username, self.auth_check_func
+            # Use rag_mcp_config directly since servers_config was restored above
+            rag_cfg_servers = self.config_manager.rag_mcp_config.servers
+            authorized_servers: List[str] = await self._get_authorized_rag_servers(
+                username, rag_cfg_servers
             )
 
             # --- Compliance Filtering (Step 2) ---

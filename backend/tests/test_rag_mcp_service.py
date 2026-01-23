@@ -64,12 +64,39 @@ class FakeMCP:
         return types.SimpleNamespace(structured_content={})
 
 
+class FakeMCPServerConfig:
+    """Minimal server config for testing."""
+    def __init__(self, enabled=True, groups=None):
+        self.enabled = enabled
+        self.groups = groups or []
+
+
+class FakeMCPConfig:
+    """Minimal MCP config for testing."""
+    def __init__(self, servers=None):
+        self.servers = servers or {}
+
+
 class FakeConfig:
-    pass
+    """Fake config manager for testing RAGMCPService."""
+    def __init__(self, rag_servers=None):
+        # Default RAG servers matching FakeMCP.available_tools
+        if rag_servers is None:
+            rag_servers = {
+                "docsRag": FakeMCPServerConfig(enabled=True, groups=["users"]),
+                "searchRag": FakeMCPServerConfig(enabled=True, groups=["users"]),
+                "misc": FakeMCPServerConfig(enabled=True, groups=["users"]),
+            }
+        self._rag_mcp_config = FakeMCPConfig(servers=rag_servers)
+
+    @property
+    def rag_mcp_config(self):
+        return self._rag_mcp_config
 
 
-def fake_auth_check(user: str, group: str) -> bool:
-    return True
+async def fake_auth_check(user: str, group: str) -> bool:
+    """Default auth check - everyone is in 'users' group."""
+    return group == "users"
 
 
 @pytest.mark.asyncio
@@ -113,3 +140,85 @@ async def test_search_and_synthesize_merge():
     )
     answer = syn.get("results", {}).get("answer")
     assert isinstance(answer, str) and "Synth for" in answer
+
+
+@pytest.mark.asyncio
+async def test_rag_authorization_uses_rag_config_not_mcp_servers_config():
+    """
+    Regression test: RAG authorization must use rag_mcp_config, not mcp_manager.servers_config.
+
+    Bug context: RAGMCPService temporarily adds RAG servers to mcp_manager.servers_config
+    for initialization, then restores the original config. If authorization checks
+    use servers_config (which no longer has RAG servers), no RAG sources are returned.
+
+    The fix is to check authorization directly against rag_mcp_config.servers.
+    """
+    from domain.rag_mcp_service import RAGMCPService
+
+    class MCPWithEmptyServersConfig:
+        """MCP manager with empty servers_config (RAG servers only in rag_mcp_config)."""
+        def __init__(self):
+            # Simulate RAG servers being initialized but NOT in servers_config
+            self.servers_config = {}  # Empty! RAG servers were temporarily added then removed
+            self.clients = {"ragServer": object()}  # Client exists (was initialized)
+            self.available_tools = {
+                "ragServer": {
+                    "tools": [FakeTool("rag_discover_resources")],
+                    "config": {}
+                }
+            }
+
+        async def get_authorized_servers(self, user: str, _auth) -> List[str]:
+            # This would return [] because servers_config is empty
+            return list(self.servers_config.keys())
+
+        async def call_tool(self, server_name: str, tool_name: str, arguments: Dict[str, Any], *_, **__):
+            if tool_name == "rag_discover_resources":
+                return types.SimpleNamespace(structured_content={
+                    "results": {"resources": [
+                        {"id": "doc1", "name": "Document 1"}
+                    ]}
+                })
+            return types.SimpleNamespace(structured_content={})
+
+    # RAG server configured in rag_mcp_config
+    rag_servers = {
+        "ragServer": FakeMCPServerConfig(enabled=True, groups=["users"])
+    }
+    fake_config = FakeConfig(rag_servers=rag_servers)
+
+    svc = RAGMCPService(MCPWithEmptyServersConfig(), fake_config, fake_auth_check)
+
+    # This should find ragServer even though mcp_manager.servers_config is empty
+    flat = await svc.discover_data_sources("user@example.com")
+
+    # Before the fix, this would return [] because authorization checked servers_config
+    # After the fix, this returns the RAG sources because authorization uses rag_mcp_config
+    assert "ragServer:doc1" in flat, \
+        "RAG authorization should use rag_mcp_config, not mcp_manager.servers_config"
+
+
+@pytest.mark.asyncio
+async def test_rag_group_filtering():
+    """Test that RAG sources are properly filtered by group membership."""
+    from domain.rag_mcp_service import RAGMCPService
+
+    # Server requires 'admin' group, not 'users'
+    rag_servers = {
+        "docsRag": FakeMCPServerConfig(enabled=True, groups=["admin"]),
+        "searchRag": FakeMCPServerConfig(enabled=True, groups=["users"]),
+        "misc": FakeMCPServerConfig(enabled=True, groups=["users"]),
+    }
+
+    async def restricted_auth_check(user: str, group: str) -> bool:
+        # User is only in 'users' group, not 'admin'
+        return group == "users"
+
+    svc = RAGMCPService(FakeMCP(), FakeConfig(rag_servers=rag_servers), restricted_auth_check)
+
+    flat = await svc.discover_data_sources("user@example.com")
+
+    # docsRag requires 'admin' group, user is not in admin
+    assert "docsRag:handbook" not in flat, "Admin-only RAG server should not be visible"
+    # searchRag is in 'users' group
+    assert "searchRag:kb" in flat, "User-accessible RAG server should be visible"

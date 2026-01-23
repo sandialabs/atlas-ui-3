@@ -110,6 +110,36 @@ def patch_mcp(monkeypatch):
     monkeypatch.setattr(MCPToolManager, "get_authorized_servers", fake_get_authorized_servers, raising=False)
     monkeypatch.setattr(MCPToolManager, "call_tool", fake_call_tool, raising=False)
 
+    # Also patch rag_mcp_config to return the test RAG servers
+    # (RAGMCPService uses rag_mcp_config for authorization, not mcp_manager.servers_config)
+    from modules.config.config_manager import ConfigManager, MCPServerConfig, MCPConfig
+    import core.auth
+    fake_rag_servers = {
+        "docsRag": MCPServerConfig(
+            description="Docs RAG",
+            enabled=True,
+            groups=["users"],  # Everyone is in users group
+        ),
+        "notionRag": MCPServerConfig(
+            description="Notion RAG",
+            enabled=True,
+            groups=["company"],  # Only company users
+        ),
+    }
+    fake_rag_mcp_config = MCPConfig(servers=fake_rag_servers)
+    monkeypatch.setattr(ConfigManager, "rag_mcp_config", property(lambda self: fake_rag_mcp_config))
+
+    # Patch is_user_in_group to simulate domain-based access
+    # @company.com users are in "company" group, everyone is in "users" group
+    async def fake_is_user_in_group(user_id: str, group_id: str) -> bool:
+        if group_id == "users":
+            return True
+        if group_id == "company":
+            return user_id.endswith("@company.com")
+        return False
+
+    monkeypatch.setattr(core.auth, "is_user_in_group", fake_is_user_in_group)
+
 
 @pytest.mark.asyncio
 async def test_discovery_across_multiple_servers():
