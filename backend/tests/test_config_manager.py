@@ -420,9 +420,10 @@ class TestAppSettingsRAGFeature:
     All RAG source configuration is done in rag-sources.json.
     """
 
-    def test_feature_rag_enabled_default_false(self):
+    def test_feature_rag_enabled_default_false(self, monkeypatch):
         """feature_rag_enabled should default to False."""
-        settings = AppSettings()
+        monkeypatch.delenv("FEATURE_RAG_ENABLED", raising=False)
+        settings = AppSettings(_env_file=None)
         assert settings.feature_rag_enabled is False
 
     def test_feature_rag_enabled_from_environment(self, monkeypatch):
