@@ -36,7 +36,6 @@ export function useChatConfig() {
       return ''
     }
   })
-  const [onlyRag, setOnlyRag] = useState(false)
   const [agentModeAvailable, setAgentModeAvailable] = useState(false)
   const [isInAdminGroup, setIsInAdminGroup] = useState(false)
 
@@ -118,8 +117,6 @@ export function useChatConfig() {
         console.warn('Failed to save current model to localStorage:', e)
       }
     },
-    onlyRag,
-  setOnlyRag,
   agentModeAvailable,
   isInAdminGroup,
   fileExtraction

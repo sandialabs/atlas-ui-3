@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileSearch, FileX } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileSearch, FileX, Search } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
@@ -38,13 +38,16 @@ const ChatArea = () => {
     selectedTools,
     toggleTool,
     setToolChoiceRequired,
-  sessionFiles,
-  agentModeEnabled,
-  agentPendingQuestion,
-  setAgentPendingQuestion,
-  stopAgent,
-  answerAgentQuestion,
-  fileExtraction
+    sessionFiles,
+    agentModeEnabled,
+    agentPendingQuestion,
+    setAgentPendingQuestion,
+    stopAgent,
+    answerAgentQuestion,
+    fileExtraction,
+    ragEnabled,
+    toggleRagEnabled,
+    features
   } = useChat()
   const { isConnected } = useWS()
 
@@ -134,20 +137,31 @@ const ChatArea = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    const message = inputValue.trim()
+    let message = inputValue.trim()
     if (!message || !currentModel || !isConnected) {
       console.debug('Submit blocked:', { message: !!message, currentModel: !!currentModel, isConnected })
       return
     }
-    
+
+    // Check for /search command - strip prefix and force RAG
+    let forceRag = false
+    if (message.toLowerCase().startsWith('/search ')) {
+      message = message.substring(8).trim() // Remove '/search ' prefix
+      forceRag = true
+      if (!message) {
+        console.debug('Empty search query after stripping /search prefix')
+        return
+      }
+    }
+
     try {
       // Process @file references in the message
       const processedFiles = await processFileReferences(message)
       const allFiles = { ...uploadedFiles, ...processedFiles }
-      
-      sendChatMessage(message, allFiles)
+
+      sendChatMessage(message, allFiles, forceRag)
       setInputValue('')
-      
+
       // Reset textarea height
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
@@ -155,9 +169,9 @@ const ChatArea = () => {
     } catch (error) {
       console.error('Error in handleSubmit:', error)
       // Still try to send the message without file processing
-      sendChatMessage(message, uploadedFiles)
+      sendChatMessage(message, uploadedFiles, forceRag)
       setInputValue('')
-      
+
       // Reset textarea height
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
@@ -422,9 +436,12 @@ const ChatArea = () => {
     setShowToolAutocomplete(false)
   }
 
-  // Check if input contains a slash command
-  const hasSlashCommand = inputValue.startsWith('/') && inputValue.includes(' ')
-  
+  // Check if input contains a slash command (but not /search)
+  const hasSlashCommand = inputValue.startsWith('/') && inputValue.includes(' ') && !inputValue.toLowerCase().startsWith('/search ')
+
+  // Check if input is a /search command
+  const hasSearchCommand = inputValue.toLowerCase().startsWith('/search ')
+
   // Check if input contains @file references
   const hasFileReference = inputValue.includes('@file ')
 
@@ -772,6 +789,21 @@ const ChatArea = () => {
               >
                 <Paperclip className="w-5 h-5" />
               </button>
+              {/* RAG Toggle Button - only show if RAG feature is enabled */}
+              {features?.rag && (
+                <button
+                  type="button"
+                  onClick={toggleRagEnabled}
+                  className={`px-3 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
+                    ragEnabled
+                      ? 'bg-green-600 hover:bg-green-700 text-white'
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  }`}
+                  title={ragEnabled ? 'RAG enabled - click to disable' : 'RAG disabled - click to enable'}
+                >
+                  <Search className="w-5 h-5" />
+                </button>
+              )}
               {agentModeEnabled && (isThinking || agentPendingQuestion) && (
                 <button
                   type="button"
@@ -788,11 +820,13 @@ const ChatArea = () => {
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Type your message... (Use /tool for tools, @file for files)"
+                placeholder={features?.rag ? "Type your message... (Use /search for RAG, /tool for tools, @file for files)" : "Type your message... (Use /tool for tools, @file for files)"}
                 rows={1}
                 className={`w-full px-4 py-3 bg-gray-800 rounded-lg text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:border-transparent ${
-                  hasSlashCommand 
-                    ? 'border-2 border-yellow-500 focus:ring-yellow-500 bg-yellow-900/10' 
+                  hasSearchCommand
+                    ? 'border-2 border-green-500 focus:ring-green-500 bg-green-900/10'
+                    : hasSlashCommand
+                    ? 'border-2 border-yellow-500 focus:ring-yellow-500 bg-yellow-900/10'
                     : hasFileReference
                     ? 'border-2 border-green-500 focus:ring-green-500 bg-green-900/10'
                     : 'border border-gray-600 focus:ring-blue-500'

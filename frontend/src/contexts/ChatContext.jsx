@@ -73,7 +73,7 @@ export const ChatProvider = ({ children }) => {
 
 		const { sendMessage, addMessageHandler } = useWS()
 	const { currentModel } = config
-	const { selectedTools, selectedPrompts, activePrompts, selectedDataSources } = selections
+	const { selectedTools, selectedPrompts, activePrompts, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -130,20 +130,31 @@ export const ChatProvider = ({ children }) => {
 		group.prompts.forEach(p => { const key = `${server}_${p.name}`; if (selectedPrompts.has(key)) selections.togglePrompt(key) })
 	}, [config.prompts, selectedPrompts, selections])
 
-	const sendChatMessage = useCallback((content, extraFiles = {}) => {
+	// Flatten ragServers into a list of all available data source IDs
+	const getAllRagSourceIds = useCallback(() => {
+		return config.ragServers.flatMap(server =>
+			server.sources.map(source => source.id)
+		)
+	}, [config.ragServers])
+
+	const sendChatMessage = useCallback((content, extraFiles = {}, forceRag = false) => {
 		if (!content.trim() || !currentModel) return
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		addMessage({ role: 'user', content, timestamp: new Date().toISOString() })
 		setIsThinking(true)
 		const tagged = files.getTaggedFilesContent()
+
+		// Determine data sources: if ragEnabled or forceRag, use all available sources
+		const useRag = ragEnabled || forceRag
+		const dataSourcesToSend = useRag ? getAllRagSourceIds() : [...selectedDataSources]
+
 		sendMessage({
 			type: 'chat',
 			content,
 			model: currentModel,
 			selected_tools: [...selectedTools],
 			selected_prompts: activePrompts,
-			selected_data_sources: [...selectedDataSources],
-			only_rag: config.onlyRag,
+			selected_data_sources: dataSourcesToSend,
 			tool_choice_required: selections.toolChoiceRequired,
 			user: config.user,
 			files: { ...extraFiles, ...tagged },
@@ -153,7 +164,7 @@ export const ChatProvider = ({ children }) => {
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
 			compliance_level_filter: selections.complianceLevelFilter,
 		})
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, config, selections, agent, files, isWelcomeVisible, sendMessage, settings])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, ragEnabled, getAllRagSourceIds])
 
 	const clearChat = useCallback(() => {
 		resetMessages()
@@ -222,7 +233,6 @@ export const ChatProvider = ({ children }) => {
 					selectedTools: [...selectedTools],
 					ragEnabled: ragEnabled,
 					selectedRagSources: ragEnabled ? [...selectedDataSources] : null,
-					onlyRag: config.onlyRag,
 					toolChoiceRequired: selections.toolChoiceRequired,
 					agentModeEnabled: agent.agentModeEnabled,
 					agentMaxSteps: agent.agentMaxSteps,
@@ -240,7 +250,7 @@ export const ChatProvider = ({ children }) => {
 			a.download = `chat-export-${ts}.json`
 			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 		}
-	}, [messages, config.appName, config.user, config.features, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, config.onlyRag, selections.toolChoiceRequired, files.canvasContent])
+	}, [messages, config.appName, config.user, config.features, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, files.canvasContent])
 
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
@@ -339,8 +349,6 @@ export const ChatProvider = ({ children }) => {
 		setFeatures: config.setFeatures,
 		currentModel: config.currentModel,
 		setCurrentModel: config.setCurrentModel,
-		onlyRag: config.onlyRag,
-		setOnlyRag: config.setOnlyRag,
 		selectedTools: selections.selectedTools,
 		toggleTool: selections.toggleTool,
 		selectAllServerTools,
@@ -359,6 +367,8 @@ export const ChatProvider = ({ children }) => {
 		deselectAllServerPrompts,
 		selectedDataSources: selections.selectedDataSources,
 		toggleDataSource: selections.toggleDataSource,
+		ragEnabled,
+		toggleRagEnabled,
 		toolChoiceRequired: selections.toolChoiceRequired,
 		setToolChoiceRequired: selections.setToolChoiceRequired,
 		clearToolsAndPrompts: selections.clearToolsAndPrompts,
