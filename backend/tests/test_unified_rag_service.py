@@ -296,14 +296,62 @@ class TestQueryRAG:
             )
 
     @pytest.mark.asyncio
-    async def test_query_rag_mcp_source_raises(self, unified_rag_service):
-        """Test querying MCP source raises NotImplementedError."""
-        with pytest.raises(NotImplementedError):
+    async def test_query_rag_mcp_source_without_service_raises(self, unified_rag_service):
+        """Test querying MCP source without RAGMCPService raises ValueError."""
+        # The unified_rag_service fixture has no rag_mcp_service configured
+        with pytest.raises(ValueError, match="RAGMCPService not configured"):
             await unified_rag_service.query_rag(
                 username="admin@test.com",
                 qualified_data_source="test_mcp:corpus1",
                 messages=[],
             )
+
+    @pytest.mark.asyncio
+    async def test_query_rag_mcp_source_routes_to_mcp_service(self, mock_config_manager, mock_auth_check):
+        """Test that MCP source queries are routed to RAGMCPService."""
+        # Create a mock RAGMCPService
+        mock_rag_mcp_service = MagicMock()
+        mock_rag_mcp_service.synthesize = AsyncMock(return_value={
+            "results": {
+                "answer": "Test answer from MCP RAG",
+                "citations": [],
+            },
+            "meta_data": {
+                "providers": {
+                    "test_mcp": {"used_synth": True, "error": None}
+                },
+                "fallback_used": False,
+            },
+        })
+
+        # Create service with rag_mcp_service
+        service = UnifiedRAGService(
+            config_manager=mock_config_manager,
+            mcp_manager=None,
+            auth_check_func=mock_auth_check,
+            rag_mcp_service=mock_rag_mcp_service,
+        )
+
+        messages = [{"role": "user", "content": "What is the fleet info?"}]
+        result = await service.query_rag(
+            username="admin@test.com",
+            qualified_data_source="test_mcp:corpus1",
+            messages=messages,
+        )
+
+        # Verify RAGMCPService.synthesize was called
+        mock_rag_mcp_service.synthesize.assert_called_once_with(
+            username="admin@test.com",
+            query="What is the fleet info?",
+            sources=["test_mcp:corpus1"],
+        )
+
+        # Verify response format
+        assert isinstance(result, RAGResponse)
+        assert result.content == "Test answer from MCP RAG"
+        assert result.metadata is not None
+        assert result.metadata.data_source_name == "test_mcp"
+        assert result.metadata.retrieval_method == "mcp_synthesis"
 
 
 class TestSourceFiltering:

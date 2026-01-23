@@ -27,6 +27,7 @@ class UnifiedRAGService:
         config_manager: ConfigManager,
         mcp_manager: Optional[Any] = None,
         auth_check_func: Optional[Callable] = None,
+        rag_mcp_service: Optional[Any] = None,
     ) -> None:
         """Initialize the unified RAG service.
 
@@ -34,10 +35,12 @@ class UnifiedRAGService:
             config_manager: Configuration manager for loading RAG sources config.
             mcp_manager: MCP tool manager for MCP-based RAG sources.
             auth_check_func: Function to check user authorization for groups.
+            rag_mcp_service: Optional RAGMCPService instance for MCP RAG queries.
         """
         self.config_manager = config_manager
         self.mcp_manager = mcp_manager
         self.auth_check_func = auth_check_func
+        self.rag_mcp_service = rag_mcp_service
 
         # Cache of HTTP RAG clients by source name
         self._http_clients: Dict[str, AtlasRAGClient] = {}
@@ -221,8 +224,53 @@ class UnifiedRAGService:
             return await client.query_rag(username, source_id, messages)
 
         elif source_config.type == "mcp":
-            # MCP sources are handled by RAGMCPService
-            raise NotImplementedError("MCP RAG queries should use RAGMCPService")
+            # Route MCP queries to RAGMCPService
+            if not self.rag_mcp_service:
+                raise ValueError("RAGMCPService not configured for MCP RAG queries")
+
+            # Extract the query from messages (last user message)
+            query = ""
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    query = msg.get("content", "")
+                    break
+
+            # Call RAGMCPService.synthesize() for MCP sources
+            qualified_sources = [qualified_data_source]  # Format: "server:source_id"
+            mcp_response = await self.rag_mcp_service.synthesize(
+                username=username,
+                query=query,
+                sources=qualified_sources,
+            )
+
+            # Convert MCP response to RAGResponse format
+            results = mcp_response.get("results", {})
+            answer = results.get("answer", "No response from MCP RAG.")
+            meta_data = mcp_response.get("meta_data", {})
+
+            # Build metadata if available
+            metadata = None
+            if meta_data.get("providers"):
+                # Create basic metadata from MCP response
+                from modules.rag.client import RAGMetadata, DocumentMetadata
+                providers_info = meta_data.get("providers", {})
+                docs_found = []
+                for provider_name, provider_info in providers_info.items():
+                    if provider_info.get("used_synth"):
+                        docs_found.append(DocumentMetadata(
+                            source=provider_name,
+                            content_type="mcp_synthesis",
+                            confidence_score=1.0,
+                        ))
+                metadata = RAGMetadata(
+                    query_processing_time_ms=0,
+                    total_documents_searched=len(providers_info),
+                    documents_found=docs_found,
+                    data_source_name=server_name,
+                    retrieval_method="mcp_synthesis",
+                )
+
+            return RAGResponse(content=answer, metadata=metadata)
 
         else:
             raise ValueError(f"Unknown RAG source type: {source_config.type}")

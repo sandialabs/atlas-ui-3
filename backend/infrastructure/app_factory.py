@@ -28,18 +28,20 @@ class AppFactory:
         # MCP tools manager
         self.mcp_tools = MCPToolManager()
 
-        # Unified RAG service for HTTP and MCP RAG sources (configured via rag-sources.json)
-        self.unified_rag_service = UnifiedRAGService(
-            config_manager=self.config_manager,
-            mcp_manager=self.mcp_tools,
-            auth_check_func=is_user_in_group,
-        )
-
-        # RAG MCP service for MCP-based RAG servers
+        # RAG MCP service for MCP-based RAG servers (create first for dependency injection)
         self.rag_mcp_service = RAGMCPService(
             mcp_manager=self.mcp_tools,
             config_manager=self.config_manager,
             auth_check_func=is_user_in_group,
+        )
+
+        # Unified RAG service for HTTP and MCP RAG sources (configured via rag-sources.json)
+        # Includes rag_mcp_service for routing MCP queries
+        self.unified_rag_service = UnifiedRAGService(
+            config_manager=self.config_manager,
+            mcp_manager=self.mcp_tools,
+            auth_check_func=is_user_in_group,
+            rag_mcp_service=self.rag_mcp_service,
         )
 
         # LLM caller with unified RAG service for RAG queries
