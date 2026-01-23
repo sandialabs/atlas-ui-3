@@ -10,6 +10,7 @@ This guide is for administrators responsible for deploying, configuring, and man
 - [Configuration Architecture](configuration.md) - Understanding the layered configuration system
 - [MCP Server Configuration](mcp-servers.md) - Setting up and configuring MCP tool servers
 - [LLM Configuration](llm-config.md) - Configuring Large Language Models
+- [RAG Configuration](external-rag-api.md) - Configuring RAG providers (mock, ATLAS API, MCP)
 
 ### Security & Access Control
 - [Authentication & Authorization](authentication.md) - User authentication and group-based access control

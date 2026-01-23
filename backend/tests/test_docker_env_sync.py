@@ -141,7 +141,7 @@ def test_docker_compose_has_required_env_vars():
         'FEATURE_FILES_PANEL_ENABLED',
         'FEATURE_RAG_ENABLED',
     ]
-    
+
     for flag in key_feature_flags:
         assert flag in docker_compose_vars, (
             f"Key feature flag '{flag}' is missing from docker-compose.yml"

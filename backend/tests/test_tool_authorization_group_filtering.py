@@ -5,7 +5,7 @@ during tool authorization in chat execution.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from application.chat.policies.tool_authorization import ToolAuthorizationService
 
 
@@ -77,16 +77,17 @@ async def test_tool_authorization_enforces_group_restrictions():
         "canvas_canvas"
     ]
 
-    # Act: Filter tools for a user who is NOT in admin group but IS in users group
-    # Note: This is where the bug manifests - the current implementation passes None
-    # to get_authorized_servers, which should be fixed to pass a real auth function
-    filtered_tools = await auth_service.filter_authorized_tools(
-        selected_tools=selected_tools,
-        user_email="regular@example.com"
-    )
+    # Mock is_user_in_group: user is in "users" group but not "admin"
+    async def mock_auth_check(user: str, group: str) -> bool:
+        return group == "users"
+
+    with patch("application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
+        filtered_tools = await auth_service.filter_authorized_tools(
+            selected_tools=selected_tools,
+            user_email="regular@example.com"
+        )
 
     # Assert: User should NOT have access to admin_server tools
-    # If the bug exists (fail-open), this will fail because admin_server_tool1 will be included
     assert "admin_server_tool1" not in filtered_tools, \
         "Admin tools should be filtered out for non-admin users"
 
@@ -97,6 +98,10 @@ async def test_tool_authorization_enforces_group_restrictions():
     # public_server tools should be allowed (no group restriction)
     assert "public_server_tool1" in filtered_tools, \
         "Public server tools should be allowed for all users"
+
+    # users_server tools should be allowed (user is in users group)
+    assert "users_server_tool1" in filtered_tools, \
+        "Users server tools should be allowed for users in the group"
 
 
 @pytest.mark.asyncio
@@ -119,14 +124,17 @@ async def test_tool_authorization_does_not_fail_open():
 
     selected_tools = ["restricted_server_secret_tool"]
 
-    # Act: Try to access restricted tools as unauthorized user
-    filtered_tools = await auth_service.filter_authorized_tools(
-        selected_tools=selected_tools,
-        user_email="unauthorized@example.com"
-    )
+    # Mock is_user_in_group: user is NOT in special_group
+    async def mock_auth_check(user: str, group: str) -> bool:
+        return False
+
+    with patch("application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
+        filtered_tools = await auth_service.filter_authorized_tools(
+            selected_tools=selected_tools,
+            user_email="unauthorized@example.com"
+        )
 
     # Assert: Restricted tools should NOT be accessible
-    # If fail-open bug exists, this will fail because the tool will still be in the list
     assert "restricted_server_secret_tool" not in filtered_tools, \
         "Restricted tools should not be accessible to unauthorized users (fail-open bug)"
 
@@ -161,12 +169,15 @@ async def test_tool_authorization_with_real_mcp_tool_manager():
         "admin_server_tool1"
     ]
 
-    # This will fail if None is passed as auth_check_func because MCPToolManager
-    # will try to call None(user_email, group) and raise TypeError
-    filtered_tools = await auth_service.filter_authorized_tools(
-        selected_tools=selected_tools,
-        user_email="user@example.com"
-    )
+    # Mock is_user_in_group: user is NOT in admin group
+    async def mock_auth_check(user: str, group: str) -> bool:
+        return False
+
+    with patch("application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
+        filtered_tools = await auth_service.filter_authorized_tools(
+            selected_tools=selected_tools,
+            user_email="user@example.com"
+        )
 
     # If we get here without the fix, the exception handler returns all tools
     # So admin_server_tool1 would incorrectly be included
@@ -174,3 +185,37 @@ async def test_tool_authorization_with_real_mcp_tool_manager():
         "Admin tools should be filtered - auth function must be properly passed"
     assert "public_server_tool1" in filtered_tools, \
         "Public server tools should be accessible"
+
+
+@pytest.mark.asyncio
+async def test_tool_authorization_passes_auth_function_not_none():
+    """
+    Regression test: Ensure is_user_in_group is passed, not None.
+
+    This test will fail if None is passed to get_authorized_servers.
+    """
+    call_tracker = {"auth_func_received": None}
+
+    class TrackingToolManager:
+        def __init__(self):
+            self.servers_config = {"test_server": {"enabled": True, "groups": []}}
+
+        async def get_authorized_servers(self, user_email: str, auth_check_func):
+            call_tracker["auth_func_received"] = auth_check_func
+            if auth_check_func is None:
+                raise TypeError("auth_check_func cannot be None - security vulnerability!")
+            return ["test_server"]
+
+    tool_manager = TrackingToolManager()
+    auth_service = ToolAuthorizationService(tool_manager)
+
+    await auth_service.filter_authorized_tools(
+        selected_tools=["test_server_tool1"],
+        user_email="test@example.com"
+    )
+
+    # Verify that an actual function was passed, not None
+    assert call_tracker["auth_func_received"] is not None, \
+        "auth_check_func must not be None - this is a security vulnerability"
+    assert callable(call_tracker["auth_func_received"]), \
+        "auth_check_func must be callable"

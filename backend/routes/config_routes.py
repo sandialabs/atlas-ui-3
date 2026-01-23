@@ -71,47 +71,37 @@ async def get_config(
     llm_config = config_manager.llm_config
     app_settings = config_manager.app_settings
     
-    # Get RAG data sources for the user (feature-gated MCP-backed discovery)
+    # Get RAG data sources for the user from unified RAG service
     rag_data_sources = []
     rag_servers = []
     # Only attempt RAG discovery if RAG feature is enabled
     if app_settings.feature_rag_enabled:
         try:
-            if app_settings.feature_rag_mcp_enabled:
-                rag_mcp = app_factory.get_rag_mcp_service()
-                rag_data_sources = await rag_mcp.discover_data_sources(
-                    current_user, user_compliance_level=compliance_level
-                )
-                rag_servers = await rag_mcp.discover_servers(
-                    current_user, user_compliance_level=compliance_level
-                )
-            else:
-                rag_client = app_factory.get_rag_client()
-                # rag_client.discover_data_sources now returns List[DataSource] objects
-                data_source_objects = await rag_client.discover_data_sources(current_user)
-                # Convert to list of names (strings) for the 'data_sources' field (backward compatibility)
-                rag_data_sources = [ds.name for ds in data_source_objects]
-                # Populate rag_servers with the mock data in the expected format for the UI
-                rag_servers = [
-                    {
-                        "server": "rag_mock",
-                        "displayName": "RAG Mock Data",
-                        "icon": "database",
-                        "complianceLevel": "Public", # Default compliance for the mock server itself
-                        "sources": [
-                            {
-                                "id": ds.name,
-                                "name": ds.name,
-                                "authRequired": True,
-                                "selected": False,
-                                "complianceLevel": ds.compliance_level,
-                            }
-                            for ds in data_source_objects
-                        ],
-                    }
-                ]
+            # Use unified RAG service for HTTP sources from rag-sources.json
+            unified_rag = app_factory.get_unified_rag_service()
+            http_rag_servers = await unified_rag.discover_data_sources(
+                current_user, user_compliance_level=compliance_level
+            )
+            rag_servers.extend(http_rag_servers)
+
+            # Also discover MCP-based RAG sources (from rag-sources.json type=mcp)
+            rag_mcp = app_factory.get_rag_mcp_service()
+            mcp_rag_servers = await rag_mcp.discover_servers(
+                current_user, user_compliance_level=compliance_level
+            )
+            rag_servers.extend(mcp_rag_servers)
+
+            # Build flat list of data sources for backward compatibility
+            # Format: "server:source_id" for qualified references
+            for server in rag_servers:
+                server_name = server.get("server", "")
+                for source in server.get("sources", []):
+                    source_id = source.get("id", "")
+                    if server_name and source_id:
+                        rag_data_sources.append(f"{server_name}:{source_id}")
+
         except Exception as e:
-            logger.warning(f"Error resolving RAG data sources: {e}")
+            logger.warning("Error resolving RAG data sources: %s", e)
     
     # Check if tools are enabled
     tools_info = []

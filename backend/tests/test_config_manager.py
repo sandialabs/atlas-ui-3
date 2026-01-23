@@ -226,6 +226,19 @@ class TestResolveEnvVar:
         # Only exact ${VAR} pattern is supported, not embedded in strings
         assert resolve_env_var("prefix-${VAR}") == "prefix-${VAR}"
 
+    def test_resolve_env_var_with_suffix_pattern(self, monkeypatch):
+        """Should not match patterns with suffix like '${VAR}-suffix'.
+
+        Regression test: Previously re.match() would match '${VAR}' at the start
+        and return just the env value, silently dropping the suffix.
+        Now we use re.fullmatch() to ensure the entire string is a pattern.
+        """
+        monkeypatch.setenv("MY_VAR", "resolved")
+        # Pattern with suffix should be treated as literal, not partially resolved
+        assert resolve_env_var("${MY_VAR}-suffix") == "${MY_VAR}-suffix"
+        # Contrast with exact pattern which should resolve
+        assert resolve_env_var("${MY_VAR}") == "resolved"
+
     def test_resolve_env_var_with_invalid_pattern(self):
         """Should return strings with invalid patterns unchanged."""
         assert resolve_env_var("${123_INVALID}") == "${123_INVALID}"
@@ -386,7 +399,7 @@ class TestLLMConfigEnvExpansion:
     def test_llm_model_config_with_missing_env_var_in_extra_headers(self):
         """resolve_env_var should raise ValueError for missing env vars in extra_headers."""
         from backend.modules.config.config_manager import ModelConfig
-        
+
         config = ModelConfig(
             model_name="test-model",
             model_url="https://api.openai.com/v1",
@@ -395,8 +408,208 @@ class TestLLMConfigEnvExpansion:
                 "X-Custom-Header": "${MISSING_HEADER_VAR}"
             }
         )
-        
+
         with pytest.raises(ValueError, match="Environment variable 'MISSING_HEADER_VAR' is not set"):
             resolve_env_var(config.extra_headers["X-Custom-Header"])
+
+
+class TestAppSettingsRAGFeature:
+    """Test AppSettings RAG feature flag configuration.
+
+    RAG is now configured via a simple on/off toggle (FEATURE_RAG_ENABLED).
+    All RAG source configuration is done in rag-sources.json.
+    """
+
+    def test_feature_rag_enabled_default_false(self, monkeypatch):
+        """feature_rag_enabled should default to False."""
+        monkeypatch.delenv("FEATURE_RAG_ENABLED", raising=False)
+        settings = AppSettings(_env_file=None)
+        assert settings.feature_rag_enabled is False
+
+    def test_feature_rag_enabled_from_environment(self, monkeypatch):
+        """FEATURE_RAG_ENABLED environment variable should enable RAG."""
+        monkeypatch.setenv("FEATURE_RAG_ENABLED", "true")
+        settings = AppSettings()
+        assert settings.feature_rag_enabled is True
+
+    def test_feature_rag_disabled_from_environment(self, monkeypatch):
+        """FEATURE_RAG_ENABLED=false should disable RAG."""
+        monkeypatch.setenv("FEATURE_RAG_ENABLED", "false")
+        settings = AppSettings()
+        assert settings.feature_rag_enabled is False
+
+    def test_feature_rag_enabled_is_stored_field(self):
+        """feature_rag_enabled should be a stored field, not a derived property."""
+        assert "feature_rag_enabled" in AppSettings.model_fields
+
+
+class TestRAGSourceConfig:
+    """Test RAGSourceConfig model validation."""
+
+    def test_mcp_source_with_command(self):
+        """MCP source should accept command for stdio transport."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="mcp",
+            display_name="Test MCP",
+            command=["python", "server.py"],
+        )
+        assert config.type == "mcp"
+        assert config.command == ["python", "server.py"]
+
+    def test_mcp_source_with_url(self):
+        """MCP source should accept url for HTTP/SSE transport."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="mcp",
+            display_name="Test MCP",
+            url="http://localhost:8080",
+        )
+        assert config.type == "mcp"
+        assert config.url == "http://localhost:8080"
+
+    def test_mcp_source_requires_command_or_url(self):
+        """MCP source should raise error if neither command nor url is provided."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        with pytest.raises(ValueError, match="MCP RAG source requires either 'command' or 'url'"):
+            RAGSourceConfig(
+                type="mcp",
+                display_name="Invalid MCP",
+            )
+
+    def test_http_source_with_url(self):
+        """HTTP source should accept url."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="http",
+            display_name="Test HTTP RAG",
+            url="https://rag-api.example.com",
+            bearer_token="secret-token",
+        )
+        assert config.type == "http"
+        assert config.url == "https://rag-api.example.com"
+        assert config.bearer_token == "secret-token"
+
+    def test_http_source_requires_url(self):
+        """HTTP source should raise error if url is not provided."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        with pytest.raises(ValueError, match="HTTP RAG source requires 'url'"):
+            RAGSourceConfig(
+                type="http",
+                display_name="Invalid HTTP",
+            )
+
+    def test_rag_source_defaults(self):
+        """RAGSourceConfig should have sensible defaults."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="http",
+            url="https://example.com",
+        )
+        assert config.enabled is True
+        assert config.groups == []
+        assert config.compliance_level is None
+        assert config.top_k == 4
+        assert config.timeout == 60.0
+        assert config.discovery_endpoint == "/discover/datasources"
+        assert config.query_endpoint == "/rag/completions"
+
+    def test_rag_source_with_all_fields(self):
+        """RAGSourceConfig should accept all optional fields."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="http",
+            display_name="Full Config RAG",
+            description="A fully configured RAG source",
+            icon="search",
+            groups=["admin", "users"],
+            compliance_level="Internal",
+            enabled=True,
+            url="https://rag.example.com",
+            bearer_token="my-token",
+            default_model="custom-model",
+            top_k=10,
+            timeout=120.0,
+            discovery_endpoint="/custom/discover",
+            query_endpoint="/custom/query",
+        )
+        assert config.display_name == "Full Config RAG"
+        assert config.description == "A fully configured RAG source"
+        assert config.icon == "search"
+        assert config.groups == ["admin", "users"]
+        assert config.compliance_level == "Internal"
+        assert config.default_model == "custom-model"
+        assert config.top_k == 10
+        assert config.timeout == 120.0
+        assert config.discovery_endpoint == "/custom/discover"
+        assert config.query_endpoint == "/custom/query"
+
+    def test_rag_source_disabled(self):
+        """RAGSourceConfig should support disabled state."""
+        from backend.modules.config.config_manager import RAGSourceConfig
+
+        config = RAGSourceConfig(
+            type="http",
+            url="https://example.com",
+            enabled=False,
+        )
+        assert config.enabled is False
+
+
+class TestRAGSourcesConfig:
+    """Test RAGSourcesConfig model for multiple RAG sources."""
+
+    def test_empty_sources_config(self):
+        """RAGSourcesConfig should accept empty sources dict."""
+        from backend.modules.config.config_manager import RAGSourcesConfig
+
+        config = RAGSourcesConfig()
+        assert config.sources == {}
+
+    def test_sources_config_with_multiple_sources(self):
+        """RAGSourcesConfig should accept multiple source configurations."""
+        from backend.modules.config.config_manager import RAGSourcesConfig, RAGSourceConfig
+
+        config = RAGSourcesConfig(
+            sources={
+                "http_source": RAGSourceConfig(
+                    type="http",
+                    url="https://http-rag.example.com",
+                ),
+                "mcp_source": RAGSourceConfig(
+                    type="mcp",
+                    command=["python", "mcp_server.py"],
+                ),
+            }
+        )
+        assert len(config.sources) == 2
+        assert "http_source" in config.sources
+        assert "mcp_source" in config.sources
+        assert config.sources["http_source"].type == "http"
+        assert config.sources["mcp_source"].type == "mcp"
+
+    def test_sources_config_from_dict(self):
+        """RAGSourcesConfig should convert dict values to RAGSourceConfig."""
+        from backend.modules.config.config_manager import RAGSourcesConfig
+
+        config = RAGSourcesConfig(
+            sources={
+                "test_source": {
+                    "type": "http",
+                    "url": "https://example.com",
+                    "display_name": "Test Source",
+                }
+            }
+        )
+        assert config.sources["test_source"].type == "http"
+        assert config.sources["test_source"].url == "https://example.com"
+        assert config.sources["test_source"].display_name == "Test Source"
 
 

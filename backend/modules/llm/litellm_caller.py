@@ -36,17 +36,46 @@ class LiteLLMCaller:
     guarantees in multi-tenant or highly concurrent environments.
     """
     
-    def __init__(self, llm_config=None, debug_mode: bool = False):
-        """Initialize with optional config dependency injection."""
+    def __init__(self, llm_config=None, debug_mode: bool = False, rag_service=None):
+        """Initialize with optional config dependency injection.
+
+        Args:
+            llm_config: LLM configuration object
+            debug_mode: Enable verbose LiteLLM logging
+            rag_service: UnifiedRAGService for RAG-augmented calls
+        """
         if llm_config is None:
             from modules.config import config_manager
             self.llm_config = config_manager.llm_config
         else:
             self.llm_config = llm_config
-        
+
+        # Store RAG service for RAG queries
+        self._rag_service = rag_service
+
         # Set litellm verbosity based on debug mode
         litellm.set_verbose = debug_mode
-    
+
+    @staticmethod
+    def _parse_qualified_data_source(qualified_data_source: str) -> str:
+        """Extract corpus name from a qualified data source identifier.
+
+        Qualified data sources have format "server:source_id" (e.g., "atlas_rag:technical-docs").
+        The prefix is used for routing in multi-RAG setups, but the RAG API expects just
+        the corpus name.
+
+        Args:
+            qualified_data_source: Data source ID, optionally prefixed with server name.
+
+        Returns:
+            The corpus/source name without the server prefix.
+        """
+        if ":" in qualified_data_source:
+            _, data_source = qualified_data_source.split(":", 1)
+            logger.debug("Stripped RAG server prefix: %s -> %s", qualified_data_source, data_source)
+            return data_source
+        return qualified_data_source
+
     def _get_litellm_model_name(self, model_name: str) -> str:
         """Convert internal model name to LiteLLM compatible format."""
         if model_name not in self.llm_config.models:
@@ -191,54 +220,104 @@ class LiteLLMCaller:
             raise Exception(f"Failed to call LLM: {exc}")
     
     async def call_with_rag(
-        self, 
-        model_name: str, 
-        messages: List[Dict[str, str]], 
+        self,
+        model_name: str,
+        messages: List[Dict[str, str]],
         data_sources: List[str],
         user_email: str,
-        rag_client=None,
+        rag_service=None,
         temperature: float = 0.7,
     ) -> str:
         """LLM call with RAG integration."""
+        logger.debug(
+            "[LLM+RAG] call_with_rag called: model=%s, data_sources=%s, user=%s, message_count=%d",
+            model_name,
+            data_sources,
+            user_email,
+            len(messages),
+        )
+
         if not data_sources:
+            logger.debug("[LLM+RAG] No data sources provided, falling back to plain LLM call")
             return await self.call_plain(model_name, messages, temperature=temperature)
-        
-        # Import RAG client if not provided
-        if rag_client is None:
-            from modules.rag import rag_client as default_rag_client
-            rag_client = default_rag_client
-        
-        # Use the first selected data source
-        data_source = data_sources[0]
-        
+
+        # Use provided service or instance service
+        if rag_service is None:
+            rag_service = self._rag_service
+        if rag_service is None:
+            logger.error("[LLM+RAG] RAG service not configured")
+            raise ValueError("RAG service not configured")
+
+        # Use the first selected data source (qualified format: server:source_id)
+        qualified_data_source = data_sources[0]
+        # Extract just the source name for display purposes
+        display_source = self._parse_qualified_data_source(qualified_data_source)
+
+        logger.info(
+            "[LLM+RAG] Querying RAG: source=%s, user=%s",
+            qualified_data_source,
+            user_email,
+        )
+
         try:
-            # Query RAG for context
-            rag_response = await rag_client.query_rag(
+            # Query RAG for context via UnifiedRAGService
+            logger.debug("[LLM+RAG] Calling rag_service.query_rag...")
+            rag_response = await rag_service.query_rag(
                 user_email,
-                data_source,
+                qualified_data_source,
                 messages
             )
-            
+
+            logger.debug(
+                "[LLM+RAG] RAG response received: content_length=%d, has_metadata=%s",
+                len(rag_response.content) if rag_response.content else 0,
+                rag_response.metadata is not None,
+            )
+            logger.debug(
+                "[LLM+RAG] RAG content preview: %s...",
+                rag_response.content[:300] if rag_response.content else "(empty)",
+            )
+
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()
             rag_context_message = {
-                "role": "system", 
-                "content": f"Retrieved context from {data_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
+                "role": "system",
+                "content": f"Retrieved context from {display_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
             }
             messages_with_rag.insert(-1, rag_context_message)
-            
+
+            logger.debug("[LLM+RAG] Calling LLM with RAG-enriched context...")
             # Call LLM with enriched context
             llm_response = await self.call_plain(model_name, messages_with_rag, temperature=temperature)
-            
-            # Append metadata if available
-            if rag_response.metadata:
+
+            # Only append metadata if RAG actually provided useful content
+            # Skip if: no content, empty content, or default fallback messages
+            rag_content_useful = bool(
+                rag_response.content
+                and rag_response.content.strip()
+                and rag_response.content not in (
+                    "No response from RAG system.",
+                    "No response from MCP RAG.",
+                    "No matching vehicles found.",
+                )
+            )
+
+            if rag_content_useful and rag_response.metadata:
                 metadata_summary = self._format_rag_metadata(rag_response.metadata)
-                llm_response += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
-            
+                # Only append if we have actual metadata (not just "Metadata unavailable")
+                if metadata_summary and metadata_summary != "Metadata unavailable":
+                    llm_response += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
+
+            logger.info(
+                "[LLM+RAG] RAG-integrated query complete: response_length=%d, rag_content_useful=%s",
+                len(llm_response),
+                rag_content_useful,
+            )
             return llm_response
-            
+
         except Exception as exc:
-            logger.error(f"Error in RAG-integrated query: {exc}")
+            logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
+            logger.warning("[LLM+RAG] Falling back to plain LLM call due to RAG error")
             # Fallback to plain LLM call
             return await self.call_plain(model_name, messages, temperature=temperature)
     
@@ -319,49 +398,101 @@ class LiteLLMCaller:
         tools_schema: List[Dict],
         user_email: str,
         tool_choice: str = "auto",
-        rag_client=None,
+        rag_service=None,
         temperature: float = 0.7,
     ) -> LLMResponse:
         """Full integration: RAG + Tools."""
+        logger.debug(
+            "[LLM+RAG+Tools] call_with_rag_and_tools called: model=%s, data_sources=%s, user=%s, tools_count=%d",
+            model_name,
+            data_sources,
+            user_email,
+            len(tools_schema) if tools_schema else 0,
+        )
+
         if not data_sources:
+            logger.debug("[LLM+RAG+Tools] No data sources provided, falling back to tools-only call")
             return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature)
-        
-        # Import RAG client if not provided
-        if rag_client is None:
-            from modules.rag import rag_client as default_rag_client
-            rag_client = default_rag_client
-        
-        # Use the first selected data source
-        data_source = data_sources[0]
-        
+
+        # Use provided service or instance service
+        if rag_service is None:
+            rag_service = self._rag_service
+        if rag_service is None:
+            logger.error("[LLM+RAG+Tools] RAG service not configured")
+            raise ValueError("RAG service not configured")
+
+        # Use the first selected data source (qualified format: server:source_id)
+        qualified_data_source = data_sources[0]
+        # Extract just the source name for display purposes
+        display_source = self._parse_qualified_data_source(qualified_data_source)
+
+        logger.info(
+            "[LLM+RAG+Tools] Querying RAG: source=%s, user=%s",
+            qualified_data_source,
+            user_email,
+        )
+
         try:
-            # Query RAG for context
-            rag_response = await rag_client.query_rag(
+            # Query RAG for context via UnifiedRAGService
+            logger.debug("[LLM+RAG+Tools] Calling rag_service.query_rag...")
+            rag_response = await rag_service.query_rag(
                 user_email,
-                data_source,
+                qualified_data_source,
                 messages
             )
-            
+
+            logger.debug(
+                "[LLM+RAG+Tools] RAG response received: content_length=%d, has_metadata=%s",
+                len(rag_response.content) if rag_response.content else 0,
+                rag_response.metadata is not None,
+            )
+            logger.debug(
+                "[LLM+RAG+Tools] RAG content preview: %s...",
+                rag_response.content[:300] if rag_response.content else "(empty)",
+            )
+
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()
             rag_context_message = {
-                "role": "system", 
-                "content": f"Retrieved context from {data_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
+                "role": "system",
+                "content": f"Retrieved context from {display_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
             }
             messages_with_rag.insert(-1, rag_context_message)
-            
+
+            logger.debug("[LLM+RAG+Tools] Calling LLM with RAG-enriched context and tools...")
             # Call LLM with enriched context and tools
             llm_response = await self.call_with_tools(model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature)
-            
-            # Append metadata to content if available and no tool calls
-            if rag_response.metadata and not llm_response.has_tool_calls():
+
+            # Only append metadata if RAG actually provided useful content
+            # Skip if: no content, empty content, or default fallback messages
+            rag_content_useful = bool(
+                rag_response.content
+                and rag_response.content.strip()
+                and rag_response.content not in (
+                    "No response from RAG system.",
+                    "No response from MCP RAG.",
+                    "No matching vehicles found.",
+                )
+            )
+
+            # Append metadata to content if RAG was useful, has metadata, and no tool calls
+            if rag_content_useful and rag_response.metadata and not llm_response.has_tool_calls():
                 metadata_summary = self._format_rag_metadata(rag_response.metadata)
-                llm_response.content += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
-            
+                # Only append if we have actual metadata (not just "Metadata unavailable")
+                if metadata_summary and metadata_summary != "Metadata unavailable":
+                    llm_response.content += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
+
+            logger.info(
+                "[LLM+RAG+Tools] RAG+tools query complete: response_length=%d, has_tool_calls=%s, rag_content_useful=%s",
+                len(llm_response.content) if llm_response.content else 0,
+                llm_response.has_tool_calls(),
+                rag_content_useful,
+            )
             return llm_response
-            
+
         except Exception as exc:
-            logger.error(f"Error in RAG+tools integrated query: {exc}")
+            logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)
+            logger.warning("[LLM+RAG+Tools] Falling back to tools-only call due to RAG error")
             # Fallback to tools-only call
             return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature)
     

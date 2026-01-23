@@ -297,21 +297,13 @@ def rag_discover_resources(username: str) -> Dict[str, Any]:
         }
 
 
-@mcp.tool
-def rag_get_raw_results(
-    username: str,
+def _do_raw_search(
     query: str,
     sources: Optional[List[str]] = None,
     top_k: int = 8,
     filters: Optional[Dict[str, Any]] = None,
-    ranking: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Search fleet data and return raw hits with location and car metadata.
-
-    Args mirror the expected contract from the aggregator. "sources" are the
-    resource IDs from rag_discover_resources.
-    """
+    """Internal function to perform raw search (not decorated as MCP tool)."""
     start, meta = _start_meta()
     filters = filters or {}
     try:
@@ -360,6 +352,25 @@ def rag_get_raw_results(
 
 
 @mcp.tool
+def rag_get_raw_results(
+    username: str,
+    query: str,
+    sources: Optional[List[str]] = None,
+    top_k: int = 8,
+    filters: Optional[Dict[str, Any]] = None,
+    ranking: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Search fleet data and return raw hits with location and car metadata.
+
+    Args mirror the expected contract from the aggregator. "sources" are the
+    resource IDs from rag_discover_resources.
+    """
+    # Delegate to internal function (ranking is ignored in this simple impl)
+    return _do_raw_search(query, sources, top_k, filters)
+
+
+@mcp.tool
 def rag_get_synthesized_results(
     username: str,
     query: str,
@@ -373,9 +384,8 @@ def rag_get_synthesized_results(
     """
     start, meta = _start_meta()
     try:
-        # Reuse raw results to build a succinct answer
-        raw = rag_get_raw_results(
-            username=username,
+        # Reuse raw results to build a succinct answer (use internal function, not the decorated tool)
+        raw = _do_raw_search(
             query=query,
             sources=sources,
             top_k=(top_k or 5),

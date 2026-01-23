@@ -21,6 +21,7 @@ export default function LogViewer() {
   const [hideWebsocketEndpoint, setHideWebsocketEndpoint] = useState(false); // State for hiding websocket_endpoint calls
   const [hideHttpClientCalls, setHideHttpClientCalls] = useState(false); // State for hiding _send_single_request calls
   const [hideDiscoverDataSources, setHideDiscoverDataSources] = useState(false); // State for hiding discover_data_sources calls
+  const [hideLiteLLM, setHideLiteLLM] = useState(true); // State for hiding LiteLLM verbose logs (enabled by default)
   const [quickFiltersCollapsed, setQuickFiltersCollapsed] = useState(false); // State for collapsing Quick Filters
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true); // State for auto-scroll
   const [pollIntervalInput, setPollIntervalInput] = useState(String(DEFAULT_POLL_INTERVAL / 1000)); // Input for poll interval in seconds
@@ -131,9 +132,9 @@ export default function LogViewer() {
 
   // Toggle all filters on/off
   const handleToggleAll = () => {
-    const anyFilterActive = hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources;
+    const anyFilterActive = hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources || hideLiteLLM;
     const newState = !anyFilterActive;
-    
+
     setPage(0);
     setHideViewerRequests(newState);
     setHideMiddleware(newState);
@@ -141,6 +142,7 @@ export default function LogViewer() {
     setHideWebsocketEndpoint(newState);
     setHideHttpClientCalls(newState);
     setHideDiscoverDataSources(newState);
+    setHideLiteLLM(newState);
   };
 
   // Memoize unique levels extracted from entries
@@ -164,34 +166,39 @@ export default function LogViewer() {
     )) {
       return false;
     }
-    
+
     // Hide middleware calls
     if (hideMiddleware && e.module === 'middleware') {
       return false;
     }
-    
+
     // Hide config routes get_config calls
     if (hideConfigRoutes && e.module === 'config_routes' && e.function === 'get_config') {
       return false;
     }
-    
+
     // Hide websocket endpoint calls
     if (hideWebsocketEndpoint && e.module === 'main' && e.function === 'websocket_endpoint') {
       return false;
     }
-    
+
     // Hide HTTP client _send_single_request calls
     if (hideHttpClientCalls && e.module === '_client' && e.function === '_send_single_request') {
       return false;
     }
-    
+
     // Hide discover_data_sources calls
     if (hideDiscoverDataSources && e.module === 'client' && e.function === 'discover_data_sources') {
       return false;
     }
-    
+
+    // Hide LiteLLM verbose logs (logger starts with "LiteLLM")
+    if (hideLiteLLM && e.logger && e.logger.startsWith('LiteLLM')) {
+      return false;
+    }
+
     return true;
-  }), [entries, hideViewerRequests, hideMiddleware, hideConfigRoutes, hideWebsocketEndpoint, hideHttpClientCalls, hideDiscoverDataSources]);
+  }), [entries, hideViewerRequests, hideMiddleware, hideConfigRoutes, hideWebsocketEndpoint, hideHttpClientCalls, hideDiscoverDataSources, hideLiteLLM]);
 
   // Memoize paginated results - compute reverse and slice in a single pass
   const paginated = useMemo(() => {
@@ -260,9 +267,9 @@ export default function LogViewer() {
           <button
             onClick={handleToggleAll}
             className="flex items-center gap-2 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-xs font-medium transition-colors"
-            title={`${hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources ? 'Disable' : 'Enable'} all filters`}
+            title={`${hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources || hideLiteLLM ? 'Disable' : 'Enable'} all filters`}
           >
-            {hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources ? (
+            {hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources || hideLiteLLM ? (
               <ToggleRight className="w-4 h-4" />
             ) : (
               <ToggleLeft className="w-4 h-4" />
@@ -346,6 +353,22 @@ export default function LogViewer() {
                   onChange={e => { setPage(0); setHideMiddleware(e.target.checked); }}
                 />
                 Middleware calls
+              </label>
+            </div>
+          </div>
+
+          {/* LLM Provider Logs */}
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">LLM Provider Logs</h4>
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-cyan-600"
+                  checked={hideLiteLLM}
+                  onChange={e => { setPage(0); setHideLiteLLM(e.target.checked); }}
+                />
+                LiteLLM verbose logs
               </label>
             </div>
           </div>
