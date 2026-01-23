@@ -474,7 +474,6 @@ class AppSettings(BaseSettings):
     
     # Config file names (can be overridden via environment variables)
     mcp_config_file: str = Field(default="mcp.json", validation_alias="MCP_CONFIG_FILE")
-    rag_mcp_config_file: str = Field(default="mcp-rag.json", validation_alias="MCP_RAG_CONFIG_FILE")
     rag_sources_config_file: str = Field(default="rag-sources.json", validation_alias="RAG_SOURCES_CONFIG_FILE")
     llm_config_file: str = Field(default="llmconfig.yml", validation_alias="LLM_CONFIG_FILE")
     help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
@@ -720,25 +719,52 @@ class ConfigManager:
 
     @property
     def rag_mcp_config(self) -> MCPConfig:
-        """Get RAG MCP configuration (cached) from mcp-rag.json."""
+        """Get RAG MCP configuration (cached) derived from rag-sources.json.
+
+        Extracts MCP-type sources from rag_sources_config and converts them
+        to MCPServerConfig format for compatibility with RAGMCPService.
+        """
         if self._rag_mcp_config is None:
             try:
-                rag_filename = self.app_settings.rag_mcp_config_file
-                file_paths = self._search_paths(rag_filename)
-                data = self._load_file_with_error_handling(file_paths, "JSON")
+                # Get all RAG sources and filter to MCP type only
+                rag_sources = self.rag_sources_config
+                mcp_servers: Dict[str, MCPServerConfig] = {}
 
-                if data:
-                    servers_data = {"servers": data}
-                    self._rag_mcp_config = MCPConfig(**servers_data)
+                for name, source in rag_sources.sources.items():
+                    if source.type != "mcp":
+                        continue
+                    if not source.enabled:
+                        continue
+
+                    # Convert RAGSourceConfig to MCPServerConfig
+                    mcp_servers[name] = MCPServerConfig(
+                        description=source.description,
+                        groups=source.groups,
+                        enabled=source.enabled,
+                        command=source.command,
+                        cwd=source.cwd,
+                        env=source.env,
+                        url=source.url,
+                        transport=source.transport,
+                        auth_token=source.auth_token,
+                        compliance_level=source.compliance_level,
+                    )
+
+                self._rag_mcp_config = MCPConfig(servers=mcp_servers)
+
+                if mcp_servers:
                     # Validate compliance levels
                     self._validate_mcp_compliance_levels(self._rag_mcp_config, "RAG MCP")
-                    logger.info(f"Loaded RAG MCP config with {len(self._rag_mcp_config.servers)} servers: {list(self._rag_mcp_config.servers.keys())}")
+                    logger.info(
+                        "Loaded RAG MCP config with %d servers from rag-sources.json: %s",
+                        len(mcp_servers),
+                        list(mcp_servers.keys())
+                    )
                 else:
-                    self._rag_mcp_config = MCPConfig()
-                    logger.info("Created empty RAG MCP config (no configuration file found)")
+                    logger.info("No MCP-type RAG sources found in rag-sources.json")
 
             except Exception as e:
-                logger.error(f"Failed to parse RAG MCP configuration: {e}", exc_info=True)
+                logger.error("Failed to build RAG MCP configuration: %s", e, exc_info=True)
                 self._rag_mcp_config = MCPConfig()
 
         return self._rag_mcp_config

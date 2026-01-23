@@ -198,10 +198,11 @@ Updated MCP server configurations to include compliance levels:
 }
 ```
 
-**config/defaults/mcp-rag.json** and **config/overrides/mcp-rag.json**:
+**config/defaults/rag-sources.json** and **config/overrides/rag-sources.json**:
 ```json
 {
   "corporate_cars": {
+    "type": "mcp",
     "command": ["python", "mcp/corporate_cars/main.py"],
     "cwd": "backend",
     "groups": ["users"],

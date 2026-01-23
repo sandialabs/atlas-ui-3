@@ -133,8 +133,8 @@ class UnifiedRAGService:
                     rag_servers.append(server_info)
 
             elif source_config.type == "mcp":
-                # MCP sources are handled by RAGMCPService separately for now
-                # This could be integrated here in the future
+                # MCP sources from rag-sources.json are handled by RAGMCPService
+                # which reads them via config_manager.rag_mcp_config
                 logger.debug("Skipping MCP source %s (handled by RAGMCPService)", source_name)
 
         return rag_servers
