@@ -144,9 +144,14 @@ export const ChatProvider = ({ children }) => {
 		setIsThinking(true)
 		const tagged = files.getTaggedFilesContent()
 
-		// Determine data sources: if ragEnabled or forceRag, use all available sources
-		const useRag = ragEnabled || forceRag
-		const dataSourcesToSend = useRag ? getAllRagSourceIds() : [...selectedDataSources]
+		// Determine data sources to send:
+		// - If user has selected specific sources, use those
+		// - If forceRag is true and no sources selected, use all sources as fallback
+		// - ragEnabled flag controls whether RAG UI is shown, but we respect user's selections
+		const hasSelectedSources = selectedDataSources.size > 0
+		const dataSourcesToSend = hasSelectedSources
+			? [...selectedDataSources]
+			: (forceRag ? getAllRagSourceIds() : [])
 
 		sendMessage({
 			type: 'chat',
@@ -164,7 +169,7 @@ export const ChatProvider = ({ children }) => {
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
 			compliance_level_filter: selections.complianceLevelFilter,
 		})
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, ragEnabled, getAllRagSourceIds])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds])
 
 	const clearChat = useCallback(() => {
 		resetMessages()
