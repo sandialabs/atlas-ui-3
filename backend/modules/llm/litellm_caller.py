@@ -290,10 +290,12 @@ class LiteLLMCaller:
             # Call LLM with enriched context
             llm_response = await self.call_plain(model_name, messages_with_rag, temperature=temperature)
 
-            # Append metadata if available
+            # Append metadata if available and useful
             if rag_response.metadata:
                 metadata_summary = self._format_rag_metadata(rag_response.metadata)
-                llm_response += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
+                # Only append if we have actual metadata (not just "Metadata unavailable")
+                if metadata_summary and metadata_summary != "Metadata unavailable":
+                    llm_response += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
 
             logger.info(
                 "[LLM+RAG] RAG-integrated query complete: response_length=%d",
@@ -449,10 +451,12 @@ class LiteLLMCaller:
             # Call LLM with enriched context and tools
             llm_response = await self.call_with_tools(model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature)
 
-            # Append metadata to content if available and no tool calls
+            # Append metadata to content if available, useful, and no tool calls
             if rag_response.metadata and not llm_response.has_tool_calls():
                 metadata_summary = self._format_rag_metadata(rag_response.metadata)
-                llm_response.content += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
+                # Only append if we have actual metadata (not just "Metadata unavailable")
+                if metadata_summary and metadata_summary != "Metadata unavailable":
+                    llm_response.content += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
 
             logger.info(
                 "[LLM+RAG+Tools] RAG+tools query complete: response_length=%d, has_tool_calls=%s",

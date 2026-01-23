@@ -497,8 +497,12 @@ class RAGMCPService:
 
                     payload = self._extract_structured_result(raw) or {}
                     logger.debug("[MCP-RAG] Server %s extracted payload keys: %s", server, list(payload.keys()))
+                    logger.debug("[MCP-RAG] Server %s full payload: %s", server, sanitize_for_logging(str(payload)[:1000]))
 
                     results = payload.get("results") or {}
+                    logger.debug("[MCP-RAG] Server %s results type: %s, results keys: %s", server, type(results).__name__, list(results.keys()) if isinstance(results, dict) else "N/A")
+                    logger.debug("[MCP-RAG] Server %s results content: %s", server, sanitize_for_logging(str(results)[:500]))
+
                     ans = results.get("answer")
                     if isinstance(ans, str) and ans:
                         logger.debug(
@@ -551,31 +555,91 @@ class RAGMCPService:
     # --- helpers ---------------------------------------------------------
     def _extract_structured_result(self, raw: Any) -> Dict[str, Any]:
         """Best-effort extraction of a structured payload from FastMCP result."""
+        import json
+
+        logger.debug("[MCP-RAG] _extract_structured_result: raw type=%s", type(raw).__name__)
+
         try:
+            # Log available attributes for debugging
+            if hasattr(raw, "__dict__"):
+                logger.debug("[MCP-RAG] _extract_structured_result: raw attributes=%s", list(raw.__dict__.keys()) if hasattr(raw, "__dict__") else "N/A")
+
+            # If raw is already a dict, return it directly
+            if isinstance(raw, dict):
+                logger.debug("[MCP-RAG] _extract_structured_result: raw is already a dict with keys=%s", list(raw.keys()))
+                return raw
+
             # Preferred attributes from fastmcp
             if hasattr(raw, "structured_content") and raw.structured_content:
+                logger.debug("[MCP-RAG] _extract_structured_result: found structured_content")
                 if isinstance(raw.structured_content, dict):
                     return raw.structured_content
             if hasattr(raw, "data") and raw.data:
+                logger.debug("[MCP-RAG] _extract_structured_result: found data")
                 if isinstance(raw.data, dict):
                     return raw.data
+
             if hasattr(raw, "content") and raw.content:
                 contents = getattr(raw, "content")
+                logger.debug("[MCP-RAG] _extract_structured_result: found content, type=%s, len=%s", type(contents).__name__, len(contents) if hasattr(contents, '__len__') else "N/A")
+
                 # content is typically a list of segments with .text
                 if isinstance(contents, list) and contents:
-                    first = contents[0]
-                    text = getattr(first, "text", None)
-                    if isinstance(text, str) and text.strip():
-                        import json
-                        try:
-                            obj = json.loads(text)
-                            if isinstance(obj, dict):
-                                return obj
-                        except Exception:
-                            # Not JSON; ignore
-                            pass
+                    # Try all content items, not just the first
+                    for idx, item in enumerate(contents):
+                        logger.debug("[MCP-RAG] _extract_structured_result: content[%d] type=%s", idx, type(item).__name__)
+
+                        # Try .text attribute
+                        text = getattr(item, "text", None)
+                        if text is None and isinstance(item, dict):
+                            text = item.get("text")
+
+                        if text:
+                            logger.debug("[MCP-RAG] _extract_structured_result: text type=%s, preview=%s", type(text).__name__, sanitize_for_logging(str(text)[:300]))
+                            if isinstance(text, str) and text.strip():
+                                try:
+                                    obj = json.loads(text)
+                                    if isinstance(obj, dict):
+                                        logger.debug("[MCP-RAG] _extract_structured_result: parsed JSON with keys=%s", list(obj.keys()))
+                                        return obj
+                                except Exception as json_err:
+                                    logger.debug("[MCP-RAG] _extract_structured_result: JSON parse failed for content[%d]: %s", idx, json_err)
+
+                        # Try if item is itself a dict with results/meta_data
+                        if isinstance(item, dict):
+                            if "results" in item or "meta_data" in item:
+                                logger.debug("[MCP-RAG] _extract_structured_result: content[%d] is a dict with results/meta_data", idx)
+                                return item
+
+                # If content is a single string (not list), try to parse as JSON
+                elif isinstance(contents, str) and contents.strip():
+                    logger.debug("[MCP-RAG] _extract_structured_result: content is a string, trying JSON parse")
+                    try:
+                        obj = json.loads(contents)
+                        if isinstance(obj, dict):
+                            logger.debug("[MCP-RAG] _extract_structured_result: parsed content string as JSON with keys=%s", list(obj.keys()))
+                            return obj
+                    except Exception as json_err:
+                        logger.debug("[MCP-RAG] _extract_structured_result: JSON parse of content string failed: %s", json_err)
+
+            # Try to convert raw to string and parse as JSON (last resort)
+            if hasattr(raw, "__str__"):
+                raw_str = str(raw)
+                # Only try if it looks like JSON
+                if raw_str.strip().startswith("{"):
+                    logger.debug("[MCP-RAG] _extract_structured_result: trying __str__ as JSON: %s...", sanitize_for_logging(raw_str[:200]))
+                    try:
+                        obj = json.loads(raw_str)
+                        if isinstance(obj, dict):
+                            logger.debug("[MCP-RAG] _extract_structured_result: parsed __str__ as JSON with keys=%s", list(obj.keys()))
+                            return obj
+                    except Exception:
+                        pass
+
         except Exception as parse_err:  # pragma: no cover - defensive
             logger.debug("Non-fatal: failed to parse structured result: %s", parse_err)
+
+        logger.debug("[MCP-RAG] _extract_structured_result: returning empty dict")
         return {}
 
     def _extract_resources(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
