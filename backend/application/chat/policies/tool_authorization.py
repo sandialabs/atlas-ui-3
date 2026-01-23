@@ -95,5 +95,5 @@ class ToolAuthorizationService:
             return await self.tool_manager.get_authorized_servers(user, is_user_in_group)  # type: ignore[attr-defined]
 
         # If no authorization method available, return empty list (no authorized servers)
-        logger.warning(f"Tool manager has no get_authorized_servers method for user {user}")
+        logger.warning("Tool manager has no get_authorized_servers method for user %s", user)
         return []

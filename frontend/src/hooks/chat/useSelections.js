@@ -11,7 +11,10 @@ export function useSelections() {
   const [dataSourcesRaw, setDataSourcesRaw] = usePersistentState('chatui-selected-data-sources', [])
   const [toolChoiceRequired, setToolChoiceRequired] = usePersistentState('chatui-tool-choice-required', false)
   const [complianceLevelFilter, setComplianceLevelFilter] = usePersistentState('chatui-compliance-level-filter', null)
-  
+
+  // RAG toggle: persistent boolean for enabling/disabling RAG
+  const [ragEnabled, setRagEnabled] = usePersistentState('chatui-rag-enabled', false)
+
   // New state: activePromptKey stores which prompt is currently active (null = use default)
   const [activePromptKey, setActivePromptKey] = usePersistentState('chatui-active-prompt', null)
 
@@ -95,6 +98,10 @@ export function useSelections() {
     setActivePromptKey(null)
   }, [setActivePromptKey])
 
+  const toggleRagEnabled = useCallback(() => {
+    setRagEnabled(prev => !prev)
+  }, [setRagEnabled])
+
   const clearToolsAndPrompts = useCallback(() => {
     setToolsRaw([])
     setPromptsRaw([])
@@ -122,6 +129,9 @@ export function useSelections() {
     setToolChoiceRequired,
     clearToolsAndPrompts,
     complianceLevelFilter,
-    setComplianceLevelFilter
+    setComplianceLevelFilter,
+    ragEnabled,
+    setRagEnabled,
+    toggleRagEnabled
   }
 }

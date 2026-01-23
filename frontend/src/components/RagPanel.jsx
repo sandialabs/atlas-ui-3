@@ -1,85 +1,18 @@
-import { useMemo, useState, useEffect, useRef } from 'react'
-import { X, Save } from 'lucide-react'
+import { useMemo } from 'react'
+import { X } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 
 const RagPanel = ({ isOpen, onClose }) => {
-  const prevOpenRef = useRef(false)
   const {
-    ragSources, // Use rich source data
-    selectedDataSources: savedSelectedDataSources,
-    toggleDataSource: saveToggleDataSource,
-    onlyRag: savedOnlyRag,
-    setOnlyRag: saveSetOnlyRag,
+    ragSources,
+    selectedDataSources,
+    toggleDataSource,
     features,
     complianceLevelFilter
   } = useChat()
 
   const complianceLevelsEnabled = features.compliance_levels
-  
-  // Local state for pending changes
-  const [pendingSelectedDataSources, setPendingSelectedDataSources] = useState(new Set())
-  const [pendingOnlyRag, setPendingOnlyRag] = useState(false)
-  const [hasChanges, setHasChanges] = useState(false)
-  
-  // Initialize pending state from saved state only when panel transitions from closed to open
-  useEffect(() => {
-    if (isOpen && !prevOpenRef.current) {
-      setPendingSelectedDataSources(new Set(savedSelectedDataSources))
-      setPendingOnlyRag(savedOnlyRag)
-      setHasChanges(false)
-    }
-    prevOpenRef.current = isOpen
-  }, [isOpen, savedSelectedDataSources, savedOnlyRag])
-  
-  // Use pending state while editing
-  const selectedDataSources = pendingSelectedDataSources
-  const onlyRag = pendingOnlyRag
-  
-  // Toggle function that works with pending state
-  const toggleDataSource = (sourceKey) => {
-    setPendingSelectedDataSources(prev => {
-      const next = new Set(prev)
-      if (next.has(sourceKey)) {
-        next.delete(sourceKey)
-      } else {
-        next.add(sourceKey)
-      }
-      setHasChanges(true)
-      return next
-    })
-  }
-  
-  const setOnlyRag = (value) => {
-    setPendingOnlyRag(value)
-    setHasChanges(true)
-  }
-  
-  // Save handler - commits pending changes to context
-  const handleSave = () => {
-    // Update data sources
-    const sourcesToAdd = Array.from(pendingSelectedDataSources).filter(s => !savedSelectedDataSources.has(s))
-    const sourcesToRemove = Array.from(savedSelectedDataSources).filter(s => !pendingSelectedDataSources.has(s))
-    
-    sourcesToAdd.forEach(s => saveToggleDataSource(s))
-    sourcesToRemove.forEach(s => saveToggleDataSource(s))
-    
-    // Update onlyRag if changed
-    if (pendingOnlyRag !== savedOnlyRag) {
-      saveSetOnlyRag(pendingOnlyRag)
-    }
-    
-    setHasChanges(false)
-    onClose()
-  }
-  
-  // Cancel handler - reverts pending changes
-  const handleCancel = () => {
-    setPendingSelectedDataSources(new Set(savedSelectedDataSources))
-    setPendingOnlyRag(savedOnlyRag)
-    setHasChanges(false)
-    onClose()
-  }
-  
+
   // Helper to get badge color
   const getComplianceBadgeColor = (level) => {
     switch (level) {
@@ -104,12 +37,12 @@ const RagPanel = ({ isOpen, onClose }) => {
     <>
       {/* Overlay */}
       {isOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
           onClick={onClose}
         />
       )}
-      
+
       {/* Panel */}
       <aside className={`
         fixed left-0 top-0 h-full w-80 bg-gray-800 border-r border-gray-700 z-50 transform transition-transform duration-300 ease-in-out flex flex-col
@@ -121,44 +54,35 @@ const RagPanel = ({ isOpen, onClose }) => {
         <div className="flex items-center justify-between p-4 border-b border-gray-700 flex-shrink-0">
           <h2 className="text-lg font-semibold text-gray-100">Data Sources</h2>
           <button
-            onClick={handleCancel}
+            onClick={onClose}
             className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* RAG Controls */}
-        <div className="p-4 border-b border-gray-700 space-y-3 flex-shrink-0">
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={onlyRag}
-              onChange={(e) => setOnlyRag(e.target.checked)}
-              className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
-            />
-            <span className="text-sm text-gray-200 font-medium">Only RAG</span>
-          </label>
-        </div>
-
         {/* Data Sources List */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 min-h-0">
+          {/* Help text */}
+          <div className="text-xs text-gray-400 mb-3 pb-3 border-b border-gray-700">
+            Click to enable/disable. <span className="text-green-400">Green</span> = enabled.
+          </div>
+
           {filteredDataSources.length === 0 ? (
             <div className="text-gray-400 text-center py-8">No data sources available</div>
           ) : (
             <div className="space-y-3">
               {filteredDataSources.map(dataSource => {
-                // The key for selection is the resource ID, which is 'id' in the ragSources object
                 const selectionKey = `${dataSource.serverName}:${dataSource.id}`
                 const isSelected = selectedDataSources.has(selectionKey)
-                
+
                 return (
                   <div
                     key={selectionKey}
                     onClick={() => toggleDataSource(selectionKey)}
                     className={`p-4 rounded-lg border cursor-pointer transition-colors ${
                       isSelected
-                        ? 'bg-blue-600 border-blue-500 text-white'
+                        ? 'bg-green-700 border-green-600 text-white'
                         : 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600'
                     }`}
                   >
@@ -173,35 +97,13 @@ const RagPanel = ({ isOpen, onClose }) => {
                       )}
                     </div>
                     <div className="text-sm mt-1 opacity-80">
-                      {dataSource.serverDisplayName} - Click to {isSelected ? 'deselect' : 'select'}
+                      {dataSource.serverDisplayName}
                     </div>
                   </div>
                 )
               })}
             </div>
           )}
-        </div>
-        
-        {/* Footer with Save/Cancel buttons */}
-        <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-gray-700 flex-shrink-0">
-          <button
-            onClick={handleCancel}
-            className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!hasChanges}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium ${
-              hasChanges
-                ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                : 'bg-gray-600 text-gray-400 cursor-not-allowed'
-            }`}
-          >
-            <Save className="w-4 h-4" />
-            Save Changes
-          </button>
         </div>
       </aside>
     </>

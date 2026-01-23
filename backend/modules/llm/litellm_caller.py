@@ -36,17 +36,46 @@ class LiteLLMCaller:
     guarantees in multi-tenant or highly concurrent environments.
     """
     
-    def __init__(self, llm_config=None, debug_mode: bool = False):
-        """Initialize with optional config dependency injection."""
+    def __init__(self, llm_config=None, debug_mode: bool = False, rag_service=None):
+        """Initialize with optional config dependency injection.
+
+        Args:
+            llm_config: LLM configuration object
+            debug_mode: Enable verbose LiteLLM logging
+            rag_service: UnifiedRAGService for RAG-augmented calls
+        """
         if llm_config is None:
             from modules.config import config_manager
             self.llm_config = config_manager.llm_config
         else:
             self.llm_config = llm_config
-        
+
+        # Store RAG service for RAG queries
+        self._rag_service = rag_service
+
         # Set litellm verbosity based on debug mode
         litellm.set_verbose = debug_mode
-    
+
+    @staticmethod
+    def _parse_qualified_data_source(qualified_data_source: str) -> str:
+        """Extract corpus name from a qualified data source identifier.
+
+        Qualified data sources have format "server:source_id" (e.g., "atlas_rag:technical-docs").
+        The prefix is used for routing in multi-RAG setups, but the RAG API expects just
+        the corpus name.
+
+        Args:
+            qualified_data_source: Data source ID, optionally prefixed with server name.
+
+        Returns:
+            The corpus/source name without the server prefix.
+        """
+        if ":" in qualified_data_source:
+            _, data_source = qualified_data_source.split(":", 1)
+            logger.debug("Stripped RAG server prefix: %s -> %s", qualified_data_source, data_source)
+            return data_source
+        return qualified_data_source
+
     def _get_litellm_model_name(self, model_name: str) -> str:
         """Convert internal model name to LiteLLM compatible format."""
         if model_name not in self.llm_config.models:
@@ -191,42 +220,45 @@ class LiteLLMCaller:
             raise Exception(f"Failed to call LLM: {exc}")
     
     async def call_with_rag(
-        self, 
-        model_name: str, 
-        messages: List[Dict[str, str]], 
+        self,
+        model_name: str,
+        messages: List[Dict[str, str]],
         data_sources: List[str],
         user_email: str,
-        rag_client=None,
+        rag_service=None,
         temperature: float = 0.7,
     ) -> str:
         """LLM call with RAG integration."""
         if not data_sources:
             return await self.call_plain(model_name, messages, temperature=temperature)
-        
-        # Import RAG client if not provided
-        if rag_client is None:
-            from modules.rag import rag_client as default_rag_client
-            rag_client = default_rag_client
-        
-        # Use the first selected data source
-        data_source = data_sources[0]
-        
+
+        # Use provided service or instance service
+        if rag_service is None:
+            rag_service = self._rag_service
+        if rag_service is None:
+            raise ValueError("RAG service not configured")
+
+        # Use the first selected data source (qualified format: server:source_id)
+        qualified_data_source = data_sources[0]
+        # Extract just the source name for display purposes
+        display_source = self._parse_qualified_data_source(qualified_data_source)
+
         try:
-            # Query RAG for context
-            rag_response = await rag_client.query_rag(
+            # Query RAG for context via UnifiedRAGService
+            rag_response = await rag_service.query_rag(
                 user_email,
-                data_source,
+                qualified_data_source,
                 messages
             )
-            
+
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()
             rag_context_message = {
-                "role": "system", 
-                "content": f"Retrieved context from {data_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
+                "role": "system",
+                "content": f"Retrieved context from {display_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
             }
             messages_with_rag.insert(-1, rag_context_message)
-            
+
             # Call LLM with enriched context
             llm_response = await self.call_plain(model_name, messages_with_rag, temperature=temperature)
             
@@ -319,37 +351,40 @@ class LiteLLMCaller:
         tools_schema: List[Dict],
         user_email: str,
         tool_choice: str = "auto",
-        rag_client=None,
+        rag_service=None,
         temperature: float = 0.7,
     ) -> LLMResponse:
         """Full integration: RAG + Tools."""
         if not data_sources:
             return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature)
-        
-        # Import RAG client if not provided
-        if rag_client is None:
-            from modules.rag import rag_client as default_rag_client
-            rag_client = default_rag_client
-        
-        # Use the first selected data source
-        data_source = data_sources[0]
-        
+
+        # Use provided service or instance service
+        if rag_service is None:
+            rag_service = self._rag_service
+        if rag_service is None:
+            raise ValueError("RAG service not configured")
+
+        # Use the first selected data source (qualified format: server:source_id)
+        qualified_data_source = data_sources[0]
+        # Extract just the source name for display purposes
+        display_source = self._parse_qualified_data_source(qualified_data_source)
+
         try:
-            # Query RAG for context
-            rag_response = await rag_client.query_rag(
+            # Query RAG for context via UnifiedRAGService
+            rag_response = await rag_service.query_rag(
                 user_email,
-                data_source,
+                qualified_data_source,
                 messages
             )
-            
+
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()
             rag_context_message = {
-                "role": "system", 
-                "content": f"Retrieved context from {data_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
+                "role": "system",
+                "content": f"Retrieved context from {display_source}:\n\n{rag_response.content}\n\nUse this context to inform your response."
             }
             messages_with_rag.insert(-1, rag_context_message)
-            
+
             # Call LLM with enriched context and tools
             llm_response = await self.call_with_tools(model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature)
             
