@@ -73,6 +73,80 @@ def create_html_report(title: str) -> Dict[str, Any]:
 
 For more details on how the canvas chooses viewers (including iframe support for external dashboards and embedded HTML), see `docs/developer/canvas-renderers.md`.
 
+## Returning Images with ImageContent
+
+MCP tools can return images directly using the `ImageContent` type from the MCP protocol. This is simpler than manually creating artifacts and is the recommended approach for returning images.
+
+### Using ImageContent
+
+When you return an `ImageContent` object, Atlas automatically extracts it and displays the image in the canvas panel:
+
+```python
+from mcp.types import ImageContent
+import base64
+from io import BytesIO
+
+@mcp.tool
+def generate_chart() -> ImageContent:
+    """Generate a chart and return it as an image."""
+    # Generate your image (example using PIL)
+    from PIL import Image, ImageDraw
+    
+    img = Image.new('RGB', (400, 300), color='white')
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([50, 50, 350, 250], fill='blue', outline='black', width=2)
+    
+    # Convert to base64
+    buffer = BytesIO()
+    img.save(buffer, format='PNG')
+    img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+    
+    return ImageContent(
+        type="image",
+        data=img_base64,
+        mimeType="image/png"
+    )
+```
+
+### Returning Multiple Images
+
+You can return multiple images from a single tool call:
+
+```python
+from typing import List
+
+@mcp.tool
+def generate_multiple_charts() -> List[ImageContent]:
+    """Generate multiple charts and return them as images."""
+    images = []
+    
+    for i in range(3):
+        # Generate image...
+        img_base64 = create_chart(i)
+        
+        images.append(ImageContent(
+            type="image",
+            data=img_base64,
+            mimeType="image/png"
+        ))
+    
+    return images
+```
+
+### ImageContent vs Artifacts
+
+**Use ImageContent when:**
+- You're generating images programmatically
+- You want the simplest code possible
+- You're returning images as the primary output
+
+**Use Artifacts when:**
+- You need fine-grained control over display options
+- You're returning mixed content types (images, PDFs, HTML, etc.)
+- You want to specify viewer hints or custom display configuration
+
+Both approaches work and will display images in the canvas panel. ImageContent is automatically converted to artifacts internally.
+
 ## Displaying External Content with Iframes
 
 MCP tools can display external content (dashboards, visualizations, web applications) using iframes in two ways:
