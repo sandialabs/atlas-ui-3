@@ -47,7 +47,8 @@ const ChatArea = () => {
     fileExtraction,
     ragEnabled,
     toggleRagEnabled,
-    features
+    features,
+    appName
   } = useChat()
   const { isConnected } = useWS()
 
@@ -720,7 +721,7 @@ const ChatArea = () => {
               A
             </div>
             <div className="w-full bg-gray-800 rounded-lg p-4">
-              <div className="text-sm font-medium text-gray-300 mb-2">Chat UI</div>
+              <div className="text-sm font-medium text-gray-300 mb-2">{appName}</div>
               <div className="flex items-center gap-2 text-gray-400">
                 <svg className="w-4 h-4 spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
