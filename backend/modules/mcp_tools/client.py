@@ -1824,6 +1824,38 @@ class MCPToolManager:
                     md = structured.get("meta_data")
                     if isinstance(md, dict):
                         meta_data = md
+                
+                # Extract ImageContent from the content array
+                if hasattr(raw_result, "content"):
+                    contents = getattr(raw_result, "content")
+                    if isinstance(contents, list):
+                        for idx, item in enumerate(contents):
+                            # Check if this is an ImageContent object
+                            if hasattr(item, "type") and getattr(item, "type") == "image":
+                                data = getattr(item, "data", None)
+                                mime_type = getattr(item, "mimeType", None)
+                                if data and mime_type:
+                                    # Generate a filename based on index and mime type
+                                    ext = mime_type.split("/")[-1] if "/" in mime_type else "bin"
+                                    filename = f"image_{idx}.{ext}"
+                                    
+                                    # Create artifact in the expected format
+                                    artifact = {
+                                        "name": filename,
+                                        "b64": data,
+                                        "mime": mime_type,
+                                        "viewer": "image",
+                                        "description": f"Image returned by {tool_call.name}"
+                                    }
+                                    artifacts.append(artifact)
+                                    logger.debug(f"Extracted ImageContent as artifact: {filename} ({mime_type})")
+                                    
+                                    # If no display config exists and this is the first image, auto-open canvas
+                                    if not display_config and idx == 0:
+                                        display_config = {
+                                            "primary_file": filename,
+                                            "open_canvas": True
+                                        }
             except Exception:
                 logger.warning("Error extracting v2 MCP components from tool result", exc_info=True)
 
