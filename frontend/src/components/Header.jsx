@@ -39,6 +39,25 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
     setDropdownOpen(false)
   }
 
+  // Close dropdowns when mobile menu opens
+  useEffect(() => {
+    if (mobileMenuOpen) {
+      setDropdownOpen(false)
+      setDownloadDropdownOpen(false)
+    }
+  }, [mobileMenuOpen])
+
+  // Handle Escape key to close mobile menu
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') setMobileMenuOpen(false)
+    }
+    if (mobileMenuOpen) {
+      document.addEventListener('keydown', handleEscape)
+      return () => document.removeEventListener('keydown', handleEscape)
+    }
+  }, [mobileMenuOpen])
+
   // Handle hotkey for new chat (Ctrl+Alt+N)
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -46,7 +65,7 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
       if (event.ctrlKey && event.altKey) {
         console.log('Ctrl+Alt pressed with key:', event.key, event.code)
       }
-      
+
       if (event.ctrlKey && event.altKey && (event.key === 'N' || event.key === 'n')) {
         event.preventDefault()
         event.stopPropagation()
@@ -322,6 +341,9 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="lg:hidden p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
           title="Menu"
+          aria-expanded={mobileMenuOpen}
+          aria-controls="mobile-menu"
+          aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
         >
           {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
@@ -337,7 +359,7 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
           />
           
           {/* Menu Panel */}
-          <div className="fixed top-[57px] sm:top-[65px] right-0 w-64 bg-gray-800 border-l border-gray-700 shadow-lg z-50 lg:hidden max-h-[calc(100vh-57px)] sm:max-h-[calc(100vh-65px)] overflow-y-auto">
+          <div id="mobile-menu" className="fixed top-[57px] sm:top-[65px] right-0 w-64 bg-gray-800 border-l border-gray-700 shadow-lg z-50 lg:hidden max-h-[calc(100vh-57px)] sm:max-h-[calc(100vh-65px)] overflow-y-auto">
             <div className="p-4 space-y-2">
               {/* User Info */}
               <div className="px-3 py-2 text-sm text-gray-300 bg-gray-700 rounded-lg">
