@@ -253,6 +253,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         help_email: toolServer.help_email,
         is_exclusive: toolServer.is_exclusive,
         compliance_level: toolServer.compliance_level,
+        auth_type: toolServer.auth_type,
         tools: toolServer.tools || [],
         tools_detailed: toolServer.tools_detailed || [],
         tool_count: toolServer.tool_count || 0,
@@ -272,6 +273,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         author: promptServer.author,
         help_email: promptServer.help_email,
         is_exclusive: false,
+        auth_type: promptServer.auth_type,
         tools: [],
         tools_detailed: [],
         tool_count: 0,
@@ -281,6 +283,10 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     } else {
       allServers[promptServer.server].prompts = promptServer.prompts || []
       allServers[promptServer.server].prompt_count = promptServer.prompt_count || 0
+      // Also update auth_type if not already set
+      if (!allServers[promptServer.server].auth_type && promptServer.auth_type) {
+        allServers[promptServer.server].auth_type = promptServer.auth_type
+      }
     }
   })
   

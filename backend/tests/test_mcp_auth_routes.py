@@ -256,15 +256,23 @@ class TestRemoveToken:
     @pytest.fixture
     def mock_dependencies(self):
         """Mock the dependencies for auth routes."""
-        with patch("backend.routes.mcp_auth_routes.get_token_storage") as mock_storage:
+        with patch("backend.routes.mcp_auth_routes.get_token_storage") as mock_storage, \
+             patch("backend.routes.mcp_auth_routes.app_factory") as mock_factory:
 
             mock_token_storage = MagicMock()
             mock_token_storage.remove_token.return_value = True
             mock_storage.return_value = mock_token_storage
 
+            # Mock tool manager for cache invalidation
+            mock_tool_manager = AsyncMock()
+            mock_tool_manager._invalidate_user_client = AsyncMock()
+            mock_factory.get_tool_manager.return_value = mock_tool_manager
+
             yield {
                 "storage": mock_storage,
                 "token_storage": mock_token_storage,
+                "factory": mock_factory,
+                "tool_manager": mock_tool_manager,
             }
 
     def test_remove_token_success(self, client, mock_dependencies):
@@ -276,6 +284,16 @@ class TestRemoveToken:
 
         assert data["message"] == "Token removed for server 'test-server'"
         assert data["server_name"] == "test-server"
+
+    def test_remove_token_invalidates_cache(self, client, mock_dependencies):
+        """Should invalidate cached client when token is removed."""
+        response = client.delete("/api/mcp/auth/test-server/token")
+
+        assert response.status_code == 200
+        # Verify cache invalidation was called
+        mock_dependencies["tool_manager"]._invalidate_user_client.assert_called_once_with(
+            "test@example.com", "test-server"
+        )
 
     def test_remove_token_not_found(self, client, mock_dependencies):
         """Should return 404 when token doesn't exist."""

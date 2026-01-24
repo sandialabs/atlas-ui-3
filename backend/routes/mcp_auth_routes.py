@@ -203,6 +203,12 @@ async def remove_token(
                 detail=f"No token found for server '{server_name}'"
             )
 
+        # Invalidate any cached client for this user/server combination
+        tool_manager = app_factory.get_tool_manager()
+        if tool_manager is not None:
+            await tool_manager._invalidate_user_client(current_user, server_name)
+            logger.debug(f"Invalidated cached client for server '{server_name}'")
+
         sanitized_server = sanitize_for_logging(server_name)
         logger.info(f"User removed token for MCP server '{sanitized_server}'")
 

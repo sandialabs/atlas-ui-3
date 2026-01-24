@@ -1376,12 +1376,12 @@ class MCPToolManager:
     def _requires_user_auth(self, server_name: str) -> bool:
         """Check if a server requires per-user authentication.
 
-        Returns True for servers with auth_type 'oauth' or 'jwt'.
+        Returns True for servers with auth_type 'oauth', 'jwt', 'bearer', or 'api_key'.
         These servers need user-specific tokens rather than shared/admin tokens.
         """
         config = self.servers_config.get(server_name, {})
         auth_type = config.get("auth_type", "none")
-        return auth_type in ("oauth", "jwt")
+        return auth_type in ("oauth", "jwt", "bearer", "api_key")
 
     async def _get_user_client(
         self,
@@ -1399,15 +1399,25 @@ class MCPToolManager:
         """
         from modules.mcp_tools.token_storage import get_token_storage
 
-        # Check cache first
+        token_storage = get_token_storage()
         cache_key = (user_email.lower(), server_name)
+
+        # Check cache first, but validate token is still valid
         async with self._user_clients_lock:
             if cache_key in self._user_clients:
-                # TODO: Check if cached client's token is still valid
-                return self._user_clients[cache_key]
+                # Verify the token is still valid before returning cached client
+                stored_token = token_storage.get_valid_token(user_email, server_name)
+                if stored_token is not None:
+                    return self._user_clients[cache_key]
+                else:
+                    # Token expired or removed, invalidate cached client
+                    logger.debug(
+                        f"Token expired for user on server '{server_name}', "
+                        f"invalidating cached client"
+                    )
+                    del self._user_clients[cache_key]
 
         # Get user's token from storage
-        token_storage = get_token_storage()
         stored_token = token_storage.get_valid_token(user_email, server_name)
 
         if stored_token is None:
