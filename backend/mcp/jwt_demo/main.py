@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_access_token
+from fastmcp.server.dependencies import get_access_token, get_http_headers
 
 mcp = FastMCP("JWT Auth Demo")
 
@@ -58,12 +58,18 @@ def whoami() -> dict[str, Any]:
     """
     start = time.perf_counter()
     token = get_access_token()
+    headers = get_http_headers() or {}
+
+    # Debug: show what headers we received
+    auth_header = headers.get("authorization", headers.get("Authorization", ""))
 
     if token is None:
         return {
             "authenticated": False,
             "error": "No token received. Upload a token in the Tools panel.",
             "hint": "Try one of: test123, admin456, demo",
+            "debug_auth_header": auth_header[:50] if auth_header else "(none)",
+            "debug_headers_keys": list(headers.keys())[:10],
             "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
         }
 
