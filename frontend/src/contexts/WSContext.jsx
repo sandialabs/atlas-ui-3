@@ -66,22 +66,26 @@ export const WSProvider = ({ children }) => {
         }
       }
 
-      wsRef.current.onclose = () => {
-        console.log('WebSocket disconnected')
+      wsRef.current.onclose = (event) => {
+        console.log('WebSocket disconnected, code:', event.code, 'reason:', event.reason)
         setIsConnected(false)
-        setConnectionStatus('Disconnected (Demo Mode)')
-        // Don't attempt to reconnect in demo mode to avoid spam
+        // Check if closed due to authentication failure (1008 = Policy Violation)
+        if (event.code === 1008) {
+          setConnectionStatus(`Unauthenticated: ${event.reason || 'Authentication required'}`)
+        } else {
+          setConnectionStatus('Disconnected')
+        }
       }
 
       wsRef.current.onerror = () => {
-        console.log('WebSocket connection failed - running in demo mode')
+        console.log('WebSocket connection failed')
         setIsConnected(false)
-        setConnectionStatus('Demo Mode')
+        setConnectionStatus('Connection Failed')
       }
     } catch {
-      console.log('WebSocket not available - running in demo mode')
+      console.log('WebSocket not available')
       setIsConnected(false)
-      setConnectionStatus('Demo Mode')
+      setConnectionStatus('Connection Failed')
     }
   }
 

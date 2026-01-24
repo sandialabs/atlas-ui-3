@@ -1,6 +1,6 @@
 # Authentication & Authorization
 
-Last updated: 2026-01-19
+Last updated: 2026-01-23
 
 The application is designed with the expectation that it operates behind a reverse proxy in a production environment. It does **not** handle user authentication (i.e., logging users in) by itself. Instead, it trusts a header that is injected by an upstream authentication service.
 
@@ -36,6 +36,27 @@ This configuration will decode the base64-encoded JWT passed in the x-amzn-oidc-
 ## Development Behavior
 
 In a local development environment (when `DEBUG_MODE=true` in the `.env` file), the system falls back to using a default `test@test.com` user if the configured authentication header is not present.
+
+## WebSocket Authentication
+
+WebSocket connections follow the same authentication model as HTTP requests:
+
+**Production Mode (`DEBUG_MODE=false`):**
+- WebSocket connections **require** the configured auth header (e.g., `X-User-Email`)
+- Connections without a valid auth header are **rejected before accepting** with a 1008 (Policy Violation) close code
+- Query parameter authentication (`/ws?user=...`) is **disabled** in production
+- Test user fallback is **disabled** in production
+
+**Debug Mode (`DEBUG_MODE=true`):**
+- Primary: Uses configured auth header if present
+- Fallback 1: Uses `?user=` query parameter if no header
+- Fallback 2: Uses `TEST_USER` from config (default: `test@test.com`)
+
+**Security Note:** The WebSocket endpoint validates authentication **before** accepting the connection. This prevents unauthenticated users from establishing a connection that could receive error messages or timing information.
+
+**Frontend Behavior on Authentication Failure:**
+- If the `/api/config` endpoint returns an error (e.g., 401), the UI displays "Chat UI (Unauthenticated)" with user shown as "Unauthenticated"
+- If the WebSocket connection is rejected with code 1008, the connection status displays the authentication error reason
 
 ## Configuring the Authentication Header
 
@@ -124,6 +145,11 @@ location / {
 - Use different secrets for different environments (dev, staging, production)
 - Rotate the secret periodically as part of your security policy
 - Never commit the secret to version control
+
+**Startup Warnings:**
+In production mode (`DEBUG_MODE=false`), the application logs security warnings at startup if:
+- `FEATURE_PROXY_SECRET_ENABLED=false` - warns that proxy secret validation is disabled
+- `FEATURE_PROXY_SECRET_ENABLED=true` but `PROXY_SECRET` is empty - warns that authentication will fail
 
 ## Customizing Authorization
 

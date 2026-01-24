@@ -93,9 +93,22 @@ def _ensure_feedback_directory():
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     logger.info("Starting Chat UI Backend with modular architecture")
-    
+
     # Initialize configuration
     config = app_factory.get_config_manager()
+
+    # SECURITY WARNING: Check for missing proxy secret in production
+    if not config.app_settings.debug_mode:
+        if not config.app_settings.feature_proxy_secret_enabled:
+            logger.warning(
+                "SECURITY WARNING: Proxy secret validation is DISABLED in production. "
+                "Set FEATURE_PROXY_SECRET_ENABLED=true and PROXY_SECRET to enable."
+            )
+        elif not config.app_settings.proxy_secret:
+            logger.warning(
+                "SECURITY WARNING: Proxy secret is ENABLED but PROXY_SECRET is not set. "
+                "Authentication will fail for all requests."
+            )
     
     logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
     logger.info(f"MCP servers configured: {len(config.mcp_config.servers)}")
@@ -270,11 +283,13 @@ async def websocket_endpoint(websocket: WebSocket):
     # Priority: 1) configured auth header (production), 2) query param (dev), 3) test user (dev fallback)
     config_manager = app_factory.get_config_manager()
 
+    is_debug_mode = config_manager.app_settings.debug_mode
+
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
         config_manager.app_settings.feature_proxy_secret_enabled
         and config_manager.app_settings.proxy_secret
-        and not config_manager.app_settings.debug_mode
+        and not is_debug_mode
     ):
         proxy_secret_header = config_manager.app_settings.proxy_secret_header
         proxy_secret_value = websocket.headers.get(proxy_secret_header)
@@ -285,31 +300,51 @@ async def websocket_endpoint(websocket: WebSocket):
             )
             raise WebSocketException(code=1008, reason="Invalid proxy secret")
 
-    await websocket.accept()
-
+    # Authenticate user BEFORE accepting the connection
     user_email = None
-    
+
     # Check configured auth header first (consistent with AuthMiddleware)
     auth_header_name = config_manager.app_settings.auth_user_header
     x_email_header = websocket.headers.get(auth_header_name)
     if x_email_header:
         user_email = get_user_from_header(x_email_header)
-        logger.info(
-            "WebSocket authenticated via %s header: %s",
-            sanitize_for_logging(auth_header_name),
-            sanitize_for_logging(user_email)
-        )
-    
-    # Fallback to query parameter for backward compatibility (development/testing)
-    if not user_email:
+
+    # Fallback to query parameter (development/testing ONLY)
+    if not user_email and is_debug_mode:
         user_email = websocket.query_params.get('user')
         if user_email:
-            logger.info("WebSocket authenticated via query parameter: %s", sanitize_for_logging(user_email))
-    
-    # Final fallback to test user (development mode only)
-    if not user_email:
+            logger.info(
+                "WebSocket authenticated via query parameter (debug mode): %s",
+                sanitize_for_logging(user_email)
+            )
+
+    # Final fallback to test user (development mode ONLY)
+    if not user_email and is_debug_mode:
         user_email = config_manager.app_settings.test_user or 'test@test.com'
-        logger.info(f"WebSocket using fallback test user: {sanitize_for_logging(user_email)}")
+        logger.info(
+            "WebSocket using fallback test user (debug mode): %s",
+            sanitize_for_logging(user_email)
+        )
+
+    # PRODUCTION: Reject unauthenticated connections
+    if not user_email:
+        logger.warning(
+            "WebSocket authentication failed - no user found in %s header. Client: %s",
+            sanitize_for_logging(auth_header_name),
+            sanitize_for_logging(websocket.client)
+        )
+        raise WebSocketException(
+            code=1008,
+            reason="Authentication required. Please ensure you are accessing this application through the configured reverse proxy."
+        )
+
+    # Now accept the connection (user is authenticated)
+    await websocket.accept()
+    logger.info(
+        "WebSocket authenticated via %s header: %s",
+        sanitize_for_logging(auth_header_name),
+        sanitize_for_logging(user_email)
+    )
 
     session_id = uuid4()
 
