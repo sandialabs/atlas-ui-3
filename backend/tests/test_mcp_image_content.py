@@ -185,10 +185,10 @@ class TestImageContentHandling:
             
             result = await manager.execute_tool(tool_call, context={})
             
-            # Verify image was extracted (text is at index 0, image at index 1)
+            # Verify image was extracted (uses image counter, so first image is image_0)
             assert len(result.artifacts) == 1
             artifact = result.artifacts[0]
-            assert artifact["name"] == "image_1.png"
+            assert artifact["name"] == "image_0.png"
             assert artifact["b64"] == image_b64
 
     @pytest.mark.asyncio

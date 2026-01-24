@@ -5,6 +5,7 @@ This is a test server to validate image display functionality.
 
 from fastmcp import FastMCP
 from mcp.types import ImageContent
+from typing import List
 import base64
 from io import BytesIO
 
@@ -61,7 +62,7 @@ def generate_test_image() -> ImageContent:
 
 
 @mcp.tool()
-def generate_multiple_images() -> list[ImageContent]:
+def generate_multiple_images() -> List[ImageContent]:
     """
     Generate multiple test images and return them as a list of ImageContent.
     This tests handling multiple images in a single tool response.

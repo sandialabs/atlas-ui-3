@@ -1829,15 +1829,16 @@ class MCPToolManager:
                 if hasattr(raw_result, "content"):
                     contents = getattr(raw_result, "content")
                     if isinstance(contents, list):
+                        image_counter = 0
                         for idx, item in enumerate(contents):
                             # Check if this is an ImageContent object
                             if hasattr(item, "type") and getattr(item, "type") == "image":
                                 data = getattr(item, "data", None)
                                 mime_type = getattr(item, "mimeType", None)
                                 if data and mime_type:
-                                    # Generate a filename based on index and mime type
+                                    # Generate a filename based on image counter and mime type
                                     ext = mime_type.split("/")[-1] if "/" in mime_type else "bin"
-                                    filename = f"image_{idx}.{ext}"
+                                    filename = f"image_{image_counter}.{ext}"
                                     
                                     # Create artifact in the expected format
                                     artifact = {
@@ -1851,11 +1852,13 @@ class MCPToolManager:
                                     logger.debug(f"Extracted ImageContent as artifact: {filename} ({mime_type})")
                                     
                                     # If no display config exists and this is the first image, auto-open canvas
-                                    if not display_config and idx == 0:
+                                    if not display_config and image_counter == 0:
                                         display_config = {
                                             "primary_file": filename,
                                             "open_canvas": True
                                         }
+                                    
+                                    image_counter += 1
             except Exception:
                 logger.warning("Error extracting v2 MCP components from tool result", exc_info=True)
 
