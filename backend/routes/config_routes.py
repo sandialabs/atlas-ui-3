@@ -164,7 +164,7 @@ async def get_config(
                     
                     # Determine auth_type from server config
                     auth_type = server_config.get('auth_type', 'none')
-                    auth_required = auth_type in ('jwt', 'bearer', 'oauth')
+                    auth_required = auth_type in ('jwt', 'bearer', 'oauth', 'api_key')
 
                     tools_info.append({
                         'server': server_name,

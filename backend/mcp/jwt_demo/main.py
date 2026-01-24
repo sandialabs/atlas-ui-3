@@ -17,7 +17,7 @@ How to use:
 For testing, you can use any valid-looking JWT token. In production,
 tokens would be validated against your identity provider.
 
-Updated: 2025-01-20
+Updated: 2025-01-21
 """
 
 import time

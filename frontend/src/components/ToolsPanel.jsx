@@ -215,6 +215,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       setTokenModalServer(null)
     } catch (err) {
       console.error('Token upload failed:', err)
+      alert(`Failed to save token: ${err.message || 'Please try again.'}`)
     } finally {
       setTokenUploadLoading(false)
     }

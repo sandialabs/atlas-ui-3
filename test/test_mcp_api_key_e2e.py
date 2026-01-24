@@ -150,7 +150,7 @@ def wait_for_server(url: str, max_retries: int = 30, delay: float = 2) -> bool:
                 print(f"  Server is ready (attempt {i+1})")
                 return True
         except requests.exceptions.RequestException:
-            pass
+            pass  # Expected during startup polling - server not ready yet
         print(f"  [{i+1}/{max_retries}] Server not ready yet, waiting {delay}s...")
         time.sleep(delay)
     print("  Server failed to become ready")

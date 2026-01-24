@@ -9,7 +9,7 @@ Updated: 2025-01-23
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 
 class TestRequiresUserAuth:

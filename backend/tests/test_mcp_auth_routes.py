@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 
-from backend.routes.mcp_auth_routes import router, TokenUpload
+from routes.mcp_auth_routes import router, TokenUpload
 from core.log_sanitizer import get_current_user
 
 
@@ -44,8 +44,8 @@ class TestGetAuthStatus:
     @pytest.fixture
     def mock_dependencies(self):
         """Mock the dependencies for auth routes."""
-        with patch("backend.routes.mcp_auth_routes.app_factory") as mock_factory, \
-             patch("backend.routes.mcp_auth_routes.get_token_storage") as mock_storage:
+        with patch("routes.mcp_auth_routes.app_factory") as mock_factory, \
+             patch("routes.mcp_auth_routes.get_token_storage") as mock_storage:
 
             # Mock MCP manager
             mock_mcp_manager = AsyncMock()
@@ -127,8 +127,8 @@ class TestUploadToken:
     @pytest.fixture
     def mock_dependencies(self):
         """Mock the dependencies for auth routes."""
-        with patch("backend.routes.mcp_auth_routes.app_factory") as mock_factory, \
-             patch("backend.routes.mcp_auth_routes.get_token_storage") as mock_storage:
+        with patch("routes.mcp_auth_routes.app_factory") as mock_factory, \
+             patch("routes.mcp_auth_routes.get_token_storage") as mock_storage:
 
             mock_mcp_manager = AsyncMock()
             mock_mcp_manager.get_authorized_servers = AsyncMock(return_value=["test-server"])
@@ -256,8 +256,8 @@ class TestRemoveToken:
     @pytest.fixture
     def mock_dependencies(self):
         """Mock the dependencies for auth routes."""
-        with patch("backend.routes.mcp_auth_routes.get_token_storage") as mock_storage, \
-             patch("backend.routes.mcp_auth_routes.app_factory") as mock_factory:
+        with patch("routes.mcp_auth_routes.get_token_storage") as mock_storage, \
+             patch("routes.mcp_auth_routes.app_factory") as mock_factory:
 
             mock_token_storage = MagicMock()
             mock_token_storage.remove_token.return_value = True

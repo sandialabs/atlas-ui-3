@@ -316,8 +316,9 @@ class MCPTokenStorage:
         self._tokens[key] = token
         self._save_tokens()
 
+        from core.log_sanitizer import sanitize_for_logging
         logger.info(
-            f"Stored {token_type} token for user and server '{server_name}' "
+            f"Stored {token_type} token for user and server '{sanitize_for_logging(server_name)}' "
             f"(expires: {'never' if expires_at is None else time.ctime(expires_at)})"
         )
         return token
@@ -372,7 +373,8 @@ class MCPTokenStorage:
         if key in self._tokens:
             del self._tokens[key]
             self._save_tokens()
-            logger.info(f"Removed token for server '{server_name}'")
+            from core.log_sanitizer import sanitize_for_logging
+            logger.info(f"Removed token for server '{sanitize_for_logging(server_name)}'")
             return True
         return False
 

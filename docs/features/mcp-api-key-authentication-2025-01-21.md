@@ -80,12 +80,14 @@ Configure MCP servers in `config/overrides/mcp.json`:
   },
   "jwt-protected-server": {
     "description": "JWT Protected Server",
-    "command": ["python", "server.py"],
-    "cwd": "path/to/server",
+    "url": "https://jwt.example.com/mcp",
+    "transport": "http",
     "auth_type": "jwt"
   }
 }
 ```
+
+**Note:** Per-user authentication (`auth_type: jwt`, `bearer`, `api_key`) is only supported for HTTP/SSE transport servers. Stdio-based servers cannot use per-user authentication because tokens are injected via HTTP headers.
 
 ### Environment Variables
 

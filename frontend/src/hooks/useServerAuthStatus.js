@@ -6,7 +6,7 @@ import { useState, useCallback } from 'react'
  * Hook to manage MCP server authentication status.
  * Provides functions to fetch auth status, upload tokens, and remove tokens.
  *
- * Updated: 2025-01-20
+ * Updated: 2025-01-21
  */
 export function useServerAuthStatus() {
   const [authStatus, setAuthStatus] = useState({})
