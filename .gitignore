@@ -52,6 +52,9 @@ backend/runtime/
 runtime/logs/
 runtime/feedback/
 runtime/uploads/
+
+# Secure token storage (per-user MCP authentication tokens)
+config/secure/
 # !runtime/logs/.gitkeep
 # !runtime/feedback/.gitkeep
 # !runtime/uploads/.gitkeep

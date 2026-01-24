@@ -1,9 +1,11 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
+import TokenInputModal from './TokenInputModal'
+import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
 
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
@@ -42,6 +44,11 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [pendingToolChoiceRequired, setPendingToolChoiceRequired] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
+
+  // Auth status state
+  const [tokenModalServer, setTokenModalServer] = useState(null)
+  const [tokenUploadLoading, setTokenUploadLoading] = useState(false)
+  const { fetchAuthStatus, uploadToken, removeToken, getServerAuth } = useServerAuthStatus()
   
   // Initialize pending state from saved state only when panel transitions from closed to open
   useEffect(() => {
@@ -53,6 +60,13 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     }
     prevOpenRef.current = isOpen
   }, [isOpen, savedSelectedTools, savedSelectedPrompts, savedToolChoiceRequired])
+
+  // Fetch auth status when panel opens
+  useEffect(() => {
+    if (isOpen) {
+      fetchAuthStatus()
+    }
+  }, [isOpen, fetchAuthStatus])
   
   // Use pending state while editing
   const selectedTools = pendingSelectedTools
@@ -191,6 +205,21 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const handleCancelDialog = () => {
     setShowUnsavedDialog(false)
   }
+
+  // Handle token upload for JWT/bearer auth servers
+  const handleTokenUpload = async (tokenData) => {
+    if (!tokenModalServer) return
+    setTokenUploadLoading(true)
+    try {
+      await uploadToken(tokenModalServer, tokenData)
+      setTokenModalServer(null)
+    } catch (err) {
+      console.error('Token upload failed:', err)
+      alert(`Failed to save token: ${err.message || 'Please try again.'}`)
+    } finally {
+      setTokenUploadLoading(false)
+    }
+  }
   
   // Use compliance-filtered tools and prompts if feature is enabled, otherwise use marketplace filtered
   const complianceEnabled = features?.compliance_levels
@@ -225,6 +254,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         help_email: toolServer.help_email,
         is_exclusive: toolServer.is_exclusive,
         compliance_level: toolServer.compliance_level,
+        auth_type: toolServer.auth_type,
         tools: toolServer.tools || [],
         tools_detailed: toolServer.tools_detailed || [],
         tool_count: toolServer.tool_count || 0,
@@ -244,6 +274,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         author: promptServer.author,
         help_email: promptServer.help_email,
         is_exclusive: false,
+        auth_type: promptServer.auth_type,
         tools: [],
         tools_detailed: [],
         tool_count: 0,
@@ -253,6 +284,10 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     } else {
       allServers[promptServer.server].prompts = promptServer.prompts || []
       allServers[promptServer.server].prompt_count = promptServer.prompt_count || 0
+      // Also update auth_type if not already set
+      if (!allServers[promptServer.server].auth_type && promptServer.auth_type) {
+        allServers[promptServer.server].auth_type = promptServer.auth_type
+      }
     }
   })
   
@@ -631,6 +666,33 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                   {server.compliance_level}
                                 </span>
                               )}
+                              {/* Auth Status Indicator - for API key/JWT/bearer servers (not OAuth) */}
+                              {(server.auth_type === 'jwt' || server.auth_type === 'bearer' || server.auth_type === 'api_key') && (() => {
+                                const serverAuth = getServerAuth(server.server)
+                                const isAuthenticated = serverAuth?.authenticated && !serverAuth?.is_expired
+                                return (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      if (isAuthenticated) {
+                                        if (confirm(`Disconnect from "${server.server}"?`)) {
+                                          removeToken(server.server)
+                                        }
+                                      } else {
+                                        setTokenModalServer(server.server)
+                                      }
+                                    }}
+                                    className={`flex-shrink-0 p-1 rounded ${
+                                      isAuthenticated
+                                        ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400'
+                                        : 'bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400'
+                                    }`}
+                                    title={isAuthenticated ? 'Authenticated. Click to disconnect.' : 'Click to add token.'}
+                                  >
+                                    {isAuthenticated ? <ShieldCheck className="w-4 h-4" /> : <Key className="w-4 h-4" />}
+                                  </button>
+                                )
+                              })()}
                             </div>
                             
                             {/* Short description - always shown (compact) */}
@@ -886,6 +948,15 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         onSave={handleSaveAndClose}
         onDiscard={handleDiscardAndClose}
         onCancel={handleCancelDialog}
+      />
+
+      {/* Token Input Modal for JWT/bearer auth */}
+      <TokenInputModal
+        isOpen={tokenModalServer !== null}
+        serverName={tokenModalServer}
+        onClose={() => setTokenModalServer(null)}
+        onUpload={handleTokenUpload}
+        isLoading={tokenUploadLoading}
       />
     </div>
   )

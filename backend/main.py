@@ -42,6 +42,7 @@ from routes.admin_routes import admin_router
 from routes.files_routes import router as files_router
 from routes.health_routes import router as health_router
 from routes.feedback_routes import feedback_router
+from routes.mcp_auth_routes import router as mcp_auth_router
 from version import VERSION
 
 # Load environment variables from the parent directory
@@ -195,6 +196,7 @@ app.include_router(admin_router)
 app.include_router(files_router)
 app.include_router(health_router)
 app.include_router(feedback_router)
+app.include_router(mcp_auth_router)
 
 # Serve frontend build (Vite)
 project_root = Path(__file__).resolve().parents[1]
@@ -379,7 +381,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             selected_data_sources=data.get("selected_data_sources"),
                             only_rag=data.get("only_rag", False),
                             tool_choice_required=data.get("tool_choice_required", False),
-                            user_email=data.get("user"),
+                            user_email=user_email,  # Use authenticated user from connection
                             agent_mode=data.get("agent_mode", False),
                             agent_max_steps=data.get("agent_max_steps", 10),
                             temperature=data.get("temperature", 0.7),
@@ -434,19 +436,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(handle_chat())
                 
             elif message_type == "download_file":
-                # Handle file download
+                # Handle file download (use authenticated user from connection)
                 response = await chat_service.handle_download_file(
                     session_id=session_id,
                     filename=data.get("filename", ""),
-                    user_email=data.get("user")
+                    user_email=user_email
                 )
                 await websocket.send_json(response)
-            
+
             elif message_type == "reset_session":
-                # Handle session reset
+                # Handle session reset (use authenticated user from connection)
                 response = await chat_service.handle_reset_session(
                     session_id=session_id,
-                    user_email=data.get("user")
+                    user_email=user_email
                 )
                 await websocket.send_json(response)
 
