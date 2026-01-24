@@ -178,5 +178,20 @@
     "short_description": "LLM sampling demonstration",
     "help_email": "support@example.com",
     "compliance_level": "Public"
+  },
+  "image_demo": {
+    "command": [
+      "python",
+      "mcp/image_demo/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates ImageContent display capabilities - MCP tools that return images. Generates test images as PNG files and displays them in the Atlas canvas. Tests single and multiple image returns.",
+    "author": "Atlas UI Team",
+    "short_description": "Image display demonstration",
+    "help_email": "support@example.com",
+    "compliance_level": "Public"
   }
 }
