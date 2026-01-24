@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #TBD - 2026-01-23
 - **Fix**: Display configured app name instead of hardcoded "Chat UI" in the thinking spinner. Fixes #244.
 
+### PR #245 - 2026-01-23
+- **Fix**: Preserve line breaks in user messages by adding `whitespace-pre-wrap` CSS class. Previously, multi-line user input displayed as a wall of text without line breaks.
+
 ### PR #243 - 2026-01-23
 - **UI Enhancement**: Implement responsive header with mobile hamburger menu for improved usability on small screens and mobile devices. Header controls collapse into a slide-out menu on screens smaller than 1024px, and button text labels are hidden on mobile while maintaining icon visibility.
 
