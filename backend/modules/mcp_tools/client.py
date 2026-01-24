@@ -1442,9 +1442,11 @@ class MCPToolManager:
         # Create client with user's token
         try:
             log_handler = self._create_log_handler(server_name)
+            # Use explicit headers for bearer token auth
+            auth_headers = {"Authorization": f"Bearer {stored_token.token_value}"}
             client = Client(
                 url,
-                auth=stored_token.token_value,
+                headers=auth_headers,
                 log_handler=log_handler,
                 elicitation_handler=self._create_elicitation_handler(server_name),
                 sampling_handler=self._create_sampling_handler(server_name),
