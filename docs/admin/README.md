@@ -1,6 +1,6 @@
 # Administrator's Guide
 
-Last updated: 2026-01-19
+Last updated: 2026-01-23
 
 This guide is for administrators responsible for deploying, configuring, and managing the Atlas UI 3 application.
 
@@ -14,6 +14,7 @@ This guide is for administrators responsible for deploying, configuring, and man
 
 ### Security & Access Control
 - [Authentication & Authorization](authentication.md) - User authentication and group-based access control
+- [WebSocket Auth Testing](websocket-auth-testing.md) - Testing WebSocket authentication with wscat
 - [Compliance & Data Security](compliance.md) - Compliance levels and data segregation
 - [Tool Approval System](tool-approval.md) - Managing tool execution permissions
 
