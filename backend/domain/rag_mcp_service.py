@@ -27,6 +27,34 @@ class RAGMCPService:
         self.config_manager = config_manager
         self.auth_check_func = auth_check_func
 
+    async def _get_authorized_rag_servers(self, username: str, rag_servers: dict) -> List[str]:
+        """Get list of RAG servers the user is authorized to access.
+
+        This checks authorization directly against rag_mcp_config servers,
+        independent of mcp_manager.servers_config (which excludes RAG servers
+        to keep them separate from the tools panel).
+        """
+        authorized = []
+        for server_name, server_config in rag_servers.items():
+            if not server_config.enabled:
+                continue
+
+            required_groups = server_config.groups or []
+            if not required_groups:
+                # No group restriction - available to all
+                authorized.append(server_name)
+                continue
+
+            # Check if user is in any of the required groups
+            group_checks = [
+                await self.auth_check_func(username, group)
+                for group in required_groups
+            ]
+            if any(group_checks):
+                authorized.append(server_name)
+
+        return authorized
+
     async def discover_data_sources(self, username: str, user_compliance_level: Optional[str] = None) -> List[str]:
         """Discover data sources across authorized MCP RAG servers.
 
@@ -52,9 +80,11 @@ class RAGMCPService:
             # If anything goes wrong, fallback silently to existing clients
             pass
         try:
-            # Determine servers current user can see
-            authorized_servers: List[str] = await self.mcp_manager.get_authorized_servers(
-                username, self.auth_check_func
+            # Determine RAG servers current user can see
+            # Use rag_mcp_config directly since servers_config was restored above
+            rag_servers = self.config_manager.rag_mcp_config.servers
+            authorized_servers: List[str] = await self._get_authorized_rag_servers(
+                username, rag_servers
             )
 
             if not authorized_servers:
@@ -171,8 +201,10 @@ class RAGMCPService:
         try:
             compliance_mgr = get_compliance_manager() if user_compliance_level else None
 
-            authorized_servers: List[str] = await self.mcp_manager.get_authorized_servers(
-                username, self.auth_check_func
+            # Use rag_mcp_config directly since servers_config was restored above
+            rag_cfg_servers = self.config_manager.rag_mcp_config.servers
+            authorized_servers: List[str] = await self._get_authorized_rag_servers(
+                username, rag_cfg_servers
             )
 
             # --- Compliance Filtering (Step 2) ---
@@ -280,6 +312,14 @@ class RAGMCPService:
 
         sources are server-qualified (server:id). We group by server.
         """
+        logger.debug(
+            "[MCP-RAG] search_raw called: user=%s, query_preview=%s..., sources=%s, top_k=%d",
+            sanitize_for_logging(username),
+            sanitize_for_logging(query[:100]) if query else "(empty)",
+            sources,
+            top_k,
+        )
+
         filters = filters or {}
         ranking = ranking or {}
         by_server: Dict[str, List[str]] = {}
@@ -288,17 +328,22 @@ class RAGMCPService:
                 srv, rid = s.split(":", 1)
                 by_server.setdefault(srv, []).append(rid)
 
+        logger.debug("[MCP-RAG] search_raw sources grouped by server: %s", by_server)
+
         all_hits: List[Dict[str, Any]] = []
         meta: Dict[str, Any] = {"providers": {}, "top_k": top_k}
 
         for server, rids in by_server.items():
+            logger.debug("[MCP-RAG] search_raw processing server=%s, resource_ids=%s", server, rids)
             try:
                 # Check tool availability
                 server_data = self.mcp_manager.available_tools.get(server) or {}
                 tool_list = server_data.get("tools", [])
                 if not any(getattr(t, "name", None) == "rag_get_raw_results" for t in tool_list):
+                    logger.debug("[MCP-RAG] Server %s lacks rag_get_raw_results tool, skipping", server)
                     continue
 
+                logger.debug("[MCP-RAG] Calling rag_get_raw_results on server %s", server)
                 raw = await self.mcp_manager.call_tool(
                     server_name=server,
                     tool_name="rag_get_raw_results",
@@ -311,9 +356,13 @@ class RAGMCPService:
                         "ranking": ranking,
                     },
                 )
+                logger.debug("[MCP-RAG] Server %s raw response type: %s", server, type(raw).__name__)
+
                 payload = self._extract_structured_result(raw) or {}
                 results = payload.get("results") or {}
                 hits = results.get("hits") or []
+                logger.debug("[MCP-RAG] Server %s returned %d hits", server, len(hits))
+
                 # Annotate with server for provenance
                 for h in hits:
                     if isinstance(h, dict):
@@ -324,6 +373,7 @@ class RAGMCPService:
                     "error": None,
                 }
             except Exception as e:
+                logger.error("[MCP-RAG] Server %s search_raw error: %s", server, e, exc_info=True)
                 meta["providers"][server] = {"returned": 0, "error": str(e)}
 
         # Merge + rerank (simple): sort by score desc if present
@@ -335,6 +385,13 @@ class RAGMCPService:
 
         all_hits.sort(key=score_of, reverse=True)
         merged = all_hits[: top_k or len(all_hits)]
+
+        logger.info(
+            "[MCP-RAG] search_raw complete: total_hits=%d, merged_count=%d, providers=%s",
+            len(all_hits),
+            len(merged),
+            list(meta["providers"].keys()),
+        )
 
         # Prompt-injection risk check on retrieved snippets (observe + log)
         try:
@@ -385,6 +442,14 @@ class RAGMCPService:
 
         If not available, fall back to raw search and concatenate snippets.
         """
+        logger.debug(
+            "[MCP-RAG] synthesize called: user=%s, query_preview=%s..., sources=%s, top_k=%s",
+            sanitize_for_logging(username),
+            sanitize_for_logging(query[:100]) if query else "(empty)",
+            sources,
+            top_k,
+        )
+
         synthesis_params = synthesis_params or {}
         provided_context = provided_context or {}
 
@@ -394,17 +459,28 @@ class RAGMCPService:
                 srv, rid = s.split(":", 1)
                 by_server.setdefault(srv, []).append(rid)
 
+        logger.debug("[MCP-RAG] Sources grouped by server: %s", by_server)
+
         answers: List[str] = []
         citations: List[Dict[str, Any]] = []
         meta: Dict[str, Any] = {"providers": {}}
         used_fallback = False
 
         for server, rids in by_server.items():
+            logger.debug(
+                "[MCP-RAG] Processing server=%s, resource_ids=%s",
+                server,
+                rids,
+            )
             try:
                 server_data = self.mcp_manager.available_tools.get(server) or {}
                 tool_list = server_data.get("tools", [])
+                tool_names = [getattr(t, "name", None) for t in tool_list]
+                logger.debug("[MCP-RAG] Server %s available tools: %s", server, tool_names)
+
                 has_synth = any(getattr(t, "name", None) == "rag_get_synthesized_results" for t in tool_list)
                 if has_synth:
+                    logger.debug("[MCP-RAG] Server %s has rag_get_synthesized_results, calling...", server)
                     raw = await self.mcp_manager.call_tool(
                         server_name=server,
                         tool_name="rag_get_synthesized_results",
@@ -417,10 +493,24 @@ class RAGMCPService:
                             "provided_context": provided_context,
                         },
                     )
+                    logger.debug("[MCP-RAG] Server %s raw response type: %s", server, type(raw).__name__)
+
                     payload = self._extract_structured_result(raw) or {}
+                    logger.debug("[MCP-RAG] Server %s extracted payload keys: %s", server, list(payload.keys()))
+                    logger.debug("[MCP-RAG] Server %s full payload: %s", server, sanitize_for_logging(str(payload)[:1000]))
+
                     results = payload.get("results") or {}
+                    logger.debug("[MCP-RAG] Server %s results type: %s, results keys: %s", server, type(results).__name__, list(results.keys()) if isinstance(results, dict) else "N/A")
+                    logger.debug("[MCP-RAG] Server %s results content: %s", server, sanitize_for_logging(str(results)[:500]))
+
                     ans = results.get("answer")
                     if isinstance(ans, str) and ans:
+                        logger.debug(
+                            "[MCP-RAG] Server %s answer length=%d, preview=%s...",
+                            server,
+                            len(ans),
+                            sanitize_for_logging(ans[:200]),
+                        )
                         answers.append(ans)
                     cits = results.get("citations") or []
                     if isinstance(cits, list):
@@ -429,19 +519,30 @@ class RAGMCPService:
                                 c.setdefault("server", server)
                         citations.extend([c for c in cits if isinstance(c, dict)])
                     meta["providers"][server] = {"used_synth": True, "error": None}
+                    logger.info("[MCP-RAG] Server %s synthesis complete: answer_length=%d", server, len(ans) if ans else 0)
                 else:
+                    logger.debug("[MCP-RAG] Server %s lacks rag_get_synthesized_results, using fallback search_raw", server)
                     used_fallback = True
                     raw_payload = await self.search_raw(username, query, [f"{server}:{rid}" for rid in rids], top_k=top_k or 8)
                     # Build a rudimentary answer from snippets
                     hits = ((raw_payload.get("results") or {}).get("hits") or [])
+                    logger.debug("[MCP-RAG] Server %s fallback search returned %d hits", server, len(hits))
                     snippet_texts = [h.get("snippet") or h.get("chunk") or "" for h in hits if isinstance(h, dict)]
                     if snippet_texts:
                         answers.append("\n\n".join(snippet_texts[:3]))
                     meta["providers"][server] = {"used_synth": False, "error": None}
             except Exception as e:
+                logger.error("[MCP-RAG] Server %s synthesis error: %s", server, e, exc_info=True)
                 meta["providers"][server] = {"used_synth": False, "error": str(e)}
 
         final_answer = "\n\n---\n\n".join([a for a in answers if a]) if answers else ""
+        logger.info(
+            "[MCP-RAG] synthesize complete: total_answers=%d, final_answer_length=%d, used_fallback=%s",
+            len(answers),
+            len(final_answer),
+            used_fallback,
+        )
+
         return {
             "results": {
                 "answer": final_answer,
@@ -454,31 +555,91 @@ class RAGMCPService:
     # --- helpers ---------------------------------------------------------
     def _extract_structured_result(self, raw: Any) -> Dict[str, Any]:
         """Best-effort extraction of a structured payload from FastMCP result."""
+        import json
+
+        logger.debug("[MCP-RAG] _extract_structured_result: raw type=%s", type(raw).__name__)
+
         try:
+            # Log available attributes for debugging
+            if hasattr(raw, "__dict__"):
+                logger.debug("[MCP-RAG] _extract_structured_result: raw attributes=%s", list(raw.__dict__.keys()) if hasattr(raw, "__dict__") else "N/A")
+
+            # If raw is already a dict, return it directly
+            if isinstance(raw, dict):
+                logger.debug("[MCP-RAG] _extract_structured_result: raw is already a dict with keys=%s", list(raw.keys()))
+                return raw
+
             # Preferred attributes from fastmcp
             if hasattr(raw, "structured_content") and raw.structured_content:
+                logger.debug("[MCP-RAG] _extract_structured_result: found structured_content")
                 if isinstance(raw.structured_content, dict):
                     return raw.structured_content
             if hasattr(raw, "data") and raw.data:
+                logger.debug("[MCP-RAG] _extract_structured_result: found data")
                 if isinstance(raw.data, dict):
                     return raw.data
+
             if hasattr(raw, "content") and raw.content:
                 contents = getattr(raw, "content")
+                logger.debug("[MCP-RAG] _extract_structured_result: found content, type=%s, len=%s", type(contents).__name__, len(contents) if hasattr(contents, '__len__') else "N/A")
+
                 # content is typically a list of segments with .text
                 if isinstance(contents, list) and contents:
-                    first = contents[0]
-                    text = getattr(first, "text", None)
-                    if isinstance(text, str) and text.strip():
-                        import json
-                        try:
-                            obj = json.loads(text)
-                            if isinstance(obj, dict):
-                                return obj
-                        except Exception:
-                            # Not JSON; ignore
-                            pass
+                    # Try all content items, not just the first
+                    for idx, item in enumerate(contents):
+                        logger.debug("[MCP-RAG] _extract_structured_result: content[%d] type=%s", idx, type(item).__name__)
+
+                        # Try .text attribute
+                        text = getattr(item, "text", None)
+                        if text is None and isinstance(item, dict):
+                            text = item.get("text")
+
+                        if text:
+                            logger.debug("[MCP-RAG] _extract_structured_result: text type=%s, preview=%s", type(text).__name__, sanitize_for_logging(str(text)[:300]))
+                            if isinstance(text, str) and text.strip():
+                                try:
+                                    obj = json.loads(text)
+                                    if isinstance(obj, dict):
+                                        logger.debug("[MCP-RAG] _extract_structured_result: parsed JSON with keys=%s", list(obj.keys()))
+                                        return obj
+                                except Exception as json_err:
+                                    logger.debug("[MCP-RAG] _extract_structured_result: JSON parse failed for content[%d]: %s", idx, json_err)
+
+                        # Try if item is itself a dict with results/meta_data
+                        if isinstance(item, dict):
+                            if "results" in item or "meta_data" in item:
+                                logger.debug("[MCP-RAG] _extract_structured_result: content[%d] is a dict with results/meta_data", idx)
+                                return item
+
+                # If content is a single string (not list), try to parse as JSON
+                elif isinstance(contents, str) and contents.strip():
+                    logger.debug("[MCP-RAG] _extract_structured_result: content is a string, trying JSON parse")
+                    try:
+                        obj = json.loads(contents)
+                        if isinstance(obj, dict):
+                            logger.debug("[MCP-RAG] _extract_structured_result: parsed content string as JSON with keys=%s", list(obj.keys()))
+                            return obj
+                    except Exception as json_err:
+                        logger.debug("[MCP-RAG] _extract_structured_result: JSON parse of content string failed: %s", json_err)
+
+            # Try to convert raw to string and parse as JSON (last resort)
+            if hasattr(raw, "__str__"):
+                raw_str = str(raw)
+                # Only try if it looks like JSON
+                if raw_str.strip().startswith("{"):
+                    logger.debug("[MCP-RAG] _extract_structured_result: trying __str__ as JSON: %s...", sanitize_for_logging(raw_str[:200]))
+                    try:
+                        obj = json.loads(raw_str)
+                        if isinstance(obj, dict):
+                            logger.debug("[MCP-RAG] _extract_structured_result: parsed __str__ as JSON with keys=%s", list(obj.keys()))
+                            return obj
+                    except Exception:
+                        pass
+
         except Exception as parse_err:  # pragma: no cover - defensive
             logger.debug("Non-fatal: failed to parse structured result: %s", parse_err)
+
+        logger.debug("[MCP-RAG] _extract_structured_result: returning empty dict")
         return {}
 
     def _extract_resources(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:

@@ -3,6 +3,8 @@
 import logging
 from typing import List, Optional, Any
 
+from core.auth import is_user_in_group
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,8 +92,8 @@ class ToolAuthorizationService:
         """
         # Use tool_manager's authorization method if available
         if hasattr(self.tool_manager, "get_authorized_servers"):
-            return await self.tool_manager.get_authorized_servers(user, None)  # type: ignore[attr-defined]
+            return await self.tool_manager.get_authorized_servers(user, is_user_in_group)  # type: ignore[attr-defined]
 
         # If no authorization method available, return empty list (no authorized servers)
-        logger.warning(f"Tool manager has no get_authorized_servers method for user {user}")
+        logger.warning("Tool manager has no get_authorized_servers method for user %s", user)
         return []

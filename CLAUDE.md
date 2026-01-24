@@ -149,7 +149,7 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 ### Configuration Files
 - **LLM Config**: `config/defaults/llmconfig.yml` and `config/overrides/llmconfig.yml`
 - **MCP Servers**: `config/defaults/mcp.json` and `config/overrides/mcp.json`
-- **MCP RAG Servers**: `config/defaults/mcp-rag.json` and `config/overrides/mcp-rag.json`
+- **RAG Sources**: `config/defaults/rag-sources.json` and `config/overrides/rag-sources.json`
 - **Help Config**: `config/defaults/help-config.json`
 - **Compliance Levels**: `config/defaults/compliance-levels.json`
 - **Environment**: `.env` (copy from `.env.example`)
@@ -163,7 +163,8 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 ## MCP and RAG Conventions
 
 ### MCP Servers
-- MCP servers live in `mcp.json` (tools/prompts) and `mcp-rag.json` (RAG-only inventory)
+- MCP tool servers live in `mcp.json` (tools/prompts)
+- RAG sources (both MCP and HTTP) are configured in `rag-sources.json`
 - Fields: `groups`, `transport|type`, `url|command/cwd`, `compliance_level`
 - Transport detection order: explicit transport -> command (stdio) -> URL protocol (http/sse) -> type fallback
 - Tool names exposed to LLM are fully-qualified: `server_toolName`. `canvas_canvas` is a pseudo-tool always available
@@ -324,7 +325,7 @@ In production, reverse proxy injects `X-User-Email` (after stripping client head
 Edit `config/overrides/mcp.json` (set `groups`, `transport`, `url/command`, `compliance_level`). Restart or call discovery on startup.
 
 **Add a RAG provider:**
-Edit `config/overrides/mcp-rag.json`; ensure it exposes `rag_*` tools; UI consumes `/api/config.rag_servers`.
+Edit `config/overrides/rag-sources.json`. For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
 
 **Change agent loop:**
 Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.

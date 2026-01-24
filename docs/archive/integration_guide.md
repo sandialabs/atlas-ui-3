@@ -190,7 +190,7 @@ TLDR: The chat app guarantees that the `username` is correct, so you can use it 
 - Include `username` and enforce access in every tool
 - Keep `results` small; put larger payloads in `artifacts`
 - Return `resourceId`, `score`, and `uri` for hits; `answer` + `citations` for synth
-- Register your server in `mcp-rag.json` and run
+- Register your server in `rag-sources.json` (with `type: "mcp"`) and run
 - In general you should NOT trust user's input. Always sanitize input against injection attacks.
 - In RAG systems it is important to also know your own data if it is collected from outside source and guard against data poisoning with specially crafted malicious inputs.
 

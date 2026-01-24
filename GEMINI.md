@@ -98,7 +98,7 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 **Configuration Files:**
 - `llmconfig.yml` - LLM model configurations
 - `mcp.json` - MCP tool servers
-- `mcp-rag.json` - RAG-only MCP servers
+- `rag-sources.json` - RAG sources (MCP and HTTP)
 - `help-config.json` - Help system configuration
 - `compliance-levels.json` - Compliance level definitions
 - `.env` - Environment variables (copy from `.env.example`)
@@ -112,7 +112,8 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 ## MCP and RAG Conventions
 
 **MCP Servers:**
-- Live in `mcp.json` (tools/prompts) and `mcp-rag.json` (RAG-only inventory)
+- MCP tool servers live in `mcp.json` (tools/prompts)
+- RAG sources (MCP and HTTP) are configured in `rag-sources.json`
 - Fields: `groups`, `transport|type`, `url|command/cwd`, `compliance_level`
 - Transport detection: explicit transport -> command (stdio) -> URL protocol (http/sse) -> type fallback
 - Tool names are fully-qualified: `server_toolName`. `canvas_canvas` is a pseudo-tool always available
@@ -241,7 +242,7 @@ Use `file_path:line_number` format for easy navigation.
 Edit `config/overrides/mcp.json` (set `groups`, `transport`, `url/command`, `compliance_level`). Restart backend.
 
 **Add a RAG provider:**
-Edit `config/overrides/mcp-rag.json`; ensure it exposes `rag_*` tools; UI consumes `/api/config.rag_servers`.
+Edit `config/overrides/rag-sources.json`. For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
 
 **Change agent loop:**
 Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.

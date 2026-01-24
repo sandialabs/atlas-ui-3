@@ -3,15 +3,15 @@ import { useNavigate } from 'react-router-dom'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
-import { Menu, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings } from 'lucide-react'
 
 const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()
-  const { 
-    user, 
-    models, 
-    currentModel, 
-    setCurrentModel, 
+  const {
+    user,
+    models,
+    currentModel,
+    setCurrentModel,
     agentModeAvailable,
     agentModeEnabled,
     setAgentModeEnabled,
@@ -22,7 +22,8 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
     features,
     isInAdminGroup,
     complianceLevelFilter,
-    setComplianceLevelFilter
+    setComplianceLevelFilter,
+    selectedDataSources
   } = useChat()
   const { isComplianceAccessible, complianceLevels } = useMarketplace()
   const { connectionStatus, isConnected } = useWS()
@@ -73,10 +74,17 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
         {features?.rag && (
           <button
             onClick={onToggleRag}
-            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+              selectedDataSources?.size > 0
+                ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+            }`}
             title="Toggle Data Sources"
           >
-            <Menu className="w-5 h-5" />
+            <Database className="w-5 h-5" />
+            <span className="text-sm font-medium">
+              {selectedDataSources?.size > 0 ? `${selectedDataSources.size} sources` : 'Sources'}
+            </span>
           </button>
         )}
         

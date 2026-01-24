@@ -10,8 +10,8 @@ from modules.file_storage import S3StorageClient, FileManager
 from modules.file_storage.mock_s3_client import MockS3StorageClient
 from modules.llm.litellm_caller import LiteLLMCaller
 from modules.mcp_tools import MCPToolManager
-from modules.rag import RAGClient
 from domain.rag_mcp_service import RAGMCPService
+from domain.unified_rag_service import UnifiedRAGService
 from core.auth import is_user_in_group
 from infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 
@@ -25,17 +25,30 @@ class AppFactory:
         # Configuration
         self.config_manager = ConfigManager()
 
-        # Core modules
-        self.llm_caller = LiteLLMCaller(
-            self.config_manager.llm_config,
-            debug_mode=self.config_manager.app_settings.debug_mode,
-        )
+        # MCP tools manager
         self.mcp_tools = MCPToolManager()
-        self.rag_client = RAGClient()
+
+        # RAG MCP service for MCP-based RAG servers (create first for dependency injection)
         self.rag_mcp_service = RAGMCPService(
             mcp_manager=self.mcp_tools,
             config_manager=self.config_manager,
             auth_check_func=is_user_in_group,
+        )
+
+        # Unified RAG service for HTTP and MCP RAG sources (configured via rag-sources.json)
+        # Includes rag_mcp_service for routing MCP queries
+        self.unified_rag_service = UnifiedRAGService(
+            config_manager=self.config_manager,
+            mcp_manager=self.mcp_tools,
+            auth_check_func=is_user_in_group,
+            rag_mcp_service=self.rag_mcp_service,
+        )
+
+        # LLM caller with unified RAG service for RAG queries
+        self.llm_caller = LiteLLMCaller(
+            self.config_manager.llm_config,
+            debug_mode=self.config_manager.app_settings.debug_mode,
+            rag_service=self.unified_rag_service,
         )
 
         # File storage & manager
@@ -74,11 +87,11 @@ class AppFactory:
     def get_mcp_manager(self) -> MCPToolManager:  # noqa: D401
         return self.mcp_tools
 
-    def get_rag_client(self) -> RAGClient:  # noqa: D401
-        return self.rag_client
-
     def get_rag_mcp_service(self) -> RAGMCPService:  # noqa: D401
         return self.rag_mcp_service
+
+    def get_unified_rag_service(self) -> UnifiedRAGService:  # noqa: D401
+        return self.unified_rag_service
 
     def get_file_storage(self) -> S3StorageClient:  # noqa: D401
         return self.file_storage

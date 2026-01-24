@@ -39,6 +39,7 @@ Key settings in the `.env` file include:
 *   **Log Level**: The `LOG_LEVEL` variable controls logging verbosity and whether sensitive data (user input/output) is logged. Set to `INFO` for production to avoid logging sensitive content, or `DEBUG` for development/testing. See [Logging and Monitoring](logging-monitoring.md) for details.
 *   **Log Directory**: The `APP_LOG_DIR` variable points to the folder where the application log file (`app.jsonl`) will be stored. This path must be updated to a valid directory in your deployment environment.
 *   **Security Headers**: Configure Content Security Policy (CSP) and other security headers. See the Security Configuration section below for details.
+*   **RAG**: Enable RAG using `FEATURE_RAG_ENABLED=true` and configure sources in `rag-sources.json`. See [RAG Configuration](external-rag-api.md) for details.
 
 ### MCP Auto-Reconnect Settings
 

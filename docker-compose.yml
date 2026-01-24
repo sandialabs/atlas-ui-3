@@ -47,7 +47,6 @@ services:
     environment:
       # Core / Development
       - DEBUG_MODE=true
-      - MOCK_RAG=false
       - PORT=8000
       - APP_NAME=ATLAS
       - ATLAS_HOST=0.0.0.0  # Required for Docker container to accept external connections
