@@ -23,13 +23,14 @@ export default function LogViewer() {
   const [hideDiscoverDataSources, setHideDiscoverDataSources] = useState(false); // State for hiding discover_data_sources calls
   const [hideLiteLLM, setHideLiteLLM] = useState(true); // State for hiding LiteLLM verbose logs (enabled by default)
   const [quickFiltersCollapsed, setQuickFiltersCollapsed] = useState(false); // State for collapsing Quick Filters
-  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true); // State for auto-scroll
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(false); // State for auto-scroll (default off to start at top)
   const [pollIntervalInput, setPollIntervalInput] = useState(String(DEFAULT_POLL_INTERVAL / 1000)); // Input for poll interval in seconds
   const [pollInterval, setPollInterval] = useState(DEFAULT_POLL_INTERVAL); // Actual poll interval in ms
 
   const tableContainerRef = useRef(null);
   const isScrolledToBottom = useRef(true); // Track if user has scrolled up
   const intervalIdRef = useRef(null); // Ref to store interval ID
+  const isInitialLoad = useRef(true); // Track initial load for scroll positioning
 
   const fetchLogs = useCallback(() => {
     setLoading(true);
@@ -56,10 +57,17 @@ export default function LogViewer() {
           return newEntries;
         });
         setError(null);
-        // After updating entries, scroll to bottom if auto-scroll is enabled and user hasn't scrolled up
+        // Handle scroll positioning after entries update
         requestAnimationFrame(() => {
-          if (tableContainerRef.current && autoScrollEnabled && isScrolledToBottom.current) {
-            tableContainerRef.current.scrollTop = tableContainerRef.current.scrollHeight;
+          if (tableContainerRef.current) {
+            if (isInitialLoad.current) {
+              // Initial load: scroll to top
+              tableContainerRef.current.scrollTop = 0;
+              isInitialLoad.current = false;
+            } else if (autoScrollEnabled && isScrolledToBottom.current) {
+              // Subsequent loads with auto-scroll: scroll to bottom
+              tableContainerRef.current.scrollTop = tableContainerRef.current.scrollHeight;
+            }
           }
         });
       })
@@ -206,33 +214,46 @@ export default function LogViewer() {
     return reversed.slice(page * pageSize, (page + 1) * pageSize);
   }, [filtered, page, pageSize]);
 
-  const totalPages = useMemo(() => 
+  const totalPages = useMemo(() =>
     Math.ceil(filtered.length / pageSize) || 1,
     [filtered.length, pageSize]
   );
+
+  // Calculate hidden count for badge display
+  const hiddenCount = useMemo(() => entries.length - filtered.length, [entries.length, filtered.length]);
 
   const changePage = (delta) => {
     setPage(p => Math.min(Math.max(0, p + delta), totalPages - 1));
   };
 
   return (
-    <div className="p-4 space-y-4 h-full flex flex-col">
+    <div className="p-4 space-y-4 h-full w-full flex flex-col min-h-0">
       {/* First row: Filters and Action Buttons */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-end">
-        <div>
-          <label className="block text-xs font-semibold mb-1">Level</label>
-          <select value={levelFilter} onChange={e => setLevelFilter(e.target.value)} className="bg-gray-200 dark:bg-gray-700 p-2 rounded text-sm">
-            <option value="">All</option>
-            {levels.map(l => <option key={l}>{l}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-semibold mb-1">Module</label>
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        {/* Left side: Filters and action buttons */}
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="block text-xs font-semibold mb-1">Level</label>
+            <select value={levelFilter} onChange={e => setLevelFilter(e.target.value)} className="bg-gray-200 dark:bg-gray-700 p-2 rounded text-sm">
+              <option value="">All</option>
+              {levels.map(l => <option key={l}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Module</label>
             <select value={moduleFilter} onChange={e => setModuleFilter(e.target.value)} className="bg-gray-200 dark:bg-gray-700 p-2 rounded text-sm max-w-52">
               <option value="">All</option>
               {modules.map(m => <option key={m}>{m}</option>)}
             </select>
+          </div>
+          <button onClick={fetchLogs} className="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded text-sm font-semibold">Refresh</button>
+          <button onClick={clearLogs} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded text-sm font-semibold">Clear Logs</button>
+          <button onClick={() => window.location.href='/admin/logs/download'} className="bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 px-3 py-2 rounded text-sm font-medium">Download</button>
+          {loading && <span className="text-sm text-gray-500">Loading...</span>}
+          {error && <span className="text-sm text-red-500">{error.message}</span>}
         </div>
+
+        {/* Right side: Back button */}
         <button
           onClick={() => navigate('/admin')}
           className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors text-sm font-semibold"
@@ -240,41 +261,51 @@ export default function LogViewer() {
           <ArrowLeft className="w-4 h-4" />
           Back to Admin Dashboard
         </button>
-        <button onClick={fetchLogs} className="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded text-sm font-semibold">Refresh</button>
-        <button onClick={clearLogs} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded text-sm font-semibold">Clear Logs</button>
-        <button onClick={() => window.location.href='/admin/logs/download'} className="bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 px-3 py-2 rounded text-sm font-medium">Download</button>
-        {loading && <span className="text-sm text-gray-500">Loading...</span>}
-        {error && <span className="text-sm text-red-500">{error.message}</span>}
       </div>
 
       {/* Quick Filters Section */}
       <div className="bg-gray-100 dark:bg-gray-800 rounded-lg">
         {/* Header with collapse and toggle all */}
         <div className="flex items-center justify-between p-4 pb-3">
-          <button
-            onClick={() => setQuickFiltersCollapsed(!quickFiltersCollapsed)}
-            className="flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg px-2 py-1 transition-colors"
-          >
-            <Filter className="w-4 h-4 text-gray-600 dark:text-gray-200" />
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100">Quick Filters</h3>
-            {quickFiltersCollapsed ? (
-              <ChevronDown className="w-4 h-4 text-gray-500 dark:text-gray-300" />
-            ) : (
-              <ChevronUp className="w-4 h-4 text-gray-500 dark:text-gray-300" />
-            )}
-          </button>
-          
+          <div>
+            <button
+              onClick={() => setQuickFiltersCollapsed(!quickFiltersCollapsed)}
+              className="flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg px-2 py-1 transition-colors"
+            >
+              <Filter className="w-4 h-4 text-gray-600 dark:text-gray-200" />
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100">Quick Filters</h3>
+              {hiddenCount > 0 && (
+                <span className="ml-1 px-2 py-0.5 bg-cyan-600 text-white text-xs font-medium rounded-full">
+                  {hiddenCount} hidden
+                </span>
+              )}
+              {quickFiltersCollapsed ? (
+                <ChevronDown className="w-4 h-4 text-gray-500 dark:text-gray-300" />
+              ) : (
+                <ChevronUp className="w-4 h-4 text-gray-500 dark:text-gray-300" />
+              )}
+            </button>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
+              Checked items are hidden from view
+            </p>
+          </div>
+
           <button
             onClick={handleToggleAll}
             className="flex items-center gap-2 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-xs font-medium transition-colors"
-            title={`${hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources || hideLiteLLM ? 'Disable' : 'Enable'} all filters`}
+            title={`${hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources || hideLiteLLM ? 'Show all entries' : 'Hide noisy entries'}`}
           >
             {hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources || hideLiteLLM ? (
-              <ToggleRight className="w-4 h-4" />
+              <>
+                <ToggleRight className="w-4 h-4" />
+                Show All
+              </>
             ) : (
-              <ToggleLeft className="w-4 h-4" />
+              <>
+                <ToggleLeft className="w-4 h-4" />
+                Hide Noise
+              </>
             )}
-            Toggle All
           </button>
         </div>
         
@@ -282,9 +313,9 @@ export default function LogViewer() {
         {!quickFiltersCollapsed && (
         <div className="px-4 pb-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* HTTP/API Noise */}
+          {/* Hide: HTTP/API Noise */}
           <div className="space-y-2">
-            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">HTTP/API Noise</h4>
+            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">Hide: HTTP/API Noise</h4>
             <div className="space-y-1.5">
               <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
                 <input
@@ -307,9 +338,9 @@ export default function LogViewer() {
             </div>
           </div>
 
-          {/* Network Requests */}
+          {/* Hide: Network Requests */}
           <div className="space-y-2">
-            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">Network Requests</h4>
+            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">Hide: Network Requests</h4>
             <div className="space-y-1.5">
               <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
                 <input
@@ -332,9 +363,9 @@ export default function LogViewer() {
             </div>
           </div>
 
-          {/* Admin Interface */}
+          {/* Hide: Admin Interface */}
           <div className="space-y-2">
-            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">Admin Interface</h4>
+            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">Hide: Admin Interface</h4>
             <div className="space-y-1.5">
               <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
                 <input
@@ -357,9 +388,9 @@ export default function LogViewer() {
             </div>
           </div>
 
-          {/* LLM Provider Logs */}
+          {/* Hide: LLM Logs */}
           <div className="space-y-2">
-            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">LLM Provider Logs</h4>
+            <h4 className="text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wide">Hide: LLM Logs</h4>
             <div className="space-y-1.5">
               <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
                 <input
@@ -435,6 +466,18 @@ export default function LogViewer() {
                 <td className="p-2 font-mono text-[11px] text-gray-700 dark:text-gray-300">{e.logger}</td>
               </tr>
             ))}
+            {loading && entries.length === 0 && (
+              [...Array(8)].map((_, i) => (
+                <tr key={`skeleton-${i}`} className="border-t border-gray-200 dark:border-gray-700 animate-pulse">
+                  <td className="p-2"><div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-20"></div></td>
+                  <td className="p-2"><div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-24"></div></td>
+                  <td className="p-2"><div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-full"></div></td>
+                  <td className="p-2"><div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-32"></div></td>
+                  <td className="p-2"><div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-16"></div></td>
+                  <td className="p-2"><div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-24"></div></td>
+                </tr>
+              ))
+            )}
             {!filtered.length && !loading && (
               <tr><td colSpan={6} className="p-4 text-center text-gray-500">No log entries</td></tr>
             )}
