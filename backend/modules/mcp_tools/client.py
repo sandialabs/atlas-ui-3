@@ -1418,11 +1418,13 @@ class MCPToolManager:
                     del self._user_clients[cache_key]
 
         # Get user's token from storage
+        logger.info(f"[AUTH DEBUG] Looking up token for user='{user_email}' server='{server_name}'")
         stored_token = token_storage.get_valid_token(user_email, server_name)
+        logger.info(f"[AUTH DEBUG] Token found: {stored_token is not None}")
 
         if stored_token is None:
-            logger.debug(
-                f"No valid token for user on server '{server_name}' - "
+            logger.info(
+                f"[AUTH DEBUG] No valid token for user '{user_email}' on server '{server_name}' - "
                 f"user needs to authenticate"
             )
             return None
@@ -1501,8 +1503,10 @@ class MCPToolManager:
 
         # Check if this server requires per-user authentication
         if self._requires_user_auth(server_name):
+            logger.info(f"[AUTH DEBUG] Server '{server_name}' requires user auth, user_email={user_email}")
             if user_email:
                 client = await self._get_user_client(server_name, user_email)
+                logger.info(f"[AUTH DEBUG] _get_user_client returned: {client is not None}")
                 if client is None:
                     # Get auth type and build OAuth URL if applicable
                     server_config = self.servers_config.get(server_name, {})
