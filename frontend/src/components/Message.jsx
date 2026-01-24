@@ -1066,10 +1066,10 @@ const renderContent = () => {
               </div>
             )
           default:
-            return <div className="text-gray-200">{message.content}</div>
+            return <div className="text-gray-200 whitespace-pre-wrap">{message.content}</div>
         }
       }
-      return <div className="text-gray-200">{message.content}</div>
+      return <div className="text-gray-200 whitespace-pre-wrap">{message.content}</div>
     }
 
     // Render markdown for assistant messages
