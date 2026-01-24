@@ -20,6 +20,18 @@ from fastmcp.server.dependencies import get_access_token
 
 mcp = FastMCP("JWT Auth Demo")
 
+# Test tokens for demo - in production, validate against your identity provider
+TEST_TOKENS = {
+    "test123": {"email": "test@test.com", "name": "Test User", "role": "user"},
+    "admin456": {"email": "admin@example.com", "name": "Admin User", "role": "admin"},
+    "demo": {"email": "demo@example.com", "name": "Demo User", "role": "viewer"},
+}
+
+
+def lookup_user(token_value: str) -> dict | None:
+    """Look up user by token. Returns user info or None if not found."""
+    return TEST_TOKENS.get(token_value)
+
 
 def decode_jwt_payload(token: str) -> dict | None:
     """Decode a JWT token's payload (without verification)."""
@@ -40,10 +52,9 @@ def decode_jwt_payload(token: str) -> dict | None:
 @mcp.tool
 def whoami() -> dict[str, Any]:
     """
-    Show the current authentication status and token info.
+    Show the current authentication status and user info.
 
-    This reads the actual token sent by the client via get_access_token().
-    Use this to verify that Atlas UI is correctly sending your token.
+    Test tokens: test123, admin456, demo
     """
     start = time.perf_counter()
     token = get_access_token()
@@ -51,30 +62,32 @@ def whoami() -> dict[str, Any]:
     if token is None:
         return {
             "authenticated": False,
-            "error": "No token received. Make sure you've uploaded a token in the Tools panel.",
-            "meta_data": {
-                "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
-            }
+            "error": "No token received. Upload a token in the Tools panel.",
+            "hint": "Try one of: test123, admin456, demo",
+            "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
         }
 
-    # Try to decode if it's a JWT
-    jwt_claims = None
-    token_preview = str(token.token)[:50] + "..." if len(str(token.token)) > 50 else str(token.token)
+    token_value = str(token.token) if token.token else ""
+    user = lookup_user(token_value)
 
-    if token.token and '.' in str(token.token):
-        jwt_claims = decode_jwt_payload(str(token.token))
+    if user:
+        return {
+            "authenticated": True,
+            "user": user,
+            "token": token_value,
+            "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
+        }
+
+    # Token received but not recognized
+    jwt_claims = decode_jwt_payload(token_value) if '.' in token_value else None
 
     return {
         "authenticated": True,
-        "token_preview": token_preview,
-        "token_length": len(str(token.token)) if token.token else 0,
-        "client_id": token.client_id,
-        "scopes": token.scopes,
-        "expires_at": str(token.expires_at) if token.expires_at else None,
+        "user": None,
+        "token": token_value[:50] + "..." if len(token_value) > 50 else token_value,
+        "message": "Token received but not in test database",
         "jwt_claims": jwt_claims,
-        "meta_data": {
-            "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
-        }
+        "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
     }
 
 
@@ -93,19 +106,18 @@ def protected_action(message: str) -> dict[str, Any]:
         return {
             "success": False,
             "error": "Authentication required",
-            "meta_data": {
-                "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
-            }
+            "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
         }
+
+    token_value = str(token.token) if token.token else ""
+    user = lookup_user(token_value)
 
     return {
         "success": True,
         "message": message,
+        "processed_by": user["email"] if user else f"unknown ({token_value[:10]}...)",
         "processed_at": datetime.now(timezone.utc).isoformat(),
-        "processed_by": f"token:{str(token.token)[:20]}...",
-        "meta_data": {
-            "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
-        }
+        "elapsed_ms": round((time.perf_counter() - start) * 1000, 2),
     }
 
 
