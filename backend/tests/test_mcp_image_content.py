@@ -158,22 +158,22 @@ class TestImageContentHandling:
     async def test_extract_mixed_content(self):
         """Test extraction when both TextContent and ImageContent are present."""
         manager = MCPToolManager.__new__(MCPToolManager)
-        
+
         # Mock tool object
         class MockTool:
             def __init__(self, name):
                 self.name = name
-        
+
         tool_call = ToolCall(
             id="test-call-3",
             name="mixed_tool",
             arguments={}
         )
-        
+
         text = "Here is your visualization"
         image_b64 = "base64imagedata"
         raw_result = MockMCPResultWithMixedContent(text, image_b64)
-        
+
         with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
             mock_call.return_value = raw_result
             manager._tool_index = {
@@ -182,14 +182,21 @@ class TestImageContentHandling:
                     "tool": MockTool("mixed_tool")
                 }
             }
-            
+
             result = await manager.execute_tool(tool_call, context={})
-            
+
             # Verify image was extracted (uses image counter, so first image is image_0)
             assert len(result.artifacts) == 1
             artifact = result.artifacts[0]
             assert artifact["name"] == "image_0.png"
             assert artifact["b64"] == image_b64
+
+            # Verify the text content was extracted and included in result.content
+            # The content should be JSON containing the text in "results"
+            import json
+            content_dict = json.loads(result.content)
+            assert "results" in content_dict
+            assert text in content_dict["results"]
 
     @pytest.mark.asyncio
     async def test_no_image_content(self):

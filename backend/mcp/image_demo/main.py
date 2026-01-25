@@ -4,8 +4,8 @@ This is a test server to validate image display functionality.
 """
 
 from fastmcp import FastMCP
+from fastmcp.tools.tool import ToolResult
 from mcp.types import ImageContent, TextContent
-from typing import List
 import base64
 from io import BytesIO
 
@@ -13,7 +13,7 @@ mcp = FastMCP("Image Demo MCP")
 
 
 @mcp.tool()
-def generate_test_image() -> List[TextContent | ImageContent]:
+def generate_test_image() -> ToolResult:
     """
     Generate a simple test PNG image and return it as ImageContent.
     This demonstrates the ImageContent return type for MCP tools.
@@ -24,10 +24,12 @@ def generate_test_image() -> List[TextContent | ImageContent]:
         # If PIL is not available, return a minimal 1x1 PNG
         # This is a valid 1x1 red pixel PNG in base64
         minimal_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
-        return [
-            TextContent(type="text", text="Success: Generated fallback image (PIL not available). Returned image_0.png"),
-            ImageContent(type="image", data=minimal_png, mimeType="image/png")
-        ]
+        return ToolResult(
+            content=[
+                TextContent(type="text", text="Success: Generated fallback image (PIL not available). Returned image_0.png"),
+                ImageContent(type="image", data=minimal_png, mimeType="image/png")
+            ]
+        )
 
     # Create a 400x300 image with a gradient background
     img = Image.new('RGB', (400, 300), color='white')
@@ -53,14 +55,16 @@ def generate_test_image() -> List[TextContent | ImageContent]:
     img.save(buffer, format='PNG')
     img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
-    return [
-        TextContent(type="text", text="Success: Generated 400x300 PNG test image with gradient background. Returned image_0.png - the image should now be visible in the canvas panel."),
-        ImageContent(type="image", data=img_base64, mimeType="image/png")
-    ]
+    return ToolResult(
+        content=[
+            TextContent(type="text", text="Success: Generated 400x300 PNG test image with gradient background. Returned image_0.png - the image should now be visible in the canvas panel."),
+            ImageContent(type="image", data=img_base64, mimeType="image/png")
+        ]
+    )
 
 
 @mcp.tool()
-def generate_multiple_images() -> List[TextContent | ImageContent]:
+def generate_multiple_images() -> ToolResult:
     """
     Generate multiple test images and return them as a list of ImageContent.
     This tests handling multiple images in a single tool response.
@@ -70,13 +74,15 @@ def generate_multiple_images() -> List[TextContent | ImageContent]:
     except ImportError:
         # Return minimal PNGs if PIL not available
         minimal_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
-        return [
-            TextContent(type="text", text="Success: Generated 2 fallback images (PIL not available). Returned image_0.png, image_1.png"),
-            ImageContent(type="image", data=minimal_png, mimeType="image/png"),
-            ImageContent(type="image", data=minimal_png, mimeType="image/png")
-        ]
+        return ToolResult(
+            content=[
+                TextContent(type="text", text="Success: Generated 2 fallback images (PIL not available). Returned image_0.png, image_1.png"),
+                ImageContent(type="image", data=minimal_png, mimeType="image/png"),
+                ImageContent(type="image", data=minimal_png, mimeType="image/png")
+            ]
+        )
 
-    results = [
+    content_blocks = [
         TextContent(type="text", text="Success: Generated 3 colored PNG images (200x200 each: red, green, blue with white circles). Returned image_0.png, image_1.png, image_2.png - images should now be visible in the canvas panel.")
     ]
     colors = [(255, 100, 100), (100, 255, 100), (100, 100, 255)]
@@ -93,13 +99,13 @@ def generate_multiple_images() -> List[TextContent | ImageContent]:
         img.save(buffer, format='PNG')
         img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
-        results.append(ImageContent(
+        content_blocks.append(ImageContent(
             type="image",
             data=img_base64,
             mimeType="image/png"
         ))
 
-    return results
+    return ToolResult(content=content_blocks)
 
 
 if __name__ == "__main__":
