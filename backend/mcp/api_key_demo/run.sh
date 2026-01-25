@@ -2,7 +2,7 @@
 # Run the API Key Demo MCP Server
 #
 # Usage:
-#   ./run.sh          - Start on default port 8765
+#   ./run.sh          - Start on default port 8006
 #   ./run.sh 9000     - Start on custom port 9000
 
 set -e
@@ -20,7 +20,37 @@ fi
 
 cd "$SCRIPT_DIR"
 
-PORT="${1:-8765}"
+PORT="${1:-8006}"
 
-echo "Starting API Key Demo MCP Server on port $PORT..."
+echo "========================================"
+echo "API Key Demo MCP Server"
+echo "========================================"
+echo ""
+echo "Add this to your config/overrides/mcp.json:"
+echo ""
+cat << EOF
+{
+  "api_key_demo": {
+    "url": "http://127.0.0.1:${PORT}/mcp",
+    "auth_type": "api_key",
+    "auth_header": "X-API-Key",
+    "auth_prompt": "Enter your API key for the demo server",
+    "groups": ["users"],
+    "description": "Demo server with API key authentication",
+    "short_description": "API Key Auth Demo",
+    "compliance_level": "Public"
+  }
+}
+EOF
+echo ""
+echo "Valid test API keys:"
+echo "  - test123"
+echo "  - demo-api-key-12345"
+echo "  - user-specific-key-abcdef"
+echo ""
+echo "========================================"
+echo "Starting server on port $PORT..."
+echo "========================================"
+echo ""
+
 "$PYTHON" main.py "$PORT"

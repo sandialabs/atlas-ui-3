@@ -20,8 +20,8 @@ python main.py
 ## Valid Test Keys
 
 For demo purposes, these API keys are accepted:
+- `test123`
 - `demo-api-key-12345`
-- `test-api-key-67890`
 - `user-specific-key-abcdef`
 
 ## Configuration in Atlas
@@ -31,7 +31,7 @@ Add to `config/overrides/mcp.json`:
 ```json
 {
   "api_key_demo": {
-    "url": "http://127.0.0.1:8765/mcp",
+    "url": "http://127.0.0.1:8006/mcp",
     "transport": "streamable-http",
     "groups": ["users"],
     "description": "API key authentication demo",
@@ -66,7 +66,7 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
 transport = StreamableHttpTransport(
-    "http://localhost:8765/mcp",
+    "http://localhost:8006/mcp",
     headers={"X-API-Key": "demo-api-key-12345"}
 )
 

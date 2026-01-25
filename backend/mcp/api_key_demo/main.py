@@ -16,8 +16,8 @@ from fastmcp.exceptions import ToolError
 # Valid API keys for demo purposes
 # In production, validate against a database or external service
 VALID_KEYS = {
+    "test123",
     "demo-api-key-12345",
-    "test-api-key-67890",
     "user-specific-key-abcdef",
 }
 
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     import sys
 
     # Default port
-    port = 8765
+    port = 8006
 
     # Allow port override via command line
     if len(sys.argv) > 1:
