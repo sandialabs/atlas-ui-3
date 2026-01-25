@@ -214,13 +214,12 @@ class TestMCPTokenStorage:
     @pytest.fixture
     def storage(self, temp_storage_dir):
         """Create a MCPTokenStorage instance with temp directory."""
-        # Set encryption key for testing
-        os.environ["MCP_TOKEN_ENCRYPTION_KEY"] = "test-encryption-key-12345"
-        storage = MCPTokenStorage(storage_dir=temp_storage_dir)
+        # Pass encryption key directly to avoid app_settings caching issues
+        storage = MCPTokenStorage(
+            storage_dir=temp_storage_dir,
+            encryption_key="test-encryption-key-12345"
+        )
         yield storage
-        # Cleanup
-        if "MCP_TOKEN_ENCRYPTION_KEY" in os.environ:
-            del os.environ["MCP_TOKEN_ENCRYPTION_KEY"]
 
     def test_store_and_retrieve_token(self, storage):
         """Should store and retrieve a token successfully."""
@@ -416,27 +415,24 @@ class TestMCPTokenStoragePersistence:
 
     def test_persistence_across_instances(self, temp_storage_dir):
         """Tokens should persist across storage instances."""
-        os.environ["MCP_TOKEN_ENCRYPTION_KEY"] = "test-encryption-key-12345"
+        # Pass encryption_key directly to avoid app_settings caching issues
+        encryption_key = "test-encryption-key-12345"
 
-        try:
-            # Create first storage instance and store token
-            storage1 = MCPTokenStorage(storage_dir=temp_storage_dir)
-            storage1.store_token(
-                user_email="user@example.com",
-                server_name="test-server",
-                token_value="persistent-token",
-                token_type="api_key",
-            )
+        # Create first storage instance and store token
+        storage1 = MCPTokenStorage(storage_dir=temp_storage_dir, encryption_key=encryption_key)
+        storage1.store_token(
+            user_email="user@example.com",
+            server_name="test-server",
+            token_value="persistent-token",
+            token_type="api_key",
+        )
 
-            # Create second storage instance and retrieve token
-            storage2 = MCPTokenStorage(storage_dir=temp_storage_dir)
-            retrieved = storage2.get_token("user@example.com", "test-server")
+        # Create second storage instance and retrieve token
+        storage2 = MCPTokenStorage(storage_dir=temp_storage_dir, encryption_key=encryption_key)
+        retrieved = storage2.get_token("user@example.com", "test-server")
 
-            assert retrieved is not None
-            assert retrieved.token_value == "persistent-token"
-        finally:
-            if "MCP_TOKEN_ENCRYPTION_KEY" in os.environ:
-                del os.environ["MCP_TOKEN_ENCRYPTION_KEY"]
+        assert retrieved is not None
+        assert retrieved.token_value == "persistent-token"
 
 
 class TestMCPTokenStorageEncryption:
@@ -450,32 +446,32 @@ class TestMCPTokenStorageEncryption:
 
     def test_tokens_encrypted_at_rest(self, temp_storage_dir):
         """Token values should be encrypted in storage file."""
-        os.environ["MCP_TOKEN_ENCRYPTION_KEY"] = "test-encryption-key-12345"
+        # Pass encryption key directly to avoid app_settings caching issues
+        storage = MCPTokenStorage(
+            storage_dir=temp_storage_dir,
+            encryption_key="test-encryption-key-12345"
+        )
+        storage.store_token(
+            user_email="user@example.com",
+            server_name="test-server",
+            token_value="secret-api-key-xyz",
+            token_type="api_key",
+        )
 
-        try:
-            storage = MCPTokenStorage(storage_dir=temp_storage_dir)
-            storage.store_token(
-                user_email="user@example.com",
-                server_name="test-server",
-                token_value="secret-api-key-xyz",
-                token_type="api_key",
-            )
+        # Read raw storage file
+        storage_file = temp_storage_dir / "mcp_tokens.enc"
+        raw_content = storage_file.read_text()
 
-            # Read raw storage file
-            storage_file = temp_storage_dir / "mcp_tokens.enc"
-            raw_content = storage_file.read_text()
-
-            # Plain token should not appear in raw content
-            assert "secret-api-key-xyz" not in raw_content
-        finally:
-            if "MCP_TOKEN_ENCRYPTION_KEY" in os.environ:
-                del os.environ["MCP_TOKEN_ENCRYPTION_KEY"]
+        # Plain token should not appear in raw content
+        assert "secret-api-key-xyz" not in raw_content
 
     def test_different_keys_cannot_decrypt(self, temp_storage_dir):
         """Tokens encrypted with different keys should not be readable."""
         # Store with one key
-        os.environ["MCP_TOKEN_ENCRYPTION_KEY"] = "first-encryption-key"
-        storage1 = MCPTokenStorage(storage_dir=temp_storage_dir)
+        storage1 = MCPTokenStorage(
+            storage_dir=temp_storage_dir,
+            encryption_key="first-encryption-key"
+        )
         storage1.store_token(
             user_email="user@example.com",
             server_name="test-server",
@@ -484,15 +480,14 @@ class TestMCPTokenStorageEncryption:
         )
 
         # Try to read with different key
-        os.environ["MCP_TOKEN_ENCRYPTION_KEY"] = "different-encryption-key"
-        storage2 = MCPTokenStorage(storage_dir=temp_storage_dir)
+        storage2 = MCPTokenStorage(
+            storage_dir=temp_storage_dir,
+            encryption_key="different-encryption-key"
+        )
 
         # Should return None (decryption fails gracefully)
         retrieved = storage2.get_token("user@example.com", "test-server")
         assert retrieved is None
-
-        # Cleanup
-        del os.environ["MCP_TOKEN_ENCRYPTION_KEY"]
 
 
 class TestGetMCPTokenStorageSingleton:

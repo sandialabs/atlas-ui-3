@@ -50,6 +50,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [tokenUploadLoading, setTokenUploadLoading] = useState(false)
   const [tokenUploadError, setTokenUploadError] = useState(null)
   const [disconnectServer, setDisconnectServer] = useState(null)
+  const [disconnectError, setDisconnectError] = useState(null)
   const { fetchAuthStatus, uploadToken, removeToken, getServerAuth } = useServerAuthStatus()
   
   // Initialize pending state from saved state only when panel transitions from closed to open
@@ -233,9 +234,14 @@ const ToolsPanel = ({ isOpen, onClose }) => {
 
   // Handle disconnect confirmation
   const handleDisconnect = async () => {
-    if (disconnectServer) {
+    if (!disconnectServer) return
+    setDisconnectError(null)
+    try {
       await removeToken(disconnectServer)
       setDisconnectServer(null)
+    } catch (err) {
+      console.error('Token disconnect failed:', err)
+      setDisconnectError(err?.message || 'Failed to disconnect. Please try again.')
     }
   }
   
@@ -983,7 +989,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       {disconnectServer && (
         <div
           className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-60"
-          onClick={() => setDisconnectServer(null)}
+          onClick={() => { setDisconnectServer(null); setDisconnectError(null) }}
         >
           <div
             className="bg-gray-800 rounded-lg shadow-xl max-w-sm w-full mx-4 p-6"
@@ -992,12 +998,17 @@ const ToolsPanel = ({ isOpen, onClose }) => {
             <h3 className="text-lg font-semibold text-gray-100 mb-4">
               Disconnect from {disconnectServer}?
             </h3>
-            <p className="text-gray-400 text-sm mb-6">
+            <p className="text-gray-400 text-sm mb-4">
               This will remove your saved token for this server. You'll need to re-enter it to use this server again.
             </p>
+            {disconnectError && (
+              <div className="p-3 mb-4 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">
+                {disconnectError}
+              </div>
+            )}
             <div className="flex justify-end gap-3">
               <button
-                onClick={() => setDisconnectServer(null)}
+                onClick={() => { setDisconnectServer(null); setDisconnectError(null) }}
                 className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
               >
                 Cancel

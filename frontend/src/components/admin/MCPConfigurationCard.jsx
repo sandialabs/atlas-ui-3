@@ -182,7 +182,9 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
       loadMCPStatus()
       // Refresh the main config to update tools list in sidebar
       if (refreshConfig) {
-        refreshConfig()
+        refreshConfig().catch(err => {
+          console.error('Failed to refresh config:', err)
+        })
       }
     } catch (err) {
       addNotification('Error reloading MCP servers: ' + err.message, 'error')
@@ -209,7 +211,9 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
       loadMCPStatus()
       // Refresh the main config to update tools list in sidebar
       if (refreshConfig) {
-        refreshConfig()
+        refreshConfig().catch(err => {
+          console.error('Failed to refresh config:', err)
+        })
       }
     } catch (err) {
       addNotification('Error reconnecting MCP servers: ' + err.message, 'error')

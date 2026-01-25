@@ -24,6 +24,7 @@ import base64
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -158,16 +159,20 @@ class MCPTokenStorage:
 
         Args:
             storage_dir: Directory to store encrypted tokens. Defaults to
-                        config/secure or runtime/tokens
+                        MCP_TOKEN_STORAGE_DIR or config/secure
             encryption_key: Base64-encoded encryption key or passphrase.
-                           Defaults to MCP_TOKEN_ENCRYPTION_KEY env var.
+                           Defaults to MCP_TOKEN_ENCRYPTION_KEY setting.
         """
-        self._storage_dir = storage_dir or self._default_storage_dir()
+        # Import here to avoid circular imports
+        from modules.config.config_manager import get_app_settings
+        app_settings = get_app_settings()
+
+        self._storage_dir = storage_dir or self._get_storage_dir(app_settings)
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._storage_file = self._storage_dir / "mcp_tokens.enc"
 
-        # Get or generate encryption key
-        key_source = encryption_key or os.environ.get("MCP_TOKEN_ENCRYPTION_KEY")
+        # Get or generate encryption key (prefer passed arg, then settings)
+        key_source = encryption_key or app_settings.mcp_token_encryption_key
         if key_source:
             self._fernet = self._derive_fernet(key_source)
             logger.info("Token storage initialized with configured encryption key")
@@ -180,13 +185,33 @@ class MCPTokenStorage:
                 "tokens will not persist across application restarts."
             )
 
+        # Thread lock for concurrent access
+        self._lock = threading.Lock()
+
         # In-memory cache of decrypted tokens
         # Key format: "user_email:server_name"
         self._tokens: Dict[str, StoredToken] = {}
         self._load_tokens()
 
-    def _default_storage_dir(self) -> Path:
-        """Get default storage directory."""
+    def _get_storage_dir(self, app_settings) -> Path:
+        """Get storage directory from settings or default locations.
+
+        Args:
+            app_settings: AppSettings instance with mcp_token_storage_dir
+
+        Returns:
+            Path to storage directory
+        """
+        # Check configured directory first
+        if app_settings.mcp_token_storage_dir:
+            configured_path = Path(app_settings.mcp_token_storage_dir)
+            try:
+                configured_path.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Using token storage directory: {configured_path}")
+                return configured_path
+            except (PermissionError, OSError) as e:
+                logger.warning(f"Cannot use MCP_TOKEN_STORAGE_DIR={app_settings.mcp_token_storage_dir}: {e}")
+
         # Try project root locations
         candidates = [
             Path(__file__).parent.parent.parent.parent / "config" / "secure",
@@ -313,8 +338,9 @@ class MCPTokenStorage:
         )
 
         key = _make_token_key(user_email, server_name)
-        self._tokens[key] = token
-        self._save_tokens()
+        with self._lock:
+            self._tokens[key] = token
+            self._save_tokens()
 
         from core.log_sanitizer import sanitize_for_logging
         logger.info(
@@ -370,13 +396,14 @@ class MCPTokenStorage:
             True if token was removed, False if not found
         """
         key = _make_token_key(user_email, server_name)
-        if key in self._tokens:
-            del self._tokens[key]
-            self._save_tokens()
-            from core.log_sanitizer import sanitize_for_logging
-            logger.info(f"Removed token for server '{sanitize_for_logging(server_name)}'")
-            return True
-        return False
+        with self._lock:
+            if key in self._tokens:
+                del self._tokens[key]
+                self._save_tokens()
+                from core.log_sanitizer import sanitize_for_logging
+                logger.info(f"Removed token for server '{sanitize_for_logging(server_name)}'")
+                return True
+            return False
 
     def get_user_tokens(self, user_email: str) -> Dict[str, StoredToken]:
         """Get all tokens for a specific user.
@@ -489,17 +516,18 @@ class MCPTokenStorage:
             Number of tokens removed
         """
         user_email_lower = user_email.lower()
-        keys_to_remove = [
-            key for key, token in self._tokens.items()
-            if token.user_email == user_email_lower
-        ]
+        with self._lock:
+            keys_to_remove = [
+                key for key, token in self._tokens.items()
+                if token.user_email == user_email_lower
+            ]
 
-        for key in keys_to_remove:
-            del self._tokens[key]
+            for key in keys_to_remove:
+                del self._tokens[key]
 
-        if keys_to_remove:
-            self._save_tokens()
-            logger.info(f"Cleared {len(keys_to_remove)} tokens for user")
+            if keys_to_remove:
+                self._save_tokens()
+                logger.info(f"Cleared {len(keys_to_remove)} tokens for user")
 
         return len(keys_to_remove)
 
@@ -509,10 +537,11 @@ class MCPTokenStorage:
         Returns:
             Number of tokens removed
         """
-        count = len(self._tokens)
-        self._tokens.clear()
-        self._save_tokens()
-        logger.info(f"Cleared all {count} stored tokens")
+        with self._lock:
+            count = len(self._tokens)
+            self._tokens.clear()
+            self._save_tokens()
+            logger.info(f"Cleared all {count} stored tokens")
         return count
 
 

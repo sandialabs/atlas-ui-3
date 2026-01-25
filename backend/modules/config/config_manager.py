@@ -346,7 +346,19 @@ class AppSettings(BaseSettings):
         description="Multiplier for exponential backoff between reconnect attempts",
         validation_alias="MCP_RECONNECT_BACKOFF_MULTIPLIER"
     )
-    
+
+    # MCP Token Storage settings
+    mcp_token_storage_dir: Optional[str] = Field(
+        default=None,
+        description="Directory for storing encrypted user tokens. Defaults to config/secure/",
+        validation_alias="MCP_TOKEN_STORAGE_DIR"
+    )
+    mcp_token_encryption_key: Optional[str] = Field(
+        default=None,
+        description="Encryption key for user tokens. If not set, tokens won't persist across restarts",
+        validation_alias="MCP_TOKEN_ENCRYPTION_KEY"
+    )
+
     # Admin settings
     admin_group: str = "admin"
     test_user: str = "test@test.com"  # Test user for development

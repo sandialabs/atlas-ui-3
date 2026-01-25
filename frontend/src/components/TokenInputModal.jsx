@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Upload, RefreshCw } from 'lucide-react'
+import { X, Upload, RefreshCw, Eye, EyeOff } from 'lucide-react'
 
 /**
  * TokenInputModal
@@ -22,8 +22,9 @@ import { X, Upload, RefreshCw } from 'lucide-react'
  * Updated: 2026-01-25
  */
 const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, error }) => {
-  const [jwtInput, setJwtInput] = useState('')
-  const [jwtExpiry, setJwtExpiry] = useState('')
+  const [tokenInput, setTokenInput] = useState('')
+  const [tokenExpiry, setTokenExpiry] = useState('')
+  const [showToken, setShowToken] = useState(false)
   const inputRef = useRef(null)
   const submitRef = useRef(null)
 
@@ -35,21 +36,22 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
         inputRef.current?.focus()
       }, 50)
     } else {
-      setJwtInput('')
-      setJwtExpiry('')
+      setTokenInput('')
+      setTokenExpiry('')
+      setShowToken(false)
     }
   }, [isOpen])
 
   const handleSubmit = () => {
-    if (!jwtInput.trim() || isLoading) return
+    if (!tokenInput.trim() || isLoading) return
 
     const tokenData = {
-      token: jwtInput.trim(),
+      token: tokenInput.trim(),
     }
 
     // Parse expiry date if provided
-    if (jwtExpiry) {
-      const expiryDate = new Date(jwtExpiry)
+    if (tokenExpiry) {
+      const expiryDate = new Date(tokenExpiry)
       if (!isNaN(expiryDate.getTime())) {
         tokenData.expires_at = expiryDate.getTime() / 1000  // Convert to Unix timestamp
       }
@@ -70,8 +72,9 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
   }
 
   const handleClose = () => {
-    setJwtInput('')
-    setJwtExpiry('')
+    setTokenInput('')
+    setTokenExpiry('')
+    setShowToken(false)
     onClose()
   }
 
@@ -105,15 +108,27 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
             <label className="block text-sm font-medium text-gray-300 mb-2">
               API Key or Token
             </label>
-            <input
-              ref={inputRef}
-              type="text"
-              value={jwtInput}
-              onChange={(e) => setJwtInput(e.target.value)}
-              placeholder="Paste your API key, JWT, or bearer token here..."
-              className="w-full px-3 py-2 bg-gray-700 text-gray-100 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-              autoFocus
-            />
+            <div className="relative">
+              <input
+                ref={inputRef}
+                type={showToken ? "text" : "password"}
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                placeholder="Paste your API key, JWT, or bearer token here..."
+                className="w-full px-3 py-2 pr-10 bg-gray-700 text-gray-100 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                autoComplete="off"
+                spellCheck="false"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => setShowToken(!showToken)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-200 transition-colors"
+                tabIndex={-1}
+              >
+                {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
             <p className="text-xs text-gray-400 mt-1">
               Press Enter to submit
             </p>
@@ -125,8 +140,8 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
             </label>
             <input
               type="datetime-local"
-              value={jwtExpiry}
-              onChange={(e) => setJwtExpiry(e.target.value)}
+              value={tokenExpiry}
+              onChange={(e) => setTokenExpiry(e.target.value)}
               className="w-full px-3 py-2 bg-gray-700 text-gray-100 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-xs text-gray-400 mt-1">
@@ -151,7 +166,7 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
           <button
             ref={submitRef}
             onClick={handleSubmit}
-            disabled={!jwtInput.trim() || isLoading}
+            disabled={!tokenInput.trim() || isLoading}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
           >
             {isLoading ? (

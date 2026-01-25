@@ -68,14 +68,15 @@ class ApiKeyAuthMiddleware(Middleware):
 
         user = self.api_key_users.get(api_key)
         if not user:
-            print(f"[AUTH FAILED] Tool '{tool_name}': Invalid API key '{api_key[:8]}...'", flush=True)
+            # Don't log the API key value, even partially
+            print(f"[AUTH FAILED] Tool '{tool_name}': Invalid API key", flush=True)
             raise ToolError(
                 "Authentication failed: Invalid API key. "
                 "Please check your API key and try again."
             )
 
-        # Log successful authentication
-        print(f"[AUTH OK] Tool '{tool_name}': {user['name']} ({user['email']}) - role: {user['role']}", flush=True)
+        # Log successful authentication - only role, not sensitive user details
+        print(f"[AUTH OK] Tool '{tool_name}': Authenticated user with role: {user['role']}", flush=True)
 
         # Set current user in context for tools to access
         token = current_user_var.set(user)
@@ -165,7 +166,7 @@ if __name__ == "__main__":
             print(f"Invalid port: {sys.argv[1]}, using default {port}")
 
     print(f"Starting API Key Demo MCP server on http://localhost:{port}/mcp")
-    print(f"Valid API keys: {list(API_KEY_USERS.keys())}")
+    print(f"Valid API key count: {len(API_KEY_USERS)} (use list_valid_keys tool to see them)")
     print("\nTo test, set your API key in Atlas UI or use the FastMCP client.")
 
     mcp.run(transport="streamable-http", host="0.0.0.0", port=port)

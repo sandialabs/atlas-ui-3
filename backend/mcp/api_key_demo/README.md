@@ -32,7 +32,7 @@ Add to `config/overrides/mcp.json`:
 {
   "api_key_demo": {
     "url": "http://127.0.0.1:8006/mcp",
-    "transport": "streamable-http",
+    "transport": "http",
     "groups": ["users"],
     "description": "API key authentication demo",
     "auth_type": "api_key",

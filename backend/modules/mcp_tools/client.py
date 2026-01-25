@@ -1419,14 +1419,13 @@ class MCPToolManager:
                     del self._user_clients[cache_key]
 
         # Get user's token from storage
-        logger.info(f"[AUTH DEBUG] Looking up token for user='{user_email}' server='{server_name}'")
+        logger.debug(f"[AUTH] Looking up token for server='{server_name}'")
         stored_token = token_storage.get_valid_token(user_email, server_name)
-        logger.info(f"[AUTH DEBUG] Token found: {stored_token is not None}")
+        logger.debug(f"[AUTH] Token found: {stored_token is not None}")
 
         if stored_token is None:
-            logger.info(
-                f"[AUTH DEBUG] No valid token for user '{user_email}' on server '{server_name}' - "
-                f"user needs to authenticate"
+            logger.debug(
+                f"[AUTH] No valid token for server '{server_name}' - user needs to authenticate"
             )
             return None
 

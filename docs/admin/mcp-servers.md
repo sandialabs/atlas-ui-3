@@ -1,6 +1,6 @@
 # MCP Server Configuration
 
-Last updated: 2026-01-19
+Last updated: 2026-01-25
 
 The `mcp.json` file defines the MCP (Model Context Protocol) servers that the application can connect to. These servers provide the tools and capabilities available to the LLM.
 
@@ -29,6 +29,7 @@ Here is an example of a server configuration that uses all available options.
     "url": null,
     "transport": "stdio",
     "compliance_level": "Internal",
+    "auth_type": "none",
     "require_approval": ["dangerous_tool", "another_risky_tool"],
     "allow_edit": ["dangerous_tool"]
   }
@@ -50,6 +51,8 @@ Here is an example of a server configuration that uses all available options.
 *   **`transport`**: (string) The communication protocol to use. Can be `stdio`, `http`, or `sse`. This takes priority over auto-detection.
 *   **`auth_token`**: (string) For HTTP/SSE servers, the bearer token used for authentication. Use environment variable substitution (e.g., `"${MCP_SERVER_TOKEN}"`) to avoid storing secrets in config files. Stdio servers ignore this field.
 *   **`compliance_level`**: (string) The security compliance level of this server (e.g., "Public", "Internal", "SOC2"). This is used for data segregation and access control.
+*   **`auth_type`**: (string) The type of per-user authentication required. Options: `none` (default), `api_key`, `jwt`, `bearer`. When set, users must provide their own credentials via the UI.
+*   **`auth_header`**: (string) Custom HTTP header name for API key authentication. Defaults to `X-API-Key`. Only used when `auth_type` is `api_key`.
 *   **`require_approval`**: (list of strings) A list of tool names (without the server prefix) that will always require user approval before execution.
 *   **`allow_edit`**: (list of strings) A list of tool names for which the user is allowed to edit the arguments before approving. (Note: This is a legacy field and may be deprecated; the UI may allow editing for all approval requests).
 
@@ -104,6 +107,55 @@ export MCP_EXTERNAL_API_TOKEN="your-secret-api-key"
 - **Recommended**: Use environment variables for all production tokens
 - **Alternative**: For development/testing, you can use direct string values (not recommended for production)
 - **Never**: Commit tokens to `config/defaults/mcp.json` or any version-controlled files
+
+## Per-User Authentication
+
+For MCP servers where each user needs their own credentials (e.g., external APIs with individual API keys), use per-user authentication instead of server-level `auth_token`.
+
+### Configuration
+
+```json
+{
+  "external-api": {
+    "url": "https://api.example.com/mcp",
+    "transport": "http",
+    "auth_type": "api_key",
+    "auth_header": "X-API-Key",
+    "groups": ["users"]
+  }
+}
+```
+
+**Fields:**
+- `auth_type`: Required. Set to `api_key`, `jwt`, or `bearer` to enable per-user authentication.
+- `auth_header`: Optional. Custom header name for API keys (default: `X-API-Key`). Only used when `auth_type` is `api_key`.
+
+### How It Works
+
+1. Users see a key icon next to servers requiring authentication in the Tools panel
+2. Users click the icon and enter their personal API key or token
+3. The token is encrypted and stored securely per-user
+4. Future tool calls automatically include the user's token
+
+### Token Storage
+
+Tokens are stored encrypted on disk:
+- **Location:** Set `MCP_TOKEN_STORAGE_DIR` env var, or defaults to `config/secure/mcp_tokens.enc`
+- **Encryption:** Fernet (AES-128-CBC)
+- **Key:** Set `MCP_TOKEN_ENCRYPTION_KEY` environment variable
+
+If `MCP_TOKEN_ENCRYPTION_KEY` is not set, tokens use an ephemeral key and won't persist across restarts.
+
+### Per-User vs Server-Level Auth
+
+| Feature | `auth_token` (Server-level) | `auth_type` (Per-user) |
+|---------|----------------------------|------------------------|
+| Who provides token | Admin in config | Each user in UI |
+| Token storage | Config file | Encrypted per-user |
+| Use case | Shared service accounts | Individual API keys |
+| Transport support | HTTP/SSE | HTTP/SSE |
+
+See [MCP Server Authentication](./mcp-server-authentication.md) for full details.
 
 ## Environment Variables for Stdio Servers
 

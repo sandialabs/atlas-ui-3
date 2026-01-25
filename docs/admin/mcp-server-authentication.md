@@ -1,7 +1,8 @@
 # MCP API Key Authentication
 
 **Created:** 2025-01-21
-**Branch:** `feature/mcp-api-key-auth`
+**Updated:** 2026-01-25
+**PR:** #253
 
 ## Overview
 
@@ -58,7 +59,7 @@ This feature enables Atlas UI users to manually provide API keys, JWTs, or beare
 
 Tokens are stored encrypted on disk using Fernet (AES-128-CBC):
 
-- **Location:** `config/secure/mcp_tokens.enc`
+- **Location:** Set via `MCP_TOKEN_STORAGE_DIR` env var, or defaults to `config/secure/mcp_tokens.enc`
 - **Encryption key:** From `MCP_TOKEN_ENCRYPTION_KEY` environment variable
 - **Key format:** `{user_email}:{server_name}`
 
@@ -76,7 +77,8 @@ Configure MCP servers in `config/overrides/mcp.json`:
     "description": "My API Server",
     "url": "https://api.example.com/mcp",
     "transport": "http",
-    "auth_type": "api_key"
+    "auth_type": "api_key",
+    "auth_header": "X-API-Key"
   },
   "jwt-protected-server": {
     "description": "JWT Protected Server",
@@ -87,6 +89,10 @@ Configure MCP servers in `config/overrides/mcp.json`:
 }
 ```
 
+**Configuration fields:**
+- `auth_type`: Type of authentication required (`api_key`, `jwt`, `bearer`, or `none`)
+- `auth_header`: (Optional) Custom header name for API key auth. Defaults to `X-API-Key`. Only used when `auth_type` is `api_key`.
+
 **Note:** Per-user authentication (`auth_type: jwt`, `bearer`, `api_key`) is only supported for HTTP/SSE transport servers. Stdio-based servers cannot use per-user authentication because tokens are injected via HTTP headers.
 
 ### Environment Variables
@@ -94,8 +100,15 @@ Configure MCP servers in `config/overrides/mcp.json`:
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `MCP_TOKEN_ENCRYPTION_KEY` | Key for encrypting stored tokens | Recommended |
+| `MCP_TOKEN_STORAGE_DIR` | Directory path for token storage file | Optional |
 
-If `MCP_TOKEN_ENCRYPTION_KEY` is not set, an ephemeral key is generated. Tokens will not persist across application restarts in this case.
+**Encryption Key:** If `MCP_TOKEN_ENCRYPTION_KEY` is not set, an ephemeral key is generated. Tokens will not persist across application restarts in this case.
+
+**Storage Location:** If `MCP_TOKEN_STORAGE_DIR` is not set, tokens are stored in the first writable location from:
+1. `{project_root}/config/secure/`
+2. `{project_root}/runtime/tokens/`
+3. `~/.atlas-ui/tokens/`
+4. System temp directory (fallback)
 
 ## API Endpoints
 
@@ -186,19 +199,27 @@ The Tools panel shows authentication status for servers with `auth_type` of `api
 4. **Expiration Tracking:** Optional expiration date tracked and validated
 5. **Secure Storage:** Tokens stored in dedicated secure directory
 
-## Demo Servers
+## Demo Server
 
-### jwt_demo
+### api_key_demo
 
-A demo MCP server requiring JWT authentication. Use with `public_demo.get_jwt_demo_token()` to get a test token.
+A demo MCP server requiring API key authentication. Demonstrates the full per-user API key flow.
 
-**Config:** `config/mcp-example-configs/mcp-jwt_demo.json`
+**Location:** `backend/mcp/api_key_demo/`
 
-### public_demo
+**Config:** `config/mcp-example-configs/mcp-api_key_demo.json`
 
-A public MCP server with no authentication. Includes a `get_jwt_demo_token` tool to generate test JWTs.
+**Valid test keys:**
+- `test123` - Test user (developer role)
+- `admin123` - Admin user (admin role)
 
-**Config:** `config/mcp-example-configs/mcp-public_demo.json`
+**Running the demo:**
+```bash
+cd backend/mcp/api_key_demo
+bash run.sh
+```
+
+The server runs on port 8006 by default and validates API keys via the `X-API-Key` header.
 
 ## Files
 
@@ -215,11 +236,11 @@ A public MCP server with no authentication. Includes a `get_jwt_demo_token` tool
 - `frontend/src/hooks/useServerAuthStatus.js` - Auth status hook
 - `frontend/src/components/ToolsPanel.jsx` - Auth indicators in Tools panel
 
-### Demo Servers
+### Demo Server
 
-- `backend/mcp/jwt_demo/main.py` - JWT auth demo server
-- `backend/mcp/public_demo/main.py` - Public demo server
+- `backend/mcp/api_key_demo/main.py` - API key auth demo server
+- `backend/mcp/api_key_demo/run.sh` - Startup script (prints config snippet)
 
 ## Related
 
-- [MCP OAuth 2.1 Authentication](./mcp-oauth-authentication-2025-01-21.md) - OAuth flow support (separate feature)
+- [MCP Server Configuration](./mcp-servers.md) - General MCP server configuration

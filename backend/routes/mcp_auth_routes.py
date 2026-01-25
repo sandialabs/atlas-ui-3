@@ -93,7 +93,7 @@ async def get_auth_status(current_user: str = Depends(get_current_user)):
 
     except Exception as e:
         logger.error(f"Error getting auth status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error while fetching auth status")
 
 
 @router.post("/{server_name}/token")
@@ -177,7 +177,7 @@ async def upload_token(
         raise
     except Exception as e:
         logger.error(f"Error uploading token: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error while uploading token")
 
 
 @router.delete("/{server_name}/token")
@@ -220,4 +220,4 @@ async def remove_token(
         raise
     except Exception as e:
         logger.error(f"Error removing token: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error while removing token")
