@@ -1583,18 +1583,31 @@ class MCPToolManager:
             elif hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
                 structured = raw_result.data  # type: ignore[attr-defined]
             else:
-                # Fallback: parse first textual content if JSON-like
+                # Fallback: extract text content from content array
                 if hasattr(raw_result, "content"):
                     contents = getattr(raw_result, "content")
-                    if contents and hasattr(contents[0], "text"):
-                        first_text = getattr(contents[0], "text")
-                        # Allow JSON objects and arrays in content[0].text
-                        if isinstance(first_text, str) and first_text.strip().startswith(("{", "[")):
-                            try:
-                                logger.info("MCP tool result normalization: using content[0].text JSON fallback for structured extraction")
-                                structured = json.loads(first_text)
-                            except Exception:  # pragma: no cover - defensive
-                                pass
+                    if contents:
+                        # Collect all text content items
+                        text_parts = []
+                        for item in contents:
+                            if hasattr(item, "type") and getattr(item, "type") == "text":
+                                text = getattr(item, "text", None)
+                                if text:
+                                    text_parts.append(text)
+
+                        if text_parts:
+                            combined_text = "\n".join(text_parts)
+                            # Try to parse as JSON if it looks like JSON
+                            if combined_text.strip().startswith(("{", "[")):
+                                try:
+                                    logger.info("MCP tool result normalization: using content text JSON fallback for structured extraction")
+                                    structured = json.loads(combined_text)
+                                except Exception:  # pragma: no cover - defensive
+                                    # Not valid JSON, use as plain text result
+                                    structured = {"results": combined_text}
+                            else:
+                                # Plain text - use as results directly
+                                structured = {"results": combined_text}
         except Exception as parse_err:  # pragma: no cover - defensive
             logger.debug(f"Non-fatal parse issue extracting structured tool result: {parse_err}")
 
