@@ -203,7 +203,7 @@ async def remove_token(
             )
 
         # Invalidate any cached client for this user/server combination
-        tool_manager = app_factory.get_tool_manager()
+        tool_manager = app_factory.get_mcp_manager()
         if tool_manager is not None:
             await tool_manager._invalidate_user_client(current_user, server_name)
             logger.debug(f"Invalidated cached client for server '{server_name}'")

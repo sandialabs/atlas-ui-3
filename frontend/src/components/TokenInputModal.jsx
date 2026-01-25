@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { X, Upload, RefreshCw } from 'lucide-react'
 
 /**
@@ -17,23 +17,31 @@ import { X, Upload, RefreshCw } from 'lucide-react'
  * - onClose: function - Called when modal should close
  * - onUpload: function(tokenData) - Called with { token, expires_at } when user submits
  * - isLoading: boolean - Whether upload is in progress
+ * - error: string - Error message to display (optional)
  *
- * Updated: 2025-01-21
+ * Updated: 2026-01-25
  */
-const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading }) => {
+const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, error }) => {
   const [jwtInput, setJwtInput] = useState('')
   const [jwtExpiry, setJwtExpiry] = useState('')
+  const inputRef = useRef(null)
+  const submitRef = useRef(null)
 
-  // Reset form when modal opens/closes
+  // Reset form and focus input when modal opens
   useEffect(() => {
-    if (!isOpen) {
+    if (isOpen) {
+      // Focus the input after a short delay to ensure modal is rendered
+      setTimeout(() => {
+        inputRef.current?.focus()
+      }, 50)
+    } else {
       setJwtInput('')
       setJwtExpiry('')
     }
   }, [isOpen])
 
   const handleSubmit = () => {
-    if (!jwtInput.trim()) return
+    if (!jwtInput.trim() || isLoading) return
 
     const tokenData = {
       token: jwtInput.trim(),
@@ -48,6 +56,17 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading }) =
     }
 
     onUpload(tokenData)
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit()
+    } else if (e.key === 'Tab' && !e.shiftKey && e.target === inputRef.current) {
+      // Tab from input goes directly to Upload button, skipping expiration
+      e.preventDefault()
+      submitRef.current?.focus()
+    }
   }
 
   const handleClose = () => {
@@ -66,6 +85,7 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading }) =
       <div
         className="bg-gray-800 rounded-lg shadow-xl max-w-lg w-full mx-4 p-6"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-100 flex items-center gap-2">
@@ -85,12 +105,18 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading }) =
             <label className="block text-sm font-medium text-gray-300 mb-2">
               API Key or Token
             </label>
-            <textarea
+            <input
+              ref={inputRef}
+              type="text"
               value={jwtInput}
               onChange={(e) => setJwtInput(e.target.value)}
               placeholder="Paste your API key, JWT, or bearer token here..."
-              className="w-full px-3 py-2 bg-gray-700 text-gray-100 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 h-32 font-mono text-sm"
+              className="w-full px-3 py-2 bg-gray-700 text-gray-100 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+              autoFocus
             />
+            <p className="text-xs text-gray-400 mt-1">
+              Press Enter to submit
+            </p>
           </div>
 
           <div>
@@ -107,6 +133,12 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading }) =
               Set when the token expires. Leave empty if the token doesn't expire.
             </p>
           </div>
+
+          {error && (
+            <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">
+              {error}
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-3 mt-6">
@@ -117,6 +149,7 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading }) =
             Cancel
           </button>
           <button
+            ref={submitRef}
             onClick={handleSubmit}
             disabled={!jwtInput.trim() || isLoading}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
