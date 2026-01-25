@@ -20,9 +20,9 @@ python main.py
 ## Valid Test Keys
 
 For demo purposes, these API keys are accepted:
-- `test123`
-- `demo-api-key-12345`
-- `user-specific-key-abcdef`
+- `test123` (developer)
+- `admin123` (admin)
+- `demo-api-key-12345` (viewer)
 
 ## Configuration in Atlas
 

@@ -44,9 +44,9 @@ cat << EOF
 EOF
 echo ""
 echo "Valid test API keys:"
-echo "  - test123"
-echo "  - demo-api-key-12345"
-echo "  - user-specific-key-abcdef"
+echo "  - test123 (developer)"
+echo "  - admin123 (admin)"
+echo "  - demo-api-key-12345 (viewer)"
 echo ""
 echo "========================================"
 echo "Starting server on port $PORT..."
