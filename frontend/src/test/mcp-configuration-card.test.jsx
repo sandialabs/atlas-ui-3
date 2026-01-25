@@ -3,6 +3,13 @@ import React from 'react'
 import { render, screen, act } from '@testing-library/react'
 import MCPConfigurationCard from '../components/admin/MCPConfigurationCard.jsx'
 
+// Mock the useChat hook
+vi.mock('../contexts/ChatContext', () => ({
+  useChat: () => ({
+    refreshConfig: vi.fn(),
+  }),
+}))
+
 const isCI = process.env.CI || process.env.ENVIRONMENT === 'cicd'
 
 describe('MCPConfigurationCard', () => {
