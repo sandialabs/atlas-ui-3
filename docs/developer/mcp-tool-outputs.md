@@ -1,8 +1,8 @@
-# Creating an MCP Server
+# MCP Tool Outputs
 
-Last updated: 2026-01-19
+Last updated: 2026-01-24
 
-MCP servers are the backbone of the tool system. They are independent processes that expose functions (tools) that the LLM can call.
+This guide covers the different ways MCP tools can return data to Atlas, including text results, artifacts, images, and iframes. MCP servers are independent processes that expose functions (tools) that the LLM can call.
 
 ## 1. Server Structure
 
