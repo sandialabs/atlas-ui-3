@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable, Awaitable, AsyncIterator
 
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 from modules.config import config_manager
 from core.log_sanitizer import sanitize_for_logging
 from modules.config.config_manager import resolve_env_var
@@ -1444,21 +1445,41 @@ class MCPToolManager:
         # Create client with user's token
         try:
             log_handler = self._create_log_handler(server_name)
-            # FastMCP Client accepts auth= as a string (bearer token)
-            client = Client(
-                url,
-                auth=stored_token.token_value,
-                log_handler=log_handler,
-                elicitation_handler=self._create_elicitation_handler(server_name),
-                sampling_handler=self._create_sampling_handler(server_name),
-            )
+            auth_type = config.get("auth_type", "bearer")
+
+            # For API key auth, use custom header; for bearer/jwt/oauth, use auth parameter
+            if auth_type == "api_key":
+                # Use custom header for API key authentication
+                auth_header = config.get("auth_header", "X-API-Key")
+                logger.debug(
+                    f"Creating API key client for '{server_name}' with header '{auth_header}'"
+                )
+                transport = StreamableHttpTransport(
+                    url,
+                    headers={auth_header: stored_token.token_value},
+                )
+                client = Client(
+                    transport=transport,
+                    log_handler=log_handler,
+                    elicitation_handler=self._create_elicitation_handler(server_name),
+                    sampling_handler=self._create_sampling_handler(server_name),
+                )
+            else:
+                # FastMCP Client accepts auth= as a string (bearer token)
+                client = Client(
+                    url,
+                    auth=stored_token.token_value,
+                    log_handler=log_handler,
+                    elicitation_handler=self._create_elicitation_handler(server_name),
+                    sampling_handler=self._create_sampling_handler(server_name),
+                )
 
             # Cache the client
             async with self._user_clients_lock:
                 self._user_clients[cache_key] = client
 
             logger.info(
-                f"Created user-specific client for server '{server_name}'"
+                f"Created user-specific client for server '{server_name}' (auth_type={auth_type})"
             )
             return client
 

@@ -115,10 +115,11 @@ class TestGetUserClient:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_creates_client_with_token(self, manager):
-        """Should create client when user has valid token."""
+    async def test_creates_client_with_api_key_header(self, manager):
+        """Should create client with custom header for API key auth type."""
         with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
-             patch("modules.mcp_tools.client.Client") as mock_client_class:
+             patch("modules.mcp_tools.client.Client") as mock_client_class, \
+             patch("modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
 
             # Mock token storage
             mock_token = MagicMock()
@@ -127,23 +128,114 @@ class TestGetUserClient:
             mock_token_storage.get_valid_token.return_value = mock_token
             mock_storage.return_value = mock_token_storage
 
-            # Mock Client constructor
+            # Mock transport and Client constructor
+            mock_transport = MagicMock()
+            mock_transport_class.return_value = mock_transport
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
 
             result = await manager._get_user_client("test-server", "user@example.com")
 
             assert result is mock_client
+            # Verify StreamableHttpTransport was created with custom header
+            mock_transport_class.assert_called_once()
+            transport_call_kwargs = mock_transport_class.call_args
+            assert transport_call_kwargs[1]["headers"] == {"X-API-Key": "test-api-key-123"}
+            # Verify Client was created with transport
             mock_client_class.assert_called_once()
-            # Verify token was passed to client
-            call_kwargs = mock_client_class.call_args
-            assert call_kwargs[1]["auth"] == "test-api-key-123"
+            client_call_kwargs = mock_client_class.call_args
+            assert client_call_kwargs[1]["transport"] is mock_transport
+
+    @pytest.mark.asyncio
+    async def test_creates_client_with_bearer_token(self):
+        """Should create client with auth parameter for bearer auth type."""
+        import asyncio
+        from modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {
+            "bearer-server": {
+                "auth_type": "bearer",
+                "url": "http://localhost:8080"
+            }
+        }
+        manager._user_clients = {}
+        manager._user_clients_lock = asyncio.Lock()
+        manager._create_log_handler = MagicMock(return_value=None)
+        manager._create_elicitation_handler = MagicMock(return_value=None)
+        manager._create_sampling_handler = MagicMock(return_value=None)
+
+        with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("modules.mcp_tools.client.Client") as mock_client_class:
+
+            # Mock token storage
+            mock_token = MagicMock()
+            mock_token.token_value = "bearer-token-123"
+            mock_token_storage = MagicMock()
+            mock_token_storage.get_valid_token.return_value = mock_token
+            mock_storage.return_value = mock_token_storage
+
+            # Mock Client constructor
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+
+            result = await manager._get_user_client("bearer-server", "user@example.com")
+
+            assert result is mock_client
+            mock_client_class.assert_called_once()
+            # Verify token was passed as auth parameter (not via transport)
+            call_args = mock_client_class.call_args
+            assert call_args[0][0] == "http://localhost:8080"  # URL as first positional arg
+            assert call_args[1]["auth"] == "bearer-token-123"
+
+    @pytest.mark.asyncio
+    async def test_uses_custom_auth_header_name(self):
+        """Should use custom auth_header from config for API key auth."""
+        import asyncio
+        from modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {
+            "custom-header-server": {
+                "auth_type": "api_key",
+                "auth_header": "X-Custom-Auth",
+                "url": "http://localhost:8080"
+            }
+        }
+        manager._user_clients = {}
+        manager._user_clients_lock = asyncio.Lock()
+        manager._create_log_handler = MagicMock(return_value=None)
+        manager._create_elicitation_handler = MagicMock(return_value=None)
+        manager._create_sampling_handler = MagicMock(return_value=None)
+
+        with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("modules.mcp_tools.client.Client") as mock_client_class, \
+             patch("modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
+
+            mock_token = MagicMock()
+            mock_token.token_value = "custom-key-456"
+            mock_token_storage = MagicMock()
+            mock_token_storage.get_valid_token.return_value = mock_token
+            mock_storage.return_value = mock_token_storage
+
+            mock_transport = MagicMock()
+            mock_transport_class.return_value = mock_transport
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+
+            result = await manager._get_user_client("custom-header-server", "user@example.com")
+
+            assert result is mock_client
+            # Verify custom header name was used
+            transport_call_kwargs = mock_transport_class.call_args
+            assert transport_call_kwargs[1]["headers"] == {"X-Custom-Auth": "custom-key-456"}
 
     @pytest.mark.asyncio
     async def test_caches_client(self, manager):
         """Should cache client for subsequent calls."""
         with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
-             patch("modules.mcp_tools.client.Client") as mock_client_class:
+             patch("modules.mcp_tools.client.Client") as mock_client_class, \
+             patch("modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
 
             mock_token = MagicMock()
             mock_token.token_value = "test-api-key"
@@ -151,6 +243,8 @@ class TestGetUserClient:
             mock_token_storage.get_valid_token.return_value = mock_token
             mock_storage.return_value = mock_token_storage
 
+            mock_transport = MagicMock()
+            mock_transport_class.return_value = mock_transport
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
 
@@ -167,13 +261,16 @@ class TestGetUserClient:
     async def test_invalidates_cache_on_expired_token(self, manager):
         """Should invalidate cached client when token expires."""
         with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
-             patch("modules.mcp_tools.client.Client") as mock_client_class:
+             patch("modules.mcp_tools.client.Client") as mock_client_class, \
+             patch("modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
 
             mock_token = MagicMock()
             mock_token.token_value = "test-api-key"
             mock_token_storage = MagicMock()
             mock_storage.return_value = mock_token_storage
 
+            mock_transport = MagicMock()
+            mock_transport_class.return_value = mock_transport
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
 

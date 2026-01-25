@@ -1,0 +1,17 @@
+{
+  "api_key_demo": {
+    "url": "http://127.0.0.1:8765/mcp",
+    "transport": "streamable-http",
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates per-user API key authentication for MCP servers. Users must provide their personal API key via the key icon before using tools. The API key is sent in a custom X-API-Key header.",
+    "author": "Chat UI Team",
+    "short_description": "API key authentication demo",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Internal",
+    "auth_type": "api_key",
+    "auth_header": "X-API-Key",
+    "auth_prompt": "Enter your API key for the demo server"
+  }
+}
