@@ -266,7 +266,7 @@ class TestRemoveToken:
             # Mock tool manager for cache invalidation
             mock_tool_manager = AsyncMock()
             mock_tool_manager._invalidate_user_client = AsyncMock()
-            mock_factory.get_tool_manager.return_value = mock_tool_manager
+            mock_factory.get_mcp_manager.return_value = mock_tool_manager
 
             yield {
                 "storage": mock_storage,
