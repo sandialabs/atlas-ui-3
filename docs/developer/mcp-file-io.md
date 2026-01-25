@@ -1,6 +1,6 @@
 # MCP Tool File I/O Guide
 
-Last updated: 2026-01-24
+Last updated: 2026-01-25
 
 This guide explains how to accept files as input and return files as output from MCP tools using FastMCP. It is self-contained and can be used independently.
 
@@ -12,7 +12,12 @@ MCP tools can:
 
 ## Accepting Files as Input
 
-When users upload files and the LLM passes them to your tool, the backend rewrites the filename to a secure download URL.
+When users upload files and the LLM passes them to your tool, the backend rewrites the filename to a secure download URL. This URL may be:
+
+- **Relative path**: `/api/files/download/abc123?token=xyz` (default behavior)
+- **Absolute URL**: `http://localhost:8000/api/files/download/abc123?token=xyz` (when `BACKEND_PUBLIC_URL` is configured)
+
+Your tool should handle both cases.
 
 ### Step 1: Define a `filename` Parameter
 
@@ -29,24 +34,38 @@ def process_document(filename: str) -> Dict[str, Any]:
     Process an uploaded document.
 
     The filename parameter receives a download URL, not a raw filename.
+    It may be a relative path or an absolute URL depending on backend config.
     """
-    # filename is now something like:
-    # http://localhost:8000/api/files/download/abc123?token=xyz
+    # filename could be either:
+    # - Relative: /api/files/download/abc123?token=xyz
+    # - Absolute: http://localhost:8000/api/files/download/abc123?token=xyz
     pass
 ```
 
 ### Step 2: Fetch the File Content
 
-Use an HTTP client to download the file:
+Use an HTTP client to download the file. Since the backend may return either relative or absolute URLs, normalize relative paths first:
 
 ```python
+import os
 import httpx
+from urllib.parse import urljoin
+
+# Get the backend base URL from environment (defaults to localhost for development)
+BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000")
+
+def normalize_file_url(filename: str) -> str:
+    """Convert relative paths to absolute URLs."""
+    if filename.startswith("/"):
+        return urljoin(BACKEND_PUBLIC_URL, filename)
+    return filename
 
 @mcp.tool
 def process_document(filename: str) -> Dict[str, Any]:
     """Process an uploaded document."""
     try:
-        response = httpx.get(filename, timeout=30)
+        file_url = normalize_file_url(filename)
+        response = httpx.get(file_url, timeout=30)
         response.raise_for_status()
         file_bytes = response.content
 
@@ -188,12 +207,15 @@ return {
     ],
     "display": {
         "open_canvas": True,        # Auto-open the canvas panel
-        "primary_file": "output.html",  # Which file to show first
-        "mode": "replace",          # "replace" or "append"
-        "viewer_hint": "html"       # Suggest viewer type
+        "primary_file": "output.html"  # Which file to show first
     }
 }
 ```
+
+| Field | Status | Description |
+|-------|--------|-------------|
+| `open_canvas` | Supported | Auto-open the canvas panel when artifacts are returned |
+| `primary_file` | Supported | Which file to display first in the canvas |
 
 ## Complete Example: File Converter
 
@@ -308,8 +330,7 @@ def create_presentation(title: str) -> Dict[str, Any]:
         ],
         "display": {
             "open_canvas": True,
-            "primary_file": f"{title}.pptx",
-            "viewer_hint": "powerpoint"
+            "primary_file": f"{title}.pptx"
         }
     }
 ```
@@ -355,23 +376,41 @@ def process_and_output() -> Dict[str, Any]:
 4. **Limit file sizes** - Check content length before processing large files
 
 ```python
+import os
+import re
+from urllib.parse import urlparse
+
+BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000")
+
 def _sanitize_filename(name: str, max_length: int = 50) -> str:
     """Remove unsafe characters from filename."""
-    import re
     cleaned = re.sub(r'[^\w\-.]', '', name)
     return cleaned[:max_length] if cleaned else "output"
 
 def _is_safe_url(url: str) -> bool:
     """Check if URL is from expected backend."""
-    return url.startswith("http://localhost:8000/") or \
-           url.startswith("/api/files/download/")
+    # Allow relative download URLs
+    if url.startswith("/api/files/download/"):
+        return True
+
+    # For absolute URLs, validate against configured backend
+    parsed = urlparse(url)
+    if not parsed.netloc:
+        return False
+
+    public = urlparse(BACKEND_PUBLIC_URL)
+    return (
+        parsed.scheme == public.scheme
+        and parsed.netloc == public.netloc
+        and parsed.path.startswith("/api/files/download/")
+    )
 ```
 
 ## Summary
 
 | Direction | Method | Key Points |
 |-----------|--------|------------|
-| **Input** | `filename: str` parameter | Backend rewrites to download URL; fetch with HTTP client |
+| **Input** | `filename: str` parameter | Backend rewrites to download URL (relative or absolute); normalize and fetch with HTTP client |
 | **Output** | `artifacts` array | Base64-encode content; include name, b64, mime fields |
 
-The MCP framework handles all the complexity of file storage and retrieval. Your tool just needs to fetch URLs and return base64-encoded artifacts.
+The MCP framework handles all the complexity of file storage and retrieval. Your tool just needs to normalize and fetch URLs, then return base64-encoded artifacts.
