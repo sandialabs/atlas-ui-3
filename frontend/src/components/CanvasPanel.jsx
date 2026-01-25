@@ -279,13 +279,11 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
         case 'image':
           return (
             <div className="p-4">
-              <div className="text-center">
-                <img 
-                  src={currentFileContent.url} 
-                  alt={currentFileContent.file.filename}
-                  className="max-w-full h-auto rounded-lg shadow-lg"
-                />
-              </div>
+              <img
+                src={currentFileContent.url}
+                alt={currentFileContent.file.filename}
+                className="w-full h-auto rounded-lg shadow-lg"
+              />
             </div>
           );
 
