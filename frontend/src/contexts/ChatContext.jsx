@@ -426,7 +426,8 @@ export const ChatProvider = ({ children }) => {
 		sendMessage,
 		sendApprovalResponse: sendMessage,
 		pendingElicitation,
-		setPendingElicitation
+		setPendingElicitation,
+		refreshConfig: config.refreshConfig
 	}
 
 	return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>
