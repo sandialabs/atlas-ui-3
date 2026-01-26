@@ -12,7 +12,8 @@ from application.chat.approval_manager import (
 class TestToolApprovalRequest:
     """Test ToolApprovalRequest class."""
 
-    def test_create_approval_request(self):
+    @pytest.mark.asyncio
+    async def test_create_approval_request(self):
         """Test creating an approval request."""
         request = ToolApprovalRequest(
             tool_call_id="test_123",
@@ -78,7 +79,8 @@ class TestToolApprovalRequest:
 class TestToolApprovalManager:
     """Test ToolApprovalManager class."""
 
-    def test_create_approval_request(self):
+    @pytest.mark.asyncio
+    async def test_create_approval_request(self):
         """Test creating an approval request via manager."""
         manager = ToolApprovalManager()
         request = manager.create_approval_request(
@@ -87,11 +89,12 @@ class TestToolApprovalManager:
             arguments={"arg1": "value1"},
             allow_edit=True
         )
-        
+
         assert request.tool_call_id == "test_123"
         assert "test_123" in manager.get_pending_requests()
 
-    def test_handle_approval_response(self):
+    @pytest.mark.asyncio
+    async def test_handle_approval_response(self):
         """Test handling an approval response."""
         manager = ToolApprovalManager()
         manager.create_approval_request(
@@ -114,15 +117,16 @@ class TestToolApprovalManager:
     def test_handle_unknown_request(self):
         """Test handling response for unknown request."""
         manager = ToolApprovalManager()
-        
+
         result = manager.handle_approval_response(
             tool_call_id="unknown_123",
             approved=True
         )
-        
+
         assert result is False
 
-    def test_cleanup_request(self):
+    @pytest.mark.asyncio
+    async def test_cleanup_request(self):
         """Test cleaning up a completed request."""
         manager = ToolApprovalManager()
         manager.create_approval_request(
@@ -130,11 +134,11 @@ class TestToolApprovalManager:
             tool_name="test_tool",
             arguments={"arg1": "value1"}
         )
-        
+
         assert "test_123" in manager.get_pending_requests()
-        
+
         manager.cleanup_request("test_123")
-        
+
         assert "test_123" not in manager.get_pending_requests()
 
     def test_get_approval_manager_singleton(self):
