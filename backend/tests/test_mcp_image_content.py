@@ -98,7 +98,7 @@ class TestImageContentHandling:
             assert len(result.artifacts) == 1
             
             artifact = result.artifacts[0]
-            assert artifact["name"] == "image_0.png"
+            assert artifact["name"] == "mcp_image_0.png"
             assert artifact["b64"] == image_b64
             assert artifact["mime"] == "image/png"
             assert artifact["viewer"] == "image"
@@ -106,7 +106,7 @@ class TestImageContentHandling:
             
             # Verify display config was auto-created
             assert result.display_config is not None
-            assert result.display_config["primary_file"] == "image_0.png"
+            assert result.display_config["primary_file"] == "mcp_image_0.png"
             assert result.display_config["open_canvas"] is True
 
     @pytest.mark.asyncio
@@ -125,10 +125,11 @@ class TestImageContentHandling:
             arguments={}
         )
         
+        # Use valid base64 encoded strings
         images = [
-            {"data": "base64data1", "mime": "image/png"},
-            {"data": "base64data2", "mime": "image/jpeg"},
-            {"data": "base64data3", "mime": "image/gif"}
+            {"data": "aW1hZ2UgZGF0YSAxCg==", "mime": "image/png"},
+            {"data": "aW1hZ2UgZGF0YSAyCg==", "mime": "image/jpeg"},
+            {"data": "aW1hZ2UgZGF0YSAzCg==", "mime": "image/gif"}
         ]
         raw_result = MockMCPResultWithMultipleImages(images)
         
@@ -149,7 +150,7 @@ class TestImageContentHandling:
             # Check each artifact
             for i, (artifact, img) in enumerate(zip(result.artifacts, images)):
                 expected_ext = img["mime"].split("/")[-1]
-                assert artifact["name"] == f"image_{i}.{expected_ext}"
+                assert artifact["name"] == f"mcp_image_{i}.{expected_ext}"
                 assert artifact["b64"] == img["data"]
                 assert artifact["mime"] == img["mime"]
                 assert artifact["viewer"] == "image"
@@ -171,7 +172,8 @@ class TestImageContentHandling:
         )
 
         text = "Here is your visualization"
-        image_b64 = "base64imagedata"
+        # Use valid base64 encoded string
+        image_b64 = "aW1hZ2VkYXRhCg=="
         raw_result = MockMCPResultWithMixedContent(text, image_b64)
 
         with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
@@ -188,7 +190,7 @@ class TestImageContentHandling:
             # Verify image was extracted (uses image counter, so first image is image_0)
             assert len(result.artifacts) == 1
             artifact = result.artifacts[0]
-            assert artifact["name"] == "image_0.png"
+            assert artifact["name"] == "mcp_image_0.png"
             assert artifact["b64"] == image_b64
 
             # Verify the text content was extracted and included in result.content
@@ -239,3 +241,183 @@ class TestImageContentHandling:
             assert len(result.artifacts) == 0
             # Display config should not be auto-created
             assert result.display_config is None
+
+    @pytest.mark.asyncio
+    async def test_image_content_missing_data(self):
+        """Test that ImageContent with None/missing data is skipped."""
+        manager = MCPToolManager.__new__(MCPToolManager)
+
+        class MockTool:
+            def __init__(self, name):
+                self.name = name
+
+        tool_call = ToolCall(
+            id="test-call-5",
+            name="missing_data",
+            arguments={}
+        )
+
+        # Create ImageContent with missing data
+        class MockImageContentNoData:
+            def __init__(self):
+                self.type = "image"
+                self.data = None
+                self.mimeType = "image/png"
+
+        class MockResult:
+            def __init__(self):
+                self.content = [MockImageContentNoData()]
+                self.structured_content = None
+                self.data = None
+                self.is_error = False
+
+        raw_result = MockResult()
+
+        with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = raw_result
+            manager._tool_index = {
+                "missing_data": {
+                    "server": "test-server",
+                    "tool": MockTool("missing_data")
+                }
+            }
+
+            result = await manager.execute_tool(tool_call, context={})
+
+            # No artifacts should be created when data is missing
+            assert len(result.artifacts) == 0
+
+    @pytest.mark.asyncio
+    async def test_image_content_missing_mime_type(self):
+        """Test that ImageContent with None/missing mimeType is skipped."""
+        manager = MCPToolManager.__new__(MCPToolManager)
+
+        class MockTool:
+            def __init__(self, name):
+                self.name = name
+
+        tool_call = ToolCall(
+            id="test-call-6",
+            name="missing_mime",
+            arguments={}
+        )
+
+        # Create ImageContent with missing mime type
+        class MockImageContentNoMime:
+            def __init__(self):
+                self.type = "image"
+                self.data = "SGVsbG8gV29ybGQ="  # Valid base64
+                self.mimeType = None
+
+        class MockResult:
+            def __init__(self):
+                self.content = [MockImageContentNoMime()]
+                self.structured_content = None
+                self.data = None
+                self.is_error = False
+
+        raw_result = MockResult()
+
+        with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = raw_result
+            manager._tool_index = {
+                "missing_mime": {
+                    "server": "test-server",
+                    "tool": MockTool("missing_mime")
+                }
+            }
+
+            result = await manager.execute_tool(tool_call, context={})
+
+            # No artifacts should be created when mimeType is missing
+            assert len(result.artifacts) == 0
+
+    @pytest.mark.asyncio
+    async def test_image_content_invalid_mime_type(self):
+        """Test that ImageContent with unsupported mime type is skipped."""
+        manager = MCPToolManager.__new__(MCPToolManager)
+
+        class MockTool:
+            def __init__(self, name):
+                self.name = name
+
+        tool_call = ToolCall(
+            id="test-call-7",
+            name="bad_mime",
+            arguments={}
+        )
+
+        # Create ImageContent with unsupported mime type
+        class MockImageContentBadMime:
+            def __init__(self):
+                self.type = "image"
+                self.data = "SGVsbG8gV29ybGQ="  # Valid base64
+                self.mimeType = "application/octet-stream"
+
+        class MockResult:
+            def __init__(self):
+                self.content = [MockImageContentBadMime()]
+                self.structured_content = None
+                self.data = None
+                self.is_error = False
+
+        raw_result = MockResult()
+
+        with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = raw_result
+            manager._tool_index = {
+                "bad_mime": {
+                    "server": "test-server",
+                    "tool": MockTool("bad_mime")
+                }
+            }
+
+            result = await manager.execute_tool(tool_call, context={})
+
+            # No artifacts should be created for unsupported mime type
+            assert len(result.artifacts) == 0
+
+    @pytest.mark.asyncio
+    async def test_image_content_invalid_base64(self):
+        """Test that ImageContent with invalid base64 data is skipped."""
+        manager = MCPToolManager.__new__(MCPToolManager)
+
+        class MockTool:
+            def __init__(self, name):
+                self.name = name
+
+        tool_call = ToolCall(
+            id="test-call-8",
+            name="bad_base64",
+            arguments={}
+        )
+
+        # Create ImageContent with invalid base64
+        class MockImageContentBadB64:
+            def __init__(self):
+                self.type = "image"
+                self.data = "not-valid-base64!!!"
+                self.mimeType = "image/png"
+
+        class MockResult:
+            def __init__(self):
+                self.content = [MockImageContentBadB64()]
+                self.structured_content = None
+                self.data = None
+                self.is_error = False
+
+        raw_result = MockResult()
+
+        with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = raw_result
+            manager._tool_index = {
+                "bad_base64": {
+                    "server": "test-server",
+                    "tool": MockTool("bad_base64")
+                }
+            }
+
+            result = await manager.execute_tool(tool_call, context={})
+
+            # No artifacts should be created for invalid base64
+            assert len(result.artifacts) == 0

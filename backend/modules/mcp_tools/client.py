@@ -1839,20 +1839,46 @@ class MCPToolManager:
                         meta_data = md
                 
                 # Extract ImageContent from the content array
+                # Allowlist of safe image MIME types
+                ALLOWED_IMAGE_MIMES = {
+                    "image/png", "image/jpeg", "image/gif",
+                    "image/svg+xml", "image/webp", "image/bmp"
+                }
+
                 if hasattr(raw_result, "content"):
                     contents = getattr(raw_result, "content")
                     if isinstance(contents, list):
                         image_counter = 0
-                        for idx, item in enumerate(contents):
+                        for item in contents:
                             # Check if this is an ImageContent object
                             if hasattr(item, "type") and getattr(item, "type") == "image":
                                 data = getattr(item, "data", None)
                                 mime_type = getattr(item, "mimeType", None)
+
+                                # Validate mime type against allowlist
+                                if mime_type and mime_type not in ALLOWED_IMAGE_MIMES:
+                                    logger.warning(
+                                        f"Skipping ImageContent with unsupported mime type: {mime_type}"
+                                    )
+                                    continue
+
+                                # Validate base64 data
+                                if data:
+                                    try:
+                                        import base64
+                                        base64.b64decode(data, validate=True)
+                                    except Exception:
+                                        logger.warning(
+                                            f"Skipping ImageContent with invalid base64 data"
+                                        )
+                                        continue
+
                                 if data and mime_type:
                                     # Generate a filename based on image counter and mime type
+                                    # Use mcp_image_ prefix to avoid collisions with structured artifacts
                                     ext = mime_type.split("/")[-1] if "/" in mime_type else "bin"
-                                    filename = f"image_{image_counter}.{ext}"
-                                    
+                                    filename = f"mcp_image_{image_counter}.{ext}"
+
                                     # Create artifact in the expected format
                                     artifact = {
                                         "name": filename,
