@@ -373,15 +373,19 @@ def _filter_args_to_schema(parsed_args: Dict[str, Any], tool_name: str, tool_man
     """
     try:
         tools_schema = tool_manager.get_tools_schema([tool_name]) if tool_manager else []
+        found_schema = False
         allowed: set[str] = set()
         for tool_schema in tools_schema or []:
             if tool_schema.get("function", {}).get("name") == tool_name:
                 params = tool_schema.get("function", {}).get("parameters", {})
                 props = params.get("properties", {}) or {}
                 allowed = set(props.keys())
+                found_schema = True
                 break
 
-        if allowed:
+        # If we found the tool's schema, filter to allowed keys only
+        # (even if allowed is empty - meaning no parameters expected)
+        if found_schema:
             return {k: v for k, v in (parsed_args or {}).items() if k in allowed}
     except Exception:
         # Fall through to conservative filtering

@@ -245,7 +245,7 @@ When running locally without a reverse proxy:
 ## Related Documentation
 
 - **Admin Guide**: `docs/admin/mcp-servers.md` - See "A Note on the `username` Argument" section
-- **Creating MCP Servers**: `docs/developer/creating-mcp-servers.md` - Best practices for tool development
+- **MCP Tool Outputs**: `docs/developer/mcp-tool-outputs.md` - Best practices for tool development
 - **Authentication**: `.github/copilot-instructions.md` - How X-User-Email authentication works
 
 ## Troubleshooting
