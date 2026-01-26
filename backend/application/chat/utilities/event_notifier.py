@@ -163,19 +163,31 @@ async def notify_tool_complete(
     if tool_call.function.name == "canvas_canvas":
         await notify_canvas_content(parsed_args, update_callback)
     
-    # Trace artifacts/display presence when available
+    # Send artifacts to frontend if available
     try:
         arts = getattr(result, "artifacts", None)
         disp = getattr(result, "display_config", None)
-        if arts or disp:
+        if arts and isinstance(arts, list):
             logger.debug(
                 "Tool result has artifacts/display: artifacts=%d, has_display=%s",
-                len(arts) if isinstance(arts, list) else 0,
+                len(arts),
                 bool(disp),
             )
+            # Send artifacts as progress_artifacts so they display in canvas
+            await safe_notify(update_callback, {
+                "type": "intermediate_update",
+                "update_type": "progress_artifacts",
+                "data": {
+                    "artifacts": arts,
+                    "display": disp or {},
+                    "tool_call_id": tool_call.id,
+                    "tool_name": tool_call.function.name
+                }
+            })
+            logger.info(f"Sent {len(arts)} artifact(s) from tool {tool_call.function.name} to frontend")
     except Exception:
         # Fail open on artifact/display logging to avoid breaking tool completion
-        pass
+        logger.warning("Error sending artifacts to frontend", exc_info=True)
 
     await safe_notify(update_callback, complete_payload)
 

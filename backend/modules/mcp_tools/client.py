@@ -1748,18 +1748,31 @@ class MCPToolManager:
             elif hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
                 structured = raw_result.data  # type: ignore[attr-defined]
             else:
-                # Fallback: parse first textual content if JSON-like
+                # Fallback: extract text content from content array
                 if hasattr(raw_result, "content"):
                     contents = getattr(raw_result, "content")
-                    if contents and hasattr(contents[0], "text"):
-                        first_text = getattr(contents[0], "text")
-                        # Allow JSON objects and arrays in content[0].text
-                        if isinstance(first_text, str) and first_text.strip().startswith(("{", "[")):
-                            try:
-                                logger.info("MCP tool result normalization: using content[0].text JSON fallback for structured extraction")
-                                structured = json.loads(first_text)
-                            except Exception:  # pragma: no cover - defensive
-                                pass
+                    if contents:
+                        # Collect all text from TextContent items
+                        text_parts = []
+                        for item in contents:
+                            if hasattr(item, "type") and getattr(item, "type") == "text":
+                                text = getattr(item, "text", None)
+                                if text:
+                                    text_parts.append(text)
+
+                        if text_parts:
+                            combined_text = "\n".join(text_parts)
+                            # Try to parse as JSON if it looks like JSON
+                            if combined_text.strip().startswith(("{", "[")):
+                                try:
+                                    logger.info("MCP tool result normalization: using content text JSON fallback for structured extraction")
+                                    structured = json.loads(combined_text)
+                                except Exception:  # pragma: no cover - defensive
+                                    # Not valid JSON, use as plain text result
+                                    structured = {"results": combined_text}
+                            else:
+                                # Plain text - use as results directly
+                                structured = {"results": combined_text}
         except Exception as parse_err:  # pragma: no cover - defensive
             logger.debug(f"Non-fatal parse issue extracting structured tool result: {parse_err}")
 
@@ -1993,6 +2006,67 @@ class MCPToolManager:
                     md = structured.get("meta_data")
                     if isinstance(md, dict):
                         meta_data = md
+                
+                # Extract ImageContent from the content array
+                # Allowlist of safe image MIME types
+                ALLOWED_IMAGE_MIMES = {
+                    "image/png", "image/jpeg", "image/gif",
+                    "image/svg+xml", "image/webp", "image/bmp"
+                }
+
+                if hasattr(raw_result, "content"):
+                    contents = getattr(raw_result, "content")
+                    if isinstance(contents, list):
+                        image_counter = 0
+                        for item in contents:
+                            # Check if this is an ImageContent object
+                            if hasattr(item, "type") and getattr(item, "type") == "image":
+                                data = getattr(item, "data", None)
+                                mime_type = getattr(item, "mimeType", None)
+
+                                # Validate mime type against allowlist
+                                if mime_type and mime_type not in ALLOWED_IMAGE_MIMES:
+                                    logger.warning(
+                                        f"Skipping ImageContent with unsupported mime type: {mime_type}"
+                                    )
+                                    continue
+
+                                # Validate base64 data
+                                if data:
+                                    try:
+                                        import base64
+                                        base64.b64decode(data, validate=True)
+                                    except Exception:
+                                        logger.warning(
+                                            f"Skipping ImageContent with invalid base64 data"
+                                        )
+                                        continue
+
+                                if data and mime_type:
+                                    # Generate a filename based on image counter and mime type
+                                    # Use mcp_image_ prefix to avoid collisions with structured artifacts
+                                    ext = mime_type.split("/")[-1] if "/" in mime_type else "bin"
+                                    filename = f"mcp_image_{image_counter}.{ext}"
+
+                                    # Create artifact in the expected format
+                                    artifact = {
+                                        "name": filename,
+                                        "b64": data,
+                                        "mime": mime_type,
+                                        "viewer": "image",
+                                        "description": f"Image returned by {tool_call.name}"
+                                    }
+                                    artifacts.append(artifact)
+                                    logger.debug(f"Extracted ImageContent as artifact: {filename} ({mime_type})")
+                                    
+                                    # If no display config exists and this is the first image, auto-open canvas
+                                    if not display_config and image_counter == 0:
+                                        display_config = {
+                                            "primary_file": filename,
+                                            "open_canvas": True
+                                        }
+                                    
+                                    image_counter += 1
             except Exception:
                 logger.warning("Error extracting v2 MCP components from tool result", exc_info=True)
 
