@@ -15,6 +15,7 @@ from interfaces.llm import LLMResponse
 from core.capabilities import create_download_url
 from .event_notifier import _sanitize_filename_value  # reuse same filename sanitizer for UI args
 from ..approval_manager import get_approval_manager
+from modules.mcp_tools.token_storage import AuthenticationRequiredException
 
 logger = logging.getLogger(__name__)
 
@@ -319,12 +320,42 @@ async def execute_single_tool(
 
         return result
 
+    except AuthenticationRequiredException as auth_err:
+        # Special handling for authentication required - send OAuth redirect info
+        logger.info(f"Tool {tool_call.function.name} requires authentication for server {auth_err.server_name}")
+
+        # Send authentication required notification with OAuth URL
+        if update_callback:
+            await update_callback({
+                "type": "auth_required",
+                "tool_call_id": tool_call.id,
+                "tool_name": tool_call.function.name,
+                "server_name": auth_err.server_name,
+                "auth_type": auth_err.auth_type,
+                "oauth_start_url": auth_err.oauth_start_url,
+                "message": auth_err.message,
+            })
+
+        # Return error result with auth info
+        return ToolResult(
+            tool_call_id=tool_call.id,
+            content=f"Authentication required: {auth_err.message}",
+            success=False,
+            error=str(auth_err),
+            meta_data={
+                "auth_required": True,
+                "server_name": auth_err.server_name,
+                "auth_type": auth_err.auth_type,
+                "oauth_start_url": auth_err.oauth_start_url,
+            }
+        )
+
     except Exception as e:
         logger.error(f"Error executing tool {tool_call.function.name}: {e}")
-        
+
         # Send tool error notification
         await event_notifier.notify_tool_error(tool_call, str(e), update_callback)
-        
+
         # Return error result instead of raising
         return ToolResult(
             tool_call_id=tool_call.id,
