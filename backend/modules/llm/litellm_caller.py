@@ -199,6 +199,7 @@ class LiteLLMCaller:
         
         try:
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
+            logger.info(f"[METRIC] LLM call initiated: type=plain, model={model_name}, message_count={len(messages)}")
             logger.info(f"Plain LLM call: {len(messages)} messages, {total_chars} chars")
             
             response = await acompletion(
@@ -213,6 +214,7 @@ class LiteLLMCaller:
                 logger.debug(f"LLM response preview: '{content[:200]}{'...' if len(content) > 200 else ''}'")
             else:
                 logger.info(f"LLM response length: {len(content)} chars")
+            logger.info(f"[METRIC] LLM call completed: type=plain, model={model_name}, response_length={len(content)}")
             return content
             
         except Exception as exc:
@@ -229,6 +231,7 @@ class LiteLLMCaller:
         temperature: float = 0.7,
     ) -> str:
         """LLM call with RAG integration."""
+        logger.info(f"[METRIC] LLM call initiated: type=rag, model={model_name}, data_sources_count={len(data_sources)}")
         logger.debug(
             "[LLM+RAG] call_with_rag called: model=%s, data_sources=%s, user=%s, message_count=%d",
             model_name,
@@ -313,6 +316,7 @@ class LiteLLMCaller:
                 len(llm_response),
                 rag_content_useful,
             )
+            logger.info(f"[METRIC] LLM call completed: type=rag, model={model_name}, response_length={len(llm_response)}")
             return llm_response
 
         except Exception as exc:
@@ -330,6 +334,7 @@ class LiteLLMCaller:
         temperature: float = 0.7,
     ) -> LLMResponse:
         """LLM call with tool support using LiteLLM."""
+        logger.info(f"[METRIC] LLM call initiated: type=tools, model={model_name}, tools_count={len(tools_schema)}")
         if not tools_schema:
             content = await self.call_plain(model_name, messages, temperature=temperature)
             return LLMResponse(content=content, model_used=model_name)
@@ -358,9 +363,12 @@ class LiteLLMCaller:
                 logger.error(f"LLM failed to return tool calls when tool_choice was 'required'. Full response: {response}")
                 raise ValueError("LLM failed to return tool calls when tool_choice was 'required'.")
 
+            tool_calls = getattr(message, 'tool_calls', None)
+            has_tool_calls = tool_calls is not None and len(tool_calls) > 0
+            logger.info(f"[METRIC] LLM call completed: type=tools, model={model_name}, has_tool_calls={has_tool_calls}")
             return LLMResponse(
                 content=getattr(message, 'content', None) or "",
-                tool_calls=getattr(message, 'tool_calls', None),
+                tool_calls=tool_calls,
                 model_used=model_name
             )
             
@@ -402,6 +410,7 @@ class LiteLLMCaller:
         temperature: float = 0.7,
     ) -> LLMResponse:
         """Full integration: RAG + Tools."""
+        logger.info(f"[METRIC] LLM call initiated: type=rag_and_tools, model={model_name}, data_sources_count={len(data_sources)}, tools_count={len(tools_schema) if tools_schema else 0}")
         logger.debug(
             "[LLM+RAG+Tools] call_with_rag_and_tools called: model=%s, data_sources=%s, user=%s, tools_count=%d",
             model_name,
@@ -488,6 +497,7 @@ class LiteLLMCaller:
                 llm_response.has_tool_calls(),
                 rag_content_useful,
             )
+            logger.info(f"[METRIC] LLM call completed: type=rag_and_tools, model={model_name}, has_tool_calls={llm_response.has_tool_calls()}")
             return llm_response
 
         except Exception as exc:

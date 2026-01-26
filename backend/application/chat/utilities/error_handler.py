@@ -72,6 +72,9 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
     error_str = str(error)
     error_type_name = type(error).__name__
     
+    # Log error occurrence for metrics
+    logger.info(f"[METRIC] Error occurred: error_type={error_type_name}, category=llm_error")
+    
     # Check for rate limiting errors
     if "RateLimitError" in error_type_name or "rate limit" in error_str.lower() or "high traffic" in error_str.lower():
         user_msg = "The AI service is experiencing high traffic. Please try again in a moment."
@@ -162,6 +165,7 @@ async def safe_execute_single_tool(
         )
     except Exception as e:
         logger.error(f"Error executing tool {tool_call.function.name}: {e}")
+        logger.info(f"[METRIC] Error occurred: error_type={type(e).__name__}, category=tool_execution, tool_name={tool_call.function.name}")
         
         # Send error notification if callback available
         if update_callback:

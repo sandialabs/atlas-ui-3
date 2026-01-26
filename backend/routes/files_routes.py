@@ -74,6 +74,8 @@ async def upload_file(
     current_user: str = Depends(get_current_user)
 ) -> FileResponse:
     """Upload a file to S3 storage."""
+    logger.info(f"[METRIC] File upload initiated: content_type={request.content_type}")
+    
     # Validate base64 content size (configurable limit to prevent abuse)
     try:
         content_size = len(request.content_base64) * 3 // 4  # approximate decoded size
@@ -95,10 +97,12 @@ async def upload_file(
             source_type=request.tags.get("source", "user") if request.tags else "user"
         )
         
+        logger.info(f"[METRIC] File upload completed: size_bytes={result.get('size', 0)}, content_type={request.content_type}")
         return FileResponse(**result)
         
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
+        logger.info(f"[METRIC] Error occurred: error_type={type(e).__name__}, category=file_upload")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 

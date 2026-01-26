@@ -72,6 +72,8 @@ async def handle_session_files(
                     tags={"source": "user"}
                 )
 
+                logger.info(f"[METRIC] File stored: size_bytes={meta.get('size', 0)}, content_type={meta.get('content_type')}")
+                
                 # Store minimal reference in session context
                 file_ref = {
                     "key": meta.get("key"),

@@ -284,6 +284,8 @@ async def execute_single_tool(
         # Send tool start notification with sanitized args
         await event_notifier.notify_tool_start(tool_call, display_args, update_callback)
 
+        logger.info(f"[METRIC] Tool call initiated: tool_name={tool_call.function.name}")
+        
         # Create tool call object and execute with filtered args only
         tool_call_obj = ToolCall(
             id=tool_call.id,
@@ -301,6 +303,8 @@ async def execute_single_tool(
             }
         )
 
+        logger.info(f"[METRIC] Tool call completed: tool_name={tool_call.function.name}, success={result.success}")
+        
         # If arguments were edited, prepend a note to the result for LLM context
         if arguments_were_edited:
             edit_note = (
