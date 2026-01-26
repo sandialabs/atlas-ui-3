@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { Settings, RefreshCw, RotateCcw, Activity } from 'lucide-react'
+import { useChat } from '../../contexts/ChatContext'
 
 // Polling configuration
 const NORMAL_POLLING_INTERVAL = 15000 // 15 seconds
@@ -15,6 +16,7 @@ const calculateDelay = (failures) => {
 }
 
 const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
+  const { refreshConfig } = useChat()
   const [mcpStatus, setMcpStatus] = useState({
     connected_servers: [],
     failed_servers: {},
@@ -176,8 +178,14 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
       }
 
       addNotification(`MCP reload completed: ${data.servers.length} servers loaded, ${data.failed_servers.length} failed`, 'success')
-  // Refresh inline status after reload
-  loadMCPStatus()
+      // Refresh inline status after reload
+      loadMCPStatus()
+      // Refresh the main config to update tools list in sidebar
+      if (refreshConfig) {
+        refreshConfig().catch(err => {
+          console.error('Failed to refresh config:', err)
+        })
+      }
     } catch (err) {
       addNotification('Error reloading MCP servers: ' + err.message, 'error')
     } finally {
@@ -201,6 +209,12 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
       addNotification(`MCP reconnect: attempted ${attempted}, reconnected ${reconnected}, still failing ${stillFailed}`, 'success')
       // Refresh inline status after reconnect
       loadMCPStatus()
+      // Refresh the main config to update tools list in sidebar
+      if (refreshConfig) {
+        refreshConfig().catch(err => {
+          console.error('Failed to refresh config:', err)
+        })
+      }
     } catch (err) {
       addNotification('Error reconnecting MCP servers: ' + err.message, 'error')
     } finally {

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Plus, Minus, RefreshCw, Server, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { Plus, Minus, RefreshCw, Server, CheckCircle, XCircle, AlertCircle, Search } from 'lucide-react'
 
 const MCPServerManager = ({ addNotification }) => {
   const [availableServers, setAvailableServers] = useState({})
   const [activeServers, setActiveServers] = useState({})
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState({})
+  const [searchQuery, setSearchQuery] = useState('')
 
   const loadServers = useCallback(async () => {
     try {
@@ -143,6 +144,19 @@ const MCPServerManager = ({ addNotification }) => {
     ...Object.keys(activeServers)
   ])
 
+  // Filter servers based on search query
+  const filteredServerNames = Array.from(allServerNames).filter(serverName => {
+    if (!searchQuery.trim()) return true
+    const query = searchQuery.toLowerCase()
+    const serverInfo = availableServers[serverName]
+    return (
+      serverName.toLowerCase().includes(query) ||
+      serverInfo?.description?.toLowerCase().includes(query) ||
+      serverInfo?.short_description?.toLowerCase().includes(query) ||
+      serverInfo?.author?.toLowerCase().includes(query)
+    )
+  })
+
   return (
     <div className="bg-gray-800 rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
@@ -164,8 +178,20 @@ const MCPServerManager = ({ addNotification }) => {
         Manage MCP servers by adding them from available configurations (loaded from the <code className="text-gray-300">config/mcp-example-configs/</code> folder) or removing them from active use.
       </p>
 
+      {/* Search input */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <input
+          type="text"
+          placeholder="Search servers..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        />
+      </div>
+
       <div className="space-y-3 max-h-96 overflow-y-auto">
-        {Array.from(allServerNames).sort().map(serverName => {
+        {Array.from(filteredServerNames).sort().map(serverName => {
           const serverInfo = availableServers[serverName]
           const status = getServerStatus(serverName)
           const isActive = status === 'active'
@@ -248,11 +274,20 @@ const MCPServerManager = ({ addNotification }) => {
           )
         })}
         
-        {allServerNames.size === 0 && (
+        {filteredServerNames.length === 0 && (
           <div className="text-center py-8 text-gray-500">
             <Server className="w-12 h-12 mx-auto mb-2 opacity-50" />
-            <p>No MCP servers found</p>
-            <p className="text-sm">Check that example configurations exist in config/mcp-example-configs/</p>
+            {searchQuery ? (
+              <>
+                <p>No servers match "{searchQuery}"</p>
+                <p className="text-sm">Try a different search term</p>
+              </>
+            ) : (
+              <>
+                <p>No MCP servers found</p>
+                <p className="text-sm">Check that example configurations exist in config/mcp-example-configs/</p>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -261,6 +296,10 @@ const MCPServerManager = ({ addNotification }) => {
         <div className="mt-4 pt-4 border-t border-gray-700">
           <div className="flex items-center justify-between text-sm text-gray-400">
             <span>
+              {searchQuery && filteredServerNames.length !== allServerNames.size
+                ? `Showing ${filteredServerNames.length} of ${allServerNames.size} servers - `
+                : ''
+              }
               {Object.keys(activeServers).length} active, {Object.keys(availableServers).length} available
             </span>
             <span className="text-xs">

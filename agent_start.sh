@@ -29,7 +29,6 @@ cleanup_processes() {
     echo "Killing any running uvicorn processes for main backend..."
     pkill -f "uvicorn main:app" || true
     sleep 2
-    clear
 }
 
 cleanup_logs() {
@@ -232,9 +231,10 @@ main() {
     parse_arguments "$@"
 
     # Setup infrastructure
+    # Note: setup_environment must run first to activate venv, so venv's podman-compose is found
+    setup_environment
     setup_container_runtime
     setup_minio
-    setup_environment
     
     # Handle frontend-only mode
     if [ "$ONLY_FRONTEND" = true ]; then

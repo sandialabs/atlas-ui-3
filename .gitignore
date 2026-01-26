@@ -52,6 +52,9 @@ backend/runtime/
 runtime/logs/
 runtime/feedback/
 runtime/uploads/
+
+# Secure token storage (per-user MCP authentication tokens)
+config/secure/
 # !runtime/logs/.gitkeep
 # !runtime/feedback/.gitkeep
 # !runtime/uploads/.gitkeep
@@ -88,3 +91,6 @@ mocks/s3-mock/s3-mock-storage/
 old.env
 backend/bandit_output.txt
 config/overrides/mcp-minimal.json
+
+# Scratch folder (local experimentation)
+scratch/

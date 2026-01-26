@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #253 - 2026-01-25
+- **Feature**: Add per-user MCP API key, JWT, and bearer token authentication flow. Users can now authenticate with MCP servers that require API keys or tokens through the UI.
+- **Feature**: Secure token storage with Fernet encryption. Tokens are encrypted at rest and isolated per-user.
+- **Feature**: Add MCP Server Manager search filter on admin page for quickly finding servers by name, description, or author.
+- **UI Enhancement**: Token input uses password field with show/hide toggle for security.
+- **Fix**: Admin page "reload and reconnect" button now refreshes tools list without requiring F5.
+- **Security**: Replace generic 500 error details with safe messages to prevent internal info leakage.
+
 ### PR #TBD - 2026-01-23
 - **Fix**: Display configured app name instead of hardcoded "Chat UI" in the thinking spinner. Fixes #244.
 
