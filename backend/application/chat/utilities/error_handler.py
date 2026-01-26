@@ -164,8 +164,9 @@ async def safe_execute_single_tool(
             update_callback=update_callback
         )
     except Exception as e:
-        logger.error(f"Error executing tool {tool_call.function.name}: {e}")
-        logger.info(f"[METRIC] Error occurred: error_type={type(e).__name__}, category=tool_execution, tool_name={tool_call.function.name}")
+        tool_name = tool_call.function.name
+        logger.error(f"Error executing tool {tool_name}: {e}")
+        logger.info(f"[METRIC] Error occurred: error_type={type(e).__name__}, category=tool_execution, tool_name={tool_name}")
         
         # Send error notification if callback available
         if update_callback:
@@ -173,7 +174,7 @@ async def safe_execute_single_tool(
                 await update_callback({
                     "type": "tool_error",
                     "tool_call_id": tool_call.id,
-                    "tool_name": tool_call.function.name,
+                    "tool_name": tool_name,
                     "error": str(e)
                 })
             except Exception:
