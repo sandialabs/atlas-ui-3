@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #TBD - 2026-01-26
+- **Feature**: Add comprehensive metrics logging with [METRIC] prefix for tracking user activities without logging sensitive data. Logs LLM calls (with model and type), tool calls (with tool name only), errors (with error type), and file operations (with size and content type). Excludes all sensitive data including prompts, messages, tool arguments, and file names.
+- **Documentation**: Add metrics-logging.md guide explaining what is logged, privacy guarantees, and usage examples.
+- **Testing**: Add test_metrics_logging.py with 6 comprehensive tests verifying logging behavior and privacy protection.
+
+### PR #TBD - 2026-01-26
 - **Fix**: Add `:U` suffix to bind mounts in docker-compose.yml to fix permissions issues on some platforms where logs and config directories were owned by root instead of appuser.
 
 ### PR #250 - 2026-01-24
