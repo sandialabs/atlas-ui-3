@@ -1746,7 +1746,8 @@ class MCPToolManager:
                         sanitized[key] = f"[Base64 data removed for LLM context - {len(value)} chars]"
                         logger.debug(f"Truncated large base64-like data in key '{key}' to prevent LLM context bloat")
                     else:
-                        sanitized[key] = value
+                        # For short strings or non-strings, recurse to handle nested structures
+                        sanitized[key] = MCPToolManager._sanitize_content_for_llm(value)
                 else:
                     sanitized[key] = MCPToolManager._sanitize_content_for_llm(value)
             return sanitized
@@ -1769,14 +1770,24 @@ class MCPToolManager:
         """Check if a string looks like base64 encoded data.
         
         Uses heuristics: mostly alphanumeric with +, /, = characters and minimal whitespace.
+        For performance, only samples the first 1000 characters of large strings.
         """
         if not isinstance(s, str) or len(s) < 100:
             return False
         
-        # Count base64-valid characters
-        base64_chars = sum(1 for c in s if c.isalnum() or c in '+/=')
+        # For performance, only check first 1000 chars for large strings
+        sample = s[:1000] if len(s) > 1000 else s
+        
+        # Count base64-valid characters in the sample
+        base64_chars = sum(1 for c in sample if c.isalnum() or c in '+/=')
+        
         # Base64 strings are typically >95% base64-valid characters
-        return (base64_chars / len(s)) > 0.95
+        # Also check for common base64 indicators
+        ratio = base64_chars / len(sample)
+        has_padding = s.rstrip().endswith('=') or s.rstrip().endswith('==')
+        
+        # More strict check: high ratio of valid chars AND (padding present OR length multiple of 4)
+        return ratio > 0.95 and (has_padding or len(s) % 4 == 0)
     
     def _normalize_mcp_tool_result(self, raw_result: Any) -> Dict[str, Any]:
         """Normalize a FastMCP CallToolResult (or similar object) into our contract.
@@ -1823,7 +1834,6 @@ class MCPToolManager:
                             elif item_type == "image":
                                 # Explicitly skip ImageContent - it's extracted separately as artifacts
                                 logger.debug("Skipping ImageContent during result normalization (extracted as artifact)")
-                                continue
 
                         if text_parts:
                             combined_text = "\n".join(text_parts)
@@ -1893,7 +1903,8 @@ class MCPToolManager:
         
         # Apply final sanitization to prevent any base64 data from leaking to LLM
         # This is defense-in-depth in case ImageContent or large data slipped through
-        normalized = self._sanitize_content_for_llm(normalized)
+        # Use class name to call static method (following Python conventions)
+        normalized = MCPToolManager._sanitize_content_for_llm(normalized)
         
         return normalized
     

@@ -452,9 +452,11 @@ class TestImageContentSanitization:
         sanitized = MCPToolManager._sanitize_content_for_llm(content)
         
         # Should be truncated with explanation
-        assert len(str(sanitized["results"])) < 200
-        assert "removed" in str(sanitized["results"]).lower()
-        assert "20011" in str(sanitized["results"])  # Should include original size
+        result_str = str(sanitized["results"])
+        assert len(result_str) < 200
+        assert "removed" in result_str.lower()
+        assert "20011" in result_str  # Should include original size (11 + 20000 = 20011)
+        assert result_str.startswith("[Large base64 data removed")  # Explicit format check
 
     def test_sanitize_base64_keys(self):
         """Test that specific keys containing base64 are sanitized."""
