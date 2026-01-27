@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-01-27
+- **Fix**: Prevent ImageContent context corruption in subsequent tool calls. Added multi-layer sanitization to ensure large base64-encoded images are never included in LLM context, which was causing tool calls to fail and the UI to display raw JSON for non-multimodal models.
+- **Enhancement**: Add explicit ImageContent filtering in MCP tool result normalization with detailed logging.
+- **Enhancement**: Implement base64 data detection and automatic truncation for suspicious large strings (>10KB) in tool results.
+- **Enhancement**: Add key-based filtering for common base64 field names (data, b64, image_data, etc.) as defense-in-depth.
+- **Testing**: Add comprehensive sanitization tests for ImageContent filtering, including nested structures and edge cases.
+- **Documentation**: Update MCP tool outputs guide to explain how ImageContent is safely filtered from LLM context.
+
 ### PR #TBD - 2026-01-26
 - **Fix**: Add `:U` suffix to bind mounts in docker-compose.yml to fix permissions issues on some platforms where logs and config directories were owned by root instead of appuser.
 

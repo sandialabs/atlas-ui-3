@@ -421,3 +421,121 @@ class TestImageContentHandling:
 
             # No artifacts should be created for invalid base64
             assert len(result.artifacts) == 0
+
+
+class TestImageContentSanitization:
+    """Tests for sanitization of ImageContent to prevent LLM context corruption."""
+
+    def test_looks_like_base64(self):
+        """Test base64 detection heuristic."""
+        from backend.modules.mcp_tools.client import MCPToolManager
+        
+        # Valid base64 strings
+        assert MCPToolManager._looks_like_base64("A" * 1000)
+        assert MCPToolManager._looks_like_base64("iVBORw0KGgoAAAANS" * 50)
+        assert MCPToolManager._looks_like_base64("SGVsbG8gV29ybGQ=" * 100)
+        
+        # Not base64
+        assert not MCPToolManager._looks_like_base64("Hello world this is plain text" * 100)
+        assert not MCPToolManager._looks_like_base64("Short string")
+        assert not MCPToolManager._looks_like_base64("")
+        assert not MCPToolManager._looks_like_base64("A" * 50)  # Too short
+
+    def test_sanitize_large_base64_string(self):
+        """Test that large base64-like strings are truncated."""
+        from backend.modules.mcp_tools.client import MCPToolManager
+        
+        # Create a large base64-like string (> 10KB)
+        large_b64 = "iVBORw0KGgo" + ("A" * 20000)
+        content = {"results": large_b64}
+        
+        sanitized = MCPToolManager._sanitize_content_for_llm(content)
+        
+        # Should be truncated with explanation
+        assert len(str(sanitized["results"])) < 200
+        assert "removed" in str(sanitized["results"]).lower()
+        assert "20011" in str(sanitized["results"])  # Should include original size
+
+    def test_sanitize_base64_keys(self):
+        """Test that specific keys containing base64 are sanitized."""
+        from backend.modules.mcp_tools.client import MCPToolManager
+        
+        content = {
+            "results": "Success",
+            "b64": "A" * 1000,  # Should be truncated (common base64 key)
+            "data": "B" * 1000,  # Should be truncated (common base64 key)
+            "base64": "C" * 1000,  # Should be truncated (common base64 key)
+            "image_data": "D" * 1000,  # Should be truncated (common base64 key)
+            "other_field": "E" * 1000  # Should NOT be truncated (not a base64 key)
+        }
+        
+        sanitized = MCPToolManager._sanitize_content_for_llm(content)
+        
+        # Regular results should be unchanged
+        assert sanitized["results"] == "Success"
+        
+        # Base64 keys should be sanitized
+        assert "removed" in str(sanitized["b64"]).lower()
+        assert "1000" in str(sanitized["b64"])  # Should include original size
+        assert "removed" in str(sanitized["data"]).lower()
+        assert "removed" in str(sanitized["base64"]).lower()
+        assert "removed" in str(sanitized["image_data"]).lower()
+        
+        # Other fields should be unchanged
+        assert sanitized["other_field"] == "E" * 1000
+
+    def test_sanitize_nested_structures(self):
+        """Test sanitization of nested data structures."""
+        from backend.modules.mcp_tools.client import MCPToolManager
+        
+        content = {
+            "results": "Success",
+            "nested": {
+                "data": "A" * 1000,  # Should be truncated
+                "normal": "value",
+                "deeper": {
+                    "b64": "B" * 1000  # Should be truncated even in deep nesting
+                }
+            }
+        }
+        
+        sanitized = MCPToolManager._sanitize_content_for_llm(content)
+        
+        assert sanitized["results"] == "Success"
+        assert "removed" in str(sanitized["nested"]["data"]).lower()
+        assert sanitized["nested"]["normal"] == "value"
+        assert "removed" in str(sanitized["nested"]["deeper"]["b64"]).lower()
+
+    def test_sanitize_preserves_normal_content(self):
+        """Test that normal content is not modified."""
+        from backend.modules.mcp_tools.client import MCPToolManager
+        
+        normal_content = {
+            "results": "This is a normal result",
+            "count": 42,
+            "list": [1, 2, 3],
+            "nested": {
+                "field": "value"
+            }
+        }
+        
+        sanitized = MCPToolManager._sanitize_content_for_llm(normal_content)
+        
+        # Should be completely unchanged
+        assert sanitized == normal_content
+
+    def test_sanitize_lists(self):
+        """Test sanitization of list structures."""
+        from backend.modules.mcp_tools.client import MCPToolManager
+        
+        content = [
+            {"data": "A" * 1000},  # Should be sanitized
+            {"normal": "value"},   # Should be unchanged
+            "plain string"         # Should be unchanged
+        ]
+        
+        sanitized = MCPToolManager._sanitize_content_for_llm(content)
+        
+        assert "removed" in str(sanitized[0]["data"]).lower()
+        assert sanitized[1]["normal"] == "value"
+        assert sanitized[2] == "plain string"
