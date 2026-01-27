@@ -1722,6 +1722,62 @@ class MCPToolManager:
     # ------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------
+    @staticmethod
+    def _sanitize_content_for_llm(content: Any) -> Any:
+        """Sanitize content to ensure no ImageContent or large base64 data leaks to LLM context.
+        
+        This is a defense-in-depth measure to prevent context corruption when non-multimodal
+        LLMs receive large base64-encoded images. ImageContent should already be filtered out
+        during normalization, but this provides an additional safety check.
+        
+        Args:
+            content: The content to sanitize (can be dict, list, str, or other types)
+            
+        Returns:
+            Sanitized content with any suspicious base64-like data removed or truncated
+        """
+        if isinstance(content, dict):
+            sanitized = {}
+            for key, value in content.items():
+                # Skip keys that typically contain base64 data
+                if key in ("data", "b64", "base64", "image_data", "content_base64"):
+                    # If it looks like base64 and is large, truncate with warning
+                    if isinstance(value, str) and len(value) > 500:
+                        sanitized[key] = f"[Base64 data removed for LLM context - {len(value)} chars]"
+                        logger.debug(f"Truncated large base64-like data in key '{key}' to prevent LLM context bloat")
+                    else:
+                        sanitized[key] = value
+                else:
+                    sanitized[key] = MCPToolManager._sanitize_content_for_llm(value)
+            return sanitized
+        elif isinstance(content, list):
+            return [MCPToolManager._sanitize_content_for_llm(item) for item in content]
+        elif isinstance(content, str):
+            # Check if string looks like base64 and is suspiciously large (> 10KB)
+            if len(content) > 10000 and MCPToolManager._looks_like_base64(content):
+                logger.warning(
+                    f"Detected large base64-like string ({len(content)} chars) in tool result content. "
+                    f"This may cause LLM context issues. Truncating for safety."
+                )
+                return f"[Large base64 data removed - {len(content)} chars]"
+            return content
+        else:
+            return content
+    
+    @staticmethod
+    def _looks_like_base64(s: str) -> bool:
+        """Check if a string looks like base64 encoded data.
+        
+        Uses heuristics: mostly alphanumeric with +, /, = characters and minimal whitespace.
+        """
+        if not isinstance(s, str) or len(s) < 100:
+            return False
+        
+        # Count base64-valid characters
+        base64_chars = sum(1 for c in s if c.isalnum() or c in '+/=')
+        # Base64 strings are typically >95% base64-valid characters
+        return (base64_chars / len(s)) > 0.95
+    
     def _normalize_mcp_tool_result(self, raw_result: Any) -> Dict[str, Any]:
         """Normalize a FastMCP CallToolResult (or similar object) into our contract.
 
@@ -1735,8 +1791,10 @@ class MCPToolManager:
 
         Notes:
         - We never inline base64 file contents here to avoid prompt bloat.
+        - Explicitly filters out ImageContent items from content array.
         - Handles legacy key forms (result, meta-data, metadata).
         - Falls back to stringifying the raw result if structured extraction fails.
+        - Sanitizes final output to prevent large base64 data from reaching LLM context.
         """
         normalized: Dict[str, Any] = {}
         structured: Dict[str, Any] = {}
@@ -1749,16 +1807,23 @@ class MCPToolManager:
                 structured = raw_result.data  # type: ignore[attr-defined]
             else:
                 # Fallback: extract text content from content array
+                # IMPORTANT: Only extract TextContent, never ImageContent
                 if hasattr(raw_result, "content"):
                     contents = getattr(raw_result, "content")
                     if contents:
-                        # Collect all text from TextContent items
+                        # Collect all text from TextContent items only
+                        # This explicitly filters out ImageContent to prevent context corruption
                         text_parts = []
                         for item in contents:
-                            if hasattr(item, "type") and getattr(item, "type") == "text":
+                            item_type = getattr(item, "type", None) if hasattr(item, "type") else None
+                            if item_type == "text":
                                 text = getattr(item, "text", None)
                                 if text:
                                     text_parts.append(text)
+                            elif item_type == "image":
+                                # Explicitly skip ImageContent - it's extracted separately as artifacts
+                                logger.debug("Skipping ImageContent during result normalization (extracted as artifact)")
+                                continue
 
                         if text_parts:
                             combined_text = "\n".join(text_parts)
@@ -1825,6 +1890,11 @@ class MCPToolManager:
 
         if not normalized:
             normalized = {"results": str(raw_result)}
+        
+        # Apply final sanitization to prevent any base64 data from leaking to LLM
+        # This is defense-in-depth in case ImageContent or large data slipped through
+        normalized = self._sanitize_content_for_llm(normalized)
+        
         return normalized
     
     async def execute_tool(
