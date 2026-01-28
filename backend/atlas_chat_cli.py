@@ -46,7 +46,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Chat prompt text, or '-' to read from stdin.",
     )
     parser.add_argument("--model", default=None, help="LLM model name (uses config default if omitted).")
-    parser.add_argument("--agent", action="store_true", help="Enable agent mode for multi-step tool use.")
     parser.add_argument("--tools", default=None, help="Comma-separated list of tool names to enable.")
     parser.add_argument("--json", dest="json_output", action="store_true", help="Output structured JSON.")
     parser.add_argument("--user-email", default=None, help="Override user identity.")
@@ -102,7 +101,7 @@ async def run(args: argparse.Namespace) -> int:
         result = await client.chat(
             prompt=prompt,
             model=args.model,
-            agent_mode=args.agent,
+            agent_mode=False,
             selected_tools=selected_tools,
             user_email=args.user_email,
             session_id=None,

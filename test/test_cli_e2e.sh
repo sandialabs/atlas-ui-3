@@ -109,8 +109,6 @@ if [ "$MODE" = "all" ] || [ "$MODE" = "offline" ]; then
     run_test "--help lists --model flag" \
         bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--model'"
 
-    run_test "--help lists --agent flag" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--agent'"
 
     run_test "--help lists --tools flag" \
         bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--tools'"
