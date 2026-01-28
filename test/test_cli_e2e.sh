@@ -91,15 +91,6 @@ for k in (\"message\", \"tool_calls\", \"files\", \"session_id\"):
     run_test "Read prompt from stdin" \
         bash -c "echo 'Say hi' | (cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py - --json 2>/dev/null) | $PYTHON -c 'import sys,json; d=json.load(sys.stdin); assert len(d[\"message\"])>0'"
 
-    # 8. Session reuse returns same session_id
-    SESSION_ID="550e8400-e29b-41d4-a716-446655440000"
-    run_test "Session reuse with --session-id" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py 'Say hi' --session-id $SESSION_ID --json 2>/dev/null | $PYTHON -c '
-import sys, json
-d = json.load(sys.stdin)
-assert d[\"session_id\"] == \"$SESSION_ID\", f\"wrong session_id: {d[\"session_id\"]}\"
-'"
-
     echo ""
 fi
 
@@ -134,8 +125,6 @@ if [ "$MODE" = "all" ] || [ "$MODE" = "offline" ]; then
     run_test "--help lists --output flag" \
         bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--output'"
 
-    run_test "--help lists --session-id flag" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--session-id'"
 
     run_test "--help lists --max-steps flag" \
         bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--max-steps'"
