@@ -65,16 +65,6 @@ class AppFactory:
 
         logger.info("AppFactory initialized")
 
-    async def initialize(self) -> None:
-        """Initialize async resources (MCP clients, tool discovery) for headless use."""
-        try:
-            await self.mcp_tools.initialize_clients()
-            await self.mcp_tools.discover_tools()
-            await self.mcp_tools.discover_prompts()
-            logger.info("AppFactory async initialization complete")
-        except Exception as e:
-            logger.warning("MCP initialization failed; continuing without tools: %s", e)
-
     def create_chat_service(
         self, connection: Optional[ChatConnectionProtocol] = None
     ) -> ChatService:
@@ -85,20 +75,6 @@ class AppFactory:
             config_manager=self.config_manager,
             file_manager=self.file_manager,
             session_repository=self.session_repository,
-        )
-
-    def create_headless_chat_service(
-        self, event_publisher=None
-    ) -> ChatService:
-        """Create a ChatService for headless/CLI use with a custom event publisher."""
-        return ChatService(
-            llm=self.llm_caller,
-            tool_manager=self.mcp_tools,
-            connection=None,
-            config_manager=self.config_manager,
-            file_manager=self.file_manager,
-            session_repository=self.session_repository,
-            event_publisher=event_publisher,
         )
 
     # Accessors

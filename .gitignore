@@ -94,4 +94,3 @@ config/overrides/mcp-minimal.json
 
 # Scratch folder (local experimentation)
 scratch/
-backend/report.md

@@ -47,7 +47,6 @@ class AgentLoopFactory:
         self.prompt_provider = prompt_provider
         self.connection = connection
         self.config_manager = config_manager
-        self.skip_approval = False
 
         # Registry of available strategies
         self._strategy_registry = {
@@ -99,8 +98,6 @@ class AgentLoopFactory:
             connection=self.connection,
             config_manager=self.config_manager,
         )
-
-        loop_instance.skip_approval = self.skip_approval
 
         # Cache for future use
         self._loop_cache[strategy_normalized] = loop_instance

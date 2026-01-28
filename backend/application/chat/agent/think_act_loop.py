@@ -33,7 +33,6 @@ class ThinkActAgentLoop(AgentLoopProtocol):
         self.prompt_provider = prompt_provider
         self.connection = connection
         self.config_manager = config_manager
-        self.skip_approval = False
 
     async def run(
         self,
@@ -144,7 +143,6 @@ class ThinkActAgentLoop(AgentLoopProtocol):
                         tool_manager=self.tool_manager,
                         update_callback=(self.connection.send_json if self.connection else None),
                         config_manager=self.config_manager,
-                        skip_approval=self.skip_approval,
                     )
                     messages.append({"role": "tool", "content": result.content, "tool_call_id": result.tool_call_id})
                     # Notify service to ingest artifacts
