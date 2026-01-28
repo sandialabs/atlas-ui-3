@@ -19,6 +19,37 @@ from modules.mcp_tools.token_storage import AuthenticationRequiredException
 
 logger = logging.getLogger(__name__)
 
+
+def _try_repair_json(raw: str) -> Optional[Dict[str, Any]]:
+    """Attempt to repair truncated JSON from LLM tool arguments.
+
+    Common cases: missing opening/closing braces, trailing quote.
+    Returns parsed dict on success, None on failure.
+    """
+    s = raw.strip()
+    # Add missing braces
+    if not s.startswith("{"):
+        s = "{" + s
+    if not s.endswith("}"):
+        s = s + "}"
+    try:
+        result = json.loads(s)
+        if isinstance(result, dict):
+            return result
+    except Exception:
+        pass
+    # Try closing an open string value: e.g. {"expression": "355/113
+    if s.count('"') % 2 != 0:
+        s = s.rstrip("}") + '"}'
+        try:
+            result = json.loads(s)
+            if isinstance(result, dict):
+                return result
+        except Exception:
+            pass
+    return None
+
+
 # Type hint for update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
@@ -454,11 +485,20 @@ def prepare_tool_arguments(tool_call, session_context: Dict[str, Any], tool_mana
                 if not isinstance(parsed_args, dict):
                     parsed_args = {"_value": parsed_args}
             except Exception:
-                logger.warning(
-                    "Failed to parse tool arguments as JSON for %s, using empty dict. Raw: %r",
-                    getattr(tool_call.function, "name", "<unknown>"), raw_args
-                )
-                parsed_args = {}
+                # Attempt to repair truncated JSON (e.g., missing braces)
+                repaired = _try_repair_json(raw_args)
+                if repaired is not None:
+                    logger.info(
+                        "Repaired truncated tool arguments for %s",
+                        getattr(tool_call.function, "name", "<unknown>"),
+                    )
+                    parsed_args = repaired
+                else:
+                    logger.warning(
+                        "Failed to parse tool arguments as JSON for %s, using empty dict. Raw: %r",
+                        getattr(tool_call.function, "name", "<unknown>"), raw_args
+                    )
+                    parsed_args = {}
 
     # Inject username and file URL mappings with schema awareness
     return inject_context_into_args(parsed_args, session_context, tool_call.function.name, tool_manager)
