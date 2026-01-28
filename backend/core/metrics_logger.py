@@ -9,7 +9,7 @@ This module provides a centralized way to log user activity metrics that:
 
 Usage:
     from core.metrics_logger import log_metric
-    
+
     log_metric("llm_call", user_email, model="gpt-4", message_count=5)
     log_metric("tool_call", user_email, tool_name="calculator")
     log_metric("file_upload", user_email, file_size=1024, content_type="application/pdf")
@@ -17,7 +17,7 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -29,50 +29,31 @@ def log_metric(
 ) -> None:
     """
     Log a metric event for user activity tracking.
-    
+
     This function respects the FEATURE_METRICS_LOGGING_ENABLED setting.
     When disabled, no metrics are logged.
-    
+
     Args:
         event_type: Type of event (e.g., "llm_call", "tool_call", "file_upload", "error")
         user_email: User's email address (will be sanitized)
         **kwargs: Additional metadata to log (only non-sensitive data)
-    
-    Examples:
-        log_metric("llm_call", "user@example.com", model="gpt-4", message_count=5)
-        log_metric("tool_call", "user@example.com", tool_name="calculator")
-        log_metric("file_upload", "user@example.com", file_size=1024)
-        log_metric("error", "user@example.com", error_type="rate_limit")
     """
     # Import here to avoid circular dependencies
     from modules.config import config_manager
     from core.log_sanitizer import sanitize_for_logging
-    
-    # Check if metrics logging is enabled
+
     if not config_manager.app_settings.feature_metrics_logging_enabled:
         return
-    
-    # Sanitize user email
+
     sanitized_user = sanitize_for_logging(user_email) if user_email else "unknown"
-    
-    # Build the metric message
+
     parts = [f"[METRIC] [{sanitized_user}] {event_type}"]
-    
-    # Add any additional metadata
+
     if kwargs:
-        metadata_parts = [f"{key}={sanitize_for_logging(value)}" for key, value in kwargs.items()]
+        metadata_parts = [
+            f"{key}={sanitize_for_logging(value)}"
+            for key, value in kwargs.items()
+        ]
         parts.append(" ".join(metadata_parts))
-    
-    # Log the metric at INFO level
+
     logger.info(" ".join(parts))
-
-
-def is_metrics_logging_enabled() -> bool:
-    """
-    Check if metrics logging is currently enabled.
-    
-    Returns:
-        True if metrics logging is enabled, False otherwise
-    """
-    from modules.config import config_manager
-    return config_manager.app_settings.feature_metrics_logging_enabled

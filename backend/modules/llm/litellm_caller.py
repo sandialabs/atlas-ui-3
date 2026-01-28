@@ -19,6 +19,7 @@ import litellm
 from litellm import acompletion
 from .models import LLMResponse
 from modules.config.config_manager import resolve_env_var
+from core.metrics_logger import log_metric
 
 logger = logging.getLogger(__name__)
 
@@ -216,8 +217,6 @@ class LiteLLMCaller:
             else:
                 logger.info(f"LLM response length: {len(content)} chars")
             
-            # Log metric for LLM call (no sensitive data)
-            from core.metrics_logger import log_metric
             log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
             
             return content
@@ -246,7 +245,7 @@ class LiteLLMCaller:
 
         if not data_sources:
             logger.debug("[LLM+RAG] No data sources provided, falling back to plain LLM call")
-            return await self.call_plain(model_name, messages, temperature=temperature)
+            return await self.call_plain(model_name, messages, temperature=temperature, user_email=user_email)
 
         # Use provided service or instance service
         if rag_service is None:
@@ -295,7 +294,7 @@ class LiteLLMCaller:
 
             logger.debug("[LLM+RAG] Calling LLM with RAG-enriched context...")
             # Call LLM with enriched context
-            llm_response = await self.call_plain(model_name, messages_with_rag, temperature=temperature)
+            llm_response = await self.call_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email)
 
             # Only append metadata if RAG actually provided useful content
             # Skip if: no content, empty content, or default fallback messages
@@ -325,8 +324,7 @@ class LiteLLMCaller:
         except Exception as exc:
             logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG] Falling back to plain LLM call due to RAG error")
-            # Fallback to plain LLM call
-            return await self.call_plain(model_name, messages, temperature=temperature)
+            return await self.call_plain(model_name, messages, temperature=temperature, user_email=user_email)
     
     async def call_with_tools(
         self,
@@ -339,7 +337,7 @@ class LiteLLMCaller:
     ) -> LLMResponse:
         """LLM call with tool support using LiteLLM."""
         if not tools_schema:
-            content = await self.call_plain(model_name, messages, temperature=temperature)
+            content = await self.call_plain(model_name, messages, temperature=temperature, user_email=user_email)
             return LLMResponse(content=content, model_used=model_name)
 
         litellm_model = self._get_litellm_model_name(model_name)
@@ -366,8 +364,6 @@ class LiteLLMCaller:
                 logger.error(f"LLM failed to return tool calls when tool_choice was 'required'. Full response: {response}")
                 raise ValueError("LLM failed to return tool calls when tool_choice was 'required'.")
 
-            # Log metric for LLM call with tools (no sensitive data)
-            from core.metrics_logger import log_metric
             tool_calls = getattr(message, 'tool_calls', None)
             tool_count = len(tool_calls) if tool_calls else 0
             log_metric("llm_call", user_email, model=model_name, message_count=len(messages), tool_count=tool_count)
@@ -426,7 +422,7 @@ class LiteLLMCaller:
 
         if not data_sources:
             logger.debug("[LLM+RAG+Tools] No data sources provided, falling back to tools-only call")
-            return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature)
+            return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email)
 
         # Use provided service or instance service
         if rag_service is None:
@@ -475,7 +471,7 @@ class LiteLLMCaller:
 
             logger.debug("[LLM+RAG+Tools] Calling LLM with RAG-enriched context and tools...")
             # Call LLM with enriched context and tools
-            llm_response = await self.call_with_tools(model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature)
+            llm_response = await self.call_with_tools(model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature, user_email=user_email)
 
             # Only append metadata if RAG actually provided useful content
             # Skip if: no content, empty content, or default fallback messages
@@ -507,8 +503,7 @@ class LiteLLMCaller:
         except Exception as exc:
             logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG+Tools] Falling back to tools-only call due to RAG error")
-            # Fallback to tools-only call
-            return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature)
+            return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email)
     
     def _format_rag_metadata(self, metadata) -> str:
         """Format RAG metadata into a user-friendly summary."""

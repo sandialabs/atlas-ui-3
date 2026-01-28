@@ -31,6 +31,7 @@ from core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from core.otel_config import setup_opentelemetry
 from core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from core.auth import get_user_from_header
+from core.metrics_logger import log_metric
 
 # Import from infrastructure
 from infrastructure.app_factory import app_factory
@@ -391,8 +392,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
-                        # Log metric for error (no sensitive details)
-                        from core.metrics_logger import log_metric
                         log_metric("error", user_email, error_type="rate_limit")
                         await websocket.send_json({
                             "type": "error",
@@ -401,8 +400,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except LLMTimeoutError as e:
                         logger.warning(f"Timeout error in chat handler: {e}")
-                        # Log metric for error (no sensitive details)
-                        from core.metrics_logger import log_metric
                         log_metric("error", user_email, error_type="timeout")
                         await websocket.send_json({
                             "type": "error",
@@ -411,8 +408,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except LLMAuthenticationError as e:
                         logger.error(f"Authentication error in chat handler: {e}")
-                        # Log metric for error (no sensitive details)
-                        from core.metrics_logger import log_metric
                         log_metric("error", user_email, error_type="authentication")
                         await websocket.send_json({
                             "type": "error",
@@ -421,8 +416,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except ValidationError as e:
                         logger.warning(f"Validation error in chat handler: {e}")
-                        # Log metric for error (no sensitive details)
-                        from core.metrics_logger import log_metric
                         log_metric("error", user_email, error_type="validation")
                         await websocket.send_json({
                             "type": "error",
@@ -431,8 +424,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except DomainError as e:
                         logger.error(f"Domain error in chat handler: {e}", exc_info=True)
-                        # Log metric for error (no sensitive details)
-                        from core.metrics_logger import log_metric
                         log_metric("error", user_email, error_type="domain")
                         await websocket.send_json({
                             "type": "error",
@@ -441,8 +432,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except Exception as e:
                         logger.error(f"Unexpected error in chat handler: {e}", exc_info=True)
-                        # Log metric for error (no sensitive details)
-                        from core.metrics_logger import log_metric
                         log_metric("error", user_email, error_type="unexpected")
                         await websocket.send_json({
                             "type": "error",

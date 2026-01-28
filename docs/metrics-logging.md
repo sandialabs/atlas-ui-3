@@ -1,5 +1,7 @@
 # Metrics Logging Feature
 
+Last updated: 2026-01-28
+
 ## Overview
 
 The metrics logging feature provides a centralized way to track user activities without capturing sensitive data. This feature is controlled by a feature flag and logs only metadata about user actions.
