@@ -32,11 +32,12 @@ async def execute_tools_workflow(
     llm_caller,
     prompt_provider,
     update_callback: Optional[UpdateCallback] = None,
-    config_manager=None
+    config_manager=None,
+    skip_approval: bool = False,
 ) -> tuple[str, List[ToolResult]]:
     """
     Execute the complete tools workflow: calls -> results -> synthesis.
-    
+
     Pure function that coordinates tool execution without maintaining state.
     """
     logger.debug("Entering execute_tools_workflow")
@@ -55,7 +56,8 @@ async def execute_tools_workflow(
             session_context=session_context,
             tool_manager=tool_manager,
             update_callback=update_callback,
-            config_manager=config_manager
+            config_manager=config_manager,
+            skip_approval=skip_approval,
         )
         tool_results.append(result)
 
@@ -168,7 +170,8 @@ async def execute_single_tool(
     session_context: Dict[str, Any],
     tool_manager,
     update_callback: Optional[UpdateCallback] = None,
-    config_manager=None
+    config_manager=None,
+    skip_approval: bool = False,
 ) -> ToolResult:
     """
     Execute a single tool with argument preparation and error handling.
@@ -192,7 +195,9 @@ async def execute_single_tool(
         needs_approval = False
         allow_edit = True
         admin_required = False
-        if config_manager:
+        if skip_approval:
+            needs_approval = False
+        elif config_manager:
             needs_approval, allow_edit, admin_required = requires_approval(tool_call.function.name, config_manager)
         else:
             # No config manager means user-level approval by default
