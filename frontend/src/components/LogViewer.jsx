@@ -21,6 +21,7 @@ export default function LogViewer() {
   const [hideWebsocketEndpoint, setHideWebsocketEndpoint] = useState(false); // State for hiding websocket_endpoint calls
   const [hideHttpClientCalls, setHideHttpClientCalls] = useState(false); // State for hiding _send_single_request calls
   const [hideDiscoverDataSources, setHideDiscoverDataSources] = useState(false); // State for hiding discover_data_sources calls
+  const [hideDiscoverTools, setHideDiscoverTools] = useState(false);
   const [hideLiteLLM, setHideLiteLLM] = useState(true); // State for hiding LiteLLM verbose logs (enabled by default)
   const [quickFiltersCollapsed, setQuickFiltersCollapsed] = useState(false); // State for collapsing Quick Filters
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(false); // State for auto-scroll (default off to start at top)
@@ -140,7 +141,7 @@ export default function LogViewer() {
 
   // Toggle all filters on/off
   const handleToggleAll = () => {
-    const anyFilterActive = hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources || hideLiteLLM;
+    const anyFilterActive = hideViewerRequests || hideMiddleware || hideConfigRoutes || hideWebsocketEndpoint || hideHttpClientCalls || hideDiscoverDataSources || hideDiscoverTools || hideLiteLLM;
     const newState = !anyFilterActive;
 
     setPage(0);
@@ -150,6 +151,7 @@ export default function LogViewer() {
     setHideWebsocketEndpoint(newState);
     setHideHttpClientCalls(newState);
     setHideDiscoverDataSources(newState);
+    setHideDiscoverTools(newState);
     setHideLiteLLM(newState);
   };
 
@@ -200,13 +202,18 @@ export default function LogViewer() {
       return false;
     }
 
+    // Hide _discover_tools_for_server calls
+    if (hideDiscoverTools && e.function === '_discover_tools_for_server') {
+      return false;
+    }
+
     // Hide LiteLLM verbose logs (logger starts with "LiteLLM")
     if (hideLiteLLM && e.logger && e.logger.startsWith('LiteLLM')) {
       return false;
     }
 
     return true;
-  }), [entries, hideViewerRequests, hideMiddleware, hideConfigRoutes, hideWebsocketEndpoint, hideHttpClientCalls, hideDiscoverDataSources, hideLiteLLM]);
+  }), [entries, hideViewerRequests, hideMiddleware, hideConfigRoutes, hideWebsocketEndpoint, hideHttpClientCalls, hideDiscoverDataSources, hideDiscoverTools, hideLiteLLM]);
 
   // Memoize paginated results - compute reverse and slice in a single pass
   const paginated = useMemo(() => {
@@ -359,6 +366,15 @@ export default function LogViewer() {
                   onChange={e => { setPage(0); setHideDiscoverDataSources(e.target.checked); }}
                 />
                 RAG data source discovery
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-100 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-cyan-600"
+                  checked={hideDiscoverTools}
+                  onChange={e => { setPage(0); setHideDiscoverTools(e.target.checked); }}
+                />
+                Tool discovery (_discover_tools_for_server)
               </label>
             </div>
           </div>

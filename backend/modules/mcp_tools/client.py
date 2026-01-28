@@ -18,6 +18,7 @@ from core.log_sanitizer import sanitize_for_logging
 from modules.config.config_manager import resolve_env_var
 from domain.messages.models import ToolCall, ToolResult
 from modules.mcp_tools.token_storage import AuthenticationRequiredException
+from core.metrics_logger import log_metric
 
 logger = logging.getLogger(__name__)
 
@@ -2070,6 +2071,8 @@ class MCPToolManager:
             except Exception:
                 logger.warning("Error extracting v2 MCP components from tool result", exc_info=True)
 
+            log_metric("tool_call", user_email, tool_name=actual_tool_name)
+
             return ToolResult(
                 tool_call_id=tool_call.id,
                 content=content_str,
@@ -2080,6 +2083,9 @@ class MCPToolManager:
             )
         except Exception as e:
             logger.error(f"Error executing tool {tool_call.name}: {e}")
+            
+            log_metric("tool_error", user_email, tool_name=actual_tool_name)
+            
             return ToolResult(
                 tool_call_id=tool_call.id,
                 content=f"Error executing tool: {str(e)}",
