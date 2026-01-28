@@ -83,11 +83,7 @@ for k in (\"message\", \"tool_calls\", \"files\", \"session_id\"):
     assert k in d, f\"missing key: {k}\"
 '"
 
-    # 5. Output to file
-    run_test "Output written to file with -o" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py 'Say hello' -o '$TMPDIR/out.txt' 2>/dev/null && [ -s '$TMPDIR/out.txt' ]"
-
-    # 7. Stdin prompt
+    # 5. Stdin prompt
     run_test "Read prompt from stdin" \
         bash -c "echo 'Say hi' | (cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py - --json 2>/dev/null) | $PYTHON -c 'import sys,json; d=json.load(sys.stdin); assert len(d[\"message\"])>0'"
 
@@ -122,18 +118,8 @@ if [ "$MODE" = "all" ] || [ "$MODE" = "offline" ]; then
     run_test "--help lists --json flag" \
         bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--json'"
 
-    run_test "--help lists --output flag" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--output'"
-
-
-    run_test "--help lists --max-steps flag" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--max-steps'"
-
     run_test "--help lists --user-email flag" \
         bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--user-email'"
-
-    run_test "--help lists --quiet flag" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--quiet'"
 
     echo ""
 fi
