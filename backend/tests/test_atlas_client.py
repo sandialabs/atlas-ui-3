@@ -98,6 +98,13 @@ class TestCLIArgParsing:
         args = parser.parse_args(["prompt", "--json"])
         assert args.json_output is True
 
+    def test_output_file_flag(self):
+        from atlas_chat_cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["prompt", "-o", "/tmp/out.txt"])
+        assert args.output == "/tmp/out.txt"
+
     def test_list_tools_flag(self):
         from atlas_chat_cli import build_parser
 

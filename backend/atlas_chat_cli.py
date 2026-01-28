@@ -47,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", default=None, help="LLM model name (uses config default if omitted).")
     parser.add_argument("--tools", default=None, help="Comma-separated list of tool names to enable.")
+    parser.add_argument("-o", "--output", default=None, help="Write final response to file path.")
     parser.add_argument("--json", dest="json_output", action="store_true", help="Output structured JSON.")
     parser.add_argument("--user-email", default=None, help="Override user identity.")
     parser.add_argument("--list-tools", action="store_true", help="Print available tools and exit.")
@@ -93,8 +94,8 @@ async def run(args: argparse.Namespace) -> int:
     if args.tools:
         selected_tools = [t.strip() for t in args.tools.split(",") if t.strip()]
 
-    # In JSON mode, collect rather than stream
-    streaming = not args.json_output
+    # In JSON or output-file mode, collect rather than stream
+    streaming = not args.json_output and args.output is None
 
     client = AtlasClient()
     try:
@@ -110,6 +111,9 @@ async def run(args: argparse.Namespace) -> int:
 
         if args.json_output:
             print(json.dumps(result.to_dict(), indent=2))
+        elif args.output:
+            Path(args.output).write_text(result.message, encoding="utf-8")
+            print(f"Output written to {args.output}", file=sys.stderr)
         # If streaming, output was already printed live
 
         return 0
