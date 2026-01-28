@@ -15,7 +15,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from uuid import UUID
 
 # Suppress LiteLLM verbose stdout noise BEFORE any transitive import of litellm.
 # litellm._logging reads LITELLM_LOG at import time and defaults to DEBUG.
@@ -51,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tools", default=None, help="Comma-separated list of tool names to enable.")
     parser.add_argument("-o", "--output", default=None, help="Write final response to file path.")
     parser.add_argument("--json", dest="json_output", action="store_true", help="Output structured JSON.")
-    parser.add_argument("--session-id", default=None, help="Reuse an existing session UUID.")
+
     parser.add_argument("--max-steps", type=int, default=10, help="Max agent iterations (default: 10).")
     parser.add_argument("--user-email", default=None, help="Override user identity.")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress tool/status output, only final response.")
@@ -99,8 +98,6 @@ async def run(args: argparse.Namespace) -> int:
     if args.tools:
         selected_tools = [t.strip() for t in args.tools.split(",") if t.strip()]
 
-    session_id = UUID(args.session_id) if args.session_id else None
-
     # In JSON or output-file mode, collect rather than stream
     streaming = not args.json_output and args.output is None
 
@@ -112,7 +109,7 @@ async def run(args: argparse.Namespace) -> int:
             agent_mode=args.agent,
             selected_tools=selected_tools,
             user_email=args.user_email,
-            session_id=session_id,
+            session_id=None,
             max_steps=args.max_steps,
             streaming=streaming,
             quiet=args.quiet,
