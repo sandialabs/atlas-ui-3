@@ -95,10 +95,19 @@ async def upload_file(
             source_type=request.tags.get("source", "user") if request.tags else "user"
         )
         
+        # Log metric for file upload (no filename - only size and type)
+        from core.metrics_logger import log_metric
+        log_metric("file_upload", current_user, file_size=content_size, content_type=request.content_type)
+        
         return FileResponse(**result)
         
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
+        
+        # Log metric for file upload error (no sensitive error details)
+        from core.metrics_logger import log_metric
+        log_metric("error", current_user, error_type="file_upload_failed")
+        
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 

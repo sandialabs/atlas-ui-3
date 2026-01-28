@@ -180,7 +180,8 @@ class LiteLLMCaller:
         model_name: str, 
         messages: List[Dict[str, str]], 
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        user_email: Optional[str] = None
     ) -> str:
         """Plain LLM call - no tools, no RAG.
         
@@ -189,6 +190,7 @@ class LiteLLMCaller:
             messages: List of message dicts with 'role' and 'content'
             temperature: Optional temperature override (uses config default if None)
             max_tokens: Optional max_tokens override (uses config default if None)
+            user_email: Optional user email for metrics logging
         """
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature)
@@ -213,6 +215,11 @@ class LiteLLMCaller:
                 logger.debug(f"LLM response preview: '{content[:200]}{'...' if len(content) > 200 else ''}'")
             else:
                 logger.info(f"LLM response length: {len(content)} chars")
+            
+            # Log metric for LLM call (no sensitive data)
+            from core.metrics_logger import log_metric
+            log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
+            
             return content
             
         except Exception as exc:
@@ -328,6 +335,7 @@ class LiteLLMCaller:
         tools_schema: List[Dict],
         tool_choice: str = "auto",
         temperature: float = 0.7,
+        user_email: Optional[str] = None
     ) -> LLMResponse:
         """LLM call with tool support using LiteLLM."""
         if not tools_schema:
@@ -358,9 +366,15 @@ class LiteLLMCaller:
                 logger.error(f"LLM failed to return tool calls when tool_choice was 'required'. Full response: {response}")
                 raise ValueError("LLM failed to return tool calls when tool_choice was 'required'.")
 
+            # Log metric for LLM call with tools (no sensitive data)
+            from core.metrics_logger import log_metric
+            tool_calls = getattr(message, 'tool_calls', None)
+            tool_count = len(tool_calls) if tool_calls else 0
+            log_metric("llm_call", user_email, model=model_name, message_count=len(messages), tool_count=tool_count)
+
             return LLMResponse(
                 content=getattr(message, 'content', None) or "",
-                tool_calls=getattr(message, 'tool_calls', None),
+                tool_calls=tool_calls,
                 model_used=model_name
             )
             

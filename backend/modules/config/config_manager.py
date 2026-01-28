@@ -275,6 +275,11 @@ class AppSettings(BaseSettings):
     debug_mode: bool = False
     # Logging settings
     log_level: str = "INFO"  # Override default logging level (DEBUG, INFO, WARNING, ERROR)
+    feature_metrics_logging_enabled: bool = Field(
+        False,
+        description="Enable metrics logging for user activities (LLM calls, tool calls, file uploads, errors)",
+        validation_alias=AliasChoices("FEATURE_METRICS_LOGGING_ENABLED"),
+    )
     
     # RAG Feature Flag
     # When enabled, RAG sources are configured in config/overrides/rag-sources.json

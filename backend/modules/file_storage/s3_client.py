@@ -165,6 +165,11 @@ class S3StorageClient:
                 sanitize_for_logging(user_email),
             )
             logger.debug("Uploaded file key (sanitized): %s", sanitize_for_logging(s3_key))
+            
+            # Log metric for file stored (no filename - only size and type)
+            from core.metrics_logger import log_metric
+            log_metric("file_stored", user_email, file_size=len(content_bytes), content_type=content_type, category=category)
+            
             return result
 
         except ClientError as e:
