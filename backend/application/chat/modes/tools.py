@@ -52,6 +52,7 @@ class ToolsModeRunner:
         self.prompt_provider = prompt_provider
         self.artifact_processor = artifact_processor
         self.config_manager = config_manager
+        self.skip_approval = False
 
         # Verify event_publisher has send_json for elicitation support
         if hasattr(event_publisher, 'send_json'):
@@ -139,6 +140,7 @@ class ToolsModeRunner:
             prompt_provider=self.prompt_provider,
             update_callback=effective_callback,
             config_manager=self.config_manager,
+            skip_approval=self.skip_approval,
         )
 
         # Process artifacts if handler provided
