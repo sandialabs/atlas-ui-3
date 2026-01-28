@@ -66,6 +66,10 @@ if [ "$MODE" = "all" ] || [ "$MODE" = "online" ]; then
     echo "--- Online tests (require LLM API key) ---"
     echo ""
 
+    # --list-tools prints discovered tools
+    run_test "--list-tools prints available tools" \
+        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --list-tools 2>/dev/null | grep -q 'calculator_evaluate'"
+
     # 3. Basic prompt returns JSON with message
     run_test "Basic prompt returns JSON with message" \
         bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py 'Say hello in one word' --json 2>/dev/null | $PYTHON -c 'import sys,json; d=json.load(sys.stdin); assert len(d[\"message\"])>0, \"empty message\"'"
