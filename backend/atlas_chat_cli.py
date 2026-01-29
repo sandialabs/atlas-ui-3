@@ -26,19 +26,28 @@ from dotenv import load_dotenv
 
 # Phase 1: Parse --env-file early, before loading env and importing atlas code.
 # This allows specifying a custom .env file that affects all subsequent imports.
-def _get_env_file_from_args() -> Path:
-    """Extract --env-file from sys.argv without full parsing."""
+def _get_env_file_from_args() -> tuple[Path, bool]:
+    """Extract --env-file from sys.argv without full parsing.
+
+    Returns:
+        Tuple of (env_path, is_custom) where is_custom is True if user
+        explicitly provided --env-file, False for default .env path.
+    """
     default_env = Path(__file__).resolve().parents[1] / ".env"
     for i, arg in enumerate(sys.argv[1:], start=1):
-        if arg == "--env-file" and i < len(sys.argv):
-            return Path(sys.argv[i + 1])
+        if arg == "--env-file" and i + 1 < len(sys.argv):
+            return Path(sys.argv[i + 1]), True
         if arg.startswith("--env-file="):
-            return Path(arg.split("=", 1)[1])
-    return default_env
+            return Path(arg.split("=", 1)[1]), True
+    return default_env, False
 
-_env_file_path = _get_env_file_from_args()
+_env_file_path, _env_file_is_custom = _get_env_file_from_args()
 if not _env_file_path.exists():
-    print(f"Warning: env file not found: {_env_file_path}", file=sys.stderr)
+    if _env_file_is_custom:
+        print(f"Error: specified env file not found: {_env_file_path}", file=sys.stderr)
+        sys.exit(2)
+    else:
+        print(f"Warning: default env file not found: {_env_file_path}", file=sys.stderr)
 load_dotenv(dotenv_path=str(_env_file_path))
 
 # Now safe to import atlas code (which transitively imports litellm)
