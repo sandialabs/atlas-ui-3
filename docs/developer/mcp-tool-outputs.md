@@ -147,6 +147,16 @@ def generate_multiple_charts() -> List[ImageContent]:
 
 Both approaches work and will display images in the canvas panel. ImageContent is automatically converted to artifacts internally.
 
+### Important Notes on ImageContent
+
+**Context Safety**: ImageContent with base64-encoded images is automatically filtered out of the LLM context to prevent context corruption. Only the text description from TextContent items is sent to the LLM. This ensures that:
+- Non-multimodal LLMs don't receive confusing base64 data
+- Large images don't bloat the conversation context
+- Subsequent tool calls work correctly after image generation
+- Tool calling format remains consistent
+
+The image data is extracted as artifacts and displayed in the UI canvas, while the LLM only sees a brief text description of what was generated.
+
 ## Displaying External Content with Iframes
 
 MCP tools can display external content (dashboards, visualizations, web applications) using iframes in two ways:
