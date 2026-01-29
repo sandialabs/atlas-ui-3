@@ -275,6 +275,12 @@ class AppSettings(BaseSettings):
     debug_mode: bool = False
     # Logging settings
     log_level: str = "INFO"  # Override default logging level (DEBUG, INFO, WARNING, ERROR)
+    # Suppress LiteLLM verbose logging (independent of log_level)
+    feature_suppress_litellm_logging: bool = Field(
+        default=True,
+        description="Suppress LiteLLM verbose stdout/debug output by setting LITELLM_LOG=ERROR",
+        validation_alias=AliasChoices("FEATURE_SUPPRESS_LITELLM_LOGGING"),
+    )
     
     # RAG Feature Flag
     # When enabled, RAG sources are configured in config/overrides/rag-sources.json

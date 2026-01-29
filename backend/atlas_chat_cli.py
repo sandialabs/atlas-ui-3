@@ -6,6 +6,7 @@ Usage:
     python atlas_chat_cli.py "Use the search tool" --tools server_tool1
     python atlas_chat_cli.py --list-tools
     echo "prompt" | python atlas_chat_cli.py - --model gpt-4o
+    python atlas_chat_cli.py "prompt" --env-file /path/to/custom.env
 """
 
 import argparse
@@ -23,8 +24,22 @@ if "LITELLM_LOG" not in os.environ:
 
 from dotenv import load_dotenv
 
-# Load env (won't overwrite LITELLM_LOG we just set)
-load_dotenv(dotenv_path=str(Path(__file__).resolve().parents[1] / ".env"))
+# Phase 1: Parse --env-file early, before loading env and importing atlas code.
+# This allows specifying a custom .env file that affects all subsequent imports.
+def _get_env_file_from_args() -> Path:
+    """Extract --env-file from sys.argv without full parsing."""
+    default_env = Path(__file__).resolve().parents[1] / ".env"
+    for i, arg in enumerate(sys.argv[1:], start=1):
+        if arg == "--env-file" and i < len(sys.argv):
+            return Path(sys.argv[i + 1])
+        if arg.startswith("--env-file="):
+            return Path(arg.split("=", 1)[1])
+    return default_env
+
+_env_file_path = _get_env_file_from_args()
+if not _env_file_path.exists():
+    print(f"Warning: env file not found: {_env_file_path}", file=sys.stderr)
+load_dotenv(dotenv_path=str(_env_file_path))
 
 # Now safe to import atlas code (which transitively imports litellm)
 from atlas_client import AtlasClient  # noqa: E402
@@ -51,6 +66,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", dest="json_output", action="store_true", help="Output structured JSON.")
     parser.add_argument("--user-email", default=None, help="Override user identity.")
     parser.add_argument("--list-tools", action="store_true", help="Print available tools and exit.")
+    parser.add_argument(
+        "--data-sources",
+        default=None,
+        help="Comma-separated list of RAG data source names to query.",
+    )
+    parser.add_argument(
+        "--only-rag",
+        action="store_true",
+        help="Use only RAG without tools (RAG-only mode).",
+    )
+    parser.add_argument(
+        "--list-data-sources",
+        action="store_true",
+        help="Print available RAG data sources and exit.",
+    )
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help="Path to custom .env file (default: project root .env). Parsed early before other imports.",
+    )
     return parser
 
 
@@ -78,9 +113,50 @@ async def list_tools() -> int:
         await client.cleanup()
 
 
+async def list_data_sources(user_email: str = None) -> int:
+    """Discover and print all available RAG data sources."""
+    client = AtlasClient()
+    try:
+        result = await client.list_data_sources(user_email=user_email)
+        servers = result.get("servers", {})
+        discovered = result.get("sources", [])
+
+        if not servers and not discovered:
+            print("No RAG data sources configured.", file=sys.stderr)
+            return 1
+
+        # Show configured servers
+        if servers:
+            print("Configured RAG servers:")
+            for name, info in sorted(servers.items()):
+                display = info.get("display_name", name)
+                source_type = info.get("type", "unknown")
+                desc = info.get("description", "")
+                print(f"  {name} ({source_type})")
+                if desc:
+                    print(f"    {desc}")
+            print()
+
+        # Show discovered sources (these are the actual --data-sources values)
+        if discovered:
+            print("Available data sources (use with --data-sources):")
+            for source_id in discovered:
+                print(f"  {source_id}")
+        else:
+            print("No data sources discovered. Servers may not expose rag_discover_resources.")
+            print("For MCP RAG servers, try: --data-sources SERVER_NAME:SOURCE_ID")
+
+        return 0
+    finally:
+        await client.cleanup()
+
+
 async def run(args: argparse.Namespace) -> int:
     if args.list_tools:
         return await list_tools()
+
+    if args.list_data_sources:
+        return await list_data_sources(user_email=args.user_email)
 
     # Resolve prompt
     prompt = args.prompt
@@ -94,6 +170,10 @@ async def run(args: argparse.Namespace) -> int:
     if args.tools:
         selected_tools = [t.strip() for t in args.tools.split(",") if t.strip()]
 
+    selected_data_sources = None
+    if args.data_sources:
+        selected_data_sources = [s.strip() for s in args.data_sources.split(",") if s.strip()]
+
     # In JSON or output-file mode, collect rather than stream
     streaming = not args.json_output and args.output is None
 
@@ -104,6 +184,8 @@ async def run(args: argparse.Namespace) -> int:
             model=args.model,
             agent_mode=False,
             selected_tools=selected_tools,
+            selected_data_sources=selected_data_sources,
+            only_rag=args.only_rag,
             user_email=args.user_email,
             session_id=None,
             streaming=streaming,
