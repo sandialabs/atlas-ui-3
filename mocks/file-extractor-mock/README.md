@@ -24,6 +24,10 @@ cd mocks/file-extractor-mock
 # Install dependencies
 pip install -r requirements.txt
 
+cp endpoint_config.json.example endpoint_config.json
+
+# modify endpoint_config.json to point to your deployed nemotron url endpoint
+
 # Run the server
 python main.py
 ```
@@ -114,7 +118,7 @@ All endpoints accept the same request format:
 
 ### POST /extract - PDF Text Extraction
 
-**Real extraction** using `pypdf` library. Actually extracts text content from PDF files.
+**Real extraction** using `banyan-ingest`. If `banyan-ingest` is not installed or the endpoint url config is not set, then use the `pypdf` library. Actually extracts text content from PDF files.
 
 Returns:
 - `text`: Extracted text with page markers
