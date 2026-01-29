@@ -38,6 +38,7 @@ class ReActAgentLoop(AgentLoopProtocol):
         self.prompt_provider = prompt_provider
         self.connection = connection
         self.config_manager = config_manager
+        self.skip_approval = False
 
     # ---- Internal helpers (mirroring service implementation) ----
     def _latest_user_question(self, msgs: List[Dict[str, Any]]) -> str:
@@ -247,6 +248,7 @@ class ReActAgentLoop(AgentLoopProtocol):
                         tool_manager=self.tool_manager,
                         update_callback=(self.connection.send_json if self.connection else None),
                         config_manager=self.config_manager,
+                        skip_approval=self.skip_approval,
                     )
                     tool_results.append(result)
                     messages.append({
