@@ -129,10 +129,10 @@ async def list_data_sources(user_email: str = None) -> int:
         if servers:
             print("Configured RAG servers:")
             for name, info in sorted(servers.items()):
-                display = info.get("display_name", name)
+                display_name = info.get("display_name", name)
                 source_type = info.get("type", "unknown")
                 desc = info.get("description", "")
-                print(f"  {name} ({source_type})")
+                print(f"  {display_name} ({source_type})")
                 if desc:
                     print(f"    {desc}")
             print()

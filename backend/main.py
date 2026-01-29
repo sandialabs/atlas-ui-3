@@ -23,6 +23,8 @@ if _suppress_litellm and "LITELLM_LOG" not in os.environ:
 # Clean up temporary imports
 del _Path, _dotenv_values, _env_path, _env_values, _suppress_litellm
 
+# Standard imports follow - must come after LiteLLM logging suppression above
+# ruff: noqa: E402
 import asyncio
 import logging
 from contextlib import asynccontextmanager
