@@ -28,10 +28,17 @@ Each script should:
 
 1. **Be self-contained** - Run from the project root with no manual setup
 2. **Activate the virtual environment** - Source `.venv/bin/activate`
-3. **Test the PR's test plan items** - Cover every item from the PR description's "Test plan" section
-4. **Report pass/fail clearly** - Print PASSED/FAILED for each check with a summary at the end
-5. **Exit with code 0 on success, non-zero on failure**
-6. **Run the backend unit tests** as a final step (`./test/run_tests.sh backend`)
+3. **Exercise features end-to-end using actual CLI commands and tools** - Do NOT just check imports, parse flags, or run unit tests. The script must invoke the feature as a real user would:
+   - Run CLI commands (`python atlas_chat_cli.py ...`)
+   - Call API endpoints (`curl http://localhost:8000/api/...`)
+   - Start the backend and check behavior
+   - Set environment variables and verify feature flags take effect
+   - Import checks and unit tests are supplementary, not the primary validation
+4. **Create custom .env and config files as needed** - PR validation scripts can and should create custom `.env` files and config overrides to test different feature flag combinations. Store test-specific config files in `test/pr-validation/fixtures/pr{NUMBER}/` (e.g., `test/pr-validation/fixtures/pr264/.env`). This allows testing with `FEATURE_*` flags set to specific values without modifying the project's real config.
+5. **Test the PR's test plan items** - Cover every item from the PR description's "Test plan" section
+5. **Report pass/fail clearly** - Print PASSED/FAILED for each check with a summary at the end
+7. **Exit with code 0 on success, non-zero on failure**
+8. **Run the backend unit tests** as a final step (`./test/run_tests.sh backend`)
 
 ### Template
 
