@@ -65,7 +65,9 @@ services:
       
       # Log level configuration
       - LOG_LEVEL=INFO
-      
+      # Suppress LiteLLM verbose logging
+      - FEATURE_SUPPRESS_LITELLM_LOGGING=true
+
       - USE_NEW_FRONTEND=true
       
       # Feature Flags

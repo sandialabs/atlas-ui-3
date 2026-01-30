@@ -110,6 +110,33 @@ export const ChatProvider = ({ children }) => {
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent])
 
+	// Validate persisted data sources against current config and remove stale ones
+	useEffect(() => {
+		if (!config.ragServers || config.ragServers.length === 0) return
+
+		// Build set of valid data source IDs from current config
+		const validSourceIds = new Set(
+			config.ragServers.flatMap(server =>
+				server.sources.map(source => `${server.server}:${source.id}`)
+			)
+		)
+
+		// Find any selected sources that no longer exist in config
+		const staleSourceIds = [...selectedDataSources].filter(id => !validSourceIds.has(id))
+
+		if (staleSourceIds.length > 0) {
+			console.warn('Removing stale data sources from selection:', staleSourceIds)
+			// Remove stale sources by keeping only valid ones
+			const validSelections = [...selectedDataSources].filter(id => validSourceIds.has(id))
+			selections.clearDataSources()
+			if (validSelections.length > 0) {
+				selections.addDataSources(validSelections)
+			}
+		}
+	// Only run when ragServers config changes, not on every selectedDataSources change
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [config.ragServers])
+
 	const selectAllServerTools = useCallback((server) => {
 		const group = config.tools.find(t => t.server === server); if (!group) return
 		group.tools.forEach(tool => { const key = `${server}_${tool}`; if (!selectedTools.has(key)) selections.toggleTool(key) })
