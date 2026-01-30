@@ -23,6 +23,8 @@ export default function LogViewer() {
   const [hideDiscoverDataSources, setHideDiscoverDataSources] = useState(false); // State for hiding discover_data_sources calls
   const [hideDiscoverTools, setHideDiscoverTools] = useState(false);
   const [hideLiteLLM, setHideLiteLLM] = useState(true); // State for hiding LiteLLM verbose logs (enabled by default)
+  const [showOnlyMetrics, setShowOnlyMetrics] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [quickFiltersCollapsed, setQuickFiltersCollapsed] = useState(false); // State for collapsing Quick Filters
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(false); // State for auto-scroll (default off to start at top)
   const [pollIntervalInput, setPollIntervalInput] = useState(String(DEFAULT_POLL_INTERVAL / 1000)); // Input for poll interval in seconds
@@ -169,6 +171,21 @@ export default function LogViewer() {
 
   // Memoize filtered entries based on all filter states
   const filtered = useMemo(() => entries.filter(e => {
+    // Positive filter: show ONLY metrics entries when active
+    if (showOnlyMetrics) {
+      return e.message && e.message.includes('[METRIC]');
+    }
+
+    // Keyword search filter
+    if (searchKeyword) {
+      const kw = searchKeyword.toLowerCase();
+      const searchable = [e.message, e.module, e.function, e.logger, e.level]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      if (!searchable.includes(kw)) return false;
+    }
+
     // Hide log viewer requests
     if (hideViewerRequests && (
       (e.message && e.message.includes('GET /admin/logs/viewer')) ||
@@ -213,7 +230,7 @@ export default function LogViewer() {
     }
 
     return true;
-  }), [entries, hideViewerRequests, hideMiddleware, hideConfigRoutes, hideWebsocketEndpoint, hideHttpClientCalls, hideDiscoverDataSources, hideDiscoverTools, hideLiteLLM]);
+  }), [entries, showOnlyMetrics, searchKeyword, hideViewerRequests, hideMiddleware, hideConfigRoutes, hideWebsocketEndpoint, hideHttpClientCalls, hideDiscoverDataSources, hideDiscoverTools, hideLiteLLM]);
 
   // Memoize paginated results - compute reverse and slice in a single pass
   const paginated = useMemo(() => {
@@ -252,6 +269,16 @@ export default function LogViewer() {
               <option value="">All</option>
               {modules.map(m => <option key={m}>{m}</option>)}
             </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Search</label>
+            <input
+              type="text"
+              value={searchKeyword}
+              onChange={e => { setPage(0); setSearchKeyword(e.target.value); }}
+              placeholder="Filter by keyword..."
+              className="bg-gray-200 dark:bg-gray-700 p-2 rounded text-sm w-48"
+            />
           </div>
           <button onClick={fetchLogs} className="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded text-sm font-semibold">Refresh</button>
           <button onClick={clearLogs} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded text-sm font-semibold">Clear Logs</button>
@@ -319,6 +346,20 @@ export default function LogViewer() {
         {/* Collapsible content */}
         {!quickFiltersCollapsed && (
         <div className="px-4 pb-4">
+          <div className="mb-3 flex items-center gap-3 p-2 rounded-lg border border-purple-300 dark:border-purple-600 bg-purple-50 dark:bg-purple-900/20">
+            <label className="flex items-center gap-2 text-xs font-semibold text-purple-700 dark:text-purple-300 select-none cursor-pointer">
+              <input
+                type="checkbox"
+                className="accent-purple-600"
+                checked={showOnlyMetrics}
+                onChange={e => { setPage(0); setShowOnlyMetrics(e.target.checked); }}
+              />
+              Show Only: Metrics [METRIC]
+            </label>
+            <span className="text-[10px] text-purple-500 dark:text-purple-400">
+              When active, only metric entries are shown
+            </span>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Hide: HTTP/API Noise */}
           <div className="space-y-2">
