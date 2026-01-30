@@ -14,6 +14,7 @@ import base64
 from pydantic import BaseModel, Field
 
 from core.log_sanitizer import get_current_user
+from core.metrics_logger import log_metric
 from infrastructure.app_factory import app_factory
 from core.capabilities import verify_file_token
 
@@ -95,10 +96,15 @@ async def upload_file(
             source_type=request.tags.get("source", "user") if request.tags else "user"
         )
         
+        log_metric("file_upload", current_user, file_size=content_size, content_type=request.content_type)
+        
         return FileResponse(**result)
         
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
+        
+        log_metric("error", current_user, error_type="file_upload_failed")
+        
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 

@@ -27,6 +27,10 @@ You MUST systematically verify each of the following categories. For each item, 
 - [ ] All tests pass (backend ~5s, frontend ~6s, e2e ~70s)
 - [ ] New functionality has appropriate test coverage
 - [ ] No tests were skipped without justification
+- [ ] If backend code changed, PR validation script exists at `test/pr-validation/test_pr{N}_*.sh`
+- [ ] PR validation script exercises the feature end-to-end using actual CLI commands and tools (not just imports/unit tests). Scripts that only check imports, parse flags, or run unit tests are NOT sufficient.
+- [ ] PR validation script uses custom `.env` files and config overrides (stored in `test/pr-validation/fixtures/pr{N}/`) to test different feature flag combinations, rather than relying on the project's existing config.
+- [ ] PR validation script passes: `bash test/run_pr_validation.sh {PR_NUMBER}`
 
 ### 4. Documentation Requirements
 - [ ] CHANGELOG.md updated with entry: "### PR #<number> - YYYY-MM-DD" followed by bullet points

@@ -65,6 +65,7 @@ async def execute_tools_workflow(
     update_callback: Optional[UpdateCallback] = None,
     config_manager=None,
     skip_approval: bool = False,
+    user_email: Optional[str] = None,
 ) -> tuple[str, List[ToolResult]]:
     """
     Execute the complete tools workflow: calls -> results -> synthesis.
@@ -108,7 +109,8 @@ async def execute_tools_workflow(
         session_context=session_context,
         llm_caller=llm_caller,
         prompt_provider=prompt_provider,
-        update_callback=update_callback
+        update_callback=update_callback,
+        user_email=user_email,
     )
 
     return final_response, tool_results
@@ -614,7 +616,8 @@ async def handle_synthesis_decision(
     session_context: Dict[str, Any],
     llm_caller,
     prompt_provider,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    user_email: Optional[str] = None,
 ) -> str:
     """
     Decide whether synthesis is needed and execute accordingly.
@@ -648,7 +651,8 @@ async def handle_synthesis_decision(
         messages=messages,
         llm_caller=llm_caller,
         prompt_provider=prompt_provider,
-        update_callback=update_callback
+        update_callback=update_callback,
+        user_email=user_email,
     )
 
 
@@ -657,7 +661,8 @@ async def synthesize_tool_results(
     messages: List[Dict[str, Any]],
     llm_caller,
     prompt_provider,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    user_email: Optional[str] = None,
 ) -> str:
     """
     Prepare augmented messages with synthesis prompt and obtain final answer.
@@ -684,7 +689,7 @@ async def synthesize_tool_results(
     else:
         logger.info("Proceeding without dedicated tool synthesis prompt (fallback)")
 
-    final_response = await llm_caller.call_plain(model, synthesis_messages)
+    final_response = await llm_caller.call_plain(model, synthesis_messages, user_email=user_email)
 
     # Do not emit a separate 'tool_synthesis' assistant-visible event here.
     # The chat service will emit a single 'chat_response' for the final answer

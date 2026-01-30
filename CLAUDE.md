@@ -348,6 +348,16 @@ Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `ap
 
 **What goes in the script:** Every item from the PR's "Test plan" section, plus a backend unit test run at the end. See `test/pr-validation/README.md` for the full template and structure.
 
+**IMPORTANT: Scripts must exercise features end-to-end using actual CLI commands and tools.** Do not write validation scripts that only check imports, parse flags, or run unit tests. The script must invoke the feature as a real user would -- by running CLI commands (`python atlas_chat_cli.py ...`), calling API endpoints (`curl`), starting the backend and checking behavior, or running actual tooling. Import checks and unit tests are supplementary, not the primary validation.
+
+Examples of end-to-end validation:
+- Run `python atlas_chat_cli.py --list-tools` to verify CLI features work
+- Start the backend and hit API endpoints with `curl` to verify behavior
+- Set environment variables and run commands to verify feature flags take effect
+- Invoke tool use via CLI: `python atlas_chat_cli.py "query" --tools tool_name`
+
+**Custom .env and config files for testing:** PR validation scripts can and should create custom `.env` files and config overrides to test different feature flag combinations. Store test-specific config files in `test/pr-validation/fixtures/pr{NUMBER}/` (e.g., `test/pr-validation/fixtures/pr264/.env`). This allows testing with `FEATURE_*` flags set to specific values without modifying the project's real `.env` or config files.
+
 **Running:**
 ```bash
 bash test/run_pr_validation.sh 271       # Run one PR
@@ -359,8 +369,9 @@ bash test/run_pr_validation.sh --list     # List available
 1. Write the script in `test/pr-validation/test_pr{NUMBER}_{description}.sh`
 2. Use `PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"` to locate the project root
 3. Activate `.venv/bin/activate`, run assertions, print PASSED/FAILED per check
-4. Always run `./test/run_tests.sh backend` as the final step
-5. Exit 0 on success, non-zero on failure
+4. **Run actual CLI commands and tools** to exercise the feature end-to-end
+5. Always run `./test/run_tests.sh backend` as the final step
+6. Exit 0 on success, non-zero on failure
 
 **When reviewing a PR:** Verify the validation script exists and passes before approving.
 
