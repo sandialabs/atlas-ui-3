@@ -432,7 +432,7 @@ class TestImageContentSanitization:
         
         # Valid base64 strings
         assert MCPToolManager._looks_like_base64("A" * 1000)
-        assert MCPToolManager._looks_like_base64("iVBORw0KGgoAAAANS" * 50)
+        assert MCPToolManager._looks_like_base64("iVBORw0KGgoAAAANS" * 50 + "AA==")
         assert MCPToolManager._looks_like_base64("SGVsbG8gV29ybGQ=" * 100)
         
         # Not base64
@@ -445,17 +445,17 @@ class TestImageContentSanitization:
         """Test that large base64-like strings are truncated."""
         from backend.modules.mcp_tools.client import MCPToolManager
         
-        # Create a large base64-like string (> 10KB)
-        large_b64 = "iVBORw0KGgo" + ("A" * 20000)
+        # Create a large base64-like string (> 10KB) with length divisible by 4
+        large_b64 = "iVBORw0KGgo" + ("A" * 20001)  # 20012 chars, divisible by 4
         content = {"results": large_b64}
-        
+
         sanitized = MCPToolManager._sanitize_content_for_llm(content)
-        
+
         # Should be truncated with explanation
         result_str = str(sanitized["results"])
         assert len(result_str) < 200
         assert "removed" in result_str.lower()
-        assert "20011" in result_str  # Should include original size (11 + 20000 = 20011)
+        assert "20012" in result_str  # Should include original size (11 + 20001 = 20012)
         assert result_str.startswith("[Large base64 data removed")  # Explicit format check
 
     def test_sanitize_base64_keys(self):
