@@ -4,18 +4,15 @@
 
   "extractors": {
     "pdf-text": {
-      "url": "http://localhost:8010/extract",
+      "url": "http://localhost:8011/extract",
       "method": "POST",
       "timeout_seconds": 30,
       "max_file_size_mb": 50,
       "preview_chars": 2000,
-      "request_format": "base64",
+      "request_format": "multipart",
+      "form_field_name": "file",
       "response_field": "text",
-      "enabled": true,
-      "api_key": "${PDF_EXTRACTOR_API_KEY}",
-      "headers": {
-        "X-Client-ID": "${PDF_EXTRACTOR_CLIENT_ID}"
-      }
+      "enabled": true
     },
     "image-vision": {
       "url": "http://localhost:8010/analyze",
