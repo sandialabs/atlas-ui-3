@@ -38,6 +38,16 @@
       "response_field": "text",
       "enabled": false,
       "api_key": "${OCR_EXTRACTOR_API_KEY}"
+    },
+    "pptx-text": {
+      "url": "http://localhost:8011/extract-pptx",
+      "method": "POST",
+      "timeout_seconds": 120,
+      "max_file_size_mb": 100,
+      "preview_chars": 2000,
+      "request_format": "base64",
+      "response_field": "text",
+      "enabled": false
     }
   },
 
@@ -50,7 +60,8 @@
     ".webp": "image-vision",
     ".tiff": "ocr",
     ".tif": "ocr",
-    ".bmp": "ocr"
+    ".bmp": "ocr",
+    ".pptx": "pptx-text"
   },
 
   "mime_mapping": {
@@ -60,6 +71,7 @@
     "image/gif": "image-vision",
     "image/webp": "image-vision",
     "image/tiff": "ocr",
-    "image/bmp": "ocr"
+    "image/bmp": "ocr",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx-text"
   }
 }

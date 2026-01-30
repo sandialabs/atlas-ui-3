@@ -41,11 +41,6 @@ app = FastAPI(
     description="Mock file extraction service for testing ATLAS file content extraction",
 )
 
-ENDPOINT_CONFIG = {
-  "url": "https://NEMOTRON_ENDPOING_URL/v1",
-  "model_name": "nvidia/nemotron-parse"
-  }
-
 
 # ---------------------------------------------------------------------------
 # Request/Response Models
@@ -89,54 +84,36 @@ class ExtractionResponse(BaseModel):
 
 def extract_pdf_text(pdf_bytes: bytes) -> tuple[str, dict]:
     """
-    Extract text from PDF bytes using banyan-ingest. If banyan-ingest is not installed, then it will use pypdf.
+    Extract text from PDF bytes using pypdf.
 
     Returns:
         Tuple of (extracted_text, metadata_dict)
     """
     try:
-        print("Received pdf stream")
-        from banyan_ingest import NemoparseProcessor 
-        pdf_file = io.BytesIO(pdf_bytes)
-        processor = NemoparseProcessor(endpoint_url=ENDPOINT_CONFIG['url'], model_name=ENDPOINT_CONFIG['model_name'])
-
-        print("Processsnig pdf stream")
-        reader = processor.process_document(pdf_file)
-
-        text_parts = []
-        content_list = reader.get_content_list()
-        for page_num, page_text in enumerate(content_list):
-            text_parts.append(f"--- Page {page_num + 1} ---\n{page_text}")
-
-        num_pages = len(content_list)
+        from pypdf import PdfReader
     except ImportError:
+        # Fall back to PyPDF2 if pypdf not available
         try:
-            from pypdf import PdfReader
+            from PyPDF2 import PdfReader
         except ImportError:
-            # Fall back to PyPDF2 if pypdf not available
-            try:
-                from PyPDF2 import PdfReader
-            except ImportError:
-                raise ImportError(
-                    "PDF extraction requires 'banyan-ingest', 'pypdf', or 'PyPDF2'. "
-                    "Install with: pip install pypdf"
-                )
+            raise ImportError(
+                "PDF extraction requires 'pypdf' or 'PyPDF2'. "
+                "Install with: pip install pypdf"
+            )
 
-        pdf_file = io.BytesIO(pdf_bytes)
-        reader = PdfReader(pdf_file)
+    pdf_file = io.BytesIO(pdf_bytes)
+    reader = PdfReader(pdf_file)
 
-        text_parts = []
-        for page_num, page in enumerate(reader.pages):
-            page_text = page.extract_text()
-            if page_text:
-                text_parts.append(f"--- Page {page_num + 1} ---\n{page_text}")
-
-        num_pages = len(reader.pages)
+    text_parts = []
+    for page_num, page in enumerate(reader.pages):
+        page_text = page.extract_text()
+        if page_text:
+            text_parts.append(f"--- Page {page_num + 1} ---\n{page_text}")
 
     full_text = "\n\n".join(text_parts)
 
     metadata = {
-        "pages": num_pages,
+        "pages": len(reader.pages),
         "char_count": len(full_text),
     }
 
@@ -468,8 +445,5 @@ if __name__ == "__main__":
     print()
     print("Default port: 8010")
     print()
-
-    with open("endpoint_config.json") as file:
-        ENDPOINT_CONFIG = json.load(file)
 
     uvicorn.run(app, host="127.0.0.1", port=8010)

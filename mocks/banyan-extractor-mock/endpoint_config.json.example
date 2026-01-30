@@ -1,0 +1,4 @@
+{
+  "url": "https://YOUR_NEMOTRON_ENDPOINT_URL/v1",
+  "model_name": "nvidia/nemotron-parse"
+}
