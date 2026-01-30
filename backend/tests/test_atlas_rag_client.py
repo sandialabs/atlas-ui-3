@@ -220,6 +220,7 @@ class TestQueryRag:
 
         assert isinstance(result, RAGResponse)
         assert result.content == "This is the answer."
+        assert result.is_completion is True  # Should detect chat.completion format
         assert result.metadata is not None
         assert result.metadata.query_processing_time_ms == 150
         assert result.metadata.data_source_name == "corpus1"
@@ -265,6 +266,7 @@ class TestQueryRag:
 
         assert result.content == "Simple answer."
         assert result.metadata is None
+        assert result.is_completion is False  # No 'object' field in response
 
     @pytest.mark.asyncio
     async def test_query_403_forbidden(self, client):

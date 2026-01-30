@@ -195,6 +195,9 @@ class AtlasRAGClient:
                     list(data.keys()),
                 )
 
+                # Check if this is a chat completion (already LLM-interpreted)
+                is_completion = data.get("object") == "chat.completion"
+                
                 # Extract content from OpenAI ChatCompletion format
                 content = "No response from RAG system."
                 if "choices" in data and len(data["choices"]) > 0:
@@ -203,8 +206,9 @@ class AtlasRAGClient:
                         content = choice["message"]["content"]
 
                 logger.debug(
-                    "[HTTP-RAG] Extracted content: length=%d, preview=%s...",
+                    "[HTTP-RAG] Extracted content: length=%d, is_completion=%s, preview=%s...",
                     len(content),
+                    is_completion,
                     content[:300] if content else "(empty)",
                 )
 
@@ -212,13 +216,14 @@ class AtlasRAGClient:
                 metadata = self._parse_rag_metadata(data, data_source)
 
                 logger.info(
-                    "[HTTP-RAG] query_rag complete: user=%s, source=%s, content_length=%d, has_metadata=%s",
+                    "[HTTP-RAG] query_rag complete: user=%s, source=%s, content_length=%d, has_metadata=%s, is_completion=%s",
                     user_name,
                     data_source,
                     len(content),
                     metadata is not None,
+                    is_completion,
                 )
-                return RAGResponse(content=content, metadata=metadata)
+                return RAGResponse(content=content, metadata=metadata, is_completion=is_completion)
 
             except httpx.HTTPStatusError as exc:
                 status_code = exc.response.status_code

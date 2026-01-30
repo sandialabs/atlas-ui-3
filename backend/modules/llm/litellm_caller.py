@@ -83,6 +83,32 @@ class LiteLLMCaller:
             return data_source
         return qualified_data_source
 
+    def _build_rag_completion_response(
+        self, 
+        rag_response, 
+        display_source: str
+    ) -> str:
+        """Build formatted response for direct RAG completions.
+        
+        Args:
+            rag_response: RAGResponse object with is_completion=True
+            display_source: Display name of the data source
+            
+        Returns:
+            Formatted response string with RAG completion note and metadata
+        """
+        response_parts = []
+        response_parts.append(f"*Response from {display_source} (RAG completions endpoint):*\n")
+        response_parts.append(rag_response.content)
+        
+        # Append metadata if available
+        if rag_response.metadata:
+            metadata_summary = self._format_rag_metadata(rag_response.metadata)
+            if metadata_summary and metadata_summary != "Metadata unavailable":
+                response_parts.append(f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}")
+        
+        return "\n".join(response_parts)
+
     def _get_litellm_model_name(self, model_name: str) -> str:
         """Convert internal model name to LiteLLM compatible format."""
         if model_name not in self.llm_config.models:
@@ -281,14 +307,28 @@ class LiteLLMCaller:
             )
 
             logger.debug(
-                "[LLM+RAG] RAG response received: content_length=%d, has_metadata=%s",
+                "[LLM+RAG] RAG response received: content_length=%d, has_metadata=%s, is_completion=%s",
                 len(rag_response.content) if rag_response.content else 0,
                 rag_response.metadata is not None,
+                rag_response.is_completion,
             )
             logger.debug(
                 "[LLM+RAG] RAG content preview: %s...",
                 rag_response.content[:300] if rag_response.content else "(empty)",
             )
+
+            # If RAG returned a completion (already LLM-interpreted), return it directly
+            if rag_response.is_completion:
+                logger.info(
+                    "[LLM+RAG] RAG returned chat completion - returning directly without LLM processing"
+                )
+                
+                final_response = self._build_rag_completion_response(rag_response, display_source)
+                logger.info(
+                    "[LLM+RAG] Returning RAG completion directly: response_length=%d",
+                    len(final_response),
+                )
+                return final_response
 
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()
@@ -458,14 +498,28 @@ class LiteLLMCaller:
             )
 
             logger.debug(
-                "[LLM+RAG+Tools] RAG response received: content_length=%d, has_metadata=%s",
+                "[LLM+RAG+Tools] RAG response received: content_length=%d, has_metadata=%s, is_completion=%s",
                 len(rag_response.content) if rag_response.content else 0,
                 rag_response.metadata is not None,
+                rag_response.is_completion,
             )
             logger.debug(
                 "[LLM+RAG+Tools] RAG content preview: %s...",
                 rag_response.content[:300] if rag_response.content else "(empty)",
             )
+
+            # If RAG returned a completion (already LLM-interpreted), return it directly
+            if rag_response.is_completion:
+                logger.info(
+                    "[LLM+RAG+Tools] RAG returned chat completion - returning directly without LLM processing"
+                )
+                
+                final_response = self._build_rag_completion_response(rag_response, display_source)
+                logger.info(
+                    "[LLM+RAG+Tools] Returning RAG completion directly: response_length=%d",
+                    len(final_response),
+                )
+                return final_response
 
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()
