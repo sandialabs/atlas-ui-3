@@ -50,7 +50,7 @@ def test_file_extraction_disabled_when_feature_flag_off():
         data = resp.json()
         assert data["features"]["file_content_extraction"] is False
         assert data["file_extraction"]["enabled"] is False
-        assert data["file_extraction"]["default_behavior"] == "attach_only"
+        assert data["file_extraction"]["default_behavior"] == "none"
         assert data["file_extraction"]["supported_extensions"] == []
     finally:
         config_manager.app_settings.feature_file_content_extraction_enabled = original_setting
@@ -85,7 +85,7 @@ def test_file_extraction_enabled_with_correct_extensions():
         data = resp.json()
         assert data["features"]["file_content_extraction"] is True
         assert data["file_extraction"]["enabled"] is True
-        assert data["file_extraction"]["default_behavior"] == "extract"
+        assert data["file_extraction"]["default_behavior"] == "full"
         # Only .pdf should be in supported_extensions since image-vision is disabled
         assert ".pdf" in data["file_extraction"]["supported_extensions"]
         assert ".png" not in data["file_extraction"]["supported_extensions"]
@@ -119,7 +119,7 @@ def test_file_extraction_handles_config_errors_gracefully():
             data = resp.json()
             # Should return safe defaults on error
             assert data["file_extraction"]["enabled"] is False
-            assert data["file_extraction"]["default_behavior"] == "attach_only"
+            assert data["file_extraction"]["default_behavior"] == "none"
             assert data["file_extraction"]["supported_extensions"] == []
     finally:
         config_manager.app_settings.feature_file_content_extraction_enabled = original_feature

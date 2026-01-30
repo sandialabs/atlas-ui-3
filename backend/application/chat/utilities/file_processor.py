@@ -49,7 +49,7 @@ async def handle_session_files(
 
     # Get content extractor
     extractor = get_content_extractor()
-    default_extract = extractor.get_default_behavior() == "extract" if extractor.is_enabled() else False
+    default_extract_mode = extractor.get_default_behavior() if extractor.is_enabled() else "none"
 
     try:
         uploaded_refs: Dict[str, Dict[str, Any]] = {}
@@ -58,11 +58,16 @@ async def handle_session_files(
                 # Handle both legacy (string) and new (dict) formats
                 if isinstance(file_data, str):
                     b64 = file_data
-                    should_extract = default_extract
+                    extract_mode = default_extract_mode
                 else:
                     b64 = file_data.get("content", "")
-                    # Per-file extract flag overrides default
-                    should_extract = file_data.get("extract", default_extract)
+                    # New extractMode field takes priority, then legacy extract bool
+                    if "extractMode" in file_data:
+                        extract_mode = file_data["extractMode"]
+                    elif "extract" in file_data:
+                        extract_mode = "full" if file_data["extract"] else "none"
+                    else:
+                        extract_mode = default_extract_mode
 
                 meta = await file_manager.upload_file(
                     user_email=user_email,
@@ -81,8 +86,11 @@ async def handle_session_files(
                     "last_modified": meta.get("last_modified"),
                 }
 
-                # Attempt content extraction if enabled and requested
-                if should_extract and extractor.is_enabled():
+                # Store the extraction mode for build_files_manifest
+                file_ref["extract_mode"] = extract_mode
+
+                # Attempt content extraction if enabled and mode requests it
+                if extract_mode in ("full", "preview") and extractor.is_enabled():
                     extraction_result = await extractor.extract_content(
                         filename=filename,
                         content_base64=b64,
@@ -536,11 +544,15 @@ def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, 
     if not files_ctx:
         return None
 
-    # Build file list with extracted content previews
+    # Build file list with extracted content based on extract_mode
     file_entries = []
+    has_full = False
+    has_preview = False
+    has_none = False
     for name in sorted(files_ctx.keys()):
         file_info = files_ctx[name]
         entry = f"- {name}"
+        mode = file_info.get("extract_mode", "preview")
 
         # Include extraction metadata if available
         if file_info.get("extraction_metadata"):
@@ -548,36 +560,47 @@ def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, 
             if meta.get("pages"):
                 entry += f" ({meta['pages']} pages)"
 
-        # Include extracted preview if available
-        preview = file_info.get("extracted_preview")
-        if preview:
+        if mode == "full" and file_info.get("extracted_content"):
+            has_full = True
+            content = file_info["extracted_content"]
+            entry += (
+                f"\n    << content of file {name} >>\n"
+                f"    {content}\n"
+                f"    << end content of file {name} >>"
+            )
+        elif mode == "preview" and file_info.get("extracted_preview"):
+            has_preview = True
+            preview = file_info["extracted_preview"]
             # Limit to 10 lines and 2000 characters to prevent excessive token usage
             lines = preview.split("\n")[:10]
             indented_preview = "\n    ".join(lines)
             if len(indented_preview) > 2000:
                 indented_preview = indented_preview[:1997] + "..."
             entry += f"\n    Content preview:\n    {indented_preview}"
+        else:
+            has_none = True
 
         file_entries.append(entry)
 
     file_list = "\n".join(file_entries)
 
-    # Determine if any files have extracted content
-    has_extractions = any(
-        files_ctx[name].get("extracted_preview") for name in files_ctx
-    )
-
-    if has_extractions:
-        context_note = (
-            "(Files with content previews shown above have been analyzed. "
-            "You can reference this content directly. For files without previews, "
-            "you can ask to open or analyze them by name.)"
+    # Build context note based on which modes were used
+    notes = []
+    if has_full:
+        notes.append(
+            "Files with full content shown above have been fully extracted. "
+            "You can reference this content directly."
         )
-    else:
-        context_note = (
-            "(You can ask to open or analyze any of these by name. "
-            "Large contents are not fully in this prompt unless user or tools provided excerpts.)"
+    if has_preview:
+        notes.append(
+            "Files with content previews shown above have been partially analyzed. "
+            "You can reference preview content directly."
         )
+    if has_none:
+        notes.append(
+            "Files listed by name only can be opened or analyzed on request."
+        )
+    context_note = f"({' '.join(notes)})" if notes else ""
 
     return {
         "role": "system",
