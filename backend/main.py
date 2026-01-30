@@ -3,6 +3,28 @@ Basic chat backend implementing the modular architecture.
 Focuses on essential chat functionality only.
 """
 
+# Suppress LiteLLM verbose logging BEFORE any transitive import of litellm.
+# litellm._logging reads LITELLM_LOG at import time and defaults to DEBUG.
+# This must happen before any other imports that might load litellm.
+import os
+from pathlib import Path as _Path
+from dotenv import dotenv_values as _dotenv_values
+
+# Load .env values without setting them in os.environ yet (just to read feature flag)
+_env_path = _Path(__file__).parent.parent / ".env"
+_env_values = _dotenv_values(_env_path) if _env_path.exists() else {}
+
+# Check feature flag: FEATURE_SUPPRESS_LITELLM_LOGGING (default: true)
+_suppress_litellm = _env_values.get("FEATURE_SUPPRESS_LITELLM_LOGGING", "true").lower() in ("true", "1", "yes")
+
+if _suppress_litellm and "LITELLM_LOG" not in os.environ:
+    os.environ["LITELLM_LOG"] = "ERROR"
+
+# Clean up temporary imports
+del _Path, _dotenv_values, _env_path, _env_values, _suppress_litellm
+
+# Standard imports follow - must come after LiteLLM logging suppression above
+# ruff: noqa: E402
 import asyncio
 import logging
 from contextlib import asynccontextmanager

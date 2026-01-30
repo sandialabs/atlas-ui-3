@@ -41,7 +41,7 @@ class LiteLLMCaller:
 
         Args:
             llm_config: LLM configuration object
-            debug_mode: Enable verbose LiteLLM logging
+            debug_mode: Enable verbose LiteLLM logging (overridden by feature flag)
             rag_service: UnifiedRAGService for RAG-augmented calls
         """
         if llm_config is None:
@@ -53,8 +53,14 @@ class LiteLLMCaller:
         # Store RAG service for RAG queries
         self._rag_service = rag_service
 
-        # Set litellm verbosity based on debug mode
-        litellm.set_verbose = debug_mode
+        # Set litellm verbosity based on debug mode, but respect the suppress feature flag
+        # The feature flag takes precedence - if suppression is enabled, never set verbose
+        from modules.config.config_manager import get_app_settings
+        app_settings = get_app_settings()
+        if app_settings.feature_suppress_litellm_logging:
+            litellm.set_verbose = False
+        else:
+            litellm.set_verbose = debug_mode
 
     @staticmethod
     def _parse_qualified_data_source(qualified_data_source: str) -> str:
