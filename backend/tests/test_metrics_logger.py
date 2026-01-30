@@ -3,8 +3,6 @@
 import logging
 from unittest.mock import patch, MagicMock
 
-import pytest
-
 from core.metrics_logger import log_metric
 
 
