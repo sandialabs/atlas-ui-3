@@ -930,7 +930,7 @@ const ChatArea = () => {
                           <span className="text-xs px-2 py-1 rounded bg-gray-600 text-gray-300">{file.type}</span>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-gray-400">
-                          <span>{file.source === 'tool' ? '🔧 generated' : '📤 uploaded'}</span>
+                          <span>{file.source === 'tool' ? 'generated' : 'uploaded'}</span>
                           <span>{(file.size / 1024).toFixed(1)}KB</span>
                         </div>
                       </div>
