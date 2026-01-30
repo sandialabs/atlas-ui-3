@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - Direct Output for RAG Completions
+- RAG endpoints that return chat completions (LLM-interpreted results) are now returned directly without additional LLM processing
+- Added `is_completion` flag to `RAGResponse` to detect when content is already interpreted
+- UI displays a note when responses come from RAG completions endpoint
+- Reduces unnecessary LLM API calls and processing time for RAG completions
+
 ### PR #274 - 2026-01-30
 - **Feature**: Add multipart form-data upload support for file content extraction. Extractors can now use `request_format: "multipart"` to send files via multipart upload instead of base64 JSON, enabling compatibility with standard file upload APIs.
 - **Config**: Add `form_field_name` field to extractor config for controlling the multipart form field name (default: `"file"`).
