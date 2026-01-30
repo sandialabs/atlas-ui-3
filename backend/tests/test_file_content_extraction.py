@@ -804,6 +804,301 @@ class TestFileExtractorApiKeyAndHeaders:
                 assert captured_headers is None
 
 
+class TestMultipartUpload:
+    """Test multipart form-data upload path in FileContentExtractor."""
+
+    def test_file_extractor_config_form_field_name_default(self):
+        """form_field_name should default to 'file'."""
+        config = FileExtractorConfig(url="http://localhost:8010/extract")
+        assert config.form_field_name == "file"
+
+    def test_file_extractor_config_custom_form_field_name(self):
+        """form_field_name should accept custom values."""
+        config = FileExtractorConfig(
+            url="http://localhost:8010/extract",
+            request_format="multipart",
+            form_field_name="document"
+        )
+        assert config.form_field_name == "document"
+        assert config.request_format == "multipart"
+
+    @pytest.mark.asyncio
+    async def test_multipart_upload_sends_file(self):
+        """Multipart request_format should send file via multipart form-data."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            extractors={
+                "pdf-text": FileExtractorConfig(
+                    url="http://localhost:8010/extract-multipart",
+                    enabled=True,
+                    request_format="multipart",
+                    form_field_name="file",
+                    response_field="text"
+                )
+            },
+            extension_mapping={".pdf": "pdf-text"}
+        )
+        extractor = FileContentExtractor(config=config)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "success": True,
+            "text": "Extracted multipart content"
+        }
+
+        captured_kwargs = {}
+
+        async def capture_post(*args, **kwargs):
+            nonlocal captured_kwargs
+            captured_kwargs = kwargs
+            return mock_response
+
+        with patch('modules.file_storage.content_extractor.get_app_settings') as mock_settings:
+            mock_settings.return_value.feature_file_content_extraction_enabled = True
+
+            with patch('httpx.AsyncClient') as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(side_effect=capture_post)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client_class.return_value = mock_client
+
+                result = await extractor.extract_content(
+                    filename="document.pdf",
+                    content_base64="dGVzdCBjb250ZW50",  # "test content"
+                    mime_type="application/pdf"
+                )
+
+                assert result.success is True
+                assert result.content == "Extracted multipart content"
+
+                # Verify multipart files dict was passed
+                assert "files" in captured_kwargs
+                files = captured_kwargs["files"]
+                assert "file" in files
+                file_tuple = files["file"]
+                assert file_tuple[0] == "document.pdf"
+                assert file_tuple[1] == b"test content"
+                assert file_tuple[2] == "application/pdf"
+
+    @pytest.mark.asyncio
+    async def test_multipart_upload_custom_field_name(self):
+        """Multipart upload should use the configured form_field_name."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            extractors={
+                "pdf-text": FileExtractorConfig(
+                    url="http://localhost:8010/extract-multipart",
+                    enabled=True,
+                    request_format="multipart",
+                    form_field_name="document",
+                    response_field="text"
+                )
+            },
+            extension_mapping={".pdf": "pdf-text"}
+        )
+        extractor = FileContentExtractor(config=config)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True, "text": "Content"}
+
+        captured_kwargs = {}
+
+        async def capture_post(*args, **kwargs):
+            nonlocal captured_kwargs
+            captured_kwargs = kwargs
+            return mock_response
+
+        with patch('modules.file_storage.content_extractor.get_app_settings') as mock_settings:
+            mock_settings.return_value.feature_file_content_extraction_enabled = True
+
+            with patch('httpx.AsyncClient') as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(side_effect=capture_post)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client_class.return_value = mock_client
+
+                await extractor.extract_content(
+                    filename="document.pdf",
+                    content_base64="dGVzdA==",
+                )
+
+                files = captured_kwargs["files"]
+                assert "document" in files
+
+    @pytest.mark.asyncio
+    async def test_multipart_upload_invalid_base64(self):
+        """Multipart upload should handle invalid base64 gracefully."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            extractors={
+                "pdf-text": FileExtractorConfig(
+                    url="http://localhost:8010/extract-multipart",
+                    enabled=True,
+                    request_format="multipart",
+                    response_field="text"
+                )
+            },
+            extension_mapping={".pdf": "pdf-text"}
+        )
+        extractor = FileContentExtractor(config=config)
+
+        with patch('modules.file_storage.content_extractor.get_app_settings') as mock_settings:
+            mock_settings.return_value.feature_file_content_extraction_enabled = True
+
+            result = await extractor.extract_content(
+                filename="document.pdf",
+                content_base64="!!!not-valid-base64!!!"
+            )
+
+            assert result.success is False
+            assert "decode" in result.error.lower() or "base64" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_multipart_upload_includes_accept_header(self):
+        """Multipart upload should include Accept: application/json header."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            extractors={
+                "pdf-text": FileExtractorConfig(
+                    url="http://localhost:8010/extract-multipart",
+                    enabled=True,
+                    request_format="multipart",
+                    response_field="text"
+                )
+            },
+            extension_mapping={".pdf": "pdf-text"}
+        )
+        extractor = FileContentExtractor(config=config)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True, "text": "Content"}
+
+        captured_kwargs = {}
+
+        async def capture_post(*args, **kwargs):
+            nonlocal captured_kwargs
+            captured_kwargs = kwargs
+            return mock_response
+
+        with patch('modules.file_storage.content_extractor.get_app_settings') as mock_settings:
+            mock_settings.return_value.feature_file_content_extraction_enabled = True
+
+            with patch('httpx.AsyncClient') as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(side_effect=capture_post)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client_class.return_value = mock_client
+
+                await extractor.extract_content(
+                    filename="document.pdf",
+                    content_base64="dGVzdA=="
+                )
+
+                headers = captured_kwargs.get("headers", {})
+                assert headers.get("Accept") == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_multipart_upload_with_api_key(self):
+        """Multipart upload should include Authorization header when api_key is set."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            extractors={
+                "pdf-text": FileExtractorConfig(
+                    url="http://localhost:8010/extract-multipart",
+                    enabled=True,
+                    request_format="multipart",
+                    api_key="sk-test-key",
+                    response_field="text"
+                )
+            },
+            extension_mapping={".pdf": "pdf-text"}
+        )
+        extractor = FileContentExtractor(config=config)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True, "text": "Content"}
+
+        captured_kwargs = {}
+
+        async def capture_post(*args, **kwargs):
+            nonlocal captured_kwargs
+            captured_kwargs = kwargs
+            return mock_response
+
+        with patch('modules.file_storage.content_extractor.get_app_settings') as mock_settings:
+            mock_settings.return_value.feature_file_content_extraction_enabled = True
+
+            with patch('httpx.AsyncClient') as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(side_effect=capture_post)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client_class.return_value = mock_client
+
+                await extractor.extract_content(
+                    filename="document.pdf",
+                    content_base64="dGVzdA=="
+                )
+
+                headers = captured_kwargs.get("headers", {})
+                assert headers.get("Authorization") == "Bearer sk-test-key"
+
+    @pytest.mark.asyncio
+    async def test_multipart_default_mime_type(self):
+        """Multipart upload should default to application/octet-stream when no mime_type."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            extractors={
+                "pdf-text": FileExtractorConfig(
+                    url="http://localhost:8010/extract-multipart",
+                    enabled=True,
+                    request_format="multipart",
+                    response_field="text"
+                )
+            },
+            extension_mapping={".pdf": "pdf-text"}
+        )
+        extractor = FileContentExtractor(config=config)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True, "text": "Content"}
+
+        captured_kwargs = {}
+
+        async def capture_post(*args, **kwargs):
+            nonlocal captured_kwargs
+            captured_kwargs = kwargs
+            return mock_response
+
+        with patch('modules.file_storage.content_extractor.get_app_settings') as mock_settings:
+            mock_settings.return_value.feature_file_content_extraction_enabled = True
+
+            with patch('httpx.AsyncClient') as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(side_effect=capture_post)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client_class.return_value = mock_client
+
+                await extractor.extract_content(
+                    filename="document.pdf",
+                    content_base64="dGVzdA==",
+                    mime_type=None
+                )
+
+                files = captured_kwargs["files"]
+                file_tuple = files["file"]
+                assert file_tuple[2] == "application/octet-stream"
+
+
 class TestConfigManagerFileExtractors:
     """Test ConfigManager loading of file extractors config."""
 

@@ -17,7 +17,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from pydantic import BaseModel
 import uvicorn
 
@@ -395,6 +395,53 @@ async def ocr_extract(request: ExtractionRequest):
 
 
 # ---------------------------------------------------------------------------
+# Multipart Upload Extraction (accepts file via form-data)
+# ---------------------------------------------------------------------------
+
+@app.post("/extract-multipart", response_model=ExtractionResponse)
+async def extract_pdf_multipart(file: UploadFile = File(...)):
+    """
+    Extract text content from a PDF file uploaded as multipart form-data.
+
+    Accepts a file via multipart/form-data (e.g., curl -F 'file=@doc.pdf').
+    Returns the same JSON format as /extract.
+    """
+    try:
+        pdf_bytes = await file.read()
+        filename = file.filename or "unknown.pdf"
+
+        try:
+            text, metadata_dict = extract_pdf_text(pdf_bytes)
+        except ImportError as e:
+            return ExtractionResponse(success=False, error=str(e))
+        except Exception as e:
+            logger.exception(
+                f"PDF extraction failed for {sanitize_filename_for_log(filename)}"
+            )
+            return ExtractionResponse(
+                success=False,
+                error=f"PDF extraction failed: {str(e)}"
+            )
+
+        return ExtractionResponse(
+            success=True,
+            text=text,
+            metadata=ExtractionMetadata(
+                pages=metadata_dict.get("pages"),
+                char_count=metadata_dict.get("char_count"),
+                truncated=False,
+            )
+        )
+
+    except Exception as e:
+        logger.exception("Unexpected error processing multipart upload")
+        return ExtractionResponse(
+            success=False,
+            error=f"Unexpected error: {str(e)}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Utility Endpoints
 # ---------------------------------------------------------------------------
 
@@ -412,7 +459,8 @@ async def root():
         "version": "1.0.0",
         "description": "Mock file extraction service for testing ATLAS",
         "endpoints": {
-            "/extract": "POST - Extract text from PDF files (real extraction)",
+            "/extract": "POST - Extract text from PDF files (base64 JSON)",
+            "/extract-multipart": "POST - Extract text from PDF files (multipart form-data)",
             "/analyze": "POST - Analyze images (mock vision response)",
             "/ocr": "POST - OCR text extraction (mock response)",
             "/health": "GET - Health check",
@@ -438,10 +486,11 @@ async def root():
 if __name__ == "__main__":
     print("Starting Mock File Extractor Service...")
     print("Available endpoints:")
-    print("  - POST /extract  - PDF text extraction (real extraction with pypdf)")
-    print("  - POST /analyze  - Image vision analysis (mock response)")
-    print("  - POST /ocr      - OCR text extraction (mock response)")
-    print("  - GET  /health   - Health check")
+    print("  - POST /extract           - PDF text extraction (base64 JSON)")
+    print("  - POST /extract-multipart - PDF text extraction (multipart form-data)")
+    print("  - POST /analyze           - Image vision analysis (mock response)")
+    print("  - POST /ocr               - OCR text extraction (mock response)")
+    print("  - GET  /health            - Health check")
     print()
     print("Default port: 8010")
     print()

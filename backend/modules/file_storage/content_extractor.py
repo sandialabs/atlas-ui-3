@@ -5,6 +5,7 @@ This module provides a generic interface for extracting content from files
 (PDFs, images, etc.) via configurable HTTP endpoints.
 """
 
+import base64
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -165,15 +166,6 @@ class FileContentExtractor:
             )
 
         try:
-            # Build request payload
-            payload = {
-                "content": content_base64,
-                "filename": filename,
-                "options": {
-                    "preview_chars": extractor.preview_chars,
-                }
-            }
-
             # Build request headers
             request_headers = {}
 
@@ -186,12 +178,45 @@ class FileContentExtractor:
                 request_headers.update(extractor.headers)
 
             async with httpx.AsyncClient(timeout=extractor.timeout_seconds) as client:
-                response = await client.request(
-                    method=extractor.method,
-                    url=extractor.url,
-                    json=payload,
-                    headers=request_headers if request_headers else None,
-                )
+                if extractor.request_format == "multipart":
+                    # Multipart form-data upload
+                    try:
+                        file_bytes = base64.b64decode(content_base64)
+                    except Exception as e:
+                        return ExtractionResult(
+                            success=False,
+                            error=f"Failed to decode base64 content: {str(e)}"
+                        )
+
+                    content_type = mime_type or "application/octet-stream"
+                    files = {
+                        extractor.form_field_name: (filename, file_bytes, content_type)
+                    }
+
+                    # Request JSON response from the extractor service
+                    request_headers.setdefault("Accept", "application/json")
+
+                    response = await client.post(
+                        url=extractor.url,
+                        files=files,
+                        headers=request_headers if request_headers else None,
+                    )
+                else:
+                    # Base64 JSON payload (default)
+                    payload = {
+                        "content": content_base64,
+                        "filename": filename,
+                        "options": {
+                            "preview_chars": extractor.preview_chars,
+                        }
+                    }
+
+                    response = await client.request(
+                        method=extractor.method,
+                        url=extractor.url,
+                        json=payload,
+                        headers=request_headers if request_headers else None,
+                    )
 
                 if response.status_code != 200:
                     logger.warning(

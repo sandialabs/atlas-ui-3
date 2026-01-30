@@ -91,7 +91,8 @@ Create or edit `config/defaults/file-extractors.json` (or `config/overrides/file
 | `timeout_seconds` | int | `30` | Request timeout |
 | `max_file_size_mb` | int | `50` | Maximum file size limit |
 | `preview_chars` | int | `2000` | Chars to include in preview |
-| `request_format` | string | `"base64"` | `"base64"` or `"url"` |
+| `request_format` | string | `"base64"` | `"base64"`, `"multipart"`, or `"url"` |
+| `form_field_name` | string | `"file"` | Form field name for multipart uploads |
 | `response_field` | string | `"text"` | JSON field containing extracted text |
 | `enabled` | bool | `true` | Enable/disable this extractor |
 | `api_key` | string | `null` | API key for authentication (see below) |
@@ -159,7 +160,9 @@ Use the `headers` field for custom authentication schemes or additional metadata
 
 ## Extractor Service Contract
 
-Each extractor URL should accept:
+### Base64 JSON Format (`request_format: "base64"`)
+
+The default format sends the file as a base64-encoded string in a JSON payload:
 
 **Request:**
 ```json
@@ -180,6 +183,31 @@ Each extractor URL should accept:
   "metadata": {
     "pages": 5,
     "char_count": 12500
+  }
+}
+```
+
+### Multipart Form-Data Format (`request_format: "multipart"`)
+
+Sends the file as a multipart form-data upload, equivalent to `curl -F 'file=@document.pdf'`. This is useful for extraction services that accept standard file uploads.
+
+**Request:** `POST` with `Content-Type: multipart/form-data` containing the file in the field specified by `form_field_name` (default: `"file"`). An `Accept: application/json` header is included automatically.
+
+**Response:** Same JSON format as base64 -- the extractor must return JSON with the field specified by `response_field`.
+
+**Example config:**
+```json
+{
+  "extractors": {
+    "pdf-text": {
+      "url": "https://example.com/nlp/extract",
+      "method": "POST",
+      "request_format": "multipart",
+      "form_field_name": "file",
+      "response_field": "text",
+      "api_key": "${NLP_EXTRACT_API_KEY}",
+      "enabled": true
+    }
   }
 }
 ```
