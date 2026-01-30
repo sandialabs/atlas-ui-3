@@ -13,7 +13,7 @@ const DEFAULT_FEATURES = {
 
 const DEFAULT_FILE_EXTRACTION = {
   enabled: false,
-  default_behavior: 'attach_only',
+  default_behavior: 'none',
   supported_extensions: []
 }
 

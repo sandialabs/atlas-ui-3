@@ -75,7 +75,7 @@ class TestFileExtractorsConfig:
         config = FileExtractorsConfig()
 
         assert config.enabled is True
-        assert config.default_behavior == "extract"
+        assert config.default_behavior == "full"
         assert config.extractors == {}
         assert config.extension_mapping == {}
         assert config.mime_mapping == {}
@@ -106,7 +106,7 @@ class TestFileExtractorsConfig:
         )
 
         assert config.enabled is True
-        assert config.default_behavior == "attach_only"
+        assert config.default_behavior == "none"  # "attach_only" normalized to "none"
         assert len(config.extractors) == 2
         assert isinstance(config.extractors["pdf-text"], FileExtractorConfig)
         assert config.extractors["pdf-text"].url == "http://localhost:8010/extract"
@@ -177,7 +177,26 @@ class TestFileContentExtractor:
         config = FileExtractorsConfig(default_behavior="attach_only")
         extractor = FileContentExtractor(config=config)
 
-        assert extractor.get_default_behavior() == "attach_only"
+        assert extractor.get_default_behavior() == "none"  # "attach_only" normalized
+
+    def test_get_default_behavior_preview(self):
+        """get_default_behavior should accept preview mode directly."""
+        config = FileExtractorsConfig(default_behavior="preview")
+        extractor = FileContentExtractor(config=config)
+
+        assert extractor.get_default_behavior() == "preview"
+
+    def test_legacy_extract_normalizes_to_full(self):
+        """Legacy 'extract' value should normalize to 'full'."""
+        config = FileExtractorsConfig(default_behavior="extract")
+
+        assert config.default_behavior == "full"
+
+    def test_legacy_attach_only_normalizes_to_none(self):
+        """Legacy 'attach_only' value should normalize to 'none'."""
+        config = FileExtractorsConfig(default_behavior="attach_only")
+
+        assert config.default_behavior == "none"
 
     def test_get_extractor_for_file_by_extension(self):
         """Should find extractor by file extension."""

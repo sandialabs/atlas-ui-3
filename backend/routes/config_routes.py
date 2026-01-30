@@ -324,7 +324,7 @@ def _get_file_extraction_config(config_manager) -> dict:
     if not app_settings.feature_file_content_extraction_enabled:
         return {
             "enabled": False,
-            "default_behavior": "attach_only",
+            "default_behavior": "none",
             "supported_extensions": []
         }
 
@@ -347,7 +347,7 @@ def _get_file_extraction_config(config_manager) -> dict:
         logger.warning(f"Error building file extraction config: {e}")
         return {
             "enabled": False,
-            "default_behavior": "attach_only",
+            "default_behavior": "none",
             "supported_extensions": []
         }
 
