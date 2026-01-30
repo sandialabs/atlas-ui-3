@@ -239,7 +239,8 @@ class FileExtractorConfig(BaseModel):
     timeout_seconds: int = 30
     max_file_size_mb: int = 50
     preview_chars: Optional[int] = 2000
-    request_format: str = "base64"  # "base64" or "url"
+    request_format: str = "base64"  # "base64", "multipart", or "url"
+    form_field_name: str = "file"  # Field name for multipart form uploads
     response_field: str = "text"
     enabled: bool = True
     # API key for authentication (supports ${ENV_VAR} syntax)
