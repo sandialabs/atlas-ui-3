@@ -75,6 +75,8 @@ class AtlasClient:
         model: Optional[str] = None,
         agent_mode: bool = False,
         selected_tools: Optional[List[str]] = None,
+        selected_data_sources: Optional[List[str]] = None,
+        only_rag: bool = False,
         user_email: Optional[str] = None,
         session_id: Optional[UUID] = None,
         max_steps: int = 10,
@@ -90,6 +92,8 @@ class AtlasClient:
             model: LLM model name. Uses config default if not specified.
             agent_mode: Enable agent loop for multi-step tool use.
             selected_tools: List of tool names to enable.
+            selected_data_sources: List of RAG data source names to query.
+            only_rag: If True, use only RAG without tools (RAG-only mode).
             user_email: User identity for auth-filtered tools/RAG.
             session_id: Reuse an existing session for multi-turn.
             max_steps: Max agent iterations.
@@ -135,6 +139,8 @@ class AtlasClient:
             content=prompt,
             model=model,
             selected_tools=selected_tools,
+            selected_data_sources=selected_data_sources,
+            only_rag=only_rag,
             agent_mode=agent_mode,
             agent_max_steps=max_steps,
             user_email=user_email,
@@ -153,6 +159,49 @@ class AtlasClient:
     def chat_sync(self, prompt: str, **kwargs) -> ChatResult:
         """Synchronous wrapper around chat()."""
         return asyncio.run(self.chat(prompt, **kwargs))
+
+    async def list_data_sources(self, user_email: Optional[str] = None) -> Dict[str, Any]:
+        """Discover and list available RAG data sources.
+
+        Calls the RAG discovery mechanism to get actual available sources
+        with their qualified IDs (format: server:source_id).
+
+        Args:
+            user_email: User identity for auth-filtered sources.
+
+        Returns:
+            Dict with 'servers' (config info) and 'sources' (discovered qualified IDs).
+        """
+        await self.initialize()
+        cfg = self._factory.get_config_manager()
+
+        if user_email is None:
+            user_email = cfg.app_settings.test_user or "cli@atlas.local"
+
+        # Get server config info
+        servers = {}
+        for name, source in cfg.rag_sources_config.sources.items():
+            if source.enabled:
+                servers[name] = {
+                    "type": source.type,
+                    "display_name": source.display_name or name,
+                    "description": source.description,
+                }
+
+        # Discover actual sources via RAG MCP service
+        discovered_sources = []
+        try:
+            rag_service = self._factory.get_unified_rag_service()
+            # Use the MCP RAG discovery if available
+            if hasattr(rag_service, 'rag_mcp_service') and rag_service.rag_mcp_service:
+                discovered_sources = await rag_service.rag_mcp_service.discover_data_sources(user_email)
+        except Exception as e:
+            logger.warning("RAG discovery failed: %s", e)
+
+        return {
+            "servers": servers,
+            "sources": discovered_sources,
+        }
 
     async def cleanup(self) -> None:
         """Cleanup MCP connections."""
