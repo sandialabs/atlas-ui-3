@@ -252,10 +252,17 @@ class FileExtractorConfig(BaseModel):
 class FileExtractorsConfig(BaseModel):
     """Configuration for file content extraction services."""
     enabled: bool = True
-    default_behavior: str = "extract"  # "extract" or "attach_only"
+    default_behavior: str = "full"  # "full" | "preview" | "none"
     extractors: Dict[str, FileExtractorConfig] = Field(default_factory=dict)
     extension_mapping: Dict[str, str] = Field(default_factory=dict)
     mime_mapping: Dict[str, str] = Field(default_factory=dict)
+
+    @field_validator('default_behavior', mode='before')
+    @classmethod
+    def normalize_default_behavior(cls, v):
+        """Normalize legacy values to new 3-mode scheme."""
+        legacy_map = {"extract": "full", "attach_only": "none"}
+        return legacy_map.get(v, v)
 
     @field_validator('extractors', mode='before')
     @classmethod

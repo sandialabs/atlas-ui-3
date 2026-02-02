@@ -10,7 +10,21 @@ When users upload files, Atlas UI can automatically extract text content and sen
 
 1. **Feature flag**: `FEATURE_FILE_CONTENT_EXTRACTION_ENABLED`
 2. **Config file**: `config/defaults/file-extractors.json`
-3. **Per-file toggle**: Users can enable/disable extraction per file in the UI
+3. **Per-file mode toggle**: Users can cycle extraction mode per file in the UI
+
+## Extraction Modes
+
+Atlas UI supports three extraction modes, selectable globally and per-file:
+
+| Mode | Description | LLM Prompt Behavior |
+|------|-------------|---------------------|
+| `full` | Default. Entire extracted text injected into context | Wrapped in `<< content of file X >>` / `<< end content of file X >>` markers, no truncation |
+| `preview` | Truncated preview only | First 10 lines / 2000 chars with "Content preview:" label |
+| `none` | Filename listed, no content | File listed by name only; content available on request |
+
+The UI displays a clickable badge that cycles through modes: green (full) -> blue (preview) -> gray (none).
+
+Legacy config values are automatically normalized: `"extract"` -> `"full"`, `"attach_only"` -> `"none"`.
 
 ## Configuration
 
@@ -29,7 +43,7 @@ Create or edit `config/defaults/file-extractors.json` (or `config/overrides/file
 ```json
 {
   "enabled": true,
-  "default_behavior": "extract",
+  "default_behavior": "full",
 
   "extractors": {
     "pdf-text": {
@@ -63,7 +77,7 @@ Create or edit `config/defaults/file-extractors.json` (or `config/overrides/file
 | Field | Type | Description |
 |-------|------|-------------|
 | `enabled` | bool | Global kill switch (independent of feature flag) |
-| `default_behavior` | string | `"extract"` or `"attach_only"` - system default |
+| `default_behavior` | string | `"full"`, `"preview"`, or `"none"` - system default (legacy `"extract"` and `"attach_only"` auto-normalized) |
 | `extractors` | object | Named extractor services with HTTP config |
 | `extension_mapping` | object | File extension to extractor name mapping |
 | `mime_mapping` | object | MIME type to extractor name (fallback) |

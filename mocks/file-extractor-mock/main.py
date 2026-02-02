@@ -14,6 +14,7 @@ Follows the contract defined in the file-content-extraction-plan.
 import base64
 import io
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -21,7 +22,17 @@ from fastapi import FastAPI, File, UploadFile
 from pydantic import BaseModel
 import uvicorn
 
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("file-extractor-mock")
+
+
+def _fmt_bytes(n: int) -> str:
+    """Format byte count as human-readable string."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
 
 
 def sanitize_filename_for_log(filename: str) -> str:
@@ -127,26 +138,35 @@ async def extract_pdf(request: ExtractionRequest):
 
     This endpoint actually extracts text from the provided PDF using pypdf.
     """
+    safe_name = sanitize_filename_for_log(request.filename)
+    b64_len = len(request.content)
+    logger.info("[/extract] Received request: filename=%s, base64_size=%s", safe_name, _fmt_bytes(b64_len))
+    t0 = time.perf_counter()
+
     try:
         # Decode base64 content
         try:
             pdf_bytes = base64.b64decode(request.content)
         except Exception as e:
+            logger.warning("[/extract] FAILED - invalid base64 for %s: %s", safe_name, e)
             return ExtractionResponse(
                 success=False,
                 error=f"Invalid base64 content: {str(e)}"
             )
 
+        logger.info("[/extract] Decoded file: raw_size=%s", _fmt_bytes(len(pdf_bytes)))
+
         # Extract text
         try:
             text, metadata_dict = extract_pdf_text(pdf_bytes)
         except ImportError as e:
+            logger.warning("[/extract] FAILED - missing dependency: %s", e)
             return ExtractionResponse(
                 success=False,
                 error=str(e)
             )
         except Exception as e:
-            logger.exception(f"PDF extraction failed for {sanitize_filename_for_log(request.filename)}")
+            logger.exception(f"PDF extraction failed for {safe_name}")
             return ExtractionResponse(
                 success=False,
                 error=f"PDF extraction failed: {str(e)}"
@@ -162,6 +182,12 @@ async def extract_pdf(request: ExtractionRequest):
             # We return full text, but note truncation in metadata
             pass
 
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.info(
+            "[/extract] OK - filename=%s, pages=%s, output_chars=%d, truncated=%s, elapsed=%.1fms",
+            safe_name, metadata_dict.get("pages"), len(text), truncated, elapsed_ms,
+        )
+
         return ExtractionResponse(
             success=True,
             text=text,
@@ -173,7 +199,8 @@ async def extract_pdf(request: ExtractionRequest):
         )
 
     except Exception as e:
-        logger.exception(f"Unexpected error processing {sanitize_filename_for_log(request.filename)}")
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.exception(f"Unexpected error processing {safe_name} after {elapsed_ms:.1f}ms")
         return ExtractionResponse(
             success=False,
             error=f"Unexpected error: {str(e)}"
@@ -256,18 +283,38 @@ async def analyze_image(request: ExtractionRequest):
     This is a mock endpoint that returns generic descriptions.
     In production, this would call a vision API (GPT-4V, Claude Vision, etc.).
     """
+    safe_name = sanitize_filename_for_log(request.filename)
+    b64_len = len(request.content)
+    logger.info("[/analyze] Received request: filename=%s, base64_size=%s", safe_name, _fmt_bytes(b64_len))
+    t0 = time.perf_counter()
+
     try:
         # Decode base64 content
         try:
             image_bytes = base64.b64decode(request.content)
         except Exception as e:
+            logger.warning("[/analyze] FAILED - invalid base64 for %s: %s", safe_name, e)
             return ExtractionResponse(
                 success=False,
                 error=f"Invalid base64 content: {str(e)}"
             )
 
+        logger.info("[/analyze] Decoded file: raw_size=%s", _fmt_bytes(len(image_bytes)))
+
         # Generate mock description
         description, metadata_dict = get_image_description(request.filename, image_bytes)
+
+        dims = ""
+        if metadata_dict.get("width"):
+            dims = f", dimensions={metadata_dict['width']}x{metadata_dict['height']}"
+            if metadata_dict.get("format"):
+                dims += f" ({metadata_dict['format']})"
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.info(
+            "[/analyze] OK - filename=%s, output_chars=%d%s, elapsed=%.1fms",
+            safe_name, len(description), dims, elapsed_ms,
+        )
 
         return ExtractionResponse(
             success=True,
@@ -282,7 +329,8 @@ async def analyze_image(request: ExtractionRequest):
         )
 
     except Exception as e:
-        logger.exception(f"Unexpected error analyzing {sanitize_filename_for_log(request.filename)}")
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.exception(f"Unexpected error analyzing {safe_name} after {elapsed_ms:.1f}ms")
         return ExtractionResponse(
             success=False,
             error=f"Unexpected error: {str(e)}"
@@ -365,18 +413,32 @@ async def ocr_extract(request: ExtractionRequest):
     This is a mock endpoint that returns generic OCR results.
     In production, this would use Tesseract, Google Cloud Vision, etc.
     """
+    safe_name = sanitize_filename_for_log(request.filename)
+    b64_len = len(request.content)
+    logger.info("[/ocr] Received request: filename=%s, base64_size=%s", safe_name, _fmt_bytes(b64_len))
+    t0 = time.perf_counter()
+
     try:
         # Decode base64 content
         try:
             image_bytes = base64.b64decode(request.content)
         except Exception as e:
+            logger.warning("[/ocr] FAILED - invalid base64 for %s: %s", safe_name, e)
             return ExtractionResponse(
                 success=False,
                 error=f"Invalid base64 content: {str(e)}"
             )
 
+        logger.info("[/ocr] Decoded file: raw_size=%s", _fmt_bytes(len(image_bytes)))
+
         # Generate mock OCR text
         text, metadata_dict = perform_mock_ocr(request.filename, image_bytes)
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.info(
+            "[/ocr] OK - filename=%s, output_chars=%d, elapsed=%.1fms",
+            safe_name, len(text), elapsed_ms,
+        )
 
         return ExtractionResponse(
             success=True,
@@ -387,7 +449,8 @@ async def ocr_extract(request: ExtractionRequest):
         )
 
     except Exception as e:
-        logger.exception(f"Unexpected error OCR processing {sanitize_filename_for_log(request.filename)}")
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.exception(f"Unexpected error OCR processing {safe_name} after {elapsed_ms:.1f}ms")
         return ExtractionResponse(
             success=False,
             error=f"Unexpected error: {str(e)}"
@@ -406,22 +469,35 @@ async def extract_pdf_multipart(file: UploadFile = File(...)):
     Accepts a file via multipart/form-data (e.g., curl -F 'file=@doc.pdf').
     Returns the same JSON format as /extract.
     """
+    filename = file.filename or "unknown.pdf"
+    safe_name = sanitize_filename_for_log(filename)
+    content_type = file.content_type or "unknown"
+    logger.info("[/extract-multipart] Received upload: filename=%s, content_type=%s", safe_name, content_type)
+    t0 = time.perf_counter()
+
     try:
         pdf_bytes = await file.read()
-        filename = file.filename or "unknown.pdf"
+        logger.info("[/extract-multipart] Read file: raw_size=%s", _fmt_bytes(len(pdf_bytes)))
 
         try:
             text, metadata_dict = extract_pdf_text(pdf_bytes)
         except ImportError as e:
+            logger.warning("[/extract-multipart] FAILED - missing dependency: %s", e)
             return ExtractionResponse(success=False, error=str(e))
         except Exception as e:
             logger.exception(
-                f"PDF extraction failed for {sanitize_filename_for_log(filename)}"
+                f"PDF extraction failed for {safe_name}"
             )
             return ExtractionResponse(
                 success=False,
                 error=f"PDF extraction failed: {str(e)}"
             )
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.info(
+            "[/extract-multipart] OK - filename=%s, pages=%s, output_chars=%d, elapsed=%.1fms",
+            safe_name, metadata_dict.get("pages"), len(text), elapsed_ms,
+        )
 
         return ExtractionResponse(
             success=True,
@@ -434,7 +510,8 @@ async def extract_pdf_multipart(file: UploadFile = File(...)):
         )
 
     except Exception as e:
-        logger.exception("Unexpected error processing multipart upload")
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.exception(f"Unexpected error processing multipart upload after {elapsed_ms:.1f}ms")
         return ExtractionResponse(
             success=False,
             error=f"Unexpected error: {str(e)}"
@@ -448,6 +525,7 @@ async def extract_pdf_multipart(file: UploadFile = File(...)):
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    logger.info("[/health] Health check requested")
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
