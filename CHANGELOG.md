@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #279 - 2026-02-01
+- Make backend port configurable via `PORT` in `.env` instead of hardcoding 8000 in `agent_start.sh`, enabling git worktrees to run on different ports.
+- Add git-worktree-setup Claude Code agent with automatic port conflict handling.
+
 ### PR #278 - 2026-01-30
 - Replace boolean file extraction toggle with 3-mode system (`full` | `preview` | `none`) for fine-grained control over how file content is injected into LLM prompts.
 - Add backward-compatible normalization of legacy config values (`"extract"` -> `"full"`, `"attach_only"` -> `"none"`).
