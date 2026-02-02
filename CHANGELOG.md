@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - Direct Output for RAG Completions
+### PR #276 - 2026-02-01
 - RAG endpoints that return chat completions (LLM-interpreted results) are now returned directly without additional LLM processing
 - Added `is_completion` flag to `RAGResponse` to detect when content is already interpreted
 - UI displays a note when responses come from RAG completions endpoint

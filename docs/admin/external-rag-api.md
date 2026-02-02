@@ -228,6 +228,25 @@ The mock runs on `http://localhost:8002` with token `test-atlas-rag-token`.
 | `technical-docs` | Internal | engineering, devops | API auth, database schema, deployment, microservices |
 | `product-knowledge` | Public | (none) | Getting started, troubleshooting, pricing, API reference |
 
+## RAG Completions vs Raw Results
+
+Last updated: 2026-02-01
+
+Atlas UI supports two types of RAG responses:
+
+1. **Raw Results**: The RAG API returns document chunks or context. Atlas sends this context to the configured LLM for interpretation and response generation. This is the standard flow for most RAG queries.
+
+2. **Completions**: The RAG API returns an already-interpreted response (detected by `"object": "chat.completion"` in the JSON response). Atlas detects this automatically and returns the content directly to the user without additional LLM processing.
+
+When a RAG source returns a completion, Atlas:
+- Skips the LLM call entirely, reducing latency and API costs
+- Prepends a note indicating the response came from the RAG completions endpoint
+- Appends RAG metadata (sources, processing time) if available
+
+The `is_completion` flag on `RAGResponse` tracks whether the response is already LLM-interpreted. This is set automatically by `AtlasRAGClient` when it detects `"object": "chat.completion"` in the API response.
+
+This behavior applies to both `call_with_rag` (RAG-only mode) and `call_with_rag_and_tools` (RAG + tools mode) in the LLM caller.
+
 ## Troubleshooting
 
 ### RAG panel not showing in UI
