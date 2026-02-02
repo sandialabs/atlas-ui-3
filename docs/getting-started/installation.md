@@ -112,7 +112,7 @@ bash agent_start.sh -b    # Only start backend
 
 The MCP mock server will be available at `http://127.0.0.1:8005/mcp` and provides simulated database tools for testing.
 
-After running the script, the application will be available at `http://localhost:8000`.
+After running the script, the application will be available at `http://localhost:8000` (default). Set `PORT` in `.env` to use a different port.
 
 ### Manual Setup
 
