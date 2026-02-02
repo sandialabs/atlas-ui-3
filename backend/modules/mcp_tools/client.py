@@ -183,7 +183,6 @@ class MCPToolManager:
             """Handle log messages from MCP server."""
             try:
                 # Import here to avoid circular dependency
-                from fastmcp.client.logging import LogMessage
                 
                 # Handle both LogMessage objects and dict-like structures
                 if hasattr(message, 'level'):
@@ -2039,7 +2038,7 @@ class MCPToolManager:
                                         base64.b64decode(data, validate=True)
                                     except Exception:
                                         logger.warning(
-                                            f"Skipping ImageContent with invalid base64 data"
+                                            "Skipping ImageContent with invalid base64 data"
                                         )
                                         continue
 

@@ -73,13 +73,11 @@ def _load_csv_bytes(filename: str, file_data_base64: str = "") -> bytes:
     if filename and _is_backend_download_path(filename):
         base = _backend_base_url()
         url = base.rstrip("/") + filename
-        headers = {"Accept": "text/csv, */*"}
         r = requests.get(url, timeout=20)
         r.raise_for_status()
         return r.content
 
     if filename and _is_http_url(filename):
-        headers = {"Accept": "text/csv, */*"}
         r = requests.get(filename, timeout=20)
         r.raise_for_status()
         return r.content
@@ -481,7 +479,7 @@ def plot_time_series(
             if not pd.api.types.is_numeric_dtype(plot_df[col]):
                 try:
                     plot_df[col] = pd.to_numeric(plot_df[col], errors='coerce')
-                except:
+                except Exception:
                     return {"results": {"error": f"Column '{col}' cannot be converted to numeric values."}}
 
         # Create the plot

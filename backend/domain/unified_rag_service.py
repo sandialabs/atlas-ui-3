@@ -8,13 +8,13 @@ This service provides a single interface for:
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
 from core.compliance import get_compliance_manager
 from core.log_sanitizer import sanitize_for_logging
 from modules.config.config_manager import ConfigManager, RAGSourceConfig, resolve_env_var
 from modules.rag.atlas_rag_client import AtlasRAGClient
-from modules.rag.client import DataSource, RAGResponse
+from modules.rag.client import RAGResponse
 
 logger = logging.getLogger(__name__)
 

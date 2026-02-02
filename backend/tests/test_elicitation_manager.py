@@ -223,7 +223,7 @@ class TestElicitationManager:
     async def test_get_pending_request(self):
         """Test retrieving a pending request."""
         manager = ElicitationManager()
-        request = manager.create_elicitation_request(
+        manager.create_elicitation_request(
             elicitation_id="elicit_123",
             tool_call_id="tool_456",
             tool_name="test_tool",

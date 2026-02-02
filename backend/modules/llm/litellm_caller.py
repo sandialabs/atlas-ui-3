@@ -513,13 +513,13 @@ class LiteLLMCaller:
                 logger.info(
                     "[LLM+RAG+Tools] RAG returned chat completion - returning directly without LLM processing"
                 )
-                
+
                 final_response = self._build_rag_completion_response(rag_response, display_source)
                 logger.info(
                     "[LLM+RAG+Tools] Returning RAG completion directly: response_length=%d",
                     len(final_response),
                 )
-                return final_response
+                return LLMResponse(content=final_response)
 
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()

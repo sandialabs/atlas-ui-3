@@ -7,7 +7,6 @@ Verifies that:
 - DELETE /api/feedback/{id} requires admin group membership
 """
 
-import csv
 import json
 import tempfile
 from pathlib import Path
