@@ -21,6 +21,9 @@ print_result() {
 cd "$PROJECT_ROOT"
 source .venv/bin/activate
 
+# Tests 1-7 require backend/ as cwd for imports
+cd "$PROJECT_ROOT/backend"
+
 # --- Test 1: tool_accepts_mcp_data function exists and is importable ---
 python -c "from application.chat.utilities.tool_executor import tool_accepts_mcp_data; print('OK')" 2>&1 | grep -q "OK"
 print_result $? "tool_accepts_mcp_data function is importable"
@@ -138,13 +141,17 @@ print('OK')
 " 2>&1 | grep -q "OK"
 print_result $? "inject_context_into_args does NOT inject _mcp_data when schema lacks it"
 
-# --- Test 7: Demo server plan_with_tools tool schema includes _mcp_data ---
+# --- Test 7: Demo server plan_with_tools tool works with _mcp_data ---
 python -c "
 import sys
-sys.path.insert(0, 'backend/mcp/username-override-demo')
-from main import plan_with_tools
-# Call the tool function directly
-result = plan_with_tools(task='test task', _mcp_data={'available_servers': [{'server_name': 's', 'tools': [{'name': 's_t', 'description': 'd'}], 'description': ''}]})
+sys.path.insert(0, 'mcp/username-override-demo')
+import importlib.util
+spec = importlib.util.spec_from_file_location('uod_main', 'mcp/username-override-demo/main.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+# @mcp.tool wraps the function in FunctionTool; .fn gets the raw callable
+fn = mod.plan_with_tools.fn
+result = fn(task='test task', _mcp_data={'available_servers': [{'server_name': 's', 'tools': [{'name': 's_t', 'description': 'd'}], 'description': ''}]})
 assert result['results']['task'] == 'test task'
 assert result['results']['available_server_count'] == 1
 assert result['results']['available_tool_count'] == 1
@@ -153,10 +160,95 @@ print('OK')
 print_result $? "Demo plan_with_tools tool works with _mcp_data"
 
 # --- Test 8: Run _mcp_data injection unit tests ---
-cd "$PROJECT_ROOT/backend"
 python -m pytest tests/test_mcp_data_injection.py -v --tb=short 2>&1 | tail -5
 python -m pytest tests/test_mcp_data_injection.py --tb=short -q > /dev/null 2>&1
 print_result $? "_mcp_data injection unit tests pass"
+
+cd "$PROJECT_ROOT"
+
+# --- Test 9: tool_planner format_tools_for_llm produces readable output ---
+python -c "
+import importlib.util
+spec = importlib.util.spec_from_file_location('tp', 'backend/mcp/tool_planner/main.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+data = {
+    'available_servers': [{
+        'server_name': 'calc',
+        'description': 'Calculator',
+        'tools': [{
+            'name': 'calc_eval',
+            'description': 'Evaluate expression',
+            'parameters': {
+                'type': 'object',
+                'properties': {'expr': {'type': 'string', 'description': 'Math expression'}},
+                'required': ['expr']
+            }
+        }]
+    }]
+}
+result = mod.format_tools_for_llm(data)
+assert 'Server: calc (Calculator)' in result
+assert 'Tool: calc_eval' in result
+assert 'expr (string, required): Math expression' in result
+print('OK')
+" 2>&1 | grep -q "OK"
+print_result $? "tool_planner format_tools_for_llm produces readable output"
+
+# --- Test 10: tool_planner build_planning_prompt includes CLI instructions ---
+python -c "
+import importlib.util
+spec = importlib.util.spec_from_file_location('tp', 'backend/mcp/tool_planner/main.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+result = mod.build_planning_prompt('create a pptx', 'Server: pptx')
+assert 'Task: create a pptx' in result
+assert 'atlas_chat_cli.py' in result
+assert '--tools' in result
+assert 'Server: pptx' in result
+print('OK')
+" 2>&1 | grep -q "OK"
+print_result $? "tool_planner build_planning_prompt includes CLI instructions"
+
+# --- Test 11: tool_planner plan_with_tools without ctx returns artifact ---
+python -c "
+import asyncio, base64, importlib.util
+spec = importlib.util.spec_from_file_location('tp', 'backend/mcp/tool_planner/main.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+# .fn gets the raw async function from the FastMCP FunctionTool wrapper
+fn = mod.plan_with_tools.fn
+result = asyncio.get_event_loop().run_until_complete(
+    fn(task='test', _mcp_data={'available_servers': []})
+)
+assert 'artifacts' in result, 'Missing artifacts key'
+assert 'display' in result, 'Missing display key'
+script = base64.b64decode(result['artifacts'][0]['b64']).decode('utf-8')
+assert 'Sampling unavailable' in script
+assert result['artifacts'][0]['name'].endswith('.sh')
+assert result['display']['open_canvas'] is True
+print('OK')
+" 2>&1 | grep -q "OK"
+print_result $? "tool_planner plan_with_tools returns downloadable artifact"
+
+# --- Test 12: tool_planner is in mcp.json config ---
+python -c "
+import json
+with open('config/overrides/mcp.json') as f:
+    cfg = json.load(f)
+assert 'tool_planner' in cfg, 'tool_planner missing from mcp.json'
+entry = cfg['tool_planner']
+assert entry['cwd'] == 'backend'
+assert 'mcp/tool_planner/main.py' in entry['command'][-1]
+print('OK')
+" 2>&1 | grep -q "OK"
+print_result $? "tool_planner configured in mcp.json"
+
+# --- Test 13: Run tool_planner unit tests ---
+cd "$PROJECT_ROOT/backend"
+python -m pytest tests/test_tool_planner.py -v --tb=short 2>&1 | tail -10
+python -m pytest tests/test_tool_planner.py --tb=short -q > /dev/null 2>&1
+print_result $? "tool_planner unit tests pass"
 cd "$PROJECT_ROOT"
 
 # Final: run backend unit tests

@@ -103,9 +103,20 @@ def plan_task(
 
 The `_` prefix on `_mcp_data` signals that this is a system-injected parameter, not user-provided. LLMs should not attempt to populate this field -- Atlas UI handles it automatically.
 
-## Demo Server
+## Servers Using _mcp_data
 
-The `username-override-demo` MCP server includes a `plan_with_tools` tool that demonstrates `_mcp_data` injection. See `backend/mcp/username-override-demo/main.py`.
+### tool_planner (recommended reference)
+
+The `tool_planner` MCP server (`backend/mcp/tool_planner/main.py`) is the primary example of `_mcp_data` in action. It combines `_mcp_data` injection with MCP sampling to generate runnable bash scripts:
+
+1. Receives `_mcp_data` with all available tool metadata
+2. Converts it into a human-readable CLI reference via `format_tools_for_llm()`
+3. Uses `ctx.sample()` to ask the LLM to write a bash script using `atlas_chat_cli.py`
+4. Returns the generated script
+
+### username-override-demo
+
+The `username-override-demo` MCP server includes a simpler `plan_with_tools` tool that demonstrates basic `_mcp_data` injection without sampling. See `backend/mcp/username-override-demo/main.py`.
 
 ## Related
 
