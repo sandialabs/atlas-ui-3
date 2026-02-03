@@ -205,7 +205,7 @@ async def plan_with_tools(
         messages=user_message,
         system_prompt=PLANNER_SYSTEM_PROMPT,
         temperature=0.3,
-        max_tokens=1000,
+        max_tokens=10000,
     )
 
     script_text = result.text or "#!/bin/bash\nset -e\n# Unable to generate plan"

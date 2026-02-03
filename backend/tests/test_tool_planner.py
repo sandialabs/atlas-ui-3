@@ -283,7 +283,7 @@ class TestPlanWithTools:
 
         call_kwargs = mock_ctx.sample.call_args
         assert call_kwargs.kwargs["temperature"] == 0.3
-        assert call_kwargs.kwargs["max_tokens"] == 1000
+        assert call_kwargs.kwargs["max_tokens"] == 10000
         assert "task planner" in call_kwargs.kwargs["system_prompt"].lower()
 
     @pytest.mark.asyncio
