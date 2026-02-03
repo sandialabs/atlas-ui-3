@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #287 - 2026-02-03
+- Add `_mcp_data` special injected argument for MCP tools. Tools that declare `_mcp_data` in their schema automatically receive structured metadata about all available MCP servers and tools, enabling planning/orchestration tools to reason about available capabilities.
+- Add `plan_with_tools` demo tool to the username-override-demo MCP server demonstrating the feature.
+
 ### PR #285 - 2026-02-02
 - Fix document upload failure when filenames contain spaces by sanitizing filenames (replacing whitespace with underscores) in both frontend and backend.
 - Fix S3 tag URL-encoding to properly handle special characters in tag values.
