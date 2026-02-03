@@ -546,17 +546,20 @@ const ChatArea = () => {
     return 'No Extract'
   }
 
+  const sanitizeFilename = (name) => name.replace(/\s+/g, '_')
+
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files)
     files.forEach(file => {
       const reader = new FileReader()
       reader.onload = (e) => {
         const base64Data = e.target.result.split(',')[1] // Remove data URL prefix
+        const safeName = sanitizeFilename(file.name)
         // Determine extraction mode for this file
-        const mode = canExtractFile(file.name) ? globalExtractMode : 'none'
+        const mode = canExtractFile(safeName) ? globalExtractMode : 'none'
         setUploadedFiles(prev => ({
           ...prev,
-          [file.name]: {
+          [safeName]: {
             content: base64Data,
             extractMode: mode
           }
@@ -632,11 +635,12 @@ const ChatArea = () => {
       const reader = new FileReader()
       reader.onload = (event) => {
         const base64Data = event.target.result.split(',')[1]
+        const safeName = sanitizeFilename(file.name)
         // Determine extraction mode for this file
-        const mode = canExtractFile(file.name) ? globalExtractMode : 'none'
+        const mode = canExtractFile(safeName) ? globalExtractMode : 'none'
         setUploadedFiles(prev => ({
           ...prev,
-          [file.name]: {
+          [safeName]: {
             content: base64Data,
             extractMode: mode
           }

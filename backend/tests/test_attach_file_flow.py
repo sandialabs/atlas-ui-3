@@ -207,3 +207,72 @@ async def test_handle_download_file_not_in_session_returns_error(chat_service):
     )
 
     assert resp.get("error") == "Session or file manager not available" or resp.get("error") == "File not found in session"
+
+
+@pytest.mark.asyncio
+async def test_upload_file_with_spaces_in_filename(file_manager):
+    """Files with spaces in their names should upload successfully after sanitization."""
+    user_email = "user1@example.com"
+    filename_with_spaces = "my report file.txt"
+    content_b64 = base64.b64encode(b"some content").decode()
+
+    result = await file_manager.upload_file(
+        user_email=user_email,
+        filename=filename_with_spaces,
+        content_base64=content_b64,
+        source_type="user",
+    )
+
+    # Filename should be sanitized (spaces replaced with underscores)
+    assert result["filename"] == "my_report_file.txt"
+    assert "my_report_file.txt" in result["key"]
+    assert " " not in result["key"]
+
+
+@pytest.mark.asyncio
+async def test_upload_multiple_files_with_spaces(file_manager):
+    """upload_multiple_files should sanitize filenames containing spaces."""
+    user_email = "user1@example.com"
+    files = {
+        "my document.pdf": base64.b64encode(b"pdf bytes").decode(),
+        "another file.txt": base64.b64encode(b"text bytes").decode(),
+    }
+
+    uploaded = await file_manager.upload_multiple_files(
+        user_email=user_email,
+        files=files,
+        source_type="user",
+    )
+
+    assert "my_document.pdf" in uploaded
+    assert "another_file.txt" in uploaded
+    for key in uploaded.values():
+        assert " " not in key
+
+
+@pytest.mark.asyncio
+async def test_attach_file_with_spaces_end_to_end(chat_service, file_manager):
+    """Full flow: upload a file with spaces, attach it, verify session stores sanitized name."""
+    user_email = "user1@example.com"
+    session_id = uuid.uuid4()
+    filename_with_spaces = "test report.txt"
+    content_b64 = base64.b64encode(b"hello spaces").decode()
+
+    upload_meta = await file_manager.upload_file(
+        user_email=user_email,
+        filename=filename_with_spaces,
+        content_base64=content_b64,
+        source_type="user",
+    )
+    s3_key = upload_meta["key"]
+
+    resp = await chat_service.handle_attach_file(
+        session_id=session_id,
+        s3_key=s3_key,
+        user_email=user_email,
+        update_callback=None,
+    )
+
+    assert resp.get("success") is True
+    # The filename stored should be the sanitized version from S3 metadata
+    assert " " not in s3_key

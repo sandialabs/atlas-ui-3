@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #284 - 2026-02-02
+- Fix document upload failure when filenames contain spaces by sanitizing filenames (replacing whitespace with underscores) in both frontend and backend.
+- Fix S3 tag URL-encoding to properly handle special characters in tag values.
+
 ### PR #279 - 2026-02-01
 - Make backend port configurable via `PORT` in `.env` instead of hardcoding 8000 in `agent_start.sh`, enabling git worktrees to run on different ports.
 - Add git-worktree-setup Claude Code agent with automatic port conflict handling.
