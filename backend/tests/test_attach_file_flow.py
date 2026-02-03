@@ -252,7 +252,7 @@ async def test_upload_multiple_files_with_spaces(file_manager):
 
 @pytest.mark.asyncio
 async def test_attach_file_with_spaces_end_to_end(chat_service, file_manager):
-    """Full flow: upload a file with spaces, attach it, verify session stores sanitized name."""
+    """Full flow: upload a file with spaces, attach it, verify sanitized name in session."""
     user_email = "user1@example.com"
     session_id = uuid.uuid4()
     filename_with_spaces = "test report.txt"
@@ -274,5 +274,13 @@ async def test_attach_file_with_spaces_end_to_end(chat_service, file_manager):
     )
 
     assert resp.get("success") is True
-    # The filename stored should be the sanitized version from S3 metadata
     assert " " not in s3_key
+
+    # Verify the session stores the sanitized filename (no spaces)
+    session = chat_service.sessions.get(session_id)
+    assert session is not None
+    session_files = session.context.get("files", {})
+    # The filename key in the session should have underscores, not spaces
+    stored_names = list(session_files.keys())
+    for name in stored_names:
+        assert " " not in name, f"Session stored filename with spaces: {name}"

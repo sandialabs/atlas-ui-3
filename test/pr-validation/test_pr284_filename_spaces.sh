@@ -130,11 +130,13 @@ print_result $? "upload_multiple_files sanitizes filenames with spaces"
 print_header "Test 5: Run backend unit tests"
 # -------------------------------------------------------------------
 cd "$PROJECT_ROOT"
+set -o pipefail
 ./test/run_tests.sh backend 2>&1 | tail -5
-# Use the exit code from pytest (ignoring the pre-existing port config test)
+BACKEND_EXIT=${PIPESTATUS[0]}
 cd "$BACKEND_DIR"
 python -m pytest tests/test_attach_file_flow.py -v 2>&1 | tail -20
-PYTEST_EXIT=$?
+PYTEST_EXIT=${PIPESTATUS[0]}
+set +o pipefail
 print_result $PYTEST_EXIT "Backend attach file tests pass"
 
 # -------------------------------------------------------------------

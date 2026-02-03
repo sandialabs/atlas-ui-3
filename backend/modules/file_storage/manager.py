@@ -149,7 +149,7 @@ class FileManager:
                 uploaded_files[safe_name] = file_metadata["key"]
                 logger.info(f"File uploaded: {safe_name} -> {file_metadata['key']}")
             except Exception as exc:
-                logger.error(f"Failed to upload file {filename}: {exc}")
+                logger.error(f"Failed to upload file {safe_name}: {exc}")
                 raise
         
         return uploaded_files
