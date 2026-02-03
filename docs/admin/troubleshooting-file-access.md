@@ -1,6 +1,6 @@
 # Troubleshooting File Access for MCP Servers
 
-Last updated: 2026-01-19
+Last updated: 2026-02-02
 
 This guide helps resolve issues with MCP servers accessing attached files in Atlas UI.
 
@@ -211,6 +211,18 @@ BACKEND_PUBLIC_URL=https://atlas.company.com
 ```
 
 Both local and remote servers work because the backend generates absolute URLs.
+
+### Issue 7: File Upload Fails for Filenames with Spaces
+
+**Symptoms:**
+- Uploading a file whose name contains spaces fails silently or produces an error
+- S3 tagging headers are malformed
+
+**Cause:**
+Prior to PR #284, filenames with whitespace could produce malformed S3 `Tagging` headers because tag values were not URL-encoded.
+
+**Solution:**
+As of PR #284, filenames are automatically sanitized: all whitespace characters (spaces, tabs, etc.) are replaced with underscores before storage. This happens in both the frontend (on file select/drop) and the backend (`FileManager.sanitize_filename`). No user action is required -- files like `my report.pdf` will be stored as `my_report.pdf`.
 
 ## Debugging Tips
 
