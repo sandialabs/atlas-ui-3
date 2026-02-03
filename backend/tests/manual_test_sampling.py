@@ -21,8 +21,6 @@ async def test_sampling_demo():
     """Test the sampling_demo server."""
     try:
         from fastmcp import Client
-        from modules.llm.litellm_caller import LiteLLMCaller
-        from modules.config import config_manager
         
         logger.info("Starting sampling demo test...")
         

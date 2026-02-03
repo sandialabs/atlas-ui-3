@@ -8,7 +8,6 @@ This module provides a client interface to interact with S3-compatible storage
 import base64
 import logging
 from typing import Dict, List, Optional, Any
-import hashlib
 import uuid
 import time
 

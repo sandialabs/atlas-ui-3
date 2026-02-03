@@ -39,6 +39,7 @@ class RAGResponse(BaseModel):
     """Combined response from RAG system including content and metadata."""
     content: str
     metadata: Optional[RAGMetadata] = None
+    is_completion: bool = False  # True if content is already LLM-interpreted (from /rag/completions)
 
 
 class RAGClient:

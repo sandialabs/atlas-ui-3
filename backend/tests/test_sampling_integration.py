@@ -294,7 +294,7 @@ class TestSamplingDemoTools:
         """Test multi_turn_conversation tool with SamplingMessage objects."""
         from fastmcp import Client
         from fastmcp.client.transports import StdioTransport
-        from mcp.types import CreateMessageResult, TextContent, SamplingMessage
+        from mcp.types import CreateMessageResult, TextContent
         from pathlib import Path
         import sys
 

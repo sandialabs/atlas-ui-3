@@ -48,7 +48,6 @@ def calculate_prompt_injection_risk(message: str, *, mode: str = "general") -> D
     triggers: List[str] = []
 
     msg_lower = (message or "").lower()
-    msg_clean = re.sub(r"\s+", " ", (message or "").strip())
 
     # 1) Suspicious patterns
     patterns = {

@@ -69,7 +69,7 @@ async def test_rag_results_risk_logging(tmp_path, monkeypatch):
     assert os.path.exists(log_file)
     with open(log_file, "r", encoding="utf-8") as f:
         lines = [json.loads(x) for x in f.read().splitlines() if x.strip()]
-    assert any(l.get("source") == "rag_chunk" for l in lines)
+    assert any(line.get("source") == "rag_chunk" for line in lines)
 
 
 @pytest.mark.asyncio
@@ -100,8 +100,11 @@ async def test_tool_acl_filters_unauthorized(monkeypatch):
                     return False
             return R()
 
-    class FakeTool: 
-        def __init__(self, name): self.name = name; self.description=""; self.inputSchema={"type":"object","properties":{"username":{"type":"string"}}}
+    class FakeTool:
+        def __init__(self, name):
+            self.name = name
+            self.description = ""
+            self.inputSchema = {"type": "object", "properties": {"username": {"type": "string"}}}
 
     class FakeToolManager:
         def __init__(self):

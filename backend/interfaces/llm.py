@@ -1,24 +1,8 @@
 """LLM interface protocols."""
 
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Dict, List, Protocol, runtime_checkable
 
-
-
-class LLMResponse:
-    """Response from LLM."""
-    def __init__(
-        self,
-        content: str,
-        tool_calls: Optional[List[Dict[str, Any]]] = None,
-        model_used: Optional[str] = None
-    ):
-        self.content = content
-        self.tool_calls = tool_calls
-        self.model_used = model_used
-    
-    def has_tool_calls(self) -> bool:
-        """Check if response has tool calls."""
-        return bool(self.tool_calls)
+from modules.llm.models import LLMResponse as LLMResponse
 
 
 @runtime_checkable

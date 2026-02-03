@@ -5,7 +5,7 @@ during tool authorization in chat execution.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from application.chat.policies.tool_authorization import ToolAuthorizationService
 
 

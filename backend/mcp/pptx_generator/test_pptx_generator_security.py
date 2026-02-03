@@ -7,13 +7,11 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from main import (
     _escape_html,
     _is_safe_local_path,
     _clean_markdown_text,
-    ALLOWED_BASE_PATH,
 )
 
 
