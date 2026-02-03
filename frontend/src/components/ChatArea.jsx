@@ -209,7 +209,7 @@ const ChatArea = () => {
           if (response.ok) {
             const fileData = await response.json()
             fileRefs[filename] = fileData.content_base64
-            console.log(`📎 Loaded content for @file ${filename}`)
+            console.log(`Loaded content for @file ${filename}`)
           } else {
             console.warn(`Failed to load @file ${filename}:`, response.status)
             fileRefs[filename] = `[Error loading file: ${filename}]`
