@@ -219,10 +219,10 @@ Both local and remote servers work because the backend generates absolute URLs.
 - S3 tagging headers are malformed
 
 **Cause:**
-Prior to PR #284, filenames with whitespace could produce malformed S3 `Tagging` headers because tag values were not URL-encoded.
+Prior to PR #285, filenames with whitespace could produce malformed S3 `Tagging` headers because tag values were not URL-encoded.
 
 **Solution:**
-As of PR #284, filenames are automatically sanitized: all whitespace characters (spaces, tabs, etc.) are replaced with underscores before storage. This happens in both the frontend (on file select/drop) and the backend (`FileManager.sanitize_filename`). No user action is required -- files like `my report.pdf` will be stored as `my_report.pdf`.
+As of PR #285, filenames are automatically sanitized: all whitespace characters (spaces, tabs, etc.) are replaced with underscores before storage. This happens in both the frontend (on file select/drop) and the backend (`FileManager.sanitize_filename`). No user action is required -- files like `my report.pdf` will be stored as `my_report.pdf`.
 
 ## Debugging Tips
 

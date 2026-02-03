@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test script for PR #284: Fix document upload failure for filenames with spaces
+# Test script for PR #285: Fix document upload failure for filenames with spaces
 #
 # Test plan:
 # - E2E: Verify FileManager.sanitize_filename replaces spaces with underscores
