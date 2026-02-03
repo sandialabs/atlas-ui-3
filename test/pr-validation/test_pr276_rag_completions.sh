@@ -314,6 +314,124 @@ print('call_with_rag_and_tools correctly returns RAG completion directly')
 print_result $? "call_with_rag_and_tools returns RAG completion directly without calling LLM"
 
 # ==========================================
+# Check 5b: call_with_rag multi-source combines all as raw context
+# ==========================================
+print_header "Check 5b: call_with_rag multi-source combines all as raw context"
+
+cd "$BACKEND_DIR"
+python3 -c "
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+from modules.llm.litellm_caller import LiteLLMCaller
+from modules.rag.client import RAGResponse
+
+async def test_multi_source_rag():
+    class FakeLLMConfig:
+        models = {}
+
+    caller = LiteLLMCaller.__new__(LiteLLMCaller)
+    caller.llm_config = FakeLLMConfig()
+
+    # Mock RAG service: first source returns completion, second returns raw
+    mock_rag = AsyncMock()
+    call_count = 0
+
+    async def mock_query(user, source, msgs):
+        nonlocal call_count
+        call_count += 1
+        if 'source-a' in source:
+            return RAGResponse(content='Completion from A', is_completion=True)
+        return RAGResponse(content='Raw context from B', is_completion=False)
+
+    mock_rag.query_rag = AsyncMock(side_effect=mock_query)
+    caller._rag_service = mock_rag
+
+    # call_plain SHOULD be called because multi-source always goes through LLM
+    caller.call_plain = AsyncMock(return_value='LLM combined answer')
+
+    result = await caller.call_with_rag(
+        model_name='test-model',
+        messages=[{'role': 'user', 'content': 'test'}],
+        data_sources=['rag:source-a', 'rag:source-b'],
+        user_email='user@test.com',
+        rag_service=mock_rag,
+    )
+
+    # Both sources should have been queried
+    assert mock_rag.query_rag.call_count == 2, f'Expected 2 RAG calls, got {mock_rag.query_rag.call_count}'
+
+    # call_plain SHOULD have been called (multi-source never shortcuts)
+    caller.call_plain.assert_called_once()
+
+    # Verify combined context was passed to LLM
+    call_args = caller.call_plain.call_args
+    enriched_messages = call_args[0][1]  # second positional arg
+    context_msg = [m for m in enriched_messages if m['role'] == 'system' and 'Context from' in m['content']]
+    assert len(context_msg) == 1, f'Expected 1 context message, got {len(context_msg)}'
+    assert 'Context from source-a' in context_msg[0]['content'], 'Missing source-a context'
+    assert 'Context from source-b' in context_msg[0]['content'], 'Missing source-b context'
+
+    print(f'Multi-source RAG: both sources queried, combined context sent to LLM')
+    print(f'Result: {result}')
+
+asyncio.run(test_multi_source_rag())
+print('call_with_rag multi-source works correctly')
+"
+print_result $? "call_with_rag multi-source combines all sources as raw context"
+
+# ==========================================
+# Check 5c: call_with_rag_and_tools multi-source combines all as raw context
+# ==========================================
+print_header "Check 5c: call_with_rag_and_tools multi-source combines all as raw context"
+
+cd "$BACKEND_DIR"
+python3 -c "
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+from modules.llm.litellm_caller import LiteLLMCaller
+from modules.rag.client import RAGResponse
+from interfaces.llm import LLMResponse
+
+async def test_multi_source_rag_tools():
+    class FakeLLMConfig:
+        models = {}
+
+    caller = LiteLLMCaller.__new__(LiteLLMCaller)
+    caller.llm_config = FakeLLMConfig()
+
+    mock_rag = AsyncMock()
+
+    async def mock_query(user, source, msgs):
+        if 'source-a' in source:
+            return RAGResponse(content='Completion from A', is_completion=True)
+        return RAGResponse(content='Raw context from B', is_completion=False)
+
+    mock_rag.query_rag = AsyncMock(side_effect=mock_query)
+    caller._rag_service = mock_rag
+
+    # call_with_tools SHOULD be called for multi-source
+    caller.call_with_tools = AsyncMock(return_value=LLMResponse(content='LLM combined answer'))
+
+    result = await caller.call_with_rag_and_tools(
+        model_name='test-model',
+        messages=[{'role': 'user', 'content': 'test'}],
+        data_sources=['rag:source-a', 'rag:source-b'],
+        tools_schema=[{'type': 'function', 'function': {'name': 'test_tool'}}],
+        user_email='user@test.com',
+        rag_service=mock_rag,
+    )
+
+    assert mock_rag.query_rag.call_count == 2, f'Expected 2 RAG calls, got {mock_rag.query_rag.call_count}'
+    caller.call_with_tools.assert_called_once()
+    assert isinstance(result, LLMResponse), f'Expected LLMResponse, got {type(result)}'
+    print(f'Multi-source RAG+Tools: both sources queried, combined context sent to LLM')
+
+asyncio.run(test_multi_source_rag_tools())
+print('call_with_rag_and_tools multi-source works correctly')
+"
+print_result $? "call_with_rag_and_tools multi-source combines all sources as raw context"
+
+# ==========================================
 # Check 6: E2E - Mock RAG API returning chat.completion
 # ==========================================
 print_header "Check 6: E2E - Mock RAG API returns chat.completion object"
