@@ -1,6 +1,6 @@
 # File Content Extraction
 
-**Last updated:** 2026-01-19
+**Last updated:** 2026-02-02
 
 This document describes how to configure automatic file content extraction for uploaded files (PDFs, images, etc.) in Atlas UI.
 
@@ -170,11 +170,36 @@ Each extractor URL should accept:
 }
 ```
 
+## Mock Extractor Services
+
+Atlas UI includes two mock extractor services for development and testing:
+
+### file-extractor-mock (Port 8010)
+
+Basic PDF extraction using pypdf. Lightweight, no external dependencies beyond pypdf.
+
+- **Endpoint**: `POST /extract` - PDF text extraction
+- **Start**: `cd mocks/file-extractor-mock && bash run.sh`
+
+### banyan-extractor-mock (Port 8011)
+
+Advanced extraction using banyan-ingest with Nemotron Parse for PDFs and PptxProcessor for PowerPoint files. Falls back to pypdf for PDF extraction if banyan-ingest is not installed.
+
+- **Endpoints**:
+  - `POST /extract` - PDF extraction (banyan-ingest with pypdf fallback)
+  - `POST /extract-pptx` - PPTX extraction (banyan-ingest required)
+  - `GET /health` - Health check (reports banyan-ingest availability)
+- **Start**: `cd mocks/banyan-extractor-mock && bash run.sh`
+- **Config**: Copy `endpoint_config.json.example` to `endpoint_config.json` and set your Nemotron endpoint URL
+
+To use the banyan extractor for PDFs, update `config/overrides/file-extractors.json` to point the `pdf-text` extractor URL to `http://localhost:8011/extract`. For PPTX support, add a `pptx-text` extractor pointing to `http://localhost:8011/extract-pptx`.
+
 ## Example Implementations
 
 | Extractor | Backend |
 |-----------|---------|
-| `pdf-text` | Custom PDF extraction service |
+| `pdf-text` | file-extractor-mock (pypdf) or banyan-extractor-mock (Nemotron Parse) |
+| `pptx-text` | banyan-extractor-mock (banyan-ingest PptxProcessor) |
 | `image-vision` | OpenAI Vision API, Claude Vision |
 | `ocr` | Tesseract, Google Cloud Vision |
 

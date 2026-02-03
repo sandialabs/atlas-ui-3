@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #277 - 2026-01-30
+- Create separate banyan-extractor-mock service (port 8011) for PDF/PPTX extraction using banyan-ingest with Nemotron Parse, with pypdf fallback for PDFs
+- Revert file-extractor-mock to original pypdf-only implementation (port 8010)
+
 ### PR #TBD - 2026-01-27
 - **Feature**: Add non-interactive CLI (`atlas_chat_cli.py`) and Python API (`atlas_client.py`) for one-shot LLM chat with full MCP tools, RAG, and agent mode support. Enables scripted workflows, E2E testing, and MCP development without the browser UI.
 - **Feature**: Add CLI event publisher for headless operation with streaming and collecting modes.

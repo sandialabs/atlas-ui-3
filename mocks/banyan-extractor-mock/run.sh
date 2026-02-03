@@ -19,4 +19,4 @@ if [ ! -f "endpoint_config.json" ]; then
 fi
 
 # Run the server
-python main.py "$@"
+python banyan_extractor_service.py "$@"

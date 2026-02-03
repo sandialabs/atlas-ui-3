@@ -27,7 +27,7 @@ cp endpoint_config.json.example endpoint_config.json
 # Edit endpoint_config.json with your Nemotron Parse URL
 
 # Run the server
-python main.py
+python banyan_extractor_service.py
 ```
 
 Server starts at `http://127.0.0.1:8011`

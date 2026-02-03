@@ -152,9 +152,12 @@ class TestAppSettings:
         assert hasattr(settings, "app_config_overrides")
         assert hasattr(settings, "app_config_defaults")
 
-    def test_app_settings_defaults(self):
+    def test_app_settings_defaults(self, monkeypatch):
         """AppSettings should have sensible defaults."""
-        settings = AppSettings()
+        # Clear env vars that override defaults (other tests or .env may set these)
+        for key in ["PORT", "DEBUG_MODE", "LOG_LEVEL", "BANNER_ENABLED"]:
+            monkeypatch.delenv(key, raising=False)
+        settings = AppSettings(_env_file=None)
 
         assert settings.port == 8000
         assert settings.log_level in ["DEBUG", "INFO", "WARNING", "ERROR"]
