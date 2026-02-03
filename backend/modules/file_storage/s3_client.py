@@ -10,6 +10,7 @@ import logging
 from typing import Dict, List, Optional, Any
 import uuid
 import time
+from urllib.parse import quote
 
 import boto3
 from botocore.client import Config
@@ -122,8 +123,8 @@ class S3StorageClient:
             file_tags["user_email"] = user_email
             file_tags["original_filename"] = filename
 
-            # Convert tags to S3 tag format
-            tag_set = "&".join([f"{k}={v}" for k, v in file_tags.items()])
+            # Convert tags to S3 tag format (URL-encode values for safety)
+            tag_set = "&".join([f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in file_tags.items()])
 
             # Upload to S3
             self.s3_client.put_object(

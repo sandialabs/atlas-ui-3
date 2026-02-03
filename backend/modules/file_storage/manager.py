@@ -3,12 +3,13 @@ File management utilities for handling files across the application.
 
 This module provides utilities for:
 - Content type detection
-- File categorization  
+- File categorization
 - File metadata management
 - Integration with S3 storage
 """
 
 import logging
+import re
 from typing import Dict, List, Optional, Any
 from .s3_client import S3StorageClient
 
@@ -22,6 +23,11 @@ class FileManager:
         """Initialize with optional S3 client dependency injection."""
         self.s3_client = s3_client or S3StorageClient()
     
+    @staticmethod
+    def sanitize_filename(filename: str) -> str:
+        """Replace whitespace in a filename with underscores."""
+        return re.sub(r"\s+", "_", filename)
+
     def get_content_type(self, filename: str) -> str:
         """Determine content type based on filename."""
         extension = filename.lower().split('.')[-1] if '.' in filename else ''
@@ -110,6 +116,7 @@ class FileManager:
         tags: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Upload a file with automatic content type detection."""
+        filename = self.sanitize_filename(filename)
         content_type = self.get_content_type(filename)
         
         return await self.s3_client.upload_file(
@@ -129,19 +136,20 @@ class FileManager:
     ) -> Dict[str, str]:
         """Upload multiple files and return filename -> s3_key mapping."""
         uploaded_files = {}
-        
-        for filename, base64_content in files.items():
+
+        for original_name, base64_content in files.items():
+            safe_name = self.sanitize_filename(original_name)
             try:
                 file_metadata = await self.upload_file(
                     user_email=user_email,
-                    filename=filename,
+                    filename=safe_name,
                     content_base64=base64_content,
                     source_type=source_type
                 )
-                uploaded_files[filename] = file_metadata["key"]
-                logger.info(f"File uploaded: {filename} -> {file_metadata['key']}")
+                uploaded_files[safe_name] = file_metadata["key"]
+                logger.info(f"File uploaded: {safe_name} -> {file_metadata['key']}")
             except Exception as exc:
-                logger.error(f"Failed to upload file {filename}: {exc}")
+                logger.error(f"Failed to upload file {safe_name}: {exc}")
                 raise
         
         return uploaded_files
@@ -205,6 +213,8 @@ class FileManager:
         for f in files:
             try:
                 filename = f.get("filename")
+                if filename:
+                    filename = self.sanitize_filename(filename)
                 content_b64 = f.get("content")
                 mime_type = f.get("mime_type") or self.get_content_type(filename or "")
                 if not filename or not content_b64:

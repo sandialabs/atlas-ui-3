@@ -11,6 +11,7 @@ import logging
 import time
 import uuid
 from typing import Dict, List, Optional, Any
+from urllib.parse import quote
 
 from core.log_sanitizer import sanitize_for_logging
 from core.metrics_logger import log_metric
@@ -118,8 +119,8 @@ class MockS3StorageClient:
             file_tags["user_email"] = user_email
             file_tags["original_filename"] = filename
 
-            # Convert tags to query param format
-            tag_param = "&".join([f"{k}={v}" for k, v in file_tags.items()])
+            # Convert tags to query param format (URL-encode values for safety)
+            tag_param = "&".join([f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in file_tags.items()])
 
             # Upload via TestClient
             headers = {
