@@ -273,6 +273,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from modules.llm.litellm_caller import LiteLLMCaller
 from modules.rag.client import RAGResponse
+from interfaces.llm import LLMResponse
 
 async def test_call_with_rag_and_tools_completion():
     class FakeLLMConfig:
@@ -301,10 +302,10 @@ async def test_call_with_rag_and_tools_completion():
 
     caller.call_with_tools.assert_not_called()
 
-    # Result is a string (not LLMResponse) since it's returned directly
-    assert isinstance(result, str), f'Expected string result, got {type(result)}'
-    assert 'Direct completion from RAG with tools' in result
-    print(f'call_with_rag_and_tools returned completion directly (length={len(result)})')
+    # Result is LLMResponse since call_with_rag_and_tools wraps it
+    assert isinstance(result, LLMResponse), f'Expected LLMResponse, got {type(result)}'
+    assert 'Direct completion from RAG with tools' in result.content
+    print(f'call_with_rag_and_tools returned LLMResponse directly (length={len(result.content)})')
     print('call_with_tools was NOT called - completion bypassed LLM')
 
 asyncio.run(test_call_with_rag_and_tools_completion())
