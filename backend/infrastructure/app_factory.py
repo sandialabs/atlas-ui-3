@@ -28,23 +28,30 @@ class AppFactory:
         # MCP tools manager
         self.mcp_tools = MCPToolManager()
 
-        # RAG MCP service for MCP-based RAG servers (create first for dependency injection)
-        self.rag_mcp_service = RAGMCPService(
-            mcp_manager=self.mcp_tools,
-            config_manager=self.config_manager,
-            auth_check_func=is_user_in_group,
-        )
+        # Only initialize RAG services when the RAG feature flag is enabled
+        if self.config_manager.app_settings.feature_rag_enabled:
+            # RAG MCP service for MCP-based RAG servers (create first for dependency injection)
+            self.rag_mcp_service = RAGMCPService(
+                mcp_manager=self.mcp_tools,
+                config_manager=self.config_manager,
+                auth_check_func=is_user_in_group,
+            )
 
-        # Unified RAG service for HTTP and MCP RAG sources (configured via rag-sources.json)
-        # Includes rag_mcp_service for routing MCP queries
-        self.unified_rag_service = UnifiedRAGService(
-            config_manager=self.config_manager,
-            mcp_manager=self.mcp_tools,
-            auth_check_func=is_user_in_group,
-            rag_mcp_service=self.rag_mcp_service,
-        )
+            # Unified RAG service for HTTP and MCP RAG sources (configured via rag-sources.json)
+            # Includes rag_mcp_service for routing MCP queries
+            self.unified_rag_service = UnifiedRAGService(
+                config_manager=self.config_manager,
+                mcp_manager=self.mcp_tools,
+                auth_check_func=is_user_in_group,
+                rag_mcp_service=self.rag_mcp_service,
+            )
+            logger.info("RAG services initialized (FEATURE_RAG_ENABLED=true)")
+        else:
+            self.rag_mcp_service = None
+            self.unified_rag_service = None
+            logger.info("RAG services disabled (FEATURE_RAG_ENABLED=false)")
 
-        # LLM caller with unified RAG service for RAG queries
+        # LLM caller with unified RAG service for RAG queries (None when RAG disabled)
         self.llm_caller = LiteLLMCaller(
             self.config_manager.llm_config,
             debug_mode=self.config_manager.app_settings.debug_mode,
@@ -111,10 +118,10 @@ class AppFactory:
     def get_mcp_manager(self) -> MCPToolManager:  # noqa: D401
         return self.mcp_tools
 
-    def get_rag_mcp_service(self) -> RAGMCPService:  # noqa: D401
+    def get_rag_mcp_service(self) -> Optional[RAGMCPService]:  # noqa: D401
         return self.rag_mcp_service
 
-    def get_unified_rag_service(self) -> UnifiedRAGService:  # noqa: D401
+    def get_unified_rag_service(self) -> Optional[UnifiedRAGService]:  # noqa: D401
         return self.unified_rag_service
 
     def get_file_storage(self) -> S3StorageClient:  # noqa: D401

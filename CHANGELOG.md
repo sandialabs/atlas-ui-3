@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #283 - 2026-02-03
+- Fix FEATURE_RAG_ENABLED flag to fully disable RAG on the backend, not just the UI. RAG services (RAGMCPService, UnifiedRAGService) are no longer initialized, and RAG config files are no longer loaded when the flag is false.
+- Make RAG retrieval best-effort: a single failing RAG data source no longer prevents other sources from being queried. HTTP and MCP RAG discovery are now independent, per-source errors are isolated, and null content is handled gracefully.
+
 ### PR #285 - 2026-02-02
 - Fix document upload failure when filenames contain spaces by sanitizing filenames (replacing whitespace with underscores) in both frontend and backend.
 - Fix S3 tag URL-encoding to properly handle special characters in tag values.

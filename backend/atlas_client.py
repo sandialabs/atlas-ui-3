@@ -175,6 +175,11 @@ class AtlasClient:
         await self.initialize()
         cfg = self._factory.get_config_manager()
 
+        # Return empty results when RAG feature is disabled
+        if not cfg.app_settings.feature_rag_enabled:
+            logger.info("RAG discovery skipped (FEATURE_RAG_ENABLED=false)")
+            return {"servers": {}, "sources": []}
+
         if user_email is None:
             user_email = cfg.app_settings.test_user or "cli@atlas.local"
 
@@ -193,7 +198,7 @@ class AtlasClient:
         try:
             rag_service = self._factory.get_unified_rag_service()
             # Use the MCP RAG discovery if available
-            if hasattr(rag_service, 'rag_mcp_service') and rag_service.rag_mcp_service:
+            if rag_service and hasattr(rag_service, 'rag_mcp_service') and rag_service.rag_mcp_service:
                 discovered_sources = await rag_service.rag_mcp_service.discover_data_sources(user_email)
         except Exception as e:
             logger.warning("RAG discovery failed: %s", e)
