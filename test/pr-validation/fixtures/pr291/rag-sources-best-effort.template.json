@@ -1,0 +1,27 @@
+{
+  "good_http": {
+    "type": "http",
+    "enabled": true,
+    "display_name": "Good HTTP RAG",
+    "description": "Healthy HTTP RAG source (mock)",
+    "url": "__RAG_MOCK_URL__",
+    "bearer_token": "test-atlas-rag-token",
+    "timeout": 5.0
+  },
+  "bad_http": {
+    "type": "http",
+    "enabled": true,
+    "display_name": "Bad HTTP RAG",
+    "description": "Intentionally unreachable HTTP RAG source",
+    "url": "http://127.0.0.1:1",
+    "bearer_token": "test-atlas-rag-token",
+    "timeout": 2.0
+  },
+  "bad_mcp": {
+    "type": "mcp",
+    "enabled": true,
+    "description": "Intentionally failing MCP RAG source",
+    "command": ["false"],
+    "transport": "stdio"
+  }
+}
