@@ -252,6 +252,7 @@ class TestPlanWithTools:
         mock_result = MagicMock()
         mock_result.text = "#!/bin/bash\nset -e\npython atlas_chat_cli.py 'hello' --tools calc_add"
         mock_ctx.sample = AsyncMock(return_value=mock_result)
+        mock_ctx.report_progress = AsyncMock()
 
         mcp_data = {
             "available_servers": [
@@ -292,6 +293,7 @@ class TestPlanWithTools:
         mock_result = MagicMock()
         mock_result.text = None
         mock_ctx.sample = AsyncMock(return_value=mock_result)
+        mock_ctx.report_progress = AsyncMock()
 
         result = await _call_plan_with_tools(task="test", _mcp_data={}, ctx=mock_ctx)
         script = _decode_artifact(result)

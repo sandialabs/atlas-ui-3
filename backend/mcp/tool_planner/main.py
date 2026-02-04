@@ -202,6 +202,17 @@ async def plan_with_tools(
         )
         return _build_artifact_response(fallback, task)
 
+    server_count = len(mcp_data.get("available_servers", []))
+    await ctx.report_progress(
+        progress=0, total=3,
+        message=f"Discovered {server_count} servers, building prompt...",
+    )
+
+    await ctx.report_progress(
+        progress=1, total=3,
+        message="Asking LLM to generate bash script...",
+    )
+
     result = await ctx.sample(
         messages=user_message,
         system_prompt=PLANNER_SYSTEM_PROMPT,
@@ -209,8 +220,20 @@ async def plan_with_tools(
         max_tokens=10000,
     )
 
+    await ctx.report_progress(
+        progress=2, total=3,
+        message="Packaging script as downloadable artifact...",
+    )
+
     script_text = result.text or "#!/bin/bash\nset -e\n# Unable to generate plan"
-    return _build_artifact_response(script_text, task)
+    response = _build_artifact_response(script_text, task)
+
+    await ctx.report_progress(
+        progress=3, total=3,
+        message="Done.",
+    )
+
+    return response
 
 
 if __name__ == "__main__":
