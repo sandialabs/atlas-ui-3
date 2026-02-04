@@ -151,6 +151,7 @@ async def run_chat(args) -> CLIResult:
 ```
 
 CLI arguments:
+- Note: this is a planning document and may not match the current CLI implementation. For the authoritative, up-to-date CLI docs, see `docs/developer/cli-usage-2026-01-27.md`. The current CLI entry point lives at `backend/atlas_chat_cli.py`.
 - `prompt` (positional) - The prompt to send
 - `--model, -m` - LLM model (default from config)
 - `--agent, -a` - Enable agent mode
@@ -162,6 +163,18 @@ CLI arguments:
 - `--verbose, -v` - Show detailed events
 - `--quiet, -q` - Only output final answer
 - `--user, -u` - User email for auth context
+
+Config override flags (useful for testing/CI and alternative config layouts):
+- `--config-overrides` - Override config overrides directory (sets `APP_CONFIG_OVERRIDES`)
+- `--config-defaults` - Override config defaults directory (sets `APP_CONFIG_DEFAULTS`)
+- `--llm-config` - Override LLM config file (sets `LLM_CONFIG_FILE`)
+- `--mcp-config` - Override MCP config file (sets `MCP_CONFIG_FILE`)
+- `--rag-sources-config` - Override RAG sources config file (sets `RAG_SOURCES_CONFIG_FILE`)
+- `--help-config` - Override help config file (sets `HELP_CONFIG_FILE`)
+- `--messages-config` - Override messages config file (sets `MESSAGES_CONFIG_FILE`)
+- `--tool-approvals-config` - Override tool approvals config file (sets `TOOL_APPROVALS_CONFIG_FILE`)
+- `--splash-config` - Override splash config file (sets `SPLASH_CONFIG_FILE`)
+- `--file-extractors-config` - Override file extractors config file (sets `FILE_EXTRACTORS_CONFIG_FILE`)
 
 ### Step 4: Modify ChatService to Accept EventPublisher
 
