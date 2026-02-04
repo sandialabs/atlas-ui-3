@@ -97,8 +97,14 @@ class RAGMCPService:
                 compliance_mgr = get_compliance_manager()
                 filtered_servers = []
                 for server in authorized_servers:
-                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
-                    server_compliance_level = cfg.get("compliance_level")
+                    server_cfg = rag_servers.get(server)
+                    server_compliance_level = getattr(server_cfg, "compliance_level", None)
+                    if server_compliance_level is None:
+                        logger.info(
+                            "RAG server %s has no compliance_level configured; allowing by default for user %s",
+                            sanitize_for_logging(server),
+                            sanitize_for_logging(user_compliance_level),
+                        )
                     if compliance_mgr.is_accessible(
                         user_level=user_compliance_level, resource_level=server_compliance_level
                     ):
@@ -212,8 +218,14 @@ class RAGMCPService:
             if compliance_mgr:
                 filtered_servers = []
                 for server in authorized_servers:
-                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
-                    server_compliance_level = cfg.get("compliance_level")
+                    server_cfg = rag_cfg_servers.get(server)
+                    server_compliance_level = getattr(server_cfg, "compliance_level", None)
+                    if server_compliance_level is None:
+                        logger.info(
+                            "RAG server %s has no compliance_level configured; allowing by default for user %s",
+                            sanitize_for_logging(server),
+                            sanitize_for_logging(user_compliance_level),
+                        )
                     if compliance_mgr.is_accessible(
                         user_level=user_compliance_level, resource_level=server_compliance_level
                     ):

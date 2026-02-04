@@ -1,7 +1,7 @@
 ```markdown
 # Error Handling Improvements
 
-Last updated: 2026-01-19
+Last updated: 2026-02-04
 
 ## Problem
 When backend errors occurred (especially rate limiting from services like Cerebras), users were left staring at a non-responsive UI with no indication of what went wrong. Errors were only visible in backend logs.
@@ -30,6 +30,8 @@ Enhanced error handling to:
 - Send user-friendly messages to frontend
 - Include `error_type` field for frontend categorization
 - Log full error details for debugging
+- Avoid loop-variable capture in background chat tasks by snapshotting inbound payloads
+- Track and cancel outstanding chat tasks on disconnect (prevents leaked tasks and unhandled task exceptions)
 
 ### 4. Tests
 - `backend/tests/test_error_classification.py` - Unit tests for error classification
@@ -42,7 +44,7 @@ Enhanced error handling to:
 ```
 User sends message → Rate limit hit → UI sits there thinking forever
 Backend logs: "litellm.RateLimitError: CerebrasException - We're experiencing high traffic..."
-User: 🤷 *No idea what's happening*
+User: *No idea what's happening*
 ```
 
 ### After
@@ -50,7 +52,7 @@ User: 🤷 *No idea what's happening*
 User sends message → Rate limit hit → Error displayed in chat
 UI shows: "The AI service is experiencing high traffic. Please try again in a moment."
 Backend logs: "Rate limit error: litellm.RateLimitError: CerebrasException - We're experiencing high traffic..."
-User: ✅ *Knows to wait and try again*
+User: *Knows to wait and try again*
 ```
 
 ## Error Messages

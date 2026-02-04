@@ -98,7 +98,11 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
     except Exception:
         # Non-fatal logging error; continue to send
         pass
-    await websocket.send_json(message)
+    try:
+        await websocket.send_json(message)
+    except Exception as e:
+        # WebSocket may have disconnected; avoid bubbling exceptions into background tasks.
+        logger.debug("WS send failed: %s", e)
 
 
 def _ensure_feedback_directory():
@@ -379,6 +383,26 @@ async def websocket_endpoint(websocket: WebSocket):
     
     logger.info(f"WebSocket connection established for session {sanitize_for_logging(str(session_id))}")
 
+    chat_tasks: set[asyncio.Task] = set()
+
+    async def _safe_send_json(payload: dict) -> None:
+        try:
+            await websocket.send_json(payload)
+        except Exception as e:
+            logger.debug("WS send_json failed: %s", e)
+
+    def _on_chat_task_done(task: asyncio.Task) -> None:
+        chat_tasks.discard(task)
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.debug("Failed to inspect chat task exception: %s", e)
+            return
+        if exc:
+            logger.error("Unhandled exception in chat task: %s", exc, exc_info=True)
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -393,29 +417,31 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if message_type == "chat":
                 # Handle chat message in background so we can still receive approval responses
-                async def handle_chat():
+                chat_data = dict(data)
+
+                async def handle_chat(payload: dict):
                     try:
                         await chat_service.handle_chat_message(
                             session_id=session_id,
-                            content=data.get("content", ""),
-                            model=data.get("model", ""),
-                            selected_tools=data.get("selected_tools"),
-                            selected_prompts=data.get("selected_prompts"),
-                            selected_data_sources=data.get("selected_data_sources"),
-                            only_rag=data.get("only_rag", False),
-                            tool_choice_required=data.get("tool_choice_required", False),
+                            content=payload.get("content", ""),
+                            model=payload.get("model", ""),
+                            selected_tools=payload.get("selected_tools"),
+                            selected_prompts=payload.get("selected_prompts"),
+                            selected_data_sources=payload.get("selected_data_sources"),
+                            only_rag=payload.get("only_rag", False),
+                            tool_choice_required=payload.get("tool_choice_required", False),
                             user_email=user_email,  # Use authenticated user from connection
-                            agent_mode=data.get("agent_mode", False),
-                            agent_max_steps=data.get("agent_max_steps", 10),
-                            temperature=data.get("temperature", 0.7),
-                            agent_loop_strategy=data.get("agent_loop_strategy"),
+                            agent_mode=payload.get("agent_mode", False),
+                            agent_max_steps=payload.get("agent_max_steps", 10),
+                            temperature=payload.get("temperature", 0.7),
+                            agent_loop_strategy=payload.get("agent_loop_strategy"),
                             update_callback=lambda message: websocket_update_callback(websocket, message),
-                            files=data.get("files")
+                            files=payload.get("files")
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
                         log_metric("error", user_email, error_type="rate_limit")
-                        await websocket.send_json({
+                        await _safe_send_json({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "rate_limit"
@@ -423,7 +449,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     except LLMTimeoutError as e:
                         logger.warning(f"Timeout error in chat handler: {e}")
                         log_metric("error", user_email, error_type="timeout")
-                        await websocket.send_json({
+                        await _safe_send_json({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "timeout"
@@ -431,7 +457,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     except LLMAuthenticationError as e:
                         logger.error(f"Authentication error in chat handler: {e}")
                         log_metric("error", user_email, error_type="authentication")
-                        await websocket.send_json({
+                        await _safe_send_json({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "authentication"
@@ -439,7 +465,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     except ValidationError as e:
                         logger.warning(f"Validation error in chat handler: {e}")
                         log_metric("error", user_email, error_type="validation")
-                        await websocket.send_json({
+                        await _safe_send_json({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "validation"
@@ -447,7 +473,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     except DomainError as e:
                         logger.error(f"Domain error in chat handler: {e}", exc_info=True)
                         log_metric("error", user_email, error_type="domain")
-                        await websocket.send_json({
+                        await _safe_send_json({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "domain"
@@ -455,14 +481,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     except Exception as e:
                         logger.error(f"Unexpected error in chat handler: {e}", exc_info=True)
                         log_metric("error", user_email, error_type="unexpected")
-                        await websocket.send_json({
+                        await _safe_send_json({
                             "type": "error",
                             "message": "An unexpected error occurred. Please try again or contact support if the issue persists.",
                             "error_type": "unexpected"
                         })
 
                 # Start chat handling in background
-                asyncio.create_task(handle_chat())
+                task = asyncio.create_task(handle_chat(chat_data))
+                chat_tasks.add(task)
+                task.add_done_callback(_on_chat_task_done)
                 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection)
@@ -551,6 +579,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
                 
     except WebSocketDisconnect:
+        # Cancel any in-flight chat work
+        for task in list(chat_tasks):
+            task.cancel()
+        if chat_tasks:
+            await asyncio.gather(*chat_tasks, return_exceptions=True)
+            chat_tasks.clear()
+
         chat_service.end_session(session_id)
         logger.info(f"WebSocket connection closed for session {session_id}")
 

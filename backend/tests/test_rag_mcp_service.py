@@ -66,9 +66,10 @@ class FakeMCP:
 
 class FakeMCPServerConfig:
     """Minimal server config for testing."""
-    def __init__(self, enabled=True, groups=None):
+    def __init__(self, enabled=True, groups=None, compliance_level=None):
         self.enabled = enabled
         self.groups = groups or []
+        self.compliance_level = compliance_level
 
 
 class FakeMCPConfig:
@@ -222,3 +223,28 @@ async def test_rag_group_filtering():
     assert "docsRag:handbook" not in flat, "Admin-only RAG server should not be visible"
     # searchRag is in 'users' group
     assert "searchRag:kb" in flat, "User-accessible RAG server should be visible"
+
+
+@pytest.mark.asyncio
+async def test_compliance_filtering_uses_rag_config_not_available_tools_config(monkeypatch):
+    """Regression: compliance filtering should use rag_mcp_config server config."""
+    from domain.rag_mcp_service import RAGMCPService
+    import domain.rag_mcp_service as rag_mcp_module
+
+    class FakeComplianceManager:
+        def is_accessible(self, user_level, resource_level):
+            # Only allow servers explicitly tagged "Allowed"
+            return resource_level == "Allowed"
+
+    monkeypatch.setattr(rag_mcp_module, "get_compliance_manager", lambda: FakeComplianceManager())
+
+    rag_servers = {
+        "docsRag": FakeMCPServerConfig(enabled=True, groups=["users"], compliance_level="Denied"),
+        "searchRag": FakeMCPServerConfig(enabled=True, groups=["users"], compliance_level="Allowed"),
+    }
+
+    svc = RAGMCPService(FakeMCP(), FakeConfig(rag_servers=rag_servers), fake_auth_check)
+    flat = await svc.discover_data_sources("bob@example.com", user_compliance_level="User")
+
+    assert "docsRag:handbook" not in flat
+    assert "searchRag:kb" in flat
