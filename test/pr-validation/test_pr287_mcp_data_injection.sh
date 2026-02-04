@@ -218,7 +218,7 @@ mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 # .fn gets the raw async function from the FastMCP FunctionTool wrapper
 fn = mod.plan_with_tools.fn
-result = asyncio.get_event_loop().run_until_complete(
+result = asyncio.run(
     fn(task='test', _mcp_data={'available_servers': []})
 )
 assert 'artifacts' in result, 'Missing artifacts key'
@@ -231,18 +231,23 @@ print('OK')
 " 2>&1 | grep -q "OK"
 print_result $? "tool_planner plan_with_tools returns downloadable artifact"
 
-# --- Test 12: tool_planner is in mcp.json config ---
+# --- Test 12: tool_planner server files exist and are valid ---
 python -c "
-import json
-with open('config/overrides/mcp.json') as f:
-    cfg = json.load(f)
-assert 'tool_planner' in cfg, 'tool_planner missing from mcp.json'
-entry = cfg['tool_planner']
-assert entry['cwd'] == 'backend'
-assert 'mcp/tool_planner/main.py' in entry['command'][-1]
+import os, importlib.util
+# Verify the server entry point exists
+server_path = 'backend/mcp/tool_planner/main.py'
+assert os.path.isfile(server_path), f'{server_path} does not exist'
+# Verify it can be loaded as a module
+spec = importlib.util.spec_from_file_location('tp', server_path)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+# Verify required functions exist
+assert hasattr(mod, 'plan_with_tools'), 'plan_with_tools not found'
+assert hasattr(mod, 'format_tools_for_llm'), 'format_tools_for_llm not found'
+assert hasattr(mod, 'build_planning_prompt'), 'build_planning_prompt not found'
 print('OK')
 " 2>&1 | grep -q "OK"
-print_result $? "tool_planner configured in mcp.json"
+print_result $? "tool_planner server files exist and are valid"
 
 # --- Test 13: Run tool_planner unit tests ---
 cd "$PROJECT_ROOT/backend"

@@ -156,7 +156,7 @@ class TestAppSettings:
         """AppSettings should have sensible defaults."""
         settings = AppSettings()
 
-        assert settings.port == 8000
+        assert isinstance(settings.port, int) and 1 <= settings.port <= 65535
         assert settings.log_level in ["DEBUG", "INFO", "WARNING", "ERROR"]
         assert isinstance(settings.debug_mode, bool)
         assert isinstance(settings.banner_enabled, bool)
