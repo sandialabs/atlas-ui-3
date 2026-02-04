@@ -55,8 +55,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # File loading constants and helpers
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 RUNTIME_UPLOADS = os.environ.get(
-    "CHATUI_RUNTIME_UPLOADS", "/workspaces/atlas-ui-3-11/runtime/uploads"
+    "CHATUI_RUNTIME_UPLOADS", os.path.join(_PROJECT_ROOT, "runtime", "uploads")
 )
 
 def _is_http_url(s: str) -> bool:

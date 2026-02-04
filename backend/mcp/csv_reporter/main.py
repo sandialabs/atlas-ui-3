@@ -33,8 +33,9 @@ from fastmcp import FastMCP
 mcp = FastMCP("CSV_Reporter")
 
 
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 RUNTIME_UPLOADS = os.environ.get(
-    "CHATUI_RUNTIME_UPLOADS", "/workspaces/atlas-ui-3-11/runtime/uploads"
+    "CHATUI_RUNTIME_UPLOADS", os.path.join(_PROJECT_ROOT, "runtime", "uploads")
 )
 
 
