@@ -169,6 +169,70 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
     return (True, True, False)  # Default to user-level approval on error
 
 
+def tool_accepts_mcp_data(tool_name: str, tool_manager) -> bool:
+    """
+    Check if a tool accepts an _mcp_data parameter by examining its schema.
+
+    Returns True if the tool schema defines an '_mcp_data' parameter, False otherwise.
+    """
+    if not tool_name or not tool_manager:
+        return False
+
+    try:
+        tools_schema = tool_manager.get_tools_schema([tool_name])
+        if not tools_schema:
+            return False
+
+        for tool_schema in tools_schema:
+            if tool_schema.get("function", {}).get("name") == tool_name:
+                parameters = tool_schema.get("function", {}).get("parameters", {})
+                properties = parameters.get("properties", {})
+                return "_mcp_data" in properties
+
+        return False
+    except Exception as e:
+        logger.warning(f"Could not determine if tool {tool_name} accepts _mcp_data: {e}")
+        return False
+
+
+def build_mcp_data(tool_manager) -> Dict[str, Any]:
+    """
+    Build structured metadata about all available MCP tools for injection.
+
+    Returns a dict with server and tool information that planning tools
+    can use to reason about available capabilities.
+    """
+    available_servers = []
+
+    if not tool_manager or not hasattr(tool_manager, "available_tools"):
+        return {"available_servers": available_servers}
+
+    for server_name, server_data in tool_manager.available_tools.items():
+        if server_name == "canvas":
+            continue
+
+        tools_list = server_data.get("tools", []) or []
+        config = server_data.get("config", {}) or {}
+
+        tools_info = []
+        for tool in tools_list:
+            tool_entry = {
+                "name": f"{server_name}_{tool.name}",
+                "description": getattr(tool, "description", "") or "",
+                "parameters": getattr(tool, "inputSchema", {}) or {},
+            }
+            tools_info.append(tool_entry)
+
+        server_entry = {
+            "server_name": server_name,
+            "description": config.get("description", "") or config.get("short_description", "") or "",
+            "tools": tools_info,
+        }
+        available_servers.append(server_entry)
+
+    return {"available_servers": available_servers}
+
+
 def tool_accepts_username(tool_name: str, tool_manager) -> bool:
     """
     Check if a tool accepts a username parameter by examining its schema.
@@ -525,6 +589,10 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
         user_email = session_context.get("user_email")
         if user_email and (not tool_manager or tool_accepts_username(tool_name, tool_manager)):
             parsed_args["username"] = user_email
+
+        # Inject _mcp_data if the tool schema declares it
+        if tool_manager and tool_accepts_mcp_data(tool_name, tool_manager):
+            parsed_args["_mcp_data"] = build_mcp_data(tool_manager)
 
         # Provide URL hints for filename/file_names fields
         files_ctx = session_context.get("files", {})

@@ -234,5 +234,75 @@ def demonstrate_override_attempt(username: str, attempted_username: Optional[str
     }
 
 
+@mcp.tool
+def plan_with_tools(
+    task: str,
+    _mcp_data: Optional[Dict[str, Any]] = None,
+    username: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Plan how to accomplish a task using available MCP tools.
+
+    This tool demonstrates the _mcp_data injection feature. Atlas UI backend
+    automatically populates _mcp_data with structured metadata about all
+    available MCP tools, enabling this tool to reason about capabilities.
+
+    Args:
+        task: Description of the task to plan for.
+        _mcp_data: Automatically injected by Atlas UI with available tool metadata.
+                   Do not provide this manually.
+        username: The authenticated user (automatically injected by Atlas UI backend).
+
+    Returns:
+        MCP contract shape with a plan based on available tools:
+        {
+          "results": {
+            "task": str,
+            "username": str,
+            "available_server_count": int,
+            "available_tool_count": int,
+            "plan_steps": list,
+            "note": str
+          },
+          "meta_data": {
+            "elapsed_ms": float
+          }
+        }
+    """
+    start = time.perf_counter()
+
+    mcp_data = _mcp_data or {}
+    servers = mcp_data.get("available_servers", [])
+    total_tools = sum(len(s.get("tools", [])) for s in servers)
+
+    # Build a simple plan listing available tools
+    plan_steps = []
+    for server in servers:
+        for tool in server.get("tools", []):
+            plan_steps.append({
+                "tool": tool.get("name", "unknown"),
+                "server": server.get("server_name", "unknown"),
+                "description": tool.get("description", "")[:100],
+            })
+
+    elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
+
+    return {
+        "results": {
+            "task": task,
+            "username": username or "unknown",
+            "available_server_count": len(servers),
+            "available_tool_count": total_tools,
+            "plan_steps": plan_steps,
+            "note": (
+                "This is a demo showing that _mcp_data was automatically "
+                "injected with metadata about all available MCP tools."
+            ),
+        },
+        "meta_data": {
+            "elapsed_ms": elapsed_ms
+        },
+    }
+
+
 if __name__ == "__main__":
     mcp.run()

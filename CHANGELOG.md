@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #287 - 2026-02-03
+- Add `_mcp_data` special injected argument for MCP tools. Tools that declare `_mcp_data` in their schema automatically receive structured metadata about all available MCP servers and tools, enabling planning/orchestration tools to reason about available capabilities.
+- Add `tool_planner` MCP server that uses `_mcp_data` injection and MCP sampling to generate runnable bash scripts from task descriptions. Converts available tool metadata into an LLM-friendly CLI reference and uses `ctx.sample()` to produce multi-step scripts using `atlas_chat_cli.py`.
+
 ### PR #285 - 2026-02-02
 - Fix document upload failure when filenames contain spaces by sanitizing filenames (replacing whitespace with underscores) in both frontend and backend.
 - Fix S3 tag URL-encoding to properly handle special characters in tag values.
