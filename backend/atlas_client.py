@@ -175,6 +175,11 @@ class AtlasClient:
         await self.initialize()
         cfg = self._factory.get_config_manager()
 
+        # Return empty results when RAG feature is disabled
+        if not cfg.app_settings.feature_rag_enabled:
+            logger.info("RAG discovery skipped (FEATURE_RAG_ENABLED=false)")
+            return {"servers": {}, "sources": []}
+
         if user_email is None:
             user_email = cfg.app_settings.test_user or "cli@atlas.local"
 
@@ -188,19 +193,42 @@ class AtlasClient:
                     "description": source.description,
                 }
 
-        # Discover actual sources via RAG MCP service
-        discovered_sources = []
-        try:
-            rag_service = self._factory.get_unified_rag_service()
-            # Use the MCP RAG discovery if available
-            if hasattr(rag_service, 'rag_mcp_service') and rag_service.rag_mcp_service:
-                discovered_sources = await rag_service.rag_mcp_service.discover_data_sources(user_email)
-        except Exception as e:
-            logger.warning("RAG discovery failed: %s", e)
+        discovered_sources: List[str] = []
+        rag_service = self._factory.get_unified_rag_service()
+
+        # Best-effort discovery across HTTP sources
+        if rag_service:
+            try:
+                rag_servers = await rag_service.discover_data_sources(username=user_email)
+                for server in rag_servers:
+                    server_name = server.get("server")
+                    for src in server.get("sources", []) or []:
+                        source_id = src.get("id")
+                        if server_name and source_id:
+                            discovered_sources.append(f"{server_name}:{source_id}")
+            except Exception as e:
+                logger.warning("HTTP RAG discovery failed: %s", e)
+
+        # Best-effort discovery across MCP RAG sources
+        if rag_service and getattr(rag_service, "rag_mcp_service", None):
+            try:
+                mcp_sources = await rag_service.rag_mcp_service.discover_data_sources(user_email)
+                if mcp_sources:
+                    discovered_sources.extend(mcp_sources)
+            except Exception as e:
+                logger.warning("MCP RAG discovery failed: %s", e)
+
+        # Deduplicate while preserving order
+        seen = set()
+        deduped: List[str] = []
+        for s in discovered_sources:
+            if s not in seen:
+                seen.add(s)
+                deduped.append(s)
 
         return {
             "servers": servers,
-            "sources": discovered_sources,
+            "sources": deduped,
         }
 
     async def cleanup(self) -> None:

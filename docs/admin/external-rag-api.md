@@ -8,6 +8,17 @@ This guide explains how to configure RAG (Retrieval-Augmented Generation) in Atl
 
 Atlas UI supports multiple RAG backends through a unified configuration file (`rag-sources.json`). This allows you to configure multiple RAG sources of different types in a single place.
 
+### Feature Flag Semantics
+
+RAG is controlled by the `FEATURE_RAG_ENABLED` feature flag.
+
+- When `FEATURE_RAG_ENABLED=false`, the backend skips RAG service initialization and does not load `rag-sources.json`. The `/api/config` response will show `features.rag=false` and will return empty `rag_servers` and `data_sources`.
+- When `FEATURE_RAG_ENABLED=true`, the backend loads `rag-sources.json`, initializes RAG services, and exposes discovered sources to the UI via `/api/config`.
+
+### Best-Effort Discovery and Retrieval
+
+RAG discovery is best-effort. If one configured RAG source is offline or misconfigured, other sources can still be discovered and used. Expect partial results when some sources fail.
+
 **Supported RAG Source Types:**
 
 | Type | Description |

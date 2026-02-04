@@ -41,6 +41,61 @@ def _get_env_file_from_args() -> tuple[Path, bool]:
             return Path(arg.split("=", 1)[1]), True
     return default_env, False
 
+
+def _extract_flag_value(argv: list[str], flag_name: str) -> str | None:
+    """Extract a flag value from argv.
+
+    Supports both `--flag value` and `--flag=value` forms.
+    """
+    for i, arg in enumerate(argv):
+        if arg == flag_name and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith(flag_name + "="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def _apply_config_overrides_from_args() -> None:
+    """Apply config path overrides from CLI args as env vars.
+
+    This must run BEFORE load_dotenv() and BEFORE importing atlas code, so
+    flags override values coming from .env files.
+    """
+    argv = sys.argv[1:]
+
+    # Directories
+    overrides_dir = _extract_flag_value(argv, "--config-overrides")
+    defaults_dir = _extract_flag_value(argv, "--config-defaults")
+    if overrides_dir:
+        os.environ["APP_CONFIG_OVERRIDES"] = str(Path(overrides_dir).expanduser().resolve())
+    if defaults_dir:
+        os.environ["APP_CONFIG_DEFAULTS"] = str(Path(defaults_dir).expanduser().resolve())
+
+    def _apply_config_file_override(flag: str, env_var: str) -> None:
+        value = _extract_flag_value(argv, flag)
+        if not value:
+            return
+        p = Path(value).expanduser()
+        # If user provides a path, set *_CONFIG_FILE to basename and (unless
+        # explicitly set) point APP_CONFIG_OVERRIDES at the containing directory.
+        if "/" in value or p.parent != Path("."):
+            resolved = p.resolve()
+            os.environ[env_var] = resolved.name
+            if "APP_CONFIG_OVERRIDES" not in os.environ:
+                os.environ["APP_CONFIG_OVERRIDES"] = str(resolved.parent)
+        else:
+            os.environ[env_var] = value
+
+    # Individual config files
+    _apply_config_file_override("--mcp-config", "MCP_CONFIG_FILE")
+    _apply_config_file_override("--rag-sources-config", "RAG_SOURCES_CONFIG_FILE")
+    _apply_config_file_override("--llm-config", "LLM_CONFIG_FILE")
+    _apply_config_file_override("--help-config", "HELP_CONFIG_FILE")
+    _apply_config_file_override("--messages-config", "MESSAGES_CONFIG_FILE")
+    _apply_config_file_override("--tool-approvals-config", "TOOL_APPROVALS_CONFIG_FILE")
+    _apply_config_file_override("--splash-config", "SPLASH_CONFIG_FILE")
+    _apply_config_file_override("--file-extractors-config", "FILE_EXTRACTORS_CONFIG_FILE")
+
 _env_file_path, _env_file_is_custom = _get_env_file_from_args()
 if not _env_file_path.exists():
     if _env_file_is_custom:
@@ -48,6 +103,9 @@ if not _env_file_path.exists():
         sys.exit(2)
     else:
         print(f"Warning: default env file not found: {_env_file_path}", file=sys.stderr)
+
+# Phase 1b: Apply config override flags before loading the env file.
+_apply_config_overrides_from_args()
 load_dotenv(dotenv_path=str(_env_file_path))
 
 # Now safe to import atlas code (which transitively imports litellm)
@@ -95,10 +153,62 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to custom .env file (default: project root .env). Parsed early before other imports.",
     )
+
+    # Config override flags (useful for testing and CI)
+    parser.add_argument(
+        "--config-overrides",
+        default=None,
+        help="Override config overrides directory (sets APP_CONFIG_OVERRIDES).",
+    )
+    parser.add_argument(
+        "--config-defaults",
+        default=None,
+        help="Override config defaults directory (sets APP_CONFIG_DEFAULTS).",
+    )
+    parser.add_argument(
+        "--llm-config",
+        default=None,
+        help="Override LLM config file (sets LLM_CONFIG_FILE). Accepts a filename or path.",
+    )
+    parser.add_argument(
+        "--mcp-config",
+        default=None,
+        help="Override MCP config file (sets MCP_CONFIG_FILE). Accepts a filename or path.",
+    )
+    parser.add_argument(
+        "--rag-sources-config",
+        default=None,
+        help="Override RAG sources config file (sets RAG_SOURCES_CONFIG_FILE). Accepts a filename or path.",
+    )
+    parser.add_argument(
+        "--help-config",
+        default=None,
+        help="Override help config file (sets HELP_CONFIG_FILE). Accepts a filename or path.",
+    )
+    parser.add_argument(
+        "--messages-config",
+        default=None,
+        help="Override messages config file (sets MESSAGES_CONFIG_FILE). Accepts a filename or path.",
+    )
+    parser.add_argument(
+        "--tool-approvals-config",
+        default=None,
+        help="Override tool approvals config file (sets TOOL_APPROVALS_CONFIG_FILE). Accepts a filename or path.",
+    )
+    parser.add_argument(
+        "--splash-config",
+        default=None,
+        help="Override splash config file (sets SPLASH_CONFIG_FILE). Accepts a filename or path.",
+    )
+    parser.add_argument(
+        "--file-extractors-config",
+        default=None,
+        help="Override file extractors config file (sets FILE_EXTRACTORS_CONFIG_FILE). Accepts a filename or path.",
+    )
     return parser
 
 
-async def list_tools() -> int:
+async def list_tools(*, json_output: bool = False) -> int:
     """Discover and print all available tools in CLI-usable format."""
     client = AtlasClient()
     try:
@@ -106,6 +216,9 @@ async def list_tools() -> int:
         mcp_manager = client._factory.get_mcp_manager()
         tool_index = getattr(mcp_manager, "_tool_index", {})
         if not tool_index:
+            if json_output:
+                print(json.dumps({"servers": {}, "tools": []}, indent=2))
+                return 0
             print("No tools discovered.", file=sys.stderr)
             return 1
         # Group by server
@@ -113,6 +226,10 @@ async def list_tools() -> int:
         for full_name, info in sorted(tool_index.items()):
             server = info["server"]
             servers.setdefault(server, []).append(full_name)
+        if json_output:
+            tools = [name for names in servers.values() for name in names]
+            print(json.dumps({"servers": servers, "tools": tools}, indent=2))
+            return 0
         for server, tools in servers.items():
             print(f"{server}:")
             for name in tools:
@@ -122,11 +239,14 @@ async def list_tools() -> int:
         await client.cleanup()
 
 
-async def list_data_sources(user_email: str = None) -> int:
+async def list_data_sources(user_email: str = None, *, json_output: bool = False) -> int:
     """Discover and print all available RAG data sources."""
     client = AtlasClient()
     try:
         result = await client.list_data_sources(user_email=user_email)
+        if json_output:
+            print(json.dumps(result, indent=2))
+            return 0
         servers = result.get("servers", {})
         discovered = result.get("sources", [])
 
@@ -162,10 +282,10 @@ async def list_data_sources(user_email: str = None) -> int:
 
 async def run(args: argparse.Namespace) -> int:
     if args.list_tools:
-        return await list_tools()
+        return await list_tools(json_output=args.json_output)
 
     if args.list_data_sources:
-        return await list_data_sources(user_email=args.user_email)
+        return await list_data_sources(user_email=args.user_email, json_output=args.json_output)
 
     # Resolve prompt
     prompt = args.prompt

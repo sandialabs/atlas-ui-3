@@ -165,7 +165,8 @@ class LiteLLMCaller:
         merged_metadata = None
 
         for display_source, rag_response in source_responses:
-            parts.append(f"### Context from {display_source}:\n{rag_response.content}")
+            content = rag_response.content if rag_response.content else ""
+            parts.append(f"### Context from {display_source}:\n{content}")
             if rag_response.metadata and merged_metadata is None:
                 merged_metadata = rag_response.metadata
 

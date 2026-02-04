@@ -1,6 +1,6 @@
 # _mcp_data Injection for MCP Tools
 
-Last updated: 2026-02-03
+Last updated: 2026-02-04
 
 ## Overview
 
@@ -111,7 +111,7 @@ The `tool_planner` MCP server (`backend/mcp/tool_planner/main.py`) is the primar
 
 1. Receives `_mcp_data` with all available tool metadata
 2. Converts it into a human-readable CLI reference via `format_tools_for_llm()`
-3. Uses `ctx.sample()` to ask the LLM to write a bash script using `atlas_chat_cli.py`
+3. Uses `ctx.sample()` to ask the LLM to write a bash script using `atlas_chat_cli.py` (optionally with `--env-file` and config overrides like `--config-overrides`, `--llm-config`, `--mcp-config`, and `--rag-sources-config` for repeatable testing)
 4. Returns the generated script
 
 ### username-override-demo

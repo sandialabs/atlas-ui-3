@@ -768,7 +768,13 @@ class ConfigManager:
 
         Extracts MCP-type sources from rag_sources_config and converts them
         to MCPServerConfig format for compatibility with RAGMCPService.
+        Returns an empty config when FEATURE_RAG_ENABLED is false.
         """
+        if not self.app_settings.feature_rag_enabled:
+            if self._rag_mcp_config is None:
+                self._rag_mcp_config = MCPConfig()
+            return self._rag_mcp_config
+
         if self._rag_mcp_config is None:
             try:
                 # Get all RAG sources and filter to MCP type only
@@ -819,7 +825,14 @@ class ConfigManager:
         """Get unified RAG sources configuration (cached) from rag-sources.json.
 
         This config supports both MCP-based and HTTP REST API RAG sources.
+        Returns an empty config when FEATURE_RAG_ENABLED is false.
         """
+        if not self.app_settings.feature_rag_enabled:
+            if self._rag_sources_config is None:
+                self._rag_sources_config = RAGSourcesConfig()
+                logger.info("RAG sources config skipped (FEATURE_RAG_ENABLED=false)")
+            return self._rag_sources_config
+
         if self._rag_sources_config is None:
             try:
                 rag_filename = self.app_settings.rag_sources_config_file

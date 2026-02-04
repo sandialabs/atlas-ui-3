@@ -1,0 +1,7 @@
+models:
+  mock-model:
+    model_url: "__LLM_MOCK_URL__/v1/chat/completions"
+    model_name: "mock-model"
+    api_key: "mock"
+    description: "Local mock LLM for PR #291 validation"
+    compliance_level: "Internal"
