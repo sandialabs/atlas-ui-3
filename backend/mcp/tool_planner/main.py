@@ -38,7 +38,8 @@ Rules:
 - The script should be self-contained and runnable from the backend/ directory
 - Do NOT use --json unless parsing structured output is truly necessary
 - Keep instructions to the LLM clear and specific in each CLI call
-- Add brief comments explaining each step
+- Be concise: at most 2 short comment lines between commands, no lengthy explanations
+- The script should be easy to read at a glance
 """
 
 
