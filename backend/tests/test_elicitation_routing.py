@@ -6,7 +6,6 @@ from MCP tools to reach the correct WebSocket connection across async tasks.
 """
 
 import pytest
-import asyncio
 from unittest.mock import Mock, AsyncMock, patch
 from domain.messages.models import ToolCall
 

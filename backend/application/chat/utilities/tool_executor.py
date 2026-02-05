@@ -65,6 +65,7 @@ async def execute_tools_workflow(
     update_callback: Optional[UpdateCallback] = None,
     config_manager=None,
     skip_approval: bool = False,
+    user_email: Optional[str] = None,
 ) -> tuple[str, List[ToolResult]]:
     """
     Execute the complete tools workflow: calls -> results -> synthesis.
@@ -108,7 +109,8 @@ async def execute_tools_workflow(
         session_context=session_context,
         llm_caller=llm_caller,
         prompt_provider=prompt_provider,
-        update_callback=update_callback
+        update_callback=update_callback,
+        user_email=user_email,
     )
 
     return final_response, tool_results
@@ -165,6 +167,70 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
     except Exception as e:
         logger.warning(f"Error checking approval requirements for {tool_name}: {e}")
     return (True, True, False)  # Default to user-level approval on error
+
+
+def tool_accepts_mcp_data(tool_name: str, tool_manager) -> bool:
+    """
+    Check if a tool accepts an _mcp_data parameter by examining its schema.
+
+    Returns True if the tool schema defines an '_mcp_data' parameter, False otherwise.
+    """
+    if not tool_name or not tool_manager:
+        return False
+
+    try:
+        tools_schema = tool_manager.get_tools_schema([tool_name])
+        if not tools_schema:
+            return False
+
+        for tool_schema in tools_schema:
+            if tool_schema.get("function", {}).get("name") == tool_name:
+                parameters = tool_schema.get("function", {}).get("parameters", {})
+                properties = parameters.get("properties", {})
+                return "_mcp_data" in properties
+
+        return False
+    except Exception as e:
+        logger.warning(f"Could not determine if tool {tool_name} accepts _mcp_data: {e}")
+        return False
+
+
+def build_mcp_data(tool_manager) -> Dict[str, Any]:
+    """
+    Build structured metadata about all available MCP tools for injection.
+
+    Returns a dict with server and tool information that planning tools
+    can use to reason about available capabilities.
+    """
+    available_servers = []
+
+    if not tool_manager or not hasattr(tool_manager, "available_tools"):
+        return {"available_servers": available_servers}
+
+    for server_name, server_data in tool_manager.available_tools.items():
+        if server_name == "canvas":
+            continue
+
+        tools_list = server_data.get("tools", []) or []
+        config = server_data.get("config", {}) or {}
+
+        tools_info = []
+        for tool in tools_list:
+            tool_entry = {
+                "name": f"{server_name}_{tool.name}",
+                "description": getattr(tool, "description", "") or "",
+                "parameters": getattr(tool, "inputSchema", {}) or {},
+            }
+            tools_info.append(tool_entry)
+
+        server_entry = {
+            "server_name": server_name,
+            "description": config.get("description", "") or config.get("short_description", "") or "",
+            "tools": tools_info,
+        }
+        available_servers.append(server_entry)
+
+    return {"available_servers": available_servers}
 
 
 def tool_accepts_username(tool_name: str, tool_manager) -> bool:
@@ -524,6 +590,10 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
         if user_email and (not tool_manager or tool_accepts_username(tool_name, tool_manager)):
             parsed_args["username"] = user_email
 
+        # Inject _mcp_data if the tool schema declares it
+        if tool_manager and tool_accepts_mcp_data(tool_name, tool_manager):
+            parsed_args["_mcp_data"] = build_mcp_data(tool_manager)
+
         # Provide URL hints for filename/file_names fields
         files_ctx = session_context.get("files", {})
         
@@ -614,7 +684,8 @@ async def handle_synthesis_decision(
     session_context: Dict[str, Any],
     llm_caller,
     prompt_provider,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    user_email: Optional[str] = None,
 ) -> str:
     """
     Decide whether synthesis is needed and execute accordingly.
@@ -648,7 +719,8 @@ async def handle_synthesis_decision(
         messages=messages,
         llm_caller=llm_caller,
         prompt_provider=prompt_provider,
-        update_callback=update_callback
+        update_callback=update_callback,
+        user_email=user_email,
     )
 
 
@@ -657,7 +729,8 @@ async def synthesize_tool_results(
     messages: List[Dict[str, Any]],
     llm_caller,
     prompt_provider,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    user_email: Optional[str] = None,
 ) -> str:
     """
     Prepare augmented messages with synthesis prompt and obtain final answer.
@@ -684,7 +757,7 @@ async def synthesize_tool_results(
     else:
         logger.info("Proceeding without dedicated tool synthesis prompt (fallback)")
 
-    final_response = await llm_caller.call_plain(model, synthesis_messages)
+    final_response = await llm_caller.call_plain(model, synthesis_messages, user_email=user_email)
 
     # Do not emit a separate 'tool_synthesis' assistant-visible event here.
     # The chat service will emit a single 'chat_response' for the final answer

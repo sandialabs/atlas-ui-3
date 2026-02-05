@@ -55,8 +55,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # File loading constants and helpers
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 RUNTIME_UPLOADS = os.environ.get(
-    "CHATUI_RUNTIME_UPLOADS", "/workspaces/atlas-ui-3-11/runtime/uploads"
+    "CHATUI_RUNTIME_UPLOADS", os.path.join(_PROJECT_ROOT, "runtime", "uploads")
 )
 
 def _is_http_url(s: str) -> bool:
@@ -108,13 +109,11 @@ def _load_file_bytes(filename: str, file_data_base64: str = "") -> bytes:
     if filename and _is_backend_download_path(filename):
         base = _backend_base_url()
         url = base.rstrip("/") + filename
-        headers = {"Accept": "*/*"}
         r = requests.get(url, timeout=20)
         r.raise_for_status()
         return r.content
 
     if filename and _is_http_url(filename):
-        headers = {"Accept": "*/*"}
         r = requests.get(filename, timeout=20)
         r.raise_for_status()
         return r.content
@@ -365,7 +364,7 @@ def execute_python_code_with_file(
                 # Calculate size from base64
                 try:
                     size = len(base64.b64decode(content_b64))
-                except:
+                except Exception:
                     size = 0
                 
                 artifacts.append({

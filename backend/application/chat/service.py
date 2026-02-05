@@ -360,9 +360,9 @@ class ChatService:
             }
 
         except Exception as e:
-            cleaned_s3_key = s3_key.replace('\n', '').replace('\r', '')
-            cleaned_error_description = str(e).replace('\n', '').replace('\r', '')
-            logger.error(f"Failed to attach file {cleaned_s3_key} to session {session_id}: {cleaned_error_description}")
+            safe_key = s3_key.replace('\n', '').replace('\r', '')
+            safe_err = str(e).replace('\n', '').replace('\r', '')
+            logger.error(f"Failed to attach file {safe_key} to session {session_id}: {safe_err}")
             return {
                 "type": "file_attach",
                 "s3_key": s3_key,

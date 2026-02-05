@@ -1,0 +1,32 @@
+{
+  "enabled": true,
+  "default_behavior": "extract",
+
+  "extractors": {
+    "pdf-multipart": {
+      "url": "http://localhost:8011/extract",
+      "method": "POST",
+      "timeout_seconds": 30,
+      "max_file_size_mb": 50,
+      "preview_chars": 2000,
+      "request_format": "multipart",
+      "form_field_name": "file",
+      "response_field": "text",
+      "enabled": true
+    }
+  },
+
+  "extension_mapping": {
+    ".pdf": "pdf-multipart",
+    ".txt": "pdf-multipart",
+    ".md": "pdf-multipart",
+    ".csv": "pdf-multipart"
+  },
+
+  "mime_mapping": {
+    "application/pdf": "pdf-multipart",
+    "text/plain": "pdf-multipart",
+    "text/markdown": "pdf-multipart",
+    "text/csv": "pdf-multipart"
+  }
+}

@@ -24,8 +24,8 @@ class _FakeLLM:
 fake_litellm_caller.LiteLLMCaller = _FakeLLM  # type: ignore
 sys.modules["modules.llm.litellm_caller"] = fake_litellm_caller
 
-from main import app  # type: ignore
-from core.capabilities import generate_file_token, verify_file_token  # type: ignore
+from main import app  # noqa: E402  # type: ignore
+from core.capabilities import generate_file_token, verify_file_token  # noqa: E402  # type: ignore
 
 
 class FakeS3:

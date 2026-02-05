@@ -7,7 +7,6 @@ This module tests that the file download URL generation correctly handles:
 3. Proper token generation and validation
 """
 
-import os
 import pytest
 from unittest.mock import patch, MagicMock
 

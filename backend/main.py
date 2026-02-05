@@ -3,6 +3,28 @@ Basic chat backend implementing the modular architecture.
 Focuses on essential chat functionality only.
 """
 
+# Suppress LiteLLM verbose logging BEFORE any transitive import of litellm.
+# litellm._logging reads LITELLM_LOG at import time and defaults to DEBUG.
+# This must happen before any other imports that might load litellm.
+import os
+from pathlib import Path as _Path
+from dotenv import dotenv_values as _dotenv_values
+
+# Load .env values without setting them in os.environ yet (just to read feature flag)
+_env_path = _Path(__file__).parent.parent / ".env"
+_env_values = _dotenv_values(_env_path) if _env_path.exists() else {}
+
+# Check feature flag: FEATURE_SUPPRESS_LITELLM_LOGGING (default: true)
+_suppress_litellm = _env_values.get("FEATURE_SUPPRESS_LITELLM_LOGGING", "true").lower() in ("true", "1", "yes")
+
+if _suppress_litellm and "LITELLM_LOG" not in os.environ:
+    os.environ["LITELLM_LOG"] = "ERROR"
+
+# Clean up temporary imports
+del _Path, _dotenv_values, _env_path, _env_values, _suppress_litellm
+
+# Standard imports follow - must come after LiteLLM logging suppression above
+# ruff: noqa: E402
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -31,6 +53,7 @@ from core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from core.otel_config import setup_opentelemetry
 from core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from core.auth import get_user_from_header
+from core.metrics_logger import log_metric
 
 # Import from infrastructure
 from infrastructure.app_factory import app_factory
@@ -391,6 +414,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
+                        log_metric("error", user_email, error_type="rate_limit")
                         await websocket.send_json({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
@@ -398,6 +422,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except LLMTimeoutError as e:
                         logger.warning(f"Timeout error in chat handler: {e}")
+                        log_metric("error", user_email, error_type="timeout")
                         await websocket.send_json({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
@@ -405,6 +430,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except LLMAuthenticationError as e:
                         logger.error(f"Authentication error in chat handler: {e}")
+                        log_metric("error", user_email, error_type="authentication")
                         await websocket.send_json({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
@@ -412,6 +438,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except ValidationError as e:
                         logger.warning(f"Validation error in chat handler: {e}")
+                        log_metric("error", user_email, error_type="validation")
                         await websocket.send_json({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
@@ -419,6 +446,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except DomainError as e:
                         logger.error(f"Domain error in chat handler: {e}", exc_info=True)
+                        log_metric("error", user_email, error_type="domain")
                         await websocket.send_json({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
@@ -426,6 +454,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except Exception as e:
                         logger.error(f"Unexpected error in chat handler: {e}", exc_info=True)
+                        log_metric("error", user_email, error_type="unexpected")
                         await websocket.send_json({
                             "type": "error",
                             "message": "An unexpected error occurred. Please try again or contact support if the issue persists.",

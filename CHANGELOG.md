@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #302 - 2026-02-04
+- Fix help page width constraint so documentation content fills the full available width (#145)
+- Add configurable timeouts (`MCP_DISCOVERY_TIMEOUT`, `MCP_CALL_TIMEOUT`) for MCP discovery and tool calls to prevent indefinite hangs (#298)
+- Close #293 (f-string backslash SyntaxError was already resolved on main)
+
+### PR #291 - 2026-02-04
+- Fix `FEATURE_RAG_ENABLED` to fully disable RAG on the backend (not just the UI). When disabled, RAG services are not initialized and `rag-sources.json` is not loaded.
+- Make RAG discovery and retrieval best-effort: a single failing RAG data source no longer prevents other sources from returning results. HTTP and MCP RAG discovery are independent, per-source errors are isolated, and null content is handled gracefully.
+
+### PR #287 - 2026-02-03
+- Add `_mcp_data` special injected argument for MCP tools. Tools that declare `_mcp_data` in their schema automatically receive structured metadata about all available MCP servers and tools, enabling planning/orchestration tools to reason about available capabilities.
+- Add `tool_planner` MCP server that uses `_mcp_data` injection and MCP sampling to generate runnable bash scripts from task descriptions. Converts available tool metadata into an LLM-friendly CLI reference and uses `ctx.sample()` to produce multi-step scripts using `atlas_chat_cli.py`.
+
+### PR #285 - 2026-02-02
+- Fix document upload failure when filenames contain spaces by sanitizing filenames (replacing whitespace with underscores) in both frontend and backend.
+- Fix S3 tag URL-encoding to properly handle special characters in tag values.
+
+### PR #279 - 2026-02-01
+- Make backend port configurable via `PORT` in `.env` instead of hardcoding 8000 in `agent_start.sh`, enabling git worktrees to run on different ports.
+- Add git-worktree-setup Claude Code agent with automatic port conflict handling.
+
+### PR #278 - 2026-01-30
+- Replace boolean file extraction toggle with 3-mode system (`full` | `preview` | `none`) for fine-grained control over how file content is injected into LLM prompts.
+- Add backward-compatible normalization of legacy config values (`"extract"` -> `"full"`, `"attach_only"` -> `"none"`).
+
+### PR #276 - 2026-02-01
+- RAG endpoints that return chat completions (LLM-interpreted results) are now returned directly without additional LLM processing
+- Added `is_completion` flag to `RAGResponse` to detect when content is already interpreted
+- UI displays a note when responses come from RAG completions endpoint
+- Reduces unnecessary LLM API calls and processing time for RAG completions
+
+### PR #274 - 2026-01-30
+- **Feature**: Add multipart form-data upload support for file content extraction. Extractors can now use `request_format: "multipart"` to send files via multipart upload instead of base64 JSON, enabling compatibility with standard file upload APIs.
+- **Config**: Add `form_field_name` field to extractor config for controlling the multipart form field name (default: `"file"`).
+
+### PR #264 - 2026-01-28
+- **Feature**: Add metrics logging for user activity tracking without capturing sensitive data. Logs LLM calls, tool usage, file uploads, and errors with only metadata (counts, sizes, types).
+- **Feature**: Add `FEATURE_METRICS_LOGGING_ENABLED` environment variable to enable/disable metrics logging.
+- **Privacy**: Metrics explicitly exclude prompts, tool arguments, file names, and error details - only non-sensitive metadata is logged.
+- **Format**: All metrics use consistent `[METRIC] [username] event_type key=value ...` pattern for easy filtering and analysis.
+- **Documentation**: Add comprehensive metrics logging documentation in `docs/metrics-logging.md` with examples and query patterns.
+
 ### PR #TBD - 2026-01-27
 - **Feature**: Add non-interactive CLI (`atlas_chat_cli.py`) and Python API (`atlas_client.py`) for one-shot LLM chat with full MCP tools, RAG, and agent mode support. Enables scripted workflows, E2E testing, and MCP development without the browser UI.
 - **Feature**: Add CLI event publisher for headless operation with streaming and collecting modes.

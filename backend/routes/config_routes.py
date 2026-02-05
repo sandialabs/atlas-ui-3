@@ -76,32 +76,36 @@ async def get_config(
     rag_servers = []
     # Only attempt RAG discovery if RAG feature is enabled
     if app_settings.feature_rag_enabled:
+        # Discover HTTP and MCP RAG sources independently (best-effort)
+        # so a failure in one type does not prevent discovery of the other
         try:
-            # Use unified RAG service for HTTP sources from rag-sources.json
             unified_rag = app_factory.get_unified_rag_service()
-            http_rag_servers = await unified_rag.discover_data_sources(
-                current_user, user_compliance_level=compliance_level
-            )
-            rag_servers.extend(http_rag_servers)
-
-            # Also discover MCP-based RAG sources (from rag-sources.json type=mcp)
-            rag_mcp = app_factory.get_rag_mcp_service()
-            mcp_rag_servers = await rag_mcp.discover_servers(
-                current_user, user_compliance_level=compliance_level
-            )
-            rag_servers.extend(mcp_rag_servers)
-
-            # Build flat list of data sources for backward compatibility
-            # Format: "server:source_id" for qualified references
-            for server in rag_servers:
-                server_name = server.get("server", "")
-                for source in server.get("sources", []):
-                    source_id = source.get("id", "")
-                    if server_name and source_id:
-                        rag_data_sources.append(f"{server_name}:{source_id}")
-
+            if unified_rag:
+                http_rag_servers = await unified_rag.discover_data_sources(
+                    current_user, user_compliance_level=compliance_level
+                )
+                rag_servers.extend(http_rag_servers)
         except Exception as e:
-            logger.warning("Error resolving RAG data sources: %s", e)
+            logger.warning("Error discovering HTTP RAG sources: %s", e)
+
+        try:
+            rag_mcp = app_factory.get_rag_mcp_service()
+            if rag_mcp:
+                mcp_rag_servers = await rag_mcp.discover_servers(
+                    current_user, user_compliance_level=compliance_level
+                )
+                rag_servers.extend(mcp_rag_servers)
+        except Exception as e:
+            logger.warning("Error discovering MCP RAG sources: %s", e)
+
+        # Build flat list of data sources for backward compatibility
+        # Format: "server:source_id" for qualified references
+        for server in rag_servers:
+            server_name = server.get("server", "")
+            for source in server.get("sources", []):
+                source_id = source.get("id", "")
+                if server_name and source_id:
+                    rag_data_sources.append(f"{server_name}:{source_id}")
     
     # Check if tools are enabled
     tools_info = []
@@ -324,7 +328,7 @@ def _get_file_extraction_config(config_manager) -> dict:
     if not app_settings.feature_file_content_extraction_enabled:
         return {
             "enabled": False,
-            "default_behavior": "attach_only",
+            "default_behavior": "none",
             "supported_extensions": []
         }
 
@@ -347,7 +351,7 @@ def _get_file_extraction_config(config_manager) -> dict:
         logger.warning(f"Error building file extraction config: {e}")
         return {
             "enabled": False,
-            "default_behavior": "attach_only",
+            "default_behavior": "none",
             "supported_extensions": []
         }
 

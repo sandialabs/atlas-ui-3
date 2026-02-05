@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileSearch, FileX, Search } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
@@ -10,9 +10,9 @@ import PromptSelector from './PromptSelector'
 const ChatArea = () => {
   const [inputValue, setInputValue] = useState('')
   const [isMobile, setIsMobile] = useState(false)
-  // uploadedFiles: { filename: { content: base64, extract: boolean } }
+  // uploadedFiles: { filename: { content: base64, extractMode: "full"|"preview"|"none" } }
   const [uploadedFiles, setUploadedFiles] = useState({})
-  const [globalExtractEnabled, setGlobalExtractEnabled] = useState(true)
+  const [globalExtractMode, setGlobalExtractMode] = useState('full')
   const [showToolAutocomplete, setShowToolAutocomplete] = useState(false)
   const [filteredTools, setFilteredTools] = useState([])
   const [selectedToolIndex, setSelectedToolIndex] = useState(0)
@@ -209,7 +209,7 @@ const ChatArea = () => {
           if (response.ok) {
             const fileData = await response.json()
             fileRefs[filename] = fileData.content_base64
-            console.log(`📎 Loaded content for @file ${filename}`)
+            console.log(`Loaded content for @file ${filename}`)
           } else {
             console.warn(`Failed to load @file ${filename}:`, response.status)
             fileRefs[filename] = `[Error loading file: ${filename}]`
@@ -532,19 +532,36 @@ const ChatArea = () => {
     return fileExtraction.supported_extensions?.includes(ext) || false
   }, [fileExtraction])
 
+  // 3-mode extraction cycle helpers
+  const EXTRACT_MODES = ['full', 'preview', 'none']
+  const nextExtractMode = (mode) => EXTRACT_MODES[(EXTRACT_MODES.indexOf(mode) + 1) % EXTRACT_MODES.length]
+  const extractModeIcon = (mode) => {
+    if (mode === 'full') return FileText
+    if (mode === 'preview') return FileSearch
+    return FileX
+  }
+  const extractModeLabel = (mode) => {
+    if (mode === 'full') return 'Full Text'
+    if (mode === 'preview') return 'Preview'
+    return 'No Extract'
+  }
+
+  const sanitizeFilename = (name) => name.replace(/\s+/g, '_')
+
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files)
     files.forEach(file => {
       const reader = new FileReader()
       reader.onload = (e) => {
         const base64Data = e.target.result.split(',')[1] // Remove data URL prefix
-        // Determine if extraction should be enabled for this file
-        const shouldExtract = globalExtractEnabled && canExtractFile(file.name)
+        const safeName = sanitizeFilename(file.name)
+        // Determine extraction mode for this file
+        const mode = canExtractFile(safeName) ? globalExtractMode : 'none'
         setUploadedFiles(prev => ({
           ...prev,
-          [file.name]: {
+          [safeName]: {
             content: base64Data,
-            extract: shouldExtract
+            extractMode: mode
           }
         }))
       }
@@ -564,7 +581,7 @@ const ChatArea = () => {
     })
   }
 
-  // Toggle extraction for a specific file
+  // Cycle extraction mode for a specific file
   const toggleFileExtraction = (filename) => {
     setUploadedFiles(prev => {
       if (!prev[filename]) return prev
@@ -572,7 +589,7 @@ const ChatArea = () => {
         ...prev,
         [filename]: {
           ...prev[filename],
-          extract: !prev[filename].extract
+          extractMode: nextExtractMode(prev[filename].extractMode || 'none')
         }
       }
     })
@@ -618,13 +635,14 @@ const ChatArea = () => {
       const reader = new FileReader()
       reader.onload = (event) => {
         const base64Data = event.target.result.split(',')[1]
-        // Determine if extraction should be enabled for this file
-        const shouldExtract = globalExtractEnabled && canExtractFile(file.name)
+        const safeName = sanitizeFilename(file.name)
+        // Determine extraction mode for this file
+        const mode = canExtractFile(safeName) ? globalExtractMode : 'none'
         setUploadedFiles(prev => ({
           ...prev,
-          [file.name]: {
+          [safeName]: {
             content: base64Data,
-            extract: shouldExtract
+            extractMode: mode
           }
         }))
       }
@@ -748,45 +766,56 @@ const ChatArea = () => {
             <div className="mb-3 p-3 bg-gray-800 rounded-lg border border-gray-600">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-sm text-gray-300">Uploaded Files:</div>
-                {/* Global extraction toggle - only show if feature is enabled */}
-                {fileExtraction?.enabled && (
-                  <button
-                    onClick={() => setGlobalExtractEnabled(!globalExtractEnabled)}
-                    className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
-                      globalExtractEnabled
-                        ? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30'
-                        : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                    }`}
-                    title={globalExtractEnabled ? 'Content extraction enabled for new files' : 'Content extraction disabled'}
-                  >
-                    {globalExtractEnabled ? <FileSearch className="w-3 h-3" /> : <FileX className="w-3 h-3" />}
-                    <span>{globalExtractEnabled ? 'Extract On' : 'Extract Off'}</span>
-                  </button>
-                )}
+                {/* Global extraction mode toggle - only show if feature is enabled */}
+                {fileExtraction?.enabled && (() => {
+                  const GlobalIcon = extractModeIcon(globalExtractMode)
+                  const modeColors = {
+                    full: 'bg-green-600/20 text-green-400 hover:bg-green-600/30',
+                    preview: 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30',
+                    none: 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  }
+                  return (
+                    <button
+                      onClick={() => setGlobalExtractMode(nextExtractMode(globalExtractMode))}
+                      className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${modeColors[globalExtractMode]}`}
+                      title={`Extraction mode for new files: ${extractModeLabel(globalExtractMode)}`}
+                    >
+                      <GlobalIcon className="w-3 h-3" />
+                      <span>{extractModeLabel(globalExtractMode)}</span>
+                    </button>
+                  )
+                })()}
               </div>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(uploadedFiles).map(([filename, fileData]) => {
                   const supportsExtraction = canExtractFile(filename)
-                  const extractEnabled = fileData.extract
+                  const mode = fileData.extractMode || 'none'
+                  const borderColors = {
+                    full: 'bg-green-900/30 border border-green-600/50',
+                    preview: 'bg-blue-900/30 border border-blue-600/50',
+                    none: 'bg-gray-700'
+                  }
+                  const iconColors = {
+                    full: 'text-green-400 hover:text-green-300',
+                    preview: 'text-blue-400 hover:text-blue-300',
+                    none: 'text-gray-500 hover:text-gray-400'
+                  }
+                  const ModeIcon = extractModeIcon(mode)
                   return (
                     <div
                       key={filename}
                       className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
-                        extractEnabled && supportsExtraction
-                          ? 'bg-blue-900/30 border border-blue-600/50'
-                          : 'bg-gray-700'
+                        supportsExtraction ? borderColors[mode] : 'bg-gray-700'
                       }`}
                     >
-                      {/* Extraction toggle for individual file */}
+                      {/* Extraction mode toggle for individual file */}
                       {fileExtraction?.enabled && supportsExtraction && (
                         <button
                           onClick={() => toggleFileExtraction(filename)}
-                          className={`transition-colors ${
-                            extractEnabled ? 'text-blue-400 hover:text-blue-300' : 'text-gray-500 hover:text-gray-400'
-                          }`}
-                          title={extractEnabled ? 'Content will be extracted' : 'Click to enable extraction'}
+                          className={`transition-colors ${iconColors[mode]}`}
+                          title={`Extraction: ${extractModeLabel(mode)} - click to cycle`}
                         >
-                          {extractEnabled ? <FileSearch className="w-3 h-3" /> : <FileX className="w-3 h-3" />}
+                          <ModeIcon className="w-3 h-3" />
                         </button>
                       )}
                       <span className="text-gray-200">{filename}</span>
@@ -905,7 +934,7 @@ const ChatArea = () => {
                           <span className="text-xs px-2 py-1 rounded bg-gray-600 text-gray-300">{file.type}</span>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-gray-400">
-                          <span>{file.source === 'tool' ? '🔧 generated' : '📤 uploaded'}</span>
+                          <span>{file.source === 'tool' ? 'generated' : 'uploaded'}</span>
                           <span>{(file.size / 1024).toFixed(1)}KB</span>
                         </div>
                       </div>

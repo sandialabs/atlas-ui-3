@@ -18,7 +18,7 @@ def test_security_headers_present_by_default():
 def test_download_filename_sanitized(monkeypatch):
     # Insert a file into mock S3 listing by calling upload
     from infrastructure.app_factory import app_factory
-    fm = app_factory.get_file_manager()
+    app_factory.get_file_manager()
 
     # Prepare malicious filename
     bad_name = 'evil\r\nInjected.txt'

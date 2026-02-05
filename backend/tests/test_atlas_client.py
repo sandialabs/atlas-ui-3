@@ -112,6 +112,54 @@ class TestCLIArgParsing:
         args = parser.parse_args(["--list-tools"])
         assert args.list_tools is True
 
+    def test_env_file_flag(self):
+        from atlas_chat_cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["prompt", "--env-file", "/path/to/custom.env"])
+        assert args.env_file == "/path/to/custom.env"
+
+    def test_env_file_flag_equals_syntax(self):
+        from atlas_chat_cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["prompt", "--env-file=/other/path.env"])
+        assert args.env_file == "/other/path.env"
+
+    def test_data_sources_flag(self):
+        from atlas_chat_cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["prompt", "--data-sources", "source1,source2"])
+        assert args.data_sources == "source1,source2"
+
+    def test_only_rag_flag(self):
+        from atlas_chat_cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["prompt", "--only-rag"])
+        assert args.only_rag is True
+
+    def test_list_data_sources_flag(self):
+        from atlas_chat_cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["--list-data-sources"])
+        assert args.list_data_sources is True
+
+    def test_combined_tools_and_data_sources(self):
+        from atlas_chat_cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "prompt",
+            "--tools", "calculator_evaluate",
+            "--data-sources", "atlas_rag",
+        ])
+        assert args.tools == "calculator_evaluate"
+        assert args.data_sources == "atlas_rag"
+        assert args.only_rag is False
+
 
 # ---------------------------------------------------------------------------
 # ChatResult serialization tests

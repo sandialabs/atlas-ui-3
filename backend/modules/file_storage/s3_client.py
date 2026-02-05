@@ -8,15 +8,16 @@ This module provides a client interface to interact with S3-compatible storage
 import base64
 import logging
 from typing import Dict, List, Optional, Any
-import hashlib
 import uuid
 import time
+from urllib.parse import quote
 
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
 from core.log_sanitizer import sanitize_for_logging
+from core.metrics_logger import log_metric
 
 
 logger = logging.getLogger(__name__)
@@ -122,8 +123,8 @@ class S3StorageClient:
             file_tags["user_email"] = user_email
             file_tags["original_filename"] = filename
 
-            # Convert tags to S3 tag format
-            tag_set = "&".join([f"{k}={v}" for k, v in file_tags.items()])
+            # Convert tags to S3 tag format (URL-encode values for safety)
+            tag_set = "&".join([f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in file_tags.items()])
 
             # Upload to S3
             self.s3_client.put_object(
@@ -165,6 +166,9 @@ class S3StorageClient:
                 sanitize_for_logging(user_email),
             )
             logger.debug("Uploaded file key (sanitized): %s", sanitize_for_logging(s3_key))
+            
+            log_metric("file_stored", user_email, file_size=len(content_bytes), content_type=content_type, category=category)
+            
             return result
 
         except ClientError as e:

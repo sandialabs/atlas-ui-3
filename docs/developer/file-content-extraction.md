@@ -1,6 +1,6 @@
 # File Content Extraction
 
-**Last updated:** 2026-01-19
+**Last updated:** 2026-01-30
 
 This document describes how to configure automatic file content extraction for uploaded files (PDFs, images, etc.) in Atlas UI.
 
@@ -10,7 +10,21 @@ When users upload files, Atlas UI can automatically extract text content and sen
 
 1. **Feature flag**: `FEATURE_FILE_CONTENT_EXTRACTION_ENABLED`
 2. **Config file**: `config/defaults/file-extractors.json`
-3. **Per-file toggle**: Users can enable/disable extraction per file in the UI
+3. **Per-file mode toggle**: Users can cycle extraction mode per file in the UI
+
+## Extraction Modes
+
+Atlas UI supports three extraction modes, selectable globally and per-file:
+
+| Mode | Description | LLM Prompt Behavior |
+|------|-------------|---------------------|
+| `full` | Default. Entire extracted text injected into context | Wrapped in `<< content of file X >>` / `<< end content of file X >>` markers, no truncation |
+| `preview` | Truncated preview only | First 10 lines / 2000 chars with "Content preview:" label |
+| `none` | Filename listed, no content | File listed by name only; content available on request |
+
+The UI displays a clickable badge that cycles through modes: green (full) -> blue (preview) -> gray (none).
+
+Legacy config values are automatically normalized: `"extract"` -> `"full"`, `"attach_only"` -> `"none"`.
 
 ## Configuration
 
@@ -29,7 +43,7 @@ Create or edit `config/defaults/file-extractors.json` (or `config/overrides/file
 ```json
 {
   "enabled": true,
-  "default_behavior": "extract",
+  "default_behavior": "full",
 
   "extractors": {
     "pdf-text": {
@@ -63,7 +77,7 @@ Create or edit `config/defaults/file-extractors.json` (or `config/overrides/file
 | Field | Type | Description |
 |-------|------|-------------|
 | `enabled` | bool | Global kill switch (independent of feature flag) |
-| `default_behavior` | string | `"extract"` or `"attach_only"` - system default |
+| `default_behavior` | string | `"full"`, `"preview"`, or `"none"` - system default (legacy `"extract"` and `"attach_only"` auto-normalized) |
 | `extractors` | object | Named extractor services with HTTP config |
 | `extension_mapping` | object | File extension to extractor name mapping |
 | `mime_mapping` | object | MIME type to extractor name (fallback) |
@@ -77,7 +91,8 @@ Create or edit `config/defaults/file-extractors.json` (or `config/overrides/file
 | `timeout_seconds` | int | `30` | Request timeout |
 | `max_file_size_mb` | int | `50` | Maximum file size limit |
 | `preview_chars` | int | `2000` | Chars to include in preview |
-| `request_format` | string | `"base64"` | `"base64"` or `"url"` |
+| `request_format` | string | `"base64"` | `"base64"`, `"multipart"`, or `"url"` |
+| `form_field_name` | string | `"file"` | Form field name for multipart uploads |
 | `response_field` | string | `"text"` | JSON field containing extracted text |
 | `enabled` | bool | `true` | Enable/disable this extractor |
 | `api_key` | string | `null` | API key for authentication (see below) |
@@ -145,7 +160,9 @@ Use the `headers` field for custom authentication schemes or additional metadata
 
 ## Extractor Service Contract
 
-Each extractor URL should accept:
+### Base64 JSON Format (`request_format: "base64"`)
+
+The default format sends the file as a base64-encoded string in a JSON payload:
 
 **Request:**
 ```json
@@ -166,6 +183,31 @@ Each extractor URL should accept:
   "metadata": {
     "pages": 5,
     "char_count": 12500
+  }
+}
+```
+
+### Multipart Form-Data Format (`request_format: "multipart"`)
+
+Sends the file as a multipart form-data upload, equivalent to `curl -F 'file=@document.pdf'`. This is useful for extraction services that accept standard file uploads.
+
+**Request:** `POST` with `Content-Type: multipart/form-data` containing the file in the field specified by `form_field_name` (default: `"file"`). An `Accept: application/json` header is included automatically.
+
+**Response:** Same JSON format as base64 -- the extractor must return JSON with the field specified by `response_field`.
+
+**Example config:**
+```json
+{
+  "extractors": {
+    "pdf-text": {
+      "url": "https://example.com/nlp/extract",
+      "method": "POST",
+      "request_format": "multipart",
+      "form_field_name": "file",
+      "response_field": "text",
+      "api_key": "${NLP_EXTRACT_API_KEY}",
+      "enabled": true
+    }
   }
 }
 ```

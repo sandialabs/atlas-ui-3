@@ -171,16 +171,37 @@ cd frontend && npm run lint
 
 **Logs:** `project_root/logs/app.jsonl` (override with `APP_LOG_DIR`). Use `/admin/logs/*`.
 
+## PR Validation Scripts (Required)
+
+**Any PR that changes backend code MUST include a validation script** in `test/pr-validation/` before the code is committed, the PR is created, or the PR is reviewed/merged.
+
+**Naming:** `test_pr{NUMBER}_{short_description}.sh` (e.g., `test_pr271_cli_rag_features.sh`)
+
+**What goes in the script:** Every item from the PR's "Test plan" section, plus a backend unit test run at the end. See `test/pr-validation/README.md` for the full template and structure.
+
+**IMPORTANT: Scripts must exercise features end-to-end using actual CLI commands and tools.** Do not write validation scripts that only check imports, parse flags, or run unit tests. The script must invoke the feature as a real user would -- by running CLI commands (`python atlas_chat_cli.py ...`), calling API endpoints (`curl`), starting the backend and checking behavior, or running actual tooling. Import checks and unit tests are supplementary, not the primary validation.
+
+**Custom .env and config files for testing:** PR validation scripts can and should create custom `.env` files and config overrides to test different feature flag combinations. Store test-specific config files in `test/pr-validation/fixtures/pr{NUMBER}/` (e.g., `test/pr-validation/fixtures/pr264/.env`). This allows testing with `FEATURE_*` flags set to specific values without modifying the project's real `.env` or config files.
+
+**Running:**
+```bash
+bash test/run_pr_validation.sh 271       # Run one PR
+bash test/run_pr_validation.sh            # Run all
+bash test/run_pr_validation.sh --list     # List available
+```
+
 ## Validation Workflow
 
 Before committing:
 1. **Lint**: Python and frontend
-2. **Test**: `./test/run_tests.sh all`
-3. **Build**: Frontend and backend build successfully
-4. **Manual**: Test in browser at http://localhost:8000
+2. **PR validation script**: If backend code changed, write and run `test/pr-validation/test_pr{N}_{desc}.sh`
+3. **Test**: `./test/run_tests.sh all`
+4. **Build**: Frontend and backend build successfully
+5. **Manual**: Test in browser at http://localhost:8000
 
 Before PR:
 - Run `cd frontend && npm run lint` to ensure no frontend syntax errors
+- Run `bash test/run_pr_validation.sh {PR_NUMBER}` to verify the PR validation script passes
 
 ## Key File References
 

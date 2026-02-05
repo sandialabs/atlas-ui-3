@@ -34,6 +34,14 @@ def test_app_factory_accessors():
     assert app_factory.get_config_manager() is not None
     assert app_factory.get_llm_caller() is not None
     assert app_factory.get_mcp_manager() is not None
-    assert app_factory.get_unified_rag_service() is not None
     assert app_factory.get_file_storage() is not None
     assert app_factory.get_file_manager() is not None
+
+    # RAG services are None when FEATURE_RAG_ENABLED is false (default)
+    rag_enabled = app_factory.get_config_manager().app_settings.feature_rag_enabled
+    if rag_enabled:
+        assert app_factory.get_unified_rag_service() is not None
+        assert app_factory.get_rag_mcp_service() is not None
+    else:
+        assert app_factory.get_unified_rag_service() is None
+        assert app_factory.get_rag_mcp_service() is None

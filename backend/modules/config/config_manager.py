@@ -239,7 +239,8 @@ class FileExtractorConfig(BaseModel):
     timeout_seconds: int = 30
     max_file_size_mb: int = 50
     preview_chars: Optional[int] = 2000
-    request_format: str = "base64"  # "base64" or "url"
+    request_format: str = "base64"  # "base64", "multipart", or "url"
+    form_field_name: str = "file"  # Field name for multipart form uploads
     response_field: str = "text"
     enabled: bool = True
     # API key for authentication (supports ${ENV_VAR} syntax)
@@ -251,10 +252,17 @@ class FileExtractorConfig(BaseModel):
 class FileExtractorsConfig(BaseModel):
     """Configuration for file content extraction services."""
     enabled: bool = True
-    default_behavior: str = "extract"  # "extract" or "attach_only"
+    default_behavior: str = "full"  # "full" | "preview" | "none"
     extractors: Dict[str, FileExtractorConfig] = Field(default_factory=dict)
     extension_mapping: Dict[str, str] = Field(default_factory=dict)
     mime_mapping: Dict[str, str] = Field(default_factory=dict)
+
+    @field_validator('default_behavior', mode='before')
+    @classmethod
+    def normalize_default_behavior(cls, v):
+        """Normalize legacy values to new 3-mode scheme."""
+        legacy_map = {"extract": "full", "attach_only": "none"}
+        return legacy_map.get(v, v)
 
     @field_validator('extractors', mode='before')
     @classmethod
@@ -275,6 +283,17 @@ class AppSettings(BaseSettings):
     debug_mode: bool = False
     # Logging settings
     log_level: str = "INFO"  # Override default logging level (DEBUG, INFO, WARNING, ERROR)
+    feature_metrics_logging_enabled: bool = Field(
+        False,
+        description="Enable metrics logging for user activities (LLM calls, tool calls, file uploads, errors)",
+        validation_alias=AliasChoices("FEATURE_METRICS_LOGGING_ENABLED"),
+    )
+    # Suppress LiteLLM verbose logging (independent of log_level)
+    feature_suppress_litellm_logging: bool = Field(
+        default=True,
+        description="Suppress LiteLLM verbose stdout/debug output by setting LITELLM_LOG=ERROR",
+        validation_alias=AliasChoices("FEATURE_SUPPRESS_LITELLM_LOGGING"),
+    )
     
     # RAG Feature Flag
     # When enabled, RAG sources are configured in config/overrides/rag-sources.json
@@ -345,6 +364,16 @@ class AppSettings(BaseSettings):
         default=2.0,
         description="Multiplier for exponential backoff between reconnect attempts",
         validation_alias="MCP_RECONNECT_BACKOFF_MULTIPLIER"
+    )
+    mcp_discovery_timeout: int = Field(
+        default=30,
+        description="Timeout in seconds for MCP discovery calls (list_tools, list_prompts)",
+        validation_alias="MCP_DISCOVERY_TIMEOUT"
+    )
+    mcp_call_timeout: int = Field(
+        default=120,
+        description="Timeout in seconds for MCP tool calls (call_tool)",
+        validation_alias="MCP_CALL_TIMEOUT"
     )
 
     # MCP Token Storage settings
@@ -749,7 +778,13 @@ class ConfigManager:
 
         Extracts MCP-type sources from rag_sources_config and converts them
         to MCPServerConfig format for compatibility with RAGMCPService.
+        Returns an empty config when FEATURE_RAG_ENABLED is false.
         """
+        if not self.app_settings.feature_rag_enabled:
+            if self._rag_mcp_config is None:
+                self._rag_mcp_config = MCPConfig()
+            return self._rag_mcp_config
+
         if self._rag_mcp_config is None:
             try:
                 # Get all RAG sources and filter to MCP type only
@@ -800,7 +835,14 @@ class ConfigManager:
         """Get unified RAG sources configuration (cached) from rag-sources.json.
 
         This config supports both MCP-based and HTTP REST API RAG sources.
+        Returns an empty config when FEATURE_RAG_ENABLED is false.
         """
+        if not self.app_settings.feature_rag_enabled:
+            if self._rag_sources_config is None:
+                self._rag_sources_config = RAGSourcesConfig()
+                logger.info("RAG sources config skipped (FEATURE_RAG_ENABLED=false)")
+            return self._rag_sources_config
+
         if self._rag_sources_config is None:
             try:
                 rag_filename = self.app_settings.rag_sources_config_file

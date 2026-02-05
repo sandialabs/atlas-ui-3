@@ -65,7 +65,9 @@ services:
       
       # Log level configuration
       - LOG_LEVEL=INFO
-      
+      # Suppress LiteLLM verbose logging
+      - FEATURE_SUPPRESS_LITELLM_LOGGING=true
+
       - USE_NEW_FRONTEND=true
       
       # Feature Flags
@@ -76,9 +78,12 @@ services:
       - FEATURE_FILES_PANEL_ENABLED=true
       - FEATURE_CHAT_HISTORY_ENABLED=false
       - FEATURE_COMPLIANCE_LEVELS_ENABLED=false
+      - FEATURE_METRICS_LOGGING_ENABLED=false
       - FEATURE_SPLASH_SCREEN_ENABLED=false
       - FEATURE_DOMAIN_WHITELIST_ENABLED=false
       - FEATURE_MCP_AUTO_RECONNECT_ENABLED=false
+      - MCP_DISCOVERY_TIMEOUT=30
+      - MCP_CALL_TIMEOUT=120
       - FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=false
 
       # Agent mode configuration

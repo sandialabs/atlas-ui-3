@@ -10,7 +10,6 @@ Tests the secure per-user token storage module including:
 Updated: 2025-01-21
 """
 
-import os
 import time
 import tempfile
 import pytest

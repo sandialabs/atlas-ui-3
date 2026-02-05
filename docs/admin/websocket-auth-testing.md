@@ -118,7 +118,7 @@ The HTTP AuthMiddleware rejects the request before it reaches the WebSocket endp
 Install globally with `npm install -g wscat` or use `npx wscat`.
 
 **Connection hangs:**
-Ensure the backend is running (`bash agent_start.sh`) and check that port 8000 is accessible.
+Ensure the backend is running (`bash agent_start.sh`) and check that the configured port is accessible (default 8000, overridable via `PORT` in `.env`).
 
 ## Related Documentation
 

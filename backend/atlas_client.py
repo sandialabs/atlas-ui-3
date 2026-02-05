@@ -75,6 +75,8 @@ class AtlasClient:
         model: Optional[str] = None,
         agent_mode: bool = False,
         selected_tools: Optional[List[str]] = None,
+        selected_data_sources: Optional[List[str]] = None,
+        only_rag: bool = False,
         user_email: Optional[str] = None,
         session_id: Optional[UUID] = None,
         max_steps: int = 10,
@@ -90,6 +92,8 @@ class AtlasClient:
             model: LLM model name. Uses config default if not specified.
             agent_mode: Enable agent loop for multi-step tool use.
             selected_tools: List of tool names to enable.
+            selected_data_sources: List of RAG data source names to query.
+            only_rag: If True, use only RAG without tools (RAG-only mode).
             user_email: User identity for auth-filtered tools/RAG.
             session_id: Reuse an existing session for multi-turn.
             max_steps: Max agent iterations.
@@ -135,6 +139,8 @@ class AtlasClient:
             content=prompt,
             model=model,
             selected_tools=selected_tools,
+            selected_data_sources=selected_data_sources,
+            only_rag=only_rag,
             agent_mode=agent_mode,
             agent_max_steps=max_steps,
             user_email=user_email,
@@ -153,6 +159,77 @@ class AtlasClient:
     def chat_sync(self, prompt: str, **kwargs) -> ChatResult:
         """Synchronous wrapper around chat()."""
         return asyncio.run(self.chat(prompt, **kwargs))
+
+    async def list_data_sources(self, user_email: Optional[str] = None) -> Dict[str, Any]:
+        """Discover and list available RAG data sources.
+
+        Calls the RAG discovery mechanism to get actual available sources
+        with their qualified IDs (format: server:source_id).
+
+        Args:
+            user_email: User identity for auth-filtered sources.
+
+        Returns:
+            Dict with 'servers' (config info) and 'sources' (discovered qualified IDs).
+        """
+        await self.initialize()
+        cfg = self._factory.get_config_manager()
+
+        # Return empty results when RAG feature is disabled
+        if not cfg.app_settings.feature_rag_enabled:
+            logger.info("RAG discovery skipped (FEATURE_RAG_ENABLED=false)")
+            return {"servers": {}, "sources": []}
+
+        if user_email is None:
+            user_email = cfg.app_settings.test_user or "cli@atlas.local"
+
+        # Get server config info
+        servers = {}
+        for name, source in cfg.rag_sources_config.sources.items():
+            if source.enabled:
+                servers[name] = {
+                    "type": source.type,
+                    "display_name": source.display_name or name,
+                    "description": source.description,
+                }
+
+        discovered_sources: List[str] = []
+        rag_service = self._factory.get_unified_rag_service()
+
+        # Best-effort discovery across HTTP sources
+        if rag_service:
+            try:
+                rag_servers = await rag_service.discover_data_sources(username=user_email)
+                for server in rag_servers:
+                    server_name = server.get("server")
+                    for src in server.get("sources", []) or []:
+                        source_id = src.get("id")
+                        if server_name and source_id:
+                            discovered_sources.append(f"{server_name}:{source_id}")
+            except Exception as e:
+                logger.warning("HTTP RAG discovery failed: %s", e)
+
+        # Best-effort discovery across MCP RAG sources
+        if rag_service and getattr(rag_service, "rag_mcp_service", None):
+            try:
+                mcp_sources = await rag_service.rag_mcp_service.discover_data_sources(user_email)
+                if mcp_sources:
+                    discovered_sources.extend(mcp_sources)
+            except Exception as e:
+                logger.warning("MCP RAG discovery failed: %s", e)
+
+        # Deduplicate while preserving order
+        seen = set()
+        deduped: List[str] = []
+        for s in discovered_sources:
+            if s not in seen:
+                seen.add(s)
+                deduped.append(s)
+
+        return {
+            "servers": servers,
+            "sources": deduped,
+        }
 
     async def cleanup(self) -> None:
         """Cleanup MCP connections."""

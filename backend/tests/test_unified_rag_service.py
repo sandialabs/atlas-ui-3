@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from domain.unified_rag_service import UnifiedRAGService
 from modules.config.config_manager import RAGSourceConfig, RAGSourcesConfig
-from modules.rag.client import DataSource, RAGResponse, RAGMetadata
+from modules.rag.client import DataSource, RAGResponse
 
 
 @pytest.fixture

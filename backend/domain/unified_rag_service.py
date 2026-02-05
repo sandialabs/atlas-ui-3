@@ -8,13 +8,13 @@ This service provides a single interface for:
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
 from core.compliance import get_compliance_manager
 from core.log_sanitizer import sanitize_for_logging
 from modules.config.config_manager import ConfigManager, RAGSourceConfig, resolve_env_var
 from modules.rag.atlas_rag_client import AtlasRAGClient
-from modules.rag.client import DataSource, RAGResponse
+from modules.rag.client import RAGResponse
 
 logger = logging.getLogger(__name__)
 
@@ -99,46 +99,54 @@ class UnifiedRAGService:
         rag_config = self.config_manager.rag_sources_config
 
         for source_name, source_config in rag_config.sources.items():
-            if not source_config.enabled:
-                continue
+            try:
+                if not source_config.enabled:
+                    continue
 
-            # Check group authorization
-            if not await self._is_user_authorized(username, source_config.groups):
-                logger.debug(
-                    "User %s not authorized for RAG source %s (groups: %s)",
-                    sanitize_for_logging(username),
-                    sanitize_for_logging(source_name),
-                    source_config.groups,
-                )
-                continue
-
-            # Check compliance level filtering
-            if user_compliance_level and source_config.compliance_level:
-                compliance_mgr = get_compliance_manager()
-                if not compliance_mgr.is_accessible(
-                    user_level=user_compliance_level,
-                    resource_level=source_config.compliance_level,
-                ):
-                    logger.info(
-                        "Skipping RAG source %s due to compliance level mismatch (user: %s, source: %s)",
+                # Check group authorization
+                if not await self._is_user_authorized(username, source_config.groups):
+                    logger.debug(
+                        "User %s not authorized for RAG source %s (groups: %s)",
+                        sanitize_for_logging(username),
                         sanitize_for_logging(source_name),
-                        sanitize_for_logging(user_compliance_level),
-                        sanitize_for_logging(source_config.compliance_level),
+                        source_config.groups,
                     )
                     continue
 
-            if source_config.type == "http":
-                # Discover from HTTP RAG API
-                server_info = await self._discover_http_source(
-                    source_name, source_config, username
-                )
-                if server_info:
-                    rag_servers.append(server_info)
+                # Check compliance level filtering
+                if user_compliance_level and source_config.compliance_level:
+                    compliance_mgr = get_compliance_manager()
+                    if not compliance_mgr.is_accessible(
+                        user_level=user_compliance_level,
+                        resource_level=source_config.compliance_level,
+                    ):
+                        logger.info(
+                            "Skipping RAG source %s due to compliance level mismatch (user: %s, source: %s)",
+                            sanitize_for_logging(source_name),
+                            sanitize_for_logging(user_compliance_level),
+                            sanitize_for_logging(source_config.compliance_level),
+                        )
+                        continue
 
-            elif source_config.type == "mcp":
-                # MCP sources from rag-sources.json are handled by RAGMCPService
-                # which reads them via config_manager.rag_mcp_config
-                logger.debug("Skipping MCP source %s (handled by RAGMCPService)", source_name)
+                if source_config.type == "http":
+                    # Discover from HTTP RAG API
+                    server_info = await self._discover_http_source(
+                        source_name, source_config, username
+                    )
+                    if server_info:
+                        rag_servers.append(server_info)
+
+                elif source_config.type == "mcp":
+                    # MCP sources from rag-sources.json are handled by RAGMCPService
+                    # which reads them via config_manager.rag_mcp_config
+                    logger.debug("Skipping MCP source %s (handled by RAGMCPService)", source_name)
+
+            except Exception as e:
+                logger.error(
+                    "Error discovering RAG source %s, continuing with remaining sources: %s",
+                    sanitize_for_logging(source_name),
+                    e,
+                )
 
         return rag_servers
 

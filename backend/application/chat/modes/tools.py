@@ -141,6 +141,7 @@ class ToolsModeRunner:
             update_callback=effective_callback,
             config_manager=self.config_manager,
             skip_approval=self.skip_approval,
+            user_email=user_email,
         )
 
         # Process artifacts if handler provided
