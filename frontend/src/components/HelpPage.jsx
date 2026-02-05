@@ -290,7 +290,7 @@ const HelpPage = () => {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="w-full p-6 space-y-8">
+        <div className="w-full max-w-none px-4 py-6 space-y-8 sm:px-6 lg:px-8">
           {loading && (
             <div className="bg-gray-800 rounded-lg p-6 text-center text-gray-400">
               <div className="animate-pulse">Loading help content...</div>

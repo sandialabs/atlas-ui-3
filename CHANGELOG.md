@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-02-04
+- Fix help page width constraint so documentation content fills the full available width (#145)
+- Add configurable timeouts (`MCP_DISCOVERY_TIMEOUT`, `MCP_CALL_TIMEOUT`) for MCP discovery and tool calls to prevent indefinite hangs (#298)
+- Close #293 (f-string backslash SyntaxError was already resolved on main)
+
 ### PR #291 - 2026-02-04
 - Fix `FEATURE_RAG_ENABLED` to fully disable RAG on the backend (not just the UI). When disabled, RAG services are not initialized and `rag-sources.json` is not loaded.
 - Make RAG discovery and retrieval best-effort: a single failing RAG data source no longer prevents other sources from returning results. HTTP and MCP RAG discovery are independent, per-source errors are isolated, and null content is handled gracefully.

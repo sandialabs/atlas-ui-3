@@ -365,6 +365,16 @@ class AppSettings(BaseSettings):
         description="Multiplier for exponential backoff between reconnect attempts",
         validation_alias="MCP_RECONNECT_BACKOFF_MULTIPLIER"
     )
+    mcp_discovery_timeout: int = Field(
+        default=30,
+        description="Timeout in seconds for MCP discovery calls (list_tools, list_prompts)",
+        validation_alias="MCP_DISCOVERY_TIMEOUT"
+    )
+    mcp_call_timeout: int = Field(
+        default=120,
+        description="Timeout in seconds for MCP tool calls (call_tool)",
+        validation_alias="MCP_CALL_TIMEOUT"
+    )
 
     # MCP Token Storage settings
     mcp_token_storage_dir: Optional[str] = Field(
