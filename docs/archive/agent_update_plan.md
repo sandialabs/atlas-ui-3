@@ -59,11 +59,11 @@ This plan adds a strict 3-phase agent loop (reason → act → observe) to the b
 ## File-by-file plan
 
 ### Backend — Config and Prompts
-- backend/modules/config/manager.py
+- atlas/modules/config/manager.py
   - AppSettings: add
     - `agent_reason_prompt_filename: str = "agent_reason_prompt.md"`
     - `agent_observe_prompt_filename: str = "agent_observe_prompt.md"`
-- backend/modules/prompts/prompt_provider.py
+- atlas/modules/prompts/prompt_provider.py
   - Add:
     - `get_agent_reason_prompt(user_question: str, files_manifest: str | None, last_observation: str | None) -> Optional[str]`
     - `get_agent_observe_prompt(user_question: str, tool_summaries: str, step: int) -> Optional[str]`
@@ -84,7 +84,7 @@ This plan adds a strict 3-phase agent loop (reason → act → observe) to the b
       ```
 
 ### Backend — Agent loop
-- backend/application/chat/service.py
+- atlas/application/chat/service.py
   - `_handle_agent_mode` changes:
     - At start of loop step N: emit `agent_update` `{ update_type: "agent_turn_start", step: N }` (already present).
     - Reason phase:

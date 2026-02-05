@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
 ### Example: Complete Server with Logging
 
-See `backend/mcp/logging_demo/main.py` for a complete example server that demonstrates logging at all levels.
+See `atlas/mcp/logging_demo/main.py` for a complete example server that demonstrates logging at all levels.
 
 ## Frontend Display
 
@@ -126,7 +126,7 @@ All MCP server logs (after filtering) are also written to the backend log file f
 
 ### Unit Tests
 
-Test coverage for MCP logging is provided in `backend/tests/test_mcp_logging.py`:
+Test coverage for MCP logging is provided in `atlas/tests/test_mcp_logging.py`:
 - Log level mapping verification
 - Log filtering by configured level
 - Callback forwarding to UI
@@ -134,14 +134,14 @@ Test coverage for MCP logging is provided in `backend/tests/test_mcp_logging.py`
 
 Run tests with:
 ```bash
-pytest backend/tests/test_mcp_logging.py -v
+pytest atlas/tests/test_mcp_logging.py -v
 ```
 
 ### Manual Testing
 
 1. Start the application with logging enabled:
    ```bash
-   LOG_LEVEL=DEBUG python backend/main.py
+   LOG_LEVEL=DEBUG python atlas/main.py
    ```
 
 2. Use the logging_demo MCP server:
@@ -153,16 +153,16 @@ pytest backend/tests/test_mcp_logging.py -v
 
 ### Components
 
-1. **MCPToolManager** (`backend/modules/mcp_tools/client.py`)
+1. **MCPToolManager** (`atlas/modules/mcp_tools/client.py`)
    - Creates log_handler for each MCP server
    - Filters logs based on LOG_LEVEL
    - Forwards logs to backend logger and UI callback
 
-2. **ChatService** (`backend/application/chat/service.py`)
+2. **ChatService** (`atlas/application/chat/service.py`)
    - Sets up log callback during initialization
    - Routes log messages to WebSocket connection
 
-3. **notification_utils** (`backend/application/chat/utilities/notification_utils.py`)
+3. **notification_utils** (`atlas/application/chat/utilities/notification_utils.py`)
    - `notify_tool_log()` function for sending logs to UI
 
 4. **WebSocket Handlers** (`frontend/src/handlers/chat/websocketHandlers.js`)

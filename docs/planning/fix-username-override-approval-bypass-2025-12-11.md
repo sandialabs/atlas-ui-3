@@ -10,7 +10,7 @@ The username override security feature can be bypassed when users edit tool argu
 
 ## Background
 
-Atlas UI 3 implements a username override security feature (documented in `backend/mcp/username-override-demo/README.md`) that automatically injects the authenticated user's email into tools that accept a `username` parameter. This prevents LLMs from impersonating other users.
+Atlas UI 3 implements a username override security feature (documented in `atlas/mcp/username-override-demo/README.md`) that automatically injects the authenticated user's email into tools that accept a `username` parameter. This prevents LLMs from impersonating other users.
 
 **How the username override is supposed to work:**
 1. Tool schema declares a `username` parameter
@@ -20,8 +20,8 @@ Atlas UI 3 implements a username override security feature (documented in `backe
 5. Tool receives the correct authenticated username
 
 **Current implementation location:**
-- Detection: `backend/application/chat/utilities/tool_utils.py:136-162` (`tool_accepts_username`)
-- Injection: `backend/application/chat/utilities/tool_utils.py:412-469` (`inject_context_into_args`)
+- Detection: `atlas/application/chat/utilities/tool_utils.py:136-162` (`tool_accepts_username`)
+- Injection: `atlas/application/chat/utilities/tool_utils.py:412-469` (`inject_context_into_args`)
 
 ## Security Vulnerability
 
@@ -74,7 +74,7 @@ When tool approval with argument editing is enabled:
 
 ## Root Cause
 
-The `execute_single_tool` function in `backend/application/chat/utilities/tool_utils.py` does not re-apply security injections after receiving edited arguments from the user approval flow.
+The `execute_single_tool` function in `atlas/application/chat/utilities/tool_utils.py` does not re-apply security injections after receiving edited arguments from the user approval flow.
 
 **Problematic code location:** tool_utils.py:246-256
 
@@ -84,11 +84,11 @@ The `execute_single_tool` function in `backend/application/chat/utilities/tool_u
 
 After receiving edited arguments from the user, re-apply security injections to ensure critical parameters like `username` cannot be tampered with.
 
-**Implementation location:** `backend/application/chat/utilities/tool_utils.py:246-256`
+**Implementation location:** `atlas/application/chat/utilities/tool_utils.py:246-256`
 
 ### Code Changes Required
 
-**File:** `backend/application/chat/utilities/tool_utils.py`
+**File:** `atlas/application/chat/utilities/tool_utils.py`
 
 **Current code (lines 246-256):**
 ```python
@@ -165,7 +165,7 @@ Add visual indicator for injected parameters (lines 78-105):
 
 Update the edit note sent to the LLM to clarify that security parameters were re-injected.
 
-**File:** `backend/application/chat/utilities/tool_utils.py` (lines 289-300)
+**File:** `atlas/application/chat/utilities/tool_utils.py` (lines 289-300)
 
 ```python
 if arguments_were_edited:
@@ -181,7 +181,7 @@ if arguments_were_edited:
 
 ### Unit Tests
 
-**File:** `backend/tests/test_tool_approval_utils.py` or new file `backend/tests/test_username_override_in_approval.py`
+**File:** `atlas/tests/test_tool_approval_utils.py` or new file `atlas/tests/test_username_override_in_approval.py`
 
 ```python
 import pytest
@@ -267,7 +267,7 @@ def test_username_override_with_tool_that_doesnt_accept_username():
 
 ### Integration Test
 
-**File:** `backend/tests/test_tool_approval_integration.py`
+**File:** `atlas/tests/test_tool_approval_integration.py`
 
 Test the full flow:
 1. Create mock approval request
@@ -287,7 +287,7 @@ Test the full flow:
 ## Implementation Steps
 
 1. **Make core security fix** (REQUIRED)
-   - Modify `backend/application/chat/utilities/tool_utils.py` lines 246-256
+   - Modify `atlas/application/chat/utilities/tool_utils.py` lines 246-256
    - Re-apply `inject_context_into_args` after receiving edited arguments
    - Re-apply `_filter_args_to_schema` to ensure only valid parameters
 
@@ -304,7 +304,7 @@ Test the full flow:
    - Prevents user confusion about which parameters they can actually change
 
 5. **Update documentation** (REQUIRED)
-   - Update `backend/mcp/username-override-demo/README.md` to document that the override applies even during approval edits
+   - Update `atlas/mcp/username-override-demo/README.md` to document that the override applies even during approval edits
    - Update `docs/admin/tool-approval.md` to explain security parameter re-injection
 
 6. **Run full test suite** (REQUIRED)
@@ -315,13 +315,13 @@ Test the full flow:
 
 ### Required Changes
 
-1. `backend/application/chat/utilities/tool_utils.py` (lines 246-256)
+1. `atlas/application/chat/utilities/tool_utils.py` (lines 246-256)
    - Re-apply security injections after user edits
 
-2. `backend/tests/test_username_override_in_approval.py` (NEW FILE)
+2. `atlas/tests/test_username_override_in_approval.py` (NEW FILE)
    - Add unit tests for username override in approval flow
 
-3. `backend/mcp/username-override-demo/README.md`
+3. `atlas/mcp/username-override-demo/README.md`
    - Document that override applies during approval edits
 
 ### Optional Changes
@@ -329,7 +329,7 @@ Test the full flow:
 4. `frontend/src/components/ToolApprovalDialog.jsx` (lines 78-105)
    - Add visual indicator for security-injected parameters
 
-5. `backend/application/chat/utilities/tool_utils.py` (lines 289-300)
+5. `atlas/application/chat/utilities/tool_utils.py` (lines 289-300)
    - Update LLM edit note to mention security parameter re-injection
 
 ## Security Considerations
@@ -364,7 +364,7 @@ Test the full flow:
 
 ## References
 
-- Username Override Demo: `backend/mcp/username-override-demo/`
+- Username Override Demo: `atlas/mcp/username-override-demo/`
 - Tool Approval System: `docs/admin/tool-approval.md`
-- Existing Tests: `backend/tests/test_capability_tokens_and_injection.py:155-184`
-- Tool Utils Implementation: `backend/application/chat/utilities/tool_utils.py`
+- Existing Tests: `atlas/tests/test_capability_tokens_and_injection.py:155-184`
+- Tool Utils Implementation: `atlas/application/chat/utilities/tool_utils.py`

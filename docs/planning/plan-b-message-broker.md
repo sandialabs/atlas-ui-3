@@ -28,11 +28,11 @@ This plan introduces RabbitMQ to offload the execution part of the tool call whi
 We will add two new infrastructure components to manage messaging and WebSocket connections.
 
 1.  **Add Dependency**: The `aio-pika` library will be added to `pyproject.toml` to handle asynchronous communication with RabbitMQ.
-2.  **New File: `backend/infrastructure/transport/connection_manager.py`**
+2.  **New File: `atlas/infrastructure/transport/connection_manager.py`**
     *   This file will define a singleton `ConnectionManager` class.
     *   It will maintain a dictionary `active_connections: Dict[UUID, WebSocket]` to map session IDs to active WebSocket objects.
     *   It will provide methods: `connect(session_id, websocket)`, `disconnect(session_id)`, and `get_connection(session_id)`.
-3.  **New File: `backend/infrastructure/queue_client.py`**
+3.  **New File: `atlas/infrastructure/queue_client.py`**
     *   This file will define a `QueueClient` class to abstract RabbitMQ operations.
     *   It will manage connections, channels, and declare two queues: `tool_execution_queue` for jobs and `tool_results_queue` for results.
 
@@ -40,7 +40,7 @@ We will add two new infrastructure components to manage messaging and WebSocket 
 
 A new, standalone Python process will be responsible for executing the tools.
 
-*   **New File: `backend/worker.py`**
+*   **New File: `atlas/worker.py`**
     *   This script will initialize the `QueueClient`.
     *   It will define a consumer function that listens to the `tool_execution_queue`.
     *   When a job is received, the consumer will:
@@ -53,12 +53,12 @@ A new, standalone Python process will be responsible for executing the tools.
 
 We will change the application to hand off jobs to the worker instead of executing them directly.
 
-1.  **Modify `backend/application/chat/utilities/tool_utils.py`**:
+1.  **Modify `atlas/application/chat/utilities/tool_utils.py`**:
     *   The `execute_single_tool` function will be refactored. The logic for the approval flow will remain.
     *   After receiving user approval, instead of executing the tool, the function will return the approved `tool_call` object and its arguments.
     *   A **new function, `execute_approved_tool`**, will be created containing the logic that was previously *after* the approval block (i.e., calling `tool_manager.execute_tool`). This is the function the worker will import and call.
 
-2.  **Modify `backend/application/chat/modes/tools.py`**:
+2.  **Modify `atlas/application/chat/modes/tools.py`**:
     *   In `ToolsModeRunner.run`, the call to `tool_utils.execute_tools_workflow` will still be `await`ed to handle the synchronous approval step.
     *   This function will now return a list of *approved* tool calls.
     *   For each approved tool call, `ToolsModeRunner` will create a job payload and use the `QueueClient` to publish it to the `tool_execution_queue`.
@@ -68,7 +68,7 @@ We will change the application to hand off jobs to the worker instead of executi
 
 The main application needs to listen for results from the worker and push them to the correct user.
 
-1.  **Modify `backend/main.py`**:
+1.  **Modify `atlas/main.py`**:
     *   The `websocket_endpoint` will be updated to use the `ConnectionManager` to register connections on connect and deregister them on disconnect.
     *   In the `lifespan` context manager, a background `asyncio.task` will be started to run a `results_consumer` function.
     *   This `results_consumer` will listen to the `tool_results_queue`.
@@ -78,12 +78,12 @@ The main application needs to listen for results from the worker and push them t
 ## Summary of Changes
 
 ### New Files
-- `backend/worker.py`
-- `backend/infrastructure/queue_client.py`
-- `backend/infrastructure/transport/connection_manager.py`
+- `atlas/worker.py`
+- `atlas/infrastructure/queue_client.py`
+- `atlas/infrastructure/transport/connection_manager.py`
 
 ### Modified Files
 - `pyproject.toml` (to add `aio-pika`)
-- `backend/main.py`
-- `backend/application/chat/modes/tools.py`
-- `backend/application/chat/utilities/tool_utils.py`
+- `atlas/main.py`
+- `atlas/application/chat/modes/tools.py`
+- `atlas/application/chat/utilities/tool_utils.py`

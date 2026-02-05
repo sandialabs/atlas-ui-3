@@ -34,7 +34,7 @@ To ensure code quality and consistency, please adhere to the following conventio
 *   **Backend Development**: **Never** use `uvicorn --reload`. This can cause unexpected issues. Restart the server manually (`python main.py`) to apply changes.
 *   **File Naming**: Avoid generic names like `utils.py` or `helpers.py`. Use descriptive names that clearly indicate the file's purpose (e.g., `mcp_tool_manager.py`).
 *   **Linting**: Before committing, run the linters to check for style issues:
-    *   **Python**: `ruff check backend/`
+    *   **Python**: `ruff check atlas/`
     *   **Frontend**: `cd frontend && npm run lint`
 
 ## Creating an MCP Server
@@ -45,7 +45,7 @@ MCP servers are the backbone of the tool system. They are independent processes 
 
 A new MCP server is a simple Python script using the `FastMCP` library.
 
-1.  Create a new directory for your server inside `backend/mcp/`.
+1.  Create a new directory for your server inside `atlas/mcp/`.
 2.  Inside that directory, create a `main.py` file.
 
 **Example `main.py`:**
@@ -440,7 +440,7 @@ async def task_with_intermediate_files(
 
 ### Example: Complete Demo Server
 
-See `/backend/mcp/progress_updates_demo/` for a complete working example with three tools demonstrating all update types. To try it:
+See `/atlas/mcp/progress_updates_demo/` for a complete working example with three tools demonstrating all update types. To try it:
 
 1. Add the server to your `config/overrides/mcp.json`:
 ```json

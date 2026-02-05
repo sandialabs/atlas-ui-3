@@ -8,7 +8,7 @@ The application uses a layered configuration system that loads settings from thr
 2.  **Override Files (`config/overrides/`)**: For custom, instance-specific configurations. These files are not checked into version control.
 3.  **Default Files (`config/defaults/`)**: The base configuration that is part of the repository.
 
-**Note**: The definitive source for all possible configuration options and their default values is the `AppSettings` class within `backend/modules/config/config_manager.py`. This class dictates how the application reads and interprets all its settings.
+**Note**: The definitive source for all possible configuration options and their default values is the `AppSettings` class within `atlas/modules/config/config_manager.py`. This class dictates how the application reads and interprets all its settings.
 
 ## Key Override Files
 
@@ -128,4 +128,4 @@ SECURITY_XFO_VALUE=SAMEORIGIN
 SECURITY_REFERRER_POLICY_VALUE=no-referrer
 ```
 
-For more details on security headers implementation, see `backend/core/security_headers_middleware.py`.
+For more details on security headers implementation, see `atlas/core/security_headers_middleware.py`.

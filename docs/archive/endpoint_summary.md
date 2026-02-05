@@ -61,10 +61,10 @@ Last Updated: 2025-11-21
 ## 5. Method Source Verification
 
 Backend files reviewed:
-- backend/main.py
-- backend/admin_routes.py
-- backend/feedback_routes.py
-- backend/files_routes.py
+- atlas/main.py
+- atlas/admin_routes.py
+- atlas/feedback_routes.py
+- atlas/files_routes.py
 
 Frontend files scanned for usage (fetch/WebSocket):
 - frontend/src/contexts/ChatContext.jsx

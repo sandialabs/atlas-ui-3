@@ -52,7 +52,7 @@ This document outlines a proposal to make "git clone → run" dramatically easie
   - Performs LLM configuration sanity check.
   - Downloads prebuilt frontend into `frontend/dist`.
   - Creates `.venv` and installs `requirements.txt` via uv.
-  - Starts the backend with `python backend/main.py`.
+  - Starts the backend with `python atlas/main.py`.
 
 ### 3. Developer with full toolchain (Docker, Python+uv, Node)
 
@@ -149,7 +149,7 @@ This document outlines a proposal to make "git clone → run" dramatically easie
      ```
    - Start the backend directly (since frontend is already present via prebuilt dist):
      ```bash
-     python backend/main.py
+     python atlas/main.py
      ```
    - `agent_start.sh` remains a **dev-only** helper that builds the frontend and wires up mocks, and is documented in the Developer Guide.
 
@@ -180,7 +180,7 @@ Key differences/considerations:
 - Mode selection and steps (env, LLM check, frontend download, start app) should be conceptually identical to `easy-start.sh`.
 - For local Python mode on Windows:
   - Use `uv venv` and activate via `.venv\Scripts\Activate.ps1`.
-  - Then run `python backend/main.py`.
+  - Then run `python atlas/main.py`.
 
 ## Documentation Changes
 

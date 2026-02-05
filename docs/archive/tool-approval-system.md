@@ -92,22 +92,22 @@ When a tool requiring approval is called, the user sees a modal dialog with:
 
 ### Components
 
-1. **Configuration Manager** (`backend/modules/config/config_manager.py`)
+1. **Configuration Manager** (`atlas/modules/config/config_manager.py`)
    - Loads and validates tool approval configuration
    - Provides `ToolApprovalsConfig` model
 
-2. **Approval Manager** (`backend/application/chat/approval_manager.py`)
+2. **Approval Manager** (`atlas/application/chat/approval_manager.py`)
    - Manages pending approval requests
    - Handles approval/rejection responses
    - Implements timeout logic using asyncio futures
 
-3. **Tool Execution** (`backend/application/chat/utilities/tool_utils.py`)
+3. **Tool Execution** (`atlas/application/chat/utilities/tool_utils.py`)
    - Checks if tool requires approval before execution
    - Sends approval request to frontend
    - Waits for user response
    - Executes tool with approved (potentially edited) arguments
 
-4. **WebSocket Handler** (`backend/main.py`)
+4. **WebSocket Handler** (`atlas/main.py`)
    - Handles `tool_approval_response` messages from frontend
    - Routes responses to approval manager
 
@@ -184,10 +184,10 @@ When a tool requiring approval is called, the user sees a modal dialog with:
 
 ```bash
 # Test approval manager
-python -m pytest backend/tests/test_approval_manager.py -v
+python -m pytest atlas/tests/test_approval_manager.py -v
 
 # Test configuration loading
-python -m pytest backend/tests/test_config_manager.py -v
+python -m pytest atlas/tests/test_config_manager.py -v
 ```
 
 ### Test Coverage

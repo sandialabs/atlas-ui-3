@@ -28,9 +28,9 @@ Out of scope (initially):
 ## Architecture fit (current repo)
 
 Relevant existing code and patterns:
-- Tool execution flow: `backend/application/chat/utilities/tool_utils.py` (especially `execute_single_tool`, argument injection/sanitization) and `notification_utils.py` (tool_* events).
-- WebSocket publisher: `backend/infrastructure/events/websocket_publisher.py`.
-- Config and feature flags: `backend/modules/config/manager.py` (`AppSettings`, config file resolution).
+- Tool execution flow: `atlas/application/chat/utilities/tool_utils.py` (especially `execute_single_tool`, argument injection/sanitization) and `notification_utils.py` (tool_* events).
+- WebSocket publisher: `atlas/infrastructure/events/websocket_publisher.py`.
+- Config and feature flags: `atlas/modules/config/manager.py` (`AppSettings`, config file resolution).
 - Message types doc: `docs/messages_types_to_ui.md`.
 - Compliance levels feature already implemented (flag and API surfacing).
 
@@ -232,11 +232,11 @@ These complement existing tool events (`tool_start`, `tool_complete`, `tool_erro
 ## Implementation checklist (file-level)
 
 - Backend
-  - `backend/modules/config/manager.py`: add flag, load approvals config
-  - `backend/application/chat/utilities/tool_utils.py`: intercept and gate in `execute_single_tool`
-  - `backend/application/chat/utilities/notification_utils.py`: add `notify_tool_approval_required`, `notify_tool_denied`, `notify_tool_approval_granted`
-  - `backend/infrastructure/events/websocket_publisher.py`: optional thin wrappers for the above
-  - `backend/routes/tools_approval_routes.py`: policy GET/PUT and decision POST
+  - `atlas/modules/config/manager.py`: add flag, load approvals config
+  - `atlas/application/chat/utilities/tool_utils.py`: intercept and gate in `execute_single_tool`
+  - `atlas/application/chat/utilities/notification_utils.py`: add `notify_tool_approval_required`, `notify_tool_denied`, `notify_tool_approval_granted`
+  - `atlas/infrastructure/events/websocket_publisher.py`: optional thin wrappers for the above
+  - `atlas/routes/tools_approval_routes.py`: policy GET/PUT and decision POST
   - WebSocket handler (where inbound messages are parsed): consume `tool_approval_decision`
   - Audit: write structured JSON lines to security log on decisions/timeouts
 

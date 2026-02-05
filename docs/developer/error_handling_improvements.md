@@ -11,20 +11,20 @@ Implemented comprehensive error classification and user-friendly error messaging
 
 ## Changes
 
-### 1. New Error Types (`backend/domain/errors.py`)
+### 1. New Error Types (`atlas/domain/errors.py`)
 - `RateLimitError` - For rate limiting scenarios
 - `LLMTimeoutError` - For timeout scenarios
 - `LLMAuthenticationError` - For authentication failures
 - `LLMServiceError` - For generic LLM service failures
 
-### 2. Error Classification (`backend/application/chat/utilities/error_utils.py`)
+### 2. Error Classification (`atlas/application/chat/utilities/error_utils.py`)
 Added `classify_llm_error()` function that:
 - Detects error type from exception class name or message content
 - Returns appropriate domain error class
 - Provides user-friendly message (shown in UI)
 - Provides detailed log message (for debugging)
 
-### 3. WebSocket Error Handling (`backend/main.py`)
+### 3. WebSocket Error Handling (`atlas/main.py`)
 Enhanced error handling to:
 - Catch specific error types (RateLimitError, LLMTimeoutError, etc.)
 - Send user-friendly messages to frontend
@@ -32,8 +32,8 @@ Enhanced error handling to:
 - Log full error details for debugging
 
 ### 4. Tests
-- `backend/tests/test_error_classification.py` - Unit tests for error classification
-- `backend/tests/test_error_flow_integration.py` - Integration tests
+- `atlas/tests/test_error_classification.py` - Unit tests for error classification
+- `atlas/tests/test_error_flow_integration.py` - Integration tests
 - `scripts/demo_error_handling.py` - Visual demonstration
 
 ## Example: Rate Limiting Error

@@ -161,7 +161,7 @@ HTTP/1.1 401 Unauthorized
 
 ## Custom Authorization Logic
 
-### backend/core/auth.py
+### atlas/core/auth.py
 
 This file contains **mock authorization logic** that must be replaced with your organization's custom business logic before production deployment.
 
@@ -293,7 +293,7 @@ Before deploying to production:
 - [ ] **CRITICAL:** Client-provided X-User-Email headers are explicitly stripped before proxy adds its own
   - Nginx: Verify `proxy_set_header X-User-Email "";` appears BEFORE setting the authenticated header
   - Apache: Verify `RequestHeader unset X-User-Email` appears BEFORE setting the authenticated header
-- [ ] Header injection test passed (run `pytest backend/tests/test_security_header_injection.py::test_production_header_stripping`)
+- [ ] Header injection test passed (run `pytest atlas/tests/test_security_header_injection.py::test_production_header_stripping`)
 - [ ] Backend logs confirm authenticated user is received (not client-provided values)
 
 **SSL/TLS & WebSocket:**
@@ -306,7 +306,7 @@ Before deploying to production:
 - [ ] Token expiration and refresh are tested
 - [ ] Review security architecture documentation (docs/archive/security_architecture.md)
 - [ ] Review reverse proxy configuration examples (docs/reverse-proxy-examples.md)
-- [ ] Security tests pass: `pytest backend/tests/test_security_*.py`
+- [ ] Security tests pass: `pytest atlas/tests/test_security_*.py`
 
 ## Testing Authentication
 

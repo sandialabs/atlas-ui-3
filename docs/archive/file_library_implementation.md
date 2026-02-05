@@ -160,10 +160,10 @@ frontend/src/components/
 ├── SessionFilesView.jsx      - Current session files (RENAME from FileManager.jsx)
 └── AllFilesView.jsx          - All user files (NEW)
 
-backend/routes/
+atlas/routes/
 └── files_routes.py           - Add attach endpoint (MODIFY)
 
-backend/application/chat/
+atlas/application/chat/
 └── service.py                - Add attach_file method (MODIFY)
 ```
 

@@ -8,13 +8,13 @@ This PR adds support for MCP LLM sampling, allowing MCP tools to request text ge
 ## What Was Implemented
 
 ### Core Infrastructure
-- **Sampling Handler in MCP Client** (`backend/modules/mcp_tools/client.py`)
+- **Sampling Handler in MCP Client** (`atlas/modules/mcp_tools/client.py`)
   - Created `_create_sampling_handler()` that intercepts sampling requests
   - Handler calls LiteLLM directly with proper parameters
   - Returns `CreateMessageResult` as expected by FastMCP
   - Integrated into all MCP client initialization (stdio, HTTP, SSE)
 
-- **Enhanced LiteLLM Caller** (`backend/modules/llm/litellm_caller.py`)
+- **Enhanced LiteLLM Caller** (`atlas/modules/llm/litellm_caller.py`)
   - Updated `call_plain()` to accept `temperature` and `max_tokens` parameters
   - Maintains backward compatibility with existing callers
 
@@ -24,7 +24,7 @@ This PR adds support for MCP LLM sampling, allowing MCP tools to request text ge
   - Respects configured models in llmconfig.yml
 
 ### Demo Server
-- **sampling_demo MCP Server** (`backend/mcp/sampling_demo/`)
+- **sampling_demo MCP Server** (`atlas/mcp/sampling_demo/`)
   - 7 example tools demonstrating different sampling capabilities:
     - `summarize_text` - Basic text summarization
     - `analyze_sentiment` - Sentiment analysis with system prompt
@@ -40,11 +40,11 @@ This PR adds support for MCP LLM sampling, allowing MCP tools to request text ge
 - Configured for "users" group with Public compliance level
 
 ### Testing
-- **Integration Tests** (`backend/tests/test_sampling_integration.py`)
+- **Integration Tests** (`atlas/tests/test_sampling_integration.py`)
   - 4 tests covering handler creation, context management, and routing
   - All tests passing with mocked LLM calls
 
-- **Manual E2E Test** (`backend/tests/manual_test_sampling.py`)
+- **Manual E2E Test** (`atlas/tests/manual_test_sampling.py`)
   - Verified end-to-end functionality with actual sampling_demo server
   - Tests basic sampling with mock LLM responses
   - Confirmed proper FastMCP integration
@@ -136,20 +136,20 @@ All tests passing:
 ## Files Changed
 
 **Core Implementation:**
-- `backend/modules/mcp_tools/client.py` (+135 lines)
-- `backend/modules/llm/litellm_caller.py` (+20 lines)
-- `backend/main.py` (+24 lines, placeholder for future use)
+- `atlas/modules/mcp_tools/client.py` (+135 lines)
+- `atlas/modules/llm/litellm_caller.py` (+20 lines)
+- `atlas/main.py` (+24 lines, placeholder for future use)
 
 **Demo Server:**
-- `backend/mcp/sampling_demo/main.py` (new, 262 lines)
-- `backend/mcp/sampling_demo/README.md` (new, 172 lines)
+- `atlas/mcp/sampling_demo/main.py` (new, 262 lines)
+- `atlas/mcp/sampling_demo/README.md` (new, 172 lines)
 
 **Configuration:**
 - `config/overrides/mcp.json` (+14 lines)
 
 **Tests:**
-- `backend/tests/test_sampling_integration.py` (new, 109 lines)
-- `backend/tests/manual_test_sampling.py` (new, 97 lines)
+- `atlas/tests/test_sampling_integration.py` (new, 109 lines)
+- `atlas/tests/manual_test_sampling.py` (new, 97 lines)
 
 **Documentation:**
 - `docs/developer/sampling.md` (new, 240 lines)

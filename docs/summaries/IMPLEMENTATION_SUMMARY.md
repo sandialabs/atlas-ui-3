@@ -37,13 +37,13 @@ Users now see helpful messages instead of silence:
 ## Files Modified (8 files, 501 lines)
 
 ### Backend Core
-- `backend/domain/errors.py` - New error types
-- `backend/application/chat/utilities/error_utils.py` - Error classification logic
-- `backend/main.py` - Enhanced WebSocket error handling
+- `atlas/domain/errors.py` - New error types
+- `atlas/application/chat/utilities/error_utils.py` - Error classification logic
+- `atlas/main.py` - Enhanced WebSocket error handling
 
 ### Tests (All Passing ✅)
-- `backend/tests/test_error_classification.py` - 9 unit tests
-- `backend/tests/test_error_flow_integration.py` - 4 integration tests
+- `atlas/tests/test_error_classification.py` - 9 unit tests
+- `atlas/tests/test_error_flow_integration.py` - 4 integration tests
 
 ### Documentation
 - `docs/error_handling_improvements.md` - Complete guide

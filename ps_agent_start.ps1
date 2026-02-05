@@ -278,7 +278,9 @@ function Start-Backend {
         [string]$HostName = "127.0.0.1"
     )
 
-    Set-Location "$PROJECT_ROOT/backend"
+    Set-Location "$PROJECT_ROOT/atlas"
+    # Set PYTHONPATH so atlas package imports work correctly
+    $env:PYTHONPATH = $PROJECT_ROOT
     $uvicornExe = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
     $arguments = "main:app --host $HostName --port $Port"
 

@@ -24,7 +24,7 @@ This plan introduces a configurable, feature-flagged system for automatic file c
 
 ### 1. Feature Flag
 
-Add to `AppSettings` in `backend/modules/config/config_manager.py`:
+Add to `AppSettings` in `atlas/modules/config/config_manager.py`:
 
 ```python
 feature_file_content_extraction_enabled: bool = Field(
@@ -177,7 +177,7 @@ The `extract` field (boolean) overrides the system default per-file.
 
 ### 5. Pydantic Models
 
-New models in `backend/modules/config/config_manager.py`:
+New models in `atlas/modules/config/config_manager.py`:
 
 ```python
 class FileExtractorConfig(BaseModel):
@@ -239,7 +239,7 @@ Following existing patterns:
 
 ### 8. Frontend Config Exposure
 
-Add to `/api/config` response in `backend/routes/config_routes.py`:
+Add to `/api/config` response in `atlas/routes/config_routes.py`:
 
 ```json
 {
