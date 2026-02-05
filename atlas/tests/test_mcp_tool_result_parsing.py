@@ -6,11 +6,12 @@ These tests verify that Atlas can parse tool results from both:
 """
 
 import json
-import pytest
-from unittest.mock import patch, AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
-from atlas.modules.mcp_tools.client import MCPToolManager
+import pytest
+
 from atlas.domain.messages.models import ToolCall
+from atlas.modules.mcp_tools.client import MCPToolManager
 
 
 class MockTextContent:
@@ -92,9 +93,9 @@ class TestMCPToolResultParsing:
         manager = MCPToolManager.__new__(MCPToolManager)
         payload = self._create_screenshot_payload()
         raw_result = MockMCPResultWithStructuredContent(payload)
-        
+
         normalized = manager._normalize_mcp_tool_result(raw_result)
-        
+
         assert "results" in normalized
         assert normalized["results"]["content"] == "Screenshot captured successfully"
 
@@ -103,9 +104,9 @@ class TestMCPToolResultParsing:
         manager = MCPToolManager.__new__(MCPToolManager)
         payload = self._create_screenshot_payload()
         raw_result = MockMCPResultWithoutStructuredContent(payload)
-        
+
         normalized = manager._normalize_mcp_tool_result(raw_result)
-        
+
         assert "results" in normalized
         assert normalized["results"]["content"] == "Screenshot captured successfully"
 
@@ -159,7 +160,7 @@ class TestMCPToolResultParsing:
     @pytest.mark.asyncio
     async def test_execute_tool_extracts_artifacts_from_content_text_fallback(self):
         """Test execute_tool extracts artifacts when only content[0].text is available.
-        
+
         This is the key fix: artifacts/display/meta_data should be extracted
         even when structured_content is not present in the MCP response.
         """

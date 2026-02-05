@@ -6,21 +6,21 @@ Provides PDF text analysis and report generation through the MCP protocol.
 
 import base64
 import io
+import logging
 import os
 import re
-import requests
-import logging
 from collections import Counter
-from typing import Any, Dict, Annotated, Optional
+from typing import Annotated, Any, Dict, Optional
+
+import requests
+from fastmcp import FastMCP
 
 # This tool requires the PyPDF2 and reportlab libraries.
 # Install them using: pip install PyPDF2 reportlab
 from PyPDF2 import PdfReader
-from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
-
-from fastmcp import FastMCP
+from reportlab.pdfgen import canvas
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ mcp = FastMCP("PDF_Analyzer")
 def _analyze_pdf_content(instructions: str, filename: str, original_filename: Optional[str] = None) -> Dict[str, Any]:
     """
     Core PDF analysis logic that can be reused by multiple tools.
-    
+
     Args:
         instructions: Instructions for the tool, not used in this implementation.
         filename: The name of the file, which must have a '.pdf' extension.
@@ -73,7 +73,7 @@ def _analyze_pdf_content(instructions: str, filename: str, original_filename: Op
             # Assume it's base64-encoded data
             decoded_bytes = base64.b64decode(filename)
             pdf_stream = io.BytesIO(decoded_bytes)
-        
+
         reader = PdfReader(pdf_stream)
 
         full_text = ""
@@ -136,7 +136,7 @@ def analyze_pdf(
 =======
     This PDF processing tool provides detailed text analytics for PDF documents:
 >>>>>>> main
-    
+
     **PDF Text Extraction:**
     - Extracts text from all pages in PDF documents
     - Handles various PDF formats and structures
@@ -211,7 +211,7 @@ def generate_report_about_pdf(
     Create comprehensive PDF analysis reports with professional formatting and detailed word frequency insights.
 
     This advanced PDF reporting tool combines text analysis with professional document generation:
-    
+
     **Complete PDF Analysis Workflow:**
     - Performs full text extraction and word frequency analysis
     - Generates professional analysis reports in PDF format

@@ -1,5 +1,7 @@
+from unittest.mock import ANY, AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock, ANY
+
 from atlas.modules.mcp_tools.client import MCPToolManager
 
 
@@ -23,11 +25,11 @@ class TestMCPClientAuthentication:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             manager = MCPToolManager()
             # Manually set servers_config for the manager
             manager.servers_config = {"test-server": server_config}
-            
+
             await manager._initialize_single_client("test-server", server_config)
 
         mock_client_class.assert_called_once_with(
@@ -54,10 +56,10 @@ class TestMCPClientAuthentication:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
-            
+
             await manager._initialize_single_client("test-server", server_config)
 
         mock_client_class.assert_called_once_with(
@@ -83,10 +85,10 @@ class TestMCPClientAuthentication:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
-            
+
             await manager._initialize_single_client("test-server", server_config)
 
         mock_client_class.assert_called_once_with(
@@ -113,10 +115,10 @@ class TestMCPClientAuthentication:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
-            
+
             await manager._initialize_single_client("test-server", server_config)
 
         mock_client_class.assert_called_once_with(
@@ -162,10 +164,10 @@ class TestMCPClientAuthentication:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
-            
+
             await manager._initialize_single_client("test-server", server_config)
 
         # For stdio, the Client is called with StdioTransport, not URL and auth
@@ -209,10 +211,10 @@ class TestMCPClientAuthentication:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
-            
+
             await manager._initialize_single_client("test-server", server_config)
 
         mock_client_class.assert_called_once_with(

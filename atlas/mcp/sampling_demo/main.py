@@ -14,7 +14,7 @@ Supports:
 - Agentic workflows with tool use
 """
 
-from fastmcp import FastMCP, Context
+from fastmcp import Context, FastMCP
 
 # Initialize the MCP server
 mcp = FastMCP("Sampling Demo")
@@ -24,13 +24,13 @@ mcp = FastMCP("Sampling Demo")
 async def summarize_text(text: str, ctx: Context) -> str:
     """
     Summarize the provided text using LLM sampling.
-    
+
     This tool demonstrates basic LLM sampling - requesting the LLM
     to generate a summary of the given text.
-    
+
     Args:
         text: The text to summarize
-        
+
     Returns:
         A summary of the input text
     """
@@ -42,13 +42,13 @@ async def summarize_text(text: str, ctx: Context) -> str:
 async def analyze_sentiment(text: str, ctx: Context) -> str:
     """
     Analyze the sentiment of the provided text using LLM sampling.
-    
+
     This tool demonstrates sampling with a system prompt that establishes
     the LLM's role as a sentiment analyzer.
-    
+
     Args:
         text: The text to analyze
-        
+
     Returns:
         Sentiment analysis result
     """
@@ -64,14 +64,14 @@ async def analyze_sentiment(text: str, ctx: Context) -> str:
 async def generate_code(description: str, language: str, ctx: Context) -> str:
     """
     Generate code based on a description using LLM sampling.
-    
+
     This tool demonstrates sampling with model preferences - hinting
     which models should be used for code generation.
-    
+
     Args:
         description: Description of what the code should do
         language: Programming language to use
-        
+
     Returns:
         Generated code
     """
@@ -89,13 +89,13 @@ async def generate_code(description: str, language: str, ctx: Context) -> str:
 async def creative_story(prompt: str, ctx: Context) -> str:
     """
     Generate a creative story using LLM sampling with high temperature.
-    
+
     This tool demonstrates sampling with higher temperature for more
     creative and varied outputs.
-    
+
     Args:
         prompt: Story prompt or theme
-        
+
     Returns:
         Generated creative story
     """
@@ -112,18 +112,18 @@ async def creative_story(prompt: str, ctx: Context) -> str:
 async def multi_turn_conversation(topic: str, ctx: Context) -> str:
     """
     Have a multi-turn conversation about a topic using LLM sampling.
-    
+
     This tool demonstrates multi-turn sampling - building up a conversation
     history and maintaining context across multiple sampling calls.
-    
+
     Args:
         topic: The topic to discuss
-        
+
     Returns:
         Summary of the conversation
     """
     from mcp.types import SamplingMessage, TextContent
-    
+
     # Start with an introduction
     messages = [
         SamplingMessage(
@@ -131,14 +131,14 @@ async def multi_turn_conversation(topic: str, ctx: Context) -> str:
             content=TextContent(type="text", text=f"Let's discuss {topic}. What are the key aspects to consider?")
         )
     ]
-    
+
     # First sampling: Get initial response
     result1 = await ctx.sample(
         messages=messages,
         system_prompt="You are a knowledgeable assistant engaging in a thoughtful discussion.",
         temperature=0.7
     )
-    
+
     # Add response to history
     messages.append(
         SamplingMessage(
@@ -146,7 +146,7 @@ async def multi_turn_conversation(topic: str, ctx: Context) -> str:
             content=TextContent(type="text", text=result1.text)
         )
     )
-    
+
     # Second turn: Ask a follow-up question
     messages.append(
         SamplingMessage(
@@ -154,13 +154,13 @@ async def multi_turn_conversation(topic: str, ctx: Context) -> str:
             content=TextContent(type="text", text="That's interesting. Can you elaborate on the most important point?")
         )
     )
-    
+
     # Second sampling: Get follow-up response
     result2 = await ctx.sample(
         messages=messages,
         temperature=0.7
     )
-    
+
     # Return summary of conversation
     return f"**Discussion on {topic}**\n\n**Initial Response:**\n{result1.text}\n\n**Follow-up:**\n{result2.text}"
 
@@ -169,13 +169,13 @@ async def multi_turn_conversation(topic: str, ctx: Context) -> str:
 async def research_question(question: str, ctx: Context) -> str:
     """
     Research a question using multiple LLM sampling calls.
-    
+
     This tool demonstrates agentic behavior - using sampling to break down
     a complex question, gather information, and synthesize an answer.
-    
+
     Args:
         question: The research question to answer
-        
+
     Returns:
         Comprehensive research-based answer
     """
@@ -186,7 +186,7 @@ async def research_question(question: str, ctx: Context) -> str:
         temperature=0.5,
         max_tokens=200
     )
-    
+
     # Step 2: Research each aspect
     research_result = await ctx.sample(
         messages=f"Based on these sub-questions:\n{breakdown_result.text}\n\nProvide a comprehensive answer to the original question: {question}",
@@ -194,7 +194,7 @@ async def research_question(question: str, ctx: Context) -> str:
         temperature=0.6,
         max_tokens=800
     )
-    
+
     return f"**Research Question:** {question}\n\n**Analysis:**\n{breakdown_result.text}\n\n**Answer:**\n{research_result.text}"
 
 
@@ -202,13 +202,13 @@ async def research_question(question: str, ctx: Context) -> str:
 async def translate_and_explain(text: str, target_language: str, ctx: Context) -> str:
     """
     Translate text and explain translation choices using LLM sampling.
-    
+
     This tool demonstrates sequential sampling for multi-step tasks.
-    
+
     Args:
         text: Text to translate
         target_language: Target language for translation
-        
+
     Returns:
         Translation with explanation
     """
@@ -218,7 +218,7 @@ async def translate_and_explain(text: str, target_language: str, ctx: Context) -
         system_prompt=f"You are an expert translator. Provide accurate {target_language} translations.",
         temperature=0.3
     )
-    
+
     # Step 2: Explain translation choices
     explanation_result = await ctx.sample(
         messages=f"Explain the key translation choices made in translating to {target_language}:\n\nOriginal: {text}\n\nTranslation: {translation_result.text}",
@@ -226,7 +226,7 @@ async def translate_and_explain(text: str, target_language: str, ctx: Context) -
         temperature=0.4,
         max_tokens=300
     )
-    
+
     return f"**Translation to {target_language}:**\n{translation_result.text}\n\n**Translation Notes:**\n{explanation_result.text}"
 
 

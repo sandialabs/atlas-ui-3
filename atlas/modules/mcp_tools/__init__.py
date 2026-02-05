@@ -12,6 +12,6 @@ from .client import MCPToolManager
 mcp_tool_manager = MCPToolManager()
 
 __all__ = [
-    "MCPToolManager", 
+    "MCPToolManager",
     "mcp_tool_manager",
 ]

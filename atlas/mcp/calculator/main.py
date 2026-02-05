@@ -34,30 +34,30 @@ def evaluate(expression: str) -> Dict[str, Any]:
     """Safely evaluate a wide range of mathematical expressions with comprehensive mathematical functions.
 
     This calculator tool provides secure mathematical computation capabilities including:
-    
+
     **Basic Operations:**
     - Arithmetic: +, -, *, /, //, %, **
     - Built-in functions: abs(), round(), min(), max(), sum(), pow(), divmod()
-    
+
     **Mathematical Constants:**
     - pi, e, tau, inf, nan
-    
+
     **Trigonometric Functions:**
     - sin(), cos(), tan(), asin(), acos(), atan(), atan2()
     - degrees(), radians(), hypot()
-    
+
     **Hyperbolic Functions:**
     - sinh(), cosh(), tanh(), asinh(), acosh(), atanh()
-    
+
     **Exponential & Logarithmic:**
     - exp(), sqrt(), log(), log10(), log2()
-    
+
     **Rounding & Numeric Operations:**
     - ceil(), floor(), trunc(), modf(), copysign(), fabs(), fmod()
-    
+
     **Combinatorics & Number Theory:**
     - factorial(), comb(), perm(), gcd(), lcm()
-    
+
     **Float Validation:**
     - isfinite(), isinf(), isnan()
 

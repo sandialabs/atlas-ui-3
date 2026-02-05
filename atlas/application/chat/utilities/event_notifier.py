@@ -7,10 +7,10 @@ Also includes minimal sanitization to avoid leaking sensitive tokens/paths
 in filenames returned from tools.
 """
 
-import logging
-from typing import Any, Dict, List, Optional, Callable, Awaitable
 import json
+import logging
 import re
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ def _sanitize_result_for_ui(obj: Any) -> Any:
 async def safe_notify(callback: UpdateCallback, message: Dict[str, Any]) -> None:
     """
     Invoke callback safely, logging but suppressing exceptions.
-    
+
     Pure function that handles notification errors gracefully.
     """
     try:
@@ -106,16 +106,16 @@ async def notify_tool_start(
 ) -> None:
     """
     Send tool start notification.
-    
+
     Pure function that creates and sends tool start notification.
     """
     if not update_callback:
         return
-        
+
     # Derive server name for display context
     parts = tool_call.function.name.split("_")
     server_name = "_".join(parts[:-1]) if len(parts) > 1 else "unknown"
-    
+
     payload = {
         "type": "tool_start",
         "tool_call_id": tool_call.id,
@@ -134,7 +134,7 @@ async def notify_tool_complete(
 ) -> None:
     """
     Send tool completion notification with canvas handling.
-    
+
     Pure function that handles tool completion notifications.
     """
     if not update_callback:
@@ -158,11 +158,11 @@ async def notify_tool_complete(
         "success": result.success,
         "result": sanitized_content
     }
-    
+
     # Canvas tool special handling
     if tool_call.function.name == "canvas_canvas":
         await notify_canvas_content(parsed_args, update_callback)
-    
+
     # Send artifacts to frontend if available
     try:
         arts = getattr(result, "artifacts", None)
@@ -204,7 +204,7 @@ async def notify_tool_progress(
     Send tool progress notification.
 
     Emits an event shaped for the UI to render progress bars/messages.
-    
+
     Enhanced to support structured progress updates:
     - If message starts with "MCP_UPDATE:", parse as JSON for special updates
     - Supports canvas updates, system messages, and file artifacts during execution
@@ -229,7 +229,7 @@ async def notify_tool_progress(
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse structured progress update: {e}")
                 # Fall through to regular progress handling
-        
+
         # Regular progress notification
         pct: Optional[float] = None
         if total is not None and total != 0:
@@ -261,14 +261,14 @@ async def _handle_structured_progress_update(
 ) -> None:
     """
     Handle structured progress updates from MCP servers.
-    
+
     Supports:
     - canvas_update: Display content in canvas during tool execution
     - system_message: Add rich system messages to chat history
     - artifacts: Send file artifacts during execution
     """
     update_type = structured_data.get("type")
-    
+
     if update_type == "canvas_update":
         # Display content in canvas
         content = structured_data.get("content")
@@ -278,7 +278,7 @@ async def _handle_structured_progress_update(
                 "content": content
             })
             logger.info(f"Tool {tool_name} sent canvas update during execution")
-    
+
     elif update_type == "system_message":
         # Send rich system message to chat
         msg_content = structured_data.get("message", "")
@@ -294,7 +294,7 @@ async def _handle_structured_progress_update(
             }
         })
         logger.info(f"Tool {tool_name} sent system message during execution")
-    
+
     elif update_type == "artifacts":
         # Send file artifacts during execution
         artifacts = structured_data.get("artifacts", [])
@@ -311,7 +311,7 @@ async def _handle_structured_progress_update(
                 }
             })
             logger.info(f"Tool {tool_name} sent {len(artifacts)} artifact(s) during execution")
-    
+
     # Still send progress info along with the structured update
     pct: Optional[float] = None
     if total is not None and total != 0:
@@ -319,7 +319,7 @@ async def _handle_structured_progress_update(
             pct = (float(progress) / float(total)) * 100.0
         except Exception:
             pct = None
-    
+
     await safe_notify(update_callback, {
         "type": "tool_progress",
         "tool_call_id": tool_call_id,
@@ -337,7 +337,7 @@ async def notify_canvas_content(
 ) -> None:
     """
     Send canvas content notification.
-    
+
     Pure function that extracts and sends canvas content.
     """
     try:
@@ -361,12 +361,12 @@ async def notify_tool_error(
 ) -> None:
     """
     Send tool error notification.
-    
+
     Pure function that creates and sends error notification.
     """
     if not update_callback:
         return
-        
+
     await safe_notify(update_callback, {
         "type": "tool_error",
         "tool_call_id": tool_call.id,
@@ -382,12 +382,12 @@ async def notify_chat_response(
 ) -> None:
     """
     Send chat response notification.
-    
+
     Pure function that notifies about chat responses.
     """
     if not update_callback:
         return
-        
+
     await safe_notify(update_callback, {
         "type": "chat_response",
         "message": message,
@@ -398,12 +398,12 @@ async def notify_chat_response(
 async def notify_response_complete(update_callback: Optional[UpdateCallback]) -> None:
     """
     Send response completion notification.
-    
+
     Pure function that signals completion.
     """
     if not update_callback:
         return
-        
+
     await safe_notify(update_callback, {"type": "response_complete"})
 
 
@@ -413,12 +413,12 @@ async def notify_tool_synthesis(
 ) -> None:
     """
     Send tool synthesis notification.
-    
+
     Pure function that notifies about synthesis results.
     """
     if not update_callback:
         return
-        
+
     if message and message.strip():
         await safe_notify(update_callback, {
             "type": "tool_synthesis",
@@ -433,12 +433,12 @@ async def notify_agent_update(
 ) -> None:
     """
     Send agent mode update notification.
-    
+
     Pure function that handles agent-specific notifications.
     """
     if not connection:
         return
-        
+
     try:
         payload = {
             "type": "agent_update",
@@ -456,12 +456,12 @@ async def notify_files_update(
 ) -> None:
     """
     Send files update notification.
-    
+
     Pure function that notifies about file changes.
     """
     if not update_callback:
         return
-        
+
     await safe_notify(update_callback, {
         "type": "intermediate_update",
         "update_type": "files_update",
@@ -475,12 +475,12 @@ async def notify_canvas_files(
 ) -> None:
     """
     Send canvas files notification.
-    
+
     Pure function that notifies about canvas-displayable files.
     """
     if not update_callback or not canvas_files:
         return
-        
+
     await safe_notify(update_callback, {
         "type": "intermediate_update",
         "update_type": "canvas_files",
@@ -498,7 +498,7 @@ async def notify_tool_log(
     update_callback: UpdateCallback
 ) -> None:
     """Send a log message from an MCP tool to the UI.
-    
+
     Args:
         server_name: Name of the MCP server
         tool_name: Name of the tool (if during tool execution)
@@ -525,7 +525,7 @@ async def notify_tool_log(
 def create_error_response(error_message: str, message_type: str = "error") -> Dict[str, str]:
     """
     Create standardized error response.
-    
+
     Pure function that creates consistent error responses.
     """
     return {
@@ -537,7 +537,7 @@ def create_error_response(error_message: str, message_type: str = "error") -> Di
 def create_chat_response(message: str, message_type: str = "chat_response") -> Dict[str, str]:
     """
     Create standardized chat response.
-    
+
     Pure function that creates consistent chat responses.
     """
     return {

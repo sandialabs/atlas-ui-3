@@ -1,7 +1,7 @@
 """Authorization utilities for managing access to resources."""
 
 import logging
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 from atlas.modules.config.config_manager import get_app_settings
 

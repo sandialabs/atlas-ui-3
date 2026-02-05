@@ -13,9 +13,9 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Literal
+from typing import Any, Dict, Literal
 
-from fastapi import APIRouter, HTTPException, Depends, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -61,7 +61,7 @@ async def require_admin_for_feedback(current_user: str = Depends(get_current_use
     admin_group = config_manager.app_settings.admin_group
     if not await is_user_in_group(current_user, admin_group):
         raise HTTPException(
-            status_code=403, 
+            status_code=403,
             detail=f"Admin access required to view feedback. User must be in '{admin_group}' group."
         )
     return current_user
@@ -69,7 +69,7 @@ async def require_admin_for_feedback(current_user: str = Depends(get_current_use
 
 @feedback_router.post("/feedback")
 async def submit_feedback(
-    feedback: FeedbackData, 
+    feedback: FeedbackData,
     request: Request,
     current_user: str = Depends(get_current_user)
 ):
@@ -78,15 +78,15 @@ async def submit_feedback(
         # Validate rating
         if feedback.rating not in [-1, 0, 1]:
             raise HTTPException(status_code=400, detail="Rating must be -1, 0, or 1")
-        
+
         # Get feedback directory
         feedback_dir = get_feedback_directory()
-        
+
         # Generate unique filename with timestamp
         timestamp = datetime.now().isoformat().replace(":", "-").replace(".", "-")
         feedback_id = str(uuid.uuid4())[:8]
         filename = f"feedback_{timestamp}_{feedback_id}.json"
-        
+
         # Prepare feedback data with additional context
         feedback_data = {
             "id": feedback_id,
@@ -102,12 +102,12 @@ async def submit_feedback(
                 "referer": request.headers.get("referer", "")
             }
         }
-        
+
         # Save feedback to JSON file
         feedback_file = feedback_dir / filename
         with open(feedback_file, 'w', encoding='utf-8') as f:
             json.dump(feedback_data, f, indent=2, ensure_ascii=False)
-        
+
         rating_label = {1: "positive", 0: "neutral", -1: "negative"}.get(feedback.rating, "unknown")
         safe_current_user = sanitize_for_logging(current_user)
         logger.info(
@@ -119,13 +119,13 @@ async def submit_feedback(
                 "file": str(feedback_file)
             }
         )
-        
+
         return {
             "message": "Feedback submitted successfully",
             "feedback_id": feedback_id,
             "timestamp": feedback_data["timestamp"]
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -142,18 +142,18 @@ async def get_all_feedback(
     """Get all submitted feedback (admin only)."""
     try:
         feedback_dir = get_feedback_directory()
-        
+
         # Get all feedback files, sorted by creation time (newest first)
         feedback_files = sorted(
             feedback_dir.glob("feedback_*.json"),
             key=lambda x: x.stat().st_mtime,
             reverse=True
         )
-        
+
         # Apply pagination
         total_count = len(feedback_files)
         paginated_files = feedback_files[offset:offset + limit]
-        
+
         # Read and parse feedback files
         feedback_list = []
         for feedback_file in paginated_files:
@@ -164,7 +164,7 @@ async def get_all_feedback(
             except Exception as e:
                 logger.error(f"Error reading feedback file {feedback_file}: {e}")
                 continue
-        
+
         # Calculate rating statistics
         ratings = [fb["rating"] for fb in feedback_list if "rating" in fb]
         rating_stats = {
@@ -174,7 +174,7 @@ async def get_all_feedback(
             "total": len(ratings),
             "average": sum(ratings) / len(ratings) if ratings else 0
         }
-        
+
         return {
             "feedback": feedback_list,
             "pagination": {
@@ -186,7 +186,7 @@ async def get_all_feedback(
             "statistics": rating_stats,
             "retrieved_by": admin_user
         }
-        
+
     except Exception as e:
         logger.error(f"Error retrieving feedback: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve feedback")
@@ -200,7 +200,7 @@ async def get_feedback_stats(
     try:
         feedback_dir = get_feedback_directory()
         feedback_files = list(feedback_dir.glob("feedback_*.json"))
-        
+
         if not feedback_files:
             return {
                 "total_feedback": 0,
@@ -208,28 +208,28 @@ async def get_feedback_stats(
                 "average_rating": 0,
                 "recent_feedback": 0
             }
-        
+
         # Read all feedback files
         all_feedback = []
         recent_count = 0
         now = datetime.now()
-        
+
         for feedback_file in feedback_files:
             try:
                 with open(feedback_file, 'r', encoding='utf-8') as f:
                     feedback_data = json.load(f)
                     all_feedback.append(feedback_data)
-                    
+
                     # Count recent feedback (last 24 hours)
                     if "timestamp" in feedback_data:
                         feedback_time = datetime.fromisoformat(feedback_data["timestamp"].replace("Z", "+00:00"))
                         if (now - feedback_time).total_seconds() < 86400:  # 24 hours
                             recent_count += 1
-                            
+
             except Exception as e:
                 logger.error(f"Error reading feedback file {feedback_file}: {e}")
                 continue
-        
+
         # Calculate statistics
         ratings = [fb["rating"] for fb in all_feedback if "rating" in fb]
         rating_distribution = {
@@ -237,7 +237,7 @@ async def get_feedback_stats(
             "neutral": sum(1 for r in ratings if r == 0),
             "negative": sum(1 for r in ratings if r == -1)
         }
-        
+
         return {
             "total_feedback": len(all_feedback),
             "rating_distribution": rating_distribution,
@@ -247,7 +247,7 @@ async def get_feedback_stats(
             "unique_users": len(set(fb.get("user", "unknown") for fb in all_feedback)),
             "retrieved_by": admin_user
         }
-        
+
     except Exception as e:
         logger.error(f"Error calculating feedback stats: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to calculate feedback statistics")
@@ -261,7 +261,7 @@ async def delete_feedback(
     """Delete a specific feedback entry (admin only)."""
     try:
         feedback_dir = get_feedback_directory()
-        
+
         # Find the feedback file by ID
         feedback_file = None
         for file_path in feedback_dir.glob("feedback_*.json"):
@@ -273,10 +273,10 @@ async def delete_feedback(
                         break
             except Exception:
                 continue
-        
+
         if not feedback_file:
             raise HTTPException(status_code=404, detail="Feedback not found")
-        
+
         # Delete the file
         feedback_file.unlink()
         safe_feedback_id = sanitize_for_logging(feedback_id)
@@ -286,13 +286,13 @@ async def delete_feedback(
             safe_feedback_id,
             safe_admin_user,
         )
-        
+
         return {
             "message": "Feedback deleted successfully",
             "feedback_id": feedback_id,
             "deleted_by": admin_user
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -308,13 +308,13 @@ async def download_feedback(
     """Download all feedback data as CSV or JSON (admin only)."""
     try:
         feedback_dir = get_feedback_directory()
-        
+
         feedback_files = sorted(
             feedback_dir.glob("feedback_*.json"),
             key=lambda x: x.stat().st_mtime,
             reverse=True
         )
-        
+
         all_feedback = []
         for feedback_file in feedback_files:
             try:
@@ -324,9 +324,9 @@ async def download_feedback(
             except Exception as e:
                 logger.error(f"Error reading feedback file {feedback_file}: {e}")
                 continue
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
         if format == "json":
             content = json.dumps(all_feedback, indent=2, ensure_ascii=False)
             filename = f"feedback_export_{timestamp}.json"
@@ -347,15 +347,15 @@ async def download_feedback(
             content = output.getvalue()
             filename = f"feedback_export_{timestamp}.csv"
             media_type = "text/csv"
-        
+
         logger.info(f"Feedback downloaded by {sanitize_for_logging(admin_user)} as {format}")
-        
+
         return StreamingResponse(
             iter([content]),
             media_type=media_type,
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
-        
+
     except Exception as e:
         logger.error(f"Error downloading feedback: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to download feedback")

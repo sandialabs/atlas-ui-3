@@ -15,6 +15,7 @@ import typing as t
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
+
 from atlas.modules.config import config_manager
 
 

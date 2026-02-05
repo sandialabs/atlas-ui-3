@@ -1,24 +1,24 @@
 """Chat orchestrator - coordinates the full chat request flow."""
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from atlas.domain.errors import SessionNotFoundError
 from atlas.domain.messages.models import Message, MessageRole
-from atlas.interfaces.llm import LLMProtocol
-from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.interfaces.events import EventPublisher
+from atlas.interfaces.llm import LLMProtocol
 from atlas.interfaces.sessions import SessionRepository
+from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
-from .policies.tool_authorization import ToolAuthorizationService
-from .preprocessors.prompt_override_service import PromptOverrideService
-from .preprocessors.message_builder import MessageBuilder
+from .modes.agent import AgentModeRunner
 from .modes.plain import PlainModeRunner
 from .modes.rag import RagModeRunner
 from .modes.tools import ToolsModeRunner
-from .modes.agent import AgentModeRunner
+from .policies.tool_authorization import ToolAuthorizationService
+from .preprocessors.message_builder import MessageBuilder
+from .preprocessors.prompt_override_service import PromptOverrideService
 from .utilities import file_processor
 
 logger = logging.getLogger(__name__)
@@ -27,11 +27,11 @@ logger = logging.getLogger(__name__)
 class ChatOrchestrator:
     """
     Orchestrates the full chat request flow.
-    
+
     Coordinates preprocessing, policy checks, mode selection, and execution.
     Provides clean separation between request handling and business logic.
     """
-    
+
     def __init__(
         self,
         llm: LLMProtocol,
@@ -48,7 +48,7 @@ class ChatOrchestrator:
     ):
         """
         Initialize chat orchestrator.
-        
+
         Args:
             llm: LLM protocol implementation
             event_publisher: Event publisher for UI updates
@@ -68,12 +68,12 @@ class ChatOrchestrator:
         self.tool_manager = tool_manager
         self.prompt_provider = prompt_provider
         self.file_manager = file_manager
-        
+
         # Initialize services
         self.tool_authorization = ToolAuthorizationService(tool_manager=tool_manager)
         self.prompt_override = PromptOverrideService(tool_manager=tool_manager)
         self.message_builder = MessageBuilder(prompt_provider=prompt_provider)
-        
+
         # Initialize or use provided mode runners
         self.plain_mode = plain_mode or PlainModeRunner(
             llm=llm,
@@ -91,7 +91,7 @@ class ChatOrchestrator:
             artifact_processor=artifact_processor,
         )
         self.agent_mode = agent_mode
-    
+
     async def execute(
         self,
         session_id: UUID,
@@ -110,7 +110,7 @@ class ChatOrchestrator:
     ) -> Dict[str, Any]:
         """
         Execute a chat request through the full pipeline.
-        
+
         Args:
             session_id: Session identifier
             content: User message content
@@ -125,7 +125,7 @@ class ChatOrchestrator:
             temperature: LLM temperature
             files: Optional files to attach
             **kwargs: Additional parameters
-            
+
         Returns:
             Response dictionary
         """
@@ -133,7 +133,7 @@ class ChatOrchestrator:
         session = await self.session_repository.get(session_id)
         if not session:
             raise SessionNotFoundError(f"Session {session_id} not found")
-        
+
         # Add user message to history
         user_message = Message(
             role=MessageRole.USER,
@@ -142,7 +142,7 @@ class ChatOrchestrator:
         )
         session.history.add_message(user_message)
         session.update_timestamp()
-        
+
         # Handle file ingestion
         update_callback = kwargs.get("update_callback")
         logger.debug(f"Orchestrator.execute: update_callback present = {update_callback is not None}")
@@ -153,19 +153,19 @@ class ChatOrchestrator:
             file_manager=self.file_manager,
             update_callback=update_callback
         )
-        
+
         # Build messages with history and files manifest
         messages = await self.message_builder.build_messages(
             session=session,
             include_files_manifest=True
         )
-        
+
         # Apply MCP prompt override
         messages = await self.prompt_override.apply_prompt_override(
             messages=messages,
             selected_prompts=selected_prompts
         )
-        
+
         # Route to appropriate mode
         if agent_mode and self.agent_mode:
             return await self.agent_mode.run(

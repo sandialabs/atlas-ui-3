@@ -8,10 +8,10 @@ from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.interfaces.transport import ChatConnectionProtocol
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
+from .act_loop import ActAgentLoop
 from .protocols import AgentLoopProtocol
 from .react_loop import ReActAgentLoop
 from .think_act_loop import ThinkActAgentLoop
-from .act_loop import ActAgentLoop
 
 logger = logging.getLogger(__name__)
 

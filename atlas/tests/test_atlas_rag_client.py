@@ -1,8 +1,8 @@
 """Unit tests for AtlasRAGClient."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi import HTTPException
 
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient

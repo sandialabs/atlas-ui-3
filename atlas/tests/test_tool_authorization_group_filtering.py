@@ -4,8 +4,10 @@ This test verifies that MCP server group restrictions are properly enforced
 during tool authorization in chat execution.
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from atlas.application.chat.policies.tool_authorization import ToolAuthorizationService
 
 

@@ -8,7 +8,6 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app
 
-
 client = TestClient(app)
 
 
@@ -120,6 +119,7 @@ def test_production_header_stripping():
         - Logs confirm backend saw the real user
     """
     import os
+
     import requests
 
     deployment_url = os.getenv("PRODUCTION_URL")

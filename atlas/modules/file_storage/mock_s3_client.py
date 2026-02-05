@@ -10,12 +10,11 @@ import hashlib
 import logging
 import time
 import uuid
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
-
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +40,11 @@ class MockS3StorageClient:
     def client(self):
         """Lazy-load the TestClient to avoid circular imports."""
         if self._client is None:
-            from fastapi.testclient import TestClient
-            import sys
             import importlib.util
+            import sys
             from pathlib import Path
+
+            from fastapi.testclient import TestClient
 
             # Get the S3 mock path
             mock_path = Path(__file__).parent.parent.parent.parent / "mocks" / "s3-mock"
@@ -162,9 +162,9 @@ class MockS3StorageClient:
                 sanitize_for_logging(user_email),
             )
             logger.debug("Uploaded file key (sanitized): %s", sanitize_for_logging(s3_key))
-            
+
             log_metric("file_stored", user_email, file_size=len(content_bytes), content_type=content_type, category=category)
-            
+
             return result
 
         except Exception as e:

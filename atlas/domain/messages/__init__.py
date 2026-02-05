@@ -1,13 +1,6 @@
 """Domain models for messages."""
 
-from .models import (
-    Message,
-    MessageRole,
-    MessageType,
-    ToolCall,
-    ToolResult,
-    ConversationHistory
-)
+from .models import ConversationHistory, Message, MessageRole, MessageType, ToolCall, ToolResult
 
 __all__ = [
     "Message",

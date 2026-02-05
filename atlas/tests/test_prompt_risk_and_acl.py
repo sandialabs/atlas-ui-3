@@ -1,10 +1,12 @@
-import os
 import json
-import types
-import pytest
+import os
 
 # Ensure backend root on sys.path
 import sys
+import types
+
+import pytest
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from atlas.core.prompt_risk import calculate_prompt_injection_risk

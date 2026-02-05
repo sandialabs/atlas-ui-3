@@ -6,10 +6,10 @@ Detects numerical columns, generates basic statistical plots, and returns as Bas
 
 import base64
 import io
-from typing import Any, Dict, Annotated
+from typing import Annotated, Any, Dict
 
-import pandas as pd
 import matplotlib.pyplot as plt
+import pandas as pd
 from fastmcp import FastMCP
 
 # Initialize the MCP server
@@ -25,7 +25,7 @@ def analyze_spreadsheet(
     Perform comprehensive spreadsheet analysis with automatic data visualization for CSV and Excel files.
 
     This intelligent data analysis tool provides instant insights into spreadsheet data:
-    
+
     **File Format Support:**
     - CSV files (.csv) with various delimiters and encodings
     - Excel files (.xlsx) including multiple sheets and complex formatting
@@ -124,7 +124,7 @@ def analyze_spreadsheet(
 
         returned_file_names = ["analysis_plot.png"]
         returned_file_contents = [img_base64]
-        
+
         return {
             "results": {
                 "operation": "spreadsheet_analysis",

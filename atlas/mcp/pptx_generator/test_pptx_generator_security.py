@@ -7,11 +7,10 @@ import os
 import tempfile
 from pathlib import Path
 
-
 from main import (
+    _clean_markdown_text,
     _escape_html,
     _is_safe_local_path,
-    _clean_markdown_text,
 )
 
 

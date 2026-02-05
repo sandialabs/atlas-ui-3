@@ -6,8 +6,8 @@ This module provides:
 - Integration with ATLAS RAG API
 """
 
-from .client import RAGClient, DataSource, DocumentMetadata, RAGMetadata, RAGResponse
 from .atlas_rag_client import AtlasRAGClient, create_atlas_rag_client_from_config
+from .client import DataSource, DocumentMetadata, RAGClient, RAGMetadata, RAGResponse
 
 # Create default instance
 rag_client = RAGClient()

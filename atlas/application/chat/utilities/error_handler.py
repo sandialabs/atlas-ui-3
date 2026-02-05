@@ -6,9 +6,15 @@ across chat operations without maintaining any state.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Callable, Awaitable, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from atlas.domain.errors import ValidationError, RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError
+from atlas.domain.errors import (
+    LLMAuthenticationError,
+    LLMServiceError,
+    LLMTimeoutError,
+    RateLimitError,
+    ValidationError,
+)
 from atlas.domain.messages.models import MessageType
 
 logger = logging.getLogger(__name__)
@@ -24,7 +30,7 @@ async def safe_execute_with_tools(
 ) -> Dict[str, Any]:
     """
     Safely execute tools mode with centralized exception handling.
-    
+
     Pure function that wraps any execution function with error handling.
     """
     try:
@@ -45,12 +51,12 @@ async def safe_get_tools_schema(
 ) -> List[Dict[str, Any]]:
     """
     Safely get tools schema with error handling.
-    
+
     Pure function that handles tool schema retrieval errors.
     """
     if not tool_manager:
         raise ValidationError("Tool manager not configured")
-    
+
     try:
         tools_schema = tool_manager.get_tools_schema(selected_tools)
         logger.info(f"Got {len(tools_schema)} tool schemas for selected tools: {selected_tools}")
@@ -63,7 +69,7 @@ async def safe_get_tools_schema(
 def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
     """
     Classify LLM errors and return appropriate error type, user message, and log message.
-    
+
     Returns:
         Tuple of (error_class, user_message, log_message).
 
@@ -71,25 +77,25 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
     """
     error_str = str(error)
     error_type_name = type(error).__name__
-    
+
     # Check for rate limiting errors
     if "RateLimitError" in error_type_name or "rate limit" in error_str.lower() or "high traffic" in error_str.lower():
         user_msg = "The AI service is experiencing high traffic. Please try again in a moment."
         log_msg = f"Rate limit error: {error_str}"
         return (RateLimitError, user_msg, log_msg)
-    
+
     # Check for timeout errors
     if "timeout" in error_str.lower() or "timed out" in error_str.lower():
         user_msg = "The AI service request timed out. Please try again."
         log_msg = f"Timeout error: {error_str}"
         return (LLMTimeoutError, user_msg, log_msg)
-    
+
     # Check for authentication/authorization errors
     if any(keyword in error_str.lower() for keyword in ["unauthorized", "authentication", "invalid api key", "invalid_api_key", "api key"]):
         user_msg = "There was an authentication issue with the AI service. Please contact your administrator."
         log_msg = f"Authentication error: {error_str}"
         return (LLMAuthenticationError, user_msg, log_msg)
-    
+
     # Generic LLM service error (non-validation)
     user_msg = "The AI service encountered an error. Please try again or contact support if the issue persists."
     log_msg = f"LLM error: {error_str}"
@@ -108,7 +114,7 @@ async def safe_call_llm_with_tools(
 ):
     """
     Safely call LLM with tools and error handling.
-    
+
     Pure function that handles LLM calling errors with proper classification.
     """
     try:
@@ -150,7 +156,7 @@ async def safe_execute_single_tool(
 ):
     """
     Safely execute a single tool with comprehensive error handling.
-    
+
     Pure function that wraps tool execution with error handling.
     """
     try:
@@ -162,7 +168,7 @@ async def safe_execute_single_tool(
         )
     except Exception as e:
         logger.error(f"Error executing tool {tool_call.function.name}: {e}")
-        
+
         # Send error notification if callback available
         if update_callback:
             try:
@@ -174,7 +180,7 @@ async def safe_execute_single_tool(
                 })
             except Exception:
                 pass  # Don't let notification errors compound the problem
-        
+
         # Return error result instead of raising
         from atlas.domain.messages.models import ToolResult
         return ToolResult(
@@ -192,7 +198,7 @@ async def safe_file_operation(
 ) -> Any:
     """
     Safely execute file operations with error handling.
-    
+
     Pure function that wraps file operations with error handling.
     """
     try:
@@ -212,7 +218,7 @@ async def safe_llm_call(
 ) -> Any:
     """
     Safely execute LLM calls with error handling.
-    
+
     Pure function that wraps LLM calls with error handling.
     """
     try:
@@ -229,7 +235,7 @@ def safe_sync_operation(
 ) -> Any:
     """
     Safely execute synchronous operations with error handling.
-    
+
     Pure function that wraps sync operations with error handling.
     """
     try:
@@ -245,7 +251,7 @@ def create_error_response(
 ) -> Dict[str, str]:
     """
     Create standardized error response.
-    
+
     Pure function that creates consistent error responses.
     """
     return {
@@ -259,7 +265,7 @@ def create_validation_error_response(
 ) -> Dict[str, str]:
     """
     Create standardized validation error response.
-    
+
     Pure function that creates consistent validation error responses.
     """
     return {
@@ -275,7 +281,7 @@ def log_and_suppress_error(
 ) -> None:
     """
     Log an error and suppress it for non-critical operations.
-    
+
     Pure function that provides consistent error logging.
     """
     log_func = getattr(logger, level, logger.warning)
@@ -288,7 +294,7 @@ def handle_chat_message_error(
 ) -> Dict[str, str]:
     """
     Handle chat message errors with consistent logging and response.
-    
+
     Pure function that provides standard chat error handling.
     """
     logger.error(f"Error in {context}: {error}", exc_info=True)
@@ -305,16 +311,16 @@ def should_retry_operation(
 ) -> bool:
     """
     Determine if an operation should be retried based on error type.
-    
+
     Pure function that implements retry logic.
     """
     if retry_count >= max_retries:
         return False
-    
+
     # Don't retry validation errors
     if isinstance(error, ValidationError):
         return False
-    
+
     # Retry for other types of errors
     return True
 
@@ -327,11 +333,11 @@ async def with_retry(
 ) -> Any:
     """
     Execute operation with retry logic.
-    
+
     Pure function that provides retry capability for operations.
     """
     last_error = None
-    
+
     for attempt in range(max_retries + 1):
         try:
             return await operation_func(*args, **kwargs)
@@ -340,7 +346,7 @@ async def with_retry(
             if not should_retry_operation(e, attempt, max_retries):
                 break
             logger.warning(f"Operation failed (attempt {attempt + 1}/{max_retries + 1}): {e}")
-    
+
     # If we get here, all retries failed
     raise last_error
 
@@ -348,7 +354,7 @@ async def with_retry(
 def sanitize_kwargs_for_logging(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """
     Sanitize kwargs for safe logging by replacing large objects with summaries.
-    
+
     Pure function that creates a sanitized copy for logging purposes.
     Used to prevent large file contents from cluttering logs.
     """

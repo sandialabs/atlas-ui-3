@@ -38,7 +38,7 @@ def test_auth_middleware(debug_mode, header, expected_status):
 def test_auth_middleware_custom_header():
     """Test that custom auth header name can be configured."""
     from fastapi import Request
-    
+
     app = FastAPI()
 
     @app.get("/ping")
@@ -71,7 +71,7 @@ def test_auth_middleware_custom_header():
 def test_auth_middleware_custom_header_debug_mode():
     """Test that custom auth header works in debug mode."""
     from fastapi import Request
-    
+
     app = FastAPI()
 
     @app.get("/ping")
@@ -91,7 +91,7 @@ def test_auth_middleware_custom_header_debug_mode():
 def test_proxy_secret_disabled_default_behavior():
     """Test that with proxy secret disabled, normal auth behavior works."""
     from fastapi import Request
-    
+
     app = FastAPI()
 
     @app.get("/ping")
@@ -104,7 +104,7 @@ def test_proxy_secret_disabled_default_behavior():
 
     # Proxy secret disabled (default)
     app.add_middleware(
-        AuthMiddleware, 
+        AuthMiddleware,
         debug_mode=False,
         proxy_secret_enabled=False
     )
@@ -120,7 +120,7 @@ def test_proxy_secret_disabled_default_behavior():
 def test_proxy_secret_enabled_valid_secret():
     """Test that with valid proxy secret, request succeeds."""
     from fastapi import Request
-    
+
     app = FastAPI()
 
     @app.get("/ping")
@@ -153,7 +153,7 @@ def test_proxy_secret_enabled_valid_secret():
 def test_proxy_secret_enabled_invalid_secret():
     """Test that with invalid proxy secret, request is rejected."""
     from fastapi import Request
-    
+
     app = FastAPI()
 
     @app.get("/ping")
@@ -185,7 +185,7 @@ def test_proxy_secret_enabled_invalid_secret():
 def test_proxy_secret_enabled_missing_secret():
     """Test that with missing proxy secret, request is rejected."""
     from fastapi import Request
-    
+
     app = FastAPI()
 
     @app.get("/ping")
@@ -244,7 +244,7 @@ def test_proxy_secret_enabled_api_endpoint_returns_401():
 def test_proxy_secret_custom_redirect_url():
     """Test that custom redirect URL is used when proxy secret validation fails."""
     from fastapi import Request
-    
+
     app = FastAPI()
 
     @app.get("/ping")
@@ -274,7 +274,7 @@ def test_proxy_secret_custom_redirect_url():
 def test_auth_redirect_url_without_proxy_secret():
     """Test that custom redirect URL works for regular auth failures too."""
     from fastapi import Request
-    
+
     app = FastAPI()
 
     @app.get("/ping")
@@ -323,7 +323,7 @@ def test_proxy_secret_does_not_skip_auth_endpoint():
 def test_proxy_secret_debug_mode_bypasses_validation():
     """Test that debug mode still works when proxy secret is enabled."""
     from fastapi import Request
-    
+
     app = FastAPI()
 
     @app.get("/ping")

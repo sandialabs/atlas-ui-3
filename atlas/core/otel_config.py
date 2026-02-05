@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
-from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.instrumentation.logging import LoggingInstrumentor
+from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
+from opentelemetry.sdk.trace import TracerProvider
 
 
 class JSONFormatter(logging.Formatter):
@@ -90,12 +90,12 @@ class OpenTelemetryConfig:
             from atlas.modules.config import config_manager
             if config_manager.app_settings.app_log_dir:
                 return Path(config_manager.app_settings.app_log_dir)
-        except Exception:            
+        except Exception:
             pass
         # Fallback: project_root/logs
         project_root = Path(__file__).resolve().parents[2]
         return project_root / "logs"
-    
+
     def _is_development(self) -> bool:
         try:
             from atlas.modules.config import config_manager

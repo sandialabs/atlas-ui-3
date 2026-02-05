@@ -7,7 +7,6 @@ import pytest
 
 from atlas.infrastructure.events.cli_event_publisher import CLIEventPublisher
 
-
 # ---------------------------------------------------------------------------
 # CLIEventPublisher unit tests
 # ---------------------------------------------------------------------------

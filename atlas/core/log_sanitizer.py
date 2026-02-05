@@ -5,6 +5,7 @@ Minimal utilities for basic chat functionality.
 import logging
 import re
 from typing import Any
+
 from fastapi import Request
 
 logger = logging.getLogger(__name__)
@@ -17,12 +18,12 @@ _STANDARD_NEWLINES_RE = re.compile(r'(\r\n|\r|\n)')
 
 def sanitize_for_logging(value: Any) -> str:
     """
-    Sanitize a value for safe logging by removing ALL newlines (including Unicode and CRLF) 
+    Sanitize a value for safe logging by removing ALL newlines (including Unicode and CRLF)
     and control characters, to defend against log injection.
 
-    Removes ASCII control characters (C0 and C1 ranges), CR/LF in any combination, 
+    Removes ASCII control characters (C0 and C1 ranges), CR/LF in any combination,
     and Unicode line/paragraph separators. This includes characters
-    like newlines (\\n, \\r, \\r\\n, U+2028, U+2029), tabs, escape sequences, and other 
+    like newlines (\\n, \\r, \\r\\n, U+2028, U+2029), tabs, escape sequences, and other
     non-printable characters that could be used to manipulate log output or inject fake log entries.
 
     Args:

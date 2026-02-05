@@ -9,10 +9,10 @@ Sets common security headers:
 Each header is individually togglable via AppSettings. HSTS is intentionally omitted.
 """
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp
-from starlette.responses import Response
 from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+from starlette.types import ASGIApp
 
 from atlas.modules.config import config_manager
 

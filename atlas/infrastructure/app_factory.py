@@ -4,16 +4,16 @@ import logging
 from typing import Optional
 
 from atlas.application.chat.service import ChatService
+from atlas.core.auth import is_user_in_group
+from atlas.domain.rag_mcp_service import RAGMCPService
+from atlas.domain.unified_rag_service import UnifiedRAGService
+from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 from atlas.interfaces.transport import ChatConnectionProtocol
 from atlas.modules.config import ConfigManager
-from atlas.modules.file_storage import S3StorageClient, FileManager
+from atlas.modules.file_storage import FileManager, S3StorageClient
 from atlas.modules.file_storage.mock_s3_client import MockS3StorageClient
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 from atlas.modules.mcp_tools import MCPToolManager
-from atlas.domain.rag_mcp_service import RAGMCPService
-from atlas.domain.unified_rag_service import UnifiedRAGService
-from atlas.core.auth import is_user_in_group
-from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 
 logger = logging.getLogger(__name__)
 

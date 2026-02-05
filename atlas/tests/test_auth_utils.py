@@ -1,7 +1,8 @@
 """Tests for auth_utils module."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from atlas.core.authorization_manager import AuthorizationManager, create_authorization_manager
 
@@ -62,10 +63,10 @@ class TestAuthorizationManager:
         custom_admin_group = "super_admin"
         mock_settings = MagicMock()
         mock_settings.admin_group = custom_admin_group
-        
+
         with patch('atlas.core.authorization_manager.get_app_settings', return_value=mock_settings):
             auth_manager = AuthorizationManager(mock_auth_check_func)
-        
+
         user_email = "admin@example.com"
         mock_auth_check_func.return_value = True
 

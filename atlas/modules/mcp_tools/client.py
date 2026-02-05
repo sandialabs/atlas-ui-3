@@ -2,23 +2,24 @@
 
 import asyncio
 import contextvars
+import json
 import logging
 import os
-import json
-import time
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Callable, Awaitable, AsyncIterator
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
-from atlas.modules.config import config_manager
+
 from atlas.core.log_sanitizer import sanitize_for_logging
-from atlas.modules.config.config_manager import resolve_env_var
-from atlas.domain.messages.models import ToolCall, ToolResult
-from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 from atlas.core.metrics_logger import log_metric
+from atlas.domain.messages.models import ToolCall, ToolResult
+from atlas.modules.config import config_manager
+from atlas.modules.config.config_manager import resolve_env_var
+from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
 logger = logging.getLogger(__name__)
 
@@ -85,13 +86,13 @@ class MCPToolManager:
     """Manager for MCP servers and their tools.
 
     Default config path now points to config/overrides (or env override) with legacy fallback.
-    
+
     Supports:
     - Hot-reloading configuration from disk via reload_config()
     - Tracking failed server connections for retry
     - Auto-reconnect with exponential backoff (when feature flag is enabled)
     """
-    
+
     def __init__(self, config_path: Optional[str] = None, log_callback: Optional[LogCallback] = None):
         if config_path is None:
             # Use config manager to get config path
@@ -132,11 +133,11 @@ class MCPToolManager:
         self.clients = {}
         self.available_tools = {}
         self.available_prompts = {}
-        
+
         # Track failed servers for reconnection with backoff
         self._failed_servers: Dict[str, Dict[str, Any]] = {}
         # {server_name: {"last_attempt": timestamp, "attempt_count": int, "error": str}}
-        
+
         # Reconnect task reference (used by auto-reconnect background task)
         self._reconnect_task: Optional[asyncio.Task] = None
         self._reconnect_running = False
@@ -152,7 +153,7 @@ class MCPToolManager:
         # Key: (user_email, server_name), Value: FastMCP Client instance
         self._user_clients: Dict[tuple, Client] = {}
         self._user_clients_lock = asyncio.Lock()
-    
+
     def _get_min_log_level(self) -> int:
         """Get the minimum log level from environment or config."""
         try:
@@ -163,19 +164,19 @@ class MCPToolManager:
             level_name = raw_level_name.upper()
         except Exception:
             level_name = os.getenv("LOG_LEVEL", "INFO").upper()
-        
+
         level = getattr(logging, level_name, None)
         return level if isinstance(level, int) else logging.INFO
-    
+
     def _create_log_handler(self, server_name: str):
         """Create a log handler for an MCP server.
-        
+
         This handler forwards MCP server logs to the backend logger and optionally to the UI.
         Logs are filtered based on the configured LOG_LEVEL.
-        
+
         Args:
             server_name: Name of the MCP server
-            
+
         Returns:
             An async function that handles LogMessage objects from fastmcp
         """
@@ -183,7 +184,7 @@ class MCPToolManager:
             """Handle log messages from MCP server."""
             try:
                 # Import here to avoid circular dependency
-                
+
                 # Handle both LogMessage objects and dict-like structures
                 if hasattr(message, 'level'):
                     log_level_str = message.level.lower()
@@ -192,13 +193,13 @@ class MCPToolManager:
                     # Fallback for dict-like messages
                     log_level_str = message.get('level', 'info').lower()
                     log_data = message.get('data', {})
-                
+
                 msg = log_data.get('msg', '') if isinstance(log_data, dict) else str(log_data)
                 extra = log_data.get('extra', {}) if isinstance(log_data, dict) else {}
-                
+
                 # Convert MCP log level to Python logging level
                 python_log_level = MCP_TO_PYTHON_LOG_LEVEL.get(log_level_str, logging.INFO)
-                
+
                 # Filter based on configured minimum log level
                 if python_log_level < self._min_log_level:
                     return
@@ -207,28 +208,28 @@ class MCPToolManager:
                 # Keep their INFO messages available at LOG_LEVEL=DEBUG, but avoid flooding
                 # app logs at LOG_LEVEL=INFO. Warnings/errors still surface at INFO.
                 backend_log_level = python_log_level if python_log_level >= logging.WARNING else logging.DEBUG
-                
+
                 # Log to backend logger with server context
                 logger.log(
                     backend_log_level,
                     f"[MCP:{sanitize_for_logging(server_name)}] {sanitize_for_logging(msg)}",
                     extra={"mcp_server": server_name, "mcp_extra": extra}
                 )
-                
+
                 # Forward to the active (request-scoped) callback when present,
                 # otherwise fall back to the default callback.
                 callback = _ACTIVE_LOG_CALLBACK.get() or self._default_log_callback
                 if callback is not None:
                     await callback(server_name, log_level_str, msg, extra)
-                    
+
             except Exception as e:
                 logger.warning(f"Error handling log from MCP server {server_name}: {e}")
-        
+
         return log_handler
-    
+
     def set_log_callback(self, callback: Optional[LogCallback]) -> None:
         """Set or update the log callback for forwarding MCP server logs to UI.
-        
+
         Args:
             callback: Async function that receives (server_name, level, message, extra_data)
         """
@@ -304,6 +305,7 @@ class MCPToolManager:
 
             try:
                 import uuid
+
                 from atlas.application.chat.elicitation_manager import get_elicitation_manager
 
                 elicitation_id = str(uuid.uuid4())
@@ -398,7 +400,7 @@ class MCPToolManager:
         """
         async def handler(messages, params=None, context=None):
             """Per-server sampling handler with captured server_name."""
-            from mcp.types import SamplingMessage, TextContent, CreateMessageResult
+            from mcp.types import CreateMessageResult, SamplingMessage, TextContent
 
             # Find routing context for this server (keyed by (server_name, tool_call_id))
             routing = None
@@ -461,8 +463,8 @@ class MCPToolManager:
                     f"{len(message_dicts)} messages, temperature={temperature}, max_tokens={max_tokens}"
                 )
 
-                from atlas.modules.llm.litellm_caller import LiteLLMCaller
                 from atlas.modules.config import config_manager
+                from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
                 llm_caller = LiteLLMCaller()
 
@@ -512,41 +514,41 @@ class MCPToolManager:
                 raise
 
         return handler
-    
+
     def reload_config(self) -> Dict[str, Any]:
         """Reload MCP server configuration from disk.
-        
+
         This re-reads the mcp.json configuration file and updates servers_config.
         Call initialize_clients() and discover_tools()/discover_prompts() afterward
         to apply the changes.
-        
+
         Returns:
             Dict with previous and new server lists for comparison
         """
         previous_servers = set(self.servers_config.keys())
-        
+
         # Reload from config manager (which reads from disk)
         new_mcp_config = config_manager.reload_mcp_config()
         self.servers_config = {
-            name: server.model_dump() 
+            name: server.model_dump()
             for name, server in new_mcp_config.servers.items()
         }
-        
+
         new_servers = set(self.servers_config.keys())
-        
+
         # Clear failed servers tracking for removed servers
         removed_servers = previous_servers - new_servers
         for server_name in removed_servers:
             self._failed_servers.pop(server_name, None)
-        
+
         added_servers = new_servers - previous_servers
         unchanged_servers = previous_servers & new_servers
-        
+
         logger.info(
             f"MCP config reloaded: added={list(added_servers)}, "
             f"removed={list(removed_servers)}, unchanged={list(unchanged_servers)}"
         )
-        
+
         return {
             "previous_servers": list(previous_servers),
             "new_servers": list(new_servers),
@@ -554,16 +556,16 @@ class MCPToolManager:
             "removed": list(removed_servers),
             "unchanged": list(unchanged_servers)
         }
-    
+
     def get_failed_servers(self) -> Dict[str, Dict[str, Any]]:
         """Get information about servers that failed to connect.
-        
+
         Returns:
             Dict mapping server name to failure info including last_attempt time,
             attempt_count, and error message.
         """
         return dict(self._failed_servers)
-    
+
     def _record_server_failure(self, server_name: str, error: str) -> None:
         """Record a server connection failure for tracking."""
         if server_name in self._failed_servers:
@@ -576,28 +578,28 @@ class MCPToolManager:
                 "attempt_count": 1,
                 "error": error
             }
-    
+
     def _clear_server_failure(self, server_name: str) -> None:
         """Clear failure tracking for a server after successful connection."""
         self._failed_servers.pop(server_name, None)
-    
+
     def _calculate_backoff_delay(self, attempt_count: int) -> float:
         """Calculate exponential backoff delay for reconnection attempts.
-        
+
         Uses settings from config_manager for base interval, max interval, and multiplier.
         """
         app_settings = config_manager.app_settings
         base_interval = app_settings.mcp_reconnect_interval
         max_interval = app_settings.mcp_reconnect_max_interval
         multiplier = app_settings.mcp_reconnect_backoff_multiplier
-        
+
         delay = base_interval * (multiplier ** (attempt_count - 1))
         return min(delay, max_interval)
-        
-    
+
+
     def _determine_transport_type(self, config: Dict[str, Any]) -> str:
         """Determine the transport type for an MCP server configuration.
-        
+
         Priority order:
         1. Explicit 'transport' field (highest priority)
         2. Auto-detection from command
@@ -608,12 +610,12 @@ class MCPToolManager:
         if config.get("transport"):
             logger.debug(f"Using explicit transport: {config['transport']}")
             return config["transport"]
-        
+
         # 2. Auto-detect from command (takes priority over URL)
         if config.get("command"):
             logger.debug("Auto-detected STDIO transport from command")
             return "stdio"
-        
+
         # 3. Auto-detect from URL if it has protocol
         url = config.get("url")
         if url:
@@ -633,7 +635,7 @@ class MCPToolManager:
                 else:
                     logger.debug(f"URL without protocol, defaulting to HTTP: {url}")
                     return "http"
-            
+
         # 4. Fallback to type field (backward compatibility)
         transport_type = config.get("type", "stdio")
         logger.debug(f"Using fallback transport type: {transport_type}")
@@ -648,14 +650,14 @@ class MCPToolManager:
         try:
             transport_type = self._determine_transport_type(config)
             logger.debug("Determined transport type for %s: %s", safe_server_name, transport_type)
-            
+
             if transport_type in ["http", "sse"]:
                 # HTTP/SSE MCP server
                 url = config.get("url")
                 if not url:
                     logger.error(f"No URL provided for HTTP/SSE server: {server_name}")
                     return None
-                
+
                 # Ensure URL has protocol for FastMCP client
                 if not url.startswith(("http://", "https://")):
                     url = f"http://{url}"
@@ -667,10 +669,10 @@ class MCPToolManager:
                 except ValueError as e:
                     logger.error(f"Failed to resolve auth_token for {server_name}: {e}")
                     return None  # Skip this server
-                
+
                 # Create log handler for this server
                 log_handler = self._create_log_handler(server_name)
-                
+
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
@@ -691,10 +693,10 @@ class MCPToolManager:
                         elicitation_handler=self._create_elicitation_handler(server_name),
                         sampling_handler=self._create_sampling_handler(server_name),
                     )
-                
+
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
                 return client
-            
+
             elif transport_type == "stdio":
                 # STDIO MCP server
                 command = config.get("command")
@@ -709,7 +711,7 @@ class MCPToolManager:
                     cwd = config.get("cwd")
                     env = config.get("env")
                     logger.debug("Working directory specified for %s: %s", safe_server_name, cwd)
-                    
+
                     # Resolve environment variables in env dict
                     resolved_env = None
                     if env is not None:
@@ -722,10 +724,10 @@ class MCPToolManager:
                                 logger.error(f"Failed to resolve env var {key} for {server_name}: {e}")
                                 return None  # Skip this server if env var resolution fails
                         logger.debug("Environment variables specified for %s: %s", safe_server_name, list(resolved_env.keys()))
-                    
+
                     # Create log handler for this server
                     log_handler = self._create_log_handler(server_name)
-                    
+
                     if cwd:
                         # Convert relative path to absolute path from project root
                         if not os.path.isabs(cwd):
@@ -735,7 +737,7 @@ class MCPToolManager:
                             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
                             cwd = os.path.join(project_root, cwd)
                             logger.debug("Converted relative cwd to absolute for %s: %s", safe_server_name, cwd)
-                        
+
                         if os.path.exists(cwd):
                             logger.debug("Working directory exists for %s: %s", safe_server_name, cwd)
                             logger.debug("Creating STDIO client for %s with command=%s cwd=%s", safe_server_name, command, cwd)
@@ -786,12 +788,12 @@ class MCPToolManager:
             else:
                 logger.error(f"Unsupported transport type '{transport_type}' for server: {server_name}")
                 return None
-                        
+
         except Exception as e:
             # Targeted debugging for MCP startup errors
             error_type = type(e).__name__
             logger.error(f"Error creating client for {server_name}: {error_type}: {e}")
-            
+
             # Provide specific debugging information based on error type and config
             if "connection" in str(e).lower() or "refused" in str(e).lower():
                 if transport_type in ["http", "sse"]:
@@ -804,35 +806,35 @@ class MCPToolManager:
                     logger.error(f"    → Command: {config.get('command', 'Not specified')}")
                     logger.error(f"    → CWD: {config.get('cwd', 'Not specified')}")
                     logger.error("    → Check if command exists and is executable")
-                    
+
             elif "timeout" in str(e).lower():
                 logger.error(f"DEBUG: Timeout connecting to server '{server_name}'")
                 logger.error("    → Server may be slow to start or overloaded")
                 logger.error("    → Consider increasing timeout or checking server health")
-                
+
             elif "permission" in str(e).lower() or "access" in str(e).lower():
                 logger.error(f"DEBUG: Permission error for server '{server_name}'")
                 if config.get('cwd'):
                     logger.error(f"    → Check directory permissions: {config.get('cwd')}")
                 if config.get('command'):
                     logger.error(f"    → Check executable permissions: {config.get('command')}")
-                    
+
             elif "module" in str(e).lower() or "import" in str(e).lower():
                 logger.error(f"DEBUG: Import/module error for server '{server_name}'")
                 logger.error("    → Check if required dependencies are installed")
                 logger.error("    → Check Python path and virtual environment")
-                
+
             elif "json" in str(e).lower() or "decode" in str(e).lower():
                 logger.error(f"DEBUG: JSON/protocol error for server '{server_name}'")
                 logger.error("    → Server may not be MCP-compatible")
                 logger.error("    → Check server output format")
-                
+
             else:
                 # Generic debugging info
                 logger.error(f"DEBUG: Generic error for server '{server_name}'")
                 logger.error(f"    → Config: {config}")
                 logger.error(f"    → Transport type: {transport_type}")
-                
+
             # Always show the full traceback in debug mode
             logger.debug(f"Full traceback for {server_name}:", exc_info=True)
             return None
@@ -841,17 +843,17 @@ class MCPToolManager:
         """Initialize FastMCP clients for all configured servers in parallel."""
         logger.info("Starting MCP client initialization for %d servers", len(self.servers_config))
         logger.debug("MCP servers to initialize: %s", list(self.servers_config.keys()))
-        
+
         # Create tasks for parallel initialization
         tasks = [
             self._initialize_single_client(server_name, config)
             for server_name, config in self.servers_config.items()
         ]
         server_names = list(self.servers_config.keys())
-        
+
         # Run all initialization tasks in parallel
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Process results and store successful clients
         for server_name, result in zip(server_names, results):
             if isinstance(result, Exception):
@@ -865,7 +867,7 @@ class MCPToolManager:
             else:
                 self._record_server_failure(server_name, "Initialization returned None")
                 logger.warning(f"Failed to initialize client for {server_name}")
-        
+
         failed_servers = sorted(set(self.servers_config.keys()) - set(self.clients.keys()))
         logger.info(
             "MCP client initialization complete: %d/%d connected (%d failed)",
@@ -875,16 +877,16 @@ class MCPToolManager:
         )
         logger.debug("MCP clients initialized: %s", list(self.clients.keys()))
         logger.debug("MCP clients failed to initialize: %s", failed_servers)
-    
+
     async def reconnect_failed_servers(self, force: bool = False) -> Dict[str, Any]:
         """Attempt to reconnect to servers that previously failed.
-        
+
         When ``force`` is False (default), this respects exponential backoff and
         only attempts servers whose backoff delay has elapsed. When ``force`` is
         True, backoff delays are ignored and all currently failed servers are
         attempted immediately. The admin `/admin/mcp/reconnect` endpoint uses
         ``force=True`` to provide an on-demand retry button.
-        
+
         Returns:
             Dict with reconnection results including newly connected, still
             failed, and skipped servers due to backoff.
@@ -896,28 +898,28 @@ class MCPToolManager:
                 "still_failed": [],
                 "skipped_backoff": []
             }
-        
+
         current_time = time.time()
         attempted = []
         reconnected = []
         still_failed = []
         skipped_backoff = []
-        
+
         for server_name, failure_info in list(self._failed_servers.items()):
             # Skip if server is no longer in config
             if server_name not in self.servers_config:
                 self._clear_server_failure(server_name)
                 continue
-            
+
             # Skip if already connected
             if server_name in self.clients:
                 self._clear_server_failure(server_name)
                 continue
-            
+
             # Check backoff delay unless this is a forced reconnect
             backoff_delay = self._calculate_backoff_delay(failure_info["attempt_count"])
             time_since_last = current_time - failure_info["last_attempt"]
-            
+
             if not force and time_since_last < backoff_delay:
                 skipped_backoff.append({
                     "server": server_name,
@@ -925,11 +927,11 @@ class MCPToolManager:
                     "attempt_count": failure_info["attempt_count"]
                 })
                 continue
-            
+
             # Attempt reconnection
             attempted.append(server_name)
             config = self.servers_config[server_name]
-            
+
             try:
                 client = await self._initialize_single_client(server_name, config)
                 if client is not None:
@@ -937,7 +939,7 @@ class MCPToolManager:
                     self._clear_server_failure(server_name)
                     reconnected.append(server_name)
                     logger.info(f"Successfully reconnected to MCP server: {server_name}")
-                    
+
                     # Discover tools and prompts for the reconnected server
                     await self._discover_and_register_server(server_name, client)
                 else:
@@ -948,21 +950,21 @@ class MCPToolManager:
                 self._record_server_failure(server_name, error_msg)
                 still_failed.append(server_name)
                 logger.warning(f"Failed to reconnect to MCP server {server_name}: {error_msg}")
-        
+
         return {
             "attempted": attempted,
             "reconnected": reconnected,
             "still_failed": still_failed,
             "skipped_backoff": skipped_backoff
         }
-    
+
     async def _discover_and_register_server(self, server_name: str, client: Client) -> None:
         """Discover tools and prompts for a single server and register them."""
         try:
             # Discover tools
             tool_data = await self._discover_tools_for_server(server_name, client)
             self.available_tools[server_name] = tool_data
-            
+
             # Update tool index
             if hasattr(self, "_tool_index"):
                 for tool in tool_data.get('tools', []):
@@ -971,11 +973,11 @@ class MCPToolManager:
                         'server': server_name,
                         'tool': tool
                     }
-            
+
             # Discover prompts
             prompt_data = await self._discover_prompts_for_server(server_name, client)
             self.available_prompts[server_name] = prompt_data
-            
+
             logger.info(
                 f"Registered server {server_name}: "
                 f"{len(tool_data.get('tools', []))} tools, "
@@ -983,10 +985,10 @@ class MCPToolManager:
             )
         except Exception as e:
             logger.error(f"Error discovering tools/prompts for {server_name}: {e}")
-    
+
     async def start_auto_reconnect(self) -> None:
         """Start the background auto-reconnect task.
-        
+
         This task periodically attempts to reconnect to failed MCP servers
         using exponential backoff. Only runs if FEATURE_MCP_AUTO_RECONNECT_ENABLED is true.
         """
@@ -994,15 +996,15 @@ class MCPToolManager:
         if not app_settings.feature_mcp_auto_reconnect_enabled:
             logger.info("MCP auto-reconnect is disabled (FEATURE_MCP_AUTO_RECONNECT_ENABLED=false)")
             return
-        
+
         if self._reconnect_running:
             logger.warning("Auto-reconnect task is already running")
             return
-        
+
         self._reconnect_running = True
         self._reconnect_task = asyncio.create_task(self._auto_reconnect_loop())
         logger.info("Started MCP auto-reconnect background task")
-    
+
     async def stop_auto_reconnect(self) -> None:
         """Stop the background auto-reconnect task."""
         self._reconnect_running = False
@@ -1014,24 +1016,24 @@ class MCPToolManager:
                 pass
             self._reconnect_task = None
         logger.info("Stopped MCP auto-reconnect background task")
-    
+
     async def _auto_reconnect_loop(self) -> None:
         """Background loop that periodically attempts to reconnect failed servers."""
         app_settings = config_manager.app_settings
         base_interval = app_settings.mcp_reconnect_interval
-        
+
         while self._reconnect_running:
             try:
                 await asyncio.sleep(base_interval)
-                
+
                 if not self._failed_servers:
                     continue
-                
+
                 logger.debug(
                     f"Auto-reconnect: checking {len(self._failed_servers)} failed servers"
                 )
                 result = await self.reconnect_failed_servers()
-                
+
                 if result["reconnected"]:
                     logger.info(
                         f"Auto-reconnect: successfully reconnected {len(result['reconnected'])} servers: "
@@ -1041,13 +1043,13 @@ class MCPToolManager:
                     logger.debug(
                         f"Auto-reconnect: {len(result['still_failed'])} servers still failed"
                     )
-                    
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error in auto-reconnect loop: {e}", exc_info=True)
                 await asyncio.sleep(base_interval)  # Wait before retrying
-    
+
     async def _discover_tools_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover tools for a single server. Returns server tools data."""
         safe_server_name = sanitize_for_logging(server_name)
@@ -1082,7 +1084,7 @@ class MCPToolManager:
             error_type = type(e).__name__
             error_msg = sanitize_for_logging(str(e))
             logger.error(f"TOOL DISCOVERY FAILED for '{safe_server_name}': {error_type}: {error_msg}")
-            
+
             # Targeted debugging for tool discovery errors
             error_lower = str(e).lower()
             if "connection" in error_lower or "refused" in error_lower:
@@ -1113,7 +1115,7 @@ class MCPToolManager:
                 logger.error(f"    → Client type: {type(client).__name__}")
                 logger.error(f"    → Server URL: {server_config.get('url', 'N/A')}")
                 logger.error(f"    → Transport type: {server_config.get('transport', server_config.get('type', 'N/A'))}")
-                
+
             # Record failure for status/reconnect purposes
             self._record_server_failure(server_name, f"{error_type}: {error_msg}")
 
@@ -1142,10 +1144,10 @@ class MCPToolManager:
             for server_name, client in self.clients.items()
         ]
         server_names = list(self.clients.keys())
-        
+
         # Run all tool discovery tasks in parallel
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Process results and store server tools data
         for server_name, result in zip(server_names, results):
             # Skip clients whose config was removed during reload
@@ -1167,7 +1169,7 @@ class MCPToolManager:
                 # Clear any previous discovery failure on success
                 self._clear_server_failure(server_name)
                 self.available_tools[server_name] = result
-        
+
         total_tools = sum(len(server_data.get('tools', [])) for server_data in self.available_tools.values())
         logger.info(
             "MCP tool discovery complete: %d tools across %d servers",
@@ -1193,7 +1195,7 @@ class MCPToolManager:
                         'server': server_name,
                         'tool': tool
                     }
-    
+
     async def _discover_prompts_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover prompts for a single server. Returns server prompts data."""
         safe_server_name = sanitize_for_logging(server_name)
@@ -1229,7 +1231,7 @@ class MCPToolManager:
             error_type = type(e).__name__
             error_msg = sanitize_for_logging(str(e))
             logger.error(f"PROMPT DISCOVERY FAILED for '{safe_server_name}': {error_type}: {error_msg}")
-            
+
             # Targeted debugging for prompt discovery errors
             error_lower = str(e).lower()
             if "connection" in error_lower or "refused" in error_lower:
@@ -1252,7 +1254,7 @@ class MCPToolManager:
                 logger.error("    → On Windows, this may require installing/updating CA certificates")
             else:
                 logger.error(f"DEBUG: Generic prompt discovery error for '{safe_server_name}'")
-                
+
             # Record failure for status/reconnect purposes
             self._record_server_failure(server_name, f"{error_type}: {error_msg}")
 
@@ -1268,17 +1270,17 @@ class MCPToolManager:
         logger.info("Starting MCP prompt discovery for %d connected servers", len(self.clients))
         logger.debug("Prompt discovery servers: %s", list(self.clients.keys()))
         self.available_prompts = {}
-        
+
         # Create tasks for parallel prompt discovery
         tasks = [
             self._discover_prompts_for_server(server_name, client)
             for server_name, client in self.clients.items()
         ]
         server_names = list(self.clients.keys())
-        
+
         # Run all prompt discovery tasks in parallel
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Process results and store server prompts data
         for server_name, result in zip(server_names, results):
             # Skip clients whose config was removed during reload
@@ -1300,7 +1302,7 @@ class MCPToolManager:
                 # Clear any previous discovery failure on success
                 self._clear_server_failure(server_name)
                 self.available_prompts[server_name] = result
-        
+
         total_prompts = sum(len(server_data.get('prompts', [])) for server_data in self.available_prompts.values())
         logger.info(
             "MCP prompt discovery complete: %d prompts across %d servers",
@@ -1310,22 +1312,22 @@ class MCPToolManager:
         for server_name, server_data in self.available_prompts.items():
             prompt_names = [prompt.name for prompt in server_data.get('prompts', [])]
             logger.debug("Prompt discovery summary: %s: %d prompts %s", server_name, len(prompt_names), prompt_names)
-    
+
     def get_server_groups(self, server_name: str) -> List[str]:
         """Get required groups for a server."""
         if server_name in self.servers_config:
             return self.servers_config[server_name].get("groups", [])
         return []
-    
+
     def get_available_servers(self) -> List[str]:
         """Get list of configured servers."""
         return list(self.servers_config.keys())
-    
+
     def get_tools_for_servers(self, server_names: List[str]) -> Dict[str, Any]:
         """Get tools and their schemas for selected servers."""
         tools_schema = []
         server_tool_mapping = {}
-        
+
         for server_name in server_names:
             # Handle canvas pseudo-tool
             if server_name == "canvas":
@@ -1370,7 +1372,7 @@ class MCPToolManager:
                         'server': server_name,
                         'tool_name': tool.name
                     }
-        
+
         return {
             'tools': tools_schema,
             'mapping': server_tool_mapping
@@ -1584,12 +1586,12 @@ class MCPToolManager:
         except Exception as e:
             logger.error(f"Error calling {tool_name} on {server_name}: {e}")
             raise
-    
+
     async def get_prompt(self, server_name: str, prompt_name: str, arguments: Dict[str, Any] = None) -> Any:
         """Get a specific prompt from an MCP server."""
         if server_name not in self.clients:
             raise ValueError(f"No client available for server: {server_name}")
-        
+
         client = self.clients[server_name]
         try:
             async with client:
@@ -1602,11 +1604,11 @@ class MCPToolManager:
         except Exception as e:
             logger.error(f"Error getting prompt {prompt_name} from {server_name}: {e}")
             raise
-    
+
     def get_available_prompts_for_servers(self, server_names: List[str]) -> Dict[str, Any]:
         """Get available prompts for selected servers."""
         available_prompts = {}
-        
+
         for server_name in server_names:
             if server_name in self.available_prompts:
                 server_prompts = self.available_prompts[server_name]['prompts']
@@ -1618,9 +1620,9 @@ class MCPToolManager:
                         'description': prompt.description or '',
                         'arguments': prompt.arguments or {}
                     }
-        
+
         return available_prompts
-    
+
     async def get_authorized_servers(self, user_email: str, auth_check_func) -> List[str]:
         """Get list of servers the user is authorized to use."""
         authorized_servers = []
@@ -1639,7 +1641,7 @@ class MCPToolManager:
             if any(group_checks):
                 authorized_servers.append(server_name)
         return authorized_servers
-    
+
     def get_available_tools(self) -> List[str]:
         """Get list of available tool names."""
         available_tools = []
@@ -1650,7 +1652,7 @@ class MCPToolManager:
                 for tool in server_data.get('tools', []):
                     available_tools.append(f"{server_name}_{tool.name}")
         return available_tools
-    
+
     def get_tools_schema(self, tool_names: List[str]) -> List[Dict[str, Any]]:
         """Get schemas for specified tools.
 
@@ -1837,7 +1839,7 @@ class MCPToolManager:
         if not normalized:
             normalized = {"results": str(raw_result)}
         return normalized
-    
+
     async def execute_tool(
         self,
         tool_call: ToolCall,
@@ -1854,7 +1856,7 @@ class MCPToolManager:
                 content=f"Canvas content displayed: {content[:100]}..." if len(content) > 100 else f"Canvas content displayed: {content}",
                 success=True
             )
-        
+
         # Use the tool index to get server and tool name (avoids parsing issues with dashes/underscores)
         if not hasattr(self, "_tool_index") or not getattr(self, "_tool_index"):
             # Build tool index if not available (same logic as in get_tools_schema)
@@ -1873,7 +1875,7 @@ class MCPToolManager:
                             'tool': tool
                         }
             self._tool_index = index
-        
+
         # Look up the tool in our index
         tool_entry = self._tool_index.get(tool_call.name)
         if not tool_entry:
@@ -1883,10 +1885,10 @@ class MCPToolManager:
                 success=False,
                 error=f"Tool not found: {tool_call.name}"
             )
-        
+
         server_name = tool_entry['server']
         actual_tool_name = tool_entry['tool'].name if tool_entry['tool'] else tool_call.name
-        
+
         try:
             update_cb = None
             user_email = None
@@ -1965,7 +1967,7 @@ class MCPToolManager:
                         )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
-            
+
             # Extract v2 MCP response components (supports dict or FastMCP result objects)
             artifacts: List[Dict[str, Any]] = []
             display_config: Optional[Dict[str, Any]] = None
@@ -2017,7 +2019,7 @@ class MCPToolManager:
                     md = structured.get("meta_data")
                     if isinstance(md, dict):
                         meta_data = md
-                
+
                 # Extract ImageContent from the content array
                 # Allowlist of safe image MIME types
                 ALLOWED_IMAGE_MIMES = {
@@ -2069,14 +2071,14 @@ class MCPToolManager:
                                     }
                                     artifacts.append(artifact)
                                     logger.debug(f"Extracted ImageContent as artifact: {filename} ({mime_type})")
-                                    
+
                                     # If no display config exists and this is the first image, auto-open canvas
                                     if not display_config and image_counter == 0:
                                         display_config = {
                                             "primary_file": filename,
                                             "open_canvas": True
                                         }
-                                    
+
                                     image_counter += 1
             except Exception:
                 logger.warning("Error extracting v2 MCP components from tool result", exc_info=True)
@@ -2093,16 +2095,16 @@ class MCPToolManager:
             )
         except Exception as e:
             logger.error(f"Error executing tool {tool_call.name}: {e}")
-            
+
             log_metric("tool_error", user_email, tool_name=actual_tool_name)
-            
+
             return ToolResult(
                 tool_call_id=tool_call.id,
                 content=f"Error executing tool: {str(e)}",
                 success=False,
                 error=str(e)
             )
-    
+
     async def execute_tool_calls(
         self,
         tool_calls: List[ToolCall],

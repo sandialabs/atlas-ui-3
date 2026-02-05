@@ -2,7 +2,7 @@
 
 from .llm import LLMProtocol, LLMResponse
 from .rag import RAGClientProtocol
-from .tools import ToolProtocol, ToolManagerProtocol
+from .tools import ToolManagerProtocol, ToolProtocol
 from .transport import ChatConnectionProtocol
 
 __all__ = [

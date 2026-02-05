@@ -18,7 +18,7 @@ class Session:
     history: ConversationHistory = field(default_factory=ConversationHistory)
     context: Dict[str, Any] = field(default_factory=dict)
     active: bool = True
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -30,7 +30,7 @@ class Session:
             "context": self.context,
             "active": self.active
         }
-    
+
     def update_timestamp(self) -> None:
         """Update the last modified timestamp."""
         self.updated_at = datetime.now(timezone.utc)

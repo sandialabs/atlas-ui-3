@@ -1,39 +1,34 @@
 """Chat service - core business logic for chat operations."""
 
 import logging
-from typing import Any, Dict, List, Optional, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID
 
-from atlas.domain.messages.models import (
-    MessageType,
-    ToolResult
-)
-from atlas.domain.sessions.models import Session
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.errors import DomainError
-from atlas.interfaces.llm import LLMProtocol
+from atlas.domain.messages.models import MessageType, ToolResult
+from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
+from atlas.interfaces.llm import LLMProtocol
 from atlas.interfaces.sessions import SessionRepository
-from atlas.modules.config import ConfigManager
-from atlas.modules.prompts.prompt_provider import PromptProvider
 from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.interfaces.transport import ChatConnectionProtocol
+from atlas.modules.config import ConfigManager
+from atlas.modules.prompts.prompt_provider import PromptProvider
 
-# Import utilities
-from .utilities import file_processor, error_handler
 from .agent import AgentLoopFactory
-from atlas.core.log_sanitizer import sanitize_for_logging
-
-# Import new refactored modules
-from .policies.tool_authorization import ToolAuthorizationService
-from .preprocessors.prompt_override_service import PromptOverrideService
-from .preprocessors.message_builder import MessageBuilder, build_session_context
+from .modes.agent import AgentModeRunner
 from .modes.plain import PlainModeRunner
 from .modes.rag import RagModeRunner
 from .modes.tools import ToolsModeRunner
-from .modes.agent import AgentModeRunner
 
+# Import new refactored modules
+from .policies.tool_authorization import ToolAuthorizationService
+from .preprocessors.message_builder import MessageBuilder, build_session_context
+from .preprocessors.prompt_override_service import PromptOverrideService
 
-
+# Import utilities
+from .utilities import error_handler, file_processor
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +41,7 @@ class ChatService:
     Core chat service that orchestrates chat operations.
     Transport-agnostic, testable business logic.
     """
-    
+
     def __init__(
         self,
         llm: LLMProtocol,
@@ -87,7 +82,7 @@ class ChatService:
             # Create default WebSocket publisher
             from atlas.infrastructure.events.websocket_publisher import WebSocketEventPublisher
             self.event_publisher = WebSocketEventPublisher(connection=self.connection)
-        
+
         # Initialize or use provided session repository
         if session_repository is not None:
             self.session_repository = session_repository
@@ -95,7 +90,7 @@ class ChatService:
             # Create default in-memory repository
             from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
             self.session_repository = InMemorySessionRepository()
-        
+
         # Legacy sessions dict - deprecated, use session_repository instead
         # Kept temporarily for backward compatibility
         self.sessions: Dict[UUID, Session] = {}
@@ -147,7 +142,7 @@ class ChatService:
         except Exception:
             # Ignore config errors - fall back to default strategy
             pass
-        
+
         # Initialize agent mode runner (after agent_loop_factory is set)
         self.agent_mode = AgentModeRunner(
             agent_loop_factory=self.agent_loop_factory,
@@ -155,10 +150,10 @@ class ChatService:
             artifact_processor=self._update_session_from_tool_results,
             default_strategy=self.default_agent_strategy,
         )
-        
+
         # Initialize orchestrator
         self.orchestrator = None  # Will be initialized lazily to avoid circular dependency
-    
+
     def _get_orchestrator(self):
         """Lazy initialization of orchestrator."""
         if self.orchestrator is None:
@@ -185,14 +180,14 @@ class ChatService:
     ) -> Session:
         """Create a new chat session."""
         session = Session(id=session_id, user_email=user_email)
-        
+
         # Store in both legacy dict and new repository
         self.sessions[session_id] = session
         await self.session_repository.create(session)
-        
+
         logger.info(f"Created session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
         return session
-    
+
     async def handle_chat_message(
         self,
         session_id: UUID,
@@ -211,7 +206,7 @@ class ChatService:
     ) -> Dict[str, Any]:
         """
         Handle incoming chat message - thin façade delegating to orchestrator.
-        
+
         Returns:
             Response dictionary to send to client
         """
@@ -223,7 +218,7 @@ class ChatService:
             f"only_rag: {only_rag}, tool_choice_required: {tool_choice_required}, "
             f"user_email: {sanitize_for_logging(user_email)}, agent_mode: {agent_mode}"
         )
-        
+
         # Log sensitive content only at DEBUG level for development/testing
         if logger.isEnabledFor(logging.DEBUG):
             content_preview = content[:100] + "..." if len(content) > 100 else content
@@ -243,7 +238,7 @@ class ChatService:
             else:
                 # Sync to legacy dict
                 self.sessions[session_id] = session
-        
+
         try:
             # Delegate to orchestrator
             orchestrator = self._get_orchestrator()
@@ -269,7 +264,7 @@ class ChatService:
         except Exception as e:
             # Fallback for unexpected errors in HTTP-style callers
             return error_handler.handle_chat_message_error(e, "chat message handling")
-            
+
     async def handle_reset_session(
         self,
         session_id: UUID,
@@ -283,7 +278,7 @@ class ChatService:
         await self.create_session(session_id, user_email)
 
         logger.info(f"Reset session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
-        
+
         return {
             "type": "session_reset",
             "session_id": str(session_id),
@@ -415,7 +410,7 @@ class ChatService:
                 "filename": filename,
                 "error": str(e)
             }
-    
+
     async def _update_session_from_tool_results(
         self,
         session: Session,
@@ -451,7 +446,7 @@ class ChatService:
     def get_session(self, session_id: UUID) -> Optional[Session]:
         """Get session by ID."""
         return self.sessions.get(session_id)
-    
+
     def end_session(self, session_id: UUID) -> None:
         """End a session."""
         if session_id in self.sessions:

@@ -4,15 +4,17 @@ Tests the centralized configuration management system without
 modifying the actual environment or configuration files.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from atlas.modules.config.config_manager import (
-    ConfigManager,
     AppSettings,
+    ConfigManager,
     LLMConfig,
     MCPConfig,
-    resolve_env_var,
     MCPServerConfig,
+    resolve_env_var,
 )
 
 
@@ -303,16 +305,16 @@ class TestLLMConfigEnvExpansion:
     def test_llm_model_config_with_env_var_api_key(self, monkeypatch):
         """LLM model config should accept environment variable patterns in api_key."""
         from atlas.modules.config.config_manager import ModelConfig
-        
+
         monkeypatch.setenv("TEST_API_KEY", "secret-key-123")
-        
+
         config = ModelConfig(
             model_name="test-model",
             model_url="https://api.openai.com/v1",
             api_key="${TEST_API_KEY}"
         )
         assert config.api_key == "${TEST_API_KEY}"
-        
+
         # Test that resolve_env_var works
         resolved_key = resolve_env_var(config.api_key)
         assert resolved_key == "secret-key-123"
@@ -320,14 +322,14 @@ class TestLLMConfigEnvExpansion:
     def test_llm_model_config_with_literal_api_key(self):
         """LLM model config should accept literal api_key values."""
         from atlas.modules.config.config_manager import ModelConfig
-        
+
         config = ModelConfig(
             model_name="test-model",
             model_url="https://api.openai.com/v1",
             api_key="sk-literal-key-123"
         )
         assert config.api_key == "sk-literal-key-123"
-        
+
         # Test that resolve_env_var returns literal value unchanged
         resolved_key = resolve_env_var(config.api_key)
         assert resolved_key == "sk-literal-key-123"
@@ -335,23 +337,23 @@ class TestLLMConfigEnvExpansion:
     def test_llm_model_config_with_missing_env_var(self):
         """resolve_env_var should raise ValueError for missing env vars in api_key."""
         from atlas.modules.config.config_manager import ModelConfig
-        
+
         config = ModelConfig(
             model_name="test-model",
             model_url="https://api.openai.com/v1",
             api_key="${MISSING_API_KEY}"
         )
-        
+
         with pytest.raises(ValueError, match="Environment variable 'MISSING_API_KEY' is not set"):
             resolve_env_var(config.api_key)
 
     def test_llm_model_config_with_env_var_in_extra_headers(self, monkeypatch):
         """LLM model config should support environment variables in extra_headers."""
         from atlas.modules.config.config_manager import ModelConfig
-        
+
         monkeypatch.setenv("REFERER_URL", "https://myapp.com")
         monkeypatch.setenv("APP_NAME", "MyApp")
-        
+
         config = ModelConfig(
             model_name="test-model",
             model_url="https://openrouter.ai/api/v1",
@@ -361,11 +363,11 @@ class TestLLMConfigEnvExpansion:
                 "X-Title": "${APP_NAME}"
             }
         )
-        
+
         # Test that headers are stored as-is
         assert config.extra_headers["HTTP-Referer"] == "${REFERER_URL}"
         assert config.extra_headers["X-Title"] == "${APP_NAME}"
-        
+
         # Test that resolve_env_var works for each header
         resolved_referer = resolve_env_var(config.extra_headers["HTTP-Referer"])
         resolved_title = resolve_env_var(config.extra_headers["X-Title"])
@@ -375,7 +377,7 @@ class TestLLMConfigEnvExpansion:
     def test_llm_model_config_with_literal_extra_headers(self):
         """LLM model config should support literal values in extra_headers."""
         from atlas.modules.config.config_manager import ModelConfig
-        
+
         config = ModelConfig(
             model_name="test-model",
             model_url="https://api.openai.com/v1",
@@ -385,11 +387,11 @@ class TestLLMConfigEnvExpansion:
                 "X-Another-Header": "another-literal"
             }
         )
-        
+
         # Test that headers are stored as-is
         assert config.extra_headers["X-Custom-Header"] == "literal-value"
         assert config.extra_headers["X-Another-Header"] == "another-literal"
-        
+
         # Test that resolve_env_var returns literal values unchanged
         resolved_custom = resolve_env_var(config.extra_headers["X-Custom-Header"])
         resolved_another = resolve_env_var(config.extra_headers["X-Another-Header"])
@@ -575,7 +577,7 @@ class TestRAGSourcesConfig:
 
     def test_sources_config_with_multiple_sources(self):
         """RAGSourcesConfig should accept multiple source configurations."""
-        from atlas.modules.config.config_manager import RAGSourcesConfig, RAGSourceConfig
+        from atlas.modules.config.config_manager import RAGSourceConfig, RAGSourcesConfig
 
         config = RAGSourcesConfig(
             sources={

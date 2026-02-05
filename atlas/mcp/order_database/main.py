@@ -4,13 +4,14 @@ Order Database MCP Server using FastMCP
 Provides customer order retrieval and status update functionality.
 """
 
-from typing import Any, Dict, List
-from fastmcp import FastMCP
+import base64
+import os
+import time
 from dataclasses import dataclass
 from enum import Enum
-import time
-import os
-import base64
+from typing import Any, Dict, List
+
+from fastmcp import FastMCP
 
 # Initialize the MCP server
 mcp = FastMCP("OrderDatabase")
@@ -66,7 +67,7 @@ def get_order(order_number: str) -> Dict[str, Any]:
     Retrieve comprehensive customer order information with complete order details and tracking status.
 
     This order management tool provides full access to customer order data:
-    
+
     **Order Information Retrieved:**
     - Complete order identification and reference numbers
     - Detailed item list with all products in the order
@@ -115,7 +116,7 @@ def get_order(order_number: str) -> Dict[str, Any]:
 
     Args:
         order_number: Unique order identifier (string format, e.g., "ORD001")
-        
+
     Returns:
         Dictionary containing:
         - order_number: Confirmed order identification
@@ -128,7 +129,7 @@ def get_order(order_number: str) -> Dict[str, Any]:
     """
     start = time.perf_counter()
     meta: Dict[str, Any] = {}
-    
+
     try:
         if order_number not in ORDERS:
             meta.update({"is_error": True, "reason": "not_found"})
@@ -136,7 +137,7 @@ def get_order(order_number: str) -> Dict[str, Any]:
                 "results": {"error": f"Order {order_number} not found"},
                 "meta_data": _finalize_meta(meta, start)
             }
-        
+
         order = ORDERS[order_number]
         meta.update({"is_error": False})
         return {
@@ -162,7 +163,7 @@ def update_order_status(order_number: str, new_status: str) -> Dict[str, Any]:
     Update customer order status with workflow validation and tracking throughout the order lifecycle.
 
     This order management tool provides controlled status updates with business logic validation:
-    
+
     **Order Status Management:**
     - Secure order status updates with validation
     - Order lifecycle workflow enforcement
@@ -216,7 +217,7 @@ def update_order_status(order_number: str, new_status: str) -> Dict[str, Any]:
     Args:
         order_number: Unique order identifier to update (string format, e.g., "ORD001")
         new_status: Target status value (must be valid status: submitted, items-packaged, items-shipped, delivered)
-        
+
     Returns:
         Dictionary containing:
         - success: Boolean indicating successful status update
@@ -228,7 +229,7 @@ def update_order_status(order_number: str, new_status: str) -> Dict[str, Any]:
     """
     start = time.perf_counter()
     meta: Dict[str, Any] = {}
-    
+
     try:
         if order_number not in ORDERS:
             meta.update({"is_error": True, "reason": "not_found"})
@@ -236,7 +237,7 @@ def update_order_status(order_number: str, new_status: str) -> Dict[str, Any]:
                 "results": {"error": f"Order {order_number} not found"},
                 "meta_data": _finalize_meta(meta, start)
             }
-        
+
         # Validate status
         try:
             status_enum = OrderStatus(new_status)
@@ -250,7 +251,7 @@ def update_order_status(order_number: str, new_status: str) -> Dict[str, Any]:
                 },
                 "meta_data": _finalize_meta(meta, start)
             }
-        
+
         # Update order status
         ORDERS[order_number].status = status_enum
         meta.update({"is_error": False})
@@ -273,13 +274,13 @@ def update_order_status(order_number: str, new_status: str) -> Dict[str, Any]:
 def list_all_orders() -> Dict[str, Any]:
     """
     List all customer orders with their basic information.
-    
+
     Returns:
         Dictionary with list of all orders
     """
     start = time.perf_counter()
     meta: Dict[str, Any] = {}
-    
+
     try:
         orders_list = []
         for order in ORDERS.values():
@@ -289,7 +290,7 @@ def list_all_orders() -> Dict[str, Any]:
                 "status": order.status.value,
                 "item_count": len(order.items)
             })
-        
+
         meta.update({"is_error": False})
         return {
             "results": {
@@ -309,32 +310,32 @@ def list_all_orders() -> Dict[str, Any]:
 def get_signal_data_csv() -> Dict[str, Any]:
     """
     Return the signal_data.csv file from the same directory as this MCP.
-    
+
     Returns:
         Dictionary with the CSV file as a base64 encoded artifact
     """
     start = time.perf_counter()
     meta: Dict[str, Any] = {}
-    
+
     try:
         # Get the directory where this script is located
         script_dir = os.path.dirname(os.path.abspath(__file__))
         csv_path = os.path.join(script_dir, "signal_data.csv")
-        
+
         if not os.path.exists(csv_path):
             meta.update({"is_error": True, "reason": "file_not_found"})
             return {
                 "results": {"error": "signal_data.csv file not found"},
                 "meta_data": _finalize_meta(meta, start)
             }
-        
+
         # Read the CSV file
         with open(csv_path, 'rb') as f:
             csv_content = f.read()
-        
+
         # Encode as base64
         csv_b64 = base64.b64encode(csv_content).decode('utf-8')
-        
+
         meta.update({"is_error": False, "file_size_bytes": len(csv_content)})
         return {
             "results": {

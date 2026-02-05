@@ -9,13 +9,14 @@ Updated: 2025-01-21
 """
 
 import time
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
 
-from atlas.routes.mcp_auth_routes import router, TokenUpload
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from atlas.core.log_sanitizer import get_current_user
+from atlas.routes.mcp_auth_routes import TokenUpload, router
 
 
 # Create a test app with the auth routes

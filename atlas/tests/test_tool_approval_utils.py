@@ -1,11 +1,12 @@
 """Tests for tool approval utilities in tool_executor.py"""
 
 from unittest.mock import Mock
+
 from atlas.application.chat.utilities.tool_executor import (
+    _filter_args_to_schema,
+    _sanitize_args_for_ui,
     requires_approval,
     tool_accepts_username,
-    _sanitize_args_for_ui,
-    _filter_args_to_schema
 )
 
 

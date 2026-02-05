@@ -15,22 +15,22 @@ from __future__ import annotations
 
 import base64
 import html
+import io
 import logging
 import os
-import tempfile
-import io
 import re
-import requests
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Annotated, Optional
+from typing import Annotated, Any, Dict, List, Optional
+
+import requests
 from fastmcp import FastMCP
+from PIL import Image
 from pptx import Presentation
-from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
-from PIL import Image
-
+from pptx.enum.text import PP_ALIGN
+from pptx.util import Inches, Pt
 
 # Configuration
 VERBOSE = True
@@ -127,27 +127,27 @@ def _clean_markdown_text(text: str) -> str:
     """Clean markdown formatting from text while preserving content."""
     if not text:
         return ""
-    
+
     # Remove bold markers (**text** or __text__)
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
     text = re.sub(r'__(.+?)__', r'\1', text)
-    
+
     # Remove italic markers (*text* or _text_) - be careful not to match bullet points
     text = re.sub(r'(?<!\*)\*([^*\n]+?)\*(?!\*)', r'\1', text)
     text = re.sub(r'(?<!_)_([^_\n]+?)_(?!_)', r'\1', text)
-    
+
     # Remove inline code markers (`text`)
     text = re.sub(r'`([^`]+?)`', r'\1', text)
-    
+
     # Remove image syntax ![alt](url) - must come before link syntax
     text = re.sub(r'!\[([^\]]*?)\]\([^)]+?\)', r'\1', text)
-    
+
     # Remove link syntax [text](url) - keep the text
     text = re.sub(r'\[([^\]]+?)\]\([^)]+?\)', r'\1', text)
-    
+
     # Clean up any remaining markdown artifacts
     text = re.sub(r'^\s*#{1,6}\s*', '', text)  # Remove header markers at start of line
-    
+
     return text.strip()
 
 
@@ -163,7 +163,7 @@ def _add_footer_bar(slide_obj, slide_num: int, total_slides: int) -> None:
     # Add footer bar at bottom
     footer_height = Inches(0.4)
     footer_top = SLIDE_HEIGHT - footer_height
-    
+
     # Add footer rectangle
     footer_shape = slide_obj.shapes.add_shape(
         MSO_SHAPE.RECTANGLE,
@@ -173,7 +173,7 @@ def _add_footer_bar(slide_obj, slide_num: int, total_slides: int) -> None:
     footer_shape.fill.solid()
     footer_shape.fill.fore_color.rgb = SANDIA_BLUE
     footer_shape.line.fill.background()
-    
+
     # Add slide number text
     slide_num_box = slide_obj.shapes.add_textbox(
         SLIDE_WIDTH - Inches(1), footer_top + Inches(0.05),
@@ -236,7 +236,7 @@ def _load_image_bytes(filename: str, file_data_base64: str = "") -> Optional[byt
             if VERBOSE:
                 logger.info(f"Error decoding base64 image data: {e}")
             return None
-    
+
     if _is_backend_download_path(filename):
         # Backend provided a download path
         full_url = _backend_base_url() + filename
@@ -250,7 +250,7 @@ def _load_image_bytes(filename: str, file_data_base64: str = "") -> Optional[byt
             if VERBOSE:
                 logger.info(f"Error fetching image from {full_url}: {e}")
             return None
-    
+
     # Try as local file path - with path traversal protection
     if _is_safe_local_path(filename) and os.path.isfile(filename):
         try:
@@ -264,7 +264,7 @@ def _load_image_bytes(filename: str, file_data_base64: str = "") -> Optional[byt
         if VERBOSE:
             logger.warning(f"Blocked access to unsafe path: {filename}")
         return None
-    
+
     if VERBOSE:
         logger.info(f"Image file not found: {filename}")
     return None
@@ -273,14 +273,14 @@ def _load_image_bytes(filename: str, file_data_base64: str = "") -> Optional[byt
 def _parse_markdown_slides(markdown_content: str) -> List[Dict[str, str]]:
     """Parse markdown content into slides with improved bullet point handling."""
     slides = []
-    
+
     # Split by headers (# or ##)
     sections = re.split(r'^#{1,2}\s+(.+)$', markdown_content, flags=re.MULTILINE)
-    
+
     # Remove empty first element if exists
     if sections and not sections[0].strip():
         sections = sections[1:]
-    
+
     # Group into title/content pairs
     for i in range(0, len(sections), 2):
         if i + 1 < len(sections):
@@ -290,16 +290,16 @@ def _parse_markdown_slides(markdown_content: str) -> List[Dict[str, str]]:
         elif sections[i].strip():
             # Handle case where there's a title but no content
             slides.append({"title": _clean_markdown_text(sections[i].strip()), "content": ""})
-    
+
     # If no headers found, treat entire content as one slide
     if not slides and markdown_content.strip():
         slides.append({"title": "Slide 1", "content": markdown_content.strip()})
-    
+
     return slides
 
 
-def _add_image_to_slide(slide_obj, image_bytes: bytes, 
-                       left: Inches = Inches(1), top: Inches = Inches(2), 
+def _add_image_to_slide(slide_obj, image_bytes: bytes,
+                       left: Inches = Inches(1), top: Inches = Inches(2),
                        width: Inches = Inches(10), height: Inches = Inches(5)):
     """Add image to a slide with 16:9 optimized positioning."""
     try:
@@ -307,13 +307,13 @@ def _add_image_to_slide(slide_obj, image_bytes: bytes,
         with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_file:
             tmp_file.write(image_bytes)
             tmp_file.flush()
-            
+
             # Add image to slide
             pic = slide_obj.shapes.add_picture(tmp_file.name, left, top, width, height)
-            
+
             # Clean up
             os.unlink(tmp_file.name)
-            
+
             return pic
     except Exception as e:
         logger.error(f"Error adding image to slide: {e}")
@@ -358,12 +358,12 @@ def markdown_to_pptx(
         slides = _parse_markdown_slides(markdown_content)
         if VERBOSE:
             logger.info(f"Parsed {len(slides)} slides from markdown")
-        
+
         if not slides:
             return {"results": {"error": "No slides could be parsed from markdown content"}}
-        
+
         total_slides = len(slides)
-        
+
         # Load image if provided
         image_bytes = None
         if image_filename:
@@ -374,24 +374,24 @@ def markdown_to_pptx(
             else:
                 if VERBOSE:
                     logger.info(f"Failed to load image: {image_filename}")
-        
+
         # Create presentation with 16:9 aspect ratio
         prs = Presentation()
         _apply_sandia_template(prs)
         if VERBOSE:
             logger.info("Created PowerPoint presentation with 16:9 aspect ratio")
-        
+
         for i, slide_data in enumerate(slides):
             title = slide_data.get('title', 'Untitled Slide')
             content = slide_data.get('content', '')
-            
+
             # Add slide using blank layout for full control
             slide_layout = prs.slide_layouts[6]  # Blank layout
             slide_obj = prs.slides.add_slide(slide_layout)
-            
+
             # Add header accent bar
             _add_header_bar(slide_obj)
-            
+
             # Add title text box
             title_box = slide_obj.shapes.add_textbox(
                 Inches(0.5), Inches(0.3),
@@ -405,10 +405,10 @@ def markdown_to_pptx(
             title_p.font.bold = True
             title_p.font.color.rgb = SANDIA_BLUE
             title_p.alignment = PP_ALIGN.LEFT
-            
+
             if VERBOSE:
                 logger.info(f"Added slide {i+1}: {title}")
-            
+
             # Add content text box
             content_box = slide_obj.shapes.add_textbox(
                 Inches(0.5), Inches(1.3),
@@ -416,27 +416,27 @@ def markdown_to_pptx(
             )
             tf = content_box.text_frame
             tf.word_wrap = True
-            
+
             # Process content - handle bullet points and regular text with improved cleanup
             if content.strip():
                 lines = content.split('\n')
                 first_paragraph = True
-                
+
                 for line in lines:
                     line = line.rstrip()
-                    
+
                     if not line.strip():
                         continue
-                    
+
                     # Calculate indentation level
                     indent_level = 0
                     stripped_line = line.lstrip()
                     leading_spaces = len(line) - len(stripped_line)
-                    
+
                     # Check for various bullet point formats
                     is_bullet = False
                     bullet_text = stripped_line
-                    
+
                     # Handle numbered lists (1. 2. etc.)
                     numbered_match = re.match(r'^(\d+)\.\s+(.+)$', stripped_line)
                     if numbered_match:
@@ -450,35 +450,35 @@ def markdown_to_pptx(
                             is_bullet = True
                             bullet_text = bullet_match.group(1)
                             indent_level = _calculate_indent_level(leading_spaces)
-                    
+
                     # Clean the bullet text from markdown formatting
                     bullet_text = _clean_markdown_text(bullet_text.strip())
-                    
+
                     if not bullet_text:
                         continue
-                    
+
                     if first_paragraph:
                         p = tf.paragraphs[0]
                         first_paragraph = False
                     else:
                         p = tf.add_paragraph()
-                    
+
                     p.text = bullet_text
                     p.level = min(indent_level, 4)  # Cap at level 4
                     p.font.size = Pt(20)
                     p.font.color.rgb = SANDIA_GRAY if indent_level > 0 else RGBColor(51, 51, 51)
                     p.space_after = Pt(8)
                     p.alignment = PP_ALIGN.LEFT
-            
+
             # Add footer bar with slide number
             _add_footer_bar(slide_obj, i + 1, total_slides)
-            
+
             # Add image to first slide if provided
             if i == 0 and image_bytes:
-                _add_image_to_slide(slide_obj, image_bytes, 
-                                   left=Inches(8), top=Inches(2), 
+                _add_image_to_slide(slide_obj, image_bytes,
+                                   left=Inches(8), top=Inches(2),
                                    width=Inches(4.5), height=Inches(4))
-        
+
         # Write outputs to a temporary directory and clean up after encoding
         with tempfile.TemporaryDirectory() as tmpdir:
             # Save presentation
@@ -501,14 +501,14 @@ def markdown_to_pptx(
     <title>PowerPoint Presentation</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f0f0f0; }
-        .slide { 
-            background: white; 
-            margin: 20px auto; 
-            padding: 0; 
-            max-width: 960px; 
+        .slide {
+            background: white;
+            margin: 20px auto;
+            padding: 0;
+            max-width: 960px;
             aspect-ratio: 16/9;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15); 
-            border-radius: 4px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 4px;
             page-break-after: always;
             position: relative;
             overflow: hidden;
@@ -530,47 +530,47 @@ def markdown_to_pptx(
             padding-right: 20px;
             box-sizing: border-box;
         }
-        .slide-number { 
-            color: white; 
-            font-size: 12px; 
+        .slide-number {
+            color: white;
+            font-size: 12px;
         }
         .slide-content-wrapper {
             padding: 20px 40px;
         }
-        .slide-title { 
-            color: #003366; 
-            font-size: 28px; 
-            font-weight: bold; 
-            margin-bottom: 20px; 
+        .slide-title {
+            color: #003366;
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 20px;
         }
-        .slide-content { 
-            font-size: 16px; 
-            line-height: 1.6; 
+        .slide-content {
+            font-size: 16px;
+            line-height: 1.6;
             color: #333;
         }
-        .slide-content ul { 
-            margin: 0; 
-            padding-left: 30px; 
+        .slide-content ul {
+            margin: 0;
+            padding-left: 30px;
             list-style-type: disc;
         }
         .slide-content ul ul {
             list-style-type: circle;
             color: #666;
         }
-        .slide-content li { 
-            margin-bottom: 8px; 
+        .slide-content li {
+            margin-bottom: 8px;
         }
-        .slide-image { 
-            max-width: 350px; 
-            max-height: 250px; 
-            display: block; 
-            margin: 20px auto; 
-            border-radius: 4px; 
+        .slide-image {
+            max-width: 350px;
+            max-height: 250px;
+            display: block;
+            margin: 20px auto;
+            border-radius: 4px;
         }
     </style>
 </head>
 <body>"""
-        
+
             for i, slide_data in enumerate(slides):
                 title = slide_data.get('title', 'Untitled Slide')
                 content = slide_data.get('content', '')
@@ -584,7 +584,7 @@ def markdown_to_pptx(
         <div class="slide-content-wrapper">
             <div class="slide-title">{safe_title}</div>
             <div class="slide-content">"""
-                
+
                 # Add image to first slide if provided
                 if i == 0 and image_bytes:
                     try:
@@ -601,17 +601,17 @@ def markdown_to_pptx(
                     lines = content.split('\n')
                     in_list = False
                     current_indent = 0
-                    
+
                     for line in lines:
                         stripped = line.strip()
                         if not stripped:
                             continue
-                        
+
                         # Detect bullet points with various formats
                         is_bullet = False
                         bullet_text = stripped
                         indent = _calculate_indent_level(len(line) - len(line.lstrip()))
-                        
+
                         # Numbered list
                         numbered_match = re.match(r'^(\d+)\.\s+(.+)$', stripped)
                         if numbered_match:
@@ -623,16 +623,16 @@ def markdown_to_pptx(
                             if bullet_match:
                                 is_bullet = True
                                 bullet_text = bullet_match.group(1)
-                        
+
                         # Clean markdown from text and escape HTML
                         bullet_text = _escape_html(_clean_markdown_text(bullet_text))
-                        
+
                         if is_bullet:
                             if not in_list:
                                 html_content += "<ul>"
                                 in_list = True
                                 current_indent = indent
-                            
+
                             # Handle indent changes
                             while current_indent < indent:
                                 html_content += "<ul>"
@@ -640,7 +640,7 @@ def markdown_to_pptx(
                             while current_indent > indent:
                                 html_content += "</ul>"
                                 current_indent -= 1
-                            
+
                             html_content += f"<li>{bullet_text}</li>"
                         else:
                             # Close all open lists
@@ -653,7 +653,7 @@ def markdown_to_pptx(
                             # Escape HTML in paragraph text to prevent XSS
                             safe_paragraph = _escape_html(_clean_markdown_text(stripped))
                             html_content += f"<p>{safe_paragraph}</p>"
-                    
+
                     # Close any remaining open lists
                     while current_indent > 0:
                         html_content += "</ul>"
@@ -672,7 +672,7 @@ def markdown_to_pptx(
             html_content += """
 </body>
 </html>"""
-            
+
             # Save HTML file
             try:
                 if VERBOSE:

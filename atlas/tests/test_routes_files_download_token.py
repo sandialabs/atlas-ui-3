@@ -1,7 +1,8 @@
 import base64
-from starlette.testclient import TestClient
 
 from main import app
+from starlette.testclient import TestClient
+
 from atlas.core.capabilities import generate_file_token
 
 

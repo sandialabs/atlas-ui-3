@@ -4,11 +4,12 @@ These tests verify that Atlas can extract and process ImageContent items
 from MCP tool responses and convert them to artifacts for display.
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from atlas.modules.mcp_tools.client import MCPToolManager
+import pytest
+
 from atlas.domain.messages.models import ToolCall
+from atlas.modules.mcp_tools.client import MCPToolManager
 
 
 class MockImageContent:
@@ -63,26 +64,26 @@ class TestImageContentHandling:
     async def test_extract_single_image_content(self):
         """Test extraction of a single ImageContent item."""
         manager = MCPToolManager.__new__(MCPToolManager)
-        
+
         # Mock tool object
         class MockTool:
             def __init__(self, name):
                 self.name = name
-        
+
         # Create a tool call
         tool_call = ToolCall(
             id="test-call-1",
             name="generate_image",
             arguments={}
         )
-        
+
         # Mock the call_tool to return ImageContent
         image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
         raw_result = MockMCPResultWithImage(image_b64, "image/png")
-        
+
         with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
             mock_call.return_value = raw_result
-            
+
             # Mock _tool_index with correct structure
             manager._tool_index = {
                 "generate_image": {
@@ -90,20 +91,20 @@ class TestImageContentHandling:
                     "tool": MockTool("generate_image")
                 }
             }
-            
+
             result = await manager.execute_tool(tool_call, context={})
-            
+
             # Verify artifacts were created
             assert result.artifacts is not None
             assert len(result.artifacts) == 1
-            
+
             artifact = result.artifacts[0]
             assert artifact["name"] == "mcp_image_0.png"
             assert artifact["b64"] == image_b64
             assert artifact["mime"] == "image/png"
             assert artifact["viewer"] == "image"
             assert "generate_image" in artifact["description"]
-            
+
             # Verify display config was auto-created
             assert result.display_config is not None
             assert result.display_config["primary_file"] == "mcp_image_0.png"
@@ -113,18 +114,18 @@ class TestImageContentHandling:
     async def test_extract_multiple_image_contents(self):
         """Test extraction of multiple ImageContent items."""
         manager = MCPToolManager.__new__(MCPToolManager)
-        
+
         # Mock tool object
         class MockTool:
             def __init__(self, name):
                 self.name = name
-        
+
         tool_call = ToolCall(
             id="test-call-2",
             name="generate_multiple",
             arguments={}
         )
-        
+
         # Use valid base64 encoded strings
         images = [
             {"data": "aW1hZ2UgZGF0YSAxCg==", "mime": "image/png"},
@@ -132,7 +133,7 @@ class TestImageContentHandling:
             {"data": "aW1hZ2UgZGF0YSAzCg==", "mime": "image/gif"}
         ]
         raw_result = MockMCPResultWithMultipleImages(images)
-        
+
         with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
             mock_call.return_value = raw_result
             manager._tool_index = {
@@ -141,12 +142,12 @@ class TestImageContentHandling:
                     "tool": MockTool("generate_multiple")
                 }
             }
-            
+
             result = await manager.execute_tool(tool_call, context={})
-            
+
             # Verify all images were extracted
             assert len(result.artifacts) == 3
-            
+
             # Check each artifact
             for i, (artifact, img) in enumerate(zip(result.artifacts, images)):
                 expected_ext = img["mime"].split("/")[-1]
@@ -204,18 +205,18 @@ class TestImageContentHandling:
     async def test_no_image_content(self):
         """Test that non-image content doesn't create artifacts."""
         manager = MCPToolManager.__new__(MCPToolManager)
-        
+
         # Mock tool object
         class MockTool:
             def __init__(self, name):
                 self.name = name
-        
+
         tool_call = ToolCall(
             id="test-call-4",
             name="text_only",
             arguments={}
         )
-        
+
         # Create a result with only text content
         class MockTextOnlyResult:
             def __init__(self):
@@ -223,9 +224,9 @@ class TestImageContentHandling:
                 self.structured_content = None
                 self.data = None
                 self.is_error = False
-        
+
         raw_result = MockTextOnlyResult()
-        
+
         with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
             mock_call.return_value = raw_result
             manager._tool_index = {
@@ -234,9 +235,9 @@ class TestImageContentHandling:
                     "tool": MockTool("text_only")
                 }
             }
-            
+
             result = await manager.execute_tool(tool_call, context={})
-            
+
             # Verify no artifacts were created
             assert len(result.artifacts) == 0
             # Display config should not be auto-created

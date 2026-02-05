@@ -3,7 +3,9 @@ Unit tests for the env-demo MCP server.
 Tests the environment variable demonstration functionality.
 """
 import os
+
 import pytest
+
 
 # Test that the server can be imported
 def test_server_imports():
@@ -30,11 +32,11 @@ def test_env_var_configuration():
     # Set test environment variables
     os.environ["TEST_CLOUD_PROFILE"] = "test-profile"
     os.environ["TEST_CLOUD_REGION"] = "test-region"
-    
+
     # Verify they can be read
     assert os.environ.get("TEST_CLOUD_PROFILE") == "test-profile"
     assert os.environ.get("TEST_CLOUD_REGION") == "test-region"
-    
+
     # Clean up
     del os.environ["TEST_CLOUD_PROFILE"]
     del os.environ["TEST_CLOUD_REGION"]
@@ -45,13 +47,13 @@ def test_env_var_substitution_pattern():
     # This tests the pattern that config_manager.resolve_env_var handles
     # We test the pattern matching logic directly
     import re
-    
+
     # Set a test variable
     os.environ["TEST_API_KEY"] = "secret-123"
-    
+
     # Test the ${VAR} pattern matching (same as config_manager.resolve_env_var)
     pattern = r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}'
-    
+
     # Test resolution
     test_value = "${TEST_API_KEY}"
     match = re.match(pattern, test_value)
@@ -60,12 +62,12 @@ def test_env_var_substitution_pattern():
     assert var_name == "TEST_API_KEY"
     resolved = os.environ.get(var_name)
     assert resolved == "secret-123"
-    
+
     # Test literal value (no substitution)
     test_value = "literal-value"
     match = re.match(pattern, test_value)
     assert match is None  # Should not match
-    
+
     # Test missing variable
     test_value = "${MISSING_VAR}"
     match = re.match(pattern, test_value)
@@ -74,7 +76,7 @@ def test_env_var_substitution_pattern():
     assert var_name == "MISSING_VAR"
     missing_var = os.environ.get(var_name)
     assert missing_var is None  # Variable doesn't exist
-    
+
     # Clean up
     del os.environ["TEST_API_KEY"]
 

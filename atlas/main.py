@@ -8,6 +8,7 @@ Focuses on essential chat functionality only.
 # This must happen before any other imports that might load litellm.
 import os
 from pathlib import Path as _Path
+
 from dotenv import dotenv_values as _dotenv_values
 
 # Load .env values without setting them in os.environ yet (just to read feature flag)
@@ -31,40 +32,35 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, WebSocketException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from dotenv import load_dotenv
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, WebSocketException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
-# Import domain errors
-from atlas.domain.errors import (
-    ValidationError, 
-    RateLimitError, 
-    LLMTimeoutError, 
-    LLMAuthenticationError,
-    DomainError
-)
+from atlas.core.auth import get_user_from_header
+from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
+from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
+from atlas.core.metrics_logger import log_metric
 
 # Import from atlas.core (only essential middleware and config)
 from atlas.core.middleware import AuthMiddleware
+from atlas.core.otel_config import setup_opentelemetry
 from atlas.core.rate_limit_middleware import RateLimitMiddleware
 from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
-from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
-from atlas.core.otel_config import setup_opentelemetry
-from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
-from atlas.core.auth import get_user_from_header
-from atlas.core.metrics_logger import log_metric
+
+# Import domain errors
+from atlas.domain.errors import DomainError, LLMAuthenticationError, LLMTimeoutError, RateLimitError, ValidationError
 
 # Import from atlas.infrastructure
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
+from atlas.routes.admin_routes import admin_router
 
 # Import essential routes
 from atlas.routes.config_routes import router as config_router
-from atlas.routes.admin_routes import admin_router
+from atlas.routes.feedback_routes import feedback_router
 from atlas.routes.files_routes import router as files_router
 from atlas.routes.health_routes import router as health_router
-from atlas.routes.feedback_routes import feedback_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.version import VERSION
 
@@ -133,44 +129,44 @@ async def lifespan(app: FastAPI):
                 "SECURITY WARNING: Proxy secret is ENABLED but PROXY_SECRET is not set. "
                 "Authentication will fail for all requests."
             )
-    
+
     logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
     logger.info(f"MCP servers configured: {len(config.mcp_config.servers)}")
-    
+
     # Ensure feedback directory exists
     _ensure_feedback_directory()
-    
+
     # Initialize MCP tools manager
     logger.info("Initializing MCP tools manager...")
     mcp_manager = app_factory.get_mcp_manager()
-    
+
     try:
         logger.info("Step 1: Initializing MCP clients...")
         await mcp_manager.initialize_clients()
         logger.info("Step 1 complete: MCP clients initialized")
-        
+
         logger.info("Step 2: Discovering tools...")
         await mcp_manager.discover_tools()
         logger.info("Step 2 complete: Tool discovery finished")
-        
+
         logger.info("Step 3: Discovering prompts...")
         await mcp_manager.discover_prompts()
         logger.info("Step 3 complete: Prompt discovery finished")
-        
+
         logger.info("MCP tools manager initialization complete")
-        
+
         # Start auto-reconnect background task if enabled
         logger.info("Step 4: Starting MCP auto-reconnect (if enabled)...")
         await mcp_manager.start_auto_reconnect()
         logger.info("Step 4 complete: Auto-reconnect task started (if enabled)")
-        
+
     except Exception as e:
         logger.error(f"Error during MCP initialization: {e}", exc_info=True)
         # Continue startup even if MCP fails
         logger.warning("Continuing startup without MCP tools")
-    
+
     yield
-    
+
     logger.info("Shutting down Chat UI Backend")
     # Stop auto-reconnect task
     await mcp_manager.stop_auto_reconnect()
@@ -201,7 +197,7 @@ if config.app_settings.feature_domain_whitelist_enabled:
         auth_redirect_url=config.app_settings.auth_redirect_url
     )
 app.add_middleware(
-    AuthMiddleware, 
+    AuthMiddleware,
     debug_mode=config.app_settings.debug_mode,
     auth_header_name=config.app_settings.auth_user_header,
     auth_header_type=config.app_settings.auth_user_header_type,
@@ -286,7 +282,7 @@ async def websocket_endpoint(websocket: WebSocket):
     5. If valid: Auth service returns authenticated user header
     6. Reverse proxy forwards connection to this app with authenticated user header
     7. This app trusts the header (already validated by auth service)
-    
+
     The header name is configurable via AUTH_USER_HEADER environment variable
     (default: X-User-Email). This allows flexibility for different reverse proxy setups.
 
@@ -376,7 +372,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # Create connection adapter with authenticated user and chat service
     connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
     chat_service = app_factory.create_chat_service(connection_adapter)
-    
+
     logger.info(f"WebSocket connection established for session {sanitize_for_logging(str(session_id))}")
 
     try:
@@ -463,7 +459,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 # Start chat handling in background
                 asyncio.create_task(handle_chat())
-                
+
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection)
                 response = await chat_service.handle_download_file(
@@ -495,7 +491,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Handle tool approval response
                 from atlas.application.chat.approval_manager import get_approval_manager
                 approval_manager = get_approval_manager()
-                
+
                 tool_call_id = data.get("tool_call_id")
                 approved = data.get("approved", False)
                 arguments = data.get("arguments")
@@ -509,14 +505,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
 
                 logger.info(f"Processing approval: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={approved}")
-                
+
                 result = approval_manager.handle_approval_response(
                     tool_call_id=tool_call_id,
                     approved=approved,
                     arguments=arguments,
                     reason=reason
                 )
-                
+
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
 
@@ -524,22 +520,22 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Handle elicitation response
                 from atlas.application.chat.elicitation_manager import get_elicitation_manager
                 elicitation_manager = get_elicitation_manager()
-                
+
                 elicitation_id = data.get("elicitation_id")
                 action = data.get("action", "cancel")
                 response_data = data.get("data")
-                
+
                 logger.info(
                     f"Received elicitation response: id={sanitize_for_logging(elicitation_id)}, "
                     f"action={action}"
                 )
-                
+
                 result = elicitation_manager.handle_elicitation_response(
                     elicitation_id=elicitation_id,
                     action=action,
                     data=response_data
                 )
-                
+
                 logger.info(f"Elicitation response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the elicitation will unblock the waiting tool execution
 
@@ -549,19 +545,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": "error",
                     "message": f"Unknown message type: {sanitize_for_logging(message_type)}"
                 })
-                
+
     except WebSocketDisconnect:
         chat_service.end_session(session_id)
         logger.info(f"WebSocket connection closed for session {session_id}")
 
 
 if __name__ == "__main__":
-    import uvicorn
     import os
-    
+
+    import uvicorn
+
     # Use environment variable for host binding, default to localhost for security
     # Set ATLAS_HOST=0.0.0.0 in production environments where needed
     host = os.getenv("ATLAS_HOST", "127.0.0.1")
     port = int(os.getenv("PORT", 8000))
-    
+
     uvicorn.run(app, host=host, port=port)

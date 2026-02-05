@@ -3,8 +3,8 @@
 import logging
 from typing import Any, Dict, Optional
 
-from atlas.interfaces.transport import ChatConnectionProtocol
 from atlas.application.chat.utilities import event_notifier
+from atlas.interfaces.transport import ChatConnectionProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class WebSocketEventPublisher:
     """
     WebSocket implementation of EventPublisher.
-    
+
     Wraps event_notifier and ChatConnectionProtocol to publish
     events to connected WebSocket clients.
     """
@@ -20,7 +20,7 @@ class WebSocketEventPublisher:
     def __init__(self, connection: Optional[ChatConnectionProtocol] = None):
         """
         Initialize WebSocket event publisher.
-        
+
         Args:
             connection: WebSocket connection for sending messages
         """

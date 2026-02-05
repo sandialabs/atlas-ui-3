@@ -1,6 +1,5 @@
-from starlette.testclient import TestClient
-
 from main import app
+from starlette.testclient import TestClient
 
 
 def test_files_health_endpoint(monkeypatch):

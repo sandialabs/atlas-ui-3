@@ -8,8 +8,9 @@ Tests the per-user authentication functionality in MCPToolManager:
 Updated: 2025-01-23
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestRequiresUserAuth:
@@ -86,6 +87,7 @@ class TestGetUserClient:
     def manager(self):
         """Create a mock MCPToolManager for testing."""
         import asyncio
+
         from atlas.modules.mcp_tools.client import MCPToolManager
 
         manager = MCPToolManager.__new__(MCPToolManager)
@@ -150,6 +152,7 @@ class TestGetUserClient:
     async def test_creates_client_with_bearer_token(self):
         """Should create client with auth parameter for bearer auth type."""
         import asyncio
+
         from atlas.modules.mcp_tools.client import MCPToolManager
 
         manager = MCPToolManager.__new__(MCPToolManager)
@@ -192,6 +195,7 @@ class TestGetUserClient:
     async def test_uses_custom_auth_header_name(self):
         """Should use custom auth_header from config for API key auth."""
         import asyncio
+
         from atlas.modules.mcp_tools.client import MCPToolManager
 
         manager = MCPToolManager.__new__(MCPToolManager)
@@ -296,6 +300,7 @@ class TestInvalidateUserClient:
     async def test_removes_cached_client(self):
         """Should remove client from cache."""
         import asyncio
+
         from atlas.modules.mcp_tools.client import MCPToolManager
 
         manager = MCPToolManager.__new__(MCPToolManager)
@@ -315,6 +320,7 @@ class TestInvalidateUserClient:
     async def test_handles_missing_cache_entry(self):
         """Should not error when cache entry doesn't exist."""
         import asyncio
+
         from atlas.modules.mcp_tools.client import MCPToolManager
 
         manager = MCPToolManager.__new__(MCPToolManager)

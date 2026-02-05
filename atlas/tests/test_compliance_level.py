@@ -1,6 +1,6 @@
 """Test compliance level functionality for MCP servers and data sources."""
 
-from atlas.modules.config.config_manager import MCPServerConfig, MCPConfig
+from atlas.modules.config.config_manager import MCPConfig, MCPServerConfig
 
 
 def test_mcp_server_config_with_compliance_level():
@@ -47,7 +47,7 @@ def test_compliance_level_in_config_response():
         "enabled": True
     }
     server_config = MCPServerConfig(**config_dict)
-    
+
     # Verify it can be serialized to dict (as done in API responses)
     as_dict = server_config.model_dump()
     assert as_dict["compliance_level"] == "SOC2"

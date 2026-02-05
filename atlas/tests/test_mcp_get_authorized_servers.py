@@ -1,6 +1,7 @@
 """Test get_authorized_servers with async auth function."""
 
 import pytest
+
 from atlas.modules.mcp_tools.client import MCPToolManager
 
 

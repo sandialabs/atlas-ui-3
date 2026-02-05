@@ -1,6 +1,8 @@
+from unittest.mock import ANY, AsyncMock, Mock, patch
+
 import pytest
+
 from atlas.modules.mcp_tools.client import MCPToolManager
-from unittest.mock import patch, AsyncMock, Mock, ANY
 
 
 @pytest.mark.integration
@@ -25,10 +27,10 @@ class TestMCPAuthenticationIntegration:
             mock_config_manager.mcp_config.servers["mcp-http-mock"].model_dump.return_value = server_config
             mock_config_manager.app_settings.mcp_call_timeout = 120
             mock_config_manager.app_settings.mcp_discovery_timeout = 30
-            
+
             manager = MCPToolManager()
             manager.servers_config = {"mcp-http-mock": server_config}
-            
+
             # Mock the fastmcp.Client to avoid actual network call for now
             with patch('atlas.modules.mcp_tools.client.Client') as MockFastMCPClient:
                 mock_client_instance = MockFastMCPClient.return_value
@@ -36,7 +38,7 @@ class TestMCPAuthenticationIntegration:
                 mock_client_instance.list_tools.return_value = [] # Mock an empty list of tools
 
                 await manager.initialize_clients()
-                
+
                 # Assert that the client was initialized and added to manager.clients
                 assert "mcp-http-mock" in manager.clients
                 MockFastMCPClient.assert_called_once_with(
@@ -125,11 +127,11 @@ class TestMCPAuthenticationIntegration:
                 mock_client_instance.call_tool = AsyncMock(return_value=MockResult())
 
                 await manager.initialize_clients()
-                
+
                 # Simulate tool call
                 from atlas.domain.messages.models import ToolCall
                 tool_call = ToolCall(id="call_1", name="mcp-http-mock_test_tool", arguments={})
-                
+
                 # Need to mock the _tool_index for execute_tool to find the server
                 mock_tool = Mock()
                 mock_tool.name = "test_tool"
@@ -141,7 +143,7 @@ class TestMCPAuthenticationIntegration:
                 }
 
                 result = await manager.execute_tool(tool_call)
-                
+
                 assert result.success is True
                 assert "tool_result" in result.content
                 mock_client_instance.call_tool.assert_called_once()

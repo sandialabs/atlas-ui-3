@@ -4,9 +4,10 @@ Tests the FileExtractorConfig, FileExtractorsConfig models, FileContentExtractor
 and related configuration functionality.
 """
 
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
+
 import httpx
+import pytest
 
 from atlas.modules.config.config_manager import (
     ConfigManager,
@@ -14,8 +15,8 @@ from atlas.modules.config.config_manager import (
     FileExtractorsConfig,
 )
 from atlas.modules.file_storage.content_extractor import (
-    FileContentExtractor,
     ExtractionResult,
+    FileContentExtractor,
 )
 
 

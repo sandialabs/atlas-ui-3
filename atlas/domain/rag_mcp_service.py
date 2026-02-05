@@ -12,10 +12,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-
 from atlas.core.compliance import get_compliance_manager
-from atlas.core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
 
 logger = logging.getLogger(__name__)
 

@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastmcp import FastMCP, Context
-
+from fastmcp import Context, FastMCP
 
 # Initialize the MCP server
 mcp = FastMCP("ProgressDemo")
@@ -26,7 +25,7 @@ async def long_task(
     """Execute long-running operations with real-time progress tracking and user feedback capabilities.
 
     This advanced progress monitoring tool demonstrates professional long-running task management:
-    
+
     **Progress Tracking Features:**
     - Real-time progress updates with percentage completion
     - Configurable update intervals for optimal user experience

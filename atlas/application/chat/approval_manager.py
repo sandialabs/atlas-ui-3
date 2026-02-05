@@ -7,7 +7,7 @@ approve, reject, or edit tool arguments before execution.
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class ToolApprovalRequest:
     """Represents a pending tool approval request."""
-    
+
     def __init__(
         self,
         tool_call_id: str,
@@ -29,17 +29,17 @@ class ToolApprovalRequest:
         self.arguments = arguments
         self.allow_edit = allow_edit
         self.future: asyncio.Future = asyncio.Future()
-    
+
     async def wait_for_response(self, timeout: float = 300.0) -> Dict[str, Any]:
         """
         Wait for user response to this approval request.
-        
+
         Args:
             timeout: Maximum time to wait in seconds (default 5 minutes)
-        
+
         Returns:
             Dict with 'approved', 'arguments', and optional 'reason'
-        
+
         Raises:
             asyncio.TimeoutError: If timeout is reached
         """
@@ -48,7 +48,7 @@ class ToolApprovalRequest:
         except asyncio.TimeoutError:
             logger.warning(f"Approval request timed out for tool {self.tool_name}")
             raise
-    
+
     def set_response(self, approved: bool, arguments: Optional[Dict[str, Any]] = None, reason: Optional[str] = None):
         """Set the user's response to this approval request."""
         if not self.future.done():
@@ -61,10 +61,10 @@ class ToolApprovalRequest:
 
 class ToolApprovalManager:
     """Manages tool approval requests and responses."""
-    
+
     def __init__(self):
         self._pending_requests: Dict[str, ToolApprovalRequest] = {}
-    
+
     def create_approval_request(
         self,
         tool_call_id: str,
@@ -74,13 +74,13 @@ class ToolApprovalManager:
     ) -> ToolApprovalRequest:
         """
         Create a new approval request.
-        
+
         Args:
             tool_call_id: Unique ID for this tool call
             tool_name: Name of the tool being called
             arguments: Tool arguments
             allow_edit: Whether to allow editing of arguments
-        
+
         Returns:
             ToolApprovalRequest object
         """
@@ -88,7 +88,7 @@ class ToolApprovalManager:
         self._pending_requests[tool_call_id] = request
         logger.info(f"Created approval request for tool {sanitize_for_logging(tool_name)} (call_id: {sanitize_for_logging(tool_call_id)})")
         return request
-    
+
     def handle_approval_response(
         self,
         tool_call_id: str,
@@ -98,13 +98,13 @@ class ToolApprovalManager:
     ) -> bool:
         """
         Handle a user's response to an approval request.
-        
+
         Args:
             tool_call_id: ID of the tool call being responded to
             approved: Whether the user approved the call
             arguments: Potentially edited arguments (if allowed)
             reason: Optional reason for rejection
-        
+
         Returns:
             True if request was found and handled, False otherwise
         """
@@ -114,26 +114,26 @@ class ToolApprovalManager:
             sanitize_for_logging(approved),
         )
         logger.debug("Pending requests: %s", [sanitize_for_logging(key) for key in self._pending_requests.keys()])
-        
+
         request = self._pending_requests.get(tool_call_id)
         if request is None:
             logger.warning(f"Received approval response for unknown tool call: {sanitize_for_logging(tool_call_id)}")
             logger.debug("Available pending requests: %s", list(self._pending_requests.keys()))
             return False
-        
+
         logger.debug("Found pending request for %s; setting response", sanitize_for_logging(tool_call_id))
         request.set_response(approved, arguments, reason)
         # Keep the request in the dict for a bit to avoid race conditions
         # It will be cleaned up later
         logger.info(f"Approval response handled for tool {sanitize_for_logging(request.tool_name)}: approved={approved}")
         return True
-    
+
     def cleanup_request(self, tool_call_id: str):
         """Remove a completed approval request."""
         if tool_call_id in self._pending_requests:
             del self._pending_requests[tool_call_id]
             logger.debug(f"Cleaned up approval request: {tool_call_id}")
-    
+
     def get_pending_requests(self) -> Dict[str, ToolApprovalRequest]:
         """Get all pending approval requests."""
         return dict(self._pending_requests)

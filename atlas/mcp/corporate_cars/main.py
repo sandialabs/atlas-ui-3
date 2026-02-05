@@ -15,12 +15,12 @@ This is an in-memory example intended for demos and tests.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
-import time
 import datetime as dt
-from fastmcp import FastMCP
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
+from fastmcp import FastMCP
 
 # Initialize the MCP server
 mcp = FastMCP("CorporateCars")

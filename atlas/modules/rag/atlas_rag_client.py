@@ -16,7 +16,6 @@ from fastapi import HTTPException
 
 from atlas.modules.rag.client import DataSource, DocumentMetadata, RAGMetadata, RAGResponse
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -197,7 +196,7 @@ class AtlasRAGClient:
 
                 # Check if this is a chat completion (already LLM-interpreted)
                 is_completion = data.get("object") == "chat.completion"
-                
+
                 # Extract content from OpenAI ChatCompletion format
                 content = "No response from RAG system."
                 if "choices" in data and len(data["choices"]) > 0:

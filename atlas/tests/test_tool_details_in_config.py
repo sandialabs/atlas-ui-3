@@ -1,8 +1,9 @@
 """Test that tool details (description and inputSchema) are included in config API response."""
 
-import pytest
-import sys
 import os
+import sys
+
+import pytest
 
 # Ensure backend is on path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -22,7 +23,7 @@ class FakeTool:
 def mock_mcp_manager(monkeypatch):
     """Create a mock MCP manager with test data."""
     manager = MCPToolManager()
-    
+
     # Mock available_tools with detailed tool information
     manager.available_tools = {
         "test_server": {
@@ -52,7 +53,7 @@ def mock_mcp_manager(monkeypatch):
             }
         }
     }
-    
+
     manager.available_prompts = {}
     return manager
 
@@ -69,7 +70,7 @@ def test_tools_detailed_includes_description_and_schema(mock_mcp_manager):
             'inputSchema': getattr(tool, 'inputSchema', {}) or {}
         }
         tools_detailed.append(tool_detail)
-    
+
     # Verify the structure
     assert len(tools_detailed) == 1
     assert tools_detailed[0]['name'] == 'test_tool'
@@ -97,7 +98,7 @@ def test_canvas_tool_has_detailed_info():
             'required': ['content']
         }
     }]
-    
+
     # Verify canvas tool structure
     assert len(canvas_tools_detailed) == 1
     assert canvas_tools_detailed[0]['name'] == 'canvas'

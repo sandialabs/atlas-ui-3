@@ -22,12 +22,11 @@ Supported update types:
 from __future__ import annotations
 
 import asyncio
-import json
 import base64
+import json
 from typing import Any, Dict
 
-from fastmcp import FastMCP, Context
-
+from fastmcp import Context, FastMCP
 
 # Initialize the MCP server
 mcp = FastMCP("Progress Updates Demo")
@@ -111,7 +110,7 @@ def create_chart_html(data: Dict[str, int]) -> str:
             </div>
         </div>
         """
-    
+
     return f"""
     <!DOCTYPE html>
     <html>
@@ -180,22 +179,22 @@ async def task_with_canvas_updates(
 ) -> Dict[str, Any]:
     """
     Execute a long-running task with visual progress updates in the canvas.
-    
+
     This tool demonstrates how MCP servers can send canvas updates during
     execution, allowing users to see real-time visual progress indicators.
-    
+
     Args:
         task_name: Name of the task to execute
         steps: Number of steps to process (default: 5)
         interval_seconds: Delay between steps (default: 2)
         ctx: MCP context for progress reporting
-    
+
     Returns:
         Task completion summary with final results
     """
     total = max(1, int(steps))
     interval = max(1, int(interval_seconds))
-    
+
     # Initial progress
     if ctx:
         await ctx.report_progress(
@@ -203,11 +202,11 @@ async def task_with_canvas_updates(
             total=total,
             message=f"Starting {task_name}..."
         )
-    
+
     # Process each step and send visual updates as artifacts
     for step in range(1, total + 1):
         await asyncio.sleep(interval)
-        
+
         # Create progress visualization HTML
         html_content = create_progress_html(step, total, f"Processing {task_name}: Step {step}")
 
@@ -238,7 +237,7 @@ async def task_with_canvas_updates(
                 total=total,
                 message=f"MCP_UPDATE:{json.dumps(update_payload)}",
             )
-    
+
     # Final result with chart
     result_data = {
         "Items Processed": total * 10,
@@ -246,9 +245,9 @@ async def task_with_canvas_updates(
         "Warnings": 5,
         "Success Rate": 95
     }
-    
+
     chart_html = create_chart_html(result_data)
-    
+
     return {
         "results": {
             "task": task_name,
@@ -284,16 +283,16 @@ async def task_with_system_messages(
 ) -> Dict[str, Any]:
     """
     Execute a task with rich system messages displayed in chat history.
-    
+
     This tool demonstrates how MCP servers can send rich system messages
     that appear as new items in the chat history during tool execution.
-    
+
     Args:
         task_name: Name of the analysis task
         stages: Number of stages to process (default: 4)
         interval_seconds: Delay between stages (default: 2)
         ctx: MCP context for progress reporting
-    
+
     Returns:
         Analysis completion summary
     """
@@ -303,9 +302,9 @@ async def task_with_system_messages(
         "Analysis",
         "Report Generation"
     ][:stages]
-    
+
     total = len(stage_names)
-    
+
     # Initial progress
     if ctx:
         await ctx.report_progress(
@@ -313,11 +312,11 @@ async def task_with_system_messages(
             total=total,
             message=f"Starting {task_name}..."
         )
-    
+
     # Process each stage and send system messages
     for i, stage in enumerate(stage_names, 1):
         await asyncio.sleep(interval_seconds)
-        
+
         # Send system message
         if ctx:
             update_payload = {
@@ -331,7 +330,7 @@ async def task_with_system_messages(
                 total=total,
                 message=f"MCP_UPDATE:{json.dumps(update_payload)}"
             )
-    
+
     return {
         "results": {
             "task": task_name,
@@ -351,22 +350,22 @@ async def task_with_artifacts(
 ) -> Dict[str, Any]:
     """
     Execute a task that generates and displays artifacts progressively.
-    
+
     This tool demonstrates how MCP servers can send file artifacts during
     execution, allowing users to see intermediate results as they're generated.
-    
+
     Args:
         task_name: Name of the processing task
         files_to_generate: Number of intermediate files to create (default: 3)
         interval_seconds: Delay between file generation (default: 2)
         ctx: MCP context for progress reporting
-    
+
     Returns:
         Processing completion summary
     """
     total = max(1, int(files_to_generate))
     interval = max(1, int(interval_seconds))
-    
+
     # Initial progress
     if ctx:
         await ctx.report_progress(
@@ -374,11 +373,11 @@ async def task_with_artifacts(
             total=total,
             message=f"Starting {task_name}..."
         )
-    
+
     # Generate intermediate files
     for file_num in range(1, total + 1):
         await asyncio.sleep(interval)
-        
+
         # Create intermediate result HTML
         intermediate_html = f"""
         <!DOCTYPE html>
@@ -409,7 +408,7 @@ async def task_with_artifacts(
         </body>
         </html>
         """
-        
+
         # Send artifact via structured progress message
         if ctx:
             artifact_data = {
@@ -436,7 +435,7 @@ async def task_with_artifacts(
                 total=total,
                 message=f"MCP_UPDATE:{json.dumps(artifact_data)}"
             )
-    
+
     # Final result
     final_html = """
     <!DOCTYPE html>
@@ -468,7 +467,7 @@ async def task_with_artifacts(
     </body>
     </html>
     """
-    
+
     return {
         "results": {
             "task": task_name,

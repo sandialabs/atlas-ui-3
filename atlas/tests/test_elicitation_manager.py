@@ -1,12 +1,10 @@
 """Tests for the elicitation manager."""
 
 import asyncio
+
 import pytest
-from atlas.application.chat.elicitation_manager import (
-    ElicitationManager,
-    ElicitationRequest,
-    get_elicitation_manager
-)
+
+from atlas.application.chat.elicitation_manager import ElicitationManager, ElicitationRequest, get_elicitation_manager
 
 
 class TestElicitationRequest:
@@ -38,14 +36,14 @@ class TestElicitationRequest:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         # Simulate setting a response
         response_data = {"action": "accept", "data": {"name": "John"}}
         request.future.set_result(response_data)
-        
+
         # Wait for the response (should be immediate since we already set it)
         response = await request.wait_for_response(timeout=1.0)
-        
+
         assert response["action"] == "accept"
         assert response["data"] == {"name": "John"}
 
@@ -59,13 +57,13 @@ class TestElicitationRequest:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         # Simulate decline response
         response_data = {"action": "decline", "data": None}
         request.future.set_result(response_data)
-        
+
         response = await request.wait_for_response(timeout=1.0)
-        
+
         assert response["action"] == "decline"
         assert response["data"] is None
 
@@ -79,13 +77,13 @@ class TestElicitationRequest:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         # Simulate cancel response
         response_data = {"action": "cancel", "data": None}
         request.future.set_result(response_data)
-        
+
         response = await request.wait_for_response(timeout=1.0)
-        
+
         assert response["action"] == "cancel"
         assert response["data"] is None
 
@@ -99,7 +97,7 @@ class TestElicitationRequest:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         # Should timeout since we don't set a response
         with pytest.raises(asyncio.TimeoutError):
             await request.wait_for_response(timeout=0.1)
@@ -188,14 +186,14 @@ class TestElicitationManager:
     def test_handle_unknown_elicitation(self):
         """Test handling response for unknown elicitation."""
         manager = ElicitationManager()
-        
+
         # Try to handle response for non-existent elicitation
         result = manager.handle_elicitation_response(
             elicitation_id="unknown_123",
             action="accept",
             data={"name": "John"}
         )
-        
+
         assert result is False
 
     @pytest.mark.asyncio
@@ -209,13 +207,13 @@ class TestElicitationManager:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         # Verify request exists
         assert "elicit_123" in manager.get_all_pending_requests()
-        
+
         # Cleanup the request
         manager.cleanup_request("elicit_123")
-        
+
         # Verify request is removed
         assert "elicit_123" not in manager.get_all_pending_requests()
 
@@ -282,7 +280,7 @@ class TestElicitationManager:
         """Test that get_elicitation_manager returns singleton."""
         manager1 = get_elicitation_manager()
         manager2 = get_elicitation_manager()
-        
+
         assert manager1 is manager2
 
 
@@ -293,7 +291,7 @@ class TestElicitationManagerIntegration:
     async def test_full_elicitation_flow(self):
         """Test complete elicitation flow from request to response."""
         manager = ElicitationManager()
-        
+
         # Create request
         request = manager.create_elicitation_request(
             elicitation_id="elicit_123",
@@ -308,7 +306,7 @@ class TestElicitationManagerIntegration:
                 }
             }
         )
-        
+
         # Simulate async handling
         async def simulate_user_response():
             # Wait a bit to simulate user thinking
@@ -319,17 +317,17 @@ class TestElicitationManagerIntegration:
                 action="accept",
                 data={"name": "Alice", "age": 30}
             )
-        
+
         # Start the simulation
         asyncio.create_task(simulate_user_response())
-        
+
         # Wait for response
         response = await request.wait_for_response(timeout=2.0)
-        
+
         assert response["action"] == "accept"
         assert response["data"]["name"] == "Alice"
         assert response["data"]["age"] == 30
-        
+
         # Cleanup
         manager.cleanup_request("elicit_123")
         assert "elicit_123" not in manager.get_all_pending_requests()
@@ -338,7 +336,7 @@ class TestElicitationManagerIntegration:
     async def test_multi_turn_elicitation(self):
         """Test handling multiple sequential elicitation requests."""
         manager = ElicitationManager()
-        
+
         # First elicitation
         request1 = manager.create_elicitation_request(
             elicitation_id="elicit_1",
@@ -347,19 +345,19 @@ class TestElicitationManagerIntegration:
             message="Enter your name",
             response_schema={"type": "object"}
         )
-        
+
         # Immediately respond to first
         manager.handle_elicitation_response(
             elicitation_id="elicit_1",
             action="accept",
             data={"name": "Bob"}
         )
-        
+
         response1 = await request1.wait_for_response(timeout=1.0)
         assert response1["action"] == "accept"
-        
+
         manager.cleanup_request("elicit_1")
-        
+
         # Second elicitation
         request2 = manager.create_elicitation_request(
             elicitation_id="elicit_2",
@@ -368,25 +366,25 @@ class TestElicitationManagerIntegration:
             message="Enter your age",
             response_schema={"type": "object"}
         )
-        
+
         # Respond to second
         manager.handle_elicitation_response(
             elicitation_id="elicit_2",
             action="accept",
             data={"age": 25}
         )
-        
+
         response2 = await request2.wait_for_response(timeout=1.0)
         assert response2["action"] == "accept"
         assert response2["data"]["age"] == 25
-        
+
         manager.cleanup_request("elicit_2")
 
     @pytest.mark.asyncio
     async def test_elicitation_with_decline(self):
         """Test elicitation flow when user declines."""
         manager = ElicitationManager()
-        
+
         request = manager.create_elicitation_request(
             elicitation_id="elicit_123",
             tool_call_id="tool_456",
@@ -394,17 +392,17 @@ class TestElicitationManagerIntegration:
             message="Enter optional information",
             response_schema={"type": "object"}
         )
-        
+
         # User declines
         manager.handle_elicitation_response(
             elicitation_id="elicit_123",
             action="decline",
             data=None
         )
-        
+
         response = await request.wait_for_response(timeout=1.0)
-        
+
         assert response["action"] == "decline"
         assert response["data"] is None
-        
+
         manager.cleanup_request("elicit_123")

@@ -17,12 +17,12 @@ def create_rag_client(base_url: str = "", timeout: float = 30.0) -> Any:
     class MockRAGClient:
         def __init__(self):
             pass
-        
+
         async def query(self, *args, **kwargs):
             """Mock RAG query - returns empty result."""
             return {
                 "content": "RAG not available in basic chat mode",
                 "metadata": {}
             }
-    
+
     return MockRAGClient()

@@ -11,9 +11,9 @@ Or configure in mcp.json with auth_type: "api_key"
 from contextvars import ContextVar
 
 from fastmcp import FastMCP
-from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.dependencies import get_http_headers
 from fastmcp.exceptions import ToolError
+from fastmcp.server.dependencies import get_http_headers
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 
 # Context variable to store current user during request
 current_user_var: ContextVar[dict | None] = ContextVar("current_user", default=None)

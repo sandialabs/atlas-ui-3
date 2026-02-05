@@ -1,5 +1,6 @@
 import base64
 import uuid
+
 import pytest
 
 from atlas.application.chat.service import ChatService

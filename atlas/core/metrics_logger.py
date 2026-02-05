@@ -39,8 +39,8 @@ def log_metric(
         **kwargs: Additional metadata to log (only non-sensitive data)
     """
     # Import here to avoid circular dependencies
-    from atlas.modules.config import config_manager
     from atlas.core.log_sanitizer import sanitize_for_logging
+    from atlas.modules.config import config_manager
 
     if not config_manager.app_settings.feature_metrics_logging_enabled:
         return

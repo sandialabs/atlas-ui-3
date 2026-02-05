@@ -10,18 +10,19 @@ Tests the secure per-user token storage module including:
 Updated: 2025-01-21
 """
 
-import time
 import tempfile
-import pytest
+import time
 from pathlib import Path
 
+import pytest
+
 from atlas.modules.mcp_tools.token_storage import (
+    AuthenticationRequiredException,
     MCPTokenStorage,
     StoredToken,
-    AuthenticationRequiredException,
-    get_token_storage,
     _make_token_key,
     _parse_token_key,
+    get_token_storage,
 )
 
 

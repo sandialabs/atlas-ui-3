@@ -4,7 +4,8 @@ Prompts MCP Server using FastMCP
 Provides specialized system prompts that can be applied to modify the AI's behavior.
 """
 
-from typing import Dict, Any
+from typing import Any, Dict
+
 from fastmcp import FastMCP
 from fastmcp.prompts.prompt import PromptMessage, TextContent
 
@@ -17,12 +18,12 @@ def financial_tech_wizard() -> PromptMessage:
     """Think like a financial tech wizard - expert in fintech, trading algorithms, and financial markets."""
     content = """You are a financial technology wizard with deep expertise in:
 - Financial markets, trading strategies, and algorithmic trading
-- Fintech solutions, payment systems, and blockchain technology  
+- Fintech solutions, payment systems, and blockchain technology
 - Risk management, quantitative analysis, and financial modeling
 - Regulatory compliance and financial technology innovation
 
 Think analytically, provide data-driven insights, and consider both technical and business aspects when responding to financial questions. Use precise financial terminology and cite relevant market examples when appropriate."""
-    
+
     return PromptMessage(role="user", content=TextContent(type="text", text=f"System: {content}\n\nUser: Please adopt this personality and expertise for our conversation."))
 
 
@@ -37,7 +38,7 @@ def expert_dog_trainer() -> PromptMessage:
 - Problem solving for common behavioral issues
 
 Always provide practical, humane, and evidence-based training advice. Consider the dog's age, breed, and individual personality when making recommendations. Emphasize positive reinforcement and building trust between dog and owner."""
-    
+
     return PromptMessage(role="user", content=TextContent(type="text", text=f"System: {content}\n\nUser: Please adopt this expertise for our conversation."))
 
 
@@ -52,7 +53,7 @@ def creative_writer() -> PromptMessage:
 - Workshop facilitation and constructive feedback
 
 Approach writing with creativity, technical skill, and attention to voice and style. Provide specific, actionable advice that helps writers develop their craft while honoring their unique creative vision."""
-    
+
     return PromptMessage(role="user", content=TextContent(type="text", text=f"System: {content}\n\nUser: Please adopt this creative writing expertise for our conversation."))
 
 
@@ -125,7 +126,7 @@ def list_available_prompts() -> Dict[str, Any]:
     Discover and enumerate all available AI personality and expertise system prompts for customizing assistant behavior.
 
     This prompt management tool provides comprehensive access to AI behavior modification capabilities:
-    
+
     **System Prompt Categories:**
     - Professional expertise prompts (financial, technical, business)
     - Creative and artistic personality prompts (writing, design, storytelling)
@@ -185,7 +186,7 @@ def list_available_prompts() -> Dict[str, Any]:
         },
         "expert_dog_trainer": {
             "description": "You are an expert dog trainer with years of experience in canine behavior and training",
-            "type": "system_prompt", 
+            "type": "system_prompt",
             "category": "professional"
         },
         "creative_writer": {
@@ -207,7 +208,7 @@ def list_available_prompts() -> Dict[str, Any]:
             "category": "demo"
         }
     }
-    
+
     return {
         "results": {
             "available_prompts": prompts,

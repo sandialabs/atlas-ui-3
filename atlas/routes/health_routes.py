@@ -6,7 +6,7 @@ and load balancers to verify service availability.
 
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Any, Dict
 
 from fastapi import APIRouter
 

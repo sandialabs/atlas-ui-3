@@ -1,7 +1,7 @@
 """Data Transfer Objects for chat operations."""
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 
@@ -9,7 +9,7 @@ from uuid import UUID
 class ChatRequest:
     """
     Request DTO for chat operations.
-    
+
     Contains all parameters needed for different chat modes (plain, tools, RAG, agent).
     """
     session_id: UUID
@@ -33,13 +33,13 @@ class ChatRequest:
 class ChatResponse:
     """
     Response DTO for chat operations.
-    
+
     Contains the result of a chat interaction.
     """
     type: str
     message: str
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format for API response."""
         return {
@@ -53,7 +53,7 @@ class ChatResponse:
 class LLMMessage:
     """
     Type-safe message format for LLM interactions.
-    
+
     Normalizes message structure across different chat modes.
     """
     role: str  # "user", "assistant", "system", "tool"
@@ -61,7 +61,7 @@ class LLMMessage:
     name: Optional[str] = None
     tool_calls: Optional[List[Dict[str, Any]]] = None
     tool_call_id: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format for LLM API."""
         result = {"role": self.role, "content": self.content}
@@ -72,7 +72,7 @@ class LLMMessage:
         if self.tool_call_id:
             result["tool_call_id"] = self.tool_call_id
         return result
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "LLMMessage":
         """Create from dictionary format."""

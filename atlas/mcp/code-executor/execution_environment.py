@@ -29,11 +29,11 @@ def create_execution_environment() -> Path:
         exec_id = str(uuid.uuid4())
         base_dir = Path(tempfile.gettempdir()) / "secure_code_exec"
         exec_dir = base_dir / exec_id
-        
+
         # Create directory structure
         base_dir.mkdir(exist_ok=True)
         exec_dir.mkdir(exist_ok=True)
-        
+
         logger.info(f"Created execution environment: {exec_dir}")
         return exec_dir
     except Exception as e:
@@ -57,32 +57,32 @@ def cleanup_execution_environment(exec_dir: Optional[Path]):
 def save_file_to_execution_dir(filename: str, file_data_base64: str, exec_dir: Path) -> str:
     """
     Save a base64-encoded file to the execution directory.
-    
+
     Args:
         filename: Name of the file
         file_data_base64: Base64-encoded file data
         exec_dir: Execution directory
-        
+
     Returns:
         The filename that was saved
     """
     try:
         logger.info(f"Saving file {filename} to execution directory: {exec_dir}")
-        
+
         # Decode the base64 data
         file_data = base64.b64decode(file_data_base64)
-        
+
         # Ensure filename is safe (no path traversal)
         safe_filename = os.path.basename(filename)
         file_path = exec_dir / safe_filename
-        
+
         # Write the file
         with open(file_path, 'wb') as f:
             f.write(file_data)
-        
+
         logger.info(f"Successfully saved file: {safe_filename} ({len(file_data)} bytes)")
         return safe_filename
-        
+
     except binascii.Error as e:
         error_msg = f"Invalid base64 data for file {filename}: {str(e)}"
         logger.error(error_msg)

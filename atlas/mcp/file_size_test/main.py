@@ -5,9 +5,9 @@ Simple tool for testing file transfer by returning file size.
 """
 
 import base64
-import os
 import logging
-from typing import Any, Dict, Annotated
+import os
+from typing import Annotated, Any, Dict
 
 import requests
 from fastmcp import FastMCP

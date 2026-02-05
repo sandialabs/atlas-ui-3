@@ -19,15 +19,15 @@ mcp = FastMCP("Username Override Demo")
 @mcp.tool
 def get_user_info(username: str) -> Dict[str, Any]:
     """Get information about the current user.
-    
+
     This tool demonstrates the username override security feature. Even if the LLM
     tries to pass a different username, the Atlas UI backend will always override
     it with the authenticated user's email from the X-User-Email header.
-    
+
     Args:
         username: The username parameter. This will be automatically overridden
                  by Atlas UI backend with the authenticated user's email.
-    
+
     Returns:
         MCP contract shape with user information:
         {
@@ -42,9 +42,9 @@ def get_user_info(username: str) -> Dict[str, Any]:
         }
     """
     start = time.perf_counter()
-    
+
     elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
-    
+
     return {
         "results": {
             "username": username,
@@ -60,15 +60,15 @@ def get_user_info(username: str) -> Dict[str, Any]:
 @mcp.tool
 def create_user_record(username: str, record_type: str, data: str) -> Dict[str, Any]:
     """Create a record associated with the authenticated user.
-    
+
     This tool demonstrates how username override ensures that records are always
     created with the correct user context, preventing unauthorized actions.
-    
+
     Args:
         username: The username parameter (automatically overridden with authenticated user)
         record_type: Type of record to create (e.g., "note", "task", "document")
         data: The content/data for the record
-    
+
     Returns:
         MCP contract shape with record creation confirmation:
         {
@@ -85,12 +85,12 @@ def create_user_record(username: str, record_type: str, data: str) -> Dict[str, 
         }
     """
     start = time.perf_counter()
-    
+
     # In a real implementation, this would create a record in a database
     # associated with the username
-    
+
     elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
-    
+
     return {
         "results": {
             "success": True,
@@ -108,16 +108,16 @@ def create_user_record(username: str, record_type: str, data: str) -> Dict[str, 
 @mcp.tool
 def check_user_permissions(username: str, resource: str, action: str) -> Dict[str, Any]:
     """Check if the authenticated user has permission for a specific action.
-    
+
     This tool shows how username override ensures permission checks are always
     performed for the actual authenticated user, not a user the LLM might try
     to impersonate.
-    
+
     Args:
         username: The username parameter (automatically overridden with authenticated user)
         resource: The resource to check permissions for (e.g., "document", "database", "api")
         action: The action to check (e.g., "read", "write", "delete", "admin")
-    
+
     Returns:
         MCP contract shape with permission check results:
         {
@@ -135,7 +135,7 @@ def check_user_permissions(username: str, resource: str, action: str) -> Dict[st
         }
     """
     start = time.perf_counter()
-    
+
     # This is a demo, so we'll simulate permission logic
     # In a real system, this would check against a permission database
     simulated_permissions = {
@@ -143,11 +143,11 @@ def check_user_permissions(username: str, resource: str, action: str) -> Dict[st
         "database": ["read"],
         "api": ["read"]
     }
-    
+
     has_permission = action in simulated_permissions.get(resource, [])
-    
+
     elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
-    
+
     return {
         "results": {
             "username": username,
@@ -166,15 +166,15 @@ def check_user_permissions(username: str, resource: str, action: str) -> Dict[st
 @mcp.tool
 def demonstrate_override_attempt(username: str, attempted_username: Optional[str] = None) -> Dict[str, Any]:
     """Demonstrate what happens when trying to override the username.
-    
+
     This tool explicitly shows the security feature in action. Even if the LLM
     tries to pass an attempted_username, the backend will always inject the
     authenticated user's email into the username parameter.
-    
+
     Args:
         username: The authenticated user (automatically injected by Atlas UI backend)
         attempted_username: A username the LLM might try to use (for demonstration)
-    
+
     Returns:
         MCP contract shape demonstrating the override:
         {
@@ -191,13 +191,13 @@ def demonstrate_override_attempt(username: str, attempted_username: Optional[str
         }
     """
     start = time.perf_counter()
-    
+
     # The override always occurs - username is always injected by the backend
     # when a tool declares it accepts a username parameter
     override_occurred = True
     # Detect if an impersonation attempt was made
     impersonation_attempted = attempted_username is not None and username != attempted_username
-    
+
     if impersonation_attempted:
         explanation = (
             f"The authenticated user is: {username}. "
@@ -217,9 +217,9 @@ def demonstrate_override_attempt(username: str, attempted_username: Optional[str
             "Atlas UI backend automatically injected the authenticated user's email "
             "into the username parameter. No impersonation attempt was made."
         )
-    
+
     elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
-    
+
     return {
         "results": {
             "actual_username": username,

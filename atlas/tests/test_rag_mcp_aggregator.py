@@ -1,7 +1,8 @@
-import types
-import pytest
 import os
 import sys
+import types
+
+import pytest
 
 # Ensure backend root is on path (same approach used in other tests)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -112,8 +113,7 @@ def patch_mcp(monkeypatch):
 
     # Also patch rag_mcp_config to return the test RAG servers
     # (RAGMCPService uses rag_mcp_config for authorization, not mcp_manager.servers_config)
-    from atlas.modules.config.config_manager import ConfigManager, MCPServerConfig, MCPConfig
-    import atlas.core.auth
+    from atlas.modules.config.config_manager import ConfigManager, MCPConfig, MCPServerConfig
     fake_rag_servers = {
         "docsRag": MCPServerConfig(
             description="Docs RAG",
@@ -151,8 +151,8 @@ async def test_discovery_across_multiple_servers():
     await mcp.discover_tools()
     await mcp.discover_prompts()
 
-    from atlas.domain.rag_mcp_service import RAGMCPService
     from atlas.core.auth import is_user_in_group
+    from atlas.domain.rag_mcp_service import RAGMCPService
 
     svc = RAGMCPService(mcp, app_factory.get_config_manager(), is_user_in_group)
     # user with @company.com gets both servers
@@ -168,9 +168,9 @@ async def test_discovery_across_multiple_servers():
 
 @pytest.mark.asyncio
 async def test_acl_filtering():
-    from atlas.infrastructure.app_factory import app_factory
-    from atlas.domain.rag_mcp_service import RAGMCPService
     from atlas.core.auth import is_user_in_group
+    from atlas.domain.rag_mcp_service import RAGMCPService
+    from atlas.infrastructure.app_factory import app_factory
 
     mcp = app_factory.get_mcp_manager()
     await mcp.initialize_clients()
@@ -185,9 +185,9 @@ async def test_acl_filtering():
 
 @pytest.mark.asyncio
 async def test_search_and_synthesize_merge():
-    from atlas.infrastructure.app_factory import app_factory
-    from atlas.domain.rag_mcp_service import RAGMCPService
     from atlas.core.auth import is_user_in_group
+    from atlas.domain.rag_mcp_service import RAGMCPService
+    from atlas.infrastructure.app_factory import app_factory
 
     mcp = app_factory.get_mcp_manager()
     await mcp.initialize_clients()

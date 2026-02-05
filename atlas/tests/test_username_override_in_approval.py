@@ -3,7 +3,7 @@
 
 from unittest.mock import Mock
 
-from atlas.application.chat.utilities.tool_executor import inject_context_into_args, _filter_args_to_schema
+from atlas.application.chat.utilities.tool_executor import _filter_args_to_schema, inject_context_into_args
 
 
 class TestUsernameOverrideInApproval:

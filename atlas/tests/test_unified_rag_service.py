@@ -3,8 +3,9 @@
 Tests the unified RAG service that aggregates HTTP and MCP RAG sources.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from atlas.domain.unified_rag_service import UnifiedRAGService
 from atlas.modules.config.config_manager import RAGSourceConfig, RAGSourcesConfig

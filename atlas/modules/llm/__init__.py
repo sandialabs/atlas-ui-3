@@ -6,8 +6,8 @@ This module provides:
 - CLI tools for testing LLM interactions
 """
 
-from .models import LLMResponse
 from .litellm_caller import LiteLLMCaller
+from .models import LLMResponse
 
 # Create default instance
 llm_caller = LiteLLMCaller()

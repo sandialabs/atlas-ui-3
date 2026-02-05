@@ -2,24 +2,24 @@
 
 
 from atlas.domain.errors import (
-    DomainError,
-    ValidationError,
-    SessionError,
-    MessageError,
     AuthenticationError,
     AuthorizationError,
     ConfigurationError,
+    DataSourcePermissionError,
+    DomainError,
+    LLMAuthenticationError,
+    LLMConfigurationError,
     LLMError,
     LLMServiceError,
-    ToolError,
-    ToolAuthorizationError,
-    DataSourcePermissionError,
-    LLMConfigurationError,
-    SessionNotFoundError,
+    LLMTimeoutError,
+    MessageError,
     PromptOverrideError,
     RateLimitError,
-    LLMTimeoutError,
-    LLMAuthenticationError,
+    SessionError,
+    SessionNotFoundError,
+    ToolAuthorizationError,
+    ToolError,
+    ValidationError,
 )
 
 
@@ -30,7 +30,7 @@ class TestDomainError:
         """Test DomainError creation with message only."""
         message = "Something went wrong"
         error = DomainError(message)
-        
+
         assert str(error) == message
         assert error.message == message
         assert error.code is None
@@ -40,7 +40,7 @@ class TestDomainError:
         message = "Something went wrong"
         code = "ERR_001"
         error = DomainError(message, code)
-        
+
         assert str(error) == message
         assert error.message == message
         assert error.code == code
@@ -270,7 +270,7 @@ class TestErrorHierarchy:
             LLMTimeoutError,
             LLMAuthenticationError,
         ]
-        
+
         for error_class in error_classes:
             error = error_class("test message")
             assert isinstance(error, DomainError)
@@ -298,10 +298,10 @@ class TestErrorHierarchy:
             LLMTimeoutError,
             LLMAuthenticationError,
         ]
-        
+
         test_message = "Test error message"
         test_code = "TEST_001"
-        
+
         for error_class in error_classes:
             error = error_class(test_message, test_code)
             assert error.message == test_message
@@ -314,16 +314,16 @@ class TestErrorHierarchy:
         assert issubclass(LLMServiceError, LLMError)
         assert issubclass(RateLimitError, LLMError)
         assert issubclass(LLMTimeoutError, LLMError)
-        
+
         # Test authorization-related errors
         assert issubclass(ToolAuthorizationError, AuthorizationError)
         assert issubclass(DataSourcePermissionError, AuthorizationError)
-        
+
         # Test authentication-related errors
         assert issubclass(LLMAuthenticationError, AuthenticationError)
-        
+
         # Test configuration-related errors
         assert issubclass(LLMConfigurationError, ConfigurationError)
-        
+
         # Test session-related errors
         assert issubclass(SessionNotFoundError, SessionError)

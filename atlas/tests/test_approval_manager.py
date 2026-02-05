@@ -1,12 +1,10 @@
 """Tests for the tool approval manager."""
 
 import asyncio
+
 import pytest
-from atlas.application.chat.approval_manager import (
-    ToolApprovalManager,
-    ToolApprovalRequest,
-    get_approval_manager
-)
+
+from atlas.application.chat.approval_manager import ToolApprovalManager, ToolApprovalRequest, get_approval_manager
 
 
 class TestToolApprovalRequest:
@@ -34,13 +32,13 @@ class TestToolApprovalRequest:
             tool_name="test_tool",
             arguments={"arg1": "value1"}
         )
-        
+
         # Set approved response
         request.set_response(approved=True, arguments={"arg1": "edited_value"})
-        
+
         # Wait for the response (should be immediate since we already set it)
         response = await request.wait_for_response(timeout=1.0)
-        
+
         assert response["approved"] is True
         assert response["arguments"] == {"arg1": "edited_value"}
 
@@ -52,13 +50,13 @@ class TestToolApprovalRequest:
             tool_name="test_tool",
             arguments={"arg1": "value1"}
         )
-        
+
         # Set rejected response
         request.set_response(approved=False, reason="User rejected")
-        
+
         # Wait for the response
         response = await request.wait_for_response(timeout=1.0)
-        
+
         assert response["approved"] is False
         assert response["reason"] == "User rejected"
 
@@ -70,7 +68,7 @@ class TestToolApprovalRequest:
             tool_name="test_tool",
             arguments={"arg1": "value1"}
         )
-        
+
         # Should timeout since we don't set a response
         with pytest.raises(asyncio.TimeoutError):
             await request.wait_for_response(timeout=0.1)
@@ -145,14 +143,14 @@ class TestToolApprovalManager:
         """Test that get_approval_manager returns a singleton."""
         manager1 = get_approval_manager()
         manager2 = get_approval_manager()
-        
+
         assert manager1 is manager2
 
     @pytest.mark.asyncio
     async def test_full_approval_workflow(self):
         """Test the complete approval workflow."""
         manager = ToolApprovalManager()
-        
+
         # Create request
         request = manager.create_approval_request(
             tool_call_id="test_123",
@@ -160,7 +158,7 @@ class TestToolApprovalManager:
             arguments={"code": "print('test')"},
             allow_edit=True
         )
-        
+
         # Simulate async approval (in a separate task)
         async def approve_after_delay():
             await asyncio.sleep(0.1)
@@ -169,16 +167,16 @@ class TestToolApprovalManager:
                 approved=True,
                 arguments={"code": "print('edited test')"}
             )
-        
+
         # Start approval task
         asyncio.create_task(approve_after_delay())
 
         # Wait for response
         response = await request.wait_for_response(timeout=1.0)
-        
+
         assert response["approved"] is True
         assert response["arguments"]["code"] == "print('edited test')"
-        
+
         # Cleanup
         manager.cleanup_request("test_123")
         assert "test_123" not in manager.get_pending_requests()

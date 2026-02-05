@@ -5,11 +5,11 @@ Provides a tool to search DuckDuckGo, fetch the content of a result,
 and return it.
 """
 
+from typing import Any, Dict, Union
+
 import requests
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
-from typing import Any, Dict, Union
-
 from fastmcp import FastMCP
 
 # Initialize the MCP server
@@ -36,7 +36,7 @@ def get_page_content(url: str) -> str:
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
         }
-        
+
         response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
         response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
 
@@ -128,7 +128,7 @@ def search_and_fetch(query: str, max_results: Union[str, int] = 3) -> Dict[str, 
 
         # Try each result until we successfully fetch content
         errors_encountered = []
-        
+
         for i, result in enumerate(results):
             result_title = result.get('title')
             result_url = result.get('href')
@@ -138,7 +138,7 @@ def search_and_fetch(query: str, max_results: Union[str, int] = 3) -> Dict[str, 
                 continue
 
             print(f"[DEBUG] Attempting to fetch content from: {result_url}")
-            
+
             # Fetch and parse the content of the page
             content = get_page_content(result_url)
 
@@ -146,7 +146,7 @@ def search_and_fetch(query: str, max_results: Union[str, int] = 3) -> Dict[str, 
                 errors_encountered.append(f"Result {i+1} ({result_title}): {content}")
                 print(f"[DEBUG] Failed to fetch {result_url}: {content}")
                 continue
-            
+
             # Success! Return the content
             print(f"[DEBUG] Successfully fetched content from {result_url}")
             return {

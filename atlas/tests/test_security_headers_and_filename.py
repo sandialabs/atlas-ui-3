@@ -1,6 +1,5 @@
-from starlette.testclient import TestClient
-
 from main import app
+from starlette.testclient import TestClient
 
 
 def test_security_headers_present_by_default():

@@ -2,10 +2,10 @@
 
 from unittest.mock import patch
 
+from main import app
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
-from main import app
 from atlas.modules.config.config_manager import FileExtractorConfig, FileExtractorsConfig
 
 

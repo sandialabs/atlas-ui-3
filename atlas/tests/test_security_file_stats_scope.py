@@ -1,6 +1,5 @@
-from starlette.testclient import TestClient
-
 from main import app
+from starlette.testclient import TestClient
 
 
 def test_user_stats_enforces_self_scope(monkeypatch):

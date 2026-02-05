@@ -7,8 +7,8 @@ This module provides:
 - CLI tools for file operations
 """
 
-from .s3_client import S3StorageClient
 from .manager import FileManager
+from .s3_client import S3StorageClient
 
 # Create default instances
 s3_client = S3StorageClient()

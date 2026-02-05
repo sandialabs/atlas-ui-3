@@ -1,10 +1,11 @@
 """Message builder - constructs messages with history and files manifest."""
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from atlas.domain.sessions.models import Session
 from atlas.modules.prompts.prompt_provider import PromptProvider
+
 from ..utilities import file_processor
 
 logger = logging.getLogger(__name__)

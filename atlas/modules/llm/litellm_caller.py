@@ -18,9 +18,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import litellm
 from litellm import acompletion
-from .models import LLMResponse
-from atlas.modules.config.config_manager import resolve_env_var
+
 from atlas.core.metrics_logger import log_metric
+from atlas.modules.config.config_manager import resolve_env_var
+
+from .models import LLMResponse
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ class LiteLLMCaller:
     best-effort only and are not intended to provide strong isolation
     guarantees in multi-tenant or highly concurrent environments.
     """
-    
+
     def __init__(self, llm_config=None, debug_mode: bool = False, rag_service=None):
         """Initialize with optional config dependency injection.
 
@@ -85,29 +87,29 @@ class LiteLLMCaller:
         return qualified_data_source
 
     def _build_rag_completion_response(
-        self, 
-        rag_response, 
+        self,
+        rag_response,
         display_source: str
     ) -> str:
         """Build formatted response for direct RAG completions.
-        
+
         Args:
             rag_response: RAGResponse object with is_completion=True
             display_source: Display name of the data source
-            
+
         Returns:
             Formatted response string with RAG completion note and metadata
         """
         response_parts = []
         response_parts.append(f"*Response from {display_source} (RAG completions endpoint):*\n")
         response_parts.append(rag_response.content)
-        
+
         # Append metadata if available
         if rag_response.metadata:
             metadata_summary = self._format_rag_metadata(rag_response.metadata)
             if metadata_summary and metadata_summary != "Metadata unavailable":
                 response_parts.append(f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}")
-        
+
         return "\n".join(response_parts)
 
     async def _query_all_rag_sources(
@@ -177,10 +179,10 @@ class LiteLLMCaller:
         """Convert internal model name to LiteLLM compatible format."""
         if model_name not in self.llm_config.models:
             raise ValueError(f"Model {model_name} not found in configuration")
-        
+
         model_config = self.llm_config.models[model_name]
         model_id = model_config.model_name
-        
+
         # Map common providers to LiteLLM format
         if "openrouter" in model_config.model_url:
             return f"openrouter/{model_id}"
@@ -195,23 +197,23 @@ class LiteLLMCaller:
         else:
             # For custom endpoints, use the model_id directly
             return model_id
-    
+
     def _get_model_kwargs(self, model_name: str, temperature: Optional[float] = None) -> Dict[str, Any]:
         """Get LiteLLM kwargs for a specific model."""
         if model_name not in self.llm_config.models:
             raise ValueError(f"Model {model_name} not found in configuration")
-        
+
         model_config = self.llm_config.models[model_name]
         kwargs = {
             "max_tokens": model_config.max_tokens or 1000,
         }
-        
+
         # Use provided temperature or fall back to config temperature
         if temperature is not None:
             kwargs["temperature"] = temperature
         else:
             kwargs["temperature"] = model_config.temperature or 0.7
-        
+
         # Set API key - resolve environment variables
         try:
             api_key = resolve_env_var(model_config.api_key)
@@ -230,7 +232,7 @@ class LiteLLMCaller:
                     os.environ[env_key] = value
                 elif existing != value:
                     logger.warning(
-                        "Overwriting existing environment variable %s for model %s", 
+                        "Overwriting existing environment variable %s for model %s",
                         env_key,
                         model_name,
                     )
@@ -252,12 +254,12 @@ class LiteLLMCaller:
                 # only updates the env var if it is unset or already
                 # matches the same value.
                 _set_env_var_if_needed("OPENAI_API_KEY", api_key)
-        
+
         # Set custom API base for non-standard endpoints
         if hasattr(model_config, 'model_url') and model_config.model_url:
             if not any(provider in model_config.model_url for provider in ["openrouter", "api.openai.com", "api.anthropic.com", "api.cerebras.ai"]):
                 kwargs["api_base"] = model_config.model_url
-        
+
         # Handle extra headers with environment variable expansion
         if model_config.extra_headers:
             extra_headers_resolved = {}
@@ -269,19 +271,19 @@ class LiteLLMCaller:
                     logger.error(f"Failed to resolve extra header '{header_key}' for model {model_name}: {e}")
                     raise
             kwargs["extra_headers"] = extra_headers_resolved
-        
+
         return kwargs
 
     async def call_plain(
-        self, 
-        model_name: str, 
-        messages: List[Dict[str, str]], 
+        self,
+        model_name: str,
+        messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         user_email: Optional[str] = None
     ) -> str:
         """Plain LLM call - no tools, no RAG.
-        
+
         Args:
             model_name: Name of the model to use
             messages: List of message dicts with 'role' and 'content'
@@ -291,36 +293,36 @@ class LiteLLMCaller:
         """
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature)
-        
+
         # Override max_tokens if provided
         if max_tokens is not None:
             model_kwargs["max_tokens"] = max_tokens
-        
+
         try:
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
             logger.info(f"Plain LLM call: {len(messages)} messages, {total_chars} chars")
-            
+
             response = await acompletion(
                 model=litellm_model,
                 messages=messages,
                 **model_kwargs
             )
-            
+
             content = response.choices[0].message.content or ""
             # Log response preview only at DEBUG level to avoid logging sensitive data
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(f"LLM response preview: '{content[:200]}{'...' if len(content) > 200 else ''}'")
             else:
                 logger.info(f"LLM response length: {len(content)} chars")
-            
+
             log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
-            
+
             return content
-            
+
         except Exception as exc:
             logger.error("Error calling LLM: %s", exc, exc_info=True)
             raise Exception(f"Failed to call LLM: {exc}")
-    
+
     async def call_with_rag(
         self,
         model_name: str,
@@ -443,7 +445,7 @@ class LiteLLMCaller:
             logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG] Falling back to plain LLM call due to RAG error")
             return await self.call_plain(model_name, messages, temperature=temperature, user_email=user_email)
-    
+
     async def call_with_tools(
         self,
         model_name: str,
@@ -460,14 +462,14 @@ class LiteLLMCaller:
 
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature)
-        
+
         # Handle tool_choice parameter - try "required" first, fallback to "auto" if unsupported
         final_tool_choice = tool_choice
 
         try:
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
             logger.info(f"LLM call with tools: {len(messages)} messages, {total_chars} chars, {len(tools_schema)} tools")
-            
+
             response = await acompletion(
                 model=litellm_model,
                 messages=messages,
@@ -475,7 +477,7 @@ class LiteLLMCaller:
                 tool_choice=final_tool_choice,
                 **model_kwargs
             )
-            
+
             message = response.choices[0].message
 
             if tool_choice == "required" and not getattr(message, 'tool_calls', None):
@@ -491,7 +493,7 @@ class LiteLLMCaller:
                 tool_calls=tool_calls,
                 model_used=model_name
             )
-            
+
         except Exception as exc:
             # If we used "required" and it failed, try again with "auto"
             if tool_choice == "required" and final_tool_choice == "required":
@@ -504,7 +506,7 @@ class LiteLLMCaller:
                         tool_choice="auto",
                         **model_kwargs
                     )
-                    
+
                     message = response.choices[0].message
                     return LLMResponse(
                         content=getattr(message, 'content', None) or "",
@@ -514,10 +516,10 @@ class LiteLLMCaller:
                 except Exception as retry_exc:
                     logger.error("Retry with tool_choice='auto' also failed: %s", retry_exc, exc_info=True)
                     raise Exception(f"Failed to call LLM with tools: {retry_exc}")
-            
+
             logger.error("Error calling LLM with tools: %s", exc, exc_info=True)
             raise Exception(f"Failed to call LLM with tools: {exc}")
-    
+
     async def call_with_rag_and_tools(
         self,
         model_name: str,
@@ -643,7 +645,7 @@ class LiteLLMCaller:
             logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG+Tools] Falling back to tools-only call due to RAG error")
             return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email)
-    
+
     def _format_rag_metadata(self, metadata) -> str:
         """Format RAG metadata into a user-friendly summary."""
         # Import here to avoid circular imports
@@ -653,21 +655,21 @@ class LiteLLMCaller:
                 return "Metadata unavailable"
         except ImportError:
             return "Metadata unavailable"
-        
+
         summary_parts = []
         summary_parts.append(f" **Data Source:** {metadata.data_source_name}")
         summary_parts.append(f" **Processing Time:** {metadata.query_processing_time_ms}ms")
-        
+
         if metadata.documents_found:
             summary_parts.append(f" **Documents Found:** {len(metadata.documents_found)} (searched {metadata.total_documents_searched})")
-            
+
             for i, doc in enumerate(metadata.documents_found[:3]):
                 confidence_percent = int(doc.confidence_score * 100)
                 summary_parts.append(f"  • {doc.source} ({confidence_percent}% relevance, {doc.content_type})")
-            
+
             if len(metadata.documents_found) > 3:
                 remaining = len(metadata.documents_found) - 3
                 summary_parts.append(f"  • ... and {remaining} more document(s)")
-        
+
         summary_parts.append(f" **Retrieval Method:** {metadata.retrieval_method}")
         return "\n".join(summary_parts)

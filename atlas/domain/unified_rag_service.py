@@ -304,7 +304,7 @@ class UnifiedRAGService:
             metadata = None
             if meta_data.get("providers"):
                 # Create basic metadata from MCP response
-                from atlas.modules.rag.client import RAGMetadata, DocumentMetadata
+                from atlas.modules.rag.client import DocumentMetadata, RAGMetadata
                 providers_info = meta_data.get("providers", {})
                 docs_found = []
                 for provider_name, provider_info in providers_info.items():

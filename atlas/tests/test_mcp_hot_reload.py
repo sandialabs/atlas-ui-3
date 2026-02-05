@@ -1,8 +1,9 @@
 """Tests for MCP hot reload and auto-reconnect functionality."""
 
 import time
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from starlette.testclient import TestClient
 
 from atlas.modules.mcp_tools.client import MCPToolManager
@@ -15,20 +16,20 @@ class TestMCPAdminEndpoints:
         """Test that MCP status endpoint requires admin access."""
         from main import app
         client = TestClient(app)
-        
+
         # Non-admin user should be denied
         r = client.get("/admin/mcp/status", headers={"X-User-Email": "user@example.com"})
         assert r.status_code in (302, 403)
-        
+
     def test_mcp_status_endpoint_returns_data(self):
         """Test that MCP status endpoint returns expected data structure."""
         from main import app
         client = TestClient(app)
-        
+
         # Admin user should get response
         r = client.get("/admin/mcp/status", headers={"X-User-Email": "admin@example.com"})
         assert r.status_code == 200
-        
+
         data = r.json()
         assert "connected_servers" in data
         assert "configured_servers" in data
@@ -36,7 +37,7 @@ class TestMCPAdminEndpoints:
         assert "auto_reconnect" in data
         assert "tool_counts" in data
         assert "prompt_counts" in data
-        
+
         # Check auto_reconnect structure
         auto_reconnect = data["auto_reconnect"]
         assert "enabled" in auto_reconnect
@@ -72,7 +73,7 @@ class TestMCPAdminEndpoints:
         """Test that MCP reload endpoint requires admin access."""
         from main import app
         client = TestClient(app)
-        
+
         # Non-admin user should be denied
         r = client.post("/admin/mcp/reload", headers={"X-User-Email": "user@example.com"})
         assert r.status_code in (302, 403)
@@ -81,7 +82,7 @@ class TestMCPAdminEndpoints:
         """Test that MCP reconnect endpoint requires admin access."""
         from main import app
         client = TestClient(app)
-        
+
         # Non-admin user should be denied
         r = client.post("/admin/mcp/reconnect", headers={"X-User-Email": "user@example.com"})
         assert r.status_code in (302, 403)
@@ -90,11 +91,11 @@ class TestMCPAdminEndpoints:
         """Test that MCP reconnect endpoint returns expected data structure."""
         from main import app
         client = TestClient(app)
-        
+
         # Admin user should get response
         r = client.post("/admin/mcp/reconnect", headers={"X-User-Email": "admin@example.com"})
         assert r.status_code == 200
-        
+
         data = r.json()
         assert "message" in data
         assert "result" in data
@@ -106,10 +107,10 @@ class TestMCPAdminEndpoints:
         """Test that admin dashboard lists MCP endpoints."""
         from main import app
         client = TestClient(app)
-        
+
         r = client.get("/admin/", headers={"X-User-Email": "admin@example.com"})
         assert r.status_code == 200
-        
+
         data = r.json()
         endpoints = data.get("available_endpoints", [])
         assert "/admin/mcp/reload" in endpoints
@@ -124,9 +125,9 @@ class TestMCPFailedServerTracking:
         """Test recording first failure for a server."""
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._failed_servers = {}
-        
+
         manager._record_server_failure("test-server", "Connection refused")
-        
+
         assert "test-server" in manager._failed_servers
         assert manager._failed_servers["test-server"]["attempt_count"] == 1
         assert manager._failed_servers["test-server"]["error"] == "Connection refused"
@@ -143,9 +144,9 @@ class TestMCPFailedServerTracking:
                 "error": "Old error"
             }
         }
-        
+
         manager._record_server_failure("test-server", "New error")
-        
+
         assert manager._failed_servers["test-server"]["attempt_count"] == 3
         assert manager._failed_servers["test-server"]["error"] == "New error"
         assert manager._failed_servers["test-server"]["last_attempt"] > initial_time
@@ -160,19 +161,19 @@ class TestMCPFailedServerTracking:
                 "error": "Some error"
             }
         }
-        
+
         manager._clear_server_failure("test-server")
-        
+
         assert "test-server" not in manager._failed_servers
 
     def test_clear_server_failure_nonexistent(self):
         """Test clearing a server that wasn't tracked (should not error)."""
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._failed_servers = {}
-        
+
         # Should not raise any exception
         manager._clear_server_failure("nonexistent-server")
-        
+
         assert "nonexistent-server" not in manager._failed_servers
 
     def test_get_failed_servers(self):
@@ -182,9 +183,9 @@ class TestMCPFailedServerTracking:
             "server1": {"attempt_count": 1, "error": "Error 1"},
             "server2": {"attempt_count": 3, "error": "Error 2"}
         }
-        
+
         result = manager.get_failed_servers()
-        
+
         assert result == manager._failed_servers
         # Verify it returns a copy, not the original dict
         assert result is not manager._failed_servers
@@ -201,11 +202,11 @@ class TestMCPBackoffCalculation:
         mock_settings.mcp_reconnect_max_interval = 300
         mock_settings.mcp_reconnect_backoff_multiplier = 2.0
         mock_config_manager.app_settings = mock_settings
-        
+
         manager = MCPToolManager.__new__(MCPToolManager)
-        
+
         delay = manager._calculate_backoff_delay(1)
-        
+
         assert delay == 60  # Base interval for first attempt
 
     @patch('atlas.modules.mcp_tools.client.config_manager')
@@ -216,9 +217,9 @@ class TestMCPBackoffCalculation:
         mock_settings.mcp_reconnect_max_interval = 300
         mock_settings.mcp_reconnect_backoff_multiplier = 2.0
         mock_config_manager.app_settings = mock_settings
-        
+
         manager = MCPToolManager.__new__(MCPToolManager)
-        
+
         # Second attempt: 60 * 2^1 = 120
         assert manager._calculate_backoff_delay(2) == 120
         # Third attempt: 60 * 2^2 = 240
@@ -234,12 +235,12 @@ class TestMCPBackoffCalculation:
         mock_settings.mcp_reconnect_max_interval = 300
         mock_settings.mcp_reconnect_backoff_multiplier = 2.0
         mock_config_manager.app_settings = mock_settings
-        
+
         manager = MCPToolManager.__new__(MCPToolManager)
-        
+
         # Very high attempt count should still be capped
         delay = manager._calculate_backoff_delay(10)
-        
+
         assert delay == 300
 
 
@@ -252,16 +253,16 @@ class TestMCPConfigReload:
         manager = MCPToolManager.__new__(MCPToolManager)
         manager.servers_config = {"old-server": {"description": "Old"}}
         manager._failed_servers = {"old-server": {"attempt_count": 1}}
-        
+
         # Mock new config
         mock_new_config = MagicMock()
         mock_server = MagicMock()
         mock_server.model_dump.return_value = {"description": "New"}
         mock_new_config.servers = {"new-server": mock_server}
         mock_config_manager.reload_mcp_config.return_value = mock_new_config
-        
+
         result = manager.reload_config()
-        
+
         assert "old-server" in result["removed"]
         assert "new-server" in result["added"]
         assert manager.servers_config == {"new-server": {"description": "New"}}
@@ -274,16 +275,16 @@ class TestMCPConfigReload:
         manager = MCPToolManager.__new__(MCPToolManager)
         manager.servers_config = {"existing-server": {"description": "Existing"}}
         manager._failed_servers = {}
-        
+
         # Mock config with same server
         mock_new_config = MagicMock()
         mock_server = MagicMock()
         mock_server.model_dump.return_value = {"description": "Updated"}
         mock_new_config.servers = {"existing-server": mock_server}
         mock_config_manager.reload_mcp_config.return_value = mock_new_config
-        
+
         result = manager.reload_config()
-        
+
         assert "existing-server" in result["unchanged"]
         assert result["added"] == []
         assert result["removed"] == []
@@ -389,9 +390,9 @@ class TestMCPReconnection:
         """Test that reconnect returns early when no servers have failed."""
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._failed_servers = {}
-        
+
         result = await manager.reconnect_failed_servers()
-        
+
         assert result["attempted"] == []
         assert result["reconnected"] == []
         assert result["still_failed"] == []
@@ -405,7 +406,7 @@ class TestMCPReconnection:
         mock_settings.mcp_reconnect_max_interval = 300
         mock_settings.mcp_reconnect_backoff_multiplier = 2.0
         mock_config_manager.app_settings = mock_settings
-        
+
         manager = MCPToolManager.__new__(MCPToolManager)
         manager.servers_config = {"test-server": {"description": "Test"}}
         manager.clients = {}
@@ -417,9 +418,9 @@ class TestMCPReconnection:
                 "error": "Connection refused"
             }
         }
-        
+
         result = await manager.reconnect_failed_servers(force=False)
-        
+
         assert result["attempted"] == []
         assert result["skipped_backoff"][0]["server"] == "test-server"
 
@@ -431,7 +432,7 @@ class TestMCPReconnection:
         mock_settings.mcp_reconnect_max_interval = 300
         mock_settings.mcp_reconnect_backoff_multiplier = 2.0
         mock_config_manager.app_settings = mock_settings
-        
+
         manager = MCPToolManager.__new__(MCPToolManager)
         manager.servers_config = {"test-server": {"description": "Test"}}
         manager.clients = {}
@@ -443,12 +444,12 @@ class TestMCPReconnection:
                 "error": "Connection refused"
             }
         }
-        
+
         # Mock the initialization method to return None (still failing)
         manager._initialize_single_client = AsyncMock(return_value=None)
-        
+
         result = await manager.reconnect_failed_servers(force=False)
-        
+
         assert "test-server" in result["attempted"]
         assert "test-server" in result["still_failed"]
         manager._initialize_single_client.assert_called_once()
@@ -495,17 +496,17 @@ class TestConfigManagerMCPReload:
     ):
         """Test that reload_mcp_config clears the cached config."""
         from atlas.modules.config.config_manager import ConfigManager
-        
+
         manager = ConfigManager()
         # Pre-populate cache
         manager._mcp_config = MagicMock()
         manager._tool_approvals_config = MagicMock()
-        
+
         # Mock the config loading
         mock_search.return_value = []
         mock_load.return_value = {"test-server": {"description": "Test"}}
-        
+
         manager.reload_mcp_config()
-        
+
         # Cache should have been cleared and reloaded
         assert manager._tool_approvals_config is None or manager._tool_approvals_config != MagicMock()

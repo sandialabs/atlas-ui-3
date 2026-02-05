@@ -8,7 +8,7 @@ from atlas.modules.llm.models import LLMResponse as LLMResponse
 @runtime_checkable
 class LLMProtocol(Protocol):
     """Protocol for LLM interactions."""
-    
+
     async def call_plain(
         self,
         model_name: str,
@@ -17,7 +17,7 @@ class LLMProtocol(Protocol):
     ) -> str:
         """Plain LLM call without tools or RAG."""
         ...
-    
+
     async def call_with_tools(
         self,
         model_name: str,
@@ -28,7 +28,7 @@ class LLMProtocol(Protocol):
     ) -> LLMResponse:
         """LLM call with tool support."""
         ...
-    
+
     async def call_with_rag(
         self,
         model_name: str,
@@ -39,7 +39,7 @@ class LLMProtocol(Protocol):
     ) -> str:
         """LLM call with RAG integration."""
         ...
-    
+
     async def call_with_rag_and_tools(
         self,
         model_name: str,

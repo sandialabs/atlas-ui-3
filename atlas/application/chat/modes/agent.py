@@ -1,12 +1,12 @@
 """Agent mode runner - handles LLM calls with agent loop execution."""
 
 import logging
-from typing import Dict, Any, List, Optional, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from atlas.domain.sessions.models import Session
 from atlas.domain.messages.models import Message, MessageRole, ToolResult
-
+from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
+
 from ..agent import AgentLoopFactory
 from ..agent.protocols import AgentContext
 from ..events.agent_event_relay import AgentEventRelay
@@ -21,10 +21,10 @@ UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 class AgentModeRunner:
     """
     Runner for agent mode.
-    
+
     Executes agent loops with event streaming and artifact processing.
     """
-    
+
     def __init__(
         self,
         agent_loop_factory: AgentLoopFactory,
@@ -34,7 +34,7 @@ class AgentModeRunner:
     ):
         """
         Initialize agent mode runner.
-        
+
         Args:
             agent_loop_factory: Factory for creating agent loops
             event_publisher: Event publisher for UI updates
@@ -45,7 +45,7 @@ class AgentModeRunner:
         self.event_publisher = event_publisher
         self.artifact_processor = artifact_processor
         self.default_strategy = default_strategy
-    
+
     async def run(
         self,
         session: Session,
@@ -59,7 +59,7 @@ class AgentModeRunner:
     ) -> Dict[str, Any]:
         """
         Execute agent mode.
-        
+
         Args:
             session: Current chat session
             model: LLM model to use
@@ -69,7 +69,7 @@ class AgentModeRunner:
             max_steps: Maximum number of agent steps
             temperature: LLM temperature parameter
             agent_loop_strategy: Strategy name (react, think-act). Falls back to default.
-            
+
         Returns:
             Response dictionary
         """

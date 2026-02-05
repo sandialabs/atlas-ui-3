@@ -9,9 +9,9 @@ the same pattern as the username injection feature.
 from unittest.mock import MagicMock
 
 from atlas.application.chat.utilities.tool_executor import (
-    tool_accepts_mcp_data,
     build_mcp_data,
     inject_context_into_args,
+    tool_accepts_mcp_data,
 )
 
 

@@ -8,14 +8,15 @@ argument processing, and synthesis decisions without maintaining any state.
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.core.capabilities import create_download_url
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.interfaces.llm import LLMResponse
-from atlas.core.capabilities import create_download_url
-from .event_notifier import _sanitize_filename_value  # reuse same filename sanitizer for UI args
-from ..approval_manager import get_approval_manager
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
+
+from ..approval_manager import get_approval_manager
+from .event_notifier import _sanitize_filename_value  # reuse same filename sanitizer for UI args
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
     """
     if config_manager is None:
         return (True, True, False)  # Default to requiring user-level approval
-    
+
     try:
         # Global override: force approval for all tools (admin-enforced)
         app_settings = getattr(config_manager, "app_settings", None)
@@ -163,7 +164,7 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
         # Default requirement: user-level regardless of default setting
         # Users can always toggle auto-approve via inline UI unless admin explicitly requires it
         return (True, True, False)
-    
+
     except Exception as e:
         logger.warning(f"Error checking approval requirements for {tool_name}: {e}")
     return (True, True, False)  # Default to user-level approval on error
@@ -236,18 +237,18 @@ def build_mcp_data(tool_manager) -> Dict[str, Any]:
 def tool_accepts_username(tool_name: str, tool_manager) -> bool:
     """
     Check if a tool accepts a username parameter by examining its schema.
-    
+
     Returns True if the tool schema defines a 'username' parameter, False otherwise.
     """
     if not tool_name or not tool_manager:
         return False
-    
+
     try:
         # Get the tool schema for this specific tool
         tools_schema = tool_manager.get_tools_schema([tool_name])
         if not tools_schema:
             return False
-            
+
         # Find the schema for our specific tool
         for tool_schema in tools_schema:
             if tool_schema.get("function", {}).get("name") == tool_name:
@@ -255,7 +256,7 @@ def tool_accepts_username(tool_name: str, tool_manager) -> bool:
                 parameters = tool_schema.get("function", {}).get("parameters", {})
                 properties = parameters.get("properties", {})
                 return "username" in properties
-        
+
         return False
     except Exception as e:
         logger.warning(f"Could not determine if tool {tool_name} accepts username: {e}")
@@ -272,12 +273,12 @@ async def execute_single_tool(
 ) -> ToolResult:
     """
     Execute a single tool with argument preparation and error handling.
-    
+
     Pure function that doesn't maintain state - all context passed as parameters.
     """
     logger.debug("Entering execute_single_tool")
     from . import event_notifier
-    
+
     try:
         # Prepare arguments with injections (username, filename URL mapping)
         parsed_args = prepare_tool_arguments(tool_call, session_context, tool_manager)
@@ -301,7 +302,7 @@ async def execute_single_tool(
             needs_approval = True
             allow_edit = True
             admin_required = False
-        
+
         # Track if arguments were edited (for LLM context)
         arguments_were_edited = False
         original_display_args = dict(display_args) if isinstance(display_args, dict) else display_args
@@ -372,7 +373,7 @@ async def execute_single_tool(
                     else:
                         # No actual changes, but response included arguments - keep original filtered_args
                         logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
-                
+
             except asyncio.TimeoutError:
                 approval_manager.cleanup_request(tool_call.id)
                 logger.warning(f"Approval timeout for tool {tool_call.function.name}")
@@ -534,7 +535,7 @@ def _sanitize_args_for_ui(args: Dict[str, Any]) -> Dict[str, Any]:
 def prepare_tool_arguments(tool_call, session_context: Dict[str, Any], tool_manager=None) -> Dict[str, Any]:
     """
     Process and prepare tool arguments with all injections and transformations.
-    
+
     Pure function that transforms arguments based on context and tool schema.
     """
     logger.debug("Entering prepare_tool_arguments")
@@ -573,10 +574,10 @@ def prepare_tool_arguments(tool_call, session_context: Dict[str, Any], tool_mana
 def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[str, Any], tool_name: str = None, tool_manager=None) -> Dict[str, Any]:
     """
     Inject username and file URL mappings into tool arguments.
-    
+
     Pure function that adds context without side effects.
     Only injects username if the tool schema defines a username parameter.
-    
+
     If BACKEND_PUBLIC_URL is configured, uses absolute URLs for file downloads.
     If INCLUDE_FILE_CONTENT_BASE64 is enabled, also injects base64 content as fallback.
     """
@@ -596,7 +597,7 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
 
         # Provide URL hints for filename/file_names fields
         files_ctx = session_context.get("files", {})
-        
+
         # Check if base64 content injection is enabled
         include_base64 = False
         try:
@@ -605,11 +606,11 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
             include_base64 = getattr(settings, "include_file_content_base64", False)
         except Exception as e:
             logger.debug(f"Could not check include_file_content_base64 setting: {e}")
-        
+
         def to_url(key: str) -> str:
             # Use tokenized URL so tools can fetch without cookies
             return create_download_url(key, user_email)
-        
+
         async def get_file_base64(key: str) -> Optional[str]:
             """Fetch base64 content for a file key."""
             try:
@@ -618,7 +619,7 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
                 if not file_manager:
                     from atlas.infrastructure.app_factory import get_file_storage
                     file_manager = get_file_storage()
-                
+
                 if file_manager and user_email:
                     file_data = await file_manager.get_file(user_email, key)
                     return file_data.get("content_base64") if file_data else None
@@ -640,7 +641,7 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
                 parsed_args.setdefault("original_filename", fname)
                 parsed_args["filename"] = url
                 parsed_args.setdefault("file_url", url)
-                
+
                 # Optionally inject base64 content as fallback
                 if include_base64:
                     # Note: We can't make this function async, so we mark this for future enhancement
@@ -689,7 +690,7 @@ async def handle_synthesis_decision(
 ) -> str:
     """
     Decide whether synthesis is needed and execute accordingly.
-    
+
     Pure function that doesn't maintain state.
     """
     # Check if we have only canvas tools
@@ -734,7 +735,7 @@ async def synthesize_tool_results(
 ) -> str:
     """
     Prepare augmented messages with synthesis prompt and obtain final answer.
-    
+
     Pure function that coordinates LLM call for synthesis.
     """
     # Extract latest user question (walk backwards)
@@ -769,7 +770,7 @@ async def synthesize_tool_results(
 def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, str]]:
     """
     Build ephemeral files manifest for LLM context.
-    
+
     Pure function that creates manifest from session context.
     """
     files_ctx = session_context.get("files", {})

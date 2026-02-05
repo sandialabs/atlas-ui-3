@@ -20,15 +20,14 @@ from __future__ import annotations
 import base64
 import io
 import os
-from typing import Any, Dict, List, Annotated, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import requests
-import matplotlib.pyplot as plt
 import seaborn as sns
-import numpy as np
 from fastmcp import FastMCP
-
 
 mcp = FastMCP("CSV_Reporter")
 
@@ -142,7 +141,7 @@ def generate_csv_report(
     """Generate comprehensive statistical analysis and summary report for CSV data files.
 
     This tool performs in-depth analysis of CSV files to provide actionable insights:
-    
+
     **Data Analysis Features:**
     - Complete dataset overview (rows, columns, data types)
     - Statistical summaries for all numeric columns (mean, median, std, min, max, quartiles)
@@ -252,7 +251,7 @@ def summarize_multiple_csvs(
     """Create comparative analysis and consolidated summary across multiple CSV datasets.
 
     This advanced tool processes multiple CSV files simultaneously to provide:
-    
+
     **Cross-Dataset Analysis:**
     - Comparative dataset metrics (rows, columns, sizes)
     - Column name consistency analysis across files
@@ -367,7 +366,7 @@ def plot_correlation_matrix(
     file_data_base64: Annotated[str, "Framework may supply Base64 content as fallback."] = "",
 ) -> Dict[str, Any]:
     """Generate an N by N correlation matrix plot for numeric columns in a CSV file.
-    
+
     Creates a heatmap showing linear correlations between specified columns or all numeric columns.
     """
     try:
@@ -391,14 +390,14 @@ def plot_correlation_matrix(
 
         # Calculate correlation matrix
         corr_matrix = numeric_df.corr()
-        
+
         # Create the plot
         plt.figure(figsize=(10, 8))
-        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0, 
+        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0,
                    square=True, fmt='.2f', cbar_kws={'shrink': 0.8})
         plt.title('Correlation Matrix')
         plt.tight_layout()
-        
+
         # Save plot to bytes
         img_buffer = io.BytesIO()
         plt.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
@@ -453,7 +452,7 @@ def plot_time_series(
     file_data_base64: Annotated[str, "Framework may supply Base64 content as fallback."] = "",
 ) -> Dict[str, Any]:
     """Generate connected scatter plots for specified columns with index as x-axis.
-    
+
     Creates a time series style plot where each specified column is plotted against the row index.
     """
     try:
@@ -474,7 +473,7 @@ def plot_time_series(
 
         # Select only the specified columns
         plot_df = df[columns]
-        
+
         # Check if columns are numeric (convert if possible)
         for col in columns:
             if not pd.api.types.is_numeric_dtype(plot_df[col]):
@@ -485,18 +484,18 @@ def plot_time_series(
 
         # Create the plot
         plt.figure(figsize=(12, 8))
-        
+
         for col in columns:
-            plt.plot(plot_df.index, plot_df[col], marker='o', markersize=3, 
+            plt.plot(plot_df.index, plot_df[col], marker='o', markersize=3,
                     linewidth=1.5, label=col, alpha=0.8)
-        
+
         plt.xlabel('Index')
         plt.ylabel('Values')
         plt.title('Time Series Plot')
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        
+
         # Save plot to bytes
         img_buffer = io.BytesIO()
         plt.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')

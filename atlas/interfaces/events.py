@@ -1,15 +1,15 @@
 """Event publisher interface for transport-agnostic UI updates."""
 
-from typing import Protocol, Any, Dict
+from typing import Any, Dict, Protocol
 
 
 class EventPublisher(Protocol):
     """
     Protocol for publishing events to UI/clients.
-    
+
     Provides transport-agnostic interface for sending various update types
     to connected clients (e.g., via WebSocket, SSE, HTTP streaming, etc.).
-    
+
     This interface lives in the interfaces layer to avoid circular dependencies
     and keep the application layer decoupled from atlas.infrastructure concerns.
     """

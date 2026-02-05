@@ -7,7 +7,8 @@ Demonstrates MCP server logging at various levels.
 import asyncio
 import time
 from typing import Any, Dict
-from fastmcp import FastMCP, Context
+
+from fastmcp import Context, FastMCP
 
 # Initialize the MCP server
 mcp = FastMCP("Logging Demo")
@@ -82,9 +83,9 @@ async def test_logging(operation: str, ctx: Context) -> Dict[str, Any]:
         await asyncio.sleep(delay_s)
         await ctx.info("Operation completed successfully")
         logs_emitted = ["info", "debug", "debug", "info", "debug", "warning", "debug", "info"]
-    
+
     elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
-    
+
     return {
         "results": {
             "operation": operation,

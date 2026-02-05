@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from atlas.modules.mcp_tools.client import MCPToolManager
 from atlas.modules.config import ConfigManager
+from atlas.modules.mcp_tools.client import MCPToolManager
 
 
 @pytest.mark.asyncio

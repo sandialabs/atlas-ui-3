@@ -9,9 +9,11 @@ These tests verify that:
 
 import asyncio
 import logging
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
-from atlas.modules.mcp_tools.client import MCPToolManager, MCP_TO_PYTHON_LOG_LEVEL
+
+from atlas.modules.mcp_tools.client import MCP_TO_PYTHON_LOG_LEVEL, MCPToolManager
 
 
 class MockLogMessage:
@@ -44,15 +46,15 @@ class TestMCPLogging:
         """Test that log handler forwards messages to UI callback."""
         # Create a mock callback
         mock_callback = AsyncMock()
-        
+
         with patch.dict('os.environ', {'LOG_LEVEL': 'DEBUG'}):
             manager = MCPToolManager(log_callback=mock_callback)
             log_handler = manager._create_log_handler("test_server")
-            
+
             # Send a log message
             msg = MockLogMessage('info', 'Test message', {'key': 'value'})
             await log_handler(msg)
-            
+
             # Callback should be called with correct parameters
             mock_callback.assert_called_once()
             call_args = mock_callback.call_args[0]
@@ -64,68 +66,68 @@ class TestMCPLogging:
     async def test_log_handler_filters_by_level(self):
         """Test that log handler respects min_log_level filtering."""
         mock_callback = AsyncMock()
-        
+
         # Set minimum level to WARNING
         with patch.dict('os.environ', {'LOG_LEVEL': 'WARNING'}):
             manager = MCPToolManager(log_callback=mock_callback)
             manager._min_log_level = logging.WARNING  # Ensure it's set
             log_handler = manager._create_log_handler("test_server")
-            
+
             # Send a DEBUG log (should be filtered out)
             debug_msg = MockLogMessage('debug', 'Debug message')
             await log_handler(debug_msg)
-            
+
             # Callback should NOT be called for DEBUG when level is WARNING
             mock_callback.assert_not_called()
-            
+
             # Send an INFO log (should also be filtered out)
             info_msg = MockLogMessage('info', 'Info message')
             await log_handler(info_msg)
-            
+
             # Still should not be called
             mock_callback.assert_not_called()
-            
+
             # Send a WARNING log (should pass through)
             warn_msg = MockLogMessage('warning', 'Warning message')
             await log_handler(warn_msg)
-            
+
             # Now callback should be called
             mock_callback.assert_called_once()
 
     async def test_set_log_callback(self):
         """Test that log callback can be set after initialization."""
         manager = MCPToolManager()
-        
+
         # Initially no callback
         assert manager._default_log_callback is None
-        
+
         # Set a callback
         mock_callback = AsyncMock()
         manager.set_log_callback(mock_callback)
-        
+
         assert manager._default_log_callback is mock_callback
-        
+
         # Test that it's used
         log_handler = manager._create_log_handler("test_server")
-        
+
         msg = MockLogMessage('info', 'Test message')
         await log_handler(msg)
-        
+
         mock_callback.assert_called_once()
 
     async def test_log_handler_handles_callback_errors_gracefully(self):
         """Test that log handler doesn't crash if callback raises an exception."""
         # Create a callback that raises an exception
         mock_callback = AsyncMock(side_effect=Exception("Callback error"))
-        
+
         manager = MCPToolManager(log_callback=mock_callback)
         log_handler = manager._create_log_handler("test_server")
-        
+
         # Send a log message - should not raise despite callback error
         msg = MockLogMessage('info', 'Test message')
         # This should not raise an exception
         await log_handler(msg)
-        
+
         # Verify the callback was attempted
         mock_callback.assert_called_once()
 

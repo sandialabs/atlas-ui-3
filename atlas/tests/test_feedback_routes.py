@@ -13,10 +13,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from starlette.testclient import TestClient
-
 from main import app
-
+from starlette.testclient import TestClient
 
 AUTH_HEADERS = {"X-User-Email": "test@test.com"}
 ADMIN_HEADERS = {"X-User-Email": "admin@test.com"}
@@ -34,7 +32,7 @@ def mock_feedback_dir(temp_feedback_dir, monkeypatch):
     """Mock the feedback directory to use temp directory."""
     def mock_get_feedback_directory():
         return temp_feedback_dir
-    
+
     monkeypatch.setattr(
         "atlas.routes.feedback_routes.get_feedback_directory",
         mock_get_feedback_directory
@@ -47,7 +45,7 @@ def mock_admin_check():
     """Mock admin group check to allow admin@test.com."""
     async def mock_is_user_in_group(user: str, group: str) -> bool:
         return user == "admin@test.com"
-    
+
     with patch("atlas.routes.feedback_routes.is_user_in_group", mock_is_user_in_group):
         yield
 
@@ -115,10 +113,10 @@ class TestFeedbackSubmission:
             headers=AUTH_HEADERS
         )
         assert resp.status_code == 200
-        
+
         feedback_files = list(mock_feedback_dir.glob("feedback_*.json"))
         assert len(feedback_files) == 1
-        
+
         with open(feedback_files[0]) as f:
             saved_data = json.load(f)
         assert saved_data["rating"] == 0
@@ -146,13 +144,13 @@ class TestFeedbackAdminAccess:
     def test_admin_can_view_feedback(self, mock_feedback_dir, mock_admin_check):
         """Admin users can view feedback list."""
         client = TestClient(app)
-        
+
         client.post(
             "/api/feedback",
             json={"rating": 1, "comment": "Test"},
             headers=AUTH_HEADERS
         )
-        
+
         resp = client.get("/api/feedback", headers=ADMIN_HEADERS)
         assert resp.status_code == 200
         data = resp.json()
@@ -182,14 +180,14 @@ class TestFeedbackDeletion:
     def test_admin_can_delete_feedback(self, mock_feedback_dir, mock_admin_check):
         """Admin users can delete feedback."""
         client = TestClient(app)
-        
+
         resp = client.post(
             "/api/feedback",
             json={"rating": -1, "comment": "To be deleted"},
             headers=AUTH_HEADERS
         )
         feedback_id = resp.json()["feedback_id"]
-        
+
         resp = client.delete(f"/api/feedback/{feedback_id}", headers=ADMIN_HEADERS)
         assert resp.status_code == 200
         assert resp.json()["message"] == "Feedback deleted successfully"

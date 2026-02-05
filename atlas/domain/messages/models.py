@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID, uuid4
 
 
@@ -36,7 +36,7 @@ class Message:
     content: str = ""
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -46,7 +46,7 @@ class Message:
             "timestamp": self.timestamp.isoformat(),
             "metadata": self.metadata
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Message":
         """Create from dictionary."""
@@ -65,7 +65,7 @@ class ToolCall:
     id: str
     name: str
     arguments: Dict[str, Any]
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -85,7 +85,7 @@ class ToolResult:
     artifacts: List[Dict[str, Any]] = field(default_factory=list)
     display_config: Optional[Dict[str, Any]] = None
     meta_data: Optional[Dict[str, Any]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         result = {
@@ -106,18 +106,18 @@ class ToolResult:
 class ConversationHistory:
     """Domain model for conversation history."""
     messages: List[Message] = field(default_factory=list)
-    
+
     def add_message(self, message: Message) -> None:
         """Add a message to the history."""
         self.messages.append(message)
-    
+
     def get_messages_for_llm(self) -> List[Dict[str, str]]:
         """Get messages formatted for LLM API."""
         return [
             {"role": msg.role.value, "content": msg.content}
             for msg in self.messages
         ]
-    
+
     def to_dict(self) -> List[Dict[str, Any]]:
         """Convert to dictionary list."""
         return [msg.to_dict() for msg in self.messages]
@@ -131,7 +131,7 @@ class ElicitationRequest:
     tool_name: str
     message: str
     response_schema: Dict[str, Any]
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for WebSocket transmission."""
         return {
@@ -150,7 +150,7 @@ class ElicitationResponse:
     elicitation_id: str
     action: Literal["accept", "decline", "cancel"]
     data: Optional[Dict[str, Any]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {

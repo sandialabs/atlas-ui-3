@@ -1,9 +1,9 @@
 """Unit tests for health check endpoint."""
 
-from starlette.testclient import TestClient
 from datetime import datetime
 
 from main import app
+from starlette.testclient import TestClient
 
 
 def test_health_endpoint_returns_200():
@@ -38,7 +38,7 @@ def test_health_endpoint_response_structure():
     # Verify field values
     assert data["status"] == "healthy"
     assert data["service"] == "atlas-ui-3-backend"
-    
+
     # This version number can change, so just check it's a non-empty string
     assert isinstance(data["version"], str) and len(data["version"]) > 0
 

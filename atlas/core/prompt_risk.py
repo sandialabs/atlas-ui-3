@@ -13,8 +13,8 @@ import math
 import re
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
 from pathlib import Path
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

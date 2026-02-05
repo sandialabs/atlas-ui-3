@@ -13,7 +13,7 @@ class LLMResponse:
     tool_calls: Optional[List[Dict]] = None
     model_used: str = ""
     tokens_used: int = 0
-    
+
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""
         return self.tool_calls is not None and len(self.tool_calls) > 0

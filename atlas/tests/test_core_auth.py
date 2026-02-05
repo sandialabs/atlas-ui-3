@@ -1,8 +1,7 @@
 
-from atlas.modules.config.config_manager import config_manager
-
-
 import pytest
+
+from atlas.modules.config.config_manager import config_manager
 
 
 @pytest.mark.asyncio

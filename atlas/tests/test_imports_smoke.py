@@ -2,7 +2,6 @@ import pkgutil
 import sys
 from pathlib import Path
 
-
 # Import all backend python modules to catch import-time errors quickly.
 # Skip heavy runtime side effects by not executing app.run, etc.
 

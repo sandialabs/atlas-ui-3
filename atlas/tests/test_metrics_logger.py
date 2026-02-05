@@ -1,7 +1,7 @@
 """Tests for core.metrics_logger module."""
 
 import logging
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from atlas.core.metrics_logger import log_metric
 

@@ -3,11 +3,12 @@ MCP server that demonstrates returning ImageContent.
 This is a test server to validate image display functionality.
 """
 
+import base64
+from io import BytesIO
+
 from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 from mcp.types import ImageContent, TextContent
-import base64
-from io import BytesIO
 
 mcp = FastMCP("Image Demo MCP")
 

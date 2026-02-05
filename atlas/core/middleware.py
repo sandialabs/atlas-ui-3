@@ -3,12 +3,11 @@
 import logging
 
 from fastapi import Request
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from atlas.core.auth import get_user_from_header
-from atlas.core.auth import get_user_from_aws_alb_jwt
+from atlas.core.auth import get_user_from_aws_alb_jwt, get_user_from_header
 from atlas.core.capabilities import verify_file_token
 from atlas.infrastructure.app_factory import app_factory
 
@@ -17,11 +16,11 @@ logger = logging.getLogger(__name__)
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """Middleware to handle authentication and logging."""
-    
+
     def __init__(
-        self, 
-        app, 
-        debug_mode: bool = False, 
+        self,
+        app,
+        debug_mode: bool = False,
         auth_header_name: str = "X-User-Email",
         auth_header_type: str = "email-string",
         auth_aws_expected_alb_arn: str = "",
@@ -41,7 +40,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.proxy_secret_header = proxy_secret_header
         self.proxy_secret = proxy_secret
         self.auth_redirect_url = auth_redirect_url
-        
+
     async def dispatch(self, request: Request, call_next) -> Response:
         # Log request
         logger.debug("Request: %s %s", request.method, request.url.path)
@@ -51,11 +50,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.url.path == '/api/health' or
             request.url.path == self.auth_redirect_url):
             return await call_next(request)
-        
+
         # Validate proxy secret if enabled (skip in debug mode for local development)
         if self.proxy_secret_enabled and self.proxy_secret and not self.debug_mode:
             proxy_secret_value = request.headers.get(self.proxy_secret_header)
-            
+
             if not proxy_secret_value or proxy_secret_value != self.proxy_secret:
                 logger.warning(f"Invalid or missing proxy secret for {request.url.path}")
                 # Distinguish between API endpoints (return 401) and browser endpoints (redirect)

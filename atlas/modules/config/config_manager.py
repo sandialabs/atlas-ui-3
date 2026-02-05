@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, AliasChoices, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -89,13 +89,13 @@ class ModelConfig(BaseModel):
 class LLMConfig(BaseModel):
     """Configuration for all LLM models."""
     models: Dict[str, ModelConfig]
-    
+
     @field_validator('models', mode='before')
     @classmethod
     def validate_models(cls, v):
         """Convert dict values to ModelConfig objects."""
         if isinstance(v, dict):
-            return {name: ModelConfig(**config) if isinstance(config, dict) else config 
+            return {name: ModelConfig(**config) if isinstance(config, dict) else config
                    for name, config in v.items()}
         return v
 
@@ -276,7 +276,7 @@ class FileExtractorsConfig(BaseModel):
 
 class AppSettings(BaseSettings):
     """Main application settings loaded from environment variables."""
-    
+
     # Application settings
     app_name: str = "Chat UI"
     port: int = 8000
@@ -294,7 +294,7 @@ class AppSettings(BaseSettings):
         description="Suppress LiteLLM verbose stdout/debug output by setting LITELLM_LOG=ERROR",
         validation_alias=AliasChoices("FEATURE_SUPPRESS_LITELLM_LOGGING"),
     )
-    
+
     # RAG Feature Flag
     # When enabled, RAG sources are configured in config/overrides/rag-sources.json
     # See docs/admin/external-rag-api.md for configuration details
@@ -306,18 +306,18 @@ class AppSettings(BaseSettings):
 
     # Banner settings
     banner_enabled: bool = False
-    
+
     # Splash screen settings
     feature_splash_screen_enabled: bool = Field(
         False,
         description="Enable startup splash screen for displaying policies and information",
         validation_alias=AliasChoices("FEATURE_SPLASH_SCREEN_ENABLED", "SPLASH_SCREEN_ENABLED"),
     )
-    
+
     # Agent settings
     # Renamed to feature_agent_mode_available to align with other FEATURE_* flags.
     feature_agent_mode_available: bool = Field(
-        True, 
+        True,
         description="Agent mode availability feature flag",
         validation_alias=AliasChoices("FEATURE_AGENT_MODE_AVAILABLE", "AGENT_MODE_AVAILABLE")
     )  # Accept both old and new env var names
@@ -340,10 +340,10 @@ class AppSettings(BaseSettings):
 
     # LLM Health Check settings
     llm_health_check_interval: int = 5  # minutes
-    
-    # MCP Health Check settings  
+
+    # MCP Health Check settings
     mcp_health_check_interval: int = 300  # seconds (5 minutes)
-    
+
     # MCP Auto-Reconnect settings
     feature_mcp_auto_reconnect_enabled: bool = Field(
         False,
@@ -393,7 +393,7 @@ class AppSettings(BaseSettings):
     test_user: str = "test@test.com"  # Test user for development
     auth_group_check_url: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_URL")
     auth_group_check_api_key: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_API_KEY")
-    
+
     # Authentication header configuration
     auth_user_header: str = Field(
         default="X-User-Email",
@@ -421,7 +421,7 @@ class AppSettings(BaseSettings):
         description="The AWS region",
         validation_alias="AUTH_AWS_REGION"
     )
-    
+
     # Proxy secret authentication configuration
     feature_proxy_secret_enabled: bool = Field(
         default=False,
@@ -443,7 +443,7 @@ class AppSettings(BaseSettings):
         description="URL to redirect to when authentication fails",
         validation_alias="AUTH_REDIRECT_URL"
     )
-    
+
     # S3/MinIO storage settings
     use_mock_s3: bool = False  # Use in-process S3 mock (no Docker required)
     s3_endpoint: str = "http://localhost:9000"
@@ -453,7 +453,7 @@ class AppSettings(BaseSettings):
     s3_region: str = "us-east-1"
     s3_timeout: int = 30
     s3_use_ssl: bool = False
-    
+
     # Feature flags
     feature_workspaces_enabled: bool = False
     feature_tools_enabled: bool = False
@@ -526,7 +526,7 @@ class AppSettings(BaseSettings):
     # Agent prompts
     agent_reason_prompt_filename: str = "agent_reason_prompt.md"  # Filename for agent reason phase
     agent_observe_prompt_filename: str = "agent_observe_prompt.md"  # Filename for agent observe phase
-    
+
     # Config file names (can be overridden via environment variables)
     mcp_config_file: str = Field(default="mcp.json", validation_alias="MCP_CONFIG_FILE")
     rag_sources_config_file: str = Field(default="rag-sources.json", validation_alias="RAG_SOURCES_CONFIG_FILE")
@@ -536,26 +536,26 @@ class AppSettings(BaseSettings):
     tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
     splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
     file_extractors_config_file: str = Field(default="file-extractors.json", validation_alias="FILE_EXTRACTORS_CONFIG_FILE")
-    
+
     # Config directory paths
     app_config_overrides: str = Field(default="config/overrides", validation_alias="APP_CONFIG_OVERRIDES")
     app_config_defaults: str = Field(default="config/defaults", validation_alias="APP_CONFIG_DEFAULTS")
-    
+
     # Logging directory
     app_log_dir: Optional[str] = Field(default=None, validation_alias="APP_LOG_DIR")
-    
+
     # Environment mode
     environment: str = Field(default="production", validation_alias="ENVIRONMENT")
-    
+
     # Prompt injection risk thresholds
-    # NOT USED RIGHT NOW. 
+    # NOT USED RIGHT NOW.
     pi_threshold_low: int = Field(default=30, validation_alias="PI_THRESHOLD_LOW")
     pi_threshold_medium: int = Field(default=50, validation_alias="PI_THRESHOLD_MEDIUM")
     pi_threshold_high: int = Field(default=80, validation_alias="PI_THRESHOLD_HIGH")
-    
+
     # Runtime directories (relative to project root, not backend/)
     runtime_feedback_dir: str = Field(default="../runtime/feedback", validation_alias="RUNTIME_FEEDBACK_DIR")
-    
+
     @model_validator(mode='after')
     def validate_aws_alb_config(self):
         """Validate that AWS ALB ARN is properly configured when using aws-alb-jwt auth."""
@@ -567,10 +567,10 @@ class AppSettings(BaseSettings):
                     "Current value is empty or a placeholder. Set AUTH_AWS_EXPECTED_ALB_ARN environment variable."
                 )
         return self
-    
+
     model_config = {
-        "env_file": "../.env", 
-        "env_file_encoding": "utf-8", 
+        "env_file": "../.env",
+        "env_file_encoding": "utf-8",
         "extra": "ignore",
     "env_prefix": "",
     }
@@ -578,7 +578,7 @@ class AppSettings(BaseSettings):
 
 class ConfigManager:
     """Centralized configuration manager with proper error handling."""
-    
+
     def __init__(self, backend_root: Optional[Path] = None):
         self._backend_root = backend_root or Path(__file__).parent.parent.parent
         self._app_settings: Optional[AppSettings] = None
@@ -588,7 +588,7 @@ class ConfigManager:
         self._rag_sources_config: Optional[RAGSourcesConfig] = None
         self._tool_approvals_config: Optional[ToolApprovalsConfig] = None
         self._file_extractors_config: Optional[FileExtractorsConfig] = None
-    
+
     def _search_paths(self, file_name: str) -> List[Path]:
         """Generate common search paths for a configuration file.
 
@@ -650,16 +650,16 @@ class ConfigManager:
             "Config search paths for %s: %s", file_name, [str(p) for p in search_paths]
         )
         return search_paths
-    
+
     def _load_file_with_error_handling(self, file_paths: List[Path], file_type: str) -> Optional[Dict[str, Any]]:
         """Load a file with comprehensive error handling and logging."""
         for path in file_paths:
             try:
                 if not path.exists():
                     continue
-                    
+
                 logger.info(f"Found {file_type} config at: {path.absolute()}")
-                
+
                 with open(path, "r", encoding="utf-8") as f:
                     if file_type.lower() == "yaml":
                         data = yaml.safe_load(f)
@@ -667,27 +667,27 @@ class ConfigManager:
                         data = json.load(f)
                     else:
                         raise ValueError(f"Unsupported file type: {file_type}")
-                
+
                 if not isinstance(data, dict):
                     logger.error(
                         f"Invalid {file_type} format in {path}: expected dict, got {type(data)}",
                         exc_info=True
                     )
                     continue
-                    
+
                 logger.info(f"Successfully loaded {file_type} config from {path}")
                 return data
-                
+
             except (yaml.YAMLError, json.JSONDecodeError) as e:
                 logger.error(f"{file_type} parsing error in {path}: {e}", exc_info=True)
                 continue
             except Exception as e:
                 logger.error(f"Unexpected error reading {path}: {e}", exc_info=True)
                 continue
-        
+
         logger.warning(f"{file_type} config not found in any of these locations: {[str(p) for p in file_paths]}")
         return None
-    
+
     @property
     def app_settings(self) -> AppSettings:
         """Get application settings (cached)."""
@@ -700,7 +700,7 @@ class ConfigManager:
                 # Create default settings as fallback
                 self._app_settings = AppSettings()
         return self._app_settings
-    
+
     @property
     def llm_config(self) -> LLMConfig:
         """Get LLM configuration (cached)."""
@@ -710,7 +710,7 @@ class ConfigManager:
                 llm_filename = self.app_settings.llm_config_file
                 file_paths = self._search_paths(llm_filename)
                 data = self._load_file_with_error_handling(file_paths, "YAML")
-                
+
                 if data:
                     self._llm_config = LLMConfig(**data)
                     # Validate compliance levels
@@ -719,13 +719,13 @@ class ConfigManager:
                 else:
                     self._llm_config = LLMConfig(models={})
                     logger.info("Created empty LLM config (no configuration file found)")
-                    
+
             except Exception as e:
                 logger.error(f"Failed to parse LLM configuration: {e}", exc_info=True)
                 self._llm_config = LLMConfig(models={})
-        
+
         return self._llm_config
-    
+
     def _validate_llm_compliance_levels(self):
         """Validate compliance levels for all LLM models."""
         try:
@@ -733,7 +733,7 @@ class ConfigManager:
             # Use non-prefixed imports so they resolve when cwd=backend
             from atlas.core.compliance import get_compliance_manager
             compliance_mgr = get_compliance_manager()
-            
+
             for model_name, model_config in self._llm_config.models.items():
                 if model_config.compliance_level:
                     validated = compliance_mgr.validate_compliance_level(
@@ -744,7 +744,7 @@ class ConfigManager:
                     model_config.compliance_level = validated
         except Exception as e:
             logger.warning(f"Could not validate LLM compliance levels: {e}")
-    
+
     @property
     def mcp_config(self) -> MCPConfig:
         """Get MCP configuration (cached)."""
@@ -754,7 +754,7 @@ class ConfigManager:
                 mcp_filename = self.app_settings.mcp_config_file
                 file_paths = self._search_paths(mcp_filename)
                 data = self._load_file_with_error_handling(file_paths, "JSON")
-                
+
                 if data:
                     # Convert flat structure to nested structure for Pydantic
                     servers_data = {"servers": data}
@@ -765,11 +765,11 @@ class ConfigManager:
                 else:
                     self._mcp_config = MCPConfig()
                     logger.info("Created empty MCP config (no configuration file found)")
-                    
+
             except Exception as e:
                 logger.error(f"Failed to parse MCP configuration: {e}", exc_info=True)
                 self._mcp_config = MCPConfig()
-        
+
         return self._mcp_config
 
     @property
@@ -1002,7 +1002,7 @@ class ConfigManager:
             # Standardize on running from atlas/ directory (agent_start.sh)
             from atlas.core.compliance import get_compliance_manager
             compliance_mgr = get_compliance_manager()
-            
+
             for server_name, server_config in config.servers.items():
                 if server_config.compliance_level:
                     validated = compliance_mgr.validate_compliance_level(
@@ -1013,7 +1013,7 @@ class ConfigManager:
                     server_config.compliance_level = validated
         except Exception as e:
             logger.warning(f"Could not validate {config_type} compliance levels: {e}")
-    
+
     def reload_configs(self) -> None:
         """Reload all configurations from files."""
         self._app_settings = None
@@ -1024,13 +1024,13 @@ class ConfigManager:
         self._tool_approvals_config = None
         self._file_extractors_config = None
         logger.info("Configuration cache cleared, will reload on next access")
-    
+
     def reload_mcp_config(self) -> MCPConfig:
         """Reload MCP configuration from disk.
-        
+
         This clears the cached MCP config and forces a reload from the config file.
         Used for hot-reloading MCP server configuration without restarting the application.
-        
+
         Returns:
             The newly loaded MCPConfig
         """
@@ -1038,18 +1038,18 @@ class ConfigManager:
         self._tool_approvals_config = None  # Also clear tool approvals since they depend on MCP
         logger.info("MCP configuration cache cleared, reloading from disk")
         return self.mcp_config
-    
+
     def validate_config(self) -> Dict[str, bool]:
         """Validate all configurations and return status."""
         status = {}
-        
+
         try:
             self.app_settings
             status["app_settings"] = True
         except Exception as e:
             logger.error(f"App settings validation failed: {e}", exc_info=True)
             status["app_settings"] = False
-        
+
         try:
             llm_config = self.llm_config
             status["llm_config"] = len(llm_config.models) > 0
@@ -1058,7 +1058,7 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"LLM config validation failed: {e}", exc_info=True)
             status["llm_config"] = False
-        
+
         try:
             mcp_config = self.mcp_config
             status["mcp_config"] = len(mcp_config.servers) > 0
@@ -1067,7 +1067,7 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"MCP config validation failed: {e}", exc_info=True)
             status["mcp_config"] = False
-        
+
         return status
 
 

@@ -8,6 +8,7 @@ from typing import Dict, Optional, Tuple
 
 import httpx
 import jwt
+
 from atlas.modules.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
@@ -73,14 +74,14 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
 def _get_alb_public_key(kid: str, aws_region: str) -> Optional[str]:
     """
     Fetch and cache AWS ALB public key by key ID.
-    
+
     Caching reduces latency and API calls since AWS ALB rotates keys infrequently.
     Cache has a 1-hour TTL to handle key rotation.
-    
+
     Args:
         kid: Key ID from JWT header
         aws_region: AWS region (e.g., 'us-east-1')
-        
+
     Returns:
         Public key string, or None if fetch fails
     """
@@ -92,7 +93,7 @@ def _get_alb_public_key(kid: str, aws_region: str) -> Optional[str]:
     if not re.match(r'^[a-z]{2}-[a-z]+-\d+$', aws_region):
         logger.error(f"Invalid AWS region format: {aws_region}")
         return None
-    
+
     # Security: TTL-based cache (1 hour) allows key rotation and prevents stale keys
     # if AWS rotates keys or a key is compromised
     cache_key = (kid, aws_region)
@@ -104,17 +105,17 @@ def _get_alb_public_key(kid: str, aws_region: str) -> Optional[str]:
         else:
             # Expired, remove from cache
             del _alb_key_cache[cache_key]
-    
+
     url = f'https://public-keys.auth.elb.{aws_region}.amazonaws.com/{kid}'
     try:
         response = httpx.get(url, timeout=5.0)
         response.raise_for_status()
         pub_key = response.text
-        
+
         # Cache with 1-hour TTL
         expiry = now + timedelta(hours=1)
         _alb_key_cache[cache_key] = (pub_key, expiry)
-        
+
         return pub_key
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error fetching ALB public key from {url}: {e.response.status_code}")
@@ -143,7 +144,7 @@ def get_user_from_aws_alb_jwt(encoded_jwt, expected_alb_arn, aws_region):
         header = jwt.get_unverified_header(encoded_jwt)
         kid = header.get('kid')
         received_alb_arn = header.get('signer')
-        
+
         if not kid:
             logger.error("Error: 'kid' not found in JWT header")
             return None

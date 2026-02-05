@@ -4,13 +4,13 @@ import asyncio
 import json
 from typing import Any, Dict, List, Optional
 
+from atlas.domain.messages.models import ToolResult
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
+from ..utilities import error_handler, file_processor, tool_executor
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
-from ..utilities import file_processor, error_handler, tool_executor
-from atlas.domain.messages.models import ToolResult
 
 
 class ReActAgentLoop(AgentLoopProtocol):

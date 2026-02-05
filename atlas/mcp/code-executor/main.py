@@ -10,23 +10,23 @@ import os
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, Annotated, Optional
+from typing import Annotated, Any, Dict, Optional
 
 import requests
+from execution_engine import execute_code_safely
+from execution_environment import CodeExecutionError, create_execution_environment, save_file_to_execution_dir
 from fastmcp import FastMCP
+from result_processing import (
+    create_visualization_html,
+    detect_matplotlib_plots,
+    encode_generated_files,
+    list_generated_files,
+    truncate_output_for_llm,
+)
+from script_generation import create_safe_execution_script
 
 # Import from modular components
 from security_checker import check_code_security
-from execution_environment import CodeExecutionError, create_execution_environment, save_file_to_execution_dir
-from script_generation import create_safe_execution_script
-from execution_engine import execute_code_safely
-from result_processing import (
-    detect_matplotlib_plots,
-    create_visualization_html,
-    list_generated_files,
-    encode_generated_files,
-    truncate_output_for_llm
-)
 
 # Debug logging control
 VERBOSE = False
@@ -76,15 +76,15 @@ def _backend_base_url() -> str:
 
 def _extract_clean_filename(filename: str) -> str:
     """Extract clean filename from backend download URLs.
-    
+
     Handles patterns like: /api/files/download/1755397356_8d48a218_signal_data.csv?token=...
     Returns: signal_data.csv
     """
     import re
-    
+
     # First, remove query parameters (everything after ?)
     clean_path = filename.split('?')[0]
-    
+
     if clean_path.startswith('/api/files/download/'):
         url_basename = os.path.basename(clean_path)
         # Try to extract original filename from pattern: timestamp_hash_originalname.ext
@@ -166,15 +166,15 @@ def execute_python_code_with_file(
     Safely execute Python code in an isolated environment with optional file upload.
 
     Demonstrates two v2 behaviors described in v2_mcp_note.md:
-    1) filename to downloadable URLs: If the backend rewrites filename 
+    1) filename to downloadable URLs: If the backend rewrites filename
        to /api/files/download/... URLs, this server will fetch and process them.
        It also accepts file_data_base64 as a fallback for content delivery.
     2) username injection: If a `username` parameter is defined in the tool schema,
        the backend can inject the authenticated user's email/username. This server
        trusts the provided username value and echoes it in outputs.
 
-    This function allows you to execute Python code either standalone or with access 
-    to an uploaded file (e.g., CSV, JSON, TXT, etc.). If a file is provided, it will 
+    This function allows you to execute Python code either standalone or with access
+    to an uploaded file (e.g., CSV, JSON, TXT, etc.). If a file is provided, it will
     be available in the execution directory and can be accessed by filename in your code.
 
     IMPORTANT - Output Truncation:
@@ -200,14 +200,14 @@ def execute_python_code_with_file(
         ```python
         import pandas as pd
         import matplotlib.pyplot as plt
-        
+
         df = pd.read_csv('data.csv')
         print(df.head())  # This will be truncated if very large
-        
+
         # For large datasets, save to file instead of printing
         df.describe().to_csv('summary.csv')  # Better approach for large output
         print(f"Dataset has {len(df)} rows")  # Concise summary instead
-        
+
         # Create plots - MUST use plt.savefig() to generate plot files
         plt.figure(figsize=(10, 6))
         plt.plot(df['column_name'])
@@ -221,7 +221,7 @@ def execute_python_code_with_file(
         filename: Name of the file to upload (Backend may rewrite to a downloadable URL)
         username: Injected by backend. Trust this value.
         file_data_base64: Framework may supply Base64 content as fallback.
-        
+
         Returns (MCP Contract):
                 {
                     "results": <primary result payload or {"error": msg}>,
@@ -314,7 +314,7 @@ def execute_python_code_with_file(
 
             # Convert to v2 artifacts format
             artifacts = []
-            
+
             # Add script artifact
             artifacts.append({
                 "name": script_filename,
@@ -324,7 +324,7 @@ def execute_python_code_with_file(
                 "description": f"Generated execution script: {script_filename}",
                 "viewer": "code"
             })
-            
+
             # Add HTML visualization if generated
             if html_filename and 'html_content_b64' in locals():
                 artifacts.append({
@@ -335,12 +335,12 @@ def execute_python_code_with_file(
                     "description": f"Execution results visualization: {html_filename}",
                     "viewer": "html"
                 })
-            
+
             # Add other generated files
             for file_info in encoded_generated_files:
                 filename = file_info["filename"]
                 content_b64 = file_info["content_base64"]
-                
+
                 # Determine MIME type based on file extension
                 if filename.endswith('.html'):
                     mime_type = "text/html"
@@ -360,13 +360,13 @@ def execute_python_code_with_file(
                 else:
                     mime_type = "application/octet-stream"
                     viewer = "auto"
-                
+
                 # Calculate size from base64
                 try:
                     size = len(base64.b64decode(content_b64))
                 except Exception:
                     size = 0
-                
+
                 artifacts.append({
                     "name": filename,
                     "b64": content_b64,
@@ -397,14 +397,14 @@ def execute_python_code_with_file(
                 "is_error": False,
                 "generated_by": username
             }
-            
+
             # Determine primary file for display (prefer HTML visualization)
             primary_file = None
             if html_filename:
                 primary_file = html_filename
             elif artifacts:
                 primary_file = artifacts[0]["name"]
-            
+
             return {
                 "results": results_payload,
                 "meta_data": meta_data,
@@ -447,7 +447,7 @@ def execute_python_code_with_file(
                 "description": f"Failed execution script: {script_filename}",
                 "viewer": "code"
             }]
-            
+
             return {
                 "results": results_payload,
                 "meta_data": meta_data,
@@ -479,7 +479,7 @@ def execute_python_code_with_file(
             "description": f"Script that caused execution error: {script_filename}",
             "viewer": "code"
         }]
-        
+
         return {
             "results": {"error": f"Code execution error: {str(ce)}"},
             "meta_data": {"is_error": True, "error_type": "CodeExecutionError", "execution_time_sec": exec_time, "generated_by": username},
@@ -511,7 +511,7 @@ def execute_python_code_with_file(
             "description": f"Script that caused server error: {script_filename}",
             "viewer": "code"
         }]
-        
+
         return {
             "results": {"error": f"Server error: {str(e)}"},
             "meta_data": {"is_error": True, "error_type": type(e).__name__, "execution_time_sec": exec_time, "generated_by": username},

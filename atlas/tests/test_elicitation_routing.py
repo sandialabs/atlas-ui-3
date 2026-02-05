@@ -5,8 +5,10 @@ Tests the dictionary-based routing system that allows elicitation requests
 from MCP tools to reach the correct WebSocket connection across async tasks.
 """
 
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
+
 from atlas.domain.messages.models import ToolCall
 
 
@@ -147,8 +149,9 @@ class TestElicitationHandler:
     @pytest.mark.asyncio
     async def test_handler_returns_cancel_when_no_routing(self, manager):
         """Test that handler returns cancel when routing not found."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
         from fastmcp.client.elicitation import ElicitResult
+
+        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
 
         _ELICITATION_ROUTING.clear()
 
@@ -164,9 +167,10 @@ class TestElicitationHandler:
     @pytest.mark.asyncio
     async def test_handler_returns_cancel_when_no_update_cb(self, manager):
         """Test that handler returns cancel when update_cb is None."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING, _ElicitationRoutingContext
-        from atlas.domain.messages.models import ToolCall
         from fastmcp.client.elicitation import ElicitResult
+
+        from atlas.domain.messages.models import ToolCall
+        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING, _ElicitationRoutingContext
 
         _ELICITATION_ROUTING.clear()
 
@@ -201,8 +205,8 @@ class TestElicitationIntegration:
     @pytest.mark.asyncio
     async def test_elicitation_request_sent_to_callback(self, manager):
         """Test that elicitation request is sent to update callback."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING, _ElicitationRoutingContext
         from atlas.domain.messages.models import ToolCall
+        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING, _ElicitationRoutingContext
 
         _ELICITATION_ROUTING.clear()
 
@@ -252,8 +256,8 @@ class TestElicitationIntegration:
         FastMCP validation for response_type=None expects an empty response object.
         Some UIs send placeholder payloads like {'none': ''}; we must not forward them.
         """
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING, _ElicitationRoutingContext
         from atlas.domain.messages.models import ToolCall
+        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING, _ElicitationRoutingContext
 
         _ELICITATION_ROUTING.clear()
 

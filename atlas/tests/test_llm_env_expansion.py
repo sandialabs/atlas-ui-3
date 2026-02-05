@@ -1,6 +1,7 @@
 """Integration tests for LLM environment variable expansion."""
 
 import pytest
+
 from atlas.modules.config.config_manager import LLMConfig, ModelConfig
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
@@ -11,7 +12,7 @@ class TestLLMEnvExpansionIntegration:
     def test_litellm_caller_resolves_api_key_env_var(self, monkeypatch):
         """LiteLLMCaller should resolve environment variables in api_key."""
         monkeypatch.setenv("TEST_OPENAI_KEY", "sk-test-12345")
-        
+
         # Create LLM config with env var in api_key
         llm_config = LLMConfig(
             models={
@@ -22,13 +23,13 @@ class TestLLMEnvExpansionIntegration:
                 )
             }
         )
-        
+
         # Create LiteLLMCaller
         caller = LiteLLMCaller(llm_config, debug_mode=True)
-        
+
         # Get model kwargs - this should resolve the env var
         _ = caller._get_model_kwargs("test-model")
-        
+
         # Verify that the environment variable was set (LiteLLMCaller sets env vars for provider detection)
         import os
         assert os.environ.get("OPENAI_API_KEY") == "sk-test-12345"
@@ -48,10 +49,10 @@ class TestLLMEnvExpansionIntegration:
                 )
             }
         )
-        
+
         # Create LiteLLMCaller
         caller = LiteLLMCaller(llm_config, debug_mode=True)
-        
+
         # Get model kwargs - this should raise ValueError
         with pytest.raises(ValueError, match="Environment variable 'MISSING_OPENAI_KEY' is not set"):
             caller._get_model_kwargs("test-model")
@@ -68,10 +69,10 @@ class TestLLMEnvExpansionIntegration:
                 )
             }
         )
-        
+
         # Create LiteLLMCaller
         caller = LiteLLMCaller(llm_config, debug_mode=True)
-        
+
         # Get model kwargs - this should work without errors
         _ = caller._get_model_kwargs("test-model")
 
@@ -86,7 +87,7 @@ class TestLLMEnvExpansionIntegration:
         """LiteLLMCaller should resolve environment variables in extra_headers."""
         monkeypatch.setenv("TEST_REFERER", "https://myapp.com")
         monkeypatch.setenv("TEST_APP_NAME", "MyTestApp")
-        
+
         # Create LLM config with env vars in extra_headers
         llm_config = LLMConfig(
             models={
@@ -101,13 +102,13 @@ class TestLLMEnvExpansionIntegration:
                 )
             }
         )
-        
+
         # Create LiteLLMCaller
         caller = LiteLLMCaller(llm_config, debug_mode=True)
-        
+
         # Get model kwargs - this should resolve the env vars
         model_kwargs = caller._get_model_kwargs("test-model")
-        
+
         # Verify that extra_headers were resolved
         assert "extra_headers" in model_kwargs
         assert model_kwargs["extra_headers"]["HTTP-Referer"] == "https://myapp.com"
@@ -128,10 +129,10 @@ class TestLLMEnvExpansionIntegration:
                 )
             }
         )
-        
+
         # Create LiteLLMCaller
         caller = LiteLLMCaller(llm_config, debug_mode=True)
-        
+
         # Get model kwargs - this should raise ValueError
         with pytest.raises(ValueError, match="Environment variable 'MISSING_REFERER' is not set"):
             caller._get_model_kwargs("test-model")
@@ -584,18 +585,18 @@ class TestLLMEnvExpansionIntegration:
         )
 
         caller = LiteLLMCaller(llm_config, debug_mode=True)
-        
+
         # Get kwargs - empty api_key is treated as None/missing
         # The implementation only sets api_key if it's truthy
         kwargs = caller._get_model_kwargs("model-with-empty-key")
-        
+
         # Empty string is not passed through (falsy value)
         assert "api_key" not in kwargs
 
     def test_switching_between_models_updates_env_correctly(self, monkeypatch):
         """Test that switching between different model types updates environment correctly."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-initial")
-        
+
         llm_config = LLMConfig(
             models={
                 "anthropic-model": ModelConfig(
@@ -619,7 +620,7 @@ class TestLLMEnvExpansionIntegration:
         caller = LiteLLMCaller(llm_config, debug_mode=True)
 
         import os
-        
+
         # Call Anthropic
         anthropic_kwargs = caller._get_model_kwargs("anthropic-model")
         assert anthropic_kwargs["api_key"] == "sk-ant-new"
@@ -644,7 +645,7 @@ class TestLLMEnvExpansionIntegration:
 
     def test_custom_endpoints_with_openai_prefix_in_model_name(self, monkeypatch):
         """Test custom endpoints that use 'openai/' prefix in model name use correct API keys.
-        
+
         LiteLLM uses model name prefixes (e.g., 'openai/', 'anthropic/') to detect providers.
         This test ensures that when we have custom endpoints with model names like
         'openai/custom-model1', each endpoint still gets its own correct API key.
@@ -684,7 +685,7 @@ class TestLLMEnvExpansionIntegration:
         # Verify the LiteLLM model names don't have prefixes for custom endpoints
         litellm_name_a = caller._get_litellm_model_name("custom-a")
         litellm_name_b = caller._get_litellm_model_name("custom-b")
-        
+
         # Custom endpoints should use model_id directly (not add prefix)
         assert litellm_name_a == "openai/custom-model1"
         assert litellm_name_b == "openai/custom-model2"
@@ -694,15 +695,15 @@ class TestLLMEnvExpansionIntegration:
 
     def test_mixed_real_and_custom_openai_endpoints_with_same_prefix(self, monkeypatch):
         """Test that real OpenAI and custom OpenAI-compatible endpoints are handled correctly.
-        
+
         When you have both:
         - A real OpenAI endpoint (api.openai.com)
         - Custom OpenAI-compatible endpoints
-        
+
         Each should use its own API key even though they might have similar model name patterns.
-        
-        NOTE: If a custom endpoint URL contains 'openai' in the hostname (e.g., 
-        'custom-openai.example.com'), it will be detected as an OpenAI endpoint and get 
+
+        NOTE: If a custom endpoint URL contains 'openai' in the hostname (e.g.,
+        'custom-openai.example.com'), it will be detected as an OpenAI endpoint and get
         the 'openai/' prefix. To avoid this, use URLs without 'openai' in them.
         """
         monkeypatch.setenv("REAL_OPENAI_KEY", "sk-real-openai-xyz")
@@ -748,7 +749,7 @@ class TestLLMEnvExpansionIntegration:
 
     def test_multiple_custom_endpoints_sequential_calls_preserve_keys(self, monkeypatch):
         """Test that calling multiple custom endpoints in sequence preserves correct API keys.
-        
+
         This is critical because the implementation sets OPENAI_API_KEY as a fallback
         for custom endpoints. We need to ensure that when switching between custom
         endpoints, each call still gets the correct API key in kwargs even though

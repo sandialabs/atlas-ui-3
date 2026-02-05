@@ -28,25 +28,25 @@ async def get_banners(current_user: str = Depends(get_current_user)):
     """Get banners for the user."""
     config_manager = app_factory.get_config_manager()
     app_settings = config_manager.app_settings
-    
+
     # Check if banners are enabled
     if not app_settings.banner_enabled:
         return {"messages": []}
-    
+
     # Read messages from messages.txt file
     try:
         from pathlib import Path
-        
+
         # Use app settings for config path
         base = Path(app_settings.app_config_overrides)
-        
+
         # If relative path, resolve from project root
         if not base.is_absolute():
             project_root = Path(__file__).parent.parent.parent
             base = project_root / base
-        
+
         messages_file = base / app_settings.messages_config_file
-        
+
         if messages_file.exists():
             with open(messages_file, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -70,7 +70,7 @@ async def get_config(
     config_manager = app_factory.get_config_manager()
     llm_config = config_manager.llm_config
     app_settings = config_manager.app_settings
-    
+
     # Get RAG data sources for the user from unified RAG service
     rag_data_sources = []
     rag_servers = []
@@ -106,22 +106,22 @@ async def get_config(
                 source_id = source.get("id", "")
                 if server_name and source_id:
                     rag_data_sources.append(f"{server_name}:{source_id}")
-    
+
     # Check if tools are enabled
     tools_info = []
     prompts_info = []
     authorized_servers = []
-    
+
     if app_settings.feature_tools_enabled:
         # Get MCP manager
         mcp_manager = app_factory.get_mcp_manager()
-        
+
         # Get authorized servers for the user - this filters out unauthorized servers completely
         authorized_servers = await mcp_manager.get_authorized_servers(current_user, is_user_in_group)
-        
+
         # Add canvas pseudo-tool to authorized servers (available to all users)
         authorized_servers.append("canvas")
-        
+
         # Only build tool information for servers the user is authorized to access
         for server_name in authorized_servers:
             # Handle canvas pseudo-tool
@@ -153,7 +153,7 @@ async def get_config(
             elif server_name in mcp_manager.available_tools:
                 server_tools = mcp_manager.available_tools[server_name]['tools']
                 server_config = mcp_manager.available_tools[server_name]['config']
-                
+
                 # Only include servers that have tools and user has access to
                 if server_tools:  # Only show servers with actual tools
                     # Build detailed tool information including descriptions and input schemas
@@ -165,7 +165,7 @@ async def get_config(
                             'inputSchema': getattr(tool, 'inputSchema', {}) or {}
                         }
                         tools_detailed.append(tool_detail)
-                    
+
                     # Determine auth_type from server config
                     auth_type = server_config.get('auth_type', 'none')
                     auth_required = auth_type in ('jwt', 'bearer', 'oauth', 'api_key')
@@ -183,7 +183,7 @@ async def get_config(
                         'auth_type': auth_type,
                         'auth_required': auth_required
                     })
-            
+
             # Collect prompts from this server if available
             if server_name in mcp_manager.available_prompts:
                 server_prompts = mcp_manager.available_prompts[server_name]['prompts']
@@ -199,7 +199,7 @@ async def get_config(
                         'help_email': server_config.get('help_email', ''),
                         'compliance_level': server_config.get('compliance_level')
                     })
-    
+
     # Read help page configuration (supports new config directory layout + legacy paths)
     help_config = {}
     import json
@@ -241,7 +241,7 @@ async def get_config(
     except Exception as e:
         logger.warning(f"Error loading help config: {e}")
         help_config = {"title": "Help & Documentation", "sections": []}
-    
+
     # Keep INFO logging concise; server lists can be very long.
     logger.info(
         "Config for user %s: %d authorized servers, %d tool groups",
@@ -265,7 +265,7 @@ async def get_config(
         if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
             model_info["compliance_level"] = model_config.compliance_level
         models_list.append(model_info)
-    
+
     # Build tool approval settings - only include tools from authorized servers
     tool_approvals_config = config_manager.tool_approvals_config
     filtered_tool_approvals = {}
@@ -362,7 +362,7 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
     try:
         from atlas.core.compliance import get_compliance_manager
         compliance_mgr = get_compliance_manager()
-        
+
         # Return level definitions for frontend use
         levels = []
         for name, level_obj in compliance_mgr.levels.items():
@@ -372,7 +372,7 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
                 "aliases": level_obj.aliases,
                 "allowed_with": level_obj.allowed_with
             })
-        
+
         return {
             "levels": levels,
             "mode": compliance_mgr.mode,
@@ -392,7 +392,7 @@ async def get_splash_config(current_user: str = Depends(get_current_user)):
     """Get splash screen configuration."""
     config_manager = app_factory.get_config_manager()
     app_settings = config_manager.app_settings
-    
+
     # Check if splash screen feature is enabled
     if not app_settings.feature_splash_screen_enabled:
         return {
@@ -406,7 +406,7 @@ async def get_splash_config(current_user: str = Depends(get_current_user)):
             "dismiss_button_text": "Dismiss",
             "show_on_every_visit": False
         }
-    
+
     # Read splash screen configuration
     splash_config = {}
     import json
@@ -469,7 +469,7 @@ async def get_splash_config(current_user: str = Depends(get_current_user)):
             "dismiss_button_text": "Dismiss",
             "show_on_every_visit": False
         }
-    
+
     return splash_config
 
 

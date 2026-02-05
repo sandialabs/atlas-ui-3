@@ -1,9 +1,9 @@
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from main import app
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
-from main import app
 
 
 def test_config_endpoint_smoke(monkeypatch):

@@ -1,16 +1,17 @@
 """Tools mode runner - handles LLM calls with tool execution."""
 
 import logging
-from typing import Dict, Any, List, Optional, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from atlas.domain.sessions.models import Session
 from atlas.domain.messages.models import Message, MessageRole, ToolResult
+from atlas.domain.sessions.models import Session
+from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 from atlas.interfaces.tools import ToolManagerProtocol
-from atlas.interfaces.events import EventPublisher
 from atlas.modules.prompts.prompt_provider import PromptProvider
-from ..utilities import tool_executor, event_notifier, error_handler
+
 from ..preprocessors.message_builder import build_session_context
+from ..utilities import error_handler, event_notifier, tool_executor
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +22,11 @@ UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 class ToolsModeRunner:
     """
     Runner for tools mode.
-    
+
     Executes LLM calls with tool integration, including tool execution
     and artifact processing.
     """
-    
+
     def __init__(
         self,
         llm: LLMProtocol,
@@ -37,7 +38,7 @@ class ToolsModeRunner:
     ):
         """
         Initialize tools mode runner.
-        
+
         Args:
             llm: LLM protocol implementation
             tool_manager: Tool manager for tool execution
@@ -74,7 +75,7 @@ class ToolsModeRunner:
     ) -> Dict[str, Any]:
         """
         Execute tools mode.
-        
+
         Args:
             session: Current chat session
             model: LLM model to use
@@ -85,7 +86,7 @@ class ToolsModeRunner:
             tool_choice_required: Whether tool use is required
             update_callback: Optional callback for streaming updates
             temperature: LLM temperature parameter
-            
+
         Returns:
             Response dictionary
         """
@@ -109,13 +110,13 @@ class ToolsModeRunner:
             content = llm_response.content if llm_response else ""
             assistant_message = Message(role=MessageRole.ASSISTANT, content=content)
             session.history.add_message(assistant_message)
-            
+
             await self.event_publisher.publish_chat_response(
                 message=content,
                 has_pending_tools=False,
             )
             await self.event_publisher.publish_response_complete()
-            
+
             return event_notifier.create_chat_response(content)
 
         # Execute tool workflow
@@ -167,7 +168,7 @@ class ToolsModeRunner:
         await self.event_publisher.publish_response_complete()
 
         return event_notifier.create_chat_response(final_response)
-    
+
     def _get_send_json(self) -> Optional[UpdateCallback]:
         """Get send_json callback from event publisher if available."""
         if hasattr(self.event_publisher, 'send_json'):

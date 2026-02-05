@@ -5,18 +5,18 @@ Provides REST API endpoints for file operations including upload, download,
 list, delete, and user statistics. Integrates with S3 storage backend.
 """
 
-import logging
-from typing import List, Dict, Any, Optional
-import re
-from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi import Query
 import base64
+import logging
+import re
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
+from atlas.core.capabilities import verify_file_token
 from atlas.core.log_sanitizer import get_current_user
 from atlas.core.metrics_logger import log_metric
 from atlas.infrastructure.app_factory import app_factory
-from atlas.core.capabilities import verify_file_token
 
 logger = logging.getLogger(__name__)
 
@@ -95,16 +95,16 @@ async def upload_file(
             tags=request.tags,
             source_type=request.tags.get("source", "user") if request.tags else "user"
         )
-        
+
         log_metric("file_upload", current_user, file_size=content_size, content_type=request.content_type)
-        
+
         return FileResponse(**result)
-        
+
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
-        
+
         log_metric("error", current_user, error_type="file_upload_failed")
-        
+
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
@@ -117,12 +117,12 @@ async def get_file(
     try:
         s3_client = app_factory.get_file_storage()
         result = await s3_client.get_file(current_user, file_key)
-        
+
         if not result:
             raise HTTPException(status_code=404, detail="File not found")
-            
+
         return FileContentResponse(**result)
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -176,12 +176,12 @@ async def delete_file(
     try:
         s3_client = app_factory.get_file_storage()
         success = await s3_client.delete_file(current_user, file_key)
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="File not found")
-            
+
         return {"message": "File deleted successfully", "key": file_key}
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -200,12 +200,12 @@ async def get_user_file_stats(
     # Users can only see their own stats
     if current_user != user_email:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     try:
         s3_client = app_factory.get_file_storage()
         result = await s3_client.get_user_stats(current_user)
         return result
-        
+
     except Exception as e:
         logger.error(f"Error getting user stats: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")

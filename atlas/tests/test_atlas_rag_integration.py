@@ -4,19 +4,18 @@ These tests require the atlas-rag-api-mock service to be running.
 They can be skipped if the mock service is not available.
 """
 
-import subprocess
-import time
-import sys
 import os
+import subprocess
+import sys
+import time
 
-import pytest
 import httpx
+import pytest
 
 # Add paths for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
-
 
 MOCK_URL = "http://localhost:8002"
 MOCK_TOKEN = "test-atlas-rag-token"

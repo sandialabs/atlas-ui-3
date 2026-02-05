@@ -1,6 +1,8 @@
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from atlas.modules.mcp_tools.client import MCPToolManager
 
 
@@ -14,7 +16,7 @@ class TestMCPClientEnvironmentVariables:
         """Should pass environment variables to StdioTransport."""
         # Set up environment variables for resolution
         monkeypatch.setenv("MY_ENV_VAR", "resolved-value")
-        
+
         server_config = {
             "command": ["python", "server.py"],
             "cwd": "backend",
@@ -27,12 +29,12 @@ class TestMCPClientEnvironmentVariables:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             # Mock os.path.exists to return True for cwd
             with patch('os.path.exists', return_value=True):
                 manager = MCPToolManager()
                 manager.servers_config = {"test-server": server_config}
-                
+
                 await manager._initialize_single_client("test-server", server_config)
 
         # Verify StdioTransport was called with env dict
@@ -52,7 +54,7 @@ class TestMCPClientEnvironmentVariables:
         # Set up environment variables
         monkeypatch.setenv("CLOUD_PROFILE", "my-profile-9")
         monkeypatch.setenv("CLOUD_REGION", "us-east-7")
-        
+
         server_config = {
             "command": ["python", "server.py"],
             "cwd": "backend",
@@ -66,12 +68,12 @@ class TestMCPClientEnvironmentVariables:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             # Mock os.path.exists to return True for cwd
             with patch('os.path.exists', return_value=True):
                 manager = MCPToolManager()
                 manager.servers_config = {"test-server": server_config}
-                
+
                 await manager._initialize_single_client("test-server", server_config)
 
         # Verify env vars were resolved
@@ -96,12 +98,12 @@ class TestMCPClientEnvironmentVariables:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             # Mock os.path.exists to return True for cwd
             with patch('os.path.exists', return_value=True):
                 manager = MCPToolManager()
                 manager.servers_config = {"test-server": server_config}
-                
+
                 await manager._initialize_single_client("test-server", server_config)
 
         # Verify env is None
@@ -123,12 +125,12 @@ class TestMCPClientEnvironmentVariables:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             # Mock os.path.exists to return True for cwd
             with patch('os.path.exists', return_value=True):
                 manager = MCPToolManager()
                 manager.servers_config = {"test-server": server_config}
-                
+
                 result = await manager._initialize_single_client("test-server", server_config)
 
         # Should return None and log error
@@ -142,7 +144,7 @@ class TestMCPClientEnvironmentVariables:
     async def test_stdio_client_with_env_no_cwd(self, mock_transport_class, mock_client_class, monkeypatch):
         """Should pass env vars even when no cwd specified."""
         monkeypatch.setenv("MY_VAR", "my-value")
-        
+
         server_config = {
             "command": ["python", "server.py"],
             "env": {
@@ -153,10 +155,10 @@ class TestMCPClientEnvironmentVariables:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
-            
+
             await manager._initialize_single_client("test-server", server_config)
 
         # Verify env was passed
@@ -177,10 +179,10 @@ class TestMCPClientEnvironmentVariables:
         with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"test-server": Mock()}
             mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
-            
+
             manager = MCPToolManager()
             manager.servers_config = {"test-server": server_config}
-            
+
             await manager._initialize_single_client("test-server", server_config)
 
         # Empty dict should become empty dict (not None)

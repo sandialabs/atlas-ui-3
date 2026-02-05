@@ -1,9 +1,11 @@
 """Integration test for MCP sampling functionality."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from atlas.modules.mcp_tools.client import MCPToolManager
+
+import pytest
+
 from atlas.domain.messages.models import ToolCall
+from atlas.modules.mcp_tools.client import MCPToolManager
 
 
 class TestSamplingIntegration:
@@ -52,42 +54,42 @@ class TestSamplingIntegration:
     async def test_sampling_handler_with_routing(self):
         """Test sampling handler with routing context."""
         manager = MCPToolManager()
-        
+
         # Create a mock tool call
         tool_call = ToolCall(
             id="test_tool_call_1",
             name="test_tool",
             arguments={}
         )
-        
+
         update_cb = AsyncMock()
-        
+
         # Mock the LLM caller - patch where it's imported in the handler
         with patch('atlas.modules.llm.litellm_caller.LiteLLMCaller') as mock_llm_class:
             mock_llm_instance = AsyncMock()
             mock_llm_instance.call_plain = AsyncMock(return_value="Mocked LLM response")
             mock_llm_class.return_value = mock_llm_instance
-            
+
             # Set up routing context
             async with manager._use_sampling_context("test_server", tool_call, update_cb):
                 handler = manager._create_sampling_handler("test_server")
-                
+
                 # Create mock sampling params
                 mock_params = MagicMock()
                 mock_params.systemPrompt = "You are helpful"
                 mock_params.temperature = 0.7
                 mock_params.maxTokens = 500
                 mock_params.modelPreferences = None
-                
+
                 # Call the handler
                 result = await handler(
                     messages=["Test message"],
                     params=mock_params
                 )
-                
+
                 # Verify result
                 assert result.content.text == "Mocked LLM response"
-                
+
                 # Verify LLM was called correctly
                 mock_llm_instance.call_plain.assert_called_once()
                 call_args = mock_llm_instance.call_plain.call_args
@@ -112,11 +114,12 @@ class TestSamplingDemoTools:
     @pytest.mark.asyncio
     async def test_summarize_text_tool(self):
         """Test summarize_text tool with basic sampling."""
+        import sys
+        from pathlib import Path
+
         from fastmcp import Client
         from fastmcp.client.transports import StdioTransport
         from mcp.types import CreateMessageResult, TextContent
-        from pathlib import Path
-        import sys
 
         # Create mock sampling handler
         async def mock_sampling_handler(messages, params=None, context=None):
@@ -150,11 +153,12 @@ class TestSamplingDemoTools:
     @pytest.mark.asyncio
     async def test_analyze_sentiment_tool(self):
         """Test analyze_sentiment tool with system prompt and low temperature."""
+        import sys
+        from pathlib import Path
+
         from fastmcp import Client
         from fastmcp.client.transports import StdioTransport
         from mcp.types import CreateMessageResult, TextContent
-        from pathlib import Path
-        import sys
 
         captured_params = {}
 
@@ -195,11 +199,12 @@ class TestSamplingDemoTools:
     @pytest.mark.asyncio
     async def test_generate_code_tool(self):
         """Test generate_code tool with model preferences."""
+        import sys
+        from pathlib import Path
+
         from fastmcp import Client
         from fastmcp.client.transports import StdioTransport
         from mcp.types import CreateMessageResult, TextContent
-        from pathlib import Path
-        import sys
 
         captured_params = {}
 
@@ -247,11 +252,12 @@ class TestSamplingDemoTools:
     @pytest.mark.asyncio
     async def test_creative_story_tool(self):
         """Test creative_story tool with high temperature."""
+        import sys
+        from pathlib import Path
+
         from fastmcp import Client
         from fastmcp.client.transports import StdioTransport
         from mcp.types import CreateMessageResult, TextContent
-        from pathlib import Path
-        import sys
 
         captured_params = {}
 
@@ -292,11 +298,12 @@ class TestSamplingDemoTools:
     @pytest.mark.asyncio
     async def test_multi_turn_conversation_tool(self):
         """Test multi_turn_conversation tool with SamplingMessage objects."""
+        import sys
+        from pathlib import Path
+
         from fastmcp import Client
         from fastmcp.client.transports import StdioTransport
         from mcp.types import CreateMessageResult, TextContent
-        from pathlib import Path
-        import sys
 
         call_count = 0
 
@@ -350,11 +357,12 @@ class TestSamplingDemoTools:
     @pytest.mark.asyncio
     async def test_research_question_tool(self):
         """Test research_question tool with multi-step agentic workflow."""
+        import sys
+        from pathlib import Path
+
         from fastmcp import Client
         from fastmcp.client.transports import StdioTransport
         from mcp.types import CreateMessageResult, TextContent
-        from pathlib import Path
-        import sys
 
         call_count = 0
         captured_calls = []
@@ -416,11 +424,12 @@ class TestSamplingDemoTools:
     @pytest.mark.asyncio
     async def test_translate_and_explain_tool(self):
         """Test translate_and_explain tool with sequential sampling workflow."""
+        import sys
+        from pathlib import Path
+
         from fastmcp import Client
         from fastmcp.client.transports import StdioTransport
         from mcp.types import CreateMessageResult, TextContent
-        from pathlib import Path
-        import sys
 
         call_count = 0
 

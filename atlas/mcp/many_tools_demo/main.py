@@ -28,17 +28,17 @@ for category, count, description_base in TOOL_CATEGORIES:
     for i in range(1, count + 1):
         tool_name = f"{category}_operation_{i}"
         tool_description = f"{description_base} - Operation {i}"
-        
+
         # Use exec to create properly named functions
         exec(f"""
 @mcp.tool()
 def {tool_name}(input_data: str = "default") -> str:
     '''
     {tool_description}
-    
+
     Args:
         input_data: Input data to process
-        
+
     Returns:
         str: Result of the operation
     '''

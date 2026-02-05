@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
 
+from main import app
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
-from main import app
 from atlas.modules.config import config_manager
 
 

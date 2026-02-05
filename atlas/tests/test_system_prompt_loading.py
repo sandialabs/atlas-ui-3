@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
+from atlas.application.chat.preprocessors.message_builder import MessageBuilder
+from atlas.domain.messages.models import Message, MessageRole
+from atlas.domain.sessions.models import Session
 from atlas.modules.config import ConfigManager
 from atlas.modules.prompts.prompt_provider import PromptProvider
-from atlas.application.chat.preprocessors.message_builder import MessageBuilder
-from atlas.domain.sessions.models import Session
-from atlas.domain.messages.models import Message, MessageRole
 
 
 @pytest.mark.asyncio

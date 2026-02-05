@@ -1,7 +1,7 @@
 """Tool authorization policy - filters tools based on user access control."""
 
 import logging
-from typing import List, Optional, Any
+from typing import Any, List, Optional
 
 from atlas.core.auth import is_user_in_group
 
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class ToolAuthorizationService:
     """
     Service that filters selected tools based on user authorization.
-    
+
     Enforces MCP tool access control lists (ACLs) by checking:
     - User authorization to MCP servers
     - Special cases (e.g., canvas_canvas tool is always allowed)
@@ -20,7 +20,7 @@ class ToolAuthorizationService:
     def __init__(self, tool_manager: Optional[Any] = None):
         """
         Initialize the tool authorization service.
-        
+
         Args:
             tool_manager: Optional tool manager with server configuration
         """

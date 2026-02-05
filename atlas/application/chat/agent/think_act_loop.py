@@ -6,8 +6,8 @@ from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
-from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 from ..utilities import error_handler, tool_executor
+from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 
 
 class ThinkActAgentLoop(AgentLoopProtocol):

@@ -24,6 +24,7 @@ if "LITELLM_LOG" not in os.environ:
 
 from dotenv import load_dotenv
 
+
 # Phase 1: Parse --env-file early, before loading env and importing atlas code.
 # This allows specifying a custom .env file that affects all subsequent imports.
 def _get_env_file_from_args() -> tuple[Path, bool]:

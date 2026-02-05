@@ -1,12 +1,13 @@
 """Plain mode runner - handles simple LLM calls without tools or RAG."""
 
 import logging
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
-from atlas.domain.sessions.models import Session
 from atlas.domain.messages.models import Message, MessageRole
-from atlas.interfaces.llm import LLMProtocol
+from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
+from atlas.interfaces.llm import LLMProtocol
+
 from ..utilities import event_notifier
 
 logger = logging.getLogger(__name__)
@@ -15,10 +16,10 @@ logger = logging.getLogger(__name__)
 class PlainModeRunner:
     """
     Runner for plain LLM mode.
-    
+
     Executes simple LLM calls without tools or RAG integration.
     """
-    
+
     def __init__(
         self,
         llm: LLMProtocol,
@@ -26,14 +27,14 @@ class PlainModeRunner:
     ):
         """
         Initialize plain mode runner.
-        
+
         Args:
             llm: LLM protocol implementation
             event_publisher: Event publisher for UI updates
         """
         self.llm = llm
         self.event_publisher = event_publisher
-    
+
     async def run(
         self,
         session: Session,
@@ -43,13 +44,13 @@ class PlainModeRunner:
     ) -> Dict[str, Any]:
         """
         Execute plain LLM mode.
-        
+
         Args:
             session: Current chat session
             model: LLM model to use
             messages: Message history
             temperature: LLM temperature parameter
-            
+
         Returns:
             Response dictionary
         """

@@ -10,7 +10,7 @@ import subprocess
 import sys
 import traceback
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -18,17 +18,17 @@ logger = logging.getLogger(__name__)
 def execute_code_safely(script_path: Path, timeout: int = 30) -> Dict[str, Any]:
     """
     Execute Python script safely with resource limits.
-    
+
     Args:
         script_path: Path to the script to execute
         timeout: Maximum execution time in seconds
-        
+
     Returns:
         Execution results
     """
     try:
         logger.info(f"Executing script: {script_path} with timeout: {timeout}s")
-        
+
         # Execute with subprocess for isolation
         result = subprocess.run(
             [sys.executable, str(script_path)],
@@ -37,9 +37,9 @@ def execute_code_safely(script_path: Path, timeout: int = 30) -> Dict[str, Any]:
             timeout=timeout,
             cwd=script_path.parent
         )
-        
+
         logger.info(f"Script execution completed with return code: {result.returncode}")
-        
+
         if result.returncode == 0:
             # Parse the JSON output from the script
             try:
@@ -73,7 +73,7 @@ def execute_code_safely(script_path: Path, timeout: int = 30) -> Dict[str, Any]:
                 "error": error_msg,
                 "error_type": "SubprocessError"
             }
-    
+
     except subprocess.TimeoutExpired:
         error_msg = f"Code execution timed out after {timeout} seconds"
         logger.error(error_msg)

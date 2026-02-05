@@ -2,6 +2,7 @@
 
 import logging
 from typing import Dict, List, Optional
+
 from fastapi import HTTPException
 from pydantic import BaseModel
 
@@ -65,7 +66,7 @@ class RAGClient:
             "Configure RAG sources in rag-sources.json."
         )
         logger.info("RAGClient initialized with URL: %s", self.base_url)
-    
+
     async def discover_data_sources(self, user_name: str) -> List[DataSource]:
         """Discover data sources accessible by a user.
 
@@ -84,7 +85,7 @@ class RAGClient:
             return []
 
         return [DataSource(**source_data) for source_data in accessible_sources_data]
-    
+
     async def query_rag(self, user_name: str, data_source: str, messages: List[Dict]) -> RAGResponse:
         """Query RAG endpoint for a response with metadata.
 
@@ -102,14 +103,14 @@ class RAGClient:
 
         try:
             data = await self.http_client.post("/v1/chat/completions", json_data=payload)
-            
+
             # Extract the assistant message from the response
             content = "No response from RAG system."
             if "choices" in data and len(data["choices"]) > 0:
                 choice = data["choices"][0]
                 if "message" in choice and "content" in choice["message"]:
                     content = choice["message"]["content"]
-            
+
             # Extract metadata if present
             metadata = None
             if "rag_metadata" in data and data["rag_metadata"]:
@@ -117,9 +118,9 @@ class RAGClient:
                     metadata = RAGMetadata(**data["rag_metadata"])
                 except Exception as e:
                     logger.warning(f"Failed to parse RAG metadata: {e}")
-            
+
             return RAGResponse(content=content, metadata=metadata)
-            
+
         except HTTPException:
             # Re-raise HTTPExceptions from the unified client (they already have proper error handling)
             raise
