@@ -1,0 +1,12 @@
+# Banyan Extractor Mock Service Dependencies
+
+# Web framework
+fastapi>=0.115.0
+uvicorn>=0.32.0
+
+# Banyan-ingest for PDF and PPTX extraction via Nemotron
+banyan-ingest[nemotronparse] @ git+https://github.com/sandialabs/banyan-ingest.git
+
+# PDF extraction dependencies
+pdf2image>=1.16.0
+pypdf>=5.0.0

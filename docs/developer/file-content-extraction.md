@@ -1,6 +1,6 @@
 # File Content Extraction
 
-**Last updated:** 2026-01-30
+**Last updated:** 2026-02-04
 
 This document describes how to configure automatic file content extraction for uploaded files (PDFs, images, etc.) in Atlas UI.
 
@@ -219,6 +219,61 @@ Sends the file as a multipart form-data upload, equivalent to `curl -F 'file=@do
 | `pdf-text` | Custom PDF extraction service |
 | `image-vision` | OpenAI Vision API, Claude Vision |
 | `ocr` | Tesseract, Google Cloud Vision |
+
+## Banyan Extractor Mock Service
+
+**Added:** 2026-02-04
+
+The `banyan-extractor-mock` service (`mocks/banyan-extractor-mock/`) provides PDF and PPTX extraction using [banyan-ingest](https://github.com/sandialabs/banyan-ingest) and Nemotron Parse. It runs on port **8011** alongside the original `file-extractor-mock` on port 8010.
+
+### Key Differences from file-extractor-mock
+
+| Feature | file-extractor-mock (8010) | banyan-extractor-mock (8011) |
+|---------|---------------------------|------------------------------|
+| PDF extraction | pypdf only | banyan-ingest with pypdf fallback |
+| PPTX extraction | Not supported | banyan-ingest PptxProcessor |
+| Image analysis | Mock responses | Not supported |
+| OCR | Mock responses | Not supported |
+| External deps | pypdf only | banyan-ingest, Nemotron endpoint |
+
+### Endpoints
+
+- `POST /extract` - PDF text extraction (banyan-ingest, falls back to pypdf)
+- `POST /extract-pptx` - PPTX text extraction (banyan-ingest required)
+- `GET /health` - Health check (includes banyan-ingest availability)
+
+### Setup
+
+```bash
+cd mocks/banyan-extractor-mock
+pip install -r requirements.txt
+cp endpoint_config.json.example endpoint_config.json
+# Edit endpoint_config.json with your Nemotron Parse URL
+python main.py
+```
+
+### ATLAS Integration
+
+To use banyan-extractor-mock for PDF and PPTX extraction, update `config/overrides/file-extractors.json` to point the `pdf-text` extractor URL to port 8011 and enable the `pptx-text` extractor:
+
+```json
+{
+  "extractors": {
+    "pdf-text": {
+      "url": "http://localhost:8011/extract",
+      "timeout_seconds": 120,
+      "enabled": true
+    },
+    "pptx-text": {
+      "url": "http://localhost:8011/extract-pptx",
+      "timeout_seconds": 120,
+      "enabled": true
+    }
+  }
+}
+```
+
+See `mocks/banyan-extractor-mock/README.md` for full documentation including API reference and configuration details.
 
 ## Troubleshooting
 
