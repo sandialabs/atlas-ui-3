@@ -12,19 +12,19 @@ echo ""
 TEST_TYPE=${1:-all}
 
 # Detect environment and set appropriate base paths
-if [ -d "/app" ] && [ -f "/app/test/backend_tests.sh" ]; then
+if [ -d "/app" ] && [ -f "/app/test/atlas_tests.sh" ]; then
     # Running in CI/CD container environment
     ENVIRONMENT="cicd"
     TEST_BASE_PATH="/app/test"
     PROJECT_ROOT="/app"
     echo "Environment: CI/CD Container"
-elif [ -f "test/backend_tests.sh" ]; then
+elif [ -f "test/atlas_tests.sh" ]; then
     # Running locally from project root
     ENVIRONMENT="local"
     TEST_BASE_PATH="$(pwd)/test"
     PROJECT_ROOT="$(pwd)"
     echo "Environment: Local (project root)"
-elif [ -f "../test/backend_tests.sh" ]; then
+elif [ -f "../test/atlas_tests.sh" ]; then
     # Running locally from subdirectory
     ENVIRONMENT="local"
     TEST_BASE_PATH="$(pwd)/../test"
@@ -70,11 +70,12 @@ run_test() {
 
 # Main test execution
 case $TEST_TYPE in
-    "backend")
-        echo "Running Backend Tests Only"
-        run_test "backend"
+    "atlas"|"backend")
+        # "backend" is supported for backward compatibility
+        echo "Running Atlas (Python) Tests Only"
+        run_test "atlas"
         ;;
-    "frontend") 
+    "frontend")
         echo "Running Frontend Tests Only"
         run_test "frontend"
         ;;
@@ -84,13 +85,14 @@ case $TEST_TYPE in
         ;;
     "all")
         echo "Running All Test Suites"
-        run_test "backend"
+        run_test "atlas"
         run_test "frontend"
         run_test "e2e"
         ;;
     *)
         echo "ERROR: Unknown test type: $TEST_TYPE"
-        echo "Usage: $0 [backend|frontend|e2e|all]"
+        echo "Usage: $0 [atlas|frontend|e2e|all]"
+        echo "  (backend is also accepted as alias for atlas)"
         exit 1
         ;;
 esac

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Running Backend Tests..."
+echo "Running Atlas (Python) Tests..."
 echo "================================="
 
 # Use PROJECT_ROOT if set by master script, otherwise detect
@@ -30,7 +30,7 @@ if [ -f "$PROJECT_ROOT/.venv/bin/activate" ]; then
     # shellcheck disable=SC1090
     source "$PROJECT_ROOT/.venv/bin/activate"
 else
-    echo "WARNING: .venv not found. Backend tests expect uv-managed venv with pytest installed."
+    echo "WARNING: .venv not found. Atlas tests expect uv-managed venv with pytest installed."
     echo "If tests fail due to missing packages, run: uv venv && source .venv/bin/activate && uv pip install -r requirements.txt"
 fi
 
@@ -38,7 +38,7 @@ fi
 cd "$ATLAS_DIR"
 
 echo ""
-echo "\nRunning Backend Tests..."
+echo "Running Atlas Tests..."
 echo "ATLAS_DIR full path: $(pwd)"
 echo "=============================="
 
@@ -53,4 +53,4 @@ fi
 echo "Running pytest on atlas/tests directory"
 timeout 300 python -m pytest tests -v --tb=short
 
-echo "\nBackend tests completed"
+echo "Atlas tests completed"
