@@ -81,7 +81,7 @@ async def test_tool_authorization_enforces_group_restrictions():
     async def mock_auth_check(user: str, group: str) -> bool:
         return group == "users"
 
-    with patch("application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
+    with patch("atlas.application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
         filtered_tools = await auth_service.filter_authorized_tools(
             selected_tools=selected_tools,
             user_email="regular@example.com"
@@ -128,7 +128,7 @@ async def test_tool_authorization_does_not_fail_open():
     async def mock_auth_check(user: str, group: str) -> bool:
         return False
 
-    with patch("application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
+    with patch("atlas.application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
         filtered_tools = await auth_service.filter_authorized_tools(
             selected_tools=selected_tools,
             user_email="unauthorized@example.com"
@@ -173,7 +173,7 @@ async def test_tool_authorization_with_real_mcp_tool_manager():
     async def mock_auth_check(user: str, group: str) -> bool:
         return False
 
-    with patch("application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
+    with patch("atlas.application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
         filtered_tools = await auth_service.filter_authorized_tools(
             selected_tools=selected_tools,
             user_email="user@example.com"

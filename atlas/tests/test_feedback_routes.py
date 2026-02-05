@@ -36,7 +36,7 @@ def mock_feedback_dir(temp_feedback_dir, monkeypatch):
         return temp_feedback_dir
     
     monkeypatch.setattr(
-        "routes.feedback_routes.get_feedback_directory",
+        "atlas.routes.feedback_routes.get_feedback_directory",
         mock_get_feedback_directory
     )
     return temp_feedback_dir

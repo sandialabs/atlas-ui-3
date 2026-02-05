@@ -20,12 +20,12 @@ def test_banner_save_success_logging(caplog, tmp_path, monkeypatch):
         return config_dir / filename
     
     monkeypatch.setattr(
-        "routes.admin_routes.get_admin_config_path",
+        "atlas.routes.admin_routes.get_admin_config_path",
         mock_get_admin_config_path
     )
     
     # Mock setup_config_overrides to avoid side effects
-    monkeypatch.setattr("routes.admin_routes.setup_config_overrides", lambda: None)
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
     
     # Capture logs at INFO level
     with caplog.at_level(logging.INFO):
@@ -68,19 +68,19 @@ def test_banner_save_failure_logging(caplog, tmp_path, monkeypatch):
         return readonly_file
     
     monkeypatch.setattr(
-        "routes.admin_routes.get_admin_config_path",
+        "atlas.routes.admin_routes.get_admin_config_path",
         mock_get_admin_config_path
     )
     
     # Mock setup_config_overrides to avoid side effects
-    monkeypatch.setattr("routes.admin_routes.setup_config_overrides", lambda: None)
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
     
     # Mock write_file_content to raise an exception
     def mock_write_file_content(file_path, content, file_type="text"):
         raise PermissionError("Permission denied")
     
     monkeypatch.setattr(
-        "routes.admin_routes.write_file_content",
+        "atlas.routes.admin_routes.write_file_content",
         mock_write_file_content
     )
     
@@ -126,12 +126,12 @@ def test_banner_save_logs_sanitized_paths(caplog, tmp_path, monkeypatch):
         return config_dir / filename
     
     monkeypatch.setattr(
-        "routes.admin_routes.get_admin_config_path",
+        "atlas.routes.admin_routes.get_admin_config_path",
         mock_get_admin_config_path
     )
     
     # Mock setup_config_overrides to avoid side effects
-    monkeypatch.setattr("routes.admin_routes.setup_config_overrides", lambda: None)
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
     
     # Capture logs at INFO level
     with caplog.at_level(logging.INFO):
@@ -175,12 +175,12 @@ def test_banner_get_includes_enabled_status(tmp_path, monkeypatch):
         return config_dir / filename
     
     monkeypatch.setattr(
-        "routes.admin_routes.get_admin_config_path",
+        "atlas.routes.admin_routes.get_admin_config_path",
         mock_get_admin_config_path
     )
     
     # Mock setup_config_overrides to avoid side effects
-    monkeypatch.setattr("routes.admin_routes.setup_config_overrides", lambda: None)
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
     
     # Make request to get banner config
     response = client.get(
@@ -214,16 +214,16 @@ def test_banner_get_with_feature_disabled(tmp_path, monkeypatch):
         return config_dir / filename
     
     monkeypatch.setattr(
-        "routes.admin_routes.get_admin_config_path",
+        "atlas.routes.admin_routes.get_admin_config_path",
         mock_get_admin_config_path
     )
     
     # Mock setup_config_overrides
-    monkeypatch.setattr("routes.admin_routes.setup_config_overrides", lambda: None)
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
     
     # Mock banner_enabled to be false
     monkeypatch.setattr(
-        "routes.admin_routes.config_manager.app_settings.banner_enabled",
+        "atlas.routes.admin_routes.config_manager.app_settings.banner_enabled",
         False
     )
     
@@ -257,16 +257,16 @@ def test_banner_get_with_feature_enabled(tmp_path, monkeypatch):
         return config_dir / filename
     
     monkeypatch.setattr(
-        "routes.admin_routes.get_admin_config_path",
+        "atlas.routes.admin_routes.get_admin_config_path",
         mock_get_admin_config_path
     )
     
     # Mock setup_config_overrides
-    monkeypatch.setattr("routes.admin_routes.setup_config_overrides", lambda: None)
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
     
     # Mock banner_enabled to be true
     monkeypatch.setattr(
-        "routes.admin_routes.config_manager.app_settings.banner_enabled",
+        "atlas.routes.admin_routes.config_manager.app_settings.banner_enabled",
         True
     )
     

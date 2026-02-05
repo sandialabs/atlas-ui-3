@@ -111,7 +111,7 @@ class TestHTTPClientCaching:
         """Test that _get_http_client creates a new client when not cached."""
         source_config = mock_config_manager.rag_sources_config.sources["test_http"]
 
-        with patch("domain.unified_rag_service.resolve_env_var", side_effect=lambda v, **kw: v):
+        with patch("atlas.domain.unified_rag_service.resolve_env_var", side_effect=lambda v, **kw: v):
             client = unified_rag_service._get_http_client("test_http", source_config)
 
         assert client is not None
@@ -122,7 +122,7 @@ class TestHTTPClientCaching:
         """Test that _get_http_client returns cached client on second call."""
         source_config = mock_config_manager.rag_sources_config.sources["test_http"]
 
-        with patch("domain.unified_rag_service.resolve_env_var", side_effect=lambda v, **kw: v):
+        with patch("atlas.domain.unified_rag_service.resolve_env_var", side_effect=lambda v, **kw: v):
             client1 = unified_rag_service._get_http_client("test_http", source_config)
             client2 = unified_rag_service._get_http_client("test_http", source_config)
 

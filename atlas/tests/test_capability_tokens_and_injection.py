@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 # Stub LiteLLM before importing app to avoid external dependency in tests
 import types
 
-fake_litellm_caller = types.ModuleType("modules.llm.litellm_caller")
+fake_litellm_caller = types.ModuleType("atlas.modules.llm.litellm_caller")
 
 class _FakeLLM:
     def __init__(self, *args, **kwargs):
@@ -22,7 +22,7 @@ class _FakeLLM:
         return "ok"
 
 fake_litellm_caller.LiteLLMCaller = _FakeLLM  # type: ignore
-sys.modules["modules.llm.litellm_caller"] = fake_litellm_caller
+sys.modules["atlas.modules.llm.litellm_caller"] = fake_litellm_caller
 
 from main import app  # noqa: E402  # type: ignore
 from atlas.core.capabilities import generate_file_token, verify_file_token  # noqa: E402  # type: ignore

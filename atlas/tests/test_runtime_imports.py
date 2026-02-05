@@ -4,10 +4,13 @@ import subprocess
 from pathlib import Path
 
 
-def run_subprocess(code: str, cwd: Path):
+def run_subprocess(code: str, cwd: Path, project_root: Path = None):
     env = os.environ.copy()
-    # Simulate production run via agent_start.sh: run from backend dir without relying on PYTHONPATH
-    env.pop("PYTHONPATH", None)
+    # For the atlas package structure, ensure project root is in PYTHONPATH
+    if project_root:
+        env["PYTHONPATH"] = str(project_root)
+    else:
+        env.pop("PYTHONPATH", None)
     proc = subprocess.run(
         [sys.executable, "-c", code],
         cwd=str(cwd),
@@ -21,11 +24,12 @@ def run_subprocess(code: str, cwd: Path):
 
 def test_backend_dir_imports_work_without_project_root_in_path():
     """
-    Ensure imports work when running from the backend directory (the supported run mode),
-    without requiring the project root on PYTHONPATH.
-    This mirrors `bash agent_start.sh` which ends up running uvicorn from ./backend.
+    Ensure imports work when running from the atlas directory (the supported run mode).
+    The atlas package requires the project root on PYTHONPATH for proper package imports.
+    This mirrors `bash agent_start.sh` which sets PYTHONPATH before running from ./atlas.
     """
-    backend_dir = Path(__file__).resolve().parents[1]
+    atlas_dir = Path(__file__).resolve().parents[1]
+    project_root = atlas_dir.parent
 
     code = (
         "import main; "
@@ -35,15 +39,15 @@ def test_backend_dir_imports_work_without_project_root_in_path():
         "print('OK')"
     )
 
-    proc = run_subprocess(code, backend_dir)
+    proc = run_subprocess(code, atlas_dir, project_root=project_root)
 
     # Helpful diagnostics on failure
     if proc.returncode != 0:
         print("STDOUT:\n" + proc.stdout)
         print("STDERR:\n" + proc.stderr)
 
-    assert proc.returncode == 0, "Subprocess failed to import and initialize config from backend dir"
+    assert proc.returncode == 0, "Subprocess failed to import and initialize config from atlas dir"
     # Guard against the specific regression seen in runtime warnings
-    assert "No module named 'backend'" not in (proc.stdout + proc.stderr)
+    assert "No module named 'atlas'" not in (proc.stdout + proc.stderr)
     assert "Could not validate LLM compliance levels" not in (proc.stdout + proc.stderr)
     assert "Could not validate MCP compliance levels" not in (proc.stdout + proc.stderr)

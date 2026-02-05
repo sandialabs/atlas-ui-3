@@ -105,7 +105,7 @@ class TestGetUserClient:
     @pytest.mark.asyncio
     async def test_returns_none_without_token(self, manager):
         """Should return None when user has no token stored."""
-        with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage:
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage:
             mock_token_storage = MagicMock()
             mock_token_storage.get_valid_token.return_value = None
             mock_storage.return_value = mock_token_storage
@@ -117,9 +117,9 @@ class TestGetUserClient:
     @pytest.mark.asyncio
     async def test_creates_client_with_api_key_header(self, manager):
         """Should create client with custom header for API key auth type."""
-        with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
-             patch("modules.mcp_tools.client.Client") as mock_client_class, \
-             patch("modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("atlas.modules.mcp_tools.client.Client") as mock_client_class, \
+             patch("atlas.modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
 
             # Mock token storage
             mock_token = MagicMock()
@@ -165,8 +165,8 @@ class TestGetUserClient:
         manager._create_elicitation_handler = MagicMock(return_value=None)
         manager._create_sampling_handler = MagicMock(return_value=None)
 
-        with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
-             patch("modules.mcp_tools.client.Client") as mock_client_class:
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("atlas.modules.mcp_tools.client.Client") as mock_client_class:
 
             # Mock token storage
             mock_token = MagicMock()
@@ -208,9 +208,9 @@ class TestGetUserClient:
         manager._create_elicitation_handler = MagicMock(return_value=None)
         manager._create_sampling_handler = MagicMock(return_value=None)
 
-        with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
-             patch("modules.mcp_tools.client.Client") as mock_client_class, \
-             patch("modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("atlas.modules.mcp_tools.client.Client") as mock_client_class, \
+             patch("atlas.modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
 
             mock_token = MagicMock()
             mock_token.token_value = "custom-key-456"
@@ -233,9 +233,9 @@ class TestGetUserClient:
     @pytest.mark.asyncio
     async def test_caches_client(self, manager):
         """Should cache client for subsequent calls."""
-        with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
-             patch("modules.mcp_tools.client.Client") as mock_client_class, \
-             patch("modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("atlas.modules.mcp_tools.client.Client") as mock_client_class, \
+             patch("atlas.modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
 
             mock_token = MagicMock()
             mock_token.token_value = "test-api-key"
@@ -260,9 +260,9 @@ class TestGetUserClient:
     @pytest.mark.asyncio
     async def test_invalidates_cache_on_expired_token(self, manager):
         """Should invalidate cached client when token expires."""
-        with patch("modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
-             patch("modules.mcp_tools.client.Client") as mock_client_class, \
-             patch("modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("atlas.modules.mcp_tools.client.Client") as mock_client_class, \
+             patch("atlas.modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
 
             mock_token = MagicMock()
             mock_token.token_value = "test-api-key"

@@ -138,7 +138,8 @@ def patch_mcp(monkeypatch):
             return user_id.endswith("@company.com")
         return False
 
-    monkeypatch.setattr(core.auth, "is_user_in_group", fake_is_user_in_group)
+    from atlas.core import auth as core_auth
+    monkeypatch.setattr(core_auth, "is_user_in_group", fake_is_user_in_group)
 
 
 @pytest.mark.asyncio
