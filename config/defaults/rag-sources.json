@@ -8,7 +8,7 @@
       "python",
       "mcp/corporate_cars/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],

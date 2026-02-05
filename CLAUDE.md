@@ -12,7 +12,29 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 - Python Package Manager: **uv** (NOT pip!)
 - Configuration: Pydantic with YAML/JSON configs
 
-## Do This First
+## Installation
+
+### As a Python Package (Recommended for Users)
+
+```bash
+# Install from PyPI
+pip install atlas-chat
+
+# Or with uv
+uv pip install atlas-chat
+
+# Use the CLI tools
+atlas-chat "Hello, how are you?" --model gpt-4o
+atlas-server --port 8000
+
+# Or use programmatically
+from atlas import AtlasClient
+client = AtlasClient()
+result = await client.chat("Hello!")
+print(result.message)
+```
+
+### For Development
 
 ```bash
 # Install uv (one-time)
@@ -27,14 +49,14 @@ bash agent_start.sh   # builds frontend, starts backend, seeds/mocks
 Manual quick run (alternative):
 ```bash
 (frontend) cd frontend && npm install && npm run build
-(backend)  cd backend && python main.py  # don't use uvicorn --reload
+(backend)  cd atlas && python main.py  # don't use uvicorn --reload
 ```
 
 ## Style and Conventions
 
 **No Emojis**: No emojis should ever be added anywhere in this codebase (code, comments, docs, commit messages). If you find one, remove it.
 
-**File Naming**: Do not use generic names like `main.py`, `cli.py`, `utils.py`, or `helpers.py`. Use descriptive names that reflect the file's purpose (e.g., `chat_service.py`, `mcp_tool_manager.py`, `websocket_handler.py`). Exception: top-level entry points like `backend/main.py` are acceptable.
+**File Naming**: Do not use generic names like `main.py`, `cli.py`, `utils.py`, or `helpers.py`. Use descriptive names that reflect the file's purpose (e.g., `chat_service.py`, `mcp_tool_manager.py`, `websocket_handler.py`). Exception: top-level entry points like `atlas/main.py` are acceptable.
 
 **File Size**: Prefer files with 400 lines or fewer when practical.
 
@@ -75,8 +97,12 @@ All tests must pass before a feature is pushed.
 ### Backend: Clean Architecture Pattern
 
 ```
-backend/
+atlas/
    main.py              # FastAPI app + WebSocket endpoint at /ws, serves frontend/dist
+   __init__.py          # Package exports (AtlasClient, ChatResult)
+   atlas_client.py      # Python API client for programmatic use
+   atlas_chat_cli.py    # CLI tool entry point
+   server_cli.py        # Server CLI entry point (atlas-server)
    infrastructure/
       app_factory.py    # Dependency injection - wires LLM (LiteLLM), MCP, RAG, files, config
    application/
@@ -140,16 +166,16 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 
 4. **Configuration Layering** (in priority order):
    - Environment variables (highest priority)
-   - `config/overrides/` (not in repo)
+   - Optional overrides directory (set `APP_CONFIG_OVERRIDES` or `--config-overrides`)
    - `config/defaults/` (versioned)
    - Code defaults (Pydantic models)
 
 ## Configuration and Feature Flags
 
 ### Configuration Files
-- **LLM Config**: `config/defaults/llmconfig.yml` and `config/overrides/llmconfig.yml`
-- **MCP Servers**: `config/defaults/mcp.json` and `config/overrides/mcp.json`
-- **RAG Sources**: `config/defaults/rag-sources.json` and `config/overrides/rag-sources.json`
+- **LLM Config**: `config/defaults/llmconfig.yml` (optional overrides via `APP_CONFIG_OVERRIDES` or `--llm-config`)
+- **MCP Servers**: `config/defaults/mcp.json` (optional overrides via `APP_CONFIG_OVERRIDES` or `--mcp-config`)
+- **RAG Sources**: `config/defaults/rag-sources.json` (optional overrides via `APP_CONFIG_OVERRIDES` or `--rag-sources-config`)
 - **Help Config**: `config/defaults/help-config.json`
 - **Compliance Levels**: `config/defaults/compliance-levels.json`
 - **Environment**: `.env` (copy from `.env.example`)
@@ -179,7 +205,7 @@ When testing or developing MCP-related features, example configurations can be f
 
 ## Compliance Levels
 
-Definitions in `config/(overrides|defaults)/compliance-levels.json`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
+Definitions in `config/defaults/compliance-levels.json` with optional overrides via `APP_CONFIG_OVERRIDES`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
 
 When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 - `/api/config` includes model and server `compliance_level`
@@ -260,7 +286,7 @@ npm run test:ui       # Interactive UI
 
 **Python:**
 ```bash
-ruff check backend/ || (uv pip install ruff && ruff check backend/)
+ruff check atlas/ || (uv pip install ruff && ruff check atlas/)
 ```
 
 **Frontend:**
@@ -281,9 +307,9 @@ docker run -p 8000:8000 atlas-ui-3
 
 Three agent loop strategies implement different reasoning patterns:
 
-- **ReAct** (`backend/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
-- **Think-Act** (`backend/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
-- **Act** (`backend/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
+- **ReAct** (`atlas/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
+- **Think-Act** (`atlas/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
+- **Act** (`atlas/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
 
 Change agent loop: set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.
 
@@ -313,7 +339,7 @@ All prompts are loaded from the directory specified by `prompt_base_path` (defau
 Request -> SecurityHeaders -> RateLimit -> Auth -> Route
 ```
 - Rate limiting before auth to prevent abuse
-- Prompt injection risk detection in `backend/core/prompt_risk.py`
+- Prompt injection risk detection in `atlas/core/prompt_risk.py`
 - Group-based MCP server access control
 
 ### Auth Assumption
@@ -322,10 +348,10 @@ In production, reverse proxy injects `X-User-Email` (after stripping client head
 ## Extend by Example
 
 **Add a tool server:**
-Edit `config/overrides/mcp.json` (set `groups`, `transport`, `url/command`, `compliance_level`). Restart or call discovery on startup.
+Edit `config/defaults/mcp.json` (or an overrides directory if you set `APP_CONFIG_OVERRIDES`). Set `groups`, `transport`, `url/command`, `compliance_level`. Restart or call discovery on startup.
 
 **Add a RAG provider:**
-Edit `config/overrides/rag-sources.json`. For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
+Edit `config/defaults/rag-sources.json` (or an overrides directory if you set `APP_CONFIG_OVERRIDES`). For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
 
 **Change agent loop:**
 Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.
@@ -379,7 +405,7 @@ bash test/run_pr_validation.sh --list     # List available
 
 Before committing:
 1. **Lint**: Address style issues before running tests
-   - Python: `ruff check backend/ || (uv pip install ruff && ruff check backend/)`
+   - Python: `ruff check atlas/ || (uv pip install ruff && ruff check atlas/)`
    - Frontend: `cd frontend && npm run lint`
 2. **PR validation script**: If backend code changed, write and run `test/pr-validation/test_pr{N}_{desc}.sh`
 3. **Test**: `./test/run_tests.sh all`
@@ -396,16 +422,16 @@ Before creating or accepting a PR:
 When referencing code locations, use `file_path:line_number` format for easy navigation.
 
 **Core Entry Points:**
-- Backend: `backend/main.py` - FastAPI app + WebSocket
+- Backend: `atlas/main.py` - FastAPI app + WebSocket
 - Frontend: `frontend/src/main.jsx` - React app entry
-- Chat Service: `backend/application/chat/service.py:ChatService`
-- Config Management: `backend/modules/config/config_manager.py`
-- MCP Integration: `backend/modules/mcp_tools/mcp_tool_manager.py`
+- Chat Service: `atlas/application/chat/service.py:ChatService`
+- Config Management: `atlas/modules/config/config_manager.py`
+- MCP Integration: `atlas/modules/mcp_tools/mcp_tool_manager.py`
 
 **Protocol Definitions:**
-- `backend/interfaces/llm.py:LLMProtocol`
-- `backend/interfaces/tools.py:ToolManagerProtocol`
-- `backend/interfaces/transport.py:ChatConnectionProtocol`
+- `atlas/interfaces/llm.py:LLMProtocol`
+- `atlas/interfaces/tools.py:ToolManagerProtocol`
+- `atlas/interfaces/transport.py:ChatConnectionProtocol`
 
 ## Critical Restrictions
 

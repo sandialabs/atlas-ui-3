@@ -3,11 +3,12 @@
 [![CI/CD Pipeline](https://github.com/sandialabs/atlas-ui-3/actions/workflows/ci.yml/badge.svg)](https://github.com/sandialabs/atlas-ui-3/actions/workflows/ci.yml)
 [![Security Checks](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml/badge.svg)](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml)
 [![Docker Image](https://ghcr-badge.egpl.dev/sandialabs/atlas-ui-3/latest_tag?trim=major&label=latest)](https://github.com/sandialabs/atlas-ui-3/pkgs/container/atlas-ui-3)
+[![PyPI version](https://badge.fury.io/py/atlas-chat.svg)](https://badge.fury.io/py/atlas-chat)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![React 19](https://img.shields.io/badge/react-19.2-blue.svg)
 ![License MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-Atlas UI 3 is a secure chat application with MCP (Model Context Protocol) integration, developed by Sandia National Laboratories—a U.S. Department of Energy national laboratory—to support U.S. Government customers.
+Atlas UI 3 is a secure chat application with MCP (Model Context Protocol) integration, developed by Sandia National Laboratories -- a U.S. Department of Energy national laboratory -- to support U.S. Government customers.
 
 
 
@@ -24,8 +25,58 @@ Atlas UI 3 is a secure chat application with MCP (Model Context Protocol) integr
 *   **RAG Support**: Enhance responses with Retrieval-Augmented Generation.
 *   **Secure and Configurable**: Features group-based access control, compliance levels, and a tool approval system.
 *   **Modern Stack**: Built with React 19, FastAPI, and WebSockets.
+*   **Python Package**: Install and use as a library or CLI tool.
 
-## Quick Start
+## Installation
+
+### Install from PyPI (Recommended for Users)
+
+```bash
+# Install the package
+pip install atlas-chat
+
+# Or with uv (faster)
+uv pip install atlas-chat
+```
+
+### CLI Usage
+
+After installation, two CLI tools are available:
+
+```bash
+# Chat with an LLM
+atlas-chat "Hello, how are you?" --model gpt-4o
+atlas-chat "Use the search tool" --tools server_tool1
+atlas-chat --list-tools
+
+# Start the server
+atlas-server --port 8000
+atlas-server --env /path/to/.env --config-folder /path/to/config
+```
+
+### Python API Usage
+
+```python
+from atlas import AtlasClient, ChatResult
+
+# Async usage
+client = AtlasClient()
+result = await client.chat("Hello, how are you?")
+print(result.message)
+
+# With options
+result = await client.chat(
+    "Analyze this data",
+    model="gpt-4o",
+    selected_tools=["calculator", "search"],
+    agent_mode=True
+)
+
+# Sync wrapper
+result = client.chat_sync("Hello!")
+```
+
+## Quick Start (Development)
 
 ### Linux/macOS
 ```bash

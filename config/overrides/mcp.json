@@ -4,7 +4,7 @@
       "python",
       "mcp/calculator/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],
@@ -23,7 +23,7 @@
       "python",
       "mcp/pptx_generator/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],
@@ -38,7 +38,7 @@
       "python",
       "mcp/tool_planner/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],

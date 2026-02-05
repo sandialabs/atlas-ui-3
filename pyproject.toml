@@ -1,48 +1,103 @@
 [project]
-name = "atlas-ui-3-11"
+name = "atlas-chat"
 version = "0.1.0"
-description = "A FastAPI-based chat UI application"
+description = "Full-stack LLM chat interface with Model Context Protocol (MCP) integration"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Sandia National Laboratories" }
+]
+keywords = ["llm", "chat", "mcp", "ai", "anthropic", "openai", "gemini"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 requires-python = ">=3.11"
 dependencies = [
+    "beautifulsoup4",
+    "boto3>=1.34.0",
     "bs4",
-    "fastapi",
-    "uvicorn[standard]",
-    "websockets",
-    "python-multipart",
-    "pydantic",
-    "pyyaml",
-    "python-dotenv",
-    "fastmcp",
-    "requests",
-    "httpx",
+    "cryptography",
     "duckduckgo-search",
-    "PyPDF2",
-    "reportlab",
-    "pandas",
+    "fastapi",
+    "fastmcp>=2.10.0",
+    "httpx",
+    "litellm",
     "matplotlib",
     "numpy",
-    "seaborn",
+    "openpyxl",
+    "opentelemetry-api",
+    "opentelemetry-exporter-otlp",
+    "opentelemetry-instrumentation-fastapi",
+    "opentelemetry-instrumentation-httpx",
+    "opentelemetry-instrumentation-logging",
+    "opentelemetry-sdk",
+    "pandas",
+    "pydantic",
+    "PyJWT",
+    "PyPDF2",
+    "python-dotenv",
+    "python-multipart",
+    "python-pptx",
+    "pyyaml",
+    "reportlab",
+    "requests",
     "scikit-learn",
     "scipy",
-    "openpyxl",
-    "beautifulsoup4",
+    "seaborn",
+    "uvicorn[standard]",
+    "websockets",
+]
+
+[project.optional-dependencies]
+dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-mock",
-    "httpx",
-    "opentelemetry-api",
-    "opentelemetry-sdk",
-    "opentelemetry-instrumentation-logging",
-    "opentelemetry-exporter-otlp",
-    "opentelemetry-instrumentation-fastapi",
-    "opentelemetry-instrumentation-httpx"
+    "ruff",
 ]
 
+[project.scripts]
+atlas-chat = "atlas.atlas_chat_cli:main"
+atlas-server = "atlas.server_cli:main"
+
+[project.urls]
+Homepage = "https://github.com/sandialabs/atlas"
+Documentation = "https://github.com/sandialabs/atlas/tree/main/docs"
+Repository = "https://github.com/sandialabs/atlas"
+Issues = "https://github.com/sandialabs/atlas/issues"
+
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["atlas*"]
+
+[tool.setuptools.package-data]
+atlas = [
+    "*.md",
+    "*.txt",
+    "mcp/**/*",
+]
 
 [tool.pytest.ini_options]
 markers = [
     "integration: marks tests as integration tests",
 ]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

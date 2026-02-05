@@ -27,14 +27,14 @@ bash agent_start.sh   # builds frontend, starts backend, seeds/mocks
 Manual quick run (alternative):
 ```bash
 (frontend) cd frontend && npm install && npm run build
-(backend)  cd backend && python main.py  # don't use uvicorn --reload
+(backend)  cd atlas && python main.py  # don't use uvicorn --reload
 ```
 
 ## Style and Conventions
 
 **No Emojis**: No emojis anywhere in codebase (code, comments, docs, commit messages). If you find one, remove it.
 
-**File Naming**: Avoid generic names (`utils.py`, `helpers.py`). Prefer descriptive names; `backend/main.py` is the entry-point exception.
+**File Naming**: Avoid generic names (`utils.py`, `helpers.py`). Prefer descriptive names; `atlas/main.py` is the entry-point exception.
 
 **File Size**: Prefer files with 400 lines or fewer when practical.
 
@@ -52,7 +52,7 @@ Manual quick run (alternative):
 ## Architecture Overview
 
 ```
-backend/
+atlas/
    main.py              # FastAPI app + WebSocket endpoint at /ws, serves frontend/dist
    infrastructure/
       app_factory.py    # Dependency injection - wires LLM (LiteLLM), MCP, RAG, files, config
@@ -150,9 +150,9 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 
 Three agent loop strategies selectable via `APP_AGENT_LOOP_STRATEGY`:
 
-- **ReAct** (`backend/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
-- **Think-Act** (`backend/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
-- **Act** (`backend/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
+- **ReAct** (`atlas/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
+- **Think-Act** (`atlas/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
+- **Act** (`atlas/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
 
 ## Prompt System
 
@@ -173,7 +173,7 @@ Request -> SecurityHeaders -> RateLimit -> Auth -> Route
 ```
 
 - Rate limiting before auth to prevent abuse
-- Prompt injection risk detection in `backend/core/prompt_risk.py`
+- Prompt injection risk detection in `atlas/core/prompt_risk.py`
 - Group-based MCP server access control
 - Auth: In prod, reverse proxy injects `X-User-Email`; dev falls back to test user
 
@@ -199,7 +199,7 @@ Options: `-f` (frontend only), `-b` (backend only)
 
 ### Linting
 ```bash
-ruff check backend/ || (uv pip install ruff && ruff check backend/)
+ruff check atlas/ || (uv pip install ruff && ruff check atlas/)
 cd frontend && npm run lint
 ```
 
@@ -246,16 +246,16 @@ Before PR:
 Use `file_path:line_number` format for easy navigation.
 
 **Core Entry Points:**
-- Backend: `backend/main.py` - FastAPI app + WebSocket
+- Backend: `atlas/main.py` - FastAPI app + WebSocket
 - Frontend: `frontend/src/main.jsx` - React app entry
-- Chat Service: `backend/application/chat/service.py:ChatService`
-- Config: `backend/modules/config/config_manager.py`
-- MCP: `backend/modules/mcp_tools/mcp_tool_manager.py`
+- Chat Service: `atlas/application/chat/service.py:ChatService`
+- Config: `atlas/modules/config/config_manager.py`
+- MCP: `atlas/modules/mcp_tools/mcp_tool_manager.py`
 
 **Protocol Definitions:**
-- `backend/interfaces/llm.py:LLMProtocol`
-- `backend/interfaces/tools.py:ToolManagerProtocol`
-- `backend/interfaces/transport.py:ChatConnectionProtocol`
+- `atlas/interfaces/llm.py:LLMProtocol`
+- `atlas/interfaces/tools.py:ToolManagerProtocol`
+- `atlas/interfaces/transport.py:ChatConnectionProtocol`
 
 ## Extend by Example
 

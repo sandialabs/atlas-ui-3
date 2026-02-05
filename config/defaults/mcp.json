@@ -4,7 +4,7 @@
       "python",
       "mcp/calculator/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],
@@ -19,7 +19,7 @@
       "python",
       "mcp/thinking/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],
@@ -34,7 +34,7 @@
       "python",
       "mcp/pdfbasic/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],
@@ -49,7 +49,7 @@
       "python",
       "mcp/ui-demo/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],
@@ -64,7 +64,7 @@
       "python",
       "mcp/code-executor/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],
@@ -79,7 +79,7 @@
       "python",
       "mcp/prompts/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],
@@ -94,7 +94,7 @@
       "python",
       "mcp/env-demo/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "env": {
       "CLOUD_PROFILE": "demo-profile",
       "CLOUD_REGION": "us-west-2",
@@ -125,7 +125,7 @@
       "python",
       "mcp/many_tools_demo/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],

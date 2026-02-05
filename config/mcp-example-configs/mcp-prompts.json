@@ -1,1 +1,1 @@
-{"prompts": {"command": ["python", "mcp/prompts/main.py"], "cwd": "backend", "groups": ["users"], "description": "prompts MCP server", "author": "Chat UI Team", "short_description": "prompts server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}
+{"prompts": {"command": ["python", "mcp/prompts/main.py"], "cwd": "atlas", "groups": ["users"], "description": "prompts MCP server", "author": "Chat UI Team", "short_description": "prompts server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

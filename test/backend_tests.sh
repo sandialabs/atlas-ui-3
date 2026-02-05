@@ -8,7 +8,7 @@ echo "================================="
 if [ -z "$PROJECT_ROOT" ]; then
     if [ -d "/app" ]; then
         PROJECT_ROOT="/app"
-    elif [ -d "../backend" ]; then
+    elif [ -d "../atlas" ]; then
         # Running from test/ directory
         PROJECT_ROOT="$(pwd)/.."
     else
@@ -18,10 +18,10 @@ if [ -z "$PROJECT_ROOT" ]; then
 fi
 
 # Set up Python environment and paths
-BACKEND_DIR="$PROJECT_ROOT/backend"
+ATLAS_DIR="$PROJECT_ROOT/atlas"
 export PYTHONPATH="$PROJECT_ROOT"
 
-echo "Backend directory: $BACKEND_DIR"
+echo "Atlas directory: $ATLAS_DIR"
 echo "PYTHONPATH: $PYTHONPATH"
 
 # Activate project virtual environment if available (per CLAUDE.md: use uv-managed venv)
@@ -34,15 +34,15 @@ else
     echo "If tests fail due to missing packages, run: uv venv && source .venv/bin/activate && uv pip install -r requirements.txt"
 fi
 
-# Change to backend directory
-cd "$BACKEND_DIR"
+# Change to atlas directory
+cd "$ATLAS_DIR"
 
 echo ""
 echo "\nRunning Backend Tests..."
-echo "BACKEND_DIR full path: $(pwd)"
+echo "ATLAS_DIR full path: $(pwd)"
 echo "=============================="
 
-# If legacy targeted tests exist, run them; otherwise run all tests in backend/tests
+# If legacy targeted tests exist, run them; otherwise run all tests in atlas/tests
 if [ -f tests/test_config_module.py ] || [ -f tests/test_file_storage_module.py ] || [ -f tests/test_llm_module.py ]; then
     echo "Detected legacy targeted tests; running individually"
     [ -f tests/test_config_module.py ] && timeout 60 python -m pytest tests/test_config_module.py -v --tb=short || true
@@ -50,7 +50,7 @@ if [ -f tests/test_config_module.py ] || [ -f tests/test_file_storage_module.py 
     [ -f tests/test_llm_module.py ] && timeout 60 python -m pytest tests/test_llm_module.py -v --tb=short || true
 fi
 
-echo "Running pytest on backend/tests directory"
+echo "Running pytest on atlas/tests directory"
 timeout 300 python -m pytest tests -v --tb=short
 
 echo "\nBackend tests completed"

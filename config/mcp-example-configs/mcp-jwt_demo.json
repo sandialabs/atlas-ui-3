@@ -4,7 +4,7 @@
       "python",
       "mcp/jwt_demo/main.py"
     ],
-    "cwd": "backend",
+    "cwd": "atlas",
     "groups": [
       "users"
     ],

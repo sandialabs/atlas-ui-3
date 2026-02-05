@@ -1,1 +1,1 @@
-Test banner message
+Test message

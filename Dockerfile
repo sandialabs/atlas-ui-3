@@ -41,9 +41,9 @@ ENV VITE_FEATURE_POWERED_BY_ATLAS=${VITE_FEATURE_POWERED_BY_ATLAS}
 # build and delete the node_modules
 RUN  npm run build && rm -rf node_modules
 
-# Switch back to app directory and copy backend code
+# Switch back to app directory and copy atlas package code
 WORKDIR /app
-COPY backend/ ./backend/
+COPY atlas/ ./atlas/
 # Copy new config directory (defaults & overrides if present)
 COPY config/ ./config/
 
@@ -51,10 +51,12 @@ COPY config/ ./config/
 COPY docs/ ./docs/
 COPY scripts/ ./scripts/
 COPY test/ ./test/
+COPY prompts/ ./prompts/
+COPY pyproject.toml ./
 
 # Create required runtime & config directories (before ownership change)
 RUN mkdir -p \
-        /app/backend/logs \
+        /app/atlas/logs \
         /app/config/defaults \
         /app/config/overrides \
         /app/runtime/logs \
@@ -104,8 +106,8 @@ ENV PYTHONPATH=/app \
     RUNTIME_LOG_DIR=/app/runtime/logs \
     RUNTIME_FEEDBACK_DIR=/app/runtime/feedback
 
-# Start the application
-WORKDIR /app/backend
+# Start the application using the atlas-server CLI or direct Python
+WORKDIR /app/atlas
 # Use environment variables for host/port configuration
 # Default to 0.0.0.0 for container environments, can be overridden
 ENV ATLAS_HOST=0.0.0.0
