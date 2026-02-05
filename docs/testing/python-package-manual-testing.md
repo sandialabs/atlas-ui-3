@@ -507,3 +507,237 @@ Or use a different port:
 ```bash
 atlas-server --port 8001
 ```
+
+---
+
+## Part 9: PyPI Integration Setup
+
+This section covers how to set up automated publishing to PyPI.
+
+### 9.1 Prerequisites
+
+- [ ] PyPI account at https://pypi.org
+- [ ] GitHub repository with Actions enabled
+- [ ] Admin access to add repository secrets
+
+### 9.2 Create PyPI API Token
+
+1. Log in to https://pypi.org
+2. Go to Account Settings → API tokens
+3. Click "Add API token"
+4. Name: `atlas-chat-github-actions`
+5. Scope: Select "Entire account" (or scope to `atlas-chat` project after first publish)
+6. Copy the token (starts with `pypi-`)
+
+- [ ] Token created and copied
+
+### 9.3 Add GitHub Secret
+
+1. Go to your GitHub repository → Settings → Secrets and variables → Actions
+2. Click "New repository secret"
+3. Name: `PYPI_API_TOKEN`
+4. Value: Paste the PyPI token
+5. Click "Add secret"
+
+- [ ] Secret `PYPI_API_TOKEN` added to repository
+
+### 9.4 Create GitHub Actions Workflow
+
+Create `.github/workflows/publish-pypi.yml`:
+
+```yaml
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (must match pyproject.toml)'
+        required: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # For trusted publishing (optional)
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build package
+        run: python -m build
+
+      - name: Check package
+        run: twine check dist/*
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload dist/*
+```
+
+- [ ] Workflow file created at `.github/workflows/publish-pypi.yml`
+
+### 9.5 Test Local Build
+
+Before publishing, verify the package builds correctly:
+
+```bash
+# Install build tools
+uv pip install build twine
+
+# Build the package
+python -m build
+
+# Check the built package
+twine check dist/*
+
+# List contents
+ls -la dist/
+```
+
+- [ ] Package builds without errors
+- [ ] `dist/atlas_chat-0.1.0.tar.gz` created
+- [ ] `dist/atlas_chat-0.1.0-py3-none-any.whl` created
+- [ ] `twine check` passes
+
+### 9.6 Test Package Installation from Built Files
+
+```bash
+# Create a fresh virtual environment
+python -m venv /tmp/test-atlas-install
+source /tmp/test-atlas-install/bin/activate
+
+# Install from the wheel
+pip install dist/atlas_chat-0.1.0-py3-none-any.whl
+
+# Verify installation
+atlas-init --version
+atlas-chat --help
+atlas-server --version
+
+# Test import
+python -c "from atlas import AtlasClient; print('Import OK')"
+
+# Cleanup
+deactivate
+rm -rf /tmp/test-atlas-install
+```
+
+- [ ] Package installs from wheel
+- [ ] CLI commands work
+- [ ] Python import works
+
+### 9.7 Publish to TestPyPI (Optional but Recommended)
+
+Before publishing to the real PyPI, test with TestPyPI:
+
+1. Create an account at https://test.pypi.org
+2. Create an API token
+3. Add `TEST_PYPI_API_TOKEN` secret to GitHub
+
+```bash
+# Manual upload to TestPyPI
+twine upload --repository testpypi dist/*
+
+# Test installation from TestPyPI
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ atlas-chat
+```
+
+- [ ] Published to TestPyPI successfully
+- [ ] Installation from TestPyPI works
+
+### 9.8 Trigger a Release
+
+To publish to PyPI:
+
+**Option A: GitHub Release (Recommended)**
+1. Go to Releases → "Create a new release"
+2. Tag: `v0.1.0` (must match version in `pyproject.toml`)
+3. Title: `v0.1.0 - Initial Python Package Release`
+4. Description: Release notes
+5. Click "Publish release"
+
+**Option B: Manual Workflow Dispatch**
+1. Go to Actions → "Publish to PyPI"
+2. Click "Run workflow"
+3. Enter version number
+4. Click "Run workflow"
+
+- [ ] Release triggered
+- [ ] GitHub Action completes successfully
+- [ ] Package visible at https://pypi.org/project/atlas-chat/
+
+### 9.9 Verify Published Package
+
+```bash
+# Create fresh environment
+python -m venv /tmp/test-pypi-install
+source /tmp/test-pypi-install/bin/activate
+
+# Install from PyPI
+pip install atlas-chat
+
+# Verify
+atlas-init --version
+atlas-chat --help
+python -c "from atlas import AtlasClient; print('Import OK')"
+
+# Cleanup
+deactivate
+rm -rf /tmp/test-pypi-install
+```
+
+- [ ] Package installs from PyPI
+- [ ] All CLI commands work
+- [ ] Python import works
+
+---
+
+## PyPI Integration Summary
+
+| Step | Status |
+|------|--------|
+| PyPI API Token | [ ] |
+| GitHub Secret | [ ] |
+| Workflow File | [ ] |
+| Local Build | [ ] |
+| TestPyPI (optional) | [ ] |
+| Production Release | [ ] |
+| Verification | [ ] |
+
+### Version Bumping Checklist
+
+When releasing a new version:
+
+1. Update version in `pyproject.toml`:
+   ```toml
+   version = "0.2.0"
+   ```
+
+2. Update CHANGELOG.md with release notes
+
+3. Commit changes:
+   ```bash
+   git add pyproject.toml CHANGELOG.md
+   git commit -m "Bump version to 0.2.0"
+   git push
+   ```
+
+4. Create GitHub release with tag `v0.2.0`
+
+5. Verify the new version appears on PyPI
