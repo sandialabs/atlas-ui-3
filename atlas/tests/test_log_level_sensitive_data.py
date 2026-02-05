@@ -8,13 +8,55 @@ These tests verify that:
 """
 
 import asyncio
+import importlib
 import logging
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from atlas.application.chat.service import ChatService
-from atlas.modules.llm.litellm_caller import LiteLLMCaller
+
+
+def _ensure_real_litellm_module():
+    """
+    Ensure the real litellm_caller module is in sys.modules.
+
+    Some test files (e.g., test_capability_tokens_and_injection.py) patch the
+    litellm_caller module at import time. This function forces a reimport of
+    the real module to ensure patches work correctly.
+    """
+    module_name = "atlas.modules.llm.litellm_caller"
+
+    # Check if current module is fake
+    if module_name in sys.modules:
+        current_module = sys.modules[module_name]
+        if hasattr(current_module, "LiteLLMCaller"):
+            caller_class = current_module.LiteLLMCaller
+            if not hasattr(caller_class, "_get_model_kwargs"):
+                # It's a fake, remove it and reimport
+                del sys.modules[module_name]
+                importlib.import_module(module_name)
+    else:
+        # Not in sys.modules, import fresh
+        importlib.import_module(module_name)
+
+
+@pytest.fixture(autouse=True)
+def ensure_real_litellm_for_tests():
+    """Fixture to ensure real LiteLLM module is loaded before each test."""
+    _ensure_real_litellm_module()
+    # Re-import the class from the now-correct module
+    from atlas.modules.llm.litellm_caller import LiteLLMCaller as RealCaller
+    # Make it available globally for this module
+    global LiteLLMCaller
+    LiteLLMCaller = RealCaller
+    yield
+
+
+# Initially try to get the real class (may be overridden by fixture)
+_ensure_real_litellm_module()
+from atlas.modules.llm.litellm_caller import LiteLLMCaller  # noqa: E402
 
 
 class TestLogLevelSensitiveData:

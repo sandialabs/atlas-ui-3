@@ -1,9 +1,45 @@
 """Integration tests for LLM environment variable expansion."""
 
+import importlib
+import sys
+
 import pytest
 
 from atlas.modules.config.config_manager import LLMConfig, ModelConfig
-from atlas.modules.llm.litellm_caller import LiteLLMCaller
+
+
+def _get_real_litellm_caller():
+    """
+    Get the real LiteLLMCaller class, even if another test has patched sys.modules.
+
+    Some test files (e.g., test_capability_tokens_and_injection.py) patch the
+    litellm_caller module at import time. This function forces a reimport of
+    the real module to get the real LiteLLMCaller class.
+    """
+    module_name = "atlas.modules.llm.litellm_caller"
+
+    # Remove the potentially fake module from sys.modules
+    if module_name in sys.modules:
+        old_module = sys.modules.pop(module_name)
+        # Check if it's a fake by seeing if LiteLLMCaller has expected attributes
+        if hasattr(old_module, "LiteLLMCaller"):
+            caller_class = old_module.LiteLLMCaller
+            if not hasattr(caller_class, "_get_model_kwargs"):
+                # It's a fake, reimport the real one
+                real_module = importlib.import_module(module_name)
+                return real_module.LiteLLMCaller
+            else:
+                # It's real, restore it
+                sys.modules[module_name] = old_module
+                return caller_class
+
+    # Not in sys.modules, import fresh
+    real_module = importlib.import_module(module_name)
+    return real_module.LiteLLMCaller
+
+
+# Get the real LiteLLMCaller at module load time
+LiteLLMCaller = _get_real_litellm_caller()
 
 
 class TestLLMEnvExpansionIntegration:

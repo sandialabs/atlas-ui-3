@@ -1,6 +1,7 @@
 import base64
 import os
 import sys
+import types
 from typing import Optional
 
 import pytest
@@ -9,10 +10,12 @@ from fastapi.testclient import TestClient
 # Ensure backend root is on path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Stub LiteLLM before importing app to avoid external dependency in tests
-import types
+# Save original module before patching (so we can restore it later)
+_ORIGINAL_LITELLM_MODULE = sys.modules.get("atlas.modules.llm.litellm_caller")
 
+# Stub LiteLLM before importing app to avoid external dependency in tests
 fake_litellm_caller = types.ModuleType("atlas.modules.llm.litellm_caller")
+
 
 class _FakeLLM:
     def __init__(self, *args, **kwargs):
@@ -21,10 +24,26 @@ class _FakeLLM:
     async def call_plain(self, *args, **kwargs):
         return "ok"
 
+
 fake_litellm_caller.LiteLLMCaller = _FakeLLM  # type: ignore
 sys.modules["atlas.modules.llm.litellm_caller"] = fake_litellm_caller
 
 from main import app  # noqa: E402  # type: ignore
+
+
+def _restore_original_module():
+    """Restore the original litellm_caller module if it was saved."""
+    if _ORIGINAL_LITELLM_MODULE is not None:
+        sys.modules["atlas.modules.llm.litellm_caller"] = _ORIGINAL_LITELLM_MODULE
+    elif "atlas.modules.llm.litellm_caller" in sys.modules:
+        del sys.modules["atlas.modules.llm.litellm_caller"]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def restore_litellm_module_after_tests():
+    """Restore the original LiteLLM module after all tests in this module complete."""
+    yield
+    _restore_original_module()
 
 from atlas.core.capabilities import generate_file_token, verify_file_token  # noqa: E402  # type: ignore
 
