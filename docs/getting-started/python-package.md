@@ -301,9 +301,11 @@ atlas-server --port 8080 --host 0.0.0.0
 atlas-server --env /path/to/.env --config-folder /path/to/config
 ```
 
-## Development Installation
+## Development Installation (Editable Mode)
 
-For development, install in editable mode:
+For development, install the package in **editable mode** (`pip install -e .`). This creates a symlink from your Python environment to your local source code directory, allowing you to modify the code and see changes immediately without reinstalling.
+
+### Setup
 
 ```bash
 # Clone the repository
@@ -313,14 +315,94 @@ cd atlas-ui-3
 # Create virtual environment
 uv venv && source .venv/bin/activate
 
-# Install in editable mode
+# Install dependencies
+uv pip install -r requirements.txt
+
+# Install atlas package in editable mode
 uv pip install -e .
 
 # Or with pip
 pip install -e .
 ```
 
-This allows you to make changes to the source code and have them immediately reflected without reinstalling.
+### What Editable Mode Does
+
+When you run `pip install -e .`, Python creates a special link that points to your source directory instead of copying files to `site-packages`. This means:
+
+| Normal Install (`pip install atlas-chat`) | Editable Install (`pip install -e .`) |
+|-------------------------------------------|---------------------------------------|
+| Copies files to `site-packages/` | Links to your source directory |
+| Must reinstall after every code change | Changes take effect immediately |
+| Uses the version from PyPI | Uses your local code |
+
+### Development Workflow
+
+```bash
+# 1. Install once in editable mode
+uv pip install -e .
+
+# 2. Make changes to the code
+vim atlas/atlas_client.py
+
+# 3. Test immediately - no reinstall needed!
+python -c "from atlas import AtlasClient; print('works!')"
+
+# 4. CLI commands also use your local code
+atlas-chat "test my changes"
+
+# 5. Run the server with your changes
+atlas-server --port 8000
+```
+
+### Example: Modifying the Client
+
+```bash
+# Edit the AtlasClient class
+vim atlas/atlas_client.py
+
+# Your script immediately uses the updated code
+python my_test_script.py
+
+# The CLI also uses your changes
+atlas-chat --list-tools
+```
+
+### Verifying Editable Mode is Working
+
+```python
+# Check where Python is loading atlas from
+import atlas
+print(atlas.__file__)
+# Should show: /path/to/atlas-ui-3/atlas/__init__.py
+# NOT: /path/to/.venv/lib/python3.x/site-packages/atlas/__init__.py
+```
+
+### Running the Full Application
+
+With editable mode installed, you can run the full web application:
+
+```bash
+# Option 1: Use the start script (builds frontend + starts backend)
+bash agent_start.sh
+
+# Option 2: Use the CLI server command
+atlas-server --port 8000
+
+# Option 3: Run directly with uvicorn
+cd atlas && PYTHONPATH=.. uvicorn main:app --port 8000
+```
+
+### Combining with Frontend Development
+
+```bash
+# Terminal 1: Build frontend (one-time or when frontend changes)
+cd frontend && npm install && npm run build
+
+# Terminal 2: Run backend with your Python changes
+atlas-server --port 8000
+
+# Now edit Python files and refresh browser to see changes
+```
 
 ## Next Steps
 

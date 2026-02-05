@@ -89,19 +89,38 @@ uv venv && source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
-### Development Installation
+### Development Installation (Editable Mode)
 
-For development, you have two options:
+For development, install the package in **editable mode**. This creates a link from your Python environment to your local source code, so any changes you make to the code are immediately available without reinstalling.
 
-**Option 1: Editable Install (Recommended)**
 ```bash
-# Install in development/editable mode - changes to files are immediately reflected
+# Install in editable mode with uv (recommended)
 uv pip install -e .
-# Or with pip:
+
+# Or with pip
 pip install -e .
 ```
 
-**Option 2: PYTHONPATH (Legacy)**
+**What editable mode gives you:**
+- Edit any Python file in `atlas/` and changes take effect immediately
+- CLI commands (`atlas-chat`, `atlas-server`) use your local code
+- Import `from atlas import AtlasClient` in scripts and get your local version
+- No need to reinstall after making changes
+
+**Example workflow:**
+```bash
+# Install once in editable mode
+uv pip install -e .
+
+# Edit code
+vim atlas/atlas_client.py
+
+# Run immediately with your changes - no reinstall needed
+atlas-chat "test my changes"
+python my_script.py  # uses updated AtlasClient
+```
+
+**Alternative: PYTHONPATH (if you can't use editable install)**
 ```bash
 # Set PYTHONPATH manually when running
 PYTHONPATH=/path/to/atlas-ui-3 python atlas/main.py
