@@ -41,9 +41,13 @@ uv pip install atlas-chat
 
 ### CLI Usage
 
-After installation, two CLI tools are available:
+After installation, three CLI tools are available:
 
 ```bash
+# Set up configuration (run this first!)
+atlas-init              # Creates .env and config/ in current directory
+atlas-init --minimal    # Creates just a minimal .env file
+
 # Chat with an LLM
 atlas-chat "Hello, how are you?" --model gpt-4o
 atlas-chat "Use the search tool" --tools server_tool1

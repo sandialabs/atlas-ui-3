@@ -14,14 +14,34 @@ pip install atlas-chat
 uv pip install atlas-chat
 ```
 
-**Important:** After installation, you must [configure your API keys](#configuration-required) before using Atlas.
+**Important:** After installation, you must configure your API keys before using Atlas.
 
 ## Quick Start
 
-**Prerequisites:** Set at least one LLM API key (see [Configuration](#configuration-required) below):
+### Step 1: Set Up Configuration
+
+The easiest way to get started is with the `atlas-init` command:
+
 ```bash
-export OPENAI_API_KEY="sk-your-key-here"
+# Create config files in current directory
+atlas-init
+
+# Or create just a minimal .env file
+atlas-init --minimal
 ```
+
+This creates a `.env` file (and optionally a `config/` folder) with all the settings you need.
+
+### Step 2: Add Your API Key
+
+Edit the `.env` file and add at least one API key:
+
+```bash
+# Edit .env and replace the placeholder with your real key
+OPENAI_API_KEY=sk-your-actual-key-here
+```
+
+### Step 3: Start Using Atlas
 
 ### Basic Usage
 
@@ -364,7 +384,25 @@ See the [Configuration Guide](../admin/configuration.md) for full details on all
 
 ## CLI Tools
 
-When you install the atlas-chat package, two CLI commands become available:
+When you install the atlas-chat package, three CLI commands become available:
+
+### atlas-init
+
+Set up configuration files in your project:
+
+```bash
+# Interactive setup - creates .env and config/ folder
+atlas-init
+
+# Create only a minimal .env file
+atlas-init --minimal
+
+# Set up in a specific directory
+atlas-init --target ./my-project
+
+# Overwrite existing files without prompting
+atlas-init --force
+```
 
 ### atlas-chat
 

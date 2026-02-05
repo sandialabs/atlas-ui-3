@@ -66,6 +66,7 @@ dev = [
 [project.scripts]
 atlas-chat = "atlas.atlas_chat_cli:main"
 atlas-server = "atlas.server_cli:main"
+atlas-init = "atlas.init_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/sandialabs/atlas"
@@ -86,6 +87,14 @@ atlas = [
     "*.md",
     "*.txt",
     "mcp/**/*",
+]
+
+# Include config files and .env.example in the distribution
+[tool.setuptools.data-files]
+"." = [".env.example"]
+"config/defaults" = [
+    "config/defaults/*.json",
+    "config/defaults/*.yml",
 ]
 
 [tool.pytest.ini_options]
