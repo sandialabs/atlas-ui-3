@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Refactor**: Rename `backend/` directory to `atlas/` for proper Python package structure with `__init__.py` exports.
 - **CLI**: Add `atlas-server` command for starting the server with `--env`, `--config-folder`, `--port` options.
 - **CI/CD**: Add GitHub Actions workflow for publishing to PyPI on release.
+- **Fix**: Resolve test isolation issue where `test_capability_tokens_and_injection.py` was polluting `sys.modules` with a fake LiteLLMCaller, causing 25 tests to fail when run together.
 
 ### PR #TBD - 2026-02-04
 - Add banyan-extractor-mock service for PDF and PPTX content extraction using banyan-ingest and Nemotron Parse, with pypdf fallback for PDFs when banyan-ingest is unavailable.
