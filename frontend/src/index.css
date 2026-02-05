@@ -42,19 +42,24 @@
     box-sizing: border-box;
   }
 
+  html {
+    height: 100%;
+  }
+
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
     background-color: #111827;
     color: #e5e7eb;
     line-height: 1.6;
-    height: 100vh;
+    height: 100%;
     overflow: hidden;
   }
 
   #root {
-    height: 100vh;
+    height: 100%;
     width: 100%;
     display: flex;
+    flex-direction: column;
   }
 }
 
