@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2026-02-04
+### PR #302 - 2026-02-04
 - Fix help page width constraint so documentation content fills the full available width (#145)
 - Add configurable timeouts (`MCP_DISCOVERY_TIMEOUT`, `MCP_CALL_TIMEOUT`) for MCP discovery and tool calls to prevent indefinite hangs (#298)
 - Close #293 (f-string backslash SyntaxError was already resolved on main)
