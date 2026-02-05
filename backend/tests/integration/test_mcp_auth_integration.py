@@ -23,6 +23,8 @@ class TestMCPAuthenticationIntegration:
         with patch('backend.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"mcp-http-mock": Mock()}
             mock_config_manager.mcp_config.servers["mcp-http-mock"].model_dump.return_value = server_config
+            mock_config_manager.app_settings.mcp_call_timeout = 120
+            mock_config_manager.app_settings.mcp_discovery_timeout = 30
             
             manager = MCPToolManager()
             manager.servers_config = {"mcp-http-mock": server_config}
@@ -59,6 +61,8 @@ class TestMCPAuthenticationIntegration:
         with patch('backend.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"mcp-http-mock": Mock()}
             mock_config_manager.mcp_config.servers["mcp-http-mock"].model_dump.return_value = server_config
+            mock_config_manager.app_settings.mcp_call_timeout = 120
+            mock_config_manager.app_settings.mcp_discovery_timeout = 30
 
             manager = MCPToolManager()
             manager.servers_config = {"mcp-http-mock": server_config}
@@ -103,6 +107,8 @@ class TestMCPAuthenticationIntegration:
         with patch('backend.modules.mcp_tools.client.config_manager') as mock_config_manager:
             mock_config_manager.mcp_config.servers = {"mcp-http-mock": Mock()}
             mock_config_manager.mcp_config.servers["mcp-http-mock"].model_dump.return_value = server_config
+            mock_config_manager.app_settings.mcp_call_timeout = 120
+            mock_config_manager.app_settings.mcp_discovery_timeout = 30
 
             manager = MCPToolManager()
             manager.servers_config = {"mcp-http-mock": server_config}

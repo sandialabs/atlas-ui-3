@@ -57,6 +57,12 @@ MCP_RECONNECT_MAX_INTERVAL=300
 
 # Multiplier for exponential backoff (default: 2.0)
 MCP_RECONNECT_BACKOFF_MULTIPLIER=2.0
+
+# Timeout in seconds for MCP discovery calls - list_tools, list_prompts (default: 30)
+MCP_DISCOVERY_TIMEOUT=30
+
+# Timeout in seconds for MCP tool calls (default: 120)
+MCP_CALL_TIMEOUT=120
 ```
 
 When `FEATURE_MCP_AUTO_RECONNECT_ENABLED=true`, the backend starts a background task that periodically retries connections for servers that previously failed to initialize.

@@ -46,7 +46,7 @@ const HelpPage = () => {
   }
 
   const renderQuickStartSection = (section) => (
-    <section key={section.id} className="bg-gray-800 rounded-lg p-6">
+    <section key={section.id} className="bg-gray-800 p-6">
       <div className="flex items-center gap-3 mb-4">
         {React.createElement(getIcon(section.icon), { className: `w-6 h-6 text-${section.iconColor}` })}
         <h2 className="text-xl font-bold">{section.title}</h2>
@@ -75,7 +75,7 @@ const HelpPage = () => {
   )
 
   const renderFeatureListSection = (section) => (
-    <section key={section.id} className="bg-gray-800 rounded-lg p-6">
+    <section key={section.id} className="bg-gray-800 p-6">
       <div className="flex items-center gap-3 mb-4">
         {React.createElement(getIcon(section.icon), { className: `w-6 h-6 text-${section.iconColor}` })}
         <h2 className="text-xl font-bold">{section.title}</h2>
@@ -101,7 +101,7 @@ const HelpPage = () => {
   )
 
   const renderTipCardsSection = (section) => (
-    <section key={section.id} className="bg-gray-800 rounded-lg p-6">
+    <section key={section.id} className="bg-gray-800 p-6">
       <div className="flex items-center gap-3 mb-4">
         {React.createElement(getIcon(section.icon), { className: `w-6 h-6 text-${section.iconColor}` })}
         <h2 className="text-xl font-bold">{section.title}</h2>
@@ -128,7 +128,7 @@ const HelpPage = () => {
   )
 
   const renderTechnicalSection = (section) => (
-    <section key={section.id} className="bg-gray-800 rounded-lg p-6">
+    <section key={section.id} className="bg-gray-800 p-6">
       <div className="flex items-center gap-3 mb-4">
         {React.createElement(getIcon(section.icon), { className: `w-6 h-6 text-${section.iconColor}` })}
         <h2 className="text-xl font-bold">{section.title}</h2>
@@ -195,7 +195,7 @@ const HelpPage = () => {
   )
 
   const renderSimpleSection = (section) => (
-    <section key={section.id} className="bg-gray-800 rounded-lg p-6">
+    <section key={section.id} className="bg-gray-800 p-6">
       <div className="flex items-center gap-3 mb-4">
         {section.iconColor === 'gradient' ? (
           <div className={`w-6 h-6 bg-gradient-to-br from-${section.gradientFrom} to-${section.gradientTo} rounded-full flex items-center justify-center`}>
@@ -229,7 +229,7 @@ const HelpPage = () => {
   )
 
   const renderSupportCardsSection = (section) => (
-    <section key={section.id} className="bg-gray-800 rounded-lg p-6">
+    <section key={section.id} className="bg-gray-800 p-6">
       <div className="flex items-center gap-3 mb-4">
         {React.createElement(getIcon(section.icon), { className: `w-6 h-6 text-${section.iconColor}` })}
         <h2 className="text-xl font-bold">{section.title}</h2>
@@ -290,7 +290,7 @@ const HelpPage = () => {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="w-full p-6 space-y-8">
+        <div className="w-full max-w-none py-6 space-y-6">
           {loading && (
             <div className="bg-gray-800 rounded-lg p-6 text-center text-gray-400">
               <div className="animate-pulse">Loading help content...</div>

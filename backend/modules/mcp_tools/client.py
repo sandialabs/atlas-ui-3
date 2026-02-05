@@ -1053,13 +1053,14 @@ class MCPToolManager:
         safe_server_name = sanitize_for_logging(server_name)
         server_config = self.servers_config.get(server_name, {})
         safe_config = sanitize_for_logging(str(server_config))
+        discovery_timeout = config_manager.app_settings.mcp_discovery_timeout
         logger.debug("Tool discovery: starting for server '%s'", safe_server_name)
         logger.debug("Server config (sanitized): %s", safe_config)
         try:
             logger.debug("Opening client connection for %s", safe_server_name)
             async with client:
                 logger.debug("Client connected for %s; listing tools", safe_server_name)
-                tools = await client.list_tools()
+                tools = await asyncio.wait_for(client.list_tools(), timeout=discovery_timeout)
                 logger.debug("Got %d tools from %s: %s", len(tools), safe_server_name, [tool.name for tool in tools])
 
                 # Log detailed tool information
@@ -1197,13 +1198,14 @@ class MCPToolManager:
         """Discover prompts for a single server. Returns server prompts data."""
         safe_server_name = sanitize_for_logging(server_name)
         server_config = self.servers_config.get(server_name, {})
+        discovery_timeout = config_manager.app_settings.mcp_discovery_timeout
         logger.debug(f"Attempting to discover prompts from {safe_server_name}")
         try:
             logger.debug(f"Opening client connection for {safe_server_name}")
             async with client:
                 logger.debug(f"Client connected for {safe_server_name}, listing prompts...")
                 try:
-                    prompts = await client.list_prompts()
+                    prompts = await asyncio.wait_for(client.list_prompts(), timeout=discovery_timeout)
                     logger.debug(
                         f"Got {len(prompts)} prompts from {safe_server_name}: {[prompt.name for prompt in prompts]}"
                     )
@@ -1555,6 +1557,7 @@ class MCPToolManager:
                 raise ValueError(f"No client available for server: {server_name}")
             client = self.clients[server_name]
 
+        call_timeout = config_manager.app_settings.mcp_call_timeout
         try:
             # Set elicitation callback before opening the client context.
             # FastMCP negotiates supported capabilities during session init.
@@ -1567,9 +1570,17 @@ class MCPToolManager:
                 if progress_handler is not None:
                     kwargs["progress_handler"] = progress_handler
 
-                result = await client.call_tool(tool_name, arguments, **kwargs)
+                result = await asyncio.wait_for(
+                    client.call_tool(tool_name, arguments, **kwargs),
+                    timeout=call_timeout,
+                )
                 logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
                 return result
+        except asyncio.TimeoutError:
+            error_msg = f"Tool call '{tool_name}' on server '{server_name}' timed out after {call_timeout}s"
+            logger.error(error_msg)
+            self._record_server_failure(server_name, error_msg)
+            raise TimeoutError(error_msg)
         except Exception as e:
             logger.error(f"Error calling {tool_name} on {server_name}: {e}")
             raise
