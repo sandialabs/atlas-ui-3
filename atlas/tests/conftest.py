@@ -14,3 +14,7 @@ if str(project_root) not in sys.path:
 # tests import the fake instead of the real module.
 # See test_capability_tokens_and_injection.py which patches LiteLLMCaller.
 import atlas.modules.llm.litellm_caller  # noqa: E402, F401
+
+# Explicitly reference the module to satisfy static analyzers that flag unused imports.
+# The import above is intentional: it pre-populates sys.modules with the real module.
+_ = atlas.modules.llm.litellm_caller.LiteLLMCaller  # noqa: E402

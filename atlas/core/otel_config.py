@@ -91,6 +91,8 @@ class OpenTelemetryConfig:
             if config_manager.app_settings.app_log_dir:
                 return Path(config_manager.app_settings.app_log_dir)
         except Exception:
+            # Config manager may not be initialized during early startup or tests.
+            # Fall back to default logs directory without logging (avoid circular deps).
             pass
         # Fallback: project_root/logs
         project_root = Path(__file__).resolve().parents[2]

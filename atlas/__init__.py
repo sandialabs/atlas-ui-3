@@ -31,8 +31,10 @@ def __getattr__(name: str):
     """Lazy import to avoid loading heavy dependencies at module import time."""
     if name == "AtlasClient":
         from atlas.atlas_client import AtlasClient
+        globals()["AtlasClient"] = AtlasClient  # Cache for subsequent accesses
         return AtlasClient
     if name == "ChatResult":
         from atlas.atlas_client import ChatResult
+        globals()["ChatResult"] = ChatResult  # Cache for subsequent accesses
         return ChatResult
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
