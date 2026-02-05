@@ -91,6 +91,7 @@ mocks/s3-mock/s3-mock-storage/
 old.env
 backend/bandit_output.txt
 config/overrides/mcp-minimal.json
+config/overrides/
 
 # Scratch folder (local experimentation)
 scratch/

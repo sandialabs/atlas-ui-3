@@ -11,7 +11,7 @@ This server provides tools to:
 
 ## Configuration
 
-The server is configured in `config/overrides/mcp.json` (or `config/defaults/mcp.json`) with the `env` field:
+The server is configured in `config/defaults/mcp.json` (or an overrides directory set via `APP_CONFIG_OVERRIDES`) with the `env` field:
 
 ```json
 {

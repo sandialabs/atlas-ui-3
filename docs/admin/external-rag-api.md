@@ -34,7 +34,7 @@ RAG discovery is best-effort. If one configured RAG source is offline or misconf
 FEATURE_RAG_ENABLED=true
 ```
 
-2. Configure your RAG sources in `config/overrides/rag-sources.json`:
+2. Configure your RAG sources in `config/defaults/rag-sources.json` (or in an overrides directory set via `APP_CONFIG_OVERRIDES`):
 
 ```json
 {
@@ -63,7 +63,7 @@ The `rag-sources.json` file defines all RAG backends. It supports environment va
 ### File Locations
 
 Configuration files are loaded in order of priority:
-1. `config/overrides/rag-sources.json` (highest priority, not in git)
+1. Optional overrides directory (set `APP_CONFIG_OVERRIDES`)
 2. `config/defaults/rag-sources.json` (versioned defaults)
 
 ### HTTP RAG Source Configuration

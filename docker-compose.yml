@@ -44,6 +44,8 @@ services:
     container_name: atlas-ui-3
     ports:
       - "8000:8000"
+    env_file:
+      - ./.env
     environment:
       # Core / Development
       - DEBUG_MODE=true
@@ -112,7 +114,7 @@ services:
       - "SECURITY_CSP_VALUE=default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' blob: data: https://www.sandia.gov; frame-ancestors 'self'"
     volumes:
       - ./logs:/app/logs:U
-      - ./config/overrides:/app/config/overrides:U
+      - ./config/defaults:/app/config/defaults:U
     depends_on:
       minio:
         condition: service_healthy

@@ -57,6 +57,22 @@ export const MarketplaceProvider = ({ children }) => {
     const promptServers = prompts.map(p => p.server)
     const allServers = new Set([...toolServers, ...promptServers])
 
+    // Remove selections for servers that no longer exist
+    setSelectedServers(prev => {
+      const next = new Set(prev)
+      const removed = []
+      prev.forEach(serverName => {
+        if (!allServers.has(serverName)) {
+          next.delete(serverName)
+          removed.push(serverName)
+        }
+      })
+      if (removed.length > 0) {
+        removed.forEach(serverName => clearServerMemory(serverName))
+      }
+      return next
+    })
+
     // Determine newly discovered servers (not seen before)
     const newlyDiscovered = []
     for (const s of allServers) {

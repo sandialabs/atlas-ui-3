@@ -18,7 +18,7 @@ This document describes how to test the new feature where RAG completions (LLM-i
 ## Configuration
 
 ### 1. Configure rag-sources.json
-Create or update `config/overrides/rag-sources.json`:
+Create or update `config/defaults/rag-sources.json` (or an overrides directory set via `APP_CONFIG_OVERRIDES`):
 ```json
 {
   "atlas_rag": {

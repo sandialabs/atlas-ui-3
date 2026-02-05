@@ -93,7 +93,7 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 
 ## Configuration and Feature Flags
 
-**Layering** (in priority order): env vars -> `config/overrides/` -> `config/defaults/` -> code defaults (Pydantic models).
+**Layering** (in priority order): env vars -> optional overrides directory (set `APP_CONFIG_OVERRIDES` or `--config-overrides`) -> `config/defaults/` -> code defaults (Pydantic models).
 
 **Configuration Files:**
 - `llmconfig.yml` - LLM model configurations
@@ -128,7 +128,7 @@ Example configurations in `config/mcp-example-configs/` with individual `mcp-{se
 
 ## Compliance Levels
 
-Definitions in `config/(overrides|defaults)/compliance-levels.json`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
+Definitions in `config/defaults/compliance-levels.json` with optional overrides via `APP_CONFIG_OVERRIDES`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
 
 When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 - `/api/config` includes model and server `compliance_level`
@@ -260,10 +260,10 @@ Use `file_path:line_number` format for easy navigation.
 ## Extend by Example
 
 **Add a tool server:**
-Edit `config/overrides/mcp.json` (set `groups`, `transport`, `url/command`, `compliance_level`). Restart backend.
+Edit `config/defaults/mcp.json` (or an overrides directory if you set `APP_CONFIG_OVERRIDES`). Set `groups`, `transport`, `url/command`, `compliance_level`. Restart backend.
 
 **Add a RAG provider:**
-Edit `config/overrides/rag-sources.json`. For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
+Edit `config/defaults/rag-sources.json` (or an overrides directory if you set `APP_CONFIG_OVERRIDES`). For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
 
 **Change agent loop:**
 Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.

@@ -93,7 +93,7 @@
         "transport": null
       }
     },
-    "config_path": "config/overrides/mcp.json"
+    "config_path": "config/defaults/mcp.json"
   },
   "servers": {
     "thinking": {

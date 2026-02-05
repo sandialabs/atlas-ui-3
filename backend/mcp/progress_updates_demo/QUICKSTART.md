@@ -14,7 +14,7 @@ MCP servers can now send three types of intermediate updates:
 
 ### 1. Enable the Demo Server
 
-Add to `config/overrides/mcp.json`:
+Add to `config/defaults/mcp.json` (or an overrides directory set via `APP_CONFIG_OVERRIDES`):
 
 ```json
 {

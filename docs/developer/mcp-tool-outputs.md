@@ -246,7 +246,7 @@ See the `backend/mcp/ui-demo/main.py` file for working examples of both iframe p
 
 ## 3. Registering the Server
 
-After creating your server, you must register it in `config/overrides/mcp.json`.
+After creating your server, register it in `config/defaults/mcp.json` (or an overrides directory set via `APP_CONFIG_OVERRIDES`).
 
 ```json
 {

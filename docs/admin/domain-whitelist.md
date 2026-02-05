@@ -16,12 +16,10 @@ The domain whitelist feature allows you to restrict access to users with email a
 ### Default Configuration
 Located at: `config/defaults/domain-whitelist.json`
 
-Contains DOE and national laboratory domains as an example. This file should not be modified directly.
+Contains DOE and national laboratory domains as an example. You can edit this file directly or override it via a custom config directory.
 
 ### Custom Configuration
-To customize domains, create: `config/overrides/domain-whitelist.json`
-
-The override file takes precedence over the default configuration.
+To customize domains, either edit `config/defaults/domain-whitelist.json` or create an override at the path set by `APP_CONFIG_OVERRIDES` (e.g., `.../domain-whitelist.json`). Override files take precedence over defaults.
 
 ## Configuration Format
 
@@ -61,7 +59,7 @@ The override file takes precedence over the default configuration.
 
 ## Enabling the Feature
 
-1. Create your custom configuration at `config/overrides/domain-whitelist.json`
+1. Create your custom configuration at `config/defaults/domain-whitelist.json` or in your overrides directory
 2. Set `"enabled": true` in the config file
 3. Set environment variable: `FEATURE_DOMAIN_WHITELIST_ENABLED=true`
 4. Restart the application
@@ -138,7 +136,7 @@ When `subdomain_matching` is `false`:
 
 ### Issue: Configuration changes not taking effect
 - Restart the application after changing config files
-- Verify the override file is at `config/overrides/domain-whitelist.json`
+- Verify the override file is at the path set by `APP_CONFIG_OVERRIDES` (if using overrides)
 - Check application logs for config loading errors
 
 ### Issue: Everyone can access (no filtering)

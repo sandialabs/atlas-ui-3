@@ -15,6 +15,18 @@ docker pull quay.io/agarlan-snl/atlas-ui-3:latest
 docker run -p 8000:8000 quay.io/agarlan-snl/atlas-ui-3:latest
 ```
 
+**Customize with a local `.env` and config defaults:**
+
+```bash
+docker run --rm \
+  --env-file ./.env \
+  -v ./config/defaults:/app/config/defaults \
+  -p 8000:8000 \
+  quay.io/agarlan-snl/atlas-ui-3:latest
+```
+
+This setup keeps your `.env` and `config/defaults` on the host, which is ideal when you're using a prebuilt image and only want to tweak environment variables or configuration files.
+
 ### Option 2: Build Locally
 
 1.  **Build the Docker Image:**

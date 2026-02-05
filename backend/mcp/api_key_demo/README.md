@@ -26,7 +26,7 @@ For demo purposes, these API keys are accepted:
 
 ## Configuration in Atlas
 
-Add to `config/overrides/mcp.json`:
+Add to `config/defaults/mcp.json` (or an overrides directory set via `APP_CONFIG_OVERRIDES`):
 
 ```json
 {

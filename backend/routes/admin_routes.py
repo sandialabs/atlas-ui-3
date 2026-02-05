@@ -6,7 +6,6 @@ Provides admin-only endpoints for: banners, configuration files, logs, and (comm
 import json
 import logging
 import os
-import shutil
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -49,45 +48,37 @@ async def require_admin(current_user: str = Depends(get_current_user)) -> str:
     return current_user
 
 
-def setup_config_overrides() -> None:
-    """Ensure editable overrides directory exists; seed from defaults / legacy if empty."""
+def _resolve_config_write_root() -> Path:
+    """Resolve the config directory used for admin edits.
+
+    If APP_CONFIG_OVERRIDES is explicitly set, we create/use that path.
+    Otherwise, we use overrides if it already exists; if not, fall back to defaults.
+    """
     app_settings = config_manager.app_settings
     overrides_root = Path(app_settings.app_config_overrides)
     defaults_root = Path(app_settings.app_config_defaults)
-    
+
     # If relative paths, resolve from project root
+    project_root = Path(__file__).parent.parent.parent
     if not overrides_root.is_absolute():
-        project_root = Path(__file__).parent.parent.parent
         overrides_root = project_root / overrides_root
     if not defaults_root.is_absolute():
-        project_root = Path(__file__).parent.parent.parent
         defaults_root = project_root / defaults_root
-    
-    overrides_root.mkdir(parents=True, exist_ok=True)
+
+    if "APP_CONFIG_OVERRIDES" in os.environ:
+        overrides_root.mkdir(parents=True, exist_ok=True)
+        return overrides_root
+
+    if overrides_root.exists():
+        return overrides_root
+
     defaults_root.mkdir(parents=True, exist_ok=True)
+    return defaults_root
 
-    if any(overrides_root.iterdir()):
-        return
 
-    logger.info("Seeding empty overrides directory")
-    seed_sources = [
-        defaults_root,
-        Path("backend/configfilesadmin"),
-        Path("backend/configfiles"),
-        Path("configfilesadmin"),
-        Path("configfiles"),
-    ]
-    for source in seed_sources:
-        if source.exists() and any(source.iterdir()):
-            for file_path in source.glob("*"):
-                if file_path.is_file():
-                    dest = overrides_root / file_path.name
-                    try:
-                        shutil.copy2(file_path, dest)
-                        logger.info(f"Copied seed config {sanitize_for_logging(str(file_path))} -> {sanitize_for_logging(str(dest))}")
-                    except Exception as e:  # noqa: BLE001
-                        logger.error(f"Failed seeding {sanitize_for_logging(str(file_path))}: {e}")
-            break
+def setup_config_overrides() -> None:
+    """Legacy hook retained for tests; resolves config write root."""
+    _resolve_config_write_root()
 
 
 def get_admin_config_path(filename: str) -> Path:
@@ -106,15 +97,7 @@ def get_admin_config_path(filename: str) -> Path:
     else:
         custom_filename = filename
     
-    # Use same logic as config manager to resolve relative paths from project root
-    base = Path(app_settings.app_config_overrides)
-    
-    # If relative path, resolve from project root (parent of backend directory)
-    if not base.is_absolute():
-        project_root = Path(__file__).parent.parent.parent  # Go up from routes/ to backend/ to project root
-        base = project_root / base
-    
-    base.mkdir(parents=True, exist_ok=True)
+    base = _resolve_config_write_root()
     return base / custom_filename
 
 

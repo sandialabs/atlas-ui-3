@@ -5,14 +5,14 @@ Last updated: 2026-01-19
 The application uses a layered configuration system that loads settings from three primary sources in the following order of precedence:
 
 1.  **Environment Variables (`.env`)**: Highest priority. These override any settings from files.
-2.  **Override Files (`config/overrides/`)**: For custom, instance-specific configurations. These files are not checked into version control.
+2.  **Optional Overrides Directory**: For instance-specific configurations. Set `APP_CONFIG_OVERRIDES` (or pass `--config-overrides`) to point at a custom directory.
 3.  **Default Files (`config/defaults/`)**: The base configuration that is part of the repository.
 
 **Note**: The definitive source for all possible configuration options and their default values is the `AppSettings` class within `backend/modules/config/config_manager.py`. This class dictates how the application reads and interprets all its settings.
 
-## Key Override Files
+## Key Configuration Files
 
-To customize your instance, you will place your own versions of the configuration files in the `config/overrides/` directory. The most common files to override are:
+To customize your instance, edit the files in `config/defaults/` (or place override copies in a directory you point to with `APP_CONFIG_OVERRIDES`). The most common files are:
 
 *   **`mcp.json`**: Registers and configures the MCP (tool) servers that provide capabilities to the LLM.
 *   **`llmconfig.yml`**: Defines the list of available Large Language Models and their connection details.

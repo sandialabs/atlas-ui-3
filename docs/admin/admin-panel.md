@@ -37,12 +37,12 @@ The backend exposes dedicated admin-only endpoints for managing MCP servers. The
 
 Reloads MCP server configuration from disk and reinitializes all connections.
 
-- Reloads `mcp.json` from `config/overrides/` (with defaults as fallback).
+- Reloads `mcp.json` from the overrides directory if configured, otherwise from `config/defaults/`.
 - Reinitializes all MCP clients.
 - Rediscovers tools and prompts from every configured server.
 - Returns a summary of configuration changes and which servers loaded successfully.
 
-Use this after editing `config/overrides/mcp.json` to apply changes **without restarting** the application.
+Use this after editing `config/defaults/mcp.json` (or your override file) to apply changes **without restarting** the application.
 
 ### `POST /admin/mcp/reconnect`
 

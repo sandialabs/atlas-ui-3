@@ -29,7 +29,7 @@ async def test_mcp_prompts_discovery_includes_expert_dog_trainer():
     await mcp.initialize_clients()
     await mcp.discover_prompts()
 
-    # The prompts server should be configured (from config/overrides mcp.json)
+    # The prompts server should be configured (from defaults or overrides).
     assert "prompts" in mcp.available_prompts, "prompts server not discovered"
 
     server_data = mcp.available_prompts["prompts"]

@@ -38,7 +38,7 @@ FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=true
 
 ### Extractors Configuration
 
-Create or edit `config/defaults/file-extractors.json` (or `config/overrides/file-extractors.json` for deployment customization):
+Create or edit `config/defaults/file-extractors.json` (or place an override in a directory set via `APP_CONFIG_OVERRIDES` for deployment customization):
 
 ```json
 {

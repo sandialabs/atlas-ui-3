@@ -28,7 +28,7 @@ This starts the HTTP server on `http://localhost:8005/mcp`
 
 ### 3. Configure in Atlas UI
 
-Add to your `config/overrides/mcp.json`:
+Add to your `config/defaults/mcp.json` (or an overrides directory set via `APP_CONFIG_OVERRIDES`):
 ```json
 {
   "mcp-http-mock": {

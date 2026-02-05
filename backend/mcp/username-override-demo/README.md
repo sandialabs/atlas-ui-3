@@ -37,7 +37,7 @@ The username injection happens in `backend/application/chat/utilities/tool_utils
 
 ## Configuration
 
-Add this server to your `config/overrides/mcp.json` or use the example config:
+Add this server to your `config/defaults/mcp.json` (or an overrides directory set via `APP_CONFIG_OVERRIDES`) or use the example config:
 
 ```json
 {
@@ -63,7 +63,7 @@ Or reference the pre-configured example:
 # View the example configuration:
 cat config/mcp-example-configs/mcp-username-override-demo.json
 
-# Manually add the "username-override-demo" entry to your config/overrides/mcp.json
+# Manually add the "username-override-demo" entry to your config/defaults/mcp.json (or your overrides directory)
 ```
 
 ## Available Tools

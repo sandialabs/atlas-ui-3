@@ -296,7 +296,7 @@ class AppSettings(BaseSettings):
     )
     
     # RAG Feature Flag
-    # When enabled, RAG sources are configured in config/overrides/rag-sources.json
+    # When enabled, RAG sources are configured in rag-sources.json (defaults or overrides).
     # See docs/admin/external-rag-api.md for configuration details
     feature_rag_enabled: bool = Field(
         False,
@@ -592,7 +592,7 @@ class ConfigManager:
     def _search_paths(self, file_name: str) -> List[Path]:
         """Generate common search paths for a configuration file.
 
-        Preferred layout uses project_root/config/overrides and project_root/config/defaults.
+        Preferred layout uses project_root/config/defaults, with optional overrides.
         The backend process often runs with CWD=backend/, so relative paths like
         "config/overrides" incorrectly resolve to backend/config/overrides (which doesn't exist).
 

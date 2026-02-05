@@ -69,7 +69,7 @@ Each user's tokens are isolated - users cannot access each other's tokens.
 
 ### Server Configuration
 
-Configure MCP servers in `config/overrides/mcp.json`:
+Configure MCP servers in `config/defaults/mcp.json` (or an overrides directory set via `APP_CONFIG_OVERRIDES`):
 
 ```json
 {

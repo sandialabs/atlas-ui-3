@@ -140,16 +140,16 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 
 4. **Configuration Layering** (in priority order):
    - Environment variables (highest priority)
-   - `config/overrides/` (not in repo)
+   - Optional overrides directory (set `APP_CONFIG_OVERRIDES` or `--config-overrides`)
    - `config/defaults/` (versioned)
    - Code defaults (Pydantic models)
 
 ## Configuration and Feature Flags
 
 ### Configuration Files
-- **LLM Config**: `config/defaults/llmconfig.yml` and `config/overrides/llmconfig.yml`
-- **MCP Servers**: `config/defaults/mcp.json` and `config/overrides/mcp.json`
-- **RAG Sources**: `config/defaults/rag-sources.json` and `config/overrides/rag-sources.json`
+- **LLM Config**: `config/defaults/llmconfig.yml` (optional overrides via `APP_CONFIG_OVERRIDES` or `--llm-config`)
+- **MCP Servers**: `config/defaults/mcp.json` (optional overrides via `APP_CONFIG_OVERRIDES` or `--mcp-config`)
+- **RAG Sources**: `config/defaults/rag-sources.json` (optional overrides via `APP_CONFIG_OVERRIDES` or `--rag-sources-config`)
 - **Help Config**: `config/defaults/help-config.json`
 - **Compliance Levels**: `config/defaults/compliance-levels.json`
 - **Environment**: `.env` (copy from `.env.example`)
@@ -179,7 +179,7 @@ When testing or developing MCP-related features, example configurations can be f
 
 ## Compliance Levels
 
-Definitions in `config/(overrides|defaults)/compliance-levels.json`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
+Definitions in `config/defaults/compliance-levels.json` with optional overrides via `APP_CONFIG_OVERRIDES`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
 
 When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 - `/api/config` includes model and server `compliance_level`
@@ -322,10 +322,10 @@ In production, reverse proxy injects `X-User-Email` (after stripping client head
 ## Extend by Example
 
 **Add a tool server:**
-Edit `config/overrides/mcp.json` (set `groups`, `transport`, `url/command`, `compliance_level`). Restart or call discovery on startup.
+Edit `config/defaults/mcp.json` (or an overrides directory if you set `APP_CONFIG_OVERRIDES`). Set `groups`, `transport`, `url/command`, `compliance_level`. Restart or call discovery on startup.
 
 **Add a RAG provider:**
-Edit `config/overrides/rag-sources.json`. For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
+Edit `config/defaults/rag-sources.json` (or an overrides directory if you set `APP_CONFIG_OVERRIDES`). For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
 
 **Change agent loop:**
 Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.

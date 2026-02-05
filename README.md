@@ -53,7 +53,17 @@ We have created a set of comprehensive guides to help you get the most out of At
 
 ## Container Images
 
-Pre-built container images are available at `quay.io/agarlan-snl/atlas-ui-3:latest` (pushes automatically from main branch).
+Pre-built container images are available at `quay.io/agarlan-snl/atlas-ui-3:latest`. The CI/CD pipeline publishes updates there automatically, so it’s the recommended image for most users.
+
+To customize a prebuilt image using a local `.env` and editable config defaults:
+
+```bash
+docker run --rm \
+  --env-file ./.env \
+  -v ./config/defaults:/app/config/defaults \
+  -p 8000:8000 \
+  quay.io/agarlan-snl/atlas-ui-3:latest
+```
 
 ## For AI Agent Contributors
 
@@ -68,4 +78,3 @@ If you are an AI agent working on this repository, please refer to the following
 Copyright 2025 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
 
 MIT License
-

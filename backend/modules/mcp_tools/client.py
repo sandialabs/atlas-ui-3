@@ -84,7 +84,7 @@ MCP_TO_PYTHON_LOG_LEVEL = {
 class MCPToolManager:
     """Manager for MCP servers and their tools.
 
-    Default config path now points to config/overrides (or env override) with legacy fallback.
+    Default config path follows config defaults with optional overrides and legacy fallbacks.
     
     Supports:
     - Hot-reloading configuration from disk via reload_config()
@@ -96,21 +96,19 @@ class MCPToolManager:
         if config_path is None:
             # Use config manager to get config path
             app_settings = config_manager.app_settings
-            overrides_root = Path(app_settings.app_config_overrides)
-
-            # If relative, resolve from project root
-            if not overrides_root.is_absolute():
-                # This file is in backend/modules/mcp_tools/client.py
+            mcp_filename = app_settings.mcp_config_file
+            try:
+                search_paths = config_manager._search_paths(mcp_filename)  # type: ignore[attr-defined]
+            except AttributeError:
                 backend_root = Path(__file__).parent.parent.parent
                 project_root = backend_root.parent
-                overrides_root = project_root / overrides_root
-
-            candidate = overrides_root / "mcp.json"
-            if not candidate.exists():
-                # Legacy fallback
-                candidate = Path("backend/configfilesadmin/mcp.json")
-                if not candidate.exists():
-                    candidate = Path("backend/configfiles/mcp.json")
+                search_paths = [
+                    project_root / "config" / "defaults" / mcp_filename,
+                    project_root / "config" / "overrides" / mcp_filename,
+                    backend_root / "configfilesadmin" / mcp_filename,
+                    backend_root / "configfiles" / mcp_filename,
+                ]
+            candidate = next((p for p in search_paths if p.exists()), Path(mcp_filename))
             self.config_path = str(candidate)
             # Use default config manager when no path specified
             mcp_config = config_manager.mcp_config

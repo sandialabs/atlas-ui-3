@@ -4,7 +4,7 @@ Last updated: 2026-01-25
 
 The `mcp.json` file defines the MCP (Model Context Protocol) servers that the application can connect to. These servers provide the tools and capabilities available to the LLM.
 
-*   **Location**: The default configuration is at `config/defaults/mcp.json`. You should place your instance-specific configuration in `config/overrides/mcp.json`.
+*   **Location**: The default configuration is at `config/defaults/mcp.json`. For instance-specific changes, edit that file directly or place an override in a directory set via `APP_CONFIG_OVERRIDES`.
 
 ## Comprehensive Example
 
@@ -65,7 +65,7 @@ The system can connect to different types of MCP servers:
 
 ## Hot Reload Note
 
-After editing `config/overrides/mcp.json`, you do **not** need to restart the backend. Admins can:
+After editing `config/defaults/mcp.json` (or your override file), you do **not** need to restart the backend. Admins can:
 
 - Call `POST /admin/mcp/reload` to reload `mcp.json`, reinitialize MCP clients, and rediscover tools/prompts.
 - Use `GET /admin/mcp/status` to see which servers are connected or failing.
@@ -224,4 +224,3 @@ MCP tools can request LLM text generation during tool execution, enabling agenti
 ### Progress Updates
 
 MCP tools can send real-time progress updates during long-running operations. See the [Progress Updates Documentation](../developer/progress-updates.md) for details.
-

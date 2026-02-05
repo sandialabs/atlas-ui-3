@@ -4,7 +4,7 @@ Last updated: 2026-01-19
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
-*   **Location**: The default configuration is at `config/defaults/llmconfig.yml`. You should place your instance-specific configuration in `config/overrides/llmconfig.yml`.
+*   **Location**: The default configuration is at `config/defaults/llmconfig.yml`. For instance-specific changes, either edit that file or place an override copy in a directory pointed to by `APP_CONFIG_OVERRIDES`.
 
 ## Comprehensive Example
 

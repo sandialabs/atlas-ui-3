@@ -35,25 +35,25 @@ async def get_banners(current_user: str = Depends(get_current_user)):
     
     # Read messages from messages.txt file
     try:
-        from pathlib import Path
-        
-        # Use app settings for config path
-        base = Path(app_settings.app_config_overrides)
-        
-        # If relative path, resolve from project root
-        if not base.is_absolute():
+        messages_filename = app_settings.messages_config_file
+        try:
+            messages_paths = config_manager._search_paths(messages_filename)  # type: ignore[attr-defined]
+        except AttributeError:
+            from pathlib import Path
             project_root = Path(__file__).parent.parent.parent
-            base = project_root / base
-        
-        messages_file = base / app_settings.messages_config_file
-        
-        if messages_file.exists():
-            with open(messages_file, "r", encoding="utf-8") as f:
+            messages_paths = [
+                project_root / "config" / "defaults" / messages_filename,
+                project_root / "config" / "overrides" / messages_filename,
+                project_root / messages_filename,
+            ]
+
+        found_path = next((p for p in messages_paths if p.exists()), None)
+        if found_path:
+            with open(found_path, "r", encoding="utf-8") as f:
                 content = f.read()
             messages = [line.strip() for line in content.splitlines() if line.strip()]
             return {"messages": messages}
-        else:
-            return {"messages": []}
+        return {"messages": []}
     except Exception as e:
         logger.error(f"Error reading banner messages: {e}")
         return {"messages": []}

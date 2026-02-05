@@ -29,7 +29,7 @@ python multipart_extractor_mock.py
 
 ```bash
 cp mocks/multipart-extractor-mock/sample-file-extractors.json \
-   config/overrides/file-extractors.json
+   config/defaults/file-extractors.json (or your overrides directory)
 ```
 
 This configures Atlas to send PDF, TXT, MD, and CSV files to the mock via multipart upload.

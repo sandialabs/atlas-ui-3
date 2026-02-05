@@ -137,6 +137,34 @@ export const ChatProvider = ({ children }) => {
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [config.ragServers])
 
+	// Validate persisted tools/prompts against current config and remove stale selections
+	useEffect(() => {
+		if (!config.tools || !config.prompts) return
+
+		const validToolKeys = new Set(
+			config.tools.flatMap(server =>
+				(server.tools || []).map(tool => `${server.server}_${tool}`)
+			)
+		)
+		const validPromptKeys = new Set(
+			config.prompts.flatMap(server =>
+				(server.prompts || []).map(prompt => `${server.server}_${prompt.name}`)
+			)
+		)
+
+		const staleTools = [...selectedTools].filter(key => !validToolKeys.has(key))
+		const stalePrompts = [...selectedPrompts].filter(key => !validPromptKeys.has(key))
+
+		if (staleTools.length > 0) {
+			console.warn('Removing stale tools from selection:', staleTools)
+			selections.removeTools(staleTools)
+		}
+		if (stalePrompts.length > 0) {
+			console.warn('Removing stale prompts from selection:', stalePrompts)
+			selections.removePrompts(stalePrompts)
+		}
+	}, [config.tools, config.prompts, selectedTools, selectedPrompts, selections])
+
 	const selectAllServerTools = useCallback((server) => {
 		const group = config.tools.find(t => t.server === server); if (!group) return
 		group.tools.forEach(tool => { const key = `${server}_${tool}`; if (!selectedTools.has(key)) selections.toggleTool(key) })
