@@ -191,7 +191,8 @@ start_backend() {
     local host="${2:-127.0.0.1}"
 
     cd "$PROJECT_ROOT/atlas"
-    "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" &
+    # Set PYTHONPATH so atlas package imports work
+    PYTHONPATH="$PROJECT_ROOT" "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" &
     echo "Backend server started on $host:$port"
     cd "$PROJECT_ROOT"
 }

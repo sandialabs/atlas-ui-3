@@ -78,19 +78,50 @@ result = client.chat_sync("Hello!")
 
 ## Quick Start (Development)
 
-### Linux/macOS
+### Prerequisites
+
+```bash
+# Install uv package manager (one-time)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create virtual environment and install dependencies
+uv venv && source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+### Development Installation
+
+For development, you have two options:
+
+**Option 1: Editable Install (Recommended)**
+```bash
+# Install in development/editable mode - changes to files are immediately reflected
+uv pip install -e .
+# Or with pip:
+pip install -e .
+```
+
+**Option 2: PYTHONPATH (Legacy)**
+```bash
+# Set PYTHONPATH manually when running
+PYTHONPATH=/path/to/atlas-ui-3 python atlas/main.py
+```
+
+### Running the Application
+
+**Linux/macOS:**
 ```bash
 bash agent_start.sh
 ```
 
-### Windows
+**Windows:**
 ```powershell
 .\ps_agent_start.ps1
 ```
 
 **Note for Windows users**: If you encounter frontend build errors related to Rollup dependencies, delete `frontend/package-lock.json` and `frontend/node_modules`, then run the script again.
 
-Both scripts automatically detect and work with Docker or Podman.
+Both scripts automatically detect and work with Docker or Podman. The `agent_start.sh` script builds the frontend, starts necessary services, and launches the backend server.
 
 ## Documentation
 
