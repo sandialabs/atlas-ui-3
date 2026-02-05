@@ -1,0 +1,17 @@
+{
+  "tool_planner": {
+    "command": [
+      "python",
+      "mcp/tool_planner/main.py"
+    ],
+    "cwd": "backend",
+    "groups": [
+      "users"
+    ],
+    "description": "Plans multi-step tasks by generating runnable bash scripts that use the Atlas CLI with available MCP tools. Uses _mcp_data injection to discover tools and LLM sampling to produce the script.",
+    "author": "Atlas UI Team",
+    "short_description": "Task planner with CLI script generation",
+    "help_email": "support@example.com",
+    "compliance_level": "Public"
+  }
+}
