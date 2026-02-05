@@ -14,7 +14,14 @@ pip install atlas-chat
 uv pip install atlas-chat
 ```
 
+**Important:** After installation, you must [configure your API keys](#configuration-required) before using Atlas.
+
 ## Quick Start
+
+**Prerequisites:** Set at least one LLM API key (see [Configuration](#configuration-required) below):
+```bash
+export OPENAI_API_KEY="sk-your-key-here"
+```
 
 ### Basic Usage
 
@@ -246,20 +253,114 @@ async def main():
 asyncio.run(main())
 ```
 
-## Configuration
+## Configuration (Required)
 
-The client uses the same configuration as the Atlas server. Set environment variables or use config files:
+**Whether you install from PyPI or use editable mode, you must configure API keys and settings before using Atlas.**
+
+### Step 1: Set Up API Keys
+
+Atlas needs API keys to communicate with LLM providers. Set them as environment variables:
 
 ```bash
-# Required: Set your LLM API keys
-export OPENAI_API_KEY="sk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."
+# At minimum, set ONE of these (depending on which provider you use):
+export OPENAI_API_KEY="sk-..."           # For GPT-4, GPT-3.5, etc.
+export ANTHROPIC_API_KEY="sk-ant-..."    # For Claude models
+export GOOGLE_API_KEY="..."              # For Gemini models
 
-# Optional: Custom config directory
-export APP_CONFIG_OVERRIDES="/path/to/config/overrides"
+# You can set multiple keys to use multiple providers
 ```
 
-See the [Configuration Guide](../admin/configuration.md) for full details on configuration options.
+**Option A: Export in your shell**
+```bash
+# Add to ~/.bashrc or ~/.zshrc for persistence
+export OPENAI_API_KEY="sk-your-key-here"
+```
+
+**Option B: Use a .env file**
+```bash
+# Create a .env file in your working directory
+echo 'OPENAI_API_KEY=sk-your-key-here' > .env
+echo 'ANTHROPIC_API_KEY=sk-ant-your-key' >> .env
+```
+
+Atlas automatically loads `.env` files from the current directory.
+
+### Step 2: Configure Models (Optional)
+
+By default, Atlas uses built-in model configurations. To customize available models, create a config directory:
+
+```bash
+# Create config directory
+mkdir -p config/defaults
+
+# Create llmconfig.yml with your models
+cat > config/defaults/llmconfig.yml << 'EOF'
+models:
+  gpt-4o:
+    model_name: gpt-4o
+    api_key: ${OPENAI_API_KEY}
+  claude-3-sonnet:
+    model_name: claude-3-5-sonnet-20241022
+    api_key: ${ANTHROPIC_API_KEY}
+EOF
+
+# Tell Atlas where to find config
+export APP_CONFIG_OVERRIDES="./config"
+```
+
+### Step 3: Configure MCP Tools (Optional)
+
+To use MCP tools, create an `mcp.json` configuration:
+
+```bash
+cat > config/defaults/mcp.json << 'EOF'
+{
+  "servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-filesystem", "/path/to/allowed/dir"],
+      "description": "File system access",
+      "enabled": true
+    }
+  }
+}
+EOF
+```
+
+### Quick Start Configuration
+
+For the simplest setup, just set your API key and go:
+
+```bash
+# Minimal setup - just need an API key
+export OPENAI_API_KEY="sk-your-key-here"
+
+# Now you can use Atlas
+atlas-chat "Hello, world!"
+
+# Or in Python
+python -c "
+from atlas import AtlasClient
+client = AtlasClient()
+result = client.chat_sync('Hello!')
+print(result.message)
+"
+```
+
+### Configuration Reference
+
+| Environment Variable | Required | Description |
+|---------------------|----------|-------------|
+| `OPENAI_API_KEY` | Yes* | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Yes* | Anthropic API key |
+| `GOOGLE_API_KEY` | Yes* | Google AI API key |
+| `APP_CONFIG_OVERRIDES` | No | Path to custom config directory |
+| `APP_LOG_DIR` | No | Directory for log files |
+| `DEBUG_MODE` | No | Enable debug logging (true/false) |
+
+*At least one API key is required.
+
+See the [Configuration Guide](../admin/configuration.md) for full details on all configuration options.
 
 ## CLI Tools
 
