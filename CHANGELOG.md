@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-02-04
+- Add banyan-extractor-mock service for PDF and PPTX content extraction using banyan-ingest and Nemotron Parse, with pypdf fallback for PDFs when banyan-ingest is unavailable.
+- Add pptx-text extractor configuration to file-extractors.json supporting PowerPoint file extraction.
+- Fix f-string log sanitization in chat service file attachment error handling.
+
 ### PR #302 - 2026-02-04
 - Fix help page width constraint so documentation content fills the full available width (#145)
 - Add configurable timeouts (`MCP_DISCOVERY_TIMEOUT`, `MCP_CALL_TIMEOUT`) for MCP discovery and tool calls to prevent indefinite hangs (#298)
