@@ -68,6 +68,10 @@ else
     echo "WARNING: .venv directory not found at $PROJECT_ROOT/.venv; proceeding without virtualenv"
 fi
 
+# Set PYTHONPATH so atlas package imports work correctly
+export PYTHONPATH="$PROJECT_ROOT"
+echo "PYTHONPATH set to: $PYTHONPATH"
+
 # Check if port 8000 is already in use
 if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
     echo "Port 8000 is already in use. Attempting to continue with existing service..."

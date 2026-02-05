@@ -42,6 +42,10 @@ def _ensure_real_litellm_module():
         importlib.import_module(module_name)
 
 
+# Module-level LiteLLMCaller variable, set by fixture
+LiteLLMCaller = None
+
+
 @pytest.fixture(autouse=True)
 def ensure_real_litellm_for_tests():
     """Fixture to ensure real LiteLLM module is loaded before each test."""
@@ -54,9 +58,10 @@ def ensure_real_litellm_for_tests():
     yield
 
 
-# Initially try to get the real class (may be overridden by fixture)
+# Initially try to get the real class
 _ensure_real_litellm_module()
-from atlas.modules.llm.litellm_caller import LiteLLMCaller  # noqa: E402
+_initial_module = importlib.import_module("atlas.modules.llm.litellm_caller")
+LiteLLMCaller = _initial_module.LiteLLMCaller
 
 
 class TestLogLevelSensitiveData:
