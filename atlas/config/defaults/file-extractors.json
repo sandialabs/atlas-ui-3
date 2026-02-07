@@ -1,0 +1,74 @@
+{
+  "enabled": true,
+  "default_behavior": "extract",
+
+  "extractors": {
+    "pdf-text": {
+      "url": "http://localhost:8011/extract",
+      "method": "POST",
+      "timeout_seconds": 30,
+      "max_file_size_mb": 50,
+      "preview_chars": 2000,
+      "request_format": "multipart",
+      "form_field_name": "file",
+      "response_field": "text",
+      "enabled": true
+    },
+    "image-vision": {
+      "url": "http://localhost:8010/analyze",
+      "method": "POST",
+      "timeout_seconds": 60,
+      "max_file_size_mb": 20,
+      "preview_chars": 1000,
+      "request_format": "base64",
+      "response_field": "description",
+      "enabled": false,
+      "api_key": "${IMAGE_EXTRACTOR_API_KEY}"
+    },
+    "ocr": {
+      "url": "http://localhost:8010/ocr",
+      "method": "POST",
+      "timeout_seconds": 45,
+      "max_file_size_mb": 20,
+      "preview_chars": 2000,
+      "request_format": "base64",
+      "response_field": "text",
+      "enabled": false,
+      "api_key": "${OCR_EXTRACTOR_API_KEY}"
+    },
+    "pptx-text": {
+      "url": "http://localhost:8011/extract-pptx",
+      "method": "POST",
+      "timeout_seconds": 120,
+      "max_file_size_mb": 100,
+      "preview_chars": 2000,
+      "request_format": "base64",
+      "response_field": "text",
+      "enabled": false
+    }
+  },
+
+  "extension_mapping": {
+    ".pdf": "pdf-text",
+    ".png": "image-vision",
+    ".jpg": "image-vision",
+    ".jpeg": "image-vision",
+    ".gif": "image-vision",
+    ".webp": "image-vision",
+    ".tiff": "ocr",
+    ".tif": "ocr",
+    ".bmp": "ocr",
+    ".pptx": "pptx-text"
+  },
+
+  "mime_mapping": {
+    "application/pdf": "pdf-text",
+    "image/png": "image-vision",
+    "image/jpeg": "image-vision",
+    "image/gif": "image-vision",
+    "image/webp": "image-vision",
+    "image/tiff": "ocr",
+    "image/bmp": "ocr",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx-text"
+  }
+}

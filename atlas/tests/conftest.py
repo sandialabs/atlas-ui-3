@@ -1,11 +1,11 @@
 import sys
 from pathlib import Path
 
-# Ensure the backend root is on sys.path for absolute imports like 'infrastructure.*'
-backend_root = Path(__file__).resolve().parents[1]
-project_root = backend_root.parent
-if str(backend_root) not in sys.path:
-    sys.path.insert(0, str(backend_root))
+# Ensure the atlas package root is on sys.path for absolute imports like 'infrastructure.*'
+atlas_root = Path(__file__).resolve().parents[1]
+project_root = atlas_root.parent
+if str(atlas_root) not in sys.path:
+    sys.path.insert(0, str(atlas_root))
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 

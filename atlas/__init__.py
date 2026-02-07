@@ -4,11 +4,22 @@ Atlas - Full-stack LLM chat interface with MCP integration.
 This package provides both a Python API for programmatic access and
 CLI tools for interacting with LLMs.
 
-Example usage:
-    from atlas import AtlasClient, ChatResult
+Example usage (async):
+    import asyncio
+    from atlas import AtlasClient
+
+    async def main():
+        client = AtlasClient()
+        result = await client.chat("Hello, world!")
+        print(result.message)
+
+    asyncio.run(main())
+
+Synchronous usage:
+    from atlas import AtlasClient
 
     client = AtlasClient()
-    result = await client.chat("Hello, world!")
+    result = client.chat_sync("Hello, world!")
     print(result.message)
 
 CLI tools (after pip install):

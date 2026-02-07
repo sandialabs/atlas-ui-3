@@ -37,14 +37,14 @@ class DomainWhitelistManager:
 
         if config_path is None:
             # Try to find config in standard locations
-            backend_root = Path(__file__).parent.parent
-            project_root = backend_root.parent
+            atlas_root = Path(__file__).parent.parent
+            project_root = atlas_root.parent
 
             search_paths = [
                 project_root / "config" / "overrides" / "domain-whitelist.json",
                 project_root / "config" / "defaults" / "domain-whitelist.json",
-                backend_root / "configfilesadmin" / "domain-whitelist.json",
-                backend_root / "configfiles" / "domain-whitelist.json",
+                atlas_root / "configfilesadmin" / "domain-whitelist.json",
+                atlas_root / "configfiles" / "domain-whitelist.json",
             ]
 
             for path in search_paths:

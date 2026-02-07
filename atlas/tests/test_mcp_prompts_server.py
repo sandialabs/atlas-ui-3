@@ -10,10 +10,10 @@ from atlas.modules.mcp_tools.client import MCPToolManager
 async def test_mcp_prompts_discovery_includes_expert_dog_trainer():
     # Use the example prompts MCP config file so this test
     # exercises the real JSON configuration used for prompts.
-    # tests run with cwd=backend/, so resolve from backend root
-    backend_root = Path(__file__).parent.parent
-    print(backend_root)
-    project_root = backend_root.parent
+    # tests run with cwd=atlas/, so resolve from atlas root
+    atlas_root = Path(__file__).parent.parent
+    print(atlas_root)
+    project_root = atlas_root.parent
     print(project_root)
     config_path = project_root / "config" / "mcp-example-configs" / "mcp-prompts.json"
     print(config_path)

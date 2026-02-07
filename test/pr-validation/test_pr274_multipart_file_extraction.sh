@@ -10,7 +10,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BACKEND_DIR="$PROJECT_ROOT/backend"
+ATLAS_DIR="$PROJECT_ROOT/atlas"
 MOCK_DIR="$PROJECT_ROOT/mocks/file-extractor-mock"
 SCRATCHPAD_DIR="/tmp/pr274_test_$$"
 
@@ -67,7 +67,7 @@ fi
 # ==========================================
 print_header "Check 1: Config model accepts multipart and form_field_name"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 python3 -c "
 from modules.config.config_manager import FileExtractorConfig
 
@@ -158,10 +158,10 @@ fi
 # ==========================================
 print_header "Check 4: content_extractor.py has multipart branch"
 
-grep -q 'request_format == "multipart"' "$BACKEND_DIR/modules/file_storage/content_extractor.py"
+grep -q 'request_format == "multipart"' "$ATLAS_DIR/modules/file_storage/content_extractor.py"
 print_result $? "content_extractor.py branches on multipart request_format"
 
-grep -q 'form_field_name' "$BACKEND_DIR/modules/file_storage/content_extractor.py"
+grep -q 'form_field_name' "$ATLAS_DIR/modules/file_storage/content_extractor.py"
 print_result $? "content_extractor.py uses form_field_name from config"
 
 # ==========================================

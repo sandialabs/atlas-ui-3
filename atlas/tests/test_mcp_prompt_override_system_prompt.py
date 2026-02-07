@@ -18,9 +18,9 @@ async def test_selected_mcp_prompt_overrides_system_prompt(monkeypatch):
     # Set up MCP manager directly (avoid importing app_factory/litellm).
     # Use the example prompts MCP config file so this test uses
     # the same JSON configuration as other prompts tests.
-    # tests run with cwd=backend/, so resolve from backend root
-    backend_root = Path(__file__).parent.parent
-    project_root = backend_root.parent
+    # tests run with cwd=atlas/, so resolve from atlas root
+    atlas_root = Path(__file__).parent.parent
+    project_root = atlas_root.parent
     config_path = project_root / "config" / "mcp-example-configs" / "mcp-prompts.json"
     assert config_path.exists(), f"Missing example prompts config: {config_path}"
 

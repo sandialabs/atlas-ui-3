@@ -11,7 +11,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BACKEND_DIR="$PROJECT_ROOT/backend"
+ATLAS_DIR="$PROJECT_ROOT/atlas"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -47,9 +47,9 @@ print_header "Issue #293: No f-string backslash expressions remain"
 
 # Check that no f-strings contain backslash escapes inside expressions
 # Pattern: f"...{...\.replace('\n'...}..." inside the expression part
-COUNT=$(grep -rn "f\".*{.*\\\\n.*}.*\"" "$BACKEND_DIR" --include="*.py" | grep -c "replace" || true)
+COUNT=$(grep -rn "f\".*{.*\\\\n.*}.*\"" "$ATLAS_DIR" --include="*.py" | grep -c "replace" || true)
 if [ "$COUNT" -eq 0 ]; then
-    print_result 0 "No f-string backslash expressions found in backend"
+    print_result 0 "No f-string backslash expressions found in atlas"
 else
     print_result 1 "Found $COUNT f-string backslash expressions in backend"
 fi
@@ -70,21 +70,21 @@ print_header "Issue #298: MCP timeout settings exist"
 ###############################################
 
 # Check AppSettings has mcp_discovery_timeout
-if grep -q "mcp_discovery_timeout" "$BACKEND_DIR/modules/config/config_manager.py"; then
+if grep -q "mcp_discovery_timeout" "$ATLAS_DIR/modules/config/config_manager.py"; then
     print_result 0 "mcp_discovery_timeout defined in AppSettings"
 else
     print_result 1 "mcp_discovery_timeout missing from AppSettings"
 fi
 
 # Check AppSettings has mcp_call_timeout
-if grep -q "mcp_call_timeout" "$BACKEND_DIR/modules/config/config_manager.py"; then
+if grep -q "mcp_call_timeout" "$ATLAS_DIR/modules/config/config_manager.py"; then
     print_result 0 "mcp_call_timeout defined in AppSettings"
 else
     print_result 1 "mcp_call_timeout missing from AppSettings"
 fi
 
 # Check asyncio.wait_for is used in client.py for discovery
-WAIT_FOR_COUNT=$(grep -c "asyncio.wait_for" "$BACKEND_DIR/modules/mcp_tools/client.py" || true)
+WAIT_FOR_COUNT=$(grep -c "asyncio.wait_for" "$ATLAS_DIR/modules/mcp_tools/client.py" || true)
 if [ "$WAIT_FOR_COUNT" -ge 3 ]; then
     print_result 0 "asyncio.wait_for used $WAIT_FOR_COUNT times in MCP client (list_tools, list_prompts, call_tool)"
 else
@@ -92,7 +92,7 @@ else
 fi
 
 # Verify timeout settings load correctly via Python import
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 python -c "
 from modules.config.config_manager import AppSettings
 s = AppSettings()

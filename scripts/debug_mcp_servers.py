@@ -11,11 +11,11 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, List
 
-# Add backend to path so we can import modules
-backend_path = Path(__file__).parent.parent / "backend"
-sys.path.insert(0, str(backend_path))
+# Add project root to path for atlas package imports
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-from modules.mcp_tools.client import MCPToolManager
+from atlas.modules.mcp_tools.client import MCPToolManager
 
 # Setup logging for debugging
 logging.basicConfig(level=logging.WARNING)  # Reduce noise

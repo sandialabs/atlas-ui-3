@@ -48,9 +48,9 @@ logger = logging.getLogger(__name__)
 # Configure paths and add file handler if available
 current_dir = Path(__file__).parent
 logger.info(f"Current dir: {current_dir.absolute()}")
-backend_dir = current_dir.parent.parent
-logger.info(f"Backend dir: {backend_dir.absolute()}")
-project_root = backend_dir.parent
+atlas_dir = current_dir.parent.parent
+logger.info(f"Atlas dir: {atlas_dir.absolute()}")
+project_root = atlas_dir.parent
 logger.info(f"Project root: {project_root.absolute()}")
 logs_dir = project_root / 'logs'
 logger.info(f"Logs dir: {logs_dir.absolute()}")

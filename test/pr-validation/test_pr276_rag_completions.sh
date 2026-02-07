@@ -12,7 +12,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BACKEND_DIR="$PROJECT_ROOT/backend"
+ATLAS_DIR="$PROJECT_ROOT/atlas"
 MOCK_DIR="$PROJECT_ROOT/mocks/atlas-rag-api-mock"
 SCRATCHPAD_DIR="/tmp/pr276_test_$$"
 
@@ -74,7 +74,7 @@ fi
 # ==========================================
 print_header "Check 1: RAGResponse model has is_completion field"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 python3 -c "
 from modules.rag.client import RAGResponse
 
@@ -95,7 +95,7 @@ print_result $? "RAGResponse model has is_completion field with correct default"
 # ==========================================
 print_header "Check 2: AtlasRAGClient detects chat completion from response"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 python3 -c "
 import asyncio
 import json
@@ -176,7 +176,7 @@ print_result $? "AtlasRAGClient detects chat completion from response object fie
 # ==========================================
 print_header "Check 3: _build_rag_completion_response helper method"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 python3 -c "
 from modules.llm.litellm_caller import LiteLLMCaller
 from modules.rag.client import RAGResponse, RAGMetadata, DocumentMetadata
@@ -215,7 +215,7 @@ print_result $? "_build_rag_completion_response builds correct output"
 # ==========================================
 print_header "Check 4: call_with_rag returns RAG completion directly"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 python3 -c "
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
@@ -267,7 +267,7 @@ print_result $? "call_with_rag returns RAG completion directly without calling L
 # ==========================================
 print_header "Check 5: call_with_rag_and_tools returns RAG completion directly"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 python3 -c "
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
@@ -318,7 +318,7 @@ print_result $? "call_with_rag_and_tools returns RAG completion directly without
 # ==========================================
 print_header "Check 5b: call_with_rag multi-source combines all as raw context"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 python3 -c "
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
@@ -384,7 +384,7 @@ print_result $? "call_with_rag multi-source combines all sources as raw context"
 # ==========================================
 print_header "Check 5c: call_with_rag_and_tools multi-source combines all as raw context"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 python3 -c "
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
@@ -494,7 +494,7 @@ print_header "Check 7: Documentation updated"
 grep -q "276" "$PROJECT_ROOT/CHANGELOG.md"
 print_result $? "CHANGELOG.md has entry for PR #276"
 
-grep -q "is_completion" "$BACKEND_DIR/modules/rag/client.py"
+grep -q "is_completion" "$ATLAS_DIR/modules/rag/client.py"
 print_result $? "RAGResponse model has is_completion field in source"
 
 grep -q "completion" "$PROJECT_ROOT/docs/admin/external-rag-api.md"

@@ -16,7 +16,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-BACKEND_DIR="$PROJECT_ROOT/backend"
+ATLAS_DIR="$PROJECT_ROOT/atlas"
 
 # Use the project venv python by default
 if [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
@@ -68,15 +68,15 @@ if [ "$MODE" = "all" ] || [ "$MODE" = "online" ]; then
 
     # --list-tools prints discovered tools
     run_test "--list-tools prints available tools" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --list-tools 2>/dev/null | grep -q 'calculator_evaluate'"
+        bash -c "cd $ATLAS_DIR && $PYTHON atlas_chat_cli.py --list-tools 2>/dev/null | grep -q 'calculator_evaluate'"
 
     # 3. Basic prompt returns JSON with message
     run_test "Basic prompt returns JSON with message" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py 'Say hello in one word' --json 2>/dev/null | $PYTHON -c 'import sys,json; d=json.load(sys.stdin); assert len(d[\"message\"])>0, \"empty message\"'"
+        bash -c "cd $ATLAS_DIR && $PYTHON atlas_chat_cli.py 'Say hello in one word' --json 2>/dev/null | $PYTHON -c 'import sys,json; d=json.load(sys.stdin); assert len(d[\"message\"])>0, \"empty message\"'"
 
     # 4. JSON output has all required keys
     run_test "JSON output has required keys" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py 'Say hi' --json 2>/dev/null | $PYTHON -c '
+        bash -c "cd $ATLAS_DIR && $PYTHON atlas_chat_cli.py 'Say hi' --json 2>/dev/null | $PYTHON -c '
 import sys, json
 d = json.load(sys.stdin)
 for k in (\"message\", \"tool_calls\", \"files\", \"session_id\"):
@@ -85,7 +85,7 @@ for k in (\"message\", \"tool_calls\", \"files\", \"session_id\"):
 
     # 5. Stdin prompt
     run_test "Read prompt from stdin" \
-        bash -c "echo 'Say hi' | (cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py - --json 2>/dev/null) | $PYTHON -c 'import sys,json; d=json.load(sys.stdin); assert len(d[\"message\"])>0'"
+        bash -c "echo 'Say hi' | (cd $ATLAS_DIR && $PYTHON atlas_chat_cli.py - --json 2>/dev/null) | $PYTHON -c 'import sys,json; d=json.load(sys.stdin); assert len(d[\"message\"])>0'"
 
     echo ""
 fi
@@ -99,25 +99,25 @@ if [ "$MODE" = "all" ] || [ "$MODE" = "offline" ]; then
 
     # 0. --help exits cleanly and shows usage
     run_test "--help prints usage and exits 0" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q 'usage:'"
+        bash -c "cd $ATLAS_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q 'usage:'"
 
     # 1. No prompt gives exit code 2
     run_test "No prompt returns exit code 2" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py 2>/dev/null; [ \$? -eq 2 ]"
+        bash -c "cd $ATLAS_DIR && $PYTHON atlas_chat_cli.py 2>/dev/null; [ \$? -eq 2 ]"
 
     # 2. --help shows all expected flags
     run_test "--help lists --model flag" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--model'"
+        bash -c "cd $ATLAS_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--model'"
 
 
     run_test "--help lists --tools flag" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--tools'"
+        bash -c "cd $ATLAS_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--tools'"
 
     run_test "--help lists --json flag" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--json'"
+        bash -c "cd $ATLAS_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--json'"
 
     run_test "--help lists --user-email flag" \
-        bash -c "cd $BACKEND_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--user-email'"
+        bash -c "cd $ATLAS_DIR && $PYTHON atlas_chat_cli.py --help 2>/dev/null | grep -q -- '--user-email'"
 
     echo ""
 fi

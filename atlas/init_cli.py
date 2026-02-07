@@ -16,7 +16,7 @@ from pathlib import Path
 
 def get_package_root() -> Path:
     """Get the root directory of the atlas package."""
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parent
 
 
 def get_config_defaults_dir() -> Path:
@@ -51,7 +51,9 @@ def copy_with_prompt(src: Path, dst: Path, force: bool = False) -> bool:
             return False
 
     if src.is_dir():
-        if dst.exists():
+        if dst.is_symlink():
+            dst.unlink()
+        elif dst.exists():
             shutil.rmtree(dst)
         shutil.copytree(src, dst)
     else:
@@ -101,7 +103,7 @@ DEBUG_MODE=true
 # ATLAS_RAG_BEARER_TOKEN=your-api-key-here
 """
 
-    env_path.write_text(minimal_env)
+    env_path.write_text(minimal_env, encoding="utf-8")
     print(f"  Created {env_path}")
     return True
 

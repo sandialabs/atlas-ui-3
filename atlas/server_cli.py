@@ -93,8 +93,8 @@ def run_server(args: argparse.Namespace) -> int:
     import uvicorn
 
     # Determine host and port
-    host = args.host or os.getenv("ATLAS_HOST", "127.0.0.1")
-    port = args.port or int(os.getenv("PORT", "8000"))
+    host = args.host if args.host is not None else os.getenv("ATLAS_HOST", "127.0.0.1")
+    port = args.port if args.port is not None else int(os.getenv("PORT", "8000"))
 
     # Import the FastAPI app
     from atlas.main import app

@@ -25,7 +25,7 @@ class TestConfigManager:
         """ConfigManager should initialize without errors."""
         cm = ConfigManager()
         assert cm is not None
-        assert cm._backend_root.name == "atlas"
+        assert cm._atlas_root.name == "atlas"
 
     def test_app_settings_loads(self):
         """AppSettings should load with defaults or environment values."""
@@ -174,19 +174,19 @@ class TestAppSettings:
 
 
 class TestConfigManagerCustomRoot:
-    """Test ConfigManager with custom backend root."""
+    """Test ConfigManager with custom atlas root."""
 
-    def test_custom_backend_root(self):
-        """ConfigManager should accept custom backend root path."""
+    def test_custom_atlas_root(self):
+        """ConfigManager should accept custom atlas root path."""
         custom_root = Path(__file__).parent.parent
-        cm = ConfigManager(backend_root=custom_root)
+        cm = ConfigManager(atlas_root=custom_root)
 
-        assert cm._backend_root == custom_root
+        assert cm._atlas_root == custom_root
 
     def test_custom_root_still_loads_configs(self):
         """ConfigManager with custom root should still load configs."""
         custom_root = Path(__file__).parent.parent
-        cm = ConfigManager(backend_root=custom_root)
+        cm = ConfigManager(atlas_root=custom_root)
 
         # Should still be able to load configs
         assert cm.app_settings is not None

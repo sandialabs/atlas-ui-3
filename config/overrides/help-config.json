@@ -150,7 +150,7 @@
             {"file": "docs/mcp-development.md", "description": "Comprehensive MCP development guide"},
             {"file": "docs/advanced-features.md", "description": "Advanced features and examples"},
             {"file": "docs/configuration.md", "description": "Configuration options"},
-            {"file": "backend/mcp/", "description": "Example MCP server implementations"}
+            {"file": "atlas/mcp/", "description": "Example MCP server implementations"}
           ]
         }
       ]

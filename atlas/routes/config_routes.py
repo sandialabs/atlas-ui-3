@@ -212,14 +212,14 @@ async def get_config(
         except AttributeError:
             # Fallback minimal search if method renamed/removed
             from pathlib import Path
-            backend_root = Path(__file__).parent.parent
-            project_root = backend_root.parent
+            atlas_root = Path(__file__).parent.parent
+            project_root = atlas_root.parent
             help_paths = [
                 project_root / "config" / "overrides" / help_config_filename,
                 project_root / "config" / "defaults" / help_config_filename,
-                backend_root / "configfilesadmin" / help_config_filename,
-                backend_root / "configfiles" / help_config_filename,
-                backend_root / help_config_filename,
+                atlas_root / "configfilesadmin" / help_config_filename,
+                atlas_root / "configfiles" / help_config_filename,
+                atlas_root / help_config_filename,
                 project_root / help_config_filename,
             ]
 
@@ -419,14 +419,14 @@ async def get_splash_config(current_user: str = Depends(get_current_user)):
         except AttributeError:
             # Fallback minimal search if method renamed/removed
             from pathlib import Path
-            backend_root = Path(__file__).parent.parent
-            project_root = backend_root.parent
+            atlas_root = Path(__file__).parent.parent
+            project_root = atlas_root.parent
             splash_paths = [
                 project_root / "config" / "overrides" / splash_config_filename,
                 project_root / "config" / "defaults" / splash_config_filename,
-                backend_root / "configfilesadmin" / splash_config_filename,
-                backend_root / "configfiles" / splash_config_filename,
-                backend_root / splash_config_filename,
+                atlas_root / "configfilesadmin" / splash_config_filename,
+                atlas_root / "configfiles" / splash_config_filename,
+                atlas_root / splash_config_filename,
                 project_root / splash_config_filename,
             ]
 

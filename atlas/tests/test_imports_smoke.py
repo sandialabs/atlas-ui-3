@@ -2,14 +2,14 @@ import pkgutil
 import sys
 from pathlib import Path
 
-# Import all backend python modules to catch import-time errors quickly.
+# Import all atlas python modules to catch import-time errors quickly.
 # Skip heavy runtime side effects by not executing app.run, etc.
 
-def iter_backend_modules():
-    backend_root = Path(__file__).resolve().parents[1]
-    sys.path.insert(0, str(backend_root))
+def iter_atlas_modules():
+    atlas_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(atlas_root))
 
-    for module in pkgutil.walk_packages([str(backend_root)], prefix=""):
+    for module in pkgutil.walk_packages([str(atlas_root)], prefix=""):
         name = module.name
         # Skip private and test packages
         if name.startswith("tests"):
@@ -20,9 +20,9 @@ def iter_backend_modules():
         yield name
 
 
-def test_import_all_backend_modules():
+def test_import_all_atlas_modules():
     failed = []
-    for name in iter_backend_modules():
+    for name in iter_atlas_modules():
         try:
             __import__(name)
         except Exception as e:

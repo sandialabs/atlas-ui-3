@@ -34,12 +34,16 @@ def _get_env_file_from_args() -> tuple[Path, bool]:
         Tuple of (env_path, is_custom) where is_custom is True if user
         explicitly provided --env-file, False for default .env path.
     """
-    default_env = Path(__file__).resolve().parents[1] / ".env"
     for i, arg in enumerate(sys.argv[1:], start=1):
         if arg == "--env-file" and i + 1 < len(sys.argv):
             return Path(sys.argv[i + 1]), True
         if arg.startswith("--env-file="):
             return Path(arg.split("=", 1)[1]), True
+    # Default: prefer .env in current working directory, then fall back to package root.
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return cwd_env, False
+    default_env = Path(__file__).resolve().parents[1] / ".env"
     return default_env, False
 
 

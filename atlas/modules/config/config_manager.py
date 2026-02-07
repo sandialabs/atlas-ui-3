@@ -579,8 +579,8 @@ class AppSettings(BaseSettings):
 class ConfigManager:
     """Centralized configuration manager with proper error handling."""
 
-    def __init__(self, backend_root: Optional[Path] = None):
-        self._backend_root = backend_root or Path(__file__).parent.parent.parent
+    def __init__(self, atlas_root: Optional[Path] = None):
+        self._atlas_root = atlas_root or Path(__file__).parent.parent.parent
         self._app_settings: Optional[AppSettings] = None
         self._llm_config: Optional[LLMConfig] = None
         self._mcp_config: Optional[MCPConfig] = None
@@ -593,15 +593,15 @@ class ConfigManager:
         """Generate common search paths for a configuration file.
 
         Preferred layout uses project_root/config/overrides and project_root/config/defaults.
-        The backend process often runs with CWD=backend/, so relative paths like
-        "config/overrides" incorrectly resolve to backend/config/overrides (which doesn't exist).
+        The process often runs with CWD=atlas/, so relative paths like
+        "config/overrides" incorrectly resolve to atlas/config/overrides (which doesn't exist).
 
         Configuration settings can override these directories:
             app_config_overrides, app_config_defaults (can be absolute or relative to project root)
 
-        Legacy fallbacks (backend/configfilesadmin, backend/configfiles) are preserved.
+        Legacy fallbacks (atlas/configfilesadmin, atlas/configfiles) are preserved.
         """
-        project_root = self._backend_root.parent  # /workspaces/atlas-ui-3-11
+        project_root = self._atlas_root.parent  # /workspaces/atlas-ui-3-11
 
         # Use app_settings for config paths
         overrides_env = self.app_settings.app_config_overrides
@@ -621,8 +621,9 @@ class ConfigManager:
             defaults_root_project = defaults_root
 
         # Legacy locations (inside backend)
-        legacy_admin = self._backend_root / "configfilesadmin" / file_name
-        legacy_defaults = self._backend_root / "configfiles" / file_name
+        legacy_admin = self._atlas_root / "configfilesadmin" / file_name
+        legacy_defaults = self._atlas_root / "configfiles" / file_name
+        package_defaults = self._atlas_root / "config" / "defaults" / file_name
 
         # Build list including both CWD-relative (for backwards compat if running from project root)
         # and project-root-relative variants. Deduplicate while preserving order.
@@ -631,12 +632,13 @@ class ConfigManager:
             defaults_root / file_name,
             overrides_root_project / file_name,
             defaults_root_project / file_name,
+            package_defaults,
             legacy_admin,
             legacy_defaults,
             Path(file_name),                # CWD
             Path(f"../{file_name}"),       # parent of CWD
             project_root / file_name,
-            self._backend_root / file_name,
+            self._atlas_root / file_name,
         ]
 
         seen = set()

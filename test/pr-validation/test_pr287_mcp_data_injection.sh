@@ -21,8 +21,8 @@ print_result() {
 cd "$PROJECT_ROOT"
 source .venv/bin/activate
 
-# Tests 1-7 require backend/ as cwd for imports
-cd "$PROJECT_ROOT/backend"
+# Tests 1-7 require atlas/ as cwd for imports
+cd "$PROJECT_ROOT/atlas"
 
 # --- Test 1: tool_accepts_mcp_data function exists and is importable ---
 python -c "from application.chat.utilities.tool_executor import tool_accepts_mcp_data; print('OK')" 2>&1 | grep -q "OK"
@@ -169,7 +169,7 @@ cd "$PROJECT_ROOT"
 # --- Test 9: tool_planner format_tools_for_llm produces readable output ---
 python -c "
 import importlib.util
-spec = importlib.util.spec_from_file_location('tp', 'backend/mcp/tool_planner/main.py')
+spec = importlib.util.spec_from_file_location('tp', 'atlas/mcp/tool_planner/main.py')
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 data = {
@@ -198,7 +198,7 @@ print_result $? "tool_planner format_tools_for_llm produces readable output"
 # --- Test 10: tool_planner build_planning_prompt includes CLI instructions ---
 python -c "
 import importlib.util
-spec = importlib.util.spec_from_file_location('tp', 'backend/mcp/tool_planner/main.py')
+spec = importlib.util.spec_from_file_location('tp', 'atlas/mcp/tool_planner/main.py')
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 result = mod.build_planning_prompt('create a pptx', 'Server: pptx')
@@ -213,7 +213,7 @@ print_result $? "tool_planner build_planning_prompt includes CLI instructions"
 # --- Test 11: tool_planner plan_with_tools without ctx returns artifact ---
 python -c "
 import asyncio, base64, importlib.util
-spec = importlib.util.spec_from_file_location('tp', 'backend/mcp/tool_planner/main.py')
+spec = importlib.util.spec_from_file_location('tp', 'atlas/mcp/tool_planner/main.py')
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 # .fn gets the raw async function from the FastMCP FunctionTool wrapper
@@ -235,7 +235,7 @@ print_result $? "tool_planner plan_with_tools returns downloadable artifact"
 python -c "
 import os, importlib.util
 # Verify the server entry point exists
-server_path = 'backend/mcp/tool_planner/main.py'
+server_path = 'atlas/mcp/tool_planner/main.py'
 assert os.path.isfile(server_path), f'{server_path} does not exist'
 # Verify it can be loaded as a module
 spec = importlib.util.spec_from_file_location('tp', server_path)
@@ -250,7 +250,7 @@ print('OK')
 print_result $? "tool_planner server files exist and are valid"
 
 # --- Test 13: Run tool_planner unit tests ---
-cd "$PROJECT_ROOT/backend"
+cd "$PROJECT_ROOT/atlas"
 python -m pytest tests/test_tool_planner.py -v --tb=short 2>&1 | tail -10
 python -m pytest tests/test_tool_planner.py --tb=short -q > /dev/null 2>&1
 print_result $? "tool_planner unit tests pass"

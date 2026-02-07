@@ -44,7 +44,7 @@ You MUST systematically verify each of the following categories. For each item, 
 
 ### 5. Build Verification
 - [ ] Frontend builds successfully: `cd frontend && npm run build`
-- [ ] Backend starts without errors: `cd backend && python main.py`
+- [ ] Backend starts without errors: `cd atlas && python main.py`
 - [ ] No import errors or missing dependencies
 
 ### 6. Package Management

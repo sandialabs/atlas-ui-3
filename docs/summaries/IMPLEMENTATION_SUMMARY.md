@@ -56,8 +56,8 @@ Users now see helpful messages instead of silence:
 
 ### 1. Run Automated Tests
 ```bash
-cd backend
-export PYTHONPATH=/path/to/atlas-ui-3/backend
+cd atlas
+export PYTHONPATH=/path/to/atlas-ui-3
 python -m pytest tests/test_error_classification.py tests/test_error_flow_integration.py -v
 ```
 **Result**: 13/13 tests passing ✅

@@ -101,9 +101,9 @@ class MCPToolManager:
 
             # If relative, resolve from project root
             if not overrides_root.is_absolute():
-                # This file is in backend/modules/mcp_tools/client.py
-                backend_root = Path(__file__).parent.parent.parent
-                project_root = backend_root.parent
+                # This file is in atlas/modules/mcp_tools/client.py
+                atlas_root = Path(__file__).parent.parent.parent
+                project_root = atlas_root.parent
                 overrides_root = project_root / overrides_root
 
             candidate = overrides_root / "mcp.json"

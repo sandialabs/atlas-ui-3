@@ -38,14 +38,14 @@ class ComplianceLevelManager:
 
         if config_path is None:
             # Try to find config in standard locations
-            backend_root = Path(__file__).parent.parent
-            project_root = backend_root.parent
+            atlas_root = Path(__file__).parent.parent
+            project_root = atlas_root.parent
 
             search_paths = [
                 project_root / "config" / "overrides" / "compliance-levels.json",
                 project_root / "config" / "defaults" / "compliance-levels.json",
-                backend_root / "configfilesadmin" / "compliance-levels.json",
-                backend_root / "configfiles" / "compliance-levels.json",
+                atlas_root / "configfilesadmin" / "compliance-levels.json",
+                atlas_root / "configfiles" / "compliance-levels.json",
             ]
 
             for path in search_paths:

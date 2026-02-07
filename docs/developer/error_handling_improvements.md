@@ -75,8 +75,8 @@ python scripts/demo_error_handling.py
 
 Run tests:
 ```bash
-cd backend
-export PYTHONPATH=/path/to/atlas-ui-3/backend
+cd atlas
+export PYTHONPATH=/path/to/atlas-ui-3
 python -m pytest tests/test_error_classification.py -v
 python -m pytest tests/test_error_flow_integration.py -v
 ```

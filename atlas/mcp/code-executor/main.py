@@ -34,9 +34,9 @@ VERBOSE = False
 # Configure logging to use main app log with prefix
 current_dir = Path(__file__).parent
 print(f"Current dir: {current_dir.absolute()}")
-backend_dir = current_dir.parent.parent
-print(f"Backend dir: {backend_dir.absolute()}")
-project_root = backend_dir.parent
+atlas_dir = current_dir.parent.parent
+print(f"Atlas dir: {atlas_dir.absolute()}")
+project_root = atlas_dir.parent
 print(f"Project root: {project_root.absolute()}")
 logs_dir = project_root / 'logs'
 print(f"Logs dir: {logs_dir.absolute()}")
