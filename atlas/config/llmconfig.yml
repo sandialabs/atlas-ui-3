@@ -17,3 +17,8 @@ models:
     model_name: "gpt-4.1-nano"
     api_key: "${OPENAI_API_KEY}"
     compliance_level: "External"
+  groq-gpt-oss-120b:
+    model_url: "https://api.groq.com/openai/v1"
+    model_name: "openai/gpt-oss-120b"
+    api_key: "${GROQ_API_KEY}"
+    compliance_level: "External"
