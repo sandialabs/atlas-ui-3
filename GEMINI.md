@@ -96,6 +96,7 @@ frontend/src/
 **Event Flow:**
 ```
 User Input -> ChatContext -> WebSocket -> Backend ChatService
+Note: ChatContext validates persisted localStorage selections (tools, prompts, data sources) against the live config and removes stale entries on every config refresh.
   <- Streaming Updates <- tool_use/canvas_content/files_update <-
 ```
 

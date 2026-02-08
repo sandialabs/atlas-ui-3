@@ -139,6 +139,56 @@ export const ChatProvider = ({ children }) => {
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [config.ragServers])
 
+	// Validate persisted tool selections against current config and remove stale ones
+	useEffect(() => {
+		if (!config.tools || config.tools.length === 0) return
+
+		// Build set of valid tool keys from current config
+		const validToolKeys = new Set(
+			config.tools.flatMap(server =>
+				server.tools.map(tool => `${server.server}_${tool}`)
+			)
+		)
+
+		// Find any selected tools that no longer exist in config
+		const staleToolKeys = [...selectedTools].filter(key => !validToolKeys.has(key))
+
+		if (staleToolKeys.length > 0) {
+			console.warn('Removing stale tools from selection:', staleToolKeys)
+			selections.removeTools(staleToolKeys)
+		}
+	// Only run when tools config changes, not on every selectedTools change
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [config.tools])
+
+	// Validate persisted prompt selections against current config and remove stale ones
+	useEffect(() => {
+		if (!config.prompts || config.prompts.length === 0) return
+
+		// Build set of valid prompt keys from current config
+		const validPromptKeys = new Set(
+			config.prompts.flatMap(server =>
+				server.prompts.map(p => `${server.server}_${p.name}`)
+			)
+		)
+
+		// Find any selected prompts that no longer exist in config
+		const stalePromptKeys = [...selectedPrompts].filter(key => !validPromptKeys.has(key))
+
+		if (stalePromptKeys.length > 0) {
+			console.warn('Removing stale prompts from selection:', stalePromptKeys)
+			selections.removePrompts(stalePromptKeys)
+		}
+
+		// Clear active prompt if it no longer exists in config
+		if (selections.activePromptKey && !validPromptKeys.has(selections.activePromptKey)) {
+			console.warn('Clearing stale active prompt:', selections.activePromptKey)
+			selections.clearActivePrompt()
+		}
+	// Only run when prompts config changes, not on every selectedPrompts change
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [config.prompts])
+
 	const selectAllServerTools = useCallback((server) => {
 		const group = config.tools.find(t => t.server === server); if (!group) return
 		group.tools.forEach(tool => { const key = `${server}_${tool}`; if (!selectedTools.has(key)) selections.toggleTool(key) })

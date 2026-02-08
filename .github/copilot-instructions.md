@@ -73,6 +73,7 @@ atlas/
 
 frontend/src/
    contexts/            # React Context API (no Redux) - ChatContext, WSContext, MarketplaceContext
+   # Note: ChatContext validates persisted selections against live config to remove stale tools/prompts
    components/          # UI components
    hooks/               # Custom hooks (useMessages, useSelections, etc.)
    handlers/            # WebSocket message handlers
