@@ -20,8 +20,7 @@ async def test_selected_mcp_prompt_overrides_system_prompt(monkeypatch):
     # the same JSON configuration as other prompts tests.
     # tests run with cwd=atlas/, so resolve from atlas root
     atlas_root = Path(__file__).parent.parent
-    project_root = atlas_root.parent
-    config_path = project_root / "config" / "mcp-example-configs" / "mcp-prompts.json"
+    config_path = atlas_root / "config" / "mcp-example-configs" / "mcp-prompts.json"
     assert config_path.exists(), f"Missing example prompts config: {config_path}"
 
     data = json.loads(config_path.read_text())

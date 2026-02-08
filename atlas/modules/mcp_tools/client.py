@@ -85,7 +85,7 @@ MCP_TO_PYTHON_LOG_LEVEL = {
 class MCPToolManager:
     """Manager for MCP servers and their tools.
 
-    Default config path now points to config/overrides (or env override) with legacy fallback.
+    Default config path now points to config/ (or env override APP_CONFIG_DIR) with package fallback.
 
     Supports:
     - Hot-reloading configuration from disk via reload_config()
@@ -97,21 +97,19 @@ class MCPToolManager:
         if config_path is None:
             # Use config manager to get config path
             app_settings = config_manager.app_settings
-            overrides_root = Path(app_settings.app_config_overrides)
+            config_root = Path(app_settings.app_config_dir)
 
             # If relative, resolve from project root
-            if not overrides_root.is_absolute():
-                # This file is in atlas/modules/mcp_tools/client.py
+            if not config_root.is_absolute():
                 atlas_root = Path(__file__).parent.parent.parent
                 project_root = atlas_root.parent
-                overrides_root = project_root / overrides_root
+                config_root = project_root / config_root
 
-            candidate = overrides_root / "mcp.json"
+            candidate = config_root / "mcp.json"
             if not candidate.exists():
-                # Legacy fallback
-                candidate = Path("backend/configfilesadmin/mcp.json")
-                if not candidate.exists():
-                    candidate = Path("backend/configfiles/mcp.json")
+                # Fall back to package defaults
+                atlas_root = Path(__file__).parent.parent.parent
+                candidate = atlas_root / "config" / "mcp.json"
             self.config_path = str(candidate)
             # Use default config manager when no path specified
             mcp_config = config_manager.mcp_config

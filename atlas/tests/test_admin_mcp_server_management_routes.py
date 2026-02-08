@@ -10,7 +10,7 @@ from atlas.modules.config import config_manager
 
 def _configure_test_overrides(tmp_path: Path, monkeypatch):
     # Keep config changes isolated per test
-    monkeypatch.setattr(config_manager.app_settings, "app_config_overrides", str(tmp_path))
+    monkeypatch.setattr(config_manager.app_settings, "app_config_dir", str(tmp_path))
     monkeypatch.setattr(config_manager.app_settings, "mcp_config_file", "mcp.json")
 
     # Avoid any side effects from attempting to reload MCP servers during add/remove.

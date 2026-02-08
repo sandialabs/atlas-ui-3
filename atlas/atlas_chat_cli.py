@@ -68,13 +68,10 @@ def _apply_config_overrides_from_args() -> None:
     """
     argv = sys.argv[1:]
 
-    # Directories
-    overrides_dir = _extract_flag_value(argv, "--config-overrides")
-    defaults_dir = _extract_flag_value(argv, "--config-defaults")
-    if overrides_dir:
-        os.environ["APP_CONFIG_OVERRIDES"] = str(Path(overrides_dir).expanduser().resolve())
-    if defaults_dir:
-        os.environ["APP_CONFIG_DEFAULTS"] = str(Path(defaults_dir).expanduser().resolve())
+    # Config directory
+    config_dir = _extract_flag_value(argv, "--config-dir")
+    if config_dir:
+        os.environ["APP_CONFIG_DIR"] = str(Path(config_dir).expanduser().resolve())
 
     def _apply_config_file_override(flag: str, env_var: str) -> None:
         value = _extract_flag_value(argv, flag)
@@ -82,12 +79,12 @@ def _apply_config_overrides_from_args() -> None:
             return
         p = Path(value).expanduser()
         # If user provides a path, set *_CONFIG_FILE to basename and (unless
-        # explicitly set) point APP_CONFIG_OVERRIDES at the containing directory.
+        # explicitly set) point APP_CONFIG_DIR at the containing directory.
         if "/" in value or p.parent != Path("."):
             resolved = p.resolve()
             os.environ[env_var] = resolved.name
-            if "APP_CONFIG_OVERRIDES" not in os.environ:
-                os.environ["APP_CONFIG_OVERRIDES"] = str(resolved.parent)
+            if "APP_CONFIG_DIR" not in os.environ:
+                os.environ["APP_CONFIG_DIR"] = str(resolved.parent)
         else:
             os.environ[env_var] = value
 
@@ -159,16 +156,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to custom .env file (default: project root .env). Parsed early before other imports.",
     )
 
-    # Config override flags (useful for testing and CI)
+    # Config directory flag (useful for testing and CI)
     parser.add_argument(
-        "--config-overrides",
+        "--config-dir",
         default=None,
-        help="Override config overrides directory (sets APP_CONFIG_OVERRIDES).",
-    )
-    parser.add_argument(
-        "--config-defaults",
-        default=None,
-        help="Override config defaults directory (sets APP_CONFIG_DEFAULTS).",
+        help="Override config directory (sets APP_CONFIG_DIR).",
     )
     parser.add_argument(
         "--llm-config",

@@ -26,12 +26,12 @@ def _apply_env_file(env_path: Path) -> None:
 
 
 def _apply_config_folder(config_folder: Path) -> None:
-    """Set up config folder as the overrides directory."""
+    """Set up config folder as the user config directory."""
     if not config_folder.exists():
         print(f"Error: config folder not found: {config_folder}", file=sys.stderr)
         sys.exit(2)
 
-    os.environ["APP_CONFIG_OVERRIDES"] = str(config_folder.resolve())
+    os.environ["APP_CONFIG_DIR"] = str(config_folder.resolve())
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -61,13 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--config-folder",
         dest="config_folder",
         default=None,
-        help="Path to config folder for overrides (sets APP_CONFIG_OVERRIDES).",
-    )
-    parser.add_argument(
-        "--config-defaults",
-        dest="config_defaults",
-        default=None,
-        help="Path to config defaults folder (sets APP_CONFIG_DEFAULTS).",
+        help="Path to config folder (sets APP_CONFIG_DIR).",
     )
     parser.add_argument(
         "--reload",
@@ -148,14 +142,6 @@ def main() -> None:
     # Apply config folder if specified
     if args.config_folder:
         _apply_config_folder(Path(args.config_folder).expanduser())
-
-    # Apply config defaults if specified
-    if args.config_defaults:
-        defaults_path = Path(args.config_defaults).expanduser()
-        if not defaults_path.exists():
-            print(f"Error: config defaults folder not found: {defaults_path}", file=sys.stderr)
-            sys.exit(2)
-        os.environ["APP_CONFIG_DEFAULTS"] = str(defaults_path.resolve())
 
     sys.exit(run_server(args))
 

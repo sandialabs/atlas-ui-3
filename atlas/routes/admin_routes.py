@@ -49,45 +49,33 @@ async def require_admin(current_user: str = Depends(get_current_user)) -> str:
     return current_user
 
 
-def setup_config_overrides() -> None:
-    """Ensure editable overrides directory exists; seed from defaults / legacy if empty."""
+def setup_config_dir() -> None:
+    """Ensure user config directory exists; seed from package defaults if empty."""
     app_settings = config_manager.app_settings
-    overrides_root = Path(app_settings.app_config_overrides)
-    defaults_root = Path(app_settings.app_config_defaults)
+    config_root = Path(app_settings.app_config_dir)
 
-    # If relative paths, resolve from project root
-    if not overrides_root.is_absolute():
+    if not config_root.is_absolute():
         project_root = Path(__file__).parent.parent.parent
-        overrides_root = project_root / overrides_root
-    if not defaults_root.is_absolute():
-        project_root = Path(__file__).parent.parent.parent
-        defaults_root = project_root / defaults_root
+        config_root = project_root / config_root
 
-    overrides_root.mkdir(parents=True, exist_ok=True)
-    defaults_root.mkdir(parents=True, exist_ok=True)
+    config_root.mkdir(parents=True, exist_ok=True)
 
-    if any(overrides_root.iterdir()):
+    if any(config_root.iterdir()):
         return
 
-    logger.info("Seeding empty overrides directory")
-    seed_sources = [
-        defaults_root,
-        Path("backend/configfilesadmin"),
-        Path("backend/configfiles"),
-        Path("configfilesadmin"),
-        Path("configfiles"),
-    ]
-    for source in seed_sources:
-        if source.exists() and any(source.iterdir()):
-            for file_path in source.glob("*"):
-                if file_path.is_file():
-                    dest = overrides_root / file_path.name
-                    try:
-                        shutil.copy2(file_path, dest)
-                        logger.info(f"Copied seed config {sanitize_for_logging(str(file_path))} -> {sanitize_for_logging(str(dest))}")
-                    except Exception as e:  # noqa: BLE001
-                        logger.error(f"Failed seeding {sanitize_for_logging(str(file_path))}: {e}")
-            break
+    # Seed from package defaults (atlas/config/)
+    atlas_root = Path(__file__).parent.parent
+    package_config = atlas_root / "config"
+    if package_config.exists():
+        logger.info("Seeding empty config directory from package defaults")
+        for file_path in package_config.glob("*"):
+            if file_path.is_file():
+                dest = config_root / file_path.name
+                try:
+                    shutil.copy2(file_path, dest)
+                    logger.info(f"Copied seed config {sanitize_for_logging(str(file_path))} -> {sanitize_for_logging(str(dest))}")
+                except Exception as e:  # noqa: BLE001
+                    logger.error(f"Failed seeding {sanitize_for_logging(str(file_path))}: {e}")
 
 
 def get_admin_config_path(filename: str) -> Path:
@@ -107,11 +95,11 @@ def get_admin_config_path(filename: str) -> Path:
         custom_filename = filename
 
     # Use same logic as config manager to resolve relative paths from project root
-    base = Path(app_settings.app_config_overrides)
+    base = Path(app_settings.app_config_dir)
 
-    # If relative path, resolve from project root (parent of backend directory)
+    # If relative path, resolve from project root
     if not base.is_absolute():
-        project_root = Path(__file__).parent.parent.parent  # Go up from atlas.routes/ to backend/ to project root
+        project_root = Path(__file__).parent.parent.parent
         base = project_root / base
 
     base.mkdir(parents=True, exist_ok=True)
@@ -212,7 +200,7 @@ async def admin_dashboard(admin_user: str = Depends(require_admin)):
 @admin_router.get("/banners")
 async def get_banner_config(admin_user: str = Depends(require_admin)):
     try:
-        setup_config_overrides()
+        setup_config_dir()
         messages_file = get_admin_config_path("messages.txt")
         if not messages_file.exists():
             write_file_content(messages_file, "System status: All services operational\n")
@@ -235,7 +223,7 @@ async def update_banner_config(
 ):
     messages_file = None
     try:
-        setup_config_overrides()
+        setup_config_dir()
         messages_file = get_admin_config_path("messages.txt")
         content = ("\n".join(update.messages) + "\n") if update.messages else ""
         write_file_content(messages_file, content)
@@ -610,14 +598,14 @@ async def get_system_status(admin_user: str = Depends(require_admin)):
     Returns basic configuration and logging status; avoids heavy checks.
     """
     try:
-        # Configuration status: overrides directory and file count
+        # Configuration status: config directory and file count
         app_settings = config_manager.app_settings
-        overrides_root = Path(app_settings.app_config_overrides)
-        if not overrides_root.is_absolute():
+        config_root = Path(app_settings.app_config_dir)
+        if not config_root.is_absolute():
             project_root = _project_root()
-            overrides_root = project_root / overrides_root
-        overrides_root.mkdir(parents=True, exist_ok=True)
-        config_files = list(overrides_root.glob("*"))
+            config_root = project_root / config_root
+        config_root.mkdir(parents=True, exist_ok=True)
+        config_files = list(config_root.glob("*"))
         config_status = "healthy" if config_files else "warning"
 
         # Logging status
@@ -631,7 +619,7 @@ async def get_system_status(admin_user: str = Depends(require_admin)):
                 "component": "Configuration",
                 "status": config_status,
                 "details": {
-                    "overrides_dir": str(overrides_root),
+                    "config_dir": str(config_root),
                     "files_count": len(config_files),
                 },
             },
@@ -665,8 +653,8 @@ async def get_available_mcp_servers(
 ):
     """Get all available MCP servers from the example-configs directory."""
     try:
-        project_root = _project_root()
-        example_configs_dir = project_root / "config" / "mcp-example-configs"
+        atlas_root = Path(__file__).resolve().parents[1]
+        example_configs_dir = atlas_root / "config" / "mcp-example-configs"
 
         if not example_configs_dir.exists():
             return {"available_servers": {}}
@@ -730,8 +718,8 @@ async def add_mcp_server(
         server_name = action.server_name
 
         # Get the server config from example-configs
-        project_root = _project_root()
-        example_configs_dir = project_root / "config" / "mcp-example-configs"
+        atlas_root = Path(__file__).resolve().parents[1]
+        example_configs_dir = atlas_root / "config" / "mcp-example-configs"
 
         server_config = None
         for config_file in example_configs_dir.glob("mcp-*.json"):

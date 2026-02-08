@@ -24,8 +24,8 @@ def test_banner_save_success_logging(caplog, tmp_path, monkeypatch):
         mock_get_admin_config_path
     )
 
-    # Mock setup_config_overrides to avoid side effects
-    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
+    # Mock setup_config_dir to avoid side effects
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_dir", lambda: None)
 
     # Capture logs at INFO level
     with caplog.at_level(logging.INFO):
@@ -72,8 +72,8 @@ def test_banner_save_failure_logging(caplog, tmp_path, monkeypatch):
         mock_get_admin_config_path
     )
 
-    # Mock setup_config_overrides to avoid side effects
-    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
+    # Mock setup_config_dir to avoid side effects
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_dir", lambda: None)
 
     # Mock write_file_content to raise an exception
     def mock_write_file_content(file_path, content, file_type="text"):
@@ -130,8 +130,8 @@ def test_banner_save_logs_sanitized_paths(caplog, tmp_path, monkeypatch):
         mock_get_admin_config_path
     )
 
-    # Mock setup_config_overrides to avoid side effects
-    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
+    # Mock setup_config_dir to avoid side effects
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_dir", lambda: None)
 
     # Capture logs at INFO level
     with caplog.at_level(logging.INFO):
@@ -179,8 +179,8 @@ def test_banner_get_includes_enabled_status(tmp_path, monkeypatch):
         mock_get_admin_config_path
     )
 
-    # Mock setup_config_overrides to avoid side effects
-    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
+    # Mock setup_config_dir to avoid side effects
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_dir", lambda: None)
 
     # Make request to get banner config
     response = client.get(
@@ -218,8 +218,8 @@ def test_banner_get_with_feature_disabled(tmp_path, monkeypatch):
         mock_get_admin_config_path
     )
 
-    # Mock setup_config_overrides
-    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
+    # Mock setup_config_dir
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_dir", lambda: None)
 
     # Mock banner_enabled to be false
     monkeypatch.setattr(
@@ -261,8 +261,8 @@ def test_banner_get_with_feature_enabled(tmp_path, monkeypatch):
         mock_get_admin_config_path
     )
 
-    # Mock setup_config_overrides
-    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_overrides", lambda: None)
+    # Mock setup_config_dir
+    monkeypatch.setattr("atlas.routes.admin_routes.setup_config_dir", lambda: None)
 
     # Mock banner_enabled to be true
     monkeypatch.setattr(

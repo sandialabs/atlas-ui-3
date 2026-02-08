@@ -19,9 +19,9 @@ def get_package_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-def get_config_defaults_dir() -> Path:
-    """Get the path to config/defaults in the package."""
-    return get_package_root() / "config" / "defaults"
+def get_config_dir() -> Path:
+    """Get the path to config/ in the atlas package (package defaults)."""
+    return get_package_root() / "config"
 
 
 def get_env_example_path() -> Path:
@@ -93,7 +93,7 @@ DEBUG_MODE=true
 # Optional: Custom config location
 # Uncomment and set if you have custom config files
 # =============================================================================
-# APP_CONFIG_OVERRIDES=./config
+# APP_CONFIG_DIR=./config
 
 # =============================================================================
 # Optional: RAG Configuration
@@ -123,7 +123,7 @@ def run_init(args: argparse.Namespace) -> int:
 
     print(f"\nSetting up Atlas configuration in: {target_dir}\n")
 
-    config_defaults = get_config_defaults_dir()
+    package_config = get_config_dir()
     env_example = get_env_example_path()
 
     if args.minimal:
@@ -134,12 +134,16 @@ def run_init(args: argparse.Namespace) -> int:
         # Full mode: copy config and .env
         print("Copying configuration files...")
 
-        # Copy config/defaults to target/config
-        if config_defaults.exists():
+        # Copy atlas/config/ to target/config (excluding mcp-example-configs)
+        if package_config.exists():
             target_config = target_dir / "config"
-            copy_with_prompt(config_defaults, target_config, force=args.force)
+            # Copy individual config files (not subdirectories like mcp-example-configs)
+            target_config.mkdir(parents=True, exist_ok=True)
+            for src_file in package_config.iterdir():
+                if src_file.is_file():
+                    copy_with_prompt(src_file, target_config / src_file.name, force=args.force)
         else:
-            print(f"  Warning: Config defaults not found at {config_defaults}")
+            print(f"  Warning: Package config not found at {package_config}")
 
         # Copy .env.example to .env
         if env_example.exists():

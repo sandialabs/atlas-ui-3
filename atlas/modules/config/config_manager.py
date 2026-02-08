@@ -296,7 +296,7 @@ class AppSettings(BaseSettings):
     )
 
     # RAG Feature Flag
-    # When enabled, RAG sources are configured in config/overrides/rag-sources.json
+    # When enabled, RAG sources are configured in config/rag-sources.json
     # See docs/admin/external-rag-api.md for configuration details
     feature_rag_enabled: bool = Field(
         False,
@@ -537,9 +537,8 @@ class AppSettings(BaseSettings):
     splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
     file_extractors_config_file: str = Field(default="file-extractors.json", validation_alias="FILE_EXTRACTORS_CONFIG_FILE")
 
-    # Config directory paths
-    app_config_overrides: str = Field(default="config/overrides", validation_alias="APP_CONFIG_OVERRIDES")
-    app_config_defaults: str = Field(default="config/defaults", validation_alias="APP_CONFIG_DEFAULTS")
+    # Config directory path (user customizations; falls back to atlas/config/ for defaults)
+    app_config_dir: str = Field(default="config", validation_alias="APP_CONFIG_DIR")
 
     # Logging directory
     app_log_dir: Optional[str] = Field(default=None, validation_alias="APP_LOG_DIR")
@@ -590,55 +589,26 @@ class ConfigManager:
         self._file_extractors_config: Optional[FileExtractorsConfig] = None
 
     def _search_paths(self, file_name: str) -> List[Path]:
-        """Generate common search paths for a configuration file.
+        """Generate search paths for a configuration file.
 
-        Preferred layout uses project_root/config/overrides and project_root/config/defaults.
-        The process often runs with CWD=atlas/, so relative paths like
-        "config/overrides" incorrectly resolve to atlas/config/overrides (which doesn't exist).
-
-        Configuration settings can override these directories:
-            app_config_overrides, app_config_defaults (can be absolute or relative to project root)
-
-        Legacy fallbacks (atlas/configfilesadmin, atlas/configfiles) are preserved.
+        Two-layer lookup:
+        1. User config dir (APP_CONFIG_DIR, default "config/") - user customizations
+        2. Package defaults (atlas/config/) - always available as fallback
         """
-        project_root = self._atlas_root.parent  # /workspaces/atlas-ui-3-11
+        project_root = self._atlas_root.parent
 
-        # Use app_settings for config paths
-        overrides_env = self.app_settings.app_config_overrides
-        defaults_env = self.app_settings.app_config_defaults
-
-        overrides_root = Path(overrides_env)
-        defaults_root = Path(defaults_env)
-
-        # If provided paths are relative, interpret them relative to project root first.
-        if not overrides_root.is_absolute():
-            overrides_root_project = project_root / overrides_root
+        config_dir = Path(self.app_settings.app_config_dir)
+        if not config_dir.is_absolute():
+            config_dir_project = project_root / config_dir
         else:
-            overrides_root_project = overrides_root
-        if not defaults_root.is_absolute():
-            defaults_root_project = project_root / defaults_root
-        else:
-            defaults_root_project = defaults_root
+            config_dir_project = config_dir
 
-        # Legacy locations (inside backend)
-        legacy_admin = self._atlas_root / "configfilesadmin" / file_name
-        legacy_defaults = self._atlas_root / "configfiles" / file_name
-        package_defaults = self._atlas_root / "config" / "defaults" / file_name
+        package_defaults = self._atlas_root / "config" / file_name
 
-        # Build list including both CWD-relative (for backwards compat if running from project root)
-        # and project-root-relative variants. Deduplicate while preserving order.
         candidates: List[Path] = [
-            overrides_root / file_name,
-            defaults_root / file_name,
-            overrides_root_project / file_name,
-            defaults_root_project / file_name,
+            config_dir / file_name,
+            config_dir_project / file_name,
             package_defaults,
-            legacy_admin,
-            legacy_defaults,
-            Path(file_name),                # CWD
-            Path(f"../{file_name}"),       # parent of CWD
-            project_root / file_name,
-            self._atlas_root / file_name,
         ]
 
         seen = set()

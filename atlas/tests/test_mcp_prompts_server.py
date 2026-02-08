@@ -12,11 +12,7 @@ async def test_mcp_prompts_discovery_includes_expert_dog_trainer():
     # exercises the real JSON configuration used for prompts.
     # tests run with cwd=atlas/, so resolve from atlas root
     atlas_root = Path(__file__).parent.parent
-    print(atlas_root)
-    project_root = atlas_root.parent
-    print(project_root)
-    config_path = project_root / "config" / "mcp-example-configs" / "mcp-prompts.json"
-    print(config_path)
+    config_path = atlas_root / "config" / "mcp-example-configs" / "mcp-prompts.json"
     assert config_path.exists(), f"Missing example prompts config: {config_path}"
 
     # Sanity-check that the JSON contains a "prompts" server.
@@ -29,7 +25,7 @@ async def test_mcp_prompts_discovery_includes_expert_dog_trainer():
     await mcp.initialize_clients()
     await mcp.discover_prompts()
 
-    # The prompts server should be configured (from config/overrides mcp.json)
+    # The prompts server should be configured (from mcp-example-configs/mcp-prompts.json)
     assert "prompts" in mcp.available_prompts, "prompts server not discovered"
 
     server_data = mcp.available_prompts["prompts"]

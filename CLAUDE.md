@@ -69,6 +69,10 @@ Manual quick run (alternative):
 
 **Changelog Maintenance**: For every PR, add an entry to CHANGELOG.md in the root directory. Each entry should be 1-2 lines describing the core features or changes. Format: "### PR #<number> - YYYY-MM-DD" followed by a bullet point list of changes.
 
+**AI Instruction File Maintenance**: For every PR, you MUST do the following for all three AI instruction files (`CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`):
+1. **Add one helpful sentence** to each file that captures a useful insight, convention, or lesson learned from the PR's changes (e.g., a new pattern introduced, a gotcha discovered, or a clarification of existing behavior).
+2. **Scan all three files for stale or out-of-date information** (e.g., references to renamed directories, removed features, changed commands, or outdated architecture descriptions). If stale content is found, **warn the user** about what is outdated and where, but do **NOT** delete or modify the stale content unless the user explicitly asks you to.
+
 **Documentation Date-Time Stamping**: When creating markdown (.md) files, always include date-time stamps either in the filename or as a header in key sections to help track if docs are stale. Format: `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. Examples:
 - Filename: `feature-plan-2025-11-02.md`
 - Section header: `## Implementation Plan (2025-11-02)`
@@ -164,20 +168,17 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 
 3. **MCP Transport Auto-Detection**: Automatically detects stdio, HTTP, or SSE based on config
 
-4. **Configuration Layering** (in priority order):
-   - Environment variables (highest priority)
-   - Optional overrides directory (set `APP_CONFIG_OVERRIDES` or `--config-overrides`)
-   - `config/defaults/` (versioned)
-   - Code defaults (Pydantic models)
+4. **Two-Layer Configuration**: User config in `config/` (created by `atlas-init`) overrides package defaults in `atlas/config/`. Set `APP_CONFIG_DIR` to customize the user config directory.
 
 ## Configuration and Feature Flags
 
 ### Configuration Files
-- **LLM Config**: `config/defaults/llmconfig.yml` (optional overrides via `APP_CONFIG_OVERRIDES` or `--llm-config`)
-- **MCP Servers**: `config/defaults/mcp.json` (optional overrides via `APP_CONFIG_OVERRIDES` or `--mcp-config`)
-- **RAG Sources**: `config/defaults/rag-sources.json` (optional overrides via `APP_CONFIG_OVERRIDES` or `--rag-sources-config`)
-- **Help Config**: `config/defaults/help-config.json`
-- **Compliance Levels**: `config/defaults/compliance-levels.json`
+- **LLM Config**: `atlas/config/llmconfig.yml` (user overrides in `config/llmconfig.yml` or via `--llm-config`)
+- **MCP Servers**: `atlas/config/mcp.json` (user overrides in `config/mcp.json` or via `--mcp-config`)
+- **RAG Sources**: `atlas/config/rag-sources.json` (user overrides in `config/rag-sources.json` or via `--rag-sources-config`)
+- **Help Config**: `atlas/config/help-config.json`
+- **Compliance Levels**: `atlas/config/compliance-levels.json`
+- **MCP Examples**: `atlas/config/mcp-example-configs/` (shipped with package)
 - **Environment**: `.env` (copy from `.env.example`)
 
 ### Feature Flags (AppSettings)
@@ -201,11 +202,11 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 - `domain/rag_mcp_service.py` handles RAG discovery/search/synthesis
 
 ### Testing MCP Features
-When testing or developing MCP-related features, example configurations can be found in `config/mcp-example-configs/` with individual `mcp-{servername}.json` files for testing individual servers.
+When testing or developing MCP-related features, example configurations can be found in `atlas/config/mcp-example-configs/` with individual `mcp-{servername}.json` files for testing individual servers.
 
 ## Compliance Levels
 
-Definitions in `config/defaults/compliance-levels.json` with optional overrides via `APP_CONFIG_OVERRIDES`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
+Definitions in `atlas/config/compliance-levels.json` with user overrides in `config/compliance-levels.json`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
 
 When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 - `/api/config` includes model and server `compliance_level`
@@ -348,10 +349,10 @@ In production, reverse proxy injects `X-User-Email` (after stripping client head
 ## Extend by Example
 
 **Add a tool server:**
-Edit `config/defaults/mcp.json` (or an overrides directory if you set `APP_CONFIG_OVERRIDES`). Set `groups`, `transport`, `url/command`, `compliance_level`. Restart or call discovery on startup.
+Edit `config/mcp.json` (your local config, created by `atlas-init`). Set `groups`, `transport`, `url/command`, `compliance_level`. Restart or call discovery on startup.
 
 **Add a RAG provider:**
-Edit `config/defaults/rag-sources.json` (or an overrides directory if you set `APP_CONFIG_OVERRIDES`). For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
+Edit `config/rag-sources.json` (your local config). For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
 
 **Change agent loop:**
 Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.

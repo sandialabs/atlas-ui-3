@@ -86,8 +86,9 @@ atlas = [
     "*.md",
     "*.txt",
     ".env.example",
-    "config/defaults/*.json",
-    "config/defaults/*.yml",
+    "config/*.json",
+    "config/*.yml",
+    "config/mcp-example-configs/*.json",
     "mcp/**/*",
     "../frontend/dist/**/*",
 ]

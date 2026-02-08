@@ -32,6 +32,10 @@ Manual quick run (alternative):
 
 **Changelog**: For every PR, add an entry to CHANGELOG.md. Format: "### PR #<number> - YYYY-MM-DD" followed by bullet points.
 
+**AI Instruction File Maintenance**: For every PR, you MUST do the following for all three AI instruction files (`CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`):
+1. **Add one helpful sentence** to each file that captures a useful insight, convention, or lesson learned from the PR's changes (e.g., a new pattern introduced, a gotcha discovered, or a clarification of existing behavior).
+2. **Scan all three files for stale or out-of-date information** (e.g., references to renamed directories, removed features, changed commands, or outdated architecture descriptions). If stale content is found, **warn the user** about what is outdated and where, but do **NOT** delete or modify the stale content unless the user explicitly asks you to.
+
 **Date Stamps**: Include date-time stamps in markdown files (filename or section header). Format: `YYYY-MM-DD`.
 
 ## Architecture Overview
@@ -72,7 +76,7 @@ frontend/src/
 
 ## Configuration and Feature Flags
 
-**Layering** (in priority order): env vars -> `config/overrides/` -> `config/defaults/` -> code defaults (Pydantic models).
+**Two-layer config**: User config in `config/` (created by `atlas-init`, set `APP_CONFIG_DIR` to customize) overrides package defaults in `atlas/config/`.
 
 **Files:**
 - `llmconfig.yml` - LLM model configurations
@@ -102,7 +106,7 @@ frontend/src/
 - Resources and servers may include `complianceLevel`
 
 **Testing MCP:**
-Example configurations in `config/mcp-example-configs/` with individual `mcp-{servername}.json` files.
+Example configurations in `atlas/config/mcp-example-configs/` with individual `mcp-{servername}.json` files.
 
 ## Compliance Levels
 
@@ -222,10 +226,10 @@ Use `file_path:line_number` format for easy navigation.
 ## Extend by Example
 
 **Add a tool server:**
-Edit `config/overrides/mcp.json` (set `groups`, `transport`, `url/command`, `compliance_level`). Restart atlas.
+Edit `config/mcp.json` (your local config, created by `atlas-init`). Set `groups`, `transport`, `url/command`, `compliance_level`. Restart atlas.
 
 **Add a RAG provider:**
-Edit `config/overrides/rag-sources.json`. For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
+Edit `config/rag-sources.json` (your local config). For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
 
 **Change agent loop:**
 Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.

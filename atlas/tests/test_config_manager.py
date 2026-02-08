@@ -87,17 +87,17 @@ class TestConfigManager:
         assert len(paths) > 0
         assert all(isinstance(p, Path) for p in paths)
 
-    def test_search_paths_includes_overrides_and_defaults(self):
-        """Search paths should include both overrides and defaults directories."""
+    def test_search_paths_includes_config_and_package_defaults(self):
+        """Search paths should include user config dir and package defaults."""
         cm = ConfigManager()
 
         paths = cm._search_paths("mcp.json")
         path_strings = [str(p) for p in paths]
 
-        # Should include overrides directory
-        assert any("overrides" in p for p in path_strings)
-        # Should include defaults directory
-        assert any("defaults" in p for p in path_strings)
+        # Should include user config directory
+        assert any("config/mcp.json" in p for p in path_strings)
+        # Should include package defaults (atlas/config/)
+        assert any("atlas/config/mcp.json" in p for p in path_strings)
 
     def test_validate_config_returns_dict(self):
         """Validate config should return a dictionary of validation results."""
@@ -151,8 +151,7 @@ class TestAppSettings:
         assert hasattr(settings, "s3_bucket_name")
 
         # Config paths
-        assert hasattr(settings, "app_config_overrides")
-        assert hasattr(settings, "app_config_defaults")
+        assert hasattr(settings, "app_config_dir")
 
     def test_app_settings_defaults(self):
         """AppSettings should have sensible defaults."""

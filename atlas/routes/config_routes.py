@@ -38,7 +38,7 @@ async def get_banners(current_user: str = Depends(get_current_user)):
         from pathlib import Path
 
         # Use app settings for config path
-        base = Path(app_settings.app_config_overrides)
+        base = Path(app_settings.app_config_dir)
 
         # If relative path, resolve from project root
         if not base.is_absolute():
