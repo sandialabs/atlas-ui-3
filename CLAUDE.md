@@ -229,6 +229,7 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 **Server Messages:**
 - `token_stream` - Text chunks
 - `tool_use` - Tool execution events
+- `tool_start` / `tool_progress` / `tool_complete` - Direct tool lifecycle events with status transitions (`calling` -> `in_progress` -> `completed`/`failed`); Message.jsx renders spinners and elapsed timers for active states
 - `canvas_content` - HTML/markdown for canvas
 - `intermediate_update` - Files, images, etc.
 

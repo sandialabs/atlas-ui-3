@@ -148,7 +148,7 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 
 **WebSocket API (`/ws`):**
 - Client messages: `chat`, `download_file`, `reset_session`, `attach_file`
-- Server messages: `token_stream`, `tool_use`, `canvas_content`, `intermediate_update`
+- Server messages: `token_stream`, `tool_use`, `tool_start`/`tool_progress`/`tool_complete` (direct tool lifecycle with spinner/timer in Message.jsx), `canvas_content`, `intermediate_update`
 
 **REST API:**
 - `/api/config` - Models, tools, prompts, data_sources, rag_servers, features
