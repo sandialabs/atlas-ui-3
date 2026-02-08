@@ -14,6 +14,35 @@ def test_security_headers_present_by_default():
     assert "Content-Security-Policy" in r.headers
 
 
+def test_csp_includes_websocket_origins_for_configured_port():
+    """CSP connect-src should include ws:// and wss:// for the configured port."""
+    client = TestClient(app)
+    r = client.get("/api/files/healthz", headers={"X-User-Email": "test@test.com"})
+    csp = r.headers.get("Content-Security-Policy", "")
+    from atlas.modules.config import config_manager
+    port = config_manager.app_settings.port
+    assert f"ws://localhost:{port}" in csp, f"CSP missing ws://localhost:{port}: {csp}"
+    assert f"wss://localhost:{port}" in csp, f"CSP missing wss://localhost:{port}: {csp}"
+
+
+def test_csp_includes_websocket_origins_for_non_default_port():
+    """When port is set to a non-default value, CSP should include that port's WS origins."""
+    from atlas.modules.config import config_manager
+    original_port = config_manager.app_settings.port
+    try:
+        config_manager.app_settings.port = 9999
+        client = TestClient(app)
+        r = client.get("/api/files/healthz", headers={"X-User-Email": "test@test.com"})
+        csp = r.headers.get("Content-Security-Policy", "")
+        assert "ws://localhost:9999" in csp, f"CSP missing ws://localhost:9999: {csp}"
+        assert "wss://localhost:9999" in csp, f"CSP missing wss://localhost:9999: {csp}"
+        # Should NOT contain the old port
+        if original_port != 9999:
+            assert f"ws://localhost:{original_port}" not in csp
+    finally:
+        config_manager.app_settings.port = original_port
+
+
 def test_download_filename_sanitized(monkeypatch):
     # Insert a file into mock S3 listing by calling upload
     from atlas.infrastructure.app_factory import app_factory

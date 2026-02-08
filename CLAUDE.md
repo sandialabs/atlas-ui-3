@@ -233,6 +233,7 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 ### REST API
 - `/api/config` - Models, tools, prompts, data_sources, rag_servers, features
 - `/api/compliance-levels` - Compliance level definitions
+- `/api/feedback` - Submit (POST) and view (GET, admin) user feedback; conversation history is stored inline in the feedback JSON when the user opts in
 - `/admin/*` - Configs and logs (admin group required)
 
 ## Development Commands

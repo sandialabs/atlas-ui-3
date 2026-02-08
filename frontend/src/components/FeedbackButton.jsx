@@ -1,18 +1,32 @@
 import { useState } from 'react'
 import { MessageCircle, X, ThumbsUp, ThumbsDown, Minus, Send } from 'lucide-react'
+import { useChat } from '../contexts/ChatContext'
 
 const FeedbackButton = () => {
+  const { messages, currentModel, user, appName, selectedTools, selectedDataSources, agentModeEnabled, canvasContent, features } = useChat()
   const [isOpen, setIsOpen] = useState(false)
   const [selectedRating, setSelectedRating] = useState(null)
   const [comment, setComment] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSuccessMessage, setShowSuccessMessage] = useState(false)
+  const [includeHistory, setIncludeHistory] = useState(true)
+
+  const buildConversationHistory = () => {
+    if (!includeHistory || !messages.length) return ''
+    const ragSourcesDisplay = features?.rag
+      ? ([...selectedDataSources].join(', ') || 'None selected')
+      : 'None (RAG disabled)'
+    let text = `Chat Export - ${appName}\nDate: ${new Date().toLocaleString()}\nUser: ${user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected RAG Sources: ${ragSourcesDisplay}\nAgent Mode: ${agentModeEnabled ? 'Enabled' : 'Disabled'}\n\n${'='.repeat(50)}\n\n`
+    messages.forEach(m => { text += `${m.role.toUpperCase()}:\n${m.content}\n\n` })
+    if (canvasContent) text += `${'='.repeat(50)}\nCANVAS CONTENT:\n${canvasContent}\n`
+    return text
+  }
 
   const submitFeedback = async () => {
     if (selectedRating === null) return
 
     setIsSubmitting(true)
-    
+
     try {
       // Capture session information
       const sessionInfo = {
@@ -28,7 +42,8 @@ const FeedbackButton = () => {
       const feedbackData = {
         rating: selectedRating,
         comment: comment.trim(),
-        session: sessionInfo
+        session: sessionInfo,
+        conversation_history: buildConversationHistory()
       }
 
       const response = await fetch('/api/feedback', {
@@ -164,6 +179,27 @@ const FeedbackButton = () => {
                       {comment.length}/500 characters
                     </div>
                   </div>
+
+                  {/* Include Conversation History Toggle */}
+                  {messages.length > 0 && (
+                    <div className="mb-6">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={includeHistory}
+                          onChange={(e) => setIncludeHistory(e.target.checked)}
+                          className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
+                          disabled={isSubmitting}
+                        />
+                        <span className="text-sm text-gray-300">
+                          Include conversation history
+                        </span>
+                      </label>
+                      <p className="text-xs text-gray-500 mt-1 ml-6">
+                        Helps admins understand the context of your feedback
+                      </p>
+                    </div>
+                  )}
 
                   {/* Action Buttons */}
                   <div className="flex gap-3">
