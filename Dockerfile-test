@@ -51,19 +51,17 @@ COPY frontend/ .
 RUN npm run build
 # DO NOT remove node_modules - we need them for testing
 
-# Switch back to app directory and copy backend code
+# Switch back to app directory and copy atlas package code
 WORKDIR /app
-COPY backend/ ./backend/
-
-# Copy new config directory (defaults & overrides if present)
-COPY config/ ./config/
+COPY atlas/ ./atlas/
 
 # Copy other necessary files
 COPY docs/ ./docs/
-COPY scripts/ ./scripts/
 COPY test/ ./test/
 COPY test_e2e/ ./test_e2e/
 COPY mocks/ ./mocks/
+COPY prompts/ ./prompts/
+COPY pyproject.toml ./
 
 # Fix line endings for the entire app directory and set permissions BEFORE any npm/npx commands
 RUN find /app -type f \( -name "*.js" -o -name "*.json" -o -name "*.sh" -o -name "*.md" -o -name "*.txt" -o -name "*.py" \) -exec dos2unix {} \;
@@ -75,17 +73,12 @@ RUN dnf install -y python3-requests && dnf clean all
 # Switch back to app directory and create required directories
 WORKDIR /app
 RUN mkdir -p \
-        /app/backend/logs \
-        /app/config/defaults \
-        /app/config/overrides \
+        /app/atlas/logs \
+        /app/config \
         /app/runtime/logs \
         /app/runtime/feedback \
         /app/runtime/uploads && \
-    # Seed overrides from defaults if overrides is empty
-    if [ -d /app/config/defaults ] && [ "$(ls -A /app/config/overrides 2>/dev/null | wc -l)" = "0" ]; then \
-        cp -n /app/config/defaults/* /app/config/overrides/ 2>/dev/null || true; \
-    fi && \
-    # Place keep files so directories exist even if empty at runtime
+    cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/config/ 2>/dev/null || true && \
     touch /app/runtime/logs/.gitkeep /app/runtime/feedback/.gitkeep /app/runtime/uploads/.gitkeep
 
 # No special sudo configuration needed for simple E2E tests
@@ -123,8 +116,7 @@ RUN /home/appuser/.local/bin/uv pip install -r requirements.txt
 # Set environment variables
 ENV PYTHONPATH=/app \
     NODE_ENV=test \
-    APP_CONFIG_DEFAULTS=/app/config/defaults \
-    APP_CONFIG_OVERRIDES=/app/config/overrides \
+    APP_CONFIG_DIR=/app/config \
     RUNTIME_LOG_DIR=/app/runtime/logs \
     RUNTIME_FEEDBACK_DIR=/app/runtime/feedback
 

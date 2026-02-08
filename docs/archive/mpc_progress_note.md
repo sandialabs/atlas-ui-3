@@ -58,7 +58,7 @@ Patterns:
 No changes are needed to enable this—already wired in this repo.
 
 ## Try the built‑in demo server
-A sample server is provided at `backend/mcp/progress_demo/main.py`.
+A sample server is provided at `atlas/mcp/progress_demo/main.py`.
 
 Add this server to your MCP config (overrides or old paths). Example (JSON):
 
@@ -67,7 +67,7 @@ Add this server to your MCP config (overrides or old paths). Example (JSON):
   "progress_demo": {
     "transport": "stdio",
     "command": ["python", "main.py"],
-    "cwd": "backend/mcp/progress_demo",
+    "cwd": "atlas/mcp/progress_demo",
     "groups": ["mcp_basic"]
   }
 }

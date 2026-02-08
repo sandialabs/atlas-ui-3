@@ -8,7 +8,7 @@ This directory contains the centralized testing infrastructure for the project.
 test/
 ├── README.md           # This file
 ├── run_tests.sh        # Master test script (entry point)
-├── backend_tests.sh    # Backend test execution
+├── atlas_tests.sh      # Backend (atlas) test execution
 ├── frontend_tests.sh   # Frontend test execution
 └── e2e_tests.sh        # End-to-end test execution
 ```
@@ -32,7 +32,7 @@ The main entry point for all testing:
 Each test type has its own script that can be run independently:
 
 ```bash
-./test/backend_tests.sh
+./test/atlas_tests.sh
 ./test/frontend_tests.sh
 ./test/e2e_tests.sh
 ```

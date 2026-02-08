@@ -32,7 +32,7 @@ Server starts at `http://127.0.0.1:8010`
 
 ## Configuration
 
-Update your `config/overrides/file-extractors.json` to use this mock service:
+Update your `config/file-extractors.json` to use this mock service:
 
 ```json
 {
@@ -192,5 +192,5 @@ curl -X POST http://localhost:8010/ocr \
 
 1. Start the mock service: `python main.py`
 2. Enable file content extraction: `FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=true`
-3. Create `config/overrides/file-extractors.json` with the configuration above
+3. Create `config/file-extractors.json` with the configuration above
 4. Upload a PDF to ATLAS - text will be extracted automatically

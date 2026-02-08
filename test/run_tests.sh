@@ -12,19 +12,19 @@ echo ""
 TEST_TYPE=${1:-all}
 
 # Detect environment and set appropriate base paths
-if [ -d "/app" ] && [ -f "/app/test/backend_tests.sh" ]; then
+if [ -d "/app" ] && [ -f "/app/test/atlas_tests.sh" ]; then
     # Running in CI/CD container environment
     ENVIRONMENT="cicd"
     TEST_BASE_PATH="/app/test"
     PROJECT_ROOT="/app"
     echo "Environment: CI/CD Container"
-elif [ -f "test/backend_tests.sh" ]; then
+elif [ -f "test/atlas_tests.sh" ]; then
     # Running locally from project root
     ENVIRONMENT="local"
     TEST_BASE_PATH="$(pwd)/test"
     PROJECT_ROOT="$(pwd)"
     echo "Environment: Local (project root)"
-elif [ -f "../test/backend_tests.sh" ]; then
+elif [ -f "../test/atlas_tests.sh" ]; then
     # Running locally from subdirectory
     ENVIRONMENT="local"
     TEST_BASE_PATH="$(pwd)/../test"
@@ -70,11 +70,12 @@ run_test() {
 
 # Main test execution
 case $TEST_TYPE in
-    "backend")
-        echo "Running Backend Tests Only"
-        run_test "backend"
+    "atlas"|"backend")
+        # "backend" is supported for backward compatibility
+        echo "Running Atlas (Python) Tests Only"
+        run_test "atlas"
         ;;
-    "frontend") 
+    "frontend")
         echo "Running Frontend Tests Only"
         run_test "frontend"
         ;;
@@ -84,16 +85,44 @@ case $TEST_TYPE in
         ;;
     "all")
         echo "Running All Test Suites"
-        run_test "backend"
+        run_test "atlas"
         run_test "frontend"
         run_test "e2e"
         ;;
     *)
         echo "ERROR: Unknown test type: $TEST_TYPE"
-        echo "Usage: $0 [backend|frontend|e2e|all]"
+        echo "Usage: $0 [atlas|frontend|e2e|all]"
+        echo "  (backend is also accepted as alias for atlas)"
         exit 1
         ;;
 esac
+
+# Live E2E tests -- run automatically when an LLM API key is available
+LIVE_SCRIPT="${TEST_BASE_PATH}/e2e_tests_live.sh"
+if [ -f "$LIVE_SCRIPT" ]; then
+    # Check for any common API key
+    if [ -n "${OPENROUTER_API_KEY:-}" ] || [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+        HAS_KEY=true
+    elif [ -f "$PROJECT_ROOT/.env" ] && grep -qE '^(OPENROUTER_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY)=.+' "$PROJECT_ROOT/.env" 2>/dev/null; then
+        # Source .env so the live tests can use the key
+        set -a
+        source "$PROJECT_ROOT/.env"
+        set +a
+        HAS_KEY=true
+    else
+        HAS_KEY=false
+    fi
+
+    if [ "$HAS_KEY" = true ]; then
+        echo "--- Running live E2E tests (API key detected) ---"
+        bash "$LIVE_SCRIPT"
+        echo "Live E2E tests: PASSED"
+        echo ""
+    else
+        echo "--- Skipping live E2E tests (no API key found) ---"
+        echo ""
+    fi
+fi
 
 echo "===================="
 echo "All Tests Completed Successfully!"

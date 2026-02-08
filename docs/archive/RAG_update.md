@@ -1,6 +1,6 @@
 # RAG → MCP Migration Plan
 
-This document outlines how to migrate the current RAG approach to MCP-based RAG servers, aligned with the MCP v2 tool contract in `v2_mcp_note.md` and current backend/UI patterns. No code changes here—this is the plan and interface contracts plus a concrete file-by-file update plan.
+This document outlines how to migrate the current RAG approach to MCP-based RAG servers, aligned with the MCP v2 tool contract in `v2_mcp_note.md` and current atlas/UI patterns. No code changes here—this is the plan and interface contracts plus a concrete file-by-file update plan.
 
 ## Goals and scope
 
@@ -142,7 +142,7 @@ High-level: Replace the current `rag_client` path with an MCP-backed aggregator 
 New/updated components:
 
 1) RAG MCP Aggregator Service (new)
-- File: `backend/domain/rag_mcp_service.py` (new)
+- File: `atlas/domain/rag_mcp_service.py` (new)
 - Responsibilities:
   - Given a `username`, get authorized MCP servers (via MCP manager + `groups`).
   - Introspect those servers to see if they implement `rag_discover_resources`/`rag_get_raw_results`/`rag_get_synthesized_results`.
@@ -152,12 +152,12 @@ New/updated components:
   - Provide structured errors and metrics in `meta_data`.
 
 2) App Factory wiring
-- File: `backend/infrastructure/app_factory.py`
+- File: `atlas/infrastructure/app_factory.py`
 - Add: `get_rag_mcp_service()` that returns the aggregator; deprecate `get_rag_client()` usage for discovery in config route.
 - Ensure MCP manager is available and supports listing tools per server.
 
 3) Config route updates
-- File: `backend/routes/config_routes.py`
+- File: `atlas/routes/config_routes.py`
 - Replace `rag_client.discover_data_sources(current_user)` with `rag_mcp_service.discover_data_sources(current_user)` which aggregates across MCP RAG servers.
 - Response shape: either keep the existing `data_sources` array shape or enhance to `{ servers: [{server, sources: [...]}] }`. Phase 1: keep the existing `data_sources` key but include `server` on each item to minimize UI churn; add a new `rag_servers` field for richer UI if needed.
 
@@ -239,16 +239,16 @@ Phase 5: Hardening
 
 ## Code changes by file (plan)
 
-- New: `backend/domain/rag_mcp_service.py`
+- New: `atlas/domain/rag_mcp_service.py`
   - `discover_data_sources(username: str) -> list[dict] | { servers: [...] }`
   - `search_raw(username: str, query: str, sources: list[str], top_k: int, filters: dict) -> dict`
   - `synthesize(username: str, query: str, sources: list[str], params: dict, provided_context?: dict) -> dict`
 
-- Update: `backend/infrastructure/app_factory.py`
+- Update: `atlas/infrastructure/app_factory.py`
   - Provide `get_rag_mcp_service()`; ensure MCP manager injection.
   - Keep `get_rag_client()` temporarily for fallback; deprecate in config route under flag.
 
-- Update: `backend/routes/config_routes.py`
+- Update: `atlas/routes/config_routes.py`
   - Swap to `rag_mcp_service.discover_data_sources(current_user)`.
   - Optionally add `rag_servers` key to the returned config payload.
 
@@ -256,7 +256,7 @@ Phase 5: Hardening
   - Confirm overwrite of `username` and add sensitive param shielding.
   - Ensure file URL rewrite (`filename|file_names`) remains intact.
 
-- New (optional sample): `backend/mcp/rag_example/main.py`
+- New (optional sample): `atlas/mcp/rag_example/main.py`
   - Implements the three tools; uses `artifacts` and `display` per v2; supports `capability_token`.
 
 - Update: Admin API/routes (new endpoint)
@@ -336,19 +336,19 @@ What to reuse (stable infra):
 - Logging/metrics patterns (structured logs with username + simple timing stats).
 
 Share with caution (behind thin interfaces):
-- Minimal RAG DTOs/validators for the three tools in `backend/interfaces/rag_contract.py` with a `contract_version: "rag-tools-v1"`.
+- Minimal RAG DTOs/validators for the three tools in `atlas/interfaces/rag_contract.py` with a `contract_version: "rag-tools-v1"`.
 - Sensitive-parameter handling (generic): central logic to prevent secrets entering prompts/logs; ephemeral pass-through to tools.
 - Small aggregation utilities (merge + limit + optional rerank) without provider-specific coupling.
 
 Keep separate (avoid tight coupling):
-- RAG aggregator orchestration in `backend/domain/rag_mcp_service.py` (fan-out, mapping resourceId→server, merge, per-source error handling).
-- Provider/server implementations under `backend/mcp/<provider>`; no imports back into app internals (process boundary anyway).
+- RAG aggregator orchestration in `atlas/domain/rag_mcp_service.py` (fan-out, mapping resourceId→server, merge, per-source error handling).
+- Provider/server implementations under `atlas/mcp/<provider>`; no imports back into app internals (process boundary anyway).
 - Reranking/advanced synthesis policies as optional plug-ins behind the aggregator.
 
 Foldering suggestions:
-- Shared contracts/types: `backend/interfaces/rag_contract.py`
-- Aggregator (domain logic): `backend/domain/rag_mcp_service.py`
-- Optional shared bits for our MCP servers: `backend/mcp/_common/` (internal only)
+- Shared contracts/types: `atlas/interfaces/rag_contract.py`
+- Aggregator (domain logic): `atlas/domain/rag_mcp_service.py`
+- Optional shared bits for our MCP servers: `atlas/mcp/_common/` (internal only)
 
 Versioning & compatibility:
 - Include `contract_version` in outputs and `meta_data`.

@@ -13,12 +13,12 @@ You MUST systematically verify each of the following categories. For each item, 
 
 ### 1. Code Style and Conventions
 - [ ] No emojis anywhere in code, comments, docs, or commit messages
-- [ ] No generic file names (utils.py, helpers.py, main.py except backend/main.py, cli.py)
+- [ ] No generic file names (utils.py, helpers.py, main.py except atlas/main.py, cli.py)
 - [ ] Files are under 400 lines when practical
 - [ ] Descriptive naming that reflects file purpose
 
 ### 2. Linting
-- [ ] Python linting passes: Run `ruff check backend/` and report results
+- [ ] Python linting passes: Run `ruff check atlas/` and report results
 - [ ] Frontend linting passes: Run `cd frontend && npm run lint` and report results
 - [ ] Address any warnings or errors found
 
@@ -44,7 +44,7 @@ You MUST systematically verify each of the following categories. For each item, 
 
 ### 5. Build Verification
 - [ ] Frontend builds successfully: `cd frontend && npm run build`
-- [ ] Backend starts without errors: `cd backend && python main.py`
+- [ ] Backend starts without errors: `cd atlas && python main.py`
 - [ ] No import errors or missing dependencies
 
 ### 6. Package Management

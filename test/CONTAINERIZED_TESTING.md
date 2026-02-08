@@ -10,7 +10,7 @@ The project now uses a containerized testing approach that builds the Docker ima
 test/
 ├── README.md              # Test directory documentation
 ├── run_tests.sh           # Master test script (entry point)
-├── backend_tests.sh       # Backend test execution
+├── atlas_tests.sh         # Backend (atlas) test execution
 ├── frontend_tests.sh      # Frontend test execution
 └── e2e_tests.sh          # End-to-end test execution
 ```
@@ -75,8 +75,8 @@ docker run --rm atlas-ui-3-test bash /app/test/run_tests.sh all
 
 The test scripts expect the following container environment:
 - **Working Directory**: `/app`
-- **Python Path**: `/app/backend` 
-- **Backend Code**: `/app/backend/`
+- **Python Path**: `/app`
+- **Backend Code**: `/app/atlas/`
 - **Frontend Code**: `/app/frontend/`
 - **Test Scripts**: `/app/test/`
 - **Dependencies**: Pre-installed via Dockerfile

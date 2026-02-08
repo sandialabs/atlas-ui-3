@@ -8,11 +8,11 @@ This document outlines the plan to create a headless CLI for the application, al
 
 The goal is to reuse the existing backend logic to create a scriptable and user-friendly CLI.
 
-1.  **New Entrypoint**: Create a new Python script (`backend/cli.py`) that will serve as the entrypoint for the CLI.
+1.  **New Entrypoint**: Create a new Python script (`atlas/cli.py`) that will serve as the entrypoint for the CLI.
 2.  **Leverage `AppFactory`**: Use the existing `infrastructure.app_factory.app_factory` singleton to initialize and access all core services (`ChatService`, `MCPToolManager`, etc.), ensuring maximum code reuse.
 3.  **Console Adapter**: Implement a new `CLIConnectionAdapter` class that conforms to the `ChatConnectionProtocol`. Instead of sending data over a WebSocket, it will print formatted JSON to the console.
 4.  **CLI Framework**: Use `typer` to create a user-friendly command-line interface.
-5.  **Lifecycle Management**: Replicate the `lifespan` context manager from `backend/main.py` to ensure that services are initialized and shut down gracefully.
+5.  **Lifecycle Management**: Replicate the `lifespan` context manager from `atlas/main.py` to ensure that services are initialized and shut down gracefully.
 6.  **Resource Discovery**: Add commands (`list-models`, `list-tools`, `list-rag-sources`) to allow users to query the available LLMs, tools, and data sources from the backend configuration.
 7.  **Configuration File**: Support a YAML configuration file (`--config`) to reduce command-line verbosity. The `chat` command will load settings from this file, which can be overridden by specific CLI arguments.
 
@@ -45,7 +45,7 @@ The `typer` library is required to build the CLI. `PyYAML` is already a dependen
 
 This new file will contain all the logic for the CLI application.
 
-**File:** `backend/cli.py` (New)
+**File:** `atlas/cli.py` (New)
 **Content:**
 
 ```python
@@ -216,7 +216,7 @@ if __name__ == "__main__":
 
 Tests will be updated to cover the new functionality.
 
-**File:** `backend/tests/test_cli.py` (New)
+**File:** `atlas/tests/test_cli.py` (New)
 **Content:**
 
 ```python
@@ -245,7 +245,7 @@ def temp_config_file(tmp_path: Path) -> Path:
 @pytest.mark.integration
 def test_cli_list_models():
     """Tests the list-models command."""
-    command = [sys.executable, "backend/cli.py", "list-models"]
+    command = [sys.executable, "atlas/cli.py", "list-models"]
     result = subprocess.run(command, capture_output=True, text=True, check=True)
     assert "Available LLM Models" in result.stdout
     # The default mock LLM is gpt-4
@@ -256,7 +256,7 @@ def test_cli_chat_with_config_file(temp_config_file: Path):
     """Tests that the chat command correctly uses a config file."""
     command = [
         sys.executable,
-        "backend/cli.py",
+        "atlas/cli.py",
         "--config",
         str(temp_config_file),
         "chat",
@@ -276,7 +276,7 @@ def test_cli_chat_override_config_with_cli_arg(temp_config_file: Path):
     """Tests that CLI arguments override config file settings."""
     command = [
         sys.executable,
-        "backend/cli.py",
+        "atlas/cli.py",
         "--config",
         str(temp_config_file),
         "chat",
@@ -311,7 +311,7 @@ The application includes a headless CLI for scripting, testing, and interacting 
 Use the `--help` flag to see all available commands and options.
 
 ```bash
-python backend/cli.py --help
+python atlas/cli.py --help
 ```
 
 **Discovering Resources**
@@ -320,10 +320,10 @@ You can list available models and tools that the backend is configured with.
 
 ```bash
 # List available LLM models
-python backend/cli.py list-models
+python atlas/cli.py list-models
 
 # List available tools (MCPs)
-python backend/cli.py list-tools
+python atlas/cli.py list-tools
 ```
 
 **Using a Configuration File**
@@ -348,12 +348,12 @@ The `chat` command runs a single-turn conversation.
 **Usage:**
 ```bash
 # Using a config file
-python backend/cli.py --config cli-config.yaml chat "What is 2+2 and what is the weather in Paris?"
+python atlas/cli.py --config cli-config.yaml chat "What is 2+2 and what is the weather in Paris?"
 
 # Overriding a config setting with a CLI flag
-python backend/cli.py --config cli-config.yaml chat --model gpt-4 "Tell me a joke."
+python atlas/cli.py --config cli-config.yaml chat --model gpt-4 "Tell me a joke."
 
 # Without a config file
-python backend/cli.py chat --model gpt-4 --tool "mcp/calculator" "What is 5*5?"
+python atlas/cli.py chat --model gpt-4 --tool "mcp/calculator" "What is 5*5?"
 ```
 ````

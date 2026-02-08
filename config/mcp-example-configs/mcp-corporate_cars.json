@@ -1,1 +1,0 @@
-{"corporate_cars": {"command": ["python", "mcp/corporate_cars/main.py"], "cwd": "backend", "groups": ["users"], "description": "corporate_cars MCP server", "author": "Chat UI Team", "short_description": "corporate_cars server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

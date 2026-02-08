@@ -1,1 +1,0 @@
-{"order_database": {"command": ["python", "mcp/order_database/main.py"], "cwd": "backend", "groups": ["users"], "description": "order_database MCP server", "author": "Chat UI Team", "short_description": "order_database server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

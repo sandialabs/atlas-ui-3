@@ -9,5 +9,5 @@ To ensure code quality and consistency, please adhere to the following conventio
 *   **Backend Development**: **Never** use `uvicorn --reload`. This can cause unexpected issues. Restart the server manually (`python main.py`) to apply changes.
 *   **File Naming**: Avoid generic names like `utils.py` or `helpers.py`. Use descriptive names that clearly indicate the file's purpose (e.g., `mcp_tool_manager.py`).
 *   **Linting**: Before committing, run the linters to check for style issues:
-    *   **Python**: `ruff check backend/`
+    *   **Python**: `ruff check atlas/`
     *   **Frontend**: `cd frontend && npm run lint`

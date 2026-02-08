@@ -1,12 +1,13 @@
 # Getting Started with Atlas UI 3
 
-Last updated: 2026-01-19
+Last updated: 2026-02-04
 
 Welcome to Atlas UI 3! This guide will help you get the application up and running.
 
 ## Quick Links
 
 - [Installation Guide](installation.md) - How to install and run Atlas UI 3
+- [Python Package Guide](python-package.md) - Use Atlas as a Python library or CLI tool
 - [Interactive Tool Elicitation](elicitation.md) - Learn about tool elicitation features
 
 ## Next Steps

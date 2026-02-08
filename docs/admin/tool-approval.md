@@ -8,7 +8,7 @@ The tool approval system provides a safety layer by requiring user confirmation 
 
 As an administrator, you can mandate that certain high-risk functions always require user approval.
 
-*   **Configuration**: In your `config/overrides/mcp.json` file, you can add a `require_approval` list to a server's definition.
+*   **Configuration**: In your `config/mcp.json` file, you can add a `require_approval` list to a server's definition.
 *   **Behavior**: Any function listed here will always prompt the user for approval, and the user cannot disable this check.
 
 **Example:**

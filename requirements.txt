@@ -6,7 +6,7 @@ python-multipart
 pydantic
 pyyaml
 python-dotenv
-fastmcp>=2.10.0
+fastmcp>=2.10.0,<3.0.0
 requests
 PyJWT
 httpx
@@ -35,3 +35,4 @@ opentelemetry-exporter-otlp
 opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-httpx
 python-pptx
+podman-compose

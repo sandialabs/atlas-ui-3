@@ -28,7 +28,7 @@ This starts the HTTP server on `http://localhost:8005/mcp`
 
 ### 3. Configure in Atlas UI
 
-Add to your `config/overrides/mcp.json`:
+Add to your `config/mcp.json`:
 ```json
 {
   "mcp-http-mock": {
@@ -187,7 +187,7 @@ def analyze_file(
    - Follow the same URL handling pattern
 
 3. **Advanced Use Cases:**
-   - PDF text extraction (see backend/mcp/pdfbasic)
-   - CSV data analysis (see backend/mcp/csv_reporter)
+   - PDF text extraction (see atlas/mcp/pdfbasic)
+   - CSV data analysis (see atlas/mcp/csv_reporter)
    - Image processing
    - Document conversion

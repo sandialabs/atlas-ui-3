@@ -51,14 +51,10 @@ jobs:
         mkdir -p build-artifacts
         # Copy frontend build output
         cp -r frontend/dist build-artifacts/frontend
-        # Copy backend source code
-        cp -r backend build-artifacts/
-        # Copy config directory
-        cp -r config build-artifacts/
+        # Copy atlas package (Python backend, includes config defaults)
+        cp -r atlas build-artifacts/
         # Copy docs
         cp -r docs build-artifacts/
-        # Copy scripts
-        cp -r scripts build-artifacts/
         # Copy prompts
         cp -r prompts build-artifacts/
         # Copy deployment files

@@ -186,22 +186,22 @@ grep "\[METRIC\].*tool_call" application.log | cut -d' ' -f2 | sort | uniq -c
 
 ## Implementation Details
 
-The metrics logging feature is implemented in `backend/core/metrics_logger.py` and is integrated into:
+The metrics logging feature is implemented in `atlas/core/metrics_logger.py` and is integrated into:
 
-1. **LLM calls** (`backend/modules/llm/litellm_caller.py`)
+1. **LLM calls** (`atlas/modules/llm/litellm_caller.py`)
    - `call_plain()` - Basic LLM calls
    - `call_with_tools()` - LLM calls with tool support
 
-2. **Tool execution** (`backend/modules/mcp_tools/client.py`)
+2. **Tool execution** (`atlas/modules/mcp_tools/client.py`)
    - `execute_tool()` - Tool call execution and errors
 
-3. **File uploads** (`backend/routes/files_routes.py`)
+3. **File uploads** (`atlas/routes/files_routes.py`)
    - `upload_file()` - File upload API endpoint
 
-4. **File storage** (`backend/modules/file_storage/`)
+4. **File storage** (`atlas/modules/file_storage/`)
    - `s3_client.py` and `mock_s3_client.py` - File storage operations
 
-5. **Error handling** (`backend/main.py`)
+5. **Error handling** (`atlas/main.py`)
    - WebSocket error handlers for all error types
 
 ## Testing

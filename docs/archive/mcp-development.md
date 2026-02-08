@@ -9,7 +9,7 @@ MCP (Model Context Protocol) enables LLMs to connect to external data sources an
 ## Built-in MCP Servers
 
 ### Filesystem Server
-**Location**: `backend/mcp/filesystem/`
+**Location**: `atlas/mcp/filesystem/`
 
 **Tools**:
 - `read_file`: Read file contents
@@ -22,7 +22,7 @@ MCP (Model Context Protocol) enables LLMs to connect to external data sources an
 **Security**: Path validation prevents directory traversal
 
 ### Calculator Server
-**Location**: `backend/mcp/calculator/`
+**Location**: `atlas/mcp/calculator/`
 
 **Tools**:
 - `add`, `subtract`, `multiply`, `divide`: Basic arithmetic
@@ -34,7 +34,7 @@ MCP (Model Context Protocol) enables LLMs to connect to external data sources an
 **Security**: Restricted builtins for safe evaluation
 
 ### UI Demo Server
-**Location**: `backend/mcp/ui_demo/`
+**Location**: `atlas/mcp/ui_demo/`
 
 **Tools**:
 - `create_button_demo`: Interactive buttons with JavaScript
@@ -47,10 +47,10 @@ MCP (Model Context Protocol) enables LLMs to connect to external data sources an
 
 ### 1. Basic Server Structure
 
-Create a new directory in `backend/mcp/`:
+Create a new directory in `atlas/mcp/`:
 ```bash
-mkdir backend/mcp/myserver
-cd backend/mcp/myserver
+mkdir atlas/mcp/myserver
+cd atlas/mcp/myserver
 ```
 
 Create `main.py`:
@@ -245,7 +245,7 @@ def safe_read_file(filepath: str) -> dict:
 Test your server directly:
 
 ```bash
-cd backend/mcp/myserver
+cd atlas/mcp/myserver
 python main.py
 ```
 
@@ -380,4 +380,4 @@ def system_info() -> dict:
 
 4. **Authorization errors**:
    - Verify user groups in `mcp.json`
-   - Check `backend/auth.py` for group assignments
+   - Check `atlas/auth.py` for group assignments

@@ -1,0 +1,1 @@
+{"progress_updates_demo": {"command": ["python", "mcp/progress_updates_demo/main.py"], "cwd": "atlas", "groups": ["users"], "description": "progress_updates_demo MCP server", "author": "Chat UI Team", "short_description": "progress_updates_demo server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

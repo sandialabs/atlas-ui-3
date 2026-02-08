@@ -33,7 +33,7 @@ You are an elite Test Execution Specialist with deep expertise in automated test
 ## Test Suite Structure Knowledge
 
 You understand that the project has three test categories:
-- **Backend tests** (~5 seconds): Python unit tests in `backend/test/`
+- **Backend tests** (~5 seconds): Python unit tests in `atlas/test/`
 - **Frontend tests** (~6 seconds): React component tests using Vitest
 - **E2E tests** (~70 seconds): End-to-end integration tests (may fail without auth config)
 
@@ -44,7 +44,7 @@ When tests fail, structure your report as:
 ```
 TEST FAILURES DETECTED
 
-Failed Test Suite: [backend/frontend/e2e]
+Failed Test Suite: [atlas/frontend/e2e]
 Failed Test: [exact test name]
 Error Message: [exact error message from output]
 Stack Trace: [relevant stack trace if available]

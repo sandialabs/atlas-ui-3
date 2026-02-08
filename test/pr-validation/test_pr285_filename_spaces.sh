@@ -10,7 +10,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BACKEND_DIR="$PROJECT_ROOT/backend"
+ATLAS_DIR="$PROJECT_ROOT/atlas"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -41,7 +41,7 @@ if [ -f "$PROJECT_ROOT/.venv/bin/activate" ]; then
     source "$PROJECT_ROOT/.venv/bin/activate"
 fi
 
-export PYTHONPATH="$BACKEND_DIR:$PYTHONPATH"
+export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
 
 # -------------------------------------------------------------------
 print_header "Test 1: FileManager.sanitize_filename replaces spaces"
@@ -133,7 +133,7 @@ cd "$PROJECT_ROOT"
 set -o pipefail
 ./test/run_tests.sh backend 2>&1 | tail -5
 BACKEND_EXIT=${PIPESTATUS[0]}
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 python -m pytest tests/test_attach_file_flow.py -v 2>&1 | tail -20
 PYTEST_EXIT=${PIPESTATUS[0]}
 set +o pipefail

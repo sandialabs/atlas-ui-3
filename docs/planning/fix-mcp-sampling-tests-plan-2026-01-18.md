@@ -2,19 +2,19 @@
 
 ## Problem Summary
 
-Multiple backend tests are failing due to a mismatch between the test code and the actual implementation. The root cause is that the MCP sampling implementation was removed from `backend/modules/mcp_tools/client.py` in commit `a502798` but the related tests, documentation, and demo server were left in place.
+Multiple backend tests are failing due to a mismatch between the test code and the actual implementation. The root cause is that the MCP sampling implementation was removed from `atlas/modules/mcp_tools/client.py` in commit `a502798` but the related tests, documentation, and demo server were left in place.
 
 ### Current State
 
 **What exists:**
-- Tests: `backend/tests/test_sampling_integration.py` (tries to import `_SamplingRoutingContext`)
-- Demo server: `backend/mcp/sampling_demo/`
+- Tests: `atlas/tests/test_sampling_integration.py` (tries to import `_SamplingRoutingContext`)
+- Demo server: `atlas/mcp/sampling_demo/`
 - Documentation: `docs/developer/sampling.md`, updates in `docs/admin/mcp-servers.md`
 - Implementation summary: `IMPLEMENTATION_SUMMARY_SAMPLING.md`
-- Manual test: `backend/tests/manual_test_sampling.py`
+- Manual test: `atlas/tests/manual_test_sampling.py`
 
 **What's missing:**
-- The actual implementation in `backend/modules/mcp_tools/client.py`:
+- The actual implementation in `atlas/modules/mcp_tools/client.py`:
   - `_SamplingRoutingContext` class
   - `_SAMPLING_ROUTING` dictionary
   - `_create_sampling_handler()` method
@@ -61,7 +61,7 @@ Based on the PR context and the comprehensive documentation/tests, it appears th
 ## Implementation Steps
 
 ### Step 1: Restore Sampling Implementation
-**File:** `backend/modules/mcp_tools/client.py`
+**File:** `atlas/modules/mcp_tools/client.py`
 
 **Location:** After `_ELICITATION_ROUTING` definition (around line 48)
 
@@ -313,7 +313,7 @@ else:
 
 ### Step 4: Verify LiteLLM Caller Supports Required Parameters
 
-**File:** `backend/modules/llm/litellm_caller.py`
+**File:** `atlas/modules/llm/litellm_caller.py`
 
 Ensure `call_plain()` method accepts `temperature` and `max_tokens` parameters. According to the implementation summary, this was already done. Verify it's still present.
 
@@ -321,13 +321,13 @@ Ensure `call_plain()` method accepts `temperature` and `max_tokens` parameters. 
 
 ```bash
 # Run sampling tests specifically
-python -m pytest backend/tests/test_sampling_integration.py -v
+python -m pytest atlas/tests/test_sampling_integration.py -v
 
 # Run all backend tests
 ./test/run_tests.sh backend
 
 # Run manual test if needed
-python -m pytest backend/tests/manual_test_sampling.py -v
+python -m pytest atlas/tests/manual_test_sampling.py -v
 ```
 
 ### Step 6: Update CHANGELOG
@@ -346,15 +346,15 @@ Add entry for this PR:
 If the decision is to remove sampling (not recommended based on evidence):
 
 ### Files to Remove:
-1. `backend/tests/test_sampling_integration.py`
-2. `backend/tests/manual_test_sampling.py`
-3. `backend/mcp/sampling_demo/` (entire directory)
+1. `atlas/tests/test_sampling_integration.py`
+2. `atlas/tests/manual_test_sampling.py`
+3. `atlas/mcp/sampling_demo/` (entire directory)
 4. `docs/developer/sampling.md`
 5. `IMPLEMENTATION_SUMMARY_SAMPLING.md`
 
 ### Files to Update:
 1. `docs/admin/mcp-servers.md` - Remove sampling references
-2. `config/overrides/mcp.json` - Remove sampling_demo server entry
+2. `config/mcp.json` - Remove sampling_demo server entry
 3. `CHANGELOG.md` - Add entry explaining removal
 
 ### Revert commits (optional):

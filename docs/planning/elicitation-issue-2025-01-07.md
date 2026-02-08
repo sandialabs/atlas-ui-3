@@ -18,7 +18,7 @@ MCP tool elicitation requests (ctx.elicit()) are not displaying the dialog in th
 
 ## Root Cause
 
-**Location**: backend/modules/mcp_tools/client.py:247-249
+**Location**: atlas/modules/mcp_tools/client.py:247-249
 
 ```python
 routing = _ACTIVE_ELICITATION_CONTEXT.get()
@@ -86,9 +86,9 @@ Ensure `update_callback` is always valid when tools execute:
 5. Updated `_use_elicitation_context` to use dictionary instead of context variable
 
 **Files Modified**:
-- `backend/modules/mcp_tools/client.py`: Core elicitation routing fix
-- `backend/application/chat/modes/tools.py`: Added logging and validation
-- `backend/application/chat/orchestrator.py`: Added logging
+- `atlas/modules/mcp_tools/client.py`: Core elicitation routing fix
+- `atlas/application/chat/modes/tools.py`: Added logging and validation
+- `atlas/application/chat/orchestrator.py`: Added logging
 - `CHANGELOG.md`: Documented the fix
 
 **Result**: Elicitation requests now properly route from the MCP receive loop task to the correct WebSocket connection, allowing the dialog to appear in the UI.

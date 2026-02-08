@@ -10,7 +10,7 @@ The project uses a **centralized Pydantic-based configuration system** (`ConfigM
 - **No random env vars** - environment variables are loaded only through `AppSettings`
 - **Environment integration** with .env file loading
 - **Single source of truth** for all configuration
-- **Easy to understand** - all settings defined in `backend/modules/config/manager.py`
+- **Easy to understand** - all settings defined in `atlas/modules/config/manager.py`
 
 ### How It Works
 
@@ -46,7 +46,7 @@ servers = mcp_config.servers
 Configuration files are searched in this order:
 1. `APP_CONFIG_OVERRIDES` (default: `config/overrides/`)
 2. `APP_CONFIG_DEFAULTS` (default: `config/defaults/`)
-3. Legacy locations: `backend/configfilesadmin/`, `backend/configfiles/`
+3. Legacy locations: `atlas/configfilesadmin/`, `atlas/configfiles/`
 
 **Important**: All direct `os.getenv()` calls have been replaced with `config_manager.app_settings` for consistency.
 
@@ -250,7 +250,7 @@ DEBUG_MODE=false
 The application expects the `x-email-header` from your reverse proxy.
 
 ### User Group Configuration
-Edit `backend/auth.py` to configure user group assignments:
+Edit `atlas/auth.py` to configure user group assignments:
 
 ```python
 def get_user_groups(user_email: str) -> List[str]:

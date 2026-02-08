@@ -199,4 +199,4 @@ When building MCP tools with sampling (requires FastMCP 2.0.0+):
 
 ---
 
-For technical documentation on creating sampling-enabled MCP tools, see the [Sampling Demo MCP Server Documentation](../../../backend/mcp/sampling_demo/README.md) and [FastMCP Sampling Documentation](https://gofastmcp.com/clients/sampling).
+For technical documentation on creating sampling-enabled MCP tools, see the [Sampling Demo MCP Server Documentation](../../../atlas/mcp/sampling_demo/README.md) and [FastMCP Sampling Documentation](https://gofastmcp.com/clients/sampling).

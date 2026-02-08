@@ -4,7 +4,7 @@ Last updated: 2026-01-25
 
 The `mcp.json` file defines the MCP (Model Context Protocol) servers that the application can connect to. These servers provide the tools and capabilities available to the LLM.
 
-*   **Location**: The default configuration is at `config/defaults/mcp.json`. You should place your instance-specific configuration in `config/overrides/mcp.json`.
+*   **Location**: The package default is at `atlas/config/mcp.json`. Place your instance-specific configuration in `config/mcp.json`.
 
 ## Comprehensive Example
 
@@ -65,7 +65,7 @@ The system can connect to different types of MCP servers:
 
 ## Hot Reload Note
 
-After editing `config/overrides/mcp.json`, you do **not** need to restart the backend. Admins can:
+After editing `config/mcp.json`, you do **not** need to restart the backend. Admins can:
 
 - Call `POST /admin/mcp/reload` to reload `mcp.json`, reinitialize MCP clients, and rediscover tools/prompts.
 - Use `GET /admin/mcp/status` to see which servers are connected or failing.
@@ -106,7 +106,7 @@ export MCP_EXTERNAL_API_TOKEN="your-secret-api-key"
 
 - **Recommended**: Use environment variables for all production tokens
 - **Alternative**: For development/testing, you can use direct string values (not recommended for production)
-- **Never**: Commit tokens to `config/defaults/mcp.json` or any version-controlled files
+- **Never**: Commit tokens to `atlas/config/mcp.json` or any version-controlled files
 
 ## Per-User Authentication
 

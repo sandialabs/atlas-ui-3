@@ -1,0 +1,15 @@
+{
+  "calculator": {
+    "command": [
+      "python",
+      "mcp/calculator/main.py"
+    ],
+    "cwd": "atlas",
+    "groups": [
+      "users"
+    ],
+    "description": "Mathematical calculator for live e2e tests",
+    "short_description": "Calculator",
+    "compliance_level": "Public"
+  }
+}

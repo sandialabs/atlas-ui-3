@@ -15,7 +15,7 @@ This document describes a practical plan for introducing a message broker (Rabbi
 ## Why this fits the current codebase
 
 - Current flow (important points)
-  - WebSocket handler in `backend/main.py` constructs a `ChatService` and accepts chat messages.
+  - WebSocket handler in `atlas/main.py` constructs a `ChatService` and accepts chat messages.
   - `ChatService.handle_chat_message` delegates to `ChatOrchestrator.execute`, which selects a mode (tools/agent/rag/plain).
   - `ToolsModeRunner.run` calls LLM and then `tool_utils.execute_tools_workflow` when tool calls are present.
   - `tool_utils.execute_single_tool` prepares args (injects signed file URLs and username), sends a `tool_approval_request` update to the UI, waits on an in-process `ToolApprovalManager`, and then calls `tool_manager.execute_tool(...)` directly. The same `update_callback` is used to stream progress to the UI.
@@ -37,8 +37,8 @@ This document describes a practical plan for introducing a message broker (Rabbi
 
 ## Where to hook changes in the codebase
 
-- Producer (backend): modify `backend/application/chat/utilities/tool_utils.py` in `execute_single_tool` to publish to the broker after approval (Phase 1 change).
-- Backend bridge: add a small consumer in backend infrastructure that subscribes to broker response topics and calls existing `notification_utils` / `EventPublisher` methods to forward messages to the UI. This can live under `backend/infrastructure/` (for example `infrastructure/broker_bridge/`) or be a lightweight thread/task in the backend process.
+- Producer (backend): modify `atlas/application/chat/utilities/tool_utils.py` in `execute_single_tool` to publish to the broker after approval (Phase 1 change).
+- Backend bridge: add a small consumer in backend infrastructure that subscribes to broker response topics and calls existing `notification_utils` / `EventPublisher` methods to forward messages to the UI. This can live under `atlas/infrastructure/` (for example `infrastructure/broker_bridge/`) or be a lightweight thread/task in the backend process.
 - Worker: new microservice `tools_worker` (e.g., `services/tools_worker/`) that consumes `function_request` messages and invokes `tool_manager.execute_tool` or an MCP client. It publishes progress and final result messages.
 - Optionally: add a shared datastore (Redis) for idempotency, cancellation flags, and short-lived session replay caches.
 
@@ -90,7 +90,7 @@ This document describes a practical plan for introducing a message broker (Rabbi
 }
 ```
 
-- cancel_request (publish from backend/UI to cancel)
+- cancel_request (publish from atlas/UI to cancel)
 ```json
 {
   "correlation_id": "<tool_call.id>",
@@ -145,18 +145,18 @@ Notes:
 Phase 1 (minimal-change PoC, low risk)
 
 1. Add a lightweight RabbitMQ publisher and configuration.
-   - Candidate location: `backend/infrastructure/broker/producer.py` (or reuse existing infra patterns if present).
+   - Candidate location: `atlas/infrastructure/broker/producer.py` (or reuse existing infra patterns if present).
 
-2. Modify `backend/application/chat/utilities/tool_utils.py`:
+2. Modify `atlas/application/chat/utilities/tool_utils.py`:
    - After the approval step and `notification_utils.notify_tool_start`, publish `function_request` to broker instead of calling `tool_manager.execute_tool` inline.
    - Keep `notify_tool_start` so UI shows the job started.
 
 3. Add a backend bridge (consumer) that subscribes to `results.*` and forwards `tool_progress` and `tool_response` messages into existing notification paths (`notification_utils.notify_tool_complete`, `notify_tool_error`, or `EventPublisher.publish_chat_response`).
-   - Candidate location: `backend/infrastructure/broker/bridge.py` or a small background task started from `infrastructure.app_factory` during lifespan startup.
+   - Candidate location: `atlas/infrastructure/broker/bridge.py` or a small background task started from `infrastructure.app_factory` during lifespan startup.
 
 4. Create `tools_worker` service (separate process):
    - Small Python process consuming `function_request` queue, calling `tool_manager.execute_tool` or invoking MCP clients, publishing progress and final responses.
-   - Place as a new top-level directory `services/tools_worker/` or `backend/tools_worker/` if you prefer to keep it inside the repo.
+   - Place as a new top-level directory `services/tools_worker/` or `atlas/tools_worker/` if you prefer to keep it inside the repo.
 
 5. Tests:
    - Simulate a chat flow where a tool call is made, approval is granted, and worker returns progress + final. Confirm WebSocket receives progress and final messages.

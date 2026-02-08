@@ -24,7 +24,7 @@ This plan introduces a configurable, feature-flagged system for automatic file c
 
 ### 1. Feature Flag
 
-Add to `AppSettings` in `backend/modules/config/config_manager.py`:
+Add to `AppSettings` in `atlas/modules/config/config_manager.py`:
 
 ```python
 feature_file_content_extraction_enabled: bool = Field(
@@ -42,7 +42,7 @@ When `false`, files are attached as references only (current behavior).
 
 ### 2. New Config File: `file-extractors.json`
 
-**Location:** `config/defaults/file-extractors.json` (with override support in `config/overrides/`)
+**Location:** `atlas/config/file-extractors.json` (user overrides in `config/file-extractors.json`)
 
 **Structure:**
 
@@ -177,7 +177,7 @@ The `extract` field (boolean) overrides the system default per-file.
 
 ### 5. Pydantic Models
 
-New models in `backend/modules/config/config_manager.py`:
+New models in `atlas/modules/config/config_manager.py`:
 
 ```python
 class FileExtractorConfig(BaseModel):
@@ -233,13 +233,13 @@ Include in files manifest to LLM:
 Following existing patterns:
 
 1. **Code defaults** - Pydantic model defaults (extraction disabled)
-2. **`config/defaults/file-extractors.json`** - Shipped defaults
-3. **`config/overrides/file-extractors.json`** - Deployment customization
+2. **`atlas/config/file-extractors.json`** - Package defaults (shipped with atlas)
+3. **`config/file-extractors.json`** - User overrides (created by `atlas-init`)
 4. **Environment variables** - `FEATURE_FILE_CONTENT_EXTRACTION_ENABLED`
 
 ### 8. Frontend Config Exposure
 
-Add to `/api/config` response in `backend/routes/config_routes.py`:
+Add to `/api/config` response in `atlas/routes/config_routes.py`:
 
 ```json
 {

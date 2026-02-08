@@ -12,7 +12,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BACKEND_DIR="$PROJECT_ROOT/backend"
+ATLAS_DIR="$PROJECT_ROOT/atlas"
 SCRATCHPAD_DIR="/tmp/pr278_test_$$"
 
 RED='\033[0;31m'
@@ -79,7 +79,7 @@ E2E_LOG_DIR="$SCRATCHPAD_DIR/logs_enabled"
 E2E_PORT=18278
 mkdir -p "$E2E_LOG_DIR"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 
 echo "  Starting backend on port $E2E_PORT with FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=true..."
 FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=true \
@@ -136,7 +136,7 @@ E2E_LOG_DIR_OFF="$SCRATCHPAD_DIR/logs_disabled"
 E2E_PORT_OFF=18279
 mkdir -p "$E2E_LOG_DIR_OFF"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 
 echo "  Starting backend on port $E2E_PORT_OFF with FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=false..."
 FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=false \
@@ -187,7 +187,7 @@ fi
 # ==============================================================================
 print_header "Part 3: E2E -- Legacy normalization via actual config model"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 
 python << 'PYTEST' 2>&1
 import sys, os
@@ -243,7 +243,7 @@ print_result $? "Legacy normalization and 3-mode config values"
 # ==============================================================================
 print_header "Part 4: E2E -- build_files_manifest for full/preview/none modes"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 
 python << 'PYTEST' 2>&1
 import sys, os
@@ -352,7 +352,7 @@ print_result $? "build_files_manifest for full/preview/none modes"
 # ==============================================================================
 print_header "Part 5: E2E -- handle_session_files respects extractMode field"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 
 python << 'PYTEST' 2>&1
 import sys, os, asyncio
