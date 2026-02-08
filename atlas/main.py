@@ -99,9 +99,12 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
 
 def _ensure_feedback_directory():
     """Ensure feedback storage directory exists at startup."""
-    from pathlib import Path
     config = app_factory.get_config_manager()
-    feedback_dir = Path(config.app_settings.runtime_feedback_dir)
+    if config.app_settings.runtime_feedback_dir:
+        feedback_dir = Path(config.app_settings.runtime_feedback_dir)
+    else:
+        project_root = Path(__file__).resolve().parents[1]
+        feedback_dir = project_root / "runtime" / "feedback"
     try:
         feedback_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Feedback directory ready: {feedback_dir}")
@@ -218,8 +221,10 @@ app.include_router(feedback_router)
 app.include_router(mcp_auth_router)
 
 # Serve frontend build (Vite)
-project_root = Path(__file__).resolve().parents[1]
-static_dir = project_root / "frontend" / "dist"
+# PyPI package bundles frontend into atlas/static/; local dev uses frontend/dist/
+_package_static = Path(__file__).resolve().parent / "static"
+_dev_static = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+static_dir = _package_static if _package_static.exists() else _dev_static
 if static_dir.exists():
     # Serve the SPA entry
     @app.get("/")
@@ -237,7 +242,7 @@ if static_dir.exists():
         app.mount("/fonts", StaticFiles(directory=fonts_dir), name="fonts")
     else:
         # Fallback to unbuilt public fonts if dist/fonts is missing
-        public_fonts = project_root / "frontend" / "public" / "fonts"
+        public_fonts = Path(__file__).resolve().parents[1] / "frontend" / "public" / "fonts"
         if public_fonts.exists():
             app.mount("/fonts", StaticFiles(directory=public_fonts), name="fonts")
 

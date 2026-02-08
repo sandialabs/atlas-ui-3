@@ -49,8 +49,12 @@ class FeedbackResponse(BaseModel):
 
 def get_feedback_directory() -> Path:
     """Get the feedback storage directory."""
-    from atlas.modules.config import config_manager
-    base = Path(config_manager.app_settings.runtime_feedback_dir)
+    config = app_factory.get_config_manager()
+    if config.app_settings.runtime_feedback_dir:
+        base = Path(config.app_settings.runtime_feedback_dir)
+    else:
+        project_root = Path(__file__).resolve().parents[2]
+        base = project_root / "runtime" / "feedback"
     base.mkdir(parents=True, exist_ok=True)
     return base
 

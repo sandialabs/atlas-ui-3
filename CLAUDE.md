@@ -12,6 +12,8 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 - Python Package Manager: **uv** (NOT pip!)
 - Configuration: Pydantic with YAML/JSON configs
 
+**PyPI Packaging**: The CI workflow bundles the frontend into `atlas/static/` before building the wheel; at runtime `atlas/main.py` checks `atlas/static/` first (package install) then falls back to `frontend/dist/` (local dev), so both paths work transparently.
+
 ## Installation
 
 ### As a Python Package (Recommended for Users)
