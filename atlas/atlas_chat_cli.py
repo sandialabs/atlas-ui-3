@@ -1,12 +1,21 @@
 """
 Non-interactive CLI for Atlas chat.
 
-Usage:
+Usage (as installed package):
+    atlas-chat "Summarize the latest docs" --model gpt-4o
+    atlas-chat "Use the search tool" --tools server_tool1
+    atlas-chat --list-tools
+    atlas-chat --list-models
+    atlas-chat --list-data-sources
+    atlas-chat "prompt" --json
+    atlas-chat "prompt" -o response.txt
+    echo "prompt" | atlas-chat -
+    atlas-chat "prompt" --env-file /path/to/custom.env
+    atlas-chat "prompt" --config-dir /path/to/config
+
+Usage (from source):
     python atlas_chat_cli.py "Summarize the latest docs" --model gpt-4o
-    python atlas_chat_cli.py "Use the search tool" --tools server_tool1
     python atlas_chat_cli.py --list-tools
-    echo "prompt" | python atlas_chat_cli.py - --model gpt-4o
-    python atlas_chat_cli.py "prompt" --env-file /path/to/custom.env
 """
 
 import argparse
@@ -135,6 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", dest="json_output", action="store_true", help="Output structured JSON.")
     parser.add_argument("--user-email", default=None, help="Override user identity.")
     parser.add_argument("--list-tools", action="store_true", help="Print available tools and exit.")
+    parser.add_argument("--list-models", action="store_true", help="Print available models and exit.")
     parser.add_argument(
         "--data-sources",
         default=None,
@@ -203,6 +213,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override file extractors config file (sets FILE_EXTRACTORS_CONFIG_FILE). Accepts a filename or path.",
     )
     return parser
+
+
+async def list_models(*, json_output: bool = False) -> int:
+    """Print all configured LLM models."""
+    from atlas.modules.config import ConfigManager
+
+    cm = ConfigManager()
+    llm_config = cm.llm_config
+    models = llm_config.models
+
+    if not models:
+        if json_output:
+            print(json.dumps({"models": []}, indent=2))
+            return 0
+        print("No models configured.", file=sys.stderr)
+        return 1
+
+    if json_output:
+        out = []
+        for name, cfg in models.items():
+            out.append({
+                "name": name,
+                "model": cfg.model_name,
+                "description": cfg.description or "",
+                "compliance_level": cfg.compliance_level or "",
+            })
+        print(json.dumps({"models": out}, indent=2))
+        return 0
+
+    for name, cfg in models.items():
+        desc = f"  ({cfg.description})" if cfg.description else ""
+        print(f"  {name}: {cfg.model_name}{desc}")
+    return 0
 
 
 async def list_tools(*, json_output: bool = False) -> int:
@@ -278,6 +321,9 @@ async def list_data_sources(user_email: str = None, *, json_output: bool = False
 
 
 async def run(args: argparse.Namespace) -> int:
+    if args.list_models:
+        return await list_models(json_output=args.json_output)
+
     if args.list_tools:
         return await list_tools(json_output=args.json_output)
 

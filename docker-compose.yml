@@ -112,7 +112,7 @@ services:
       - "SECURITY_CSP_VALUE=default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' blob: data: https://www.sandia.gov; frame-ancestors 'self'"
     volumes:
       - ./logs:/app/logs:U
-      - ./config/overrides:/app/config/overrides:U
+      - ./config:/app/config:U
     depends_on:
       minio:
         condition: service_healthy

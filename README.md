@@ -156,7 +156,28 @@ We have created a set of comprehensive guides to help you get the most out of At
 
 *   **[Developer's Guide](./docs/developer/README.md)**: For developers who want to contribute to the project. It provides an overview of the architecture and instructions for creating new MCP servers.
 
-## Container Images
+## Docker / Podman
+
+### Quick Start
+
+```bash
+# 1. Set up local config (copies defaults from atlas/config/)
+atlas-init
+# Edit .env to add your API keys
+
+# 2. Build the image
+podman build -t atlas-ui-3 .
+
+# 3. Run with your local config mounted
+podman run -p 8000:8000 \
+  -v $(pwd)/config:/app/config:Z \
+  --env-file .env \
+  atlas-ui-3
+```
+
+The container seeds `/app/config` from package defaults at build time. Mounting your local `config/` folder overrides those defaults, so you can customize `llmconfig.yml`, `mcp.json`, etc. without rebuilding.
+
+### Container Images
 
 Pre-built container images are available at `quay.io/agarlan-snl/atlas-ui-3:latest` (pushes automatically from main branch).
 
