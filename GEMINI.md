@@ -1,5 +1,7 @@
 # Gemini Guide: Atlas UI 3
 
+Last updated: 2026-02-08
+
 This file provides guidance to Google Gemini AI assistants when working with code in this repository.
 
 ## Project Overview

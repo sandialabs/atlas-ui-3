@@ -13,11 +13,11 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
@@ -33,8 +33,8 @@ class FeedbackData(BaseModel):
     """Model for user feedback submission."""
     rating: int  # -1, 0, or 1
     comment: str = ""
-    session: dict = {}
-    conversation_history: str = ""
+    session: Dict[str, Any] = Field(default_factory=dict)
+    conversation_history: Optional[str] = Field(default=None, max_length=500_000)
 
 
 class FeedbackResponse(BaseModel):
@@ -93,8 +93,8 @@ async def submit_feedback(
         filename = f"feedback_{timestamp}_{feedback_id}.json"
 
         # Prepare feedback data with additional context
-        conversation_history = feedback.conversation_history or None
-        if conversation_history and not conversation_history.strip():
+        conversation_history = feedback.conversation_history
+        if conversation_history is not None and not conversation_history.strip():
             conversation_history = None
         feedback_data = {
             "id": feedback_id,

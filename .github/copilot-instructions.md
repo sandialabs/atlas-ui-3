@@ -1,5 +1,7 @@
 # GitHub Copilot Guide: Atlas UI 3
 
+Last updated: 2026-02-08
+
 Concise rules for getting productive fast in this repo. Prefer these over exploration; fall back to code/docs only if something is missing.
 
 **PyPI Packaging**: The CI workflow bundles the frontend into `atlas/static/` before building the wheel; at runtime `atlas/main.py` checks `atlas/static/` first (package install) then falls back to `frontend/dist/` (local dev), so both paths work transparently.
