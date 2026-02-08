@@ -61,23 +61,29 @@ atlas-server --env /path/to/.env --config-folder /path/to/config
 ### Python API Usage
 
 ```python
-from atlas import AtlasClient, ChatResult
+import asyncio
+from atlas import AtlasClient
 
-# Async usage
+async def main():
+    client = AtlasClient()
+    result = await client.chat("Hello, how are you?")
+    print(result.message)
+
+    # With options
+    result = await client.chat(
+        "Analyze this data",
+        model="gpt-4o",
+        selected_tools=["calculator", "search"],
+        agent_mode=True,
+    )
+    await client.cleanup()
+
+asyncio.run(main())
+
+# Or use the sync wrapper
 client = AtlasClient()
-result = await client.chat("Hello, how are you?")
-print(result.message)
-
-# With options
-result = await client.chat(
-    "Analyze this data",
-    model="gpt-4o",
-    selected_tools=["calculator", "search"],
-    agent_mode=True
-)
-
-# Sync wrapper
 result = client.chat_sync("Hello!")
+print(result.message)
 ```
 
 ## Quick Start (Development)
