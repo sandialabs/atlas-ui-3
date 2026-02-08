@@ -1,6 +1,6 @@
 [project]
 name = "atlas-chat"
-version = "0.1.1"
+version = "0.1.2"
 description = "Full-stack LLM chat interface with Model Context Protocol (MCP) integration"
 readme = "README.md"
 license = { text = "MIT" }
@@ -90,7 +90,7 @@ atlas = [
     "config/*.yml",
     "config/mcp-example-configs/*.json",
     "mcp/**/*",
-    "../frontend/dist/**/*",
+    "static/**/*",
 ]
 
 [tool.pytest.ini_options]

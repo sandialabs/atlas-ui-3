@@ -29,6 +29,19 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: cd frontend && npm ci && npm run build
+
+      - name: Bundle frontend into package
+        run: cp -r frontend/dist atlas/static
+
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip

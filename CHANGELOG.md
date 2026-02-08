@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #315 - 2026-02-07
+- **Fix**: Bundle frontend into PyPI package so `atlas-server` serves the UI when installed via pip. CI now builds the frontend and copies it to `atlas/static/` before packaging.
+- **Fix**: Resolve `runtime_feedback_dir` to an absolute path inside the project root instead of relative to cwd, preventing stray `runtime/` directories when running from arbitrary locations.
+
 ### PR #275 - 2026-02-04
 - **Feature**: Make atlas installable as a Python package (`pip install atlas-chat`). Provides `AtlasClient` for programmatic use and CLI tools (`atlas-chat`, `atlas-server`) for command-line usage.
 - **Refactor**: Rename `backend/` directory to `atlas/` for proper Python package structure with `__init__.py` exports.
