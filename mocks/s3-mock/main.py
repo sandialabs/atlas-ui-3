@@ -58,8 +58,14 @@ def add_metadata_headers(response: Response, metadata: Dict[str, str]):
 @app.put("/{bucket}/{key:path}")
 async def put_object(bucket: str, key: str, request: Request):
     """PUT Object endpoint."""
-    # Check if this is a tagging request with XML body
-    if request.query_params.get("tagging") and request.headers.get("content-type") == "application/xml":
+    # Normalize content type for robust comparison (e.g., handle charset and casing)
+    raw_content_type = request.headers.get("content-type", "")
+    normalized_content_type = raw_content_type.split(";", 1)[0].strip().lower()
+
+    # Check if this is a PutObjectTagging request with XML body.
+    # PutObjectTagging uses an empty ?tagging param; regular uploads use non-empty ?tagging=key=val.
+    tagging_param = request.query_params.get("tagging")
+    if tagging_param == "" and normalized_content_type == "application/xml":
         bucket_root = get_bucket_root(bucket)
 
         # Check if object exists
@@ -115,8 +121,8 @@ async def get_object(bucket: str, key: str, request: Request):
     """GET Object endpoint."""
     bucket_root = get_bucket_root(bucket)
 
-    # Check if this is a tagging request
-    if request.query_params.get("tagging"):
+    # Check if this is a tagging request (value may be empty string, so check key presence)
+    if "tagging" in request.query_params:
         # Check if object exists
         if load_meta(bucket_root, key) is None:
             error_xml = create_error_xml("NoSuchKey", "The specified key does not exist.", f"/{bucket}/{key}")

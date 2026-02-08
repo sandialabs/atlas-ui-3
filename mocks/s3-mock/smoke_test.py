@@ -147,7 +147,7 @@ def test_tagging():
     )
     assert response.status_code == 200
 
-    # Set tags
+    # Set tags via PUT ?tagging with XML body (S3 PutObjectTagging API)
     tagging_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <Tagging>
     <TagSet>
@@ -165,7 +165,8 @@ def test_tagging():
     response = client.put(
         f"/{BUCKET}/{key}",
         content=tagging_xml,
-        headers={"Content-Type": "application/xml"}
+        headers={"Content-Type": "application/xml"},
+        params={"tagging": ""}
     )
     assert response.status_code == 200
 
@@ -190,6 +191,73 @@ def test_tagging():
     assert retrieved_tags == expected_tags, f"Tags mismatch: {retrieved_tags} != {expected_tags}"
 
     print("  Tagging operations successful")
+
+def test_html_file_tagging():
+    """Test that tagging works correctly for HTML files (issue #303).
+
+    Previously, GET ?tagging= on an HTML file returned the file content
+    instead of tagging XML because the empty string query param was falsy.
+    """
+    print("Testing HTML file tagging (issue #303)...")
+
+    client = create_test_client()
+    key = "users/test@test.com/generated/test_report.html"
+    html_content = b"""<!DOCTYPE html>
+<html>
+<head><title>Test Report</title></head>
+<body>
+<h1>Report</h1>
+<p>Some content with <b>tags</b> and <div>nested elements</div></p>
+</body>
+</html>"""
+
+    # Upload HTML file with tags via query params (same as MockS3StorageClient.upload_file)
+    tags = "source=tool&user_email=test%40test.com&original_filename=test_report.html"
+    response = client.put(
+        f"/{BUCKET}/{key}",
+        content=html_content,
+        headers={
+            "Content-Type": "text/html",
+            "x-amz-meta-user_email": "test@test.com",
+            "x-amz-meta-original_filename": "test_report.html",
+            "x-amz-meta-source_type": "tool",
+        },
+        params={"tagging": tags}
+    )
+    assert response.status_code == 200
+    print("  HTML file uploaded with tags")
+
+    # GET the file content (should be HTML)
+    response = client.get(f"/{BUCKET}/{key}")
+    assert response.status_code == 200
+    assert response.content == html_content, "File content mismatch"
+    print("  GET file content returned HTML correctly")
+
+    # GET tags (should return tagging XML, NOT the HTML file content)
+    response = client.get(f"/{BUCKET}/{key}", params={"tagging": ""})
+    assert response.status_code == 200
+    assert response.headers.get("content-type") == "application/xml", (
+        f"Expected application/xml, got {response.headers.get('content-type')}"
+    )
+
+    # Parse the tagging XML
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(response.text)
+    tag_elements = root.findall(".//Tag")
+
+    retrieved_tags = {}
+    for tag_elem in tag_elements:
+        key_elem = tag_elem.find("Key")
+        value_elem = tag_elem.find("Value")
+        if key_elem is not None and value_elem is not None:
+            retrieved_tags[key_elem.text] = value_elem.text
+
+    assert "source" in retrieved_tags, f"Missing 'source' tag in {retrieved_tags}"
+    assert retrieved_tags["source"] == "tool", f"source tag wrong: {retrieved_tags['source']}"
+    assert "user_email" in retrieved_tags, f"Missing 'user_email' tag in {retrieved_tags}"
+
+    print("  GET tagging returned proper XML (not HTML content)")
+
 
 def test_delete_object():
     """Test DELETE object operation."""
@@ -254,6 +322,7 @@ def main():
         test_head_object()
         test_list_objects()
         test_tagging()
+        test_html_file_tagging()
         test_delete_object()
 
         print("\n" + "=" * 40)
