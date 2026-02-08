@@ -50,7 +50,7 @@ export const MarketplaceProvider = ({ children }) => {
     }
   }, [])
 
-  // When tools/prompts change, merge any newly available servers into selection
+  // When tools/prompts change, merge new servers and remove stale ones
   useEffect(() => {
     // Build the complete set of available servers
     const toolServers = tools.map(t => t.server)
@@ -63,15 +63,43 @@ export const MarketplaceProvider = ({ children }) => {
       if (!knownServersRef.current.has(s)) newlyDiscovered.push(s)
     }
 
-    if (newlyDiscovered.length > 0) {
-      // Auto-select only the newly discovered servers; preserve user choices
-      setSelectedServers(prev => {
-        const next = new Set(prev)
+    // Remove stale servers that no longer exist in config
+    setSelectedServers(prev => {
+      let next = new Set(prev)
+      let changed = false
+
+      // Add newly discovered servers
+      if (newlyDiscovered.length > 0) {
         newlyDiscovered.forEach(s => next.add(s))
-        return next
-      })
+        changed = true
+      }
+
+      // Remove servers no longer in config
+      for (const s of prev) {
+        if (!allServers.has(s)) {
+          next.delete(s)
+          changed = true
+          console.warn('Removing stale marketplace server from selection:', s)
+        }
+      }
+
+      return changed ? next : prev
+    })
+
+    if (newlyDiscovered.length > 0) {
       // Update known servers persistence
       newlyDiscovered.forEach(s => knownServersRef.current.add(s))
+    }
+
+    // Prune known servers that no longer exist
+    let knownChanged = false
+    for (const s of knownServersRef.current) {
+      if (!allServers.has(s)) {
+        knownServersRef.current.delete(s)
+        knownChanged = true
+      }
+    }
+    if (newlyDiscovered.length > 0 || knownChanged) {
       localStorage.setItem('mcp-known-servers', JSON.stringify(Array.from(knownServersRef.current)))
     }
   }, [tools, prompts])
