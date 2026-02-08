@@ -1,5 +1,7 @@
 # GitHub Copilot Guide: Atlas UI 3
 
+Last updated: 2026-02-08
+
 Concise rules for getting productive fast in this repo. Prefer these over exploration; fall back to code/docs only if something is missing.
 
 **PyPI Packaging**: The CI workflow bundles the frontend into `atlas/static/` before building the wheel; at runtime `atlas/main.py` checks `atlas/static/` first (package install) then falls back to `frontend/dist/` (local dev), so both paths work transparently.
@@ -128,6 +130,7 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 **REST API:**
 - `/api/config` - Models, tools, prompts, data_sources, rag_servers, features
 - `/api/compliance-levels` - Compliance level definitions
+- `/api/feedback` - Submit (POST) and view (GET, admin) user feedback; conversation history is stored inline in the feedback JSON when the user opts in
 - `/admin/*` - Configs and logs (admin group required)
 
 ## Agent Modes

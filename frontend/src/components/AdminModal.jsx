@@ -371,6 +371,16 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
                           "{item.comment}"
                         </div>
                       )}
+                      {item.conversation_history && (
+                        <details className="mt-2">
+                          <summary className="text-xs text-blue-400 cursor-pointer hover:text-blue-300">
+                            Conversation history attached
+                          </summary>
+                          <pre className="text-xs text-gray-300 bg-gray-900 p-2 rounded mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap">
+                            {item.conversation_history}
+                          </pre>
+                        </details>
+                      )}
                       <div className="text-xs text-gray-500 mt-2">
                         ID: {item.id}
                       </div>
