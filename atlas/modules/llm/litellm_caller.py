@@ -198,7 +198,30 @@ class LiteLLMCaller:
             # For custom endpoints, use the model_id directly
             return model_id
 
-    def _get_model_kwargs(self, model_name: str, temperature: Optional[float] = None) -> Dict[str, Any]:
+    @staticmethod
+    def _resolve_user_api_key(model_name: str, user_email: Optional[str]) -> str:
+        """Look up a per-user API key from token storage.
+
+        Raises ValueError when the key is missing so callers surface a clear
+        authentication-required error to the user.
+        """
+        if not user_email:
+            raise ValueError(
+                f"Model '{model_name}' requires a per-user API key but no user_email was provided."
+            )
+        from atlas.modules.mcp_tools.token_storage import get_token_storage
+        token_storage = get_token_storage()
+        stored = token_storage.get_valid_token(user_email, f"llm:{model_name}")
+        if stored is None:
+            raise ValueError(
+                f"Model '{model_name}' requires a per-user API key. "
+                f"Please configure your API key in the model settings."
+            )
+        return stored.token_value
+
+    def _get_model_kwargs(
+        self, model_name: str, temperature: Optional[float] = None, user_email: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Get LiteLLM kwargs for a specific model."""
         if model_name not in self.llm_config.models:
             raise ValueError(f"Model {model_name} not found in configuration")
@@ -214,12 +237,17 @@ class LiteLLMCaller:
         else:
             kwargs["temperature"] = model_config.temperature or 0.7
 
-        # Set API key - resolve environment variables
-        try:
-            api_key = resolve_env_var(model_config.api_key)
-        except ValueError as e:
-            logger.error(f"Failed to resolve API key for model {model_name}: {e}")
-            raise
+        # Resolve API key based on api_key_source
+        api_key_source = getattr(model_config, "api_key_source", "system")
+        if api_key_source == "user":
+            api_key = self._resolve_user_api_key(model_name, user_email)
+        else:
+            # Set API key - resolve environment variables
+            try:
+                api_key = resolve_env_var(model_config.api_key)
+            except ValueError as e:
+                logger.error(f"Failed to resolve API key for model {model_name}: {e}")
+                raise
 
         if api_key:
             # Always pass api_key to LiteLLM for all providers
@@ -292,7 +320,7 @@ class LiteLLMCaller:
             user_email: Optional user email for metrics logging
         """
         litellm_model = self._get_litellm_model_name(model_name)
-        model_kwargs = self._get_model_kwargs(model_name, temperature)
+        model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
 
         # Override max_tokens if provided
         if max_tokens is not None:
@@ -461,7 +489,7 @@ class LiteLLMCaller:
             return LLMResponse(content=content, model_used=model_name)
 
         litellm_model = self._get_litellm_model_name(model_name)
-        model_kwargs = self._get_model_kwargs(model_name, temperature)
+        model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
 
         # Handle tool_choice parameter - try "required" first, fallback to "auto" if unsupported
         final_tool_choice = tool_choice

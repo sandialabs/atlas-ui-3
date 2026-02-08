@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X } from 'lucide-react'
+import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
+import TokenInputModal from './TokenInputModal'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key } from 'lucide-react'
 
 const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()
@@ -30,6 +32,14 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [llmAuthModalModel, setLlmAuthModalModel] = useState(null)
+  const llmAuth = useLLMAuthStatus()
+
+  // Fetch LLM auth status on mount
+  useEffect(() => {
+    llmAuth.fetchAuthStatus()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   
   // Extract unique compliance levels from all available tools and prompts
   const availableComplianceLevels = complianceLevels.map(l => l.name)
@@ -140,6 +150,14 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
             <span className="text-xs sm:text-sm text-gray-200 truncate">
               {currentModel || 'Model...'}
             </span>
+            {(() => {
+              const cm = models.find(m => (typeof m === 'string' ? m : m.name) === currentModel)
+              const cmObj = typeof cm === 'string' ? { name: cm } : cm
+              if (cmObj?.api_key_source === 'user') {
+                return <Key className={`w-3 h-3 flex-shrink-0 ${cmObj.user_has_key ? 'text-green-400' : 'text-orange-400'}`} />
+              }
+              return null
+            })()}
             <ChevronDown className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
           </button>
           
@@ -162,20 +180,48 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
                   return filteredModels.map(m => {
                     const model = typeof m === 'string' ? { name: m } : m
                     const modelName = model.name || m
+                    const needsUserKey = model.api_key_source === 'user'
+                    const hasUserKey = model.user_has_key === true
+                    const isDisabled = needsUserKey && !hasUserKey
                     return (
-                      <button
+                      <div
                         key={modelName}
-                        onClick={() => handleModelSelect(modelName)}
-                        className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg flex items-center justify-between gap-2"
+                        className="flex items-center first:rounded-t-lg last:rounded-b-lg"
                       >
-                        <span className="truncate">{modelName}</span>
-                        {complianceEnabled && model.compliance_level && (
-                          <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1 flex-shrink-0">
-                            <Shield className="w-3 h-3" />
-                            {model.compliance_level}
+                        <button
+                          onClick={() => !isDisabled && handleModelSelect(modelName)}
+                          className={`flex-1 text-left px-4 py-2 text-sm flex items-center justify-between gap-2 ${
+                            isDisabled
+                              ? 'text-gray-500 cursor-not-allowed'
+                              : 'text-gray-200 hover:bg-gray-700'
+                          }`}
+                          disabled={isDisabled}
+                          title={isDisabled ? 'Configure your API key to use this model' : modelName}
+                        >
+                          <span className="truncate">{modelName}</span>
+                          <span className="flex items-center gap-1 flex-shrink-0">
+                            {complianceEnabled && model.compliance_level && (
+                              <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1">
+                                <Shield className="w-3 h-3" />
+                                {model.compliance_level}
+                              </span>
+                            )}
                           </span>
+                        </button>
+                        {needsUserKey && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setLlmAuthModalModel(modelName)
+                              setDropdownOpen(false)
+                            }}
+                            className="px-2 py-2 hover:bg-gray-700 transition-colors"
+                            title={hasUserKey ? 'API key configured (click to change)' : 'Click to add your API key'}
+                          >
+                            <Key className={`w-4 h-4 ${hasUserKey ? 'text-green-400' : 'text-orange-400'}`} />
+                          </button>
                         )}
-                      </button>
+                      </div>
                     )
                   })
                 })()
@@ -529,11 +575,24 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
       
       {/* Close download dropdown when clicking outside */}
       {downloadDropdownOpen && (
-        <div 
-          className="fixed inset-0 z-40" 
+        <div
+          className="fixed inset-0 z-40"
           onClick={() => setDownloadDropdownOpen(false)}
         />
       )}
+
+      {/* LLM API Key Modal */}
+      <TokenInputModal
+        isOpen={llmAuthModalModel !== null}
+        serverName={llmAuthModalModel || ''}
+        onClose={() => setLlmAuthModalModel(null)}
+        onUpload={async (tokenData) => {
+          await llmAuth.uploadToken(llmAuthModalModel, tokenData)
+          setLlmAuthModalModel(null)
+        }}
+        isLoading={llmAuth.loading}
+        error={llmAuth.error}
+      />
     </header>
   )
 }

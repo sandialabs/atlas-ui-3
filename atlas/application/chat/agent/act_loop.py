@@ -113,7 +113,7 @@ class ActAgentLoop(AgentLoopProtocol):
                 )
             else:
                 llm_response = await self.llm.call_with_tools(
-                    model, messages, tools_schema, "required", temperature=temperature
+                    model, messages, tools_schema, "required", temperature=temperature, user_email=context.user_email
                 )
 
             # Process response
@@ -173,7 +173,7 @@ class ActAgentLoop(AgentLoopProtocol):
 
         # Fallback if no final answer after max steps
         if not final_answer:
-            final_answer = await self.llm.call_plain(model, messages, temperature=temperature)
+            final_answer = await self.llm.call_plain(model, messages, temperature=temperature, user_email=context.user_email)
 
         await event_handler(AgentEvent(type="agent_completion", payload={"steps": steps}))
         return AgentResult(final_answer=final_answer, steps=steps, metadata={"agent_mode": True, "strategy": "act"})

@@ -101,7 +101,7 @@ class ThinkActAgentLoop(AgentLoopProtocol):
         # First think - ALWAYS happens before entering the loop
         steps += 1
         await event_handler(AgentEvent(type="agent_turn_start", payload={"step": steps}))
-        first_think = await self.llm.call_with_tools(model, messages, think_tools_schema, "required", temperature=temperature)
+        first_think = await self.llm.call_with_tools(model, messages, think_tools_schema, "required", temperature=temperature, user_email=context.user_email)
         think_args = parse_args(first_think)
         await emit_think(first_think.content or "", steps)
 
@@ -125,7 +125,7 @@ class ThinkActAgentLoop(AgentLoopProtocol):
                     )
                 else:
                     llm_response = await self.llm.call_with_tools(
-                        model, messages, tools_schema, "required", temperature=temperature
+                        model, messages, tools_schema, "required", temperature=temperature, user_email=context.user_email
                     )
 
                 if llm_response.has_tool_calls():
@@ -157,7 +157,7 @@ class ThinkActAgentLoop(AgentLoopProtocol):
             # Think after action
             steps += 1
             await event_handler(AgentEvent(type="agent_turn_start", payload={"step": steps}))
-            think_resp = await self.llm.call_with_tools(model, messages, think_tools_schema, "required", temperature=temperature)
+            think_resp = await self.llm.call_with_tools(model, messages, think_tools_schema, "required", temperature=temperature, user_email=context.user_email)
             think_args = parse_args(think_resp)
             await emit_think(think_resp.content or "", steps)
             if think_args.get("finish"):
@@ -165,7 +165,7 @@ class ThinkActAgentLoop(AgentLoopProtocol):
                 break
 
         if not final_answer:
-            final_answer = await self.llm.call_plain(model, messages, temperature=temperature)
+            final_answer = await self.llm.call_plain(model, messages, temperature=temperature, user_email=context.user_email)
 
         await event_handler(AgentEvent(type="agent_completion", payload={"steps": steps}))
         return AgentResult(final_answer=final_answer, steps=steps, metadata={"agent_mode": True, "strategy": "think-act"})

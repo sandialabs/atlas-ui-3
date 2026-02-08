@@ -141,7 +141,7 @@ async def test_system_prompt_sent_to_llm():
         captured = {}
 
         class DummyLLM:
-            async def call_plain(self, model_name, messages, temperature=0.7):
+            async def call_plain(self, model_name, messages, temperature=0.7, **kwargs):
                 captured["messages"] = messages
                 return "Hello! I'm here to help."
 

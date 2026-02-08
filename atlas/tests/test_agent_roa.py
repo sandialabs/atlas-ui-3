@@ -24,12 +24,12 @@ class FakeLLM(LLMProtocol):
     def __init__(self, plain_responses: Optional[List[str]] = None):
         self._plain = list(plain_responses or [])
 
-    async def call_plain(self, model_name: str, messages: List[Dict[str, str]], temperature: float = 0.7) -> str:
+    async def call_plain(self, model_name: str, messages: List[Dict[str, str]], temperature: float = 0.7, **kwargs) -> str:
         if self._plain:
             return self._plain.pop(0)
         return "{\"plan\":\"noop\",\"tools_to_consider\":[],\"finish\":true,\"final_answer\":\"ok\"}"
 
-    async def call_with_tools(self, model_name: str, messages: List[Dict[str, str]], tools_schema: List[Dict], tool_choice: str = "auto", temperature: float = 0.7):
+    async def call_with_tools(self, model_name: str, messages: List[Dict[str, str]], tools_schema: List[Dict], tool_choice: str = "auto", temperature: float = 0.7, **kwargs):
         # Minimal stub: never returns tool calls in these tests
         from atlas.interfaces.llm import LLMResponse  # type: ignore
         return LLMResponse(content="")

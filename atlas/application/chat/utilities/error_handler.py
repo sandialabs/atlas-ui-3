@@ -125,7 +125,7 @@ async def safe_call_llm_with_tools(
             logger.info(f"LLM response received with RAG and tools for user {user_email}, has_tool_calls: {llm_response.has_tool_calls()}")
         else:
             llm_response = await llm_caller.call_with_tools(
-                model, messages, tools_schema, tool_choice, temperature=temperature
+                model, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email
             )
             # Log metadata at INFO level, content only at DEBUG
             if logger.isEnabledFor(logging.DEBUG):
