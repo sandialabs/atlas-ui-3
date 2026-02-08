@@ -34,6 +34,7 @@ class FeedbackData(BaseModel):
     rating: int  # -1, 0, or 1
     comment: str = ""
     session: dict = {}
+    conversation_history: str = ""
 
 
 class FeedbackResponse(BaseModel):
@@ -92,6 +93,9 @@ async def submit_feedback(
         filename = f"feedback_{timestamp}_{feedback_id}.json"
 
         # Prepare feedback data with additional context
+        conversation_history = feedback.conversation_history or None
+        if conversation_history and not conversation_history.strip():
+            conversation_history = None
         feedback_data = {
             "id": feedback_id,
             "timestamp": datetime.now().isoformat(),
@@ -104,7 +108,8 @@ async def submit_feedback(
                 "client_host": request.client.host if request.client else "unknown",
                 "forwarded_for": request.headers.get("x-forwarded-for", ""),
                 "referer": request.headers.get("referer", "")
-            }
+            },
+            "conversation_history": conversation_history
         }
 
         # Save feedback to JSON file

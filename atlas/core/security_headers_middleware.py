@@ -46,6 +46,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if getattr(self.settings, "security_csp_enabled", True):
             csp_value = getattr(self.settings, "security_csp_value", None)
             if csp_value and "Content-Security-Policy" not in response.headers:
+                # Inject WebSocket origins for the configured port so that
+                # non-default ports (e.g. worktrees on 8004) are allowed.
+                port = getattr(self.settings, "port", 8000)
+                if port != 80 and port != 443:
+                    ws_origins = f"ws://localhost:{port} wss://localhost:{port}"
+                    csp_value = csp_value.replace(
+                        "connect-src 'self'",
+                        f"connect-src 'self' {ws_origins}",
+                    )
                 response.headers["Content-Security-Policy"] = csp_value
 
         return response

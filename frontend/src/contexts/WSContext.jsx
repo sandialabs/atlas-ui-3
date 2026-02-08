@@ -18,25 +18,8 @@ export const WSProvider = ({ children }) => {
   const messageHandlersRef = useRef([])
 
   const connectWebSocket = () => {
-    // In development, use the backend port 8000 directly
-    // In production, use the same host as the frontend
-    const isDev = window.location.hostname.includes('github.dev') || window.location.hostname === 'localhost'
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    
-    let wsUrl
-    if (isDev && window.location.hostname.includes('github.dev')) {
-      // For GitHub Codespaces, replace the port in the hostname
-      // From: bookish-giggle-695w65wxvv2j95-5173.app.github.dev
-      // To:   bookish-giggle-695w65wxvv2j95-8000.app.github.dev
-      const backendHost = window.location.hostname.replace('-5173.app.github.dev', '-8000.app.github.dev')
-      wsUrl = `${protocol}//${backendHost}/ws`
-    } else if (isDev && window.location.hostname === 'localhost') {
-      // For localhost development
-      wsUrl = `${protocol}//localhost:8000/ws`
-    } else {
-      // Production - use proxy
-      wsUrl = `${protocol}//${window.location.host}/ws`
-    }
+    const wsUrl = `${protocol}//${window.location.host}/ws`
     
     console.log('Attempting WebSocket connection to:', wsUrl)
     console.log('Current location:', window.location.host)
