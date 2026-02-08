@@ -105,16 +105,24 @@ class CLIEventPublisher:
 
     async def send_json(self, data: Dict[str, Any]) -> None:
         self._collected.raw_events.append(data)
-        if self.streaming and not self.quiet:
-            msg_type = data.get("type", "")
-            if msg_type == "tool_start":
-                tool_name = data.get("tool_name", "unknown")
+        msg_type = data.get("type", "")
+        if msg_type == "tool_start":
+            tool_name = data.get("tool_name", "unknown")
+            self._collected.tool_calls.append({"tool": tool_name, "status": "started"})
+            if self.streaming and not self.quiet:
                 args = data.get("arguments", {})
                 _print_status(f"[tool] {tool_name} called with: {args}")
-            elif msg_type == "tool_complete":
-                tool_name = data.get("tool_name", "unknown")
-                success = data.get("success", False)
-                result = data.get("result", "")
+        elif msg_type == "tool_complete":
+            tool_name = data.get("tool_name", "unknown")
+            success = data.get("success", False)
+            result = data.get("result", "")
+            for tc in reversed(self._collected.tool_calls):
+                if tc["tool"] == tool_name and tc["status"] == "started":
+                    tc["status"] = "complete"
+                    tc["result"] = result
+                    tc["success"] = success
+                    break
+            if self.streaming and not self.quiet:
                 status = "ok" if success else "error"
                 _print_status(f"[tool] {tool_name} {status}: {result}")
 

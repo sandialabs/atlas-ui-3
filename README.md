@@ -50,7 +50,7 @@ atlas-init --minimal    # Creates just a minimal .env file
 
 # Chat with an LLM
 atlas-chat "Hello, how are you?"
-atlas-chat "What is 2+2?" --tools calculator_evaluate
+atlas-chat "What is 2654687621*sqrt(2)?" --tools calculator_evaluate
 atlas-chat --list-tools
 atlas-chat --list-models
 
@@ -72,10 +72,11 @@ async def main():
     result = await client.chat("Hello, how are you?")
     print(result.message)
 
-    # Use the calculator MCP tool
+    # Use the calculator MCP tool (tool_choice_required forces tool use)
     result = await client.chat(
         "What is 1234 * 5678?",
         selected_tools=["calculator_evaluate"],
+        tool_choice_required=True,
     )
     print(result.message)
 

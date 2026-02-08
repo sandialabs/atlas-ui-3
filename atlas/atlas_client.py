@@ -77,6 +77,7 @@ class AtlasClient:
         selected_tools: Optional[List[str]] = None,
         selected_data_sources: Optional[List[str]] = None,
         only_rag: bool = False,
+        tool_choice_required: bool = False,
         user_email: Optional[str] = None,
         session_id: Optional[UUID] = None,
         max_steps: int = 10,
@@ -94,6 +95,7 @@ class AtlasClient:
             selected_tools: List of tool names to enable.
             selected_data_sources: List of RAG data source names to query.
             only_rag: If True, use only RAG without tools (RAG-only mode).
+            tool_choice_required: Force the LLM to use a tool.
             user_email: User identity for auth-filtered tools/RAG.
             session_id: Reuse an existing session for multi-turn.
             max_steps: Max agent iterations.
@@ -141,6 +143,7 @@ class AtlasClient:
             selected_tools=selected_tools,
             selected_data_sources=selected_data_sources,
             only_rag=only_rag,
+            tool_choice_required=tool_choice_required,
             agent_mode=agent_mode,
             agent_max_steps=max_steps,
             user_email=user_email,

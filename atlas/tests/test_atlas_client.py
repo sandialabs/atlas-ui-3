@@ -51,6 +51,65 @@ class TestCLIEventPublisher:
         assert len(publisher.get_result().raw_events) == 1
 
     @pytest.mark.asyncio
+    async def test_send_json_tool_start_populates_tool_calls(self, publisher):
+        """send_json with tool_start events must populate tool_calls list."""
+        await publisher.send_json({
+            "type": "tool_start",
+            "tool_call_id": "call_123",
+            "tool_name": "calculator_evaluate",
+            "arguments": {"expression": "2+2"},
+        })
+        tool_calls = publisher.get_result().tool_calls
+        assert len(tool_calls) == 1
+        assert tool_calls[0]["tool"] == "calculator_evaluate"
+        assert tool_calls[0]["status"] == "started"
+
+    @pytest.mark.asyncio
+    async def test_send_json_tool_complete_updates_tool_calls(self, publisher):
+        """send_json with tool_complete must update matching tool_calls entry."""
+        await publisher.send_json({
+            "type": "tool_start",
+            "tool_call_id": "call_456",
+            "tool_name": "calculator_evaluate",
+            "arguments": {"expression": "3*4"},
+        })
+        await publisher.send_json({
+            "type": "tool_complete",
+            "tool_call_id": "call_456",
+            "tool_name": "calculator_evaluate",
+            "success": True,
+            "result": {"answer": 12},
+        })
+        tool_calls = publisher.get_result().tool_calls
+        assert len(tool_calls) == 1
+        assert tool_calls[0]["status"] == "complete"
+        assert tool_calls[0]["result"] == {"answer": 12}
+        assert tool_calls[0]["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_send_json_and_publish_tool_both_populate(self, publisher):
+        """Tool calls from both send_json and publish_tool_* coexist."""
+        await publisher.publish_tool_start("tool_a")
+        await publisher.publish_tool_complete("tool_a", result="done")
+        await publisher.send_json({
+            "type": "tool_start",
+            "tool_call_id": "call_789",
+            "tool_name": "tool_b",
+            "arguments": {},
+        })
+        await publisher.send_json({
+            "type": "tool_complete",
+            "tool_call_id": "call_789",
+            "tool_name": "tool_b",
+            "success": True,
+            "result": "ok",
+        })
+        tool_calls = publisher.get_result().tool_calls
+        assert len(tool_calls) == 2
+        assert tool_calls[0]["tool"] == "tool_a"
+        assert tool_calls[1]["tool"] == "tool_b"
+
+    @pytest.mark.asyncio
     async def test_streaming_writes_to_stdout(self, capsys):
         pub = CLIEventPublisher(streaming=True)
         await pub.publish_chat_response("token1")
