@@ -97,6 +97,33 @@ case $TEST_TYPE in
         ;;
 esac
 
+# Live E2E tests -- run automatically when an LLM API key is available
+LIVE_SCRIPT="${TEST_BASE_PATH}/e2e_tests_live.sh"
+if [ -f "$LIVE_SCRIPT" ]; then
+    # Check for any common API key
+    if [ -n "${OPENROUTER_API_KEY:-}" ] || [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+        HAS_KEY=true
+    elif [ -f "$PROJECT_ROOT/.env" ] && grep -qE '^(OPENROUTER_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY)=.+' "$PROJECT_ROOT/.env" 2>/dev/null; then
+        # Source .env so the live tests can use the key
+        set -a
+        source "$PROJECT_ROOT/.env"
+        set +a
+        HAS_KEY=true
+    else
+        HAS_KEY=false
+    fi
+
+    if [ "$HAS_KEY" = true ]; then
+        echo "--- Running live E2E tests (API key detected) ---"
+        bash "$LIVE_SCRIPT"
+        echo "Live E2E tests: PASSED"
+        echo ""
+    else
+        echo "--- Skipping live E2E tests (no API key found) ---"
+        echo ""
+    fi
+fi
+
 echo "===================="
 echo "All Tests Completed Successfully!"
 echo "Date: $(date)"
