@@ -44,28 +44,21 @@ RUN  npm run build && rm -rf node_modules
 # Switch back to app directory and copy atlas package code
 WORKDIR /app
 COPY atlas/ ./atlas/
-# Copy user config directory (overrides package defaults in atlas/config/)
-COPY config/ ./config/
 
 # Copy other necessary files
 COPY docs/ ./docs/
-COPY scripts/ ./scripts/
 COPY test/ ./test/
 COPY prompts/ ./prompts/
 COPY pyproject.toml ./
 
-# Create required runtime & config directories (before ownership change)
+# Create required runtime & config directories and seed config from package defaults
 RUN mkdir -p \
         /app/atlas/logs \
         /app/config \
         /app/runtime/logs \
         /app/runtime/feedback \
         /app/runtime/uploads && \
-    # Seed user config from package defaults if config dir is empty
-    if [ "$(ls -A /app/config 2>/dev/null | wc -l)" = "0" ] && [ -d /app/atlas/config ]; then \
-        cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/config/ 2>/dev/null || true; \
-    fi && \
-    # Place keep files so directories exist even if empty at runtime
+    cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/config/ 2>/dev/null || true && \
     touch /app/runtime/logs/.gitkeep /app/runtime/feedback/.gitkeep /app/runtime/uploads/.gitkeep
 
 # Configure sudo for appuser (needed for Playwright browser installation)

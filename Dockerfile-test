@@ -55,12 +55,8 @@ RUN npm run build
 WORKDIR /app
 COPY atlas/ ./atlas/
 
-# Copy user config directory (overrides package defaults in atlas/config/)
-COPY config/ ./config/
-
 # Copy other necessary files
 COPY docs/ ./docs/
-COPY scripts/ ./scripts/
 COPY test/ ./test/
 COPY test_e2e/ ./test_e2e/
 COPY mocks/ ./mocks/
@@ -82,11 +78,7 @@ RUN mkdir -p \
         /app/runtime/logs \
         /app/runtime/feedback \
         /app/runtime/uploads && \
-    # Seed user config from package defaults if config dir is empty
-    if [ "$(ls -A /app/config 2>/dev/null | wc -l)" = "0" ] && [ -d /app/atlas/config ]; then \
-        cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/config/ 2>/dev/null || true; \
-    fi && \
-    # Place keep files so directories exist even if empty at runtime
+    cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/config/ 2>/dev/null || true && \
     touch /app/runtime/logs/.gitkeep /app/runtime/feedback/.gitkeep /app/runtime/uploads/.gitkeep
 
 # No special sudo configuration needed for simple E2E tests
