@@ -36,7 +36,7 @@ This PR adds support for MCP LLM sampling, allowing MCP tools to request text ge
   - Complete README with usage examples
 
 ### Configuration
-- Added sampling_demo to `config/overrides/mcp.json`
+- Added sampling_demo to `config/mcp.json`
 - Configured for "users" group with Public compliance level
 
 ### Testing
@@ -145,7 +145,7 @@ All tests passing:
 - `atlas/mcp/sampling_demo/README.md` (new, 172 lines)
 
 **Configuration:**
-- `config/overrides/mcp.json` (+14 lines)
+- `config/mcp.json` (+14 lines)
 
 **Tests:**
 - `atlas/tests/test_sampling_integration.py` (new, 109 lines)

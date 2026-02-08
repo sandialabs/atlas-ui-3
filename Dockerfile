@@ -44,7 +44,7 @@ RUN  npm run build && rm -rf node_modules
 # Switch back to app directory and copy atlas package code
 WORKDIR /app
 COPY atlas/ ./atlas/
-# Copy new config directory (defaults & overrides if present)
+# Copy user config directory (overrides package defaults in atlas/config/)
 COPY config/ ./config/
 
 # Copy other necessary files
@@ -57,14 +57,13 @@ COPY pyproject.toml ./
 # Create required runtime & config directories (before ownership change)
 RUN mkdir -p \
         /app/atlas/logs \
-        /app/config/defaults \
-        /app/config/overrides \
+        /app/config \
         /app/runtime/logs \
         /app/runtime/feedback \
         /app/runtime/uploads && \
-    # Seed overrides from defaults if overrides is empty
-    if [ -d /app/config/defaults ] && [ "$(ls -A /app/config/overrides 2>/dev/null | wc -l)" = "0" ]; then \
-        cp -n /app/config/defaults/* /app/config/overrides/ 2>/dev/null || true; \
+    # Seed user config from package defaults if config dir is empty
+    if [ "$(ls -A /app/config 2>/dev/null | wc -l)" = "0" ] && [ -d /app/atlas/config ]; then \
+        cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/config/ 2>/dev/null || true; \
     fi && \
     # Place keep files so directories exist even if empty at runtime
     touch /app/runtime/logs/.gitkeep /app/runtime/feedback/.gitkeep /app/runtime/uploads/.gitkeep
@@ -101,8 +100,7 @@ EXPOSE 8000
 # Set environment variables
 ENV PYTHONPATH=/app \
     NODE_ENV=production \
-    APP_CONFIG_DEFAULTS=/app/config/defaults \
-    APP_CONFIG_OVERRIDES=/app/config/overrides \
+    APP_CONFIG_DIR=/app/config \
     RUNTIME_LOG_DIR=/app/runtime/logs \
     RUNTIME_FEEDBACK_DIR=/app/runtime/feedback
 

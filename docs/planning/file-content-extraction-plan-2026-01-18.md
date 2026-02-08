@@ -42,7 +42,7 @@ When `false`, files are attached as references only (current behavior).
 
 ### 2. New Config File: `file-extractors.json`
 
-**Location:** `config/defaults/file-extractors.json` (with override support in `config/overrides/`)
+**Location:** `atlas/config/file-extractors.json` (user overrides in `config/file-extractors.json`)
 
 **Structure:**
 
@@ -233,8 +233,8 @@ Include in files manifest to LLM:
 Following existing patterns:
 
 1. **Code defaults** - Pydantic model defaults (extraction disabled)
-2. **`config/defaults/file-extractors.json`** - Shipped defaults
-3. **`config/overrides/file-extractors.json`** - Deployment customization
+2. **`atlas/config/file-extractors.json`** - Package defaults (shipped with atlas)
+3. **`config/file-extractors.json`** - User overrides (created by `atlas-init`)
 4. **Environment variables** - `FEATURE_FILE_CONTENT_EXTRACTION_ENABLED`
 
 ### 8. Frontend Config Exposure

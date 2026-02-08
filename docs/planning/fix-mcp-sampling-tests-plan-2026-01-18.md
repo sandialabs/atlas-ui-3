@@ -354,7 +354,7 @@ If the decision is to remove sampling (not recommended based on evidence):
 
 ### Files to Update:
 1. `docs/admin/mcp-servers.md` - Remove sampling references
-2. `config/overrides/mcp.json` - Remove sampling_demo server entry
+2. `config/mcp.json` - Remove sampling_demo server entry
 3. `CHANGELOG.md` - Add entry explaining removal
 
 ### Revert commits (optional):

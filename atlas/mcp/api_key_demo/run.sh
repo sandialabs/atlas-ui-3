@@ -26,7 +26,7 @@ echo "========================================"
 echo "API Key Demo MCP Server"
 echo "========================================"
 echo ""
-echo "Add this to your config/overrides/mcp.json:"
+echo "Add this to your config/mcp.json:"
 echo ""
 cat << EOF
 {
