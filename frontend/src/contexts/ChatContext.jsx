@@ -37,6 +37,7 @@ export const ChatProvider = ({ children }) => {
 
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
 	const [isThinking, setIsThinking] = useState(false)
+	const [isSynthesizing, setIsSynthesizing] = useState(false)
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
 	const [, setPendingFileEvents] = useState(new Map())
@@ -92,6 +93,7 @@ export const ChatProvider = ({ children }) => {
 			addMessage,
 			mapMessages,
 			setIsThinking,
+			setIsSynthesizing,
 				setCurrentAgentStep: agent.setCurrentAgentStep,
 					setAgentPendingQuestion: agent.setAgentPendingQuestion,
 			setCanvasContent: files.setCanvasContent,
@@ -169,6 +171,7 @@ export const ChatProvider = ({ children }) => {
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		addMessage({ role: 'user', content, timestamp: new Date().toISOString() })
 		setIsThinking(true)
+		setIsSynthesizing(false)
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
@@ -421,6 +424,7 @@ export const ChatProvider = ({ children }) => {
 		messages,
 		isWelcomeVisible,
 		isThinking,
+		isSynthesizing,
 		sendChatMessage,
 		clearChat,
 		stopAgent,
