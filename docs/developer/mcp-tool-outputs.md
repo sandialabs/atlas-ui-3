@@ -246,7 +246,7 @@ See the `atlas/mcp/ui-demo/main.py` file for working examples of both iframe pat
 
 ## 3. Registering the Server
 
-After creating your server, you must register it in `config/overrides/mcp.json`.
+After creating your server, you must register it in `config/mcp.json`.
 
 ```json
 {

@@ -11,7 +11,7 @@ This server provides tools to:
 
 ## Configuration
 
-The server is configured in `config/overrides/mcp.json` (or `config/defaults/mcp.json`) with the `env` field:
+The server is configured in `config/mcp.json` (or `atlas/config/mcp.json` for package defaults) with the `env` field:
 
 ```json
 {

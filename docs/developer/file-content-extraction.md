@@ -9,7 +9,7 @@ This document describes how to configure automatic file content extraction for u
 When users upload files, Atlas UI can automatically extract text content and send it to the LLM as context. This is controlled by:
 
 1. **Feature flag**: `FEATURE_FILE_CONTENT_EXTRACTION_ENABLED`
-2. **Config file**: `config/defaults/file-extractors.json`
+2. **Config file**: `atlas/config/file-extractors.json` (package default) or `config/file-extractors.json` (user config)
 3. **Per-file mode toggle**: Users can cycle extraction mode per file in the UI
 
 ## Extraction Modes
@@ -38,7 +38,7 @@ FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=true
 
 ### Extractors Configuration
 
-Create or edit `config/defaults/file-extractors.json` (or `config/overrides/file-extractors.json` for deployment customization):
+Create or edit `config/file-extractors.json` for deployment customization (package defaults are in `atlas/config/file-extractors.json`):
 
 ```json
 {
@@ -254,7 +254,7 @@ python main.py
 
 ### ATLAS Integration
 
-To use banyan-extractor-mock for PDF and PPTX extraction, update `config/overrides/file-extractors.json` to point the `pdf-text` extractor URL to port 8011 and enable the `pptx-text` extractor:
+To use banyan-extractor-mock for PDF and PPTX extraction, update `config/file-extractors.json` to point the `pdf-text` extractor URL to port 8011 and enable the `pptx-text` extractor:
 
 ```json
 {

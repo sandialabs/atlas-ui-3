@@ -102,7 +102,7 @@ Elicitation requests timeout after 5 minutes of waiting. The tool receives a "ca
 
 ## Configuration
 
-This server is configured in `config/overrides/mcp.json`:
+This server is configured in `config/mcp.json`:
 
 ```json
 {

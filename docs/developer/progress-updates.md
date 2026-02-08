@@ -181,7 +181,7 @@ async def task_with_intermediate_files(
 
 See `/atlas/mcp/progress_updates_demo/` for a complete working example with three tools demonstrating all update types. To try it:
 
-1. Add the server to your `config/overrides/mcp.json`:
+1. Add the server to your `config/mcp.json`:
 ```json
 {
   "progress_updates_demo": {

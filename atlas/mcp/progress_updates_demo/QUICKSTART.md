@@ -14,7 +14,7 @@ MCP servers can now send three types of intermediate updates:
 
 ### 1. Enable the Demo Server
 
-Add to `config/overrides/mcp.json`:
+Add to `config/mcp.json`:
 
 ```json
 {
@@ -266,7 +266,7 @@ async def generate_reports(
 
 ## More Examples
 
-See `/backend/mcp/progress_updates_demo/main.py` for complete working examples.
+See `/atlas/mcp/progress_updates_demo/main.py` for complete working examples.
 
 ## Documentation
 

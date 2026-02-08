@@ -54,7 +54,7 @@ Copy `endpoint_config.json.example` and set your Nemotron endpoint URL:
 
 ### ATLAS Integration
 
-Add entries to `config/overrides/file-extractors.json`:
+Add entries to `config/file-extractors.json`:
 
 ```json
 {

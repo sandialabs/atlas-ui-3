@@ -165,8 +165,7 @@ CLI arguments:
 - `--user, -u` - User email for auth context
 
 Config override flags (useful for testing/CI and alternative config layouts):
-- `--config-overrides` - Override config overrides directory (sets `APP_CONFIG_OVERRIDES`)
-- `--config-defaults` - Override config defaults directory (sets `APP_CONFIG_DEFAULTS`)
+- `--config-dir` - Override config directory (sets `APP_CONFIG_DIR`)
 - `--llm-config` - Override LLM config file (sets `LLM_CONFIG_FILE`)
 - `--mcp-config` - Override MCP config file (sets `MCP_CONFIG_FILE`)
 - `--rag-sources-config` - Override RAG sources config file (sets `RAG_SOURCES_CONFIG_FILE`)

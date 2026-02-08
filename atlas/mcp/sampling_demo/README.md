@@ -100,7 +100,7 @@ Model preferences are hints, not requirements. The backend uses the first matchi
 
 ## Configuration
 
-This server is configured in `config/overrides/mcp.json`:
+This server is configured in `config/mcp.json`:
 
 ```json
 {

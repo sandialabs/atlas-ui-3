@@ -310,11 +310,11 @@ Atlas automatically loads `.env` files from the current directory.
 By default, Atlas uses built-in model configurations. To customize available models, create a config directory:
 
 ```bash
-# Create config directory
-mkdir -p config/defaults
+# Create config directory (or use atlas-init)
+mkdir -p config
 
 # Create llmconfig.yml with your models
-cat > config/defaults/llmconfig.yml << 'EOF'
+cat > config/llmconfig.yml << 'EOF'
 models:
   gpt-4o:
     model_name: gpt-4o
@@ -325,7 +325,7 @@ models:
 EOF
 
 # Tell Atlas where to find config
-export APP_CONFIG_OVERRIDES="./config"
+export APP_CONFIG_DIR="./config"
 ```
 
 ### Step 3: Configure MCP Tools (Optional)
@@ -333,7 +333,7 @@ export APP_CONFIG_OVERRIDES="./config"
 To use MCP tools, create an `mcp.json` configuration:
 
 ```bash
-cat > config/defaults/mcp.json << 'EOF'
+cat > config/mcp.json << 'EOF'
 {
   "servers": {
     "filesystem": {
@@ -374,7 +374,7 @@ print(result.message)
 | `OPENAI_API_KEY` | Yes* | OpenAI API key |
 | `ANTHROPIC_API_KEY` | Yes* | Anthropic API key |
 | `GOOGLE_API_KEY` | Yes* | Google AI API key |
-| `APP_CONFIG_OVERRIDES` | No | Path to custom config directory |
+| `APP_CONFIG_DIR` | No | Path to custom config directory |
 | `APP_LOG_DIR` | No | Directory for log files |
 | `DEBUG_MODE` | No | Enable debug logging (true/false) |
 

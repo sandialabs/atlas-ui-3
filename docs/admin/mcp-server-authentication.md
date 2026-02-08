@@ -69,7 +69,7 @@ Each user's tokens are isolated - users cannot access each other's tokens.
 
 ### Server Configuration
 
-Configure MCP servers in `config/overrides/mcp.json`:
+Configure MCP servers in `config/mcp.json`:
 
 ```json
 {
@@ -207,7 +207,7 @@ A demo MCP server requiring API key authentication. Demonstrates the full per-us
 
 **Location:** `atlas/mcp/api_key_demo/`
 
-**Config:** `config/mcp-example-configs/mcp-api_key_demo.json`
+**Config:** `atlas/config/mcp-example-configs/mcp-api_key_demo.json`
 
 **Valid test keys:**
 - `test123` - Test user (developer role)
