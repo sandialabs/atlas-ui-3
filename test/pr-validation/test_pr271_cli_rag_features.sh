@@ -14,7 +14,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BACKEND_DIR="$PROJECT_ROOT/backend"
+ATLAS_DIR="$PROJECT_ROOT/atlas"
 SCRATCHPAD_DIR="/tmp/pr271_test_$$"
 
 RED='\033[0;31m'
@@ -113,7 +113,7 @@ echo "Date: $(date)"
 # ==============================================================================
 print_header "Part 1: CLI end-to-end invocations"
 
-cd "$BACKEND_DIR"
+cd "$ATLAS_DIR"
 
 # 1a. --list-tools (no LLM call needed, should always work)
 run_cli_test "--list-tools prints available tools" 60 --list-tools

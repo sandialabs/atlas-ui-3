@@ -110,7 +110,7 @@ FEATURE_COMPLIANCE_LEVELS_ENABLED=true
 
 ### Backend Changes
 
-#### 1. Compliance Level Manager (`backend/core/compliance.py`)
+#### 1. Compliance Level Manager (`atlas/core/compliance.py`)
 New module that manages compliance level definitions:
 - Loads compliance levels from `compliance-levels.json`
 - Validates compliance level names against defined options
@@ -135,7 +135,7 @@ levels = compliance_mgr.get_accessible_levels("SOC2")
 # Returns: {"Public", "External", "Internal", "SOC2"}
 ```
 
-#### 2. Configuration Models (`backend/modules/config/manager.py`)
+#### 2. Configuration Models (`atlas/modules/config/manager.py`)
 Added `compliance_level` field to `MCPServerConfig`:
 
 ```python
@@ -222,14 +222,14 @@ models:
     compliance_level: "External"
 ```
 
-#### 3. API Responses (`backend/routes/config_routes.py`)
+#### 3. API Responses (`atlas/routes/config_routes.py`)
 The `/api/config` endpoint now includes:
 - `compliance_level` in **tools** array (for MCP tool servers)
 - `compliance_level` in **prompts** array (for MCP prompt servers)
 - `compliance_level` in **models** array (for LLM endpoints)
 - `compliance_levels` in **features** object (feature flag status)
 
-**RAG MCP Service** (`backend/domain/rag_mcp_service.py`):
+**RAG MCP Service** (`atlas/domain/rag_mcp_service.py`):
 - Added `complianceLevel` to RAG server discovery responses
 - RAG sources can inherit compliance level from their server or specify their own
 
@@ -502,14 +502,14 @@ UI Example (when feature enabled):
 ## Testing
 
 ### Backend Tests
-Located in `backend/tests/test_compliance_level.py`:
+Located in `atlas/tests/test_compliance_level.py`:
 - Tests MCPServerConfig with and without compliance_level
 - Tests MCPConfig parsing with compliance levels
 - Verifies compliance_level is serialized correctly
 
 Run tests:
 ```bash
-pytest backend/tests/test_compliance_level.py
+pytest atlas/tests/test_compliance_level.py
 ```
 
 ### Manual Testing

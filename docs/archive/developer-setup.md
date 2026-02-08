@@ -67,7 +67,7 @@ npm run build
 │   │   └── hooks/      # Custom React hooks
 │   ├── package.json   # Node.js dependencies
 │   └── vite.config.js # Vite build configuration
-├── backend/           # FastAPI backend (MCP client)
+├── atlas/           # FastAPI backend (MCP client)
 │   ├── main.py        # Main FastAPI application
 │   ├── session.py     # WebSocket session management
 │   ├── message_processor.py # Core message processing logic
@@ -88,8 +88,8 @@ npm run build
 ### Running linters
 ```bash
 # Python (from root directory)
-ruff check backend/
-ruff format backend/
+ruff check atlas/
+ruff format atlas/
 
 # Frontend
 cd frontend
@@ -139,7 +139,7 @@ npm run lint
 - Components organized by functionality
 
 ### Adding New MCP Servers
-1. Create new directory in `backend/mcp/`
+1. Create new directory in `atlas/mcp/`
 2. Implement `main.py` with MCP protocol
 3. Add configuration to `mcp.json`
 4. Set appropriate user groups
@@ -162,6 +162,6 @@ See [Configuration Guide](configuration.md) for complete details.
 ## Debugging Tips
 
 - Use browser developer tools to inspect WebSocket messages
-- Check `backend/logs/app.log` for server-side errors (includes full tracebacks)
+- Check `atlas/logs/app.log` for server-side errors (includes full tracebacks)
 - Test configuration loading: `python -c "from config import config_manager; print('✅ Config OK')"`
 - Test MCP servers independently using command line

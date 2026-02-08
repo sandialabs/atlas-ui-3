@@ -142,7 +142,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         type: 'textarea',
         value: mcpConfigJson,
         readOnly: true,
-        description: 'Current MCP servers and their properties, as loaded from config/overrides/mcp.json. To make changes, edit that file directly and then use the controls below to hot-reload.',
+        description: 'Current MCP servers and their properties, as loaded from config/mcp.json. To make changes, edit that file directly and then use the controls below to hot-reload.',
       }, 'mcp-config')
     } catch (err) {
       addNotification('Error loading MCP configuration: ' + err.message, 'error')

@@ -10,7 +10,7 @@ The application uses a layered configuration system that loads settings from thr
 2.  **Override Files (`config/overrides/`)**: For custom, instance-specific configurations. These files are not checked into version control.
 3.  **Default Files (`config/defaults/`)**: The base configuration that is part of the repository.
 
-**Note**: The definitive source for all possible configuration options and their default values is the `AppSettings` class within `backend/modules/config/config_manager.py`. This class dictates how the application reads and interprets all its settings.
+**Note**: The definitive source for all possible configuration options and their default values is the `AppSettings` class within `atlas/modules/config/config_manager.py`. This class dictates how the application reads and interprets all its settings.
 
 ### Key Override Files
 
@@ -488,13 +488,13 @@ You can configure the application to call an external HTTP endpoint to check for
         }
         ```
 
-If `AUTH_GROUP_CHECK_URL` is not set, the application will fall back to the mock implementation in `backend/core/auth.py`.
+If `AUTH_GROUP_CHECK_URL` is not set, the application will fall back to the mock implementation in `atlas/core/auth.py`.
 
 When using the mock implementation (no external endpoint configured), **all users are treated as part of the `users` group by default**. This ensures that basic, non-privileged features remain available even without an authorization service. Higher-privilege groups such as `admin` still require explicit membership via the mock group table or your real authorization system.
 
 #### Legacy Method: Modifying the Code
 
-For advanced use cases, you can still directly modify the `is_user_in_group` function located in `backend/core/auth.py`. The default implementation is a mock and **must be replaced** if you are not using the HTTP endpoint method.
+For advanced use cases, you can still directly modify the `is_user_in_group` function located in `atlas/core/auth.py`. The default implementation is a mock and **must be replaced** if you are not using the HTTP endpoint method.
 
 ## Compliance and Data Security
 

@@ -49,7 +49,7 @@ export MCP_SERVER_TOKEN="secret-api-key-123"
 
 Before modifying the configuration model, we need a utility function to resolve environment variables from config values.
 
-*   **File to create/modify:** `backend/modules/config/config_manager.py`
+*   **File to create/modify:** `atlas/modules/config/config_manager.py`
 *   **Function to add:** `resolve_env_var`
 
 Add this helper function to support environment variable substitution:
@@ -107,7 +107,7 @@ def resolve_env_var(value: Optional[str]) -> Optional[str]:
 
 We need to add a field to our MCP server configuration model to hold the authentication token.
 
-*   **File to modify:** `backend/modules/config/config_manager.py`
+*   **File to modify:** `atlas/modules/config/config_manager.py`
 *   **Model to modify:** `MCPServerConfig`
 
 Add a new optional field `auth_token` of type `str` to the `MCPServerConfig` Pydantic model.
@@ -143,7 +143,7 @@ class MCPServerConfig(BaseModel):
 
 Now we need to use the `auth_token` when creating the `fastmcp.Client`, with environment variable resolution.
 
-*   **File to modify:** `backend/modules/mcp_tools/client.py`
+*   **File to modify:** `atlas/modules/mcp_tools/client.py`
 *   **Function to modify:** `_initialize_single_client`
 
 In this function, when preparing to create a `Client` for an `http` or `sse` transport, we will:
@@ -286,7 +286,7 @@ To test this feature, you will need an MCP server that is configured to require 
 
 #### 1. Test Environment Variable Resolution
 
-**File:** `backend/tests/modules/config/test_config_manager.py`
+**File:** `atlas/tests/modules/config/test_config_manager.py`
 
 Create comprehensive tests for the `resolve_env_var()` function:
 
@@ -353,7 +353,7 @@ class TestResolveEnvVar:
 
 #### 2. Test MCP Configuration Model
 
-**File:** `backend/tests/modules/config/test_config_manager.py`
+**File:** `atlas/tests/modules/config/test_config_manager.py`
 
 Add tests to ensure `MCPServerConfig` correctly handles the `auth_token` field:
 
@@ -402,7 +402,7 @@ class TestMCPServerConfig:
 
 #### 3. Test MCP Client Initialization
 
-**File:** `backend/tests/modules/mcp_tools/test_client.py`
+**File:** `atlas/tests/modules/mcp_tools/test_client.py`
 
 Add tests to verify auth token is passed correctly to FastMCP client:
 
@@ -526,7 +526,7 @@ class TestMCPClientAuthentication:
 
 #### 4. Integration Test
 
-**File:** `backend/tests/integration/test_mcp_auth_integration.py`
+**File:** `atlas/tests/integration/test_mcp_auth_integration.py`
 
 Create an end-to-end test with the mock MCP server:
 
@@ -592,13 +592,13 @@ class TestMCPAuthenticationIntegration:
 ./test/run_tests.sh all
 
 # Run specific test file
-pytest backend/tests/modules/config/test_config_manager.py -v
+pytest atlas/tests/modules/config/test_config_manager.py -v
 
 # Run specific test class
-pytest backend/tests/modules/config/test_config_manager.py::TestResolveEnvVar -v
+pytest atlas/tests/modules/config/test_config_manager.py::TestResolveEnvVar -v
 
 # Run with coverage
-pytest backend/tests/ --cov=backend.modules.config --cov-report=html
+pytest atlas/tests/ --cov=backend.modules.config --cov-report=html
 ```
 
 **Test Coverage Requirements:**

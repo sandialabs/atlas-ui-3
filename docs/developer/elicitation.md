@@ -114,4 +114,4 @@ Elicitation is powered by FastMCP 2.10.0+. When building MCP tools:
 
 ---
 
-For technical documentation on creating elicitation-enabled MCP tools, see the [Elicitation Demo MCP Server Documentation](../../../backend/mcp/elicitation_demo/README.md).
+For technical documentation on creating elicitation-enabled MCP tools, see the [Elicitation Demo MCP Server Documentation](../../../atlas/mcp/elicitation_demo/README.md).

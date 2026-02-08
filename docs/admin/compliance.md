@@ -6,7 +6,7 @@ The compliance system is designed to prevent the unintentional mixing of data fr
 
 ## Compliance Levels
 
-You can assign a `compliance_level` to LLM endpoints, RAG data sources, and MCP servers. These levels are defined in `config/defaults/compliance-levels.json` (which can be overridden).
+You can assign a `compliance_level` to LLM endpoints, RAG data sources, and MCP servers. These levels are defined in `atlas/config/compliance-levels.json` (package default) and can be customized in `config/compliance-levels.json`.
 
 **Example:** A tool that accesses internal-only data can be marked with `compliance_level: "Internal"`, while a tool that uses a public API can be marked as `compliance_level: "Public"`.
 

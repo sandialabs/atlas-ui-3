@@ -1,0 +1,1 @@
+{"code-executor": {"command": ["python", "mcp/code-executor/main.py"], "cwd": "atlas", "groups": ["users"], "description": "code-executor MCP server", "author": "Chat UI Team", "short_description": "code-executor server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

@@ -437,7 +437,7 @@ services:
 ### Temporal Worker
 
 ```python
-# backend/workers/plan_worker.py
+# atlas/workers/plan_worker.py
 import asyncio
 from temporalio.client import Client
 from temporalio.worker import Worker

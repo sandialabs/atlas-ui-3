@@ -8,7 +8,7 @@ Remote MCP servers (HTTP/SSE) could not access files attached by users in Atlas 
 
 ## Root Cause
 
-The `create_download_url()` function in `backend/core/capabilities.py` was generating relative URLs by default. Remote MCP servers on different machines had no way to resolve these relative URLs to the actual backend address.
+The `create_download_url()` function in `atlas/core/capabilities.py` was generating relative URLs by default. Remote MCP servers on different machines had no way to resolve these relative URLs to the actual backend address.
 
 ## Solution
 
@@ -33,7 +33,7 @@ BACKEND_PUBLIC_URL=https://atlas.example.com:8443
 
 ### 2. Modified URL Generation Logic
 
-Updated `backend/core/capabilities.py` to:
+Updated `atlas/core/capabilities.py` to:
 - Check if `BACKEND_PUBLIC_URL` is configured
 - Generate absolute URLs when configured (e.g., `https://atlas.example.com/api/files/download/key?token=...`)
 - Fall back to relative URLs for backward compatibility
@@ -55,7 +55,7 @@ Updated `backend/core/capabilities.py` to:
 
 ### 4. Comprehensive Testing
 
-**Added 10 test cases in `backend/tests/test_backend_public_url.py`:**
+**Added 10 test cases in `atlas/tests/test_backend_public_url.py`:**
 - Relative URL generation without configuration
 - Absolute URL generation with configuration
 - URL handling with trailing slashes

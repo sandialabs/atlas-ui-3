@@ -1,1 +1,0 @@
-{"vtk-example": {"command": ["python", "mcp/vtk-example/main.py"], "cwd": "backend", "groups": ["users"], "description": "vtk-example MCP server", "author": "Chat UI Team", "short_description": "vtk-example server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

@@ -1,6 +1,6 @@
 # Refactor Plan A: Layered, Ports-and-Adapters Architecture
 
-Goal: reduce coupling in backend/core by moving toward a clean, layered design (domain, application, interfaces, infrastructure) with explicit protocols and adapters. Keep modules cohesive, testable, and transport-agnostic.
+Goal: reduce coupling in atlas/core by moving toward a clean, layered design (domain, application, interfaces, infrastructure) with explicit protocols and adapters. Keep modules cohesive, testable, and transport-agnostic.
 
 Outcomes
 - No singletons in core paths (remove global orchestrator).
@@ -15,7 +15,7 @@ Guiding principles
 - Observability and error handling standardized.
 
 Target package structure (new and existing)
-- backend/
+- atlas/
   - domain/                # Pure models and logic (no FastAPI, no I/O)
     - messages/
     - sessions/
@@ -104,7 +104,7 @@ Incremental migration plan (phases)
    - Keep a compatibility ChatSession shim delegating to ChatService.
 
 3) Replace orchestrator singleton
-   - Introduce composition root (backend/app_factory.py) to wire ChatService, LLMCaller, ToolExecutor, EventBus.
+   - Introduce composition root (atlas/app_factory.py) to wire ChatService, LLMCaller, ToolExecutor, EventBus.
    - Inject via WebSocket route/session factory.
 
 4) Move HTTP, middleware, observability to infrastructure/
@@ -139,7 +139,7 @@ Incremental migration plan (phases)
 10) Delete legacy and empty core
    - Remove core/old_session.py if unused.
    - core/utils.py emptied once functions relocated.
-   - Optionally move core/orchestrator.py to backend/app_factory.py or delete after DI.
+   - Optionally move core/orchestrator.py to atlas/app_factory.py or delete after DI.
 
 Concrete directory mapping (from current core)
 - core/chat_session.py -> application/chat/service.py (+ infrastructure/transport/chat_session_adapter.py)
@@ -240,5 +240,5 @@ Risk mitigation
 - Add type hints and dataclasses to replace raw dicts incrementally.
 
 End state
-- backend/core is empty or only contains transitional shims.
+- atlas/core is empty or only contains transitional shims.
 - Clear boundaries, simpler testing, and easier future extension (agents, tools, multi-LLM) without

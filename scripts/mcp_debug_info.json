@@ -15,7 +15,7 @@
           "python",
           "mcp/thinking/main.py"
         ],
-        "cwd": "backend",
+        "cwd": "atlas",
         "url": null,
         "type": "stdio",
         "transport": null
@@ -33,7 +33,7 @@
           "python",
           "mcp/calculator/main.py"
         ],
-        "cwd": "backend",
+        "cwd": "atlas",
         "url": null,
         "type": "stdio",
         "transport": null
@@ -51,7 +51,7 @@
           "python",
           "mcp/prompts/main.py"
         ],
-        "cwd": "backend",
+        "cwd": "atlas",
         "url": null,
         "type": "stdio",
         "transport": null
@@ -69,7 +69,7 @@
           "python",
           "mcp/ui-demo/main.py"
         ],
-        "cwd": "backend",
+        "cwd": "atlas",
         "url": null,
         "type": "stdio",
         "transport": null
@@ -87,13 +87,13 @@
           "python",
           "mcp/order_database/main.py"
         ],
-        "cwd": "backend",
+        "cwd": "atlas",
         "url": null,
         "type": "stdio",
         "transport": null
       }
     },
-    "config_path": "config/overrides/mcp.json"
+    "config_path": "config/mcp.json"
   },
   "servers": {
     "thinking": {
@@ -110,7 +110,7 @@
           "python",
           "mcp/thinking/main.py"
         ],
-        "cwd": "backend",
+        "cwd": "atlas",
         "url": null,
         "type": "stdio",
         "transport": null
@@ -157,7 +157,7 @@
           "python",
           "mcp/calculator/main.py"
         ],
-        "cwd": "backend",
+        "cwd": "atlas",
         "url": null,
         "type": "stdio",
         "transport": null
@@ -201,7 +201,7 @@
           "python",
           "mcp/prompts/main.py"
         ],
-        "cwd": "backend",
+        "cwd": "atlas",
         "url": null,
         "type": "stdio",
         "transport": null
@@ -273,7 +273,7 @@
           "python",
           "mcp/ui-demo/main.py"
         ],
-        "cwd": "backend",
+        "cwd": "atlas",
         "url": null,
         "type": "stdio",
         "transport": null
@@ -336,7 +336,7 @@
           "python",
           "mcp/order_database/main.py"
         ],
-        "cwd": "backend",
+        "cwd": "atlas",
         "url": null,
         "type": "stdio",
         "transport": null

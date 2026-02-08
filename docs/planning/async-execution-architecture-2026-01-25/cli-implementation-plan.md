@@ -43,7 +43,7 @@ The CLI is invoked as a subprocess by the execution agent. This provides:
 ## File Structure
 
 ```
-backend/
+atlas/
   cli/
     __init__.py                    # Package exports
     atlas_chat_cli.py              # Main CLI entry point (~200 lines)
@@ -55,9 +55,9 @@ backend/
 
 ### Step 1: Create CLI Event Publisher
 
-**File:** `backend/cli/cli_event_publisher.py`
+**File:** `atlas/cli/cli_event_publisher.py`
 
-Implement the `EventPublisher` protocol from `backend/interfaces/events.py`:
+Implement the `EventPublisher` protocol from `atlas/interfaces/events.py`:
 
 ```python
 class CLIEventPublisher:
@@ -82,7 +82,7 @@ Required protocol methods:
 
 ### Step 2: Create Output Formatter
 
-**File:** `backend/cli/output_formatter.py`
+**File:** `atlas/cli/output_formatter.py`
 
 ```python
 @dataclass
@@ -105,7 +105,7 @@ class OutputFormatter:
 
 ### Step 3: Create Main CLI
 
-**File:** `backend/cli/atlas_chat_cli.py`
+**File:** `atlas/cli/atlas_chat_cli.py`
 
 Key function:
 
@@ -151,7 +151,7 @@ async def run_chat(args) -> CLIResult:
 ```
 
 CLI arguments:
-- Note: this is a planning document and may not match the current CLI implementation. For the authoritative, up-to-date CLI docs, see `docs/developer/cli-usage-2026-01-27.md`. The current CLI entry point lives at `backend/atlas_chat_cli.py`.
+- Note: this is a planning document and may not match the current CLI implementation. For the authoritative, up-to-date CLI docs, see `docs/developer/cli-usage-2026-01-27.md`. The current CLI entry point lives at `atlas/atlas_chat_cli.py`.
 - `prompt` (positional) - The prompt to send
 - `--model, -m` - LLM model (default from config)
 - `--agent, -a` - Enable agent mode
@@ -165,8 +165,7 @@ CLI arguments:
 - `--user, -u` - User email for auth context
 
 Config override flags (useful for testing/CI and alternative config layouts):
-- `--config-overrides` - Override config overrides directory (sets `APP_CONFIG_OVERRIDES`)
-- `--config-defaults` - Override config defaults directory (sets `APP_CONFIG_DEFAULTS`)
+- `--config-dir` - Override config directory (sets `APP_CONFIG_DIR`)
 - `--llm-config` - Override LLM config file (sets `LLM_CONFIG_FILE`)
 - `--mcp-config` - Override MCP config file (sets `MCP_CONFIG_FILE`)
 - `--rag-sources-config` - Override RAG sources config file (sets `RAG_SOURCES_CONFIG_FILE`)
@@ -178,7 +177,7 @@ Config override flags (useful for testing/CI and alternative config layouts):
 
 ### Step 4: Modify ChatService to Accept EventPublisher
 
-**File:** `backend/application/chat/service.py`
+**File:** `atlas/application/chat/service.py`
 
 Current `ChatService.__init__()` creates its own event publisher. Need to:
 1. Add optional `event_publisher` parameter
@@ -201,7 +200,7 @@ def __init__(
 
 ### Step 5: Update AppFactory
 
-**File:** `backend/infrastructure/app_factory.py`
+**File:** `atlas/infrastructure/app_factory.py`
 
 Add method to create ChatService with custom event publisher:
 
@@ -219,7 +218,7 @@ def create_chat_service(
 
 ### Step 6: Package Init and Entry Point
 
-**File:** `backend/cli/__init__.py`
+**File:** `atlas/cli/__init__.py`
 
 ```python
 from .atlas_chat_cli import main, run_chat
@@ -308,15 +307,15 @@ for step in plan_steps:
 
 ## Critical Files to Modify
 
-1. `backend/application/chat/service.py` - Add event_publisher parameter
-2. `backend/infrastructure/app_factory.py` - Update create_chat_service()
+1. `atlas/application/chat/service.py` - Add event_publisher parameter
+2. `atlas/infrastructure/app_factory.py` - Update create_chat_service()
 
 ## New Files to Create
 
-1. `backend/cli/__init__.py`
-2. `backend/cli/atlas_chat_cli.py`
-3. `backend/cli/cli_event_publisher.py`
-4. `backend/cli/output_formatter.py`
+1. `atlas/cli/__init__.py`
+2. `atlas/cli/atlas_chat_cli.py`
+3. `atlas/cli/cli_event_publisher.py`
+4. `atlas/cli/output_formatter.py`
 
 ## Verification
 
@@ -324,7 +323,7 @@ for step in plan_steps:
 2. Run `python -m backend.cli.atlas_chat_cli --json "Hello" | jq .` - should output valid JSON
 3. Run `python -m backend.cli.atlas_chat_cli --agent --tools "canvas_canvas" "Create a simple HTML page"` - should execute tool
 4. Run `./test/run_tests.sh backend` - all existing tests should pass
-5. Run `ruff check backend/cli/` - no linting errors
+5. Run `ruff check atlas/cli/` - no linting errors
 
 ## Future Considerations
 

@@ -4,7 +4,7 @@ Last updated: 2026-01-19
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
-*   **Location**: The default configuration is at `config/defaults/llmconfig.yml`. You should place your instance-specific configuration in `config/overrides/llmconfig.yml`.
+*   **Location**: The package default is at `atlas/config/llmconfig.yml`. Place your instance-specific configuration in `config/llmconfig.yml`.
 
 ## Comprehensive Example
 
@@ -99,7 +99,7 @@ models:
 
 - **Recommended**: Use environment variables for all production API keys and sensitive header values
 - **Alternative**: For development/testing, you can use direct string values (not recommended for production)
-- **Never**: Commit API keys to `config/defaults/llmconfig.yml` or any version-controlled files
+- **Never**: Commit API keys to `atlas/config/llmconfig.yml` or any version-controlled files
 
 This environment variable expansion system works identically to the MCP server `auth_token` field, providing consistent behavior across all authentication and configuration mechanisms in the application.
 

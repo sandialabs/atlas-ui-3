@@ -174,7 +174,7 @@ Feedback files are stored in the directory specified by:
 RUNTIME_FEEDBACK_DIR=../runtime/feedback
 ```
 
-The default path is relative to the `backend/` directory, so `../runtime/feedback` resolves to `runtime/feedback` at the project root level.
+The default path is relative to the `atlas/` directory, so `../runtime/feedback` resolves to `runtime/feedback` at the project root level.
 
 In Docker deployments, the absolute path `/app/runtime/feedback` is used.
 

@@ -142,7 +142,7 @@ http_client = create_llm_client()
 
 1. **Create server directory**:
    ```bash
-   mkdir backend/mcp/myserver
+   mkdir atlas/mcp/myserver
    ```
 
 2. **Implement main.py**:
@@ -239,11 +239,11 @@ models:
 Edit `prompts/system_prompt.md` (moved out of backend code to root). Changes take effect immediately for new conversations.
 
 ### Adding New Authorization Groups
-Modify `backend/auth.py` and update group assignments in the `mock_groups` configuration.
+Modify `atlas/auth.py` and update group assignments in the `mock_groups` configuration.
 
 ## Logging
 
-All logs are written to `backend/logs/app.log` with enhanced error logging:
+All logs are written to `atlas/logs/app.log` with enhanced error logging:
 - **Full tracebacks** for all exceptions
 - **Security auditing** for authorization failures
 - **Consistent format** across all modules
@@ -265,5 +265,5 @@ uv pip list
 python -c "from config import config_manager; print(config_manager.app_settings)"
 
 # Check logs
-tail -f backend/logs/app.log
+tail -f atlas/logs/app.log
 ```

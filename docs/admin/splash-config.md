@@ -4,7 +4,7 @@ Last updated: 2026-01-19
 
 The splash screen feature allows you to display important policies and information to users when they first access the application. This is commonly used for displaying cookie policies, acceptable use policies, and other legal or organizational information.
 
-*   **Location**: Place your custom file at `config/overrides/splash-config.json`.
+*   **Location**: Place your custom file at `config/splash-config.json`.
 *   **Feature Flag**: Enable the splash screen by setting `FEATURE_SPLASH_SCREEN_ENABLED=true` in your `.env` file.
 
 The splash screen supports two operational modes:

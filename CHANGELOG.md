@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #275 - 2026-02-04
+- **Feature**: Make atlas installable as a Python package (`pip install atlas-chat`). Provides `AtlasClient` for programmatic use and CLI tools (`atlas-chat`, `atlas-server`) for command-line usage.
+- **Refactor**: Rename `backend/` directory to `atlas/` for proper Python package structure with `__init__.py` exports.
+- **CLI**: Add `atlas-server` command for starting the server with `--env`, `--config-folder`, `--port` options.
+- **CI/CD**: Add GitHub Actions workflow for publishing to PyPI on release.
+- **Fix**: Resolve test isolation issue where `test_capability_tokens_and_injection.py` was polluting `sys.modules` with a fake LiteLLMCaller, causing 25 tests to fail when run together.
+
 ### PR #TBD - 2026-02-04
 - Add banyan-extractor-mock service for PDF and PPTX content extraction using banyan-ingest and Nemotron Parse, with pypdf fallback for PDFs when banyan-ingest is unavailable.
 - Add pptx-text extractor configuration to file-extractors.json supporting PowerPoint file extraction.
@@ -182,7 +189,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Elicitation Demo Server**: Added `elicitation_demo` MCP server showcasing all elicitation types including scalar inputs, enum selections, structured forms, multi-turn flows, and approval-only requests.
 - Fix elicitation handler integration to use `client.set_elicitation_callback()` instead of passing as kwarg (resolves FastMCP API compatibility).
 - Admin UI: Fix duplicate "MCP Configuration & Controls" card rendering.
-- Admin UI: Clarify MCP Server Manager note that available configs are loaded from `config/mcp-example-configs/`.
+- Admin UI: Clarify MCP Server Manager note that available configs are loaded from `atlas/config/mcp-example-configs/`.
 
 ### PR #190 - 2026-01-05
 - Add a "Back to Admin Dashboard" navigation button to the admin LogViewer.

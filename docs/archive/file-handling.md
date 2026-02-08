@@ -67,7 +67,7 @@ All uploaded files are available to tools regardless of classification. Tools re
 
 ## Configuration
 
-File policies are defined in `backend/file_config.py`:
+File policies are defined in `atlas/file_config.py`:
 
 ```python
 # File types that should only be processed by tools

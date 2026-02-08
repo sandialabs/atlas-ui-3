@@ -53,8 +53,8 @@ runtime/logs/
 runtime/feedback/
 runtime/uploads/
 
-# Secure token storage (per-user MCP authentication tokens)
-config/secure/
+# User config directory (created by atlas-init, local customizations)
+/config/
 # !runtime/logs/.gitkeep
 # !runtime/feedback/.gitkeep
 # !runtime/uploads/.gitkeep
@@ -89,8 +89,9 @@ backend/minio-data/
 mocks/s3-mock/s3-mock-storage/
 .old.env
 old.env
+.temp.env
+temp.config
 backend/bandit_output.txt
-config/overrides/mcp-minimal.json
 
 # Scratch folder (local experimentation)
 scratch/

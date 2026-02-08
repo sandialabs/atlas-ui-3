@@ -3,11 +3,12 @@
 [![CI/CD Pipeline](https://github.com/sandialabs/atlas-ui-3/actions/workflows/ci.yml/badge.svg)](https://github.com/sandialabs/atlas-ui-3/actions/workflows/ci.yml)
 [![Security Checks](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml/badge.svg)](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml)
 [![Docker Image](https://ghcr-badge.egpl.dev/sandialabs/atlas-ui-3/latest_tag?trim=major&label=latest)](https://github.com/sandialabs/atlas-ui-3/pkgs/container/atlas-ui-3)
+[![PyPI version](https://badge.fury.io/py/atlas-chat.svg)](https://badge.fury.io/py/atlas-chat)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![React 19](https://img.shields.io/badge/react-19.2-blue.svg)
 ![License MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-Atlas UI 3 is a secure chat application with MCP (Model Context Protocol) integration, developed by Sandia National Laboratories—a U.S. Department of Energy national laboratory—to support U.S. Government customers.
+Atlas UI 3 is a secure chat application with MCP (Model Context Protocol) integration, developed by Sandia National Laboratories -- a U.S. Department of Energy national laboratory -- to support U.S. Government customers.
 
 
 
@@ -24,22 +25,126 @@ Atlas UI 3 is a secure chat application with MCP (Model Context Protocol) integr
 *   **RAG Support**: Enhance responses with Retrieval-Augmented Generation.
 *   **Secure and Configurable**: Features group-based access control, compliance levels, and a tool approval system.
 *   **Modern Stack**: Built with React 19, FastAPI, and WebSockets.
+*   **Python Package**: Install and use as a library or CLI tool.
 
-## Quick Start
+## Installation
 
-### Linux/macOS
+### Install from PyPI (Recommended for Users)
+
+```bash
+# Install the package
+pip install atlas-chat
+
+# Or with uv (faster)
+uv pip install atlas-chat
+```
+
+### CLI Usage
+
+After installation, three CLI tools are available:
+
+```bash
+# Set up configuration (run this first!)
+atlas-init              # Creates .env and config/ in current directory
+atlas-init --minimal    # Creates just a minimal .env file
+
+# Chat with an LLM
+atlas-chat "Hello, how are you?" --model gpt-4o
+atlas-chat "Use the search tool" --tools server_tool1
+atlas-chat --list-tools
+
+# Start the server
+atlas-server --port 8000
+atlas-server --env /path/to/.env --config-folder /path/to/config
+```
+
+### Python API Usage
+
+```python
+from atlas import AtlasClient, ChatResult
+
+# Async usage
+client = AtlasClient()
+result = await client.chat("Hello, how are you?")
+print(result.message)
+
+# With options
+result = await client.chat(
+    "Analyze this data",
+    model="gpt-4o",
+    selected_tools=["calculator", "search"],
+    agent_mode=True
+)
+
+# Sync wrapper
+result = client.chat_sync("Hello!")
+```
+
+## Quick Start (Development)
+
+### Prerequisites
+
+```bash
+# Install uv package manager (one-time)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create virtual environment and install dependencies
+uv venv && source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+### Development Installation (Editable Mode)
+
+For development, install the package in **editable mode**. This creates a link from your Python environment to your local source code, so any changes you make to the code are immediately available without reinstalling.
+
+```bash
+# Install in editable mode with uv (recommended)
+uv pip install -e .
+
+# Or with pip
+pip install -e .
+```
+
+**What editable mode gives you:**
+- Edit any Python file in `atlas/` and changes take effect immediately
+- CLI commands (`atlas-chat`, `atlas-server`) use your local code
+- Import `from atlas import AtlasClient` in scripts and get your local version
+- No need to reinstall after making changes
+
+**Example workflow:**
+```bash
+# Install once in editable mode
+uv pip install -e .
+
+# Edit code
+vim atlas/atlas_client.py
+
+# Run immediately with your changes - no reinstall needed
+atlas-chat "test my changes"
+python my_script.py  # uses updated AtlasClient
+```
+
+**Alternative: PYTHONPATH (if you can't use editable install)**
+```bash
+# Set PYTHONPATH manually when running
+PYTHONPATH=/path/to/atlas-ui-3 python atlas/main.py
+```
+
+### Running the Application
+
+**Linux/macOS:**
 ```bash
 bash agent_start.sh
 ```
 
-### Windows
+**Windows:**
 ```powershell
 .\ps_agent_start.ps1
 ```
 
 **Note for Windows users**: If you encounter frontend build errors related to Rollup dependencies, delete `frontend/package-lock.json` and `frontend/node_modules`, then run the script again.
 
-Both scripts automatically detect and work with Docker or Podman.
+Both scripts automatically detect and work with Docker or Podman. The `agent_start.sh` script builds the frontend, starts necessary services, and launches the backend server.
 
 ## Documentation
 

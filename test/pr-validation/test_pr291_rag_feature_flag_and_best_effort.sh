@@ -12,7 +12,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BACKEND_DIR="$PROJECT_ROOT/backend"
+ATLAS_DIR="$PROJECT_ROOT/atlas"
 RAG_MOCK_DIR="$PROJECT_ROOT/mocks/atlas-rag-api-mock"
 LLM_MOCK_DIR="$PROJECT_ROOT/mocks/llm-mock"
 FIXTURES_DIR="$SCRIPT_DIR/fixtures/pr291"
@@ -140,7 +140,7 @@ assert_cli_list_data_sources() {
 
     (
         cd "$PROJECT_ROOT"
-        "$PROJECT_ROOT/.venv/bin/python" backend/atlas_chat_cli.py \
+        "$PROJECT_ROOT/.venv/bin/python" atlas/atlas_chat_cli.py \
             --list-data-sources \
             --json \
             --user-email "test@test.com" \
@@ -214,7 +214,7 @@ print_result $? "One failing RAG source does not block discovery of other source
 # Best-effort retrieval: include a failing source in --data-sources and ensure chat succeeds.
 (
     cd "$PROJECT_ROOT"
-    "$PROJECT_ROOT/.venv/bin/python" backend/atlas_chat_cli.py \
+    "$PROJECT_ROOT/.venv/bin/python" atlas/atlas_chat_cli.py \
         "test" \
         --model "mock-model" \
         --only-rag \

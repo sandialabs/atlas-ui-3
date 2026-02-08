@@ -25,7 +25,7 @@ First, run the full test suite to verify the authentication logic:
 Or run only the WebSocket authentication tests:
 
 ```bash
-cd backend && python -m pytest tests/test_websocket_auth_header.py -v
+cd atlas && python -m pytest tests/test_websocket_auth_header.py -v
 ```
 
 Expected test cases:

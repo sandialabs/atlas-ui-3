@@ -10,5 +10,5 @@ extensions:
       # Format: [module, function, output, taintKinds]
       # Mark the function's return value as sanitized for all taint kinds.
       - ["core.utils", "sanitize_for_logging", "ReturnValue", "All"]
-      # Also include fully-qualified path with backend prefix in case imports resolve that way in analysis
-      - ["backend.core.utils", "sanitize_for_logging", "ReturnValue", "All"]
+      # Also include fully-qualified path with atlas prefix in case imports resolve that way in analysis
+      - ["atlas.core.utils", "sanitize_for_logging", "ReturnValue", "All"]

@@ -13,15 +13,15 @@ The domain whitelist feature allows you to restrict access to users with email a
 
 ## Configuration Files
 
-### Default Configuration
-Located at: `config/defaults/domain-whitelist.json`
+### Package Default
+Located at: `atlas/config/domain-whitelist.json`
 
 Contains DOE and national laboratory domains as an example. This file should not be modified directly.
 
 ### Custom Configuration
-To customize domains, create: `config/overrides/domain-whitelist.json`
+To customize domains, create: `config/domain-whitelist.json`
 
-The override file takes precedence over the default configuration.
+User config in `config/` takes precedence over package defaults in `atlas/config/`.
 
 ## Configuration Format
 
@@ -61,7 +61,7 @@ The override file takes precedence over the default configuration.
 
 ## Enabling the Feature
 
-1. Create your custom configuration at `config/overrides/domain-whitelist.json`
+1. Create your custom configuration at `config/domain-whitelist.json`
 2. Set `"enabled": true` in the config file
 3. Set environment variable: `FEATURE_DOMAIN_WHITELIST_ENABLED=true`
 4. Restart the application
@@ -138,7 +138,7 @@ When `subdomain_matching` is `false`:
 
 ### Issue: Configuration changes not taking effect
 - Restart the application after changing config files
-- Verify the override file is at `config/overrides/domain-whitelist.json`
+- Verify the config file is at `config/domain-whitelist.json`
 - Check application logs for config loading errors
 
 ### Issue: Everyone can access (no filtering)

@@ -1,0 +1,17 @@
+{
+  "elicitation_demo": {
+    "command": [
+      "python",
+      "mcp/elicitation_demo/main.py"
+    ],
+    "cwd": "atlas",
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates MCP user elicitation capabilities - requesting structured input from users during tool execution. Shows examples of string, number, boolean, enum field elicitation, structured multi-field forms, and multi-turn elicitation flows.",
+    "author": "Atlas UI Team",
+    "short_description": "User elicitation demonstration",
+    "help_email": "support@example.com",
+    "compliance_level": "Public"
+  }
+}

@@ -1,1 +1,0 @@
-{"ui-demo": {"command": ["python", "mcp/ui-demo/main.py"], "cwd": "backend", "groups": ["users"], "description": "ui-demo MCP server", "author": "Chat UI Team", "short_description": "ui-demo server", "help_email": "support@chatui.example.com", "compliance_level": "Public"}}

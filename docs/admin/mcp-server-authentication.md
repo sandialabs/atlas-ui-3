@@ -69,7 +69,7 @@ Each user's tokens are isolated - users cannot access each other's tokens.
 
 ### Server Configuration
 
-Configure MCP servers in `config/overrides/mcp.json`:
+Configure MCP servers in `config/mcp.json`:
 
 ```json
 {
@@ -205,9 +205,9 @@ The Tools panel shows authentication status for servers with `auth_type` of `api
 
 A demo MCP server requiring API key authentication. Demonstrates the full per-user API key flow.
 
-**Location:** `backend/mcp/api_key_demo/`
+**Location:** `atlas/mcp/api_key_demo/`
 
-**Config:** `config/mcp-example-configs/mcp-api_key_demo.json`
+**Config:** `atlas/config/mcp-example-configs/mcp-api_key_demo.json`
 
 **Valid test keys:**
 - `test123` - Test user (developer role)
@@ -215,7 +215,7 @@ A demo MCP server requiring API key authentication. Demonstrates the full per-us
 
 **Running the demo:**
 ```bash
-cd backend/mcp/api_key_demo
+cd atlas/mcp/api_key_demo
 bash run.sh
 ```
 
@@ -225,10 +225,10 @@ The server runs on port 8006 by default and validates API keys via the `X-API-Ke
 
 ### Backend
 
-- `backend/modules/mcp_tools/token_storage.py` - Encrypted token storage
-- `backend/routes/mcp_auth_routes.py` - API endpoints for token management
-- `backend/modules/mcp_tools/client.py` - MCP client with token injection
-- `backend/modules/config/config_manager.py` - auth_type configuration
+- `atlas/modules/mcp_tools/token_storage.py` - Encrypted token storage
+- `atlas/routes/mcp_auth_routes.py` - API endpoints for token management
+- `atlas/modules/mcp_tools/client.py` - MCP client with token injection
+- `atlas/modules/config/config_manager.py` - auth_type configuration
 
 ### Frontend
 
@@ -238,8 +238,8 @@ The server runs on port 8006 by default and validates API keys via the `X-API-Ke
 
 ### Demo Server
 
-- `backend/mcp/api_key_demo/main.py` - API key auth demo server
-- `backend/mcp/api_key_demo/run.sh` - Startup script (prints config snippet)
+- `atlas/mcp/api_key_demo/main.py` - API key auth demo server
+- `atlas/mcp/api_key_demo/run.sh` - Startup script (prints config snippet)
 
 ## Related
 

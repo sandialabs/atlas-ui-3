@@ -35,6 +35,9 @@ jobs:
         curl -LsSf https://astral.sh/uv/install.sh | sh
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
+    - name: Sync package assets
+      run: scripts/sync_package_assets.sh
+
     - name: Install frontend dependencies
       run: |
         cd frontend
@@ -51,8 +54,8 @@ jobs:
         mkdir -p build-artifacts
         # Copy frontend build output
         cp -r frontend/dist build-artifacts/frontend
-        # Copy backend source code
-        cp -r backend build-artifacts/
+        # Copy atlas package (Python backend)
+        cp -r atlas build-artifacts/
         # Copy config directory
         cp -r config build-artifacts/
         # Copy docs

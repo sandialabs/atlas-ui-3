@@ -1,6 +1,6 @@
 # Installation
 
-Last updated: 2026-01-19
+Last updated: 2026-02-04
 
 This guide provides everything you need to get Atlas UI 3 running, whether you prefer using Docker for a quick setup or setting up a local development environment.
 
@@ -135,11 +135,17 @@ npm run build
 Finally, start the FastAPI backend server.
 
 ```bash
-cd backend
-python main.py
+cd atlas
+PYTHONPATH=.. python main.py
 ```
 
 The backend will be available at `http://localhost:8000`.
+
+Alternatively, if you installed the package in editable mode (`pip install -e .`), you can use:
+
+```bash
+atlas-server --port 8000
+```
 
 ## Next Steps
 

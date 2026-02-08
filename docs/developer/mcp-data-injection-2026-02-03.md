@@ -107,7 +107,7 @@ The `_` prefix on `_mcp_data` signals that this is a system-injected parameter, 
 
 ### tool_planner (recommended reference)
 
-The `tool_planner` MCP server (`backend/mcp/tool_planner/main.py`) is the primary example of `_mcp_data` in action. It combines `_mcp_data` injection with MCP sampling to generate runnable bash scripts:
+The `tool_planner` MCP server (`atlas/mcp/tool_planner/main.py`) is the primary example of `_mcp_data` in action. It combines `_mcp_data` injection with MCP sampling to generate runnable bash scripts:
 
 1. Receives `_mcp_data` with all available tool metadata
 2. Converts it into a human-readable CLI reference via `format_tools_for_llm()`
@@ -116,10 +116,10 @@ The `tool_planner` MCP server (`backend/mcp/tool_planner/main.py`) is the primar
 
 ### username-override-demo
 
-The `username-override-demo` MCP server includes a simpler `plan_with_tools` tool that demonstrates basic `_mcp_data` injection without sampling. See `backend/mcp/username-override-demo/main.py`.
+The `username-override-demo` MCP server includes a simpler `plan_with_tools` tool that demonstrates basic `_mcp_data` injection without sampling. See `atlas/mcp/username-override-demo/main.py`.
 
 ## Related
 
 - Username injection: same pattern, injects authenticated user email into tools declaring a `username` parameter
 - Tool approval: `_mcp_data` is re-injected after user edits, same as `username`
-- Implementation: `backend/application/chat/utilities/tool_executor.py`
+- Implementation: `atlas/application/chat/utilities/tool_executor.py`

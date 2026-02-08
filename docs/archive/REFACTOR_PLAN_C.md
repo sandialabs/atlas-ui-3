@@ -26,7 +26,7 @@ Unified Architecture
 - core/ (temporary shims during migration; goal: empty)
 
 Target Structure
-- backend/
+- atlas/
   - domain/
     - messages/, sessions/, files/
     - errors.py

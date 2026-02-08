@@ -8,7 +8,7 @@ This guide covers the different ways MCP tools can return data to Atlas, includi
 
 A new MCP server is a simple Python script using the `FastMCP` library.
 
-1.  Create a new directory for your server inside `backend/mcp/`.
+1.  Create a new directory for your server inside `atlas/mcp/`.
 2.  Inside that directory, create a `main.py` file.
 
 **Example `main.py`:**
@@ -242,11 +242,11 @@ SECURITY_CSP_VALUE="default-src 'self'; img-src 'self' data: blob:; script-src '
 
 **Best Practice:** Document which external URLs your MCP server uses in your server's `description` field in `mcp.json`, so administrators know which domains need to be added to the CSP configuration.
 
-See the `backend/mcp/ui-demo/main.py` file for working examples of both iframe patterns.
+See the `atlas/mcp/ui-demo/main.py` file for working examples of both iframe patterns.
 
 ## 3. Registering the Server
 
-After creating your server, you must register it in `config/overrides/mcp.json`.
+After creating your server, you must register it in `config/mcp.json`.
 
 ```json
 {

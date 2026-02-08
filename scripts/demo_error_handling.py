@@ -7,10 +7,10 @@ This script simulates various LLM errors and shows how they are handled.
 import sys
 import os
 
-# Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
+# Add project root to path for atlas package imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from application.chat.utilities.error_utils import classify_llm_error
+from atlas.application.chat.utilities.error_utils import classify_llm_error
 
 
 def print_separator():
