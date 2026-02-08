@@ -1,7 +1,7 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useChat } from '../contexts/ChatContext'
-import { useState, memo, useEffect } from 'react'
+import { useState, memo, useEffect, useRef } from 'react'
 import { Copy } from 'lucide-react'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
@@ -709,6 +709,44 @@ const ToolApprovalMessage = ({ message }) => {
   )
 }
 
+// Elapsed time indicator for active tool calls with timeout warning
+const TOOL_SLOW_THRESHOLD_SEC = 30
+
+const ToolElapsedTime = ({ timestamp }) => {
+  const [elapsed, setElapsed] = useState(0)
+  const startRef = useRef(timestamp ? new Date(timestamp).getTime() : Date.now())
+
+  useEffect(() => {
+    startRef.current = timestamp ? new Date(timestamp).getTime() : Date.now()
+    setElapsed(0)
+  }, [timestamp])
+
+  useEffect(() => {
+    const tick = () => {
+      setElapsed(Math.floor((Date.now() - startRef.current) / 1000))
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const minutes = Math.floor(elapsed / 60)
+  const seconds = elapsed % 60
+  const timeStr = minutes > 0
+    ? `${minutes}m ${String(seconds).padStart(2, '0')}s`
+    : `${seconds}s`
+  const isSlow = elapsed >= TOOL_SLOW_THRESHOLD_SEC
+
+  return (
+    <span className="flex items-center gap-1 text-xs text-gray-400 ml-1">
+      <span>{timeStr}</span>
+      {isSlow && (
+        <span className="text-yellow-400">- taking longer than expected</span>
+      )}
+    </span>
+  )
+}
+
 const Message = ({ message }) => {
   const { appName, downloadFile } = useChat()
   
@@ -774,11 +812,18 @@ const renderContent = () => {
 
     // Handle tool call messages (both regular and agent mode use same UI)
     if (message.type === 'tool_call') {
+      const isToolActive = message.status === 'calling' || message.status === 'in_progress'
       return (
         <div className="text-gray-200 selectable-markdown">
           <div className="flex items-center gap-2 mb-3">
+            {isToolActive && (
+              <svg className="w-4 h-4 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            )}
             <span className={`px-2 py-1 rounded text-xs font-medium ${
-              message.status === 'calling' || message.status === 'in_progress' ? 'bg-blue-600' :
+              isToolActive ? 'bg-blue-600' :
               message.status === 'completed' ? 'bg-green-600' : 'bg-red-600'
             }`}>
               {message.status === 'calling' ? 'CALLING' :
@@ -787,6 +832,7 @@ const renderContent = () => {
             </span>
             <span className="font-medium">{message.tool_name}</span>
             <span className="text-gray-400 text-sm">({message.server_name})</span>
+            {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
           </div>
 
           {/* Progress Section (shows when in progress or progress data available) */}
