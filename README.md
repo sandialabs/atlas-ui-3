@@ -49,11 +49,12 @@ atlas-init              # Creates .env and config/ in current directory
 atlas-init --minimal    # Creates just a minimal .env file
 
 # Chat with an LLM
-atlas-chat "Hello, how are you?" --model gpt-4.1-nano
-atlas-chat "Use the search tool" --tools server_tool1
+atlas-chat "Hello, how are you?"
+atlas-chat "What is 2+2?" --tools calculator_evaluate
 atlas-chat --list-tools
+atlas-chat --list-models
 
-# Start the server
+# Start the web server
 atlas-server --port 8000
 atlas-server --env /path/to/.env --config-folder /path/to/config
 ```
@@ -66,21 +67,28 @@ from atlas import AtlasClient
 
 async def main():
     client = AtlasClient()
+
+    # Simple chat
     result = await client.chat("Hello, how are you?")
     print(result.message)
 
-    # With options
+    # Use the calculator MCP tool
     result = await client.chat(
-        "Analyze this data",
-        model="gpt-4.1-nano",
-        selected_tools=["calculator", "search"],
-        agent_mode=True,
+        "What is 1234 * 5678?",
+        selected_tools=["calculator_evaluate"],
     )
+    print(result.message)
+
     await client.cleanup()
 
 asyncio.run(main())
+```
 
-# Or use the sync wrapper
+Synchronous usage:
+
+```python
+from atlas import AtlasClient
+
 client = AtlasClient()
 result = client.chat_sync("Hello!")
 print(result.message)
