@@ -10,6 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Feature**: Add spinner animation and elapsed time counter to tool call status badges during active `calling`/`in_progress` states, with a timeout warning after 30 seconds.
 - **Feature**: Make the global "Thinking..." indicator context-aware: shows "Processing tool results..." after tool completion and "Running tool..." during tool execution.
 
+### PR #317 - 2026-02-08
+- **Feature**: Attach conversation history to user feedback by default (issue #307). Users see a checkbox (default on) in the feedback dialog. History is stored inline in the feedback JSON, and admins can view/download it.
+- **Fix**: CSP middleware now reads settings dynamically per-request and parses CSP directives robustly instead of brittle string replace.
+- **Fix**: FeedbackData model uses `Optional[str]` for `conversation_history` and `Field(default_factory=dict)` for `session`, with a 500K character limit on history.
+- **Docs**: Updated feedback documentation in `/docs/admin/feedback.md` to describe the new `conversation_history` field, opt-in UI toggle, admin views, and size limit.
+
 ### PR #315 - 2026-02-07
 - **Fix**: Bundle frontend into PyPI package so `atlas-server` serves the UI when installed via pip. CI now builds the frontend and copies it to `atlas/static/` before packaging.
 - **Fix**: Resolve `runtime_feedback_dir` to an absolute path inside the project root instead of relative to cwd, preventing stray `runtime/` directories when running from arbitrary locations.

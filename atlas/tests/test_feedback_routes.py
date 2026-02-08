@@ -331,3 +331,90 @@ class TestFeedbackDownload:
         assert "test123" in data_line
         assert "test@example.com" in data_line
         # Missing fields should be empty strings
+
+
+class TestFeedbackConversationHistory:
+    """Test conversation history attachment in feedback (issue #307)."""
+
+    def test_submit_feedback_with_conversation_history(self, mock_feedback_dir, mock_admin_check):
+        """Feedback with conversation_history stores it inline in the JSON."""
+        client = TestClient(app)
+        history_text = "USER:\nWhat is Python?\n\nASSISTANT:\nPython is a programming language.\n"
+
+        resp = client.post(
+            "/api/feedback",
+            json={
+                "rating": -1,
+                "comment": "Model was unhelpful",
+                "session": {},
+                "conversation_history": history_text
+            },
+            headers=AUTH_HEADERS
+        )
+        assert resp.status_code == 200
+
+        json_files = list(mock_feedback_dir.glob("feedback_*.json"))
+        assert len(json_files) == 1
+        with open(json_files[0]) as f:
+            data = json.load(f)
+        assert data["conversation_history"] == history_text
+
+    def test_submit_feedback_without_conversation_history(self, mock_feedback_dir, mock_admin_check):
+        """Feedback without conversation_history stores null."""
+        client = TestClient(app)
+        resp = client.post(
+            "/api/feedback",
+            json={"rating": 1, "comment": "All good", "session": {}},
+            headers=AUTH_HEADERS
+        )
+        assert resp.status_code == 200
+
+        json_files = list(mock_feedback_dir.glob("feedback_*.json"))
+        with open(json_files[0]) as f:
+            data = json.load(f)
+        assert data["conversation_history"] is None
+
+    def test_get_feedback_includes_conversation_history(self, mock_feedback_dir, mock_admin_check):
+        """Admin GET /api/feedback returns conversation_history inline."""
+        client = TestClient(app)
+        history_text = "USER:\nHello\n\nASSISTANT:\nHi\n"
+
+        client.post(
+            "/api/feedback",
+            json={
+                "rating": 0,
+                "comment": "",
+                "session": {},
+                "conversation_history": history_text
+            },
+            headers=AUTH_HEADERS
+        )
+
+        resp = client.get("/api/feedback", headers=ADMIN_HEADERS)
+        assert resp.status_code == 200
+        feedback_list = resp.json()["feedback"]
+        assert len(feedback_list) == 1
+        assert feedback_list[0]["conversation_history"] == history_text
+
+    def test_json_download_includes_conversation_history(self, mock_feedback_dir, mock_admin_check):
+        """JSON download includes conversation_history inline."""
+        client = TestClient(app)
+        history_text = "USER:\nWhat time is it?\n\nASSISTANT:\nI cannot tell time.\n"
+
+        client.post(
+            "/api/feedback",
+            json={
+                "rating": -1,
+                "comment": "Useless",
+                "session": {},
+                "conversation_history": history_text
+            },
+            headers=AUTH_HEADERS
+        )
+
+        resp = client.get("/api/feedback/download?format=json", headers=ADMIN_HEADERS)
+        assert resp.status_code == 200
+
+        json_data = resp.json()
+        assert len(json_data) == 1
+        assert json_data[0]["conversation_history"] == history_text

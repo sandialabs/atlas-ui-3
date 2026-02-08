@@ -1,6 +1,6 @@
 # User Feedback System
 
-Last updated: 2026-01-10
+Last updated: 2026-02-08
 
 The feedback system allows users to submit ratings and comments about their experience, which administrators can review to improve the application.
 
@@ -20,7 +20,8 @@ Users see a floating chat bubble icon in the bottom-right corner of the screen. 
 
 1. **Select a rating**: Positive (thumbs up), Neutral (dash), or Negative (thumbs down)
 2. **Add optional comments**: Up to 500 characters describing their experience
-3. **Submit**: The feedback is saved along with session metadata
+3. **Include conversation history** (opt-in, default on): A checkbox lets users attach the full chat transcript to their feedback. When enabled, the conversation text (model name, selected tools, data sources, and all messages) is sent as a string in the `conversation_history` field
+4. **Submit**: The feedback is saved along with session metadata
 
 Session metadata captured automatically includes:
 - Timestamp
@@ -40,6 +41,7 @@ Administrators can access feedback through the Admin Panel by clicking "View Fee
 - **Statistics Summary**: Total count, rating distribution (positive/neutral/negative), and average rating
 - **Feedback List**: Individual entries with timestamp, user, rating, and comments
 - **Session Details**: Expandable technical information for each entry
+- **Conversation History**: When the user opted in, the full chat transcript is shown in an expandable details section. Admins can also download the conversation history as part of the JSON export
 
 ### API Endpoints
 
@@ -64,7 +66,8 @@ Returns paginated list of all feedback with statistics.
       "rating": 1,
       "comment": "Great experience!",
       "session_info": { ... },
-      "server_context": { ... }
+      "server_context": { ... },
+      "conversation_history": "USER:\n...\n\nASSISTANT:\n..."
     }
   ],
   "pagination": {
@@ -155,9 +158,12 @@ Submits new feedback. This endpoint is available to all authenticated users (not
     "timestamp": "2026-01-10T12:00:00Z",
     "userAgent": "Mozilla/5.0...",
     "url": "https://example.com/chat"
-  }
+  },
+  "conversation_history": "USER:\nWhat is Python?\n\nASSISTANT:\nPython is a programming language.\n"
 }
 ```
+
+The `conversation_history` field is optional (defaults to `null`). When provided, it is stored inline in the feedback JSON file. Maximum length is 500,000 characters. Empty or whitespace-only values are normalized to `null`.
 
 **Rating Values:**
 - `1` = Positive
@@ -218,7 +224,8 @@ Each feedback file contains:
     "client_host": "192.168.1.100",
     "forwarded_for": "",
     "referer": "https://example.com/"
-  }
+  },
+  "conversation_history": "Model: gpt-4o\nTools: server_toolName\nData Sources: None selected\n\n--- Conversation ---\n\nUSER:\nWhat is Python?\n\nASSISTANT:\nPython is a programming language.\n"
 }
 ```
 
@@ -229,3 +236,4 @@ Each feedback file contains:
 - User email addresses are captured for accountability
 - Comments are trimmed and stored as-is (consider sanitization for display)
 - Client IP addresses are logged in server_context for audit purposes
+- Conversation history is capped at 500,000 characters to prevent resource exhaustion
