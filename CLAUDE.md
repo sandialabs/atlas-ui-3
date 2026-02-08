@@ -153,6 +153,8 @@ frontend/src/
    handlers/         # WebSocket message handlers
 ```
 
+**Stale Selection Cleanup:** ChatContext validates persisted tool/prompt selections against the current `/api/config` response and removes entries that no longer exist (e.g., removed servers, changed authorization). MarketplaceContext similarly prunes stale server selections. Follow this pattern when adding new persisted selections.
+
 **Event Flow:**
 ```
 User Input -> ChatContext -> WebSocket -> Backend ChatService
