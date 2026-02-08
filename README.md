@@ -49,7 +49,7 @@ atlas-init              # Creates .env and config/ in current directory
 atlas-init --minimal    # Creates just a minimal .env file
 
 # Chat with an LLM
-atlas-chat "Hello, how are you?" --model gpt-4o
+atlas-chat "Hello, how are you?" --model gpt-4.1-nano
 atlas-chat "Use the search tool" --tools server_tool1
 atlas-chat --list-tools
 
@@ -72,7 +72,7 @@ async def main():
     # With options
     result = await client.chat(
         "Analyze this data",
-        model="gpt-4o",
+        model="gpt-4.1-nano",
         selected_tools=["calculator", "search"],
         agent_mode=True,
     )
