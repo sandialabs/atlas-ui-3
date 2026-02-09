@@ -83,6 +83,13 @@ SLIDE_WIDTH = Inches(7.5 * 16 / 9)  # 16:9 aspect ratio = 13.333... inches
 # Only allow files relative to the current working directory
 ALLOWED_BASE_PATH = Path(".").resolve()
 
+# Template search paths (checked in order, first match wins)
+TEMPLATE_SEARCH_PATHS = [
+    current_dir / "template.pptx",              # Next to this script
+    atlas_dir / "config" / "pptx_template.pptx", # Package config dir
+    project_root / "config" / "pptx_template.pptx",  # User config override dir
+]
+
 
 def _escape_html(text: str) -> str:
     """Escape HTML special characters to prevent XSS attacks."""
@@ -151,6 +158,36 @@ def _clean_markdown_text(text: str) -> str:
     return text.strip()
 
 
+def _find_template_path() -> Optional[Path]:
+    """Search for a PPTX template file in known locations.
+
+    Checks the PPTX_TEMPLATE_PATH environment variable first,
+    then falls back to standard search paths.
+    """
+    env_path = os.environ.get("PPTX_TEMPLATE_PATH")
+    if env_path:
+        p = Path(env_path)
+        if p.is_file():
+            logger.info(f"Using template from PPTX_TEMPLATE_PATH: {p}")
+            return p
+        logger.warning(f"PPTX_TEMPLATE_PATH set but file not found: {env_path}")
+
+    for search_path in TEMPLATE_SEARCH_PATHS:
+        if search_path.is_file():
+            logger.info(f"Found template at: {search_path}")
+            return search_path
+
+    return None
+
+
+def _get_layout_by_name(prs: Presentation, name: str) -> Optional[object]:
+    """Find a slide layout by name (e.g. 'Title and Content')."""
+    for layout in prs.slide_layouts:
+        if layout.name == name:
+            return layout
+    return None
+
+
 def _apply_sandia_template(prs: Presentation) -> None:
     """Apply Sandia-style template settings to the presentation."""
     # Set 16:9 aspect ratio
@@ -207,6 +244,56 @@ def _style_title(title_shape) -> None:
             paragraph.font.color.rgb = SANDIA_BLUE
             paragraph.font.bold = True
             paragraph.font.size = Pt(36)
+
+def _populate_content_frame(tf, content: str) -> None:
+    """Populate a text frame with parsed markdown content (bullets, numbered lists, text).
+
+    Works with both placeholder text frames and manually created textboxes.
+    """
+    if not content.strip():
+        return
+
+    lines = content.split('\n')
+    first_paragraph = True
+
+    for line in lines:
+        line = line.rstrip()
+        if not line.strip():
+            continue
+
+        indent_level = 0
+        stripped_line = line.lstrip()
+        leading_spaces = len(line) - len(stripped_line)
+
+        bullet_text = stripped_line
+
+        numbered_match = re.match(r'^(\d+)\.\s+(.+)$', stripped_line)
+        if numbered_match:
+            bullet_text = numbered_match.group(2)
+            indent_level = _calculate_indent_level(leading_spaces)
+        else:
+            bullet_match = re.match(r'^[-*+]\s+(.+)$', stripped_line)
+            if bullet_match:
+                bullet_text = bullet_match.group(1)
+                indent_level = _calculate_indent_level(leading_spaces)
+
+        bullet_text = _clean_markdown_text(bullet_text.strip())
+        if not bullet_text:
+            continue
+
+        if first_paragraph:
+            p = tf.paragraphs[0]
+            first_paragraph = False
+        else:
+            p = tf.add_paragraph()
+
+        p.text = bullet_text
+        p.level = min(indent_level, 4)
+        p.font.size = Pt(20)
+        p.font.color.rgb = SANDIA_GRAY if indent_level > 0 else RGBColor(51, 51, 51)
+        p.space_after = Pt(8)
+        p.alignment = PP_ALIGN.LEFT
+
 
 def _sanitize_filename(filename: str, max_length: int = 50) -> str:
     """Sanitize filename by removing bad characters and truncating."""
@@ -375,103 +462,94 @@ def markdown_to_pptx(
                 if VERBOSE:
                     logger.info(f"Failed to load image: {image_filename}")
 
-        # Create presentation with 16:9 aspect ratio
-        prs = Presentation()
-        _apply_sandia_template(prs)
+        # Create presentation: try template file first, then built-in layouts
+        template_path = _find_template_path()
+        use_placeholders = False
+
+        if template_path:
+            prs = Presentation(str(template_path))
+            layout = _get_layout_by_name(prs, "Title and Content")
+            if layout:
+                use_placeholders = True
+                logger.info(f"Using template with 'Title and Content' layout from {template_path}")
+            else:
+                logger.warning(
+                    f"Template at {template_path} has no 'Title and Content' layout, "
+                    f"available layouts: {[l.name for l in prs.slide_layouts]}"
+                )
+                prs = Presentation()
+                _apply_sandia_template(prs)
+        else:
+            prs = Presentation()
+            _apply_sandia_template(prs)
+
+        # If no template, try built-in "Title and Content" layout
+        if not use_placeholders:
+            layout = _get_layout_by_name(prs, "Title and Content")
+            if layout:
+                use_placeholders = True
+                logger.info("Using built-in 'Title and Content' layout")
+            else:
+                layout = prs.slide_layouts[6]  # Blank layout fallback
+                logger.info("Falling back to blank layout with manual textboxes")
+
         if VERBOSE:
-            logger.info("Created PowerPoint presentation with 16:9 aspect ratio")
+            logger.info(
+                f"Created presentation (template={template_path is not None}, "
+                f"placeholders={use_placeholders})"
+            )
 
         for i, slide_data in enumerate(slides):
             title = slide_data.get('title', 'Untitled Slide')
             content = slide_data.get('content', '')
 
-            # Add slide using blank layout for full control
-            slide_layout = prs.slide_layouts[6]  # Blank layout
-            slide_obj = prs.slides.add_slide(slide_layout)
+            slide_obj = prs.slides.add_slide(layout)
 
-            # Add header accent bar
-            _add_header_bar(slide_obj)
+            if use_placeholders:
+                # Use standard layout placeholders for title and content
+                title_ph = slide_obj.placeholders[0]
+                title_ph.text = title
+                _style_title(title_ph)
 
-            # Add title text box
-            title_box = slide_obj.shapes.add_textbox(
-                Inches(0.5), Inches(0.3),
-                SLIDE_WIDTH - Inches(1), Inches(0.8)
-            )
-            title_tf = title_box.text_frame
-            title_tf.word_wrap = True
-            title_p = title_tf.paragraphs[0]
-            title_p.text = title
-            title_p.font.size = Pt(36)
-            title_p.font.bold = True
-            title_p.font.color.rgb = SANDIA_BLUE
-            title_p.alignment = PP_ALIGN.LEFT
+                if 1 in slide_obj.placeholders:
+                    content_tf = slide_obj.placeholders[1].text_frame
+                    content_tf.word_wrap = True
+                    _populate_content_frame(content_tf, content)
+
+                # Add header/footer bars only when not using a template
+                # (templates should define these in the slide master)
+                if not template_path:
+                    _add_header_bar(slide_obj)
+                    _add_footer_bar(slide_obj, i + 1, total_slides)
+            else:
+                # Blank layout fallback: manual textboxes (original behavior)
+                _add_header_bar(slide_obj)
+
+                title_box = slide_obj.shapes.add_textbox(
+                    Inches(0.5), Inches(0.3),
+                    SLIDE_WIDTH - Inches(1), Inches(0.8)
+                )
+                title_tf = title_box.text_frame
+                title_tf.word_wrap = True
+                title_p = title_tf.paragraphs[0]
+                title_p.text = title
+                title_p.font.size = Pt(36)
+                title_p.font.bold = True
+                title_p.font.color.rgb = SANDIA_BLUE
+                title_p.alignment = PP_ALIGN.LEFT
+
+                content_box = slide_obj.shapes.add_textbox(
+                    Inches(0.5), Inches(1.3),
+                    SLIDE_WIDTH - Inches(1), SLIDE_HEIGHT - Inches(2.0)
+                )
+                tf = content_box.text_frame
+                tf.word_wrap = True
+                _populate_content_frame(tf, content)
+
+                _add_footer_bar(slide_obj, i + 1, total_slides)
 
             if VERBOSE:
                 logger.info(f"Added slide {i+1}: {title}")
-
-            # Add content text box
-            content_box = slide_obj.shapes.add_textbox(
-                Inches(0.5), Inches(1.3),
-                SLIDE_WIDTH - Inches(1), SLIDE_HEIGHT - Inches(2.0)
-            )
-            tf = content_box.text_frame
-            tf.word_wrap = True
-
-            # Process content - handle bullet points and regular text with improved cleanup
-            if content.strip():
-                lines = content.split('\n')
-                first_paragraph = True
-
-                for line in lines:
-                    line = line.rstrip()
-
-                    if not line.strip():
-                        continue
-
-                    # Calculate indentation level
-                    indent_level = 0
-                    stripped_line = line.lstrip()
-                    leading_spaces = len(line) - len(stripped_line)
-
-                    # Check for various bullet point formats
-                    is_bullet = False
-                    bullet_text = stripped_line
-
-                    # Handle numbered lists (1. 2. etc.)
-                    numbered_match = re.match(r'^(\d+)\.\s+(.+)$', stripped_line)
-                    if numbered_match:
-                        is_bullet = True
-                        bullet_text = numbered_match.group(2)
-                        indent_level = _calculate_indent_level(leading_spaces)
-                    # Handle bullet points (-, *, +) with regex for proper text extraction
-                    else:
-                        bullet_match = re.match(r'^[-*+]\s+(.+)$', stripped_line)
-                        if bullet_match:
-                            is_bullet = True
-                            bullet_text = bullet_match.group(1)
-                            indent_level = _calculate_indent_level(leading_spaces)
-
-                    # Clean the bullet text from markdown formatting
-                    bullet_text = _clean_markdown_text(bullet_text.strip())
-
-                    if not bullet_text:
-                        continue
-
-                    if first_paragraph:
-                        p = tf.paragraphs[0]
-                        first_paragraph = False
-                    else:
-                        p = tf.add_paragraph()
-
-                    p.text = bullet_text
-                    p.level = min(indent_level, 4)  # Cap at level 4
-                    p.font.size = Pt(20)
-                    p.font.color.rgb = SANDIA_GRAY if indent_level > 0 else RGBColor(51, 51, 51)
-                    p.space_after = Pt(8)
-                    p.alignment = PP_ALIGN.LEFT
-
-            # Add footer bar with slide number
-            _add_footer_bar(slide_obj, i + 1, total_slides)
 
             # Add image to first slide if provided
             if i == 0 and image_bytes:
