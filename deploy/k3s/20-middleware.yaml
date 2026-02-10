@@ -1,0 +1,37 @@
+# Strip any client-provided X-User-Email header before forwarding.
+# This prevents clients from spoofing the trusted auth header.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-client-auth-header
+  namespace: atlas
+spec:
+  headers:
+    customRequestHeaders:
+      X-User-Email: ""
+---
+# Forward authentication to the atlas-auth service.
+# On 2xx, Traefik copies the X-User-Email response header to the upstream request.
+# On non-2xx (302 redirect), Traefik passes the auth response to the client.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: atlas-forward-auth
+  namespace: atlas
+spec:
+  forwardAuth:
+    address: http://atlas-auth.atlas.svc.cluster.local:5000/auth
+    authResponseHeaders:
+      - X-User-Email
+---
+# Chain: strip header first, then forward-auth.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: auth-chain
+  namespace: atlas
+spec:
+  chain:
+    middlewares:
+      - name: strip-client-auth-header
+      - name: atlas-forward-auth

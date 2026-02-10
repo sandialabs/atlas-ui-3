@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-ui
+  namespace: atlas
+  labels:
+    app: atlas-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: atlas-ui
+  template:
+    metadata:
+      labels:
+        app: atlas-ui
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: atlas-ui
+          image: localhost/atlas-ui:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: atlas-config
+            - secretRef:
+                name: atlas-secrets
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/config
+            - name: app-logs
+              mountPath: /app/logs
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+      volumes:
+        - name: app-config
+          hostPath:
+            path: /home/garlan/prod-atlas/atlas-ui-3/config
+            type: DirectoryOrCreate
+        - name: app-logs
+          hostPath:
+            path: /home/garlan/prod-atlas/atlas-ui-3/logs
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-ui
+  namespace: atlas
+spec:
+  selector:
+    app: atlas-ui
+  ports:
+    - port: 8000
+      targetPort: 8000

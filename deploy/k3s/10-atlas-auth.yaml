@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-auth
+  namespace: atlas
+  labels:
+    app: atlas-auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: atlas-auth
+  template:
+    metadata:
+      labels:
+        app: atlas-auth
+    spec:
+      containers:
+        - name: atlas-auth
+          image: localhost/atlas-auth:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 5000
+          env:
+            - name: ATLAS_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: atlas-secrets
+                  key: ATLAS_AUTH_SECRET
+            - name: ATLAS_AUTH_SESSION_HOURS
+              valueFrom:
+                configMapKeyRef:
+                  name: atlas-config
+                  key: ATLAS_AUTH_SESSION_HOURS
+          volumeMounts:
+            - name: auth-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: auth-data
+          hostPath:
+            path: /home/garlan/prod-atlas/atlas-ui-3/data/auth
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-auth
+  namespace: atlas
+spec:
+  selector:
+    app: atlas-auth
+  ports:
+    - port: 5000
+      targetPort: 5000

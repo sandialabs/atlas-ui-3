@@ -65,7 +65,8 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         mock_groups = {
             "test@test.com": ["users", "mcp_basic", "admin"],
             "user@example.com": ["users", "mcp_basic"],
-            "admin@example.com": ["admin", "users", "mcp_basic", "mcp_advanced"]
+            "admin@example.com": ["admin", "users", "mcp_basic", "mcp_advanced"],
+            "garland3@gmail.com": ["admin", "users", "mcp_basic", "mcp_advanced"],
         }
         user_groups = mock_groups.get(user_id, [])
         return group_id in user_groups

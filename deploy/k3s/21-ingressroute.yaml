@@ -1,0 +1,38 @@
+# Public routes - login and signup pages (no auth required)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: atlas-public
+  namespace: atlas
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: PathPrefix(`/login`)
+      kind: Rule
+      services:
+        - name: atlas-auth
+          port: 5000
+    - match: PathPrefix(`/signup`)
+      kind: Rule
+      services:
+        - name: atlas-auth
+          port: 5000
+---
+# Protected routes - everything else goes through auth chain
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: atlas-protected
+  namespace: atlas
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: PathPrefix(`/`)
+      kind: Rule
+      middlewares:
+        - name: auth-chain
+      services:
+        - name: atlas-ui
+          port: 8000

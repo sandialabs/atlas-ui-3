@@ -1,0 +1,15 @@
+# HelmChartConfig to override Traefik's default ports.
+# K3s auto-applies files placed in /var/lib/rancher/k3s/server/manifests/
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    ports:
+      web:
+        exposedPort: 8080
+    logs:
+      general:
+        level: INFO
