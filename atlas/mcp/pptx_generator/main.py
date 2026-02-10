@@ -475,7 +475,7 @@ def markdown_to_pptx(
             else:
                 logger.warning(
                     f"Template at {template_path} has no 'Title and Content' layout, "
-                    f"available layouts: {[l.name for l in prs.slide_layouts]}"
+                    f"available layouts: {[sl.name for sl in prs.slide_layouts]}"
                 )
                 prs = Presentation()
                 _apply_sandia_template(prs)

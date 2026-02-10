@@ -389,8 +389,8 @@ async def run_system_diagnostics() -> Dict[str, Any]:
         Dictionary with raw diagnostic telemetry and interpretation instructions
     """
     import asyncio
-    import random
     import datetime
+    import random
 
     await asyncio.sleep(10)
 

@@ -27,8 +27,8 @@ CLI tools (after pip install):
     atlas-server --port 8000
 """
 
-from atlas.version import VERSION
 from atlas.atlas_client import AtlasClient, ChatResult
+from atlas.version import VERSION
 
 __version__ = VERSION
 __all__ = [
