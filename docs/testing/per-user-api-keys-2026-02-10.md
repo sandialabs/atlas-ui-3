@@ -59,13 +59,21 @@ bash agent_start.sh -b
 2. In the model dropdown you should see:
    - **mock-system** -- selectable immediately.
    - **mock-user** -- shows an orange key icon (no key yet).
+
+   ![Model dropdown showing mock-system and mock-user with key icon](../readme_img/per-user-api-key-model-dropdown.png)
+
 3. Click the key icon next to **mock-user**. Paste any string as the API key
-   (e.g. `sk-test-my-key-1234`). The icon turns green.
+   (e.g. `sk-charlie-test-key-003`). The icon turns green.
+
+   ![Token upload modal for mock-user](../readme_img/per-user-api-key-token-upload.png)
+
 4. Select **mock-user** and send a chat message.
 5. Check the mock LLM terminal -- you should see the `[AUTH]` line with the
-   masked version of the key you pasted.
-6. The chat response will also include `[Authenticated with key sk-t...1234]`
-   confirming the key reached the mock.
+   mapped user identity for the key you pasted.
+6. The chat response will include `[Authenticated as user@example.com]`
+   confirming the key reached the mock and was mapped to a user.
+
+   ![Chat response showing authenticated user identity](../readme_img/per-user-api-key-authenticated-response.png)
 
 ### 5. Verify key removal
 
@@ -97,8 +105,8 @@ preserving backward compatibility with existing tests.
 
 ## What to Look For
 
-- **Mock LLM stdout**: `[AUTH]` lines confirm the per-user key arrived.
-- **Chat response text**: Contains `[Authenticated with key ...]` suffix.
+- **Mock LLM stdout**: `[AUTH]` lines confirm the per-user key arrived and map to a user.
+- **Chat response text**: Contains `[Authenticated as user@example.com]` suffix.
 - **Orange/green key icon**: Confirms frontend state management works.
 - **Model disabled in dropdown**: Confirms UI blocks chat without a key.
 - **No cross-user leakage**: If two browser tabs use different test users,
