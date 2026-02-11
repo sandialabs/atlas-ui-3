@@ -132,6 +132,8 @@ Note: ChatContext validates persisted localStorage selections (tools, prompts, d
 - Resources and servers may include `complianceLevel`
 - `domain/rag_mcp_service.py` handles RAG discovery/search/synthesis
 
+**PPTX Generator MCP Server:** The `pptx_generator` MCP server (`atlas/mcp/pptx_generator/main.py`) uses a three-tier layout strategy: custom template file (via `PPTX_TEMPLATE_PATH` env var or search paths) -> built-in Office "Title and Content" layout -> blank layout with manual textboxes.
+
 **Testing MCP Features:**
 Example configurations in `atlas/config/mcp-example-configs/` with individual `mcp-{servername}.json` files.
 

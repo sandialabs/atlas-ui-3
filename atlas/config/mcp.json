@@ -120,7 +120,22 @@
     "description": "Mock HTTP MCP server for testing authentication",
     "auth_token": "${MCP_EXTERNAL_API_TOKEN}"
   }, 
-   "many_tools_demo": {
+   "pptx_generator": {
+    "command": [
+      "python",
+      "mcp/pptx_generator/main.py"
+    ],
+    "cwd": "atlas",
+    "groups": [
+      "users"
+    ],
+    "description": "Convert markdown content into professional PowerPoint presentations with 16:9 aspect ratio, bullet points, and optional image integration",
+    "author": "Chat UI Team",
+    "short_description": "Markdown to PowerPoint converter",
+    "help_email": "support@chatui.example.com",
+    "compliance_level": "Public"
+  },
+  "many_tools_demo": {
     "command": [
       "python",
       "mcp/many_tools_demo/main.py"

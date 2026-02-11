@@ -110,6 +110,8 @@ frontend/src/
 - Expected tools: `rag_discover_resources`, `rag_get_raw_results`, optional `rag_get_synthesized_results`
 - Resources and servers may include `complianceLevel`
 
+**PPTX Generator MCP Server:** The `pptx_generator` MCP server (`atlas/mcp/pptx_generator/main.py`) uses a three-tier layout strategy: custom template file (via `PPTX_TEMPLATE_PATH` env var or search paths) -> built-in Office "Title and Content" layout -> blank layout with manual textboxes.
+
 **Testing MCP:**
 Example configurations in `atlas/config/mcp-example-configs/` with individual `mcp-{servername}.json` files.
 
