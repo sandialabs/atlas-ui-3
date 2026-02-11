@@ -249,7 +249,7 @@ main() {
         cleanup_processes
         cleanup_logs
         start_mcp_mock
-        start_backend "${PORT:-8000}" "0.0.0.0"
+        start_backend "${PORT:-8000}" "${ATLAS_HOST:-127.0.0.1}"
         echo "Backend server started."
         echo "Press Ctrl+C to stop all services."
         # Keep script running to prevent cleanup
@@ -262,7 +262,7 @@ main() {
     cleanup_logs
     build_frontend
     start_mcp_mock
-    start_backend "${PORT:-8000}" "127.0.0.1"
+    start_backend "${PORT:-8000}" "${ATLAS_HOST:-127.0.0.1}"
     
     # Display MCP info if started
     if [ "$START_MCP_MOCK" = true ]; then

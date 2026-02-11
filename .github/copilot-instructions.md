@@ -250,6 +250,7 @@ Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.
 4. **Frontend not loading**: Verify `npm run build` completed
 5. **Missing tools**: Check MCP transport/URL and server logs
 6. **Empty lists**: Check auth groups and compliance filtering
+7. **Host binding ignored**: `agent_start.sh` and the Dockerfile both use `ATLAS_HOST` env var for host binding; `main.py` also reads it directly -- keep all three in sync when changing network configuration
 
 ## Critical Restrictions
 
