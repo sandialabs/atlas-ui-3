@@ -154,7 +154,8 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
               const cm = models.find(m => (typeof m === 'string' ? m : m.name) === currentModel)
               const cmObj = typeof cm === 'string' ? { name: cm } : cm
               if (cmObj?.api_key_source === 'user') {
-                return <Key className={`w-3 h-3 flex-shrink-0 ${cmObj.user_has_key ? 'text-green-400' : 'text-orange-400'}`} />
+                const hasKey = cmObj.user_has_key || llmAuth.getModelAuth(currentModel)?.authenticated
+                return <Key className={`w-3 h-3 flex-shrink-0 ${hasKey ? 'text-green-400' : 'text-orange-400'}`} />
               }
               return null
             })()}
@@ -181,7 +182,7 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
                     const model = typeof m === 'string' ? { name: m } : m
                     const modelName = model.name || m
                     const needsUserKey = model.api_key_source === 'user'
-                    const hasUserKey = model.user_has_key === true
+                    const hasUserKey = model.user_has_key === true || llmAuth.getModelAuth(modelName)?.authenticated === true
                     const isDisabled = needsUserKey && !hasUserKey
                     return (
                       <div

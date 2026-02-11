@@ -192,6 +192,9 @@ start_backend() {
 
     cd "$PROJECT_ROOT/atlas"
     # Set PYTHONPATH so atlas package imports work
+    # Set APP_CONFIG_DIR so user overrides in <project_root>/config/ take
+    # precedence over package defaults in atlas/config/ (CWD is atlas/).
+    APP_CONFIG_DIR="${APP_CONFIG_DIR:-$PROJECT_ROOT/config}" \
     PYTHONPATH="$PROJECT_ROOT" "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" &
     echo "Backend server started on $host:$port"
     cd "$PROJECT_ROOT"
