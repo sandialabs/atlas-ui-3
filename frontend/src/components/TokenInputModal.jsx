@@ -82,7 +82,7 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
 
   return (
     <div
-      className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-60"
+      className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]"
       onClick={handleClose}
     >
       <div

@@ -254,7 +254,10 @@ async def get_config(
         sanitize_for_logging(current_user),
         authorized_servers,
     )
-    # Build models list with compliance levels
+    # Build models list with compliance levels and api_key_source
+    from atlas.modules.mcp_tools.token_storage import get_token_storage
+    token_storage = get_token_storage()
+
     models_list = []
     for model_name, model_config in llm_config.models.items():
         model_info = {
@@ -264,6 +267,12 @@ async def get_config(
         # Include compliance_level if feature is enabled
         if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
             model_info["compliance_level"] = model_config.compliance_level
+        # Include api_key_source so frontend knows which models need user keys
+        api_key_source = getattr(model_config, "api_key_source", "system")
+        if api_key_source == "user":
+            model_info["api_key_source"] = "user"
+            stored = token_storage.get_valid_token(current_user, f"llm:{model_name}")
+            model_info["user_has_key"] = stored is not None
         models_list.append(model_info)
 
     # Build tool approval settings - only include tools from authorized servers

@@ -76,7 +76,7 @@ class ModelConfig(BaseModel):
     """Configuration for a single LLM model."""
     model_name: str
     model_url: str
-    api_key: str
+    api_key: str = ""
     description: Optional[str] = None
     max_tokens: Optional[int] = 10000
     temperature: Optional[float] = 0.7
@@ -84,6 +84,8 @@ class ModelConfig(BaseModel):
     extra_headers: Optional[Dict[str, str]] = None
     # Compliance/security level (e.g., "External", "Internal", "Public")
     compliance_level: Optional[str] = None
+    # API key source: "system" uses env var resolution, "user" requires per-user key from token storage
+    api_key_source: str = "system"
 
 
 class LLMConfig(BaseModel):

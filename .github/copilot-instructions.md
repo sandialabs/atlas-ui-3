@@ -91,6 +91,8 @@ frontend/src/
 - `compliance-levels.json` - Compliance level definitions
 - `.env` - Environment variables (copy from `.env.example`)
 
+**Per-User LLM API Keys:** Models can set `api_key_source: "user"` in `llmconfig.yml` to require per-user keys (stored via `MCPTokenStorage` with `"llm:{model_name}"` prefix); `user_email` is threaded through all LLM call paths and REST endpoints live at `/api/llm/auth/`.
+
 **Feature Flags (AppSettings):**
 - `FEATURE_TOOLS_ENABLED` - Enable/disable MCP tools
 - `FEATURE_RAG_MCP_ENABLED` - Enable/disable RAG over MCP

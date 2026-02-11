@@ -210,4 +210,5 @@ class ChatOrchestrator:
                 model=model,
                 messages=messages,
                 temperature=temperature,
+                user_email=user_email,
             )

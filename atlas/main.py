@@ -61,6 +61,7 @@ from atlas.routes.config_routes import router as config_router
 from atlas.routes.feedback_routes import feedback_router
 from atlas.routes.files_routes import router as files_router
 from atlas.routes.health_routes import router as health_router
+from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.version import VERSION
 
@@ -218,6 +219,7 @@ app.include_router(admin_router)
 app.include_router(files_router)
 app.include_router(health_router)
 app.include_router(feedback_router)
+app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
 
 # Serve frontend build (Vite)

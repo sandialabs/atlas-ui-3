@@ -23,10 +23,11 @@ When given a branch name or PR number, you will:
    - Run: `git worktree add <worktree_path> <branch>`
    - If the worktree already exists, inform the user and ask whether to remove and recreate it.
 
-4. **Copy environment files and adjust ports:**
+4. **Copy environment and config files, adjust ports:**
    - Copy `.env` from the original repo root to the new worktree root: `cp <original_root>/.env <worktree_path>/.env`
-   - Copy any `config/overrides/` files if they exist: `cp -r <original_root>/config/overrides/* <worktree_path>/config/overrides/` (create the directory first if needed).
-   - **Avoid port conflicts:** Change `PORT=8000` to a different port (e.g., `PORT=8001`) in the worktree's `.env` so it can run alongside the main repo. Use `sed` to update the value in-place. `agent_start.sh` reads PORT from the environment, so updating `.env` is sufficient.
+   - Copy `atlas/config/` to `config/` in the worktree so it has user-level overrides: `cp -r <worktree_path>/atlas/config/ <worktree_path>/config/` (this gives the worktree its own editable config separate from the package defaults).
+   - Copy any `config/overrides/` files if they exist in the original: `cp -r <original_root>/config/overrides/* <worktree_path>/config/overrides/` (create the directory first if needed).
+   - **Avoid port conflicts:** Change `PORT=8000` to a different port (e.g., `PORT=8005`) in the worktree's `.env` so it can run alongside the main repo. Use `sed` to update the value in-place. `agent_start.sh` reads PORT from the environment, so updating `.env` is sufficient.
 
 5. **Set up the development environment in the worktree:**
    - Create a Python virtual environment: `cd <worktree_path> && uv venv`
@@ -58,6 +59,7 @@ After setup, verify:
 - [ ] Worktree directory exists as a sibling
 - [ ] `git worktree list` includes the new worktree
 - [ ] `.env` file is present in the worktree
+- [ ] `config/` directory exists (copied from `atlas/config/`)
 - [ ] `config/overrides/` copied if it existed in the original
 - [ ] `.venv` exists and dependencies are installed
 - [ ] `frontend/dist` exists (frontend built successfully)

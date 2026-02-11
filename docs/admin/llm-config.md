@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-01-19
+Last updated: 2026-02-08
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -103,6 +103,54 @@ models:
 
 This environment variable expansion system works identically to the MCP server `auth_token` field, providing consistent behavior across all authentication and configuration mechanisms in the application.
 
+## Per-User API Keys (2026-02-08)
+
+Models can be configured to require users to bring their own API keys instead of using system-managed environment variables. This is useful when admins want to provide curated model endpoints but let individual users supply their own credentials.
+
+### Configuration
+
+Add `api_key_source: "user"` to a model definition:
+
+```yaml
+models:
+  # System-managed key (default behavior)
+  gpt-4.1:
+    model_name: gpt-4.1
+    model_url: https://api.openai.com/v1/chat/completions
+    api_key: "${OPENAI_API_KEY}"
+    compliance_level: "External"
+
+  # User-managed key (users must bring their own)
+  user-openai:
+    model_name: gpt-4.1
+    model_url: https://api.openai.com/v1/chat/completions
+    api_key: ""
+    api_key_source: "user"
+    description: "OpenAI GPT-4.1 (bring your own key)"
+    compliance_level: "External"
+```
+
+### How It Works
+
+1. When `api_key_source` is `"user"`, the model appears in the UI with a key icon
+2. Users click the key icon to open a modal and paste their API key
+3. The key is encrypted and stored per-user using the same `MCPTokenStorage` as MCP server tokens (with `llm:{model_name}` prefix)
+4. When the user sends a chat message with that model, the stored key is used for the LLM API call
+5. If no key is stored, the model is disabled in the dropdown
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/llm/auth/status` | Auth status for all user-key models |
+| POST | `/api/llm/auth/{model_name}/token` | Upload API key for a model |
+| DELETE | `/api/llm/auth/{model_name}/token` | Remove API key for a model |
+
+### Values for `api_key_source`
+
+- `"system"` (default) - API key resolved from environment variables using `${VAR_NAME}` syntax
+- `"user"` - API key provided per-user via the UI, stored encrypted on disk
+
 ## Configuration Fields Explained
 
 *   **`model_name`**: (string) The identifier for the model that will be sent to the LLM provider. For `LiteLLM`, you often need to prefix this with the provider name (e.g., `openai/`, `anthropic/`).
@@ -112,4 +160,5 @@ This environment variable expansion system works identically to the MCP server `
 *   **`max_tokens`**: (integer) The maximum number of tokens to generate in a response.
 *   **`temperature`**: (float) A value between 0.0 and 1.0 that controls the creativity of the model's responses. Higher values are more creative.
 *   **`extra_headers`**: (dictionary) A set of custom HTTP headers to include in the request, which is useful for some proxy services or custom providers. **Environment Variable Support**: Header values can also use the `${VAR_NAME}` syntax for environment variable expansion. This is particularly useful for services like OpenRouter that require headers like `HTTP-Referer` and `X-Title`. If an environment variable is missing, the application will raise a clear error message.
+*   **`api_key_source`**: (string) Controls where the API key comes from. `"system"` (default) resolves from environment variables. `"user"` requires each user to provide their own key via the UI. See [Per-User API Keys](#per-user-api-keys-2026-02-08) above.
 *   **`compliance_level`**: (string) The security compliance level of this model (e.g., "Public", "Internal"). This is used to filter which models can be used in certain compliance contexts.

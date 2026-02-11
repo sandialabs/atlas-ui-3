@@ -191,6 +191,10 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 - `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Enable/disable compliance level enforcement
 - `FEATURE_AGENT_MODE_AVAILABLE` - Enable/disable agent mode UI toggle
 
+## Per-User LLM API Keys
+
+Models in `llmconfig.yml` can set `api_key_source: "user"` to require per-user API keys instead of system env vars. The `MCPTokenStorage` is reused with `"llm:{model_name}"` as the server_name key, and `user_email` is threaded through all LLM call paths (`LLMProtocol`, `LiteLLMCaller`, agent loops, orchestrator). REST endpoints live at `/api/llm/auth/` and the frontend reuses `TokenInputModal`.
+
 ## MCP and RAG Conventions
 
 ### MCP Servers

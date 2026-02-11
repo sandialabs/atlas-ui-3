@@ -81,9 +81,9 @@ async def test_tool_acl_filters_unauthorized(monkeypatch):
     from atlas.interfaces.llm import LLMProtocol
 
     class DummyLLM(LLMProtocol):
-        async def call_plain(self, model_name, messages, temperature=0.7):
+        async def call_plain(self, model_name, messages, temperature=0.7, **kwargs):
             return "ok"
-        async def call_with_tools(self, model_name, messages, tools_schema, tool_choice="auto", temperature=0.7):
+        async def call_with_tools(self, model_name, messages, tools_schema, tool_choice="auto", temperature=0.7, **kwargs):
             class R:
                 def __init__(self):
                     self.content = "tool"

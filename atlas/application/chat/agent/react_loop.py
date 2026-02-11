@@ -164,12 +164,12 @@ class ReActAgentLoop(AgentLoopProtocol):
             ]
 
             reason_resp: LLMResponse = await self.llm.call_with_tools(
-                model, reason_messages, reason_tools_schema, "required", temperature=temperature
+                model, reason_messages, reason_tools_schema, "required", temperature=temperature, user_email=context.user_email
             )
             reason_ctrl = self._extract_tool_args(reason_resp, "agent_decide_next") or self._parse_control_json(reason_resp.content)
             reason_visible_text: str = reason_resp.content or ""
             if not reason_ctrl:
-                reason_text_fallback = await self.llm.call_plain(model, reason_messages, temperature=temperature)
+                reason_text_fallback = await self.llm.call_plain(model, reason_messages, temperature=temperature, user_email=context.user_email)
                 reason_visible_text = reason_text_fallback
                 reason_ctrl = self._parse_control_json(reason_text_fallback)
 
@@ -223,7 +223,7 @@ class ReActAgentLoop(AgentLoopProtocol):
                     )
                 else:
                     llm_response = await self.llm.call_with_tools(
-                        model, messages, tools_schema, "required", temperature=temperature
+                        model, messages, tools_schema, "required", temperature=temperature, user_email=context.user_email
                     )
 
                 if llm_response.has_tool_calls():
@@ -309,12 +309,12 @@ class ReActAgentLoop(AgentLoopProtocol):
             ]
 
             observe_resp: LLMResponse = await self.llm.call_with_tools(
-                model, observe_messages, observe_tools_schema, "required", temperature=temperature
+                model, observe_messages, observe_tools_schema, "required", temperature=temperature, user_email=context.user_email
             )
             observe_ctrl = self._extract_tool_args(observe_resp, "agent_observe_decide") or self._parse_control_json(observe_resp.content)
             observe_visible_text: str = observe_resp.content or ""
             if not observe_ctrl:
-                observe_text_fallback = await self.llm.call_plain(model, observe_messages, temperature=temperature)
+                observe_text_fallback = await self.llm.call_plain(model, observe_messages, temperature=temperature, user_email=context.user_email)
                 observe_visible_text = observe_text_fallback
                 observe_ctrl = self._parse_control_json(observe_text_fallback)
 
@@ -333,6 +333,6 @@ class ReActAgentLoop(AgentLoopProtocol):
             last_observation = observe_visible_text
 
         if not final_response:
-            final_response = await self.llm.call_plain(model, messages, temperature=temperature)
+            final_response = await self.llm.call_plain(model, messages, temperature=temperature, user_email=context.user_email)
 
         return AgentResult(final_answer=final_response, steps=steps, metadata={"agent_mode": True})

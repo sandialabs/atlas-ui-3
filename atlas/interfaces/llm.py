@@ -1,6 +1,6 @@
 """LLM interface protocols."""
 
-from typing import Dict, List, Protocol, runtime_checkable
+from typing import Dict, List, Optional, Protocol, runtime_checkable
 
 from atlas.modules.llm.models import LLMResponse as LLMResponse
 
@@ -14,6 +14,7 @@ class LLMProtocol(Protocol):
         model_name: str,
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
+        user_email: Optional[str] = None,
     ) -> str:
         """Plain LLM call without tools or RAG."""
         ...
@@ -25,6 +26,7 @@ class LLMProtocol(Protocol):
         tools_schema: List[Dict],
         tool_choice: str = "auto",
         temperature: float = 0.7,
+        user_email: Optional[str] = None,
     ) -> LLMResponse:
         """LLM call with tool support."""
         ...
