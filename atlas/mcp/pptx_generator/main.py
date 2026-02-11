@@ -244,6 +244,7 @@ def _style_title(title_shape) -> None:
             paragraph.font.color.rgb = SANDIA_BLUE
             paragraph.font.bold = True
             paragraph.font.size = Pt(36)
+            paragraph.alignment = PP_ALIGN.LEFT
 
 def _populate_content_frame(tf, content: str) -> None:
     """Populate a text frame with parsed markdown content (bullets, numbered lists, text).
@@ -506,15 +507,32 @@ def markdown_to_pptx(
             slide_obj = prs.slides.add_slide(layout)
 
             if use_placeholders:
+                # Widen placeholders from 4:3 defaults to fill 16:9 width.
+                # Must re-set top/height because python-pptx zeros inherited
+                # values when any position attribute is written.
+                if not template_path:
+                    target_width = SLIDE_WIDTH - Inches(1)
+                    for ph in slide_obj.placeholders:
+                        if ph.placeholder_format.idx in (0, 1):
+                            orig_top = ph.top
+                            orig_height = ph.height
+                            ph.left = Inches(0.5)
+                            ph.top = orig_top
+                            ph.width = target_width
+                            ph.height = orig_height
+
                 # Use standard layout placeholders for title and content
                 title_ph = slide_obj.placeholders[0]
                 title_ph.text = title
                 _style_title(title_ph)
 
-                if 1 in slide_obj.placeholders:
-                    content_tf = slide_obj.placeholders[1].text_frame
+                try:
+                    content_ph = slide_obj.placeholders[1]
+                    content_tf = content_ph.text_frame
                     content_tf.word_wrap = True
                     _populate_content_frame(content_tf, content)
+                except (KeyError, IndexError):
+                    logger.warning(f"Slide {i+1}: no content placeholder at index 1")
 
                 # Add header/footer bars only when not using a template
                 # (templates should define these in the slide master)
