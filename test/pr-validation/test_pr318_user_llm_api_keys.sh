@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test script for PR #308: Per-User LLM API Keys
+# Test script for PR #318: Per-User LLM API Keys
 #
 # Test plan:
 # - Verify ModelConfig accepts api_key_source field
@@ -45,7 +45,7 @@ if [ -f ".venv/bin/activate" ]; then
 fi
 export PYTHONPATH="$PROJECT_ROOT"
 
-print_header "PR #308: Per-User LLM API Keys Validation"
+print_header "PR #318: Per-User LLM API Keys Validation"
 
 # -------------------------------------------------------
 # Test 1: ModelConfig accepts api_key_source field
@@ -177,9 +177,9 @@ echo -e "Total: ${TOTAL} | ${GREEN}Passed: ${PASSED}${NC} | ${RED}Failed: ${FAIL
 echo ""
 
 if [ $FAILED -gt 0 ]; then
-    echo -e "${RED}PR #308 validation FAILED${NC}"
+    echo -e "${RED}PR #318 validation FAILED${NC}"
     exit 1
 else
-    echo -e "${GREEN}PR #308 validation PASSED${NC}"
+    echo -e "${GREEN}PR #318 validation PASSED${NC}"
     exit 0
 fi
