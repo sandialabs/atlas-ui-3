@@ -153,6 +153,8 @@ frontend/src/
    handlers/         # WebSocket message handlers
 ```
 
+**Stale Selection Cleanup:** ChatContext validates persisted tool/prompt selections against the current `/api/config` response and removes entries that no longer exist (e.g., removed servers, changed authorization). MarketplaceContext similarly prunes stale server selections. Follow this pattern when adding new persisted selections.
+
 **Event Flow:**
 ```
 User Input -> ChatContext -> WebSocket -> Backend ChatService
@@ -207,6 +209,9 @@ Models in `llmconfig.yml` can set `api_key_source: "user"` to require per-user A
 - RAG resources and servers may include `complianceLevel`
 - `domain/rag_mcp_service.py` handles RAG discovery/search/synthesis
 
+### PPTX Generator MCP Server
+The `pptx_generator` MCP server (`atlas/mcp/pptx_generator/main.py`) uses a three-tier layout strategy: custom template file (via `PPTX_TEMPLATE_PATH` env var or search paths) -> built-in Office "Title and Content" layout -> blank layout with manual textboxes.
+
 ### Testing MCP Features
 When testing or developing MCP-related features, example configurations can be found in `atlas/config/mcp-example-configs/` with individual `mcp-{servername}.json` files for testing individual servers.
 
@@ -231,6 +236,7 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 **Server Messages:**
 - `token_stream` - Text chunks
 - `tool_use` - Tool execution events
+- `tool_start` / `tool_progress` / `tool_complete` - Direct tool lifecycle events with status transitions (`calling` -> `in_progress` -> `completed`/`failed`); Message.jsx renders spinners and elapsed timers for active states
 - `canvas_content` - HTML/markdown for canvas
 - `intermediate_update` - Files, images, etc.
 
@@ -373,6 +379,7 @@ Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `ap
 5. **Container build SSL errors**: Use local development instead
 6. **Missing tools**: Check MCP transport/URL and server logs
 7. **Empty lists**: Check auth groups and compliance filtering
+8. **Host binding ignored**: `agent_start.sh` and the Dockerfile both use `ATLAS_HOST` env var for host binding; `main.py` also reads it directly -- keep all three in sync when changing network configuration
 
 ## PR Validation Scripts (Required)
 

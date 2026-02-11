@@ -6,10 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #308 - 2026-02-08
+### PR #318 - 2026-02-10
 - **Feature**: Per-user LLM API keys. Models can be configured with `api_key_source: "user"` in `llmconfig.yml` so users bring their own API keys, stored encrypted via the existing MCP token storage infrastructure.
 - **API**: New REST endpoints at `/api/llm/auth/` for uploading, checking, and removing per-user LLM API keys.
 - **Frontend**: Key icon in model selector shows authentication status; reuses `TokenInputModal` for key entry.
+
+### PR #323 - 2026-02-09
+- **Feature**: Use standard Office slide layouts (Title and Content) for PPTX generation instead of manual textboxes, with three-tier fallback: custom template file -> built-in layouts -> blank layout.
+- **Feature**: Add template file discovery via `PPTX_TEMPLATE_PATH` environment variable and standard search paths (script directory, package config, user config).
+
+### PR #324 - 2026-02-08
+- **Fix**: `agent_start.sh` now respects the `ATLAS_HOST` environment variable instead of hardcoding host values. Previously, backend-only mode (`-b`) always bound to `0.0.0.0` and full startup always bound to `127.0.0.1`, ignoring the `.env` setting.
+
+### PR #306 - 2026-02-08
+- **Feature**: Add spinner animation and elapsed time counter to tool call status badges during active `calling`/`in_progress` states, with a timeout warning after 30 seconds.
+- **Feature**: Make the global "Thinking..." indicator context-aware: shows "Processing tool results..." after tool completion and "Running tool..." during tool execution.
+
+### PR #269 - 2026-02-08
+- **Fix**: Frontend now validates persisted tool, prompt, and marketplace server selections against the current backend config on every config refresh, removing stale entries that no longer exist (#269).
 
 ### PR #317 - 2026-02-08
 - **Feature**: Attach conversation history to user feedback by default (issue #307). Users see a checkbox (default on) in the feedback dialog. History is stored inline in the feedback JSON, and admins can view/download it.

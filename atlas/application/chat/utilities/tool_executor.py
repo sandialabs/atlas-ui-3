@@ -714,6 +714,13 @@ async def handle_synthesis_decision(
         }
         messages.append(updated_manifest)
 
+    # Notify frontend that tool synthesis is starting
+    if update_callback:
+        try:
+            await update_callback({"type": "tool_synthesis_start"})
+        except Exception:
+            logger.debug("Failed to send tool_synthesis_start notification")
+
     # Get final synthesis
     return await synthesize_tool_results(
         model=model,

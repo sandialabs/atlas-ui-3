@@ -21,7 +21,8 @@ export function createWebSocketHandler(deps) {
     triggerFileDownload,
     addAttachment,
     resolvePendingFileEvent,
-    setPendingElicitation
+    setPendingElicitation,
+    setIsSynthesizing
   } = deps
 
   const handleAgentUpdate = (data) => {
@@ -72,17 +73,20 @@ export function createWebSocketHandler(deps) {
         case 'agent_completion':
           setCurrentAgentStep(0)
           setIsThinking(false)
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
           addMessage({ role: 'system', content: `Agent Completed in ${data.steps ?? '?'} step(s)`, type: 'agent_status', timestamp: new Date().toISOString(), agent_mode: true })
           break
         case 'agent_error':
           addMessage({ role: 'system', content: `Agent Error (Step ${data.turn}): ${data.message}`, type: 'agent_error', timestamp: new Date().toISOString() })
           setIsThinking(false)
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           setCurrentAgentStep(0)
           break
         case 'agent_max_steps':
           addMessage({ role: 'system', content: `Agent Max Steps Reached - ${data.message}`, type: 'agent_status', timestamp: new Date().toISOString() })
           setIsThinking(false)
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           setCurrentAgentStep(0)
           break
         default:
@@ -336,7 +340,10 @@ export function createWebSocketHandler(deps) {
             } : msg))
           break
         }
-  // Removed: 'tool_synthesis' no longer rendered as an assistant message to prevent duplicates.
+        case 'tool_synthesis_start': {
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(true)
+          break
+        }
         case 'canvas_content': {
           if (data.content) {
             setCanvasContent(typeof data.content === 'string' ? data.content : String(data.content))
@@ -345,14 +352,17 @@ export function createWebSocketHandler(deps) {
         }
         case 'response_complete': {
           setIsThinking(false)
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           break
         }
         case 'chat_response':
           setIsThinking(false)
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           addMessage({ role: 'assistant', content: data.message, timestamp: new Date().toISOString() })
           break
         case 'error':
           setIsThinking(false)
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
           break
         case 'agent_step_update':
@@ -360,6 +370,7 @@ export function createWebSocketHandler(deps) {
           break
         case 'agent_final_response':
           setIsThinking(false)
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
             setCurrentAgentStep(0)
             addMessage({ role: 'assistant', content: `${data.message}\n\n*Agent completed in ${data.steps_taken} steps*`, timestamp: new Date().toISOString() })
           break

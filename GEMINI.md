@@ -96,6 +96,7 @@ frontend/src/
 **Event Flow:**
 ```
 User Input -> ChatContext -> WebSocket -> Backend ChatService
+Note: ChatContext validates persisted localStorage selections (tools, prompts, data sources) against the live config and removes stale entries on every config refresh.
   <- Streaming Updates <- tool_use/canvas_content/files_update <-
 ```
 
@@ -133,6 +134,8 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 - Resources and servers may include `complianceLevel`
 - `domain/rag_mcp_service.py` handles RAG discovery/search/synthesis
 
+**PPTX Generator MCP Server:** The `pptx_generator` MCP server (`atlas/mcp/pptx_generator/main.py`) uses a three-tier layout strategy: custom template file (via `PPTX_TEMPLATE_PATH` env var or search paths) -> built-in Office "Title and Content" layout -> blank layout with manual textboxes.
+
 **Testing MCP Features:**
 Example configurations in `atlas/config/mcp-example-configs/` with individual `mcp-{servername}.json` files.
 
@@ -149,7 +152,7 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 
 **WebSocket API (`/ws`):**
 - Client messages: `chat`, `download_file`, `reset_session`, `attach_file`
-- Server messages: `token_stream`, `tool_use`, `canvas_content`, `intermediate_update`
+- Server messages: `token_stream`, `tool_use`, `tool_start`/`tool_progress`/`tool_complete` (direct tool lifecycle with spinner/timer in Message.jsx), `canvas_content`, `intermediate_update`
 
 **REST API:**
 - `/api/config` - Models, tools, prompts, data_sources, rag_servers, features
@@ -288,6 +291,7 @@ Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.
 5. **Container build SSL errors**: Use local development instead
 6. **Missing tools**: Check MCP transport/URL and server logs
 7. **Empty lists**: Check auth groups and compliance filtering
+8. **Host binding ignored**: `agent_start.sh` and the Dockerfile both use `ATLAS_HOST` env var for host binding; `main.py` also reads it directly -- keep all three in sync when changing network configuration
 
 ## Critical Restrictions
 

@@ -35,7 +35,12 @@ When given a branch name or PR number, you will:
    - Install frontend dependencies: `cd <worktree_path>/frontend && npm install`
    - Build the frontend: `cd <worktree_path>/frontend && npm run build`
 
-6. **Report the result** with the full path to the worktree and any issues encountered.
+6. **Launch a tmux session with Claude Code:**
+   - Create a detached tmux session named after the sanitized branch: `tmux new-session -d -s <sanitized_branch_name> -c <worktree_path>`
+   - Activate the venv and launch Claude Code inside the session: `tmux send-keys -t <sanitized_branch_name> 'source .venv/bin/activate && claude' Enter`
+   - The user can attach later with: `tmux attach -t <sanitized_branch_name>`
+
+7. **Report the result** with the full path to the worktree and any issues encountered.
 
 ## Important Rules
 
@@ -58,6 +63,7 @@ After setup, verify:
 - [ ] `config/overrides/` copied if it existed in the original
 - [ ] `.venv` exists and dependencies are installed
 - [ ] `frontend/dist` exists (frontend built successfully)
+- [ ] tmux session is running with Claude Code
 
 Report the checklist results to the user.
 
@@ -68,9 +74,13 @@ Provide a clear summary:
 Worktree created successfully:
   Branch: <branch_name>
   Path: <full_worktree_path>
+  tmux session: <session_name>
   Status: <ready / partial - details>
 
-To start working:
+To attach to the Claude Code session:
+  tmux attach -t <session_name>
+
+To start the app manually:
   cd <worktree_path>
   source .venv/bin/activate
   bash agent_start.sh
