@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #334 - 2026-02-13
+- **Fix**: Add exponential backoff with jitter to all frontend polling endpoints to prevent accidental backend DOS. Affects WebSocket health checks, log viewer, MCP status polling, and banner panel.
+- **New**: Shared `usePollingWithBackoff` hook and `calculateBackoffDelay` utility for consistent backoff behavior across components.
+
 ### PR #333 - 2026-02-11
 - **CI**: Update GitHub Actions versions in pypi-publish.yml: checkout v4->v6, setup-python v5->v6, setup-node v4->v6, upload-artifact v4->v6, download-artifact v4->v7. Combines Dependabot PRs #328-#332.
 

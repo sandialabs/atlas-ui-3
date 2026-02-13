@@ -155,6 +155,8 @@ frontend/src/
 
 **Stale Selection Cleanup:** ChatContext validates persisted tool/prompt selections against the current `/api/config` response and removes entries that no longer exist (e.g., removed servers, changed authorization). MarketplaceContext similarly prunes stale server selections. Follow this pattern when adding new persisted selections.
 
+**Polling with Backoff:** All frontend polling must use exponential backoff with jitter on failures to prevent backend DOS. Use the shared `usePollingWithBackoff` hook or `calculateBackoffDelay` from `hooks/usePollingWithBackoff.js`. Never use bare `setInterval` for backend polling.
+
 **Event Flow:**
 ```
 User Input -> ChatContext -> WebSocket -> Backend ChatService

@@ -2,8 +2,11 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Filter, ChevronDown, ChevronUp, ToggleLeft, ToggleRight, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useChat } from '../contexts/ChatContext';
+import { calculateBackoffDelay } from '../hooks/usePollingWithBackoff';
 
 const DEFAULT_POLL_INTERVAL = 60000; // 60s refresh
+const MIN_POLL_INTERVAL = 5000; // 5s minimum to prevent accidental DOS
+const MAX_BACKOFF_DELAY = 300000; // 5 min max backoff on errors
 
 export default function LogViewer() {
   const navigate = useNavigate();
@@ -32,51 +35,47 @@ export default function LogViewer() {
 
   const tableContainerRef = useRef(null);
   const isScrolledToBottom = useRef(true); // Track if user has scrolled up
-  const intervalIdRef = useRef(null); // Ref to store interval ID
+  const timeoutIdRef = useRef(null); // Ref to store timeout ID for backoff polling
   const isInitialLoad = useRef(true); // Track initial load for scroll positioning
+  const failureCountRef = useRef(0); // Track consecutive failures for backoff
 
-  const fetchLogs = useCallback(() => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
     if (levelFilter) params.append('level_filter', levelFilter);
     if (moduleFilter) params.append('module_filter', moduleFilter);
-    fetch(`/admin/logs/viewer?${params.toString()}`, {
-      headers: {
-        'X-User-Email': user
-      }
-    })
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(data => {
-        const newEntries = data.entries || [];
-        // Use functional state update to access previous entries without dependency
-        setEntries(prevEntries => {
-          // Reset to page 0 if auto-scroll is enabled and new entries were added
-          if (autoScrollEnabled && newEntries.length > prevEntries.length) {
-            setPage(0);
+    try {
+      const r = await fetch(`/admin/logs/viewer?${params.toString()}`, {
+        headers: { 'X-User-Email': user }
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      const newEntries = data.entries || [];
+      setEntries(prevEntries => {
+        if (autoScrollEnabled && newEntries.length > prevEntries.length) {
+          setPage(0);
+        }
+        return newEntries;
+      });
+      setError(null);
+      failureCountRef.current = 0;
+      requestAnimationFrame(() => {
+        if (tableContainerRef.current) {
+          if (isInitialLoad.current) {
+            tableContainerRef.current.scrollTop = 0;
+            isInitialLoad.current = false;
+          } else if (autoScrollEnabled && isScrolledToBottom.current) {
+            tableContainerRef.current.scrollTop = tableContainerRef.current.scrollHeight;
           }
-          return newEntries;
-        });
-        setError(null);
-        // Handle scroll positioning after entries update
-        requestAnimationFrame(() => {
-          if (tableContainerRef.current) {
-            if (isInitialLoad.current) {
-              // Initial load: scroll to top
-              tableContainerRef.current.scrollTop = 0;
-              isInitialLoad.current = false;
-            } else if (autoScrollEnabled && isScrolledToBottom.current) {
-              // Subsequent loads with auto-scroll: scroll to bottom
-              tableContainerRef.current.scrollTop = tableContainerRef.current.scrollHeight;
-            }
-          }
-        });
-      })
-      .catch(err => setError(err))
-      .finally(() => setLoading(false));
-  }, [levelFilter, moduleFilter, autoScrollEnabled, user]); // Added user dependency
+        }
+      });
+    } catch (err) {
+      setError(err);
+      failureCountRef.current += 1;
+    } finally {
+      setLoading(false);
+    }
+  }, [levelFilter, moduleFilter, autoScrollEnabled, user]);
 
   // Function to clear all logs
   const clearLogs = useCallback(() => {
@@ -98,17 +97,29 @@ export default function LogViewer() {
   }, []);
 
   useEffect(() => {
-    // Clear existing interval before setting a new one
-    if (intervalIdRef.current) {
-      clearInterval(intervalIdRef.current);
-    }
-    // Fetch logs immediately and then set interval
-    fetchLogs();
-    intervalIdRef.current = setInterval(fetchLogs, pollInterval);
+    let mounted = true;
 
-    // Cleanup interval on component unmount or when pollInterval changes
-    return () => clearInterval(intervalIdRef.current);
-  }, [fetchLogs, pollInterval]); // Depend on pollInterval
+    const scheduleNext = () => {
+      if (!mounted) return;
+      if (timeoutIdRef.current) clearTimeout(timeoutIdRef.current);
+      const delay = failureCountRef.current > 0
+        ? calculateBackoffDelay(failureCountRef.current, 1000, MAX_BACKOFF_DELAY)
+        : pollInterval;
+      timeoutIdRef.current = setTimeout(async () => {
+        if (!mounted) return;
+        await fetchLogs();
+        scheduleNext();
+      }, delay);
+    };
+
+    // Fetch immediately, then schedule next
+    fetchLogs().then(() => { if (mounted) scheduleNext(); });
+
+    return () => {
+      mounted = false;
+      if (timeoutIdRef.current) clearTimeout(timeoutIdRef.current);
+    };
+  }, [fetchLogs, pollInterval]);
 
   // Handle scroll event to determine if user has manually scrolled up
   const handleScroll = useCallback(() => {
@@ -134,9 +145,10 @@ export default function LogViewer() {
     setPollIntervalInput(e.target.value);
     const intervalInSeconds = parseInt(e.target.value, 10);
     if (!isNaN(intervalInSeconds) && intervalInSeconds > 0) {
-      setPollInterval(intervalInSeconds * 1000);
+      // Enforce minimum poll interval to prevent accidental backend DOS
+      const clampedMs = Math.max(intervalInSeconds * 1000, MIN_POLL_INTERVAL);
+      setPollInterval(clampedMs);
     } else {
-      // Reset to default or handle invalid input appropriately
       setPollInterval(DEFAULT_POLL_INTERVAL);
     }
   };
@@ -479,7 +491,7 @@ export default function LogViewer() {
             type="number"
             value={pollIntervalInput}
             onChange={handlePollIntervalChange}
-            min="1"
+            min="5"
             className="bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 p-1 rounded text-sm w-16 text-center"
           />
         </div>
