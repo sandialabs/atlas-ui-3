@@ -114,6 +114,8 @@ frontend/src/
 
 **PPTX Generator MCP Server:** The `pptx_generator` MCP server (`atlas/mcp/pptx_generator/main.py`) uses a three-tier layout strategy: custom template file (via `PPTX_TEMPLATE_PATH` env var or search paths) -> built-in Office "Title and Content" layout -> blank layout with manual textboxes.
 
+**Tool Planner MCP Server:** The `tool_planner` server (`atlas/mcp/tool_planner/main.py`) provides five tools for multi-tool task orchestration: bash script generation, tuple-based CLI step planning/execution, and Python workflow generation with programmatic control flow (if/elif, for loops).
+
 **Testing MCP:**
 Example configurations in `atlas/config/mcp-example-configs/` with individual `mcp-{servername}.json` files.
 
