@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #338 - 2026-02-13
+- **Feature**: Add four new tools to the tool_planner MCP server: `plan_cli_steps` (AI generates ordered (prompt, tool) tuples), `execute_cli_plan` (runs tuple list sequentially via atlas-chat), `generate_tool_functions` (maps MCP tools to Python function stubs), and `plan_python_workflow` (AI generates a .py workflow with if/elif/for control flow).
+
 ### PR #333 - 2026-02-11
 - **CI**: Update GitHub Actions versions in pypi-publish.yml: checkout v4->v6, setup-python v5->v6, setup-node v4->v6, upload-artifact v4->v6, download-artifact v4->v7. Combines Dependabot PRs #328-#332.
 

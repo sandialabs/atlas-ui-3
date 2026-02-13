@@ -53,9 +53,9 @@
     "groups": [
       "users"
     ],
-    "description": "Generate bash scripts that accomplish tasks by calling the Atlas CLI with appropriate tools, using MCP sampling for planning",
+    "description": "Plan and execute multi-tool tasks: generate bash scripts, ordered step-tuple lists with CLI execution, and Python workflow scripts with control flow",
     "author": "Chat UI Team",
-    "short_description": "Task-to-script planner",
+    "short_description": "Task planner and executor",
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
   },

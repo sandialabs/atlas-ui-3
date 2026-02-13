@@ -212,6 +212,9 @@ Models in `llmconfig.yml` can set `api_key_source: "user"` to require per-user A
 ### PPTX Generator MCP Server
 The `pptx_generator` MCP server (`atlas/mcp/pptx_generator/main.py`) uses a three-tier layout strategy: custom template file (via `PPTX_TEMPLATE_PATH` env var or search paths) -> built-in Office "Title and Content" layout -> blank layout with manual textboxes.
 
+### Tool Planner MCP Server
+The `tool_planner` MCP server (`atlas/mcp/tool_planner/main.py`) provides five tools: the original `plan_with_tools` (bash script), `plan_cli_steps` and `execute_cli_plan` for tuple-based step planning and execution, and `generate_tool_functions` and `plan_python_workflow` for generating Python workflows with programmatic control flow.
+
 ### Testing MCP Features
 When testing or developing MCP-related features, example configurations can be found in `atlas/config/mcp-example-configs/` with individual `mcp-{servername}.json` files for testing individual servers.
 
