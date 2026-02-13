@@ -4,7 +4,7 @@ import { useChat } from '../../contexts/ChatContext'
 import { calculateBackoffDelay } from '../../hooks/usePollingWithBackoff'
 
 // Polling configuration
-const NORMAL_POLLING_INTERVAL = 30000 // 30 seconds (reduced from 15s)
+const NORMAL_POLLING_INTERVAL = 30000 // 30 seconds (increased from 15s)
 const MAX_BACKOFF_DELAY = 300000 // 5 minutes (increased from 30s)
 
 const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {

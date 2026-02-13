@@ -1,21 +1,24 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { 
-  ArrowLeft, Settings, Database, FileText, Activity, 
+import {
+  ArrowLeft, Settings, Database, FileText, Activity,
   Download, Save, X, Check, RefreshCw, Shield,
-  MessageSquare, Heart, RotateCcw, Eye, ThumbsUp, ThumbsDown, Minus
+  MessageSquare, Heart, RotateCcw, Eye, ThumbsUp, ThumbsDown, Minus,
+  WifiOff
 } from 'lucide-react'
-import LogViewer from './LogViewer' // Import the LogViewer component
+import LogViewer from './LogViewer'
 import AdminModal from './AdminModal'
-import Notifications from './Notifications' // Import the Notifications component
-import BannerMessagesCard from './admin/BannerMessagesCard' // Import the BannerMessagesCard component
-import MCPConfigurationCard from './admin/MCPConfigurationCard' // Import the MCPConfigurationCard component
-import ConfigViewerCard from './admin/ConfigViewerCard' // Import the ConfigViewerCard component
-import MCPServerManager from './admin/MCPServerManager' // Import the MCPServerManager component
-import FeedbackViewerCard from './admin/FeedbackViewerCard' // Import the FeedbackViewerCard component
+import Notifications from './Notifications'
+import BannerMessagesCard from './admin/BannerMessagesCard'
+import MCPConfigurationCard from './admin/MCPConfigurationCard'
+import ConfigViewerCard from './admin/ConfigViewerCard'
+import MCPServerManager from './admin/MCPServerManager'
+import FeedbackViewerCard from './admin/FeedbackViewerCard'
+import { useWS } from '../contexts/WSContext'
 
 const AdminDashboard = () => {
   const navigate = useNavigate()
+  const { isConnected } = useWS()
   const [currentUser, setCurrentUser] = useState('Loading...')
   const [systemStatus, setSystemStatus] = useState({})
   const [loading, setLoading] = useState(true)
@@ -25,16 +28,16 @@ const AdminDashboard = () => {
   const [currentEndpoint, setCurrentEndpoint] = useState(null)
   const [notifications, setNotifications] = useState([])
 
-  const addNotification = (message, type = 'info') => {
+  const addNotification = useCallback((message, type = 'info') => {
     const id = Date.now()
     const notification = { id, message, type }
     setNotifications(prev => [...prev, notification])
-    
+
     // Auto-remove after 5 seconds for success/info, 8 seconds for errors
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id))
     }, type === 'error' ? 8000 : 5000)
-  }
+  }, [])
 
   const removeNotification = (id) => {
     setNotifications(prev => prev.filter(n => n.id !== id))
@@ -314,6 +317,17 @@ const AdminDashboard = () => {
           </div>
           <p className="text-gray-400">Logged in as: {currentUser}</p>
         </div>
+
+        {/* Backend disconnected banner */}
+        {!isConnected && (
+          <div className="flex items-center gap-3 px-4 py-3 mb-6 bg-red-900/30 border border-red-600/40 rounded-lg text-red-300">
+            <WifiOff className="w-5 h-5 flex-shrink-0" />
+            <div>
+              <span className="font-medium">Backend disconnected</span>
+              <span className="text-red-400 ml-2 text-sm">Dashboard data may be stale. The connection will retry automatically.</span>
+            </div>
+          </div>
+        )}
 
         {/* Dashboard Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

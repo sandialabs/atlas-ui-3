@@ -16,13 +16,12 @@ const BannerMessagesCard = ({ openModal, addNotification }) => {
         setBannerEnabled(typeof data.banner_enabled === 'boolean' ? data.banner_enabled : false)
       } catch (err) {
         console.error('Error fetching banner status:', err)
-        addNotification('Error loading banner status: ' + err.message, 'error')
       } finally {
         setLoading(false)
       }
     }
     fetchBannerStatus()
-  }, [addNotification])
+  }, [])
 
   const manageBanners = async () => {
     try {

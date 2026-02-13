@@ -44,6 +44,9 @@ export function usePollingWithBackoff(fetchFn, {
   const timeoutIdRef = useRef(null)
   const isMountedRef = useRef(true)
   const pollFnRef = useRef(null)
+  const fetchFnRef = useRef(fetchFn)
+  // Keep fetchFn ref current so scheduled polls always call the latest version
+  fetchFnRef.current = fetchFn
 
   const resetBackoff = useCallback(() => {
     failureCountRef.current = 0
@@ -65,7 +68,7 @@ export function usePollingWithBackoff(fetchFn, {
     const poll = async () => {
       if (!isMountedRef.current || !enabled) return
       try {
-        await fetchFn()
+        await fetchFnRef.current()
         failureCountRef.current = 0
         scheduleNext(normalInterval)
       } catch {
