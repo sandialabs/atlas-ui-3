@@ -79,6 +79,8 @@ frontend/src/
    handlers/            # WebSocket message handlers
 ```
 
+**Polling with Backoff:** All frontend polling must use exponential backoff with jitter on failures (see `hooks/usePollingWithBackoff.js`); never use bare `setInterval` for backend polling.
+
 ## Configuration and Feature Flags
 
 **Two-layer config**: User config in `config/` (created by `atlas-init`, set `APP_CONFIG_DIR` to customize) overrides package defaults in `atlas/config/`.

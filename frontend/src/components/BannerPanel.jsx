@@ -1,42 +1,38 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { X } from 'lucide-react'
+import { usePollingWithBackoff } from '../hooks/usePollingWithBackoff'
+
+const BANNER_POLL_INTERVAL = 5 * 60 * 1000 // 5 minutes
+const BANNER_MAX_BACKOFF = 30 * 60 * 1000 // 30 minutes max backoff
 
 function BannerPanel() {
   const [bannerMessages, setBannerMessages] = useState([])
   const [dismissedMessages, setDismissedMessages] = useState(new Set())
   const [bannerEnabled, setBannerEnabled] = useState(false)
 
-  useEffect(() => {
-    // Fetch banner messages and configuration from the backend
-    const fetchBanners = async () => {
-      try {
-        // First get the config to check if banners are enabled
-        const configResponse = await fetch('/api/config')
-        const config = await configResponse.json()
-        
-        if (!config.banner_enabled) {
-          setBannerEnabled(false)
-          return
-        }
-        
-        setBannerEnabled(true)
-        
-        // If banners are enabled, fetch the messages
-        const bannersResponse = await fetch('/api/banners')
-        const bannersData = await bannersResponse.json()
-        setBannerMessages(bannersData.messages || [])
-      } catch (error) {
-        console.error('Error fetching banner messages:', error)
-        setBannerMessages([])
-      }
-    }
+  usePollingWithBackoff(
+    async () => {
+      const configResponse = await fetch('/api/config')
+      if (!configResponse.ok) throw new Error(`HTTP ${configResponse.status}`)
+      const config = await configResponse.json()
 
-    fetchBanners()
-    
-    // Refresh banner messages every 5 minutes
-    const interval = setInterval(fetchBanners, 5 * 60 * 1000)
-    return () => clearInterval(interval)
-  }, [])
+      if (!config.banner_enabled) {
+        setBannerEnabled(false)
+        return
+      }
+
+      setBannerEnabled(true)
+
+      const bannersResponse = await fetch('/api/banners')
+      if (!bannersResponse.ok) throw new Error(`HTTP ${bannersResponse.status}`)
+      const bannersData = await bannersResponse.json()
+      setBannerMessages(bannersData.messages || [])
+    },
+    {
+      normalInterval: BANNER_POLL_INTERVAL,
+      maxBackoffDelay: BANNER_MAX_BACKOFF,
+    }
+  )
 
   const handleDismiss = (index) => {
     setDismissedMessages(prev => new Set([...prev, index]))

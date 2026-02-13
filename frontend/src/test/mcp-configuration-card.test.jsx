@@ -18,17 +18,21 @@ describe('MCPConfigurationCard', () => {
     const addNotification = vi.fn()
     const systemStatus = { overall_status: 'healthy' }
     const originalFetch = global.fetch
+    const originalRandom = Math.random
 
     beforeEach(() => {
       vi.clearAllMocks()
       global.fetch = vi.fn()
       vi.useFakeTimers({ shouldAdvanceTime: true })
+      // Fix Math.random so jitter is deterministic (factor = 0.8 + 0.5*0.4 = 1.0)
+      Math.random = () => 0.5
     })
 
     afterEach(() => {
       vi.runOnlyPendingTimers()
       vi.useRealTimers()
       global.fetch = originalFetch
+      Math.random = originalRandom
     })
 
     it('filters out servers that are not configured from inline status', async () => {
@@ -128,7 +132,7 @@ describe('MCPConfigurationCard', () => {
 
       expect(global.fetch).toHaveBeenCalledTimes(1)
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('1 consecutive failures, next retry in 1s')
+        expect.stringContaining('1 consecutive failure(s), next retry in 1.0s')
       )
 
       // Verify backoff delays retry - should NOT have retried after 500ms
@@ -143,7 +147,7 @@ describe('MCPConfigurationCard', () => {
       })
       expect(global.fetch).toHaveBeenCalledTimes(2)
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('2 consecutive failures, next retry in 2s')
+        expect.stringContaining('2 consecutive failure(s), next retry in 2.0s')
       )
 
       // Should NOT retry before 2s
@@ -158,7 +162,7 @@ describe('MCPConfigurationCard', () => {
       })
       expect(global.fetch).toHaveBeenCalledTimes(3)
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('3 consecutive failures, next retry in 4s')
+        expect.stringContaining('3 consecutive failure(s), next retry in 4.0s')
       )
 
       consoleLogSpy.mockRestore()
@@ -209,13 +213,13 @@ describe('MCPConfigurationCard', () => {
         }),
       })
 
-      // After success, should NOT poll before 15 seconds
+      // After success, should NOT poll before 30 seconds (normal interval)
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(10000)
+        await vi.advanceTimersByTimeAsync(25000)
       })
       expect(global.fetch).toHaveBeenCalledTimes(2)
 
-      // Should poll after 15 second normal interval
+      // Should poll after 30 second normal interval
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5000)
       })
@@ -245,26 +249,26 @@ describe('MCPConfigurationCard', () => {
       })
       expect(global.fetch).toHaveBeenCalledTimes(1)
 
-      // After 15 seconds, should poll again
+      // After 30 seconds, should poll again
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(15000)
+        await vi.advanceTimersByTimeAsync(30000)
       })
       expect(global.fetch).toHaveBeenCalledTimes(2)
 
-      // After another 15 seconds, should poll again (verifies continuous polling)
+      // After another 30 seconds, should poll again (verifies continuous polling)
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(15000)
+        await vi.advanceTimersByTimeAsync(30000)
       })
       expect(global.fetch).toHaveBeenCalledTimes(3)
 
       // And again - polling should continue indefinitely
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(15000)
+        await vi.advanceTimersByTimeAsync(30000)
       })
       expect(global.fetch).toHaveBeenCalledTimes(4)
     })
 
-    it('caps exponential backoff at 30 seconds', async () => {
+    it('caps exponential backoff at 5 minutes', async () => {
       // Mock fetch to fail consistently
       global.fetch.mockRejectedValue(new Error('Network error'))
 
@@ -283,9 +287,10 @@ describe('MCPConfigurationCard', () => {
       })
       expect(global.fetch).toHaveBeenCalledTimes(1)
 
-      // Simulate multiple failures to reach max backoff
-      // 1s, 2s, 4s, 8s, 16s, 30s (capped)
-      const delays = [1000, 2000, 4000, 8000, 16000, 30000]
+      // Simulate multiple failures to reach max backoff (5 min = 300s)
+      // With Math.random() = 0.5, jitter factor = 1.0, so delays are exact:
+      // 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 300s (capped)
+      const delays = [1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 300000]
 
       for (let i = 0; i < delays.length; i++) {
         await act(async () => {
@@ -294,12 +299,12 @@ describe('MCPConfigurationCard', () => {
         expect(global.fetch).toHaveBeenCalledTimes(i + 2)
       }
 
-      // Verify the last delay is capped at 30 seconds
+      // Verify the last delay is capped at 5 minutes
       const lastLogCall = consoleLogSpy.mock.calls.find(call =>
-        call[0].includes('6 consecutive failures')
+        call[0].includes('10 consecutive failure(s)')
       )
       expect(lastLogCall).toBeTruthy()
-      expect(lastLogCall[0]).toContain('next retry in 30s')
+      expect(lastLogCall[0]).toContain('next retry in 300.0s')
 
       consoleLogSpy.mockRestore()
     })

@@ -1,19 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { Settings, RefreshCw, RotateCcw, Activity } from 'lucide-react'
 import { useChat } from '../../contexts/ChatContext'
+import { calculateBackoffDelay } from '../../hooks/usePollingWithBackoff'
 
 // Polling configuration
-const NORMAL_POLLING_INTERVAL = 15000 // 15 seconds
-const MAX_BACKOFF_DELAY = 30000 // 30 seconds
-
-// Calculate delay based on failure count
-const calculateDelay = (failures) => {
-  if (failures > 0) {
-    // Start with 1 second, double each time: 1s, 2s, 4s, 8s, 16s, 30s (capped)
-    return Math.min(1000 * Math.pow(2, failures - 1), MAX_BACKOFF_DELAY)
-  }
-  return NORMAL_POLLING_INTERVAL
-}
+const NORMAL_POLLING_INTERVAL = 30000 // 30 seconds (reduced from 15s)
+const MAX_BACKOFF_DELAY = 300000 // 5 minutes (increased from 30s)
 
 const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   const { refreshConfig } = useChat()
@@ -103,10 +95,10 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         // Keep this quiet in the UI but log to console for debugging
         console.error('Error loading MCP status for card:', err)
 
-        // Increment failure count and schedule next poll with backoff
+        // Increment failure count and schedule next poll with backoff (includes jitter)
         failureCountRef.current += 1
-        const delay = calculateDelay(failureCountRef.current)
-        console.log(`MCP status polling: ${failureCountRef.current} consecutive failures, next retry in ${delay / 1000}s`)
+        const delay = calculateBackoffDelay(failureCountRef.current, 1000, MAX_BACKOFF_DELAY)
+        console.log(`MCP status polling: ${failureCountRef.current} consecutive failure(s), next retry in ${(delay / 1000).toFixed(1)}s`)
         scheduleNextPoll(delay)
       } finally {
         setStatusLoading(false)
