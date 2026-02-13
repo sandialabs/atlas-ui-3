@@ -31,7 +31,7 @@ if [ -f "$PROJECT_ROOT/.venv/bin/activate" ]; then
     source "$PROJECT_ROOT/.venv/bin/activate"
 else
     echo "WARNING: .venv not found. Atlas tests expect uv-managed venv with pytest installed."
-    echo "If tests fail due to missing packages, run: uv venv && source .venv/bin/activate && uv pip install -r requirements.txt"
+    echo "If tests fail due to missing packages, run: uv venv && source .venv/bin/activate && uv pip install -e '.[dev]'"
 fi
 
 # Change to atlas directory

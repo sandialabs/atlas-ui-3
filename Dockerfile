@@ -20,8 +20,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     mkdir -p /root/.local/bin
 ENV PATH="/root/.local/bin:$PATH"
 
-# Copy requirements first
-COPY requirements.txt .
+# Copy pyproject.toml for dependency installation
+COPY pyproject.toml .
 
 # Copy and install frontend dependencies (for caching)
 COPY frontend/package*.json ./frontend/
@@ -49,7 +49,6 @@ COPY atlas/ ./atlas/
 COPY docs/ ./docs/
 COPY test/ ./test/
 COPY prompts/ ./prompts/
-COPY pyproject.toml ./
 
 # Create required runtime & config directories and seed config from package defaults
 RUN mkdir -p \
@@ -84,15 +83,14 @@ RUN /home/appuser/.local/bin/uv venv .venv --python 3.12
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Install Python dependencies using uv
-RUN /home/appuser/.local/bin/uv pip install -r requirements.txt
+# Install atlas package and all dependencies using uv (editable mode for dev)
+RUN /home/appuser/.local/bin/uv pip install -e .
 
 # Expose port
 EXPOSE 8000
 
-# Set environment variables
-ENV PYTHONPATH=/app \
-    NODE_ENV=production \
+# Set environment variables (PYTHONPATH not needed: atlas installed as package)
+ENV NODE_ENV=production \
     APP_CONFIG_DIR=/app/config \
     RUNTIME_LOG_DIR=/app/runtime/logs \
     RUNTIME_FEEDBACK_DIR=/app/runtime/feedback

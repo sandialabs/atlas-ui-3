@@ -103,41 +103,17 @@ print(result.message)
 # Install uv package manager (one-time)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Create virtual environment and install dependencies
+# Create virtual environment and install in editable mode (with dev dependencies)
 uv venv && source .venv/bin/activate
-uv pip install -r requirements.txt
+uv pip install -e ".[dev]"
 ```
 
-### Development Installation (Editable Mode)
-
-For development, install the package in **editable mode**. This creates a link from your Python environment to your local source code, so any changes you make to the code are immediately available without reinstalling.
-
-```bash
-# Install in editable mode with uv (recommended)
-uv pip install -e .
-
-# Or with pip
-pip install -e .
-```
-
-**What editable mode gives you:**
+This installs the `atlas` package in **editable mode**, meaning:
+- All dependencies are installed from `pyproject.toml` (the single source of truth)
+- The `atlas` package is importable everywhere without needing `PYTHONPATH`
 - Edit any Python file in `atlas/` and changes take effect immediately
-- CLI commands (`atlas-chat`, `atlas-server`) use your local code
-- Import `from atlas import AtlasClient` in scripts and get your local version
-- No need to reinstall after making changes
-
-**Example workflow:**
-```bash
-# Install once in editable mode
-uv pip install -e .
-
-# Edit code
-vim atlas/atlas_client.py
-
-# Run immediately with your changes - no reinstall needed
-atlas-chat "test my changes"
-python my_script.py  # uses updated AtlasClient
-```
+- CLI commands (`atlas-chat`, `atlas-server`, `atlas-init`) are available
+- Dev tools (pytest, ruff, podman-compose) are included
 
 **Alternative: PYTHONPATH (if you can't use editable install)**
 ```bash

@@ -40,7 +40,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install safety bandit semgrep
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install -e ".[dev]"
 
     - name: Python Safety Check
       run: |
@@ -71,7 +71,7 @@ jobs:
     # 
     # - name: Snyk Python scan
     #   run: |
-    #     snyk test --file=requirements.txt --json > snyk-python-report.json || true
+    #     snyk test --file=pyproject.toml --json > snyk-python-report.json || true
     #   env:
     #     SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     #   continue-on-error: true

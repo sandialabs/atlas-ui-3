@@ -30,7 +30,7 @@ uv --version
 cd /path/to/atlas-ui-3-11
 uv venv
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-uv pip install -r requirements.txt
+uv pip install -e ".[dev]"
 ```
 
 ### 2. Start backend (Terminal 1)

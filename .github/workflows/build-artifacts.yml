@@ -63,7 +63,6 @@ jobs:
         cp Dockerfile build-artifacts/
         cp .env.example build-artifacts/ 2>/dev/null || true
         # Copy other necessary files
-        cp requirements.txt build-artifacts/
         cp pyproject.toml build-artifacts/
         cp README.md build-artifacts/
 

@@ -22,7 +22,7 @@ test:
     - dnf update -y && dnf install -y python3 python3-pip nodejs npm curl
   script:
     # Install Python dependencies
-    - pip3 install -r requirements.txt
+    - pip3 install -e ".[dev]"
     
     # Install frontend dependencies
     - cd frontend && npm ci

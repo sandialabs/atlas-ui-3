@@ -51,7 +51,7 @@ This document outlines a proposal to make "git clone → run" dramatically easie
   - Ensures `.env` exists.
   - Performs LLM configuration sanity check.
   - Downloads prebuilt frontend into `frontend/dist`.
-  - Creates `.venv` and installs `requirements.txt` via uv.
+  - Creates `.venv` and installs the package via `uv pip install -e ".[dev]"`.
   - Starts the backend with `python atlas/main.py`.
 
 ### 3. Developer with full toolchain (Docker, Python+uv, Node)
@@ -61,7 +61,7 @@ This document outlines a proposal to make "git clone → run" dramatically easie
   ```bash
   uv venv
   source .venv/bin/activate
-  uv pip install -r requirements.txt
+  uv pip install -e ".[dev]"
   bash agent_start.sh
   ```
 - `agent_start.sh` remains the dev-only script that builds the frontend locally and starts backend + mocks.
@@ -145,7 +145,7 @@ This document outlines a proposal to make "git clone → run" dramatically easie
      ```bash
      uv venv
      source .venv/bin/activate
-     uv pip install -r requirements.txt
+     uv pip install -e ".[dev]"
      ```
    - Start the backend directly (since frontend is already present via prebuilt dist):
      ```bash
