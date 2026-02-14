@@ -102,6 +102,8 @@ Note: ChatContext validates persisted localStorage selections (tools, prompts, d
 
 **Polling with Backoff:** All frontend polling must use exponential backoff with jitter on failures (see `hooks/usePollingWithBackoff.js`); never use bare `setInterval` for backend polling.
 
+**RAG Activation vs Selection:** In `ChatContext.sendChatMessage`, data sources are only sent to the backend when RAG is explicitly activated (`ragEnabled` toggle or `/search` command). Selecting data sources in the UI only marks availability; the backend orchestrator routes to RAG mode only when `selected_data_sources` is non-empty, so the frontend must gate what it sends.
+
 ## Configuration and Feature Flags
 
 **Two-layer config**: User config in `config/` (created by `atlas-init`, set `APP_CONFIG_DIR` to customize) overrides package defaults in `atlas/config/`.

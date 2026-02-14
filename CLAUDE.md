@@ -157,6 +157,8 @@ frontend/src/
 
 **Polling with Backoff:** All frontend polling must use exponential backoff with jitter on failures to prevent backend DOS. Use the shared `usePollingWithBackoff` hook or `calculateBackoffDelay` from `hooks/usePollingWithBackoff.js`. Never use bare `setInterval` for backend polling.
 
+**RAG Activation vs Selection:** In `ChatContext.sendChatMessage`, data sources are only sent to the backend when RAG is explicitly activated (`ragEnabled` toggle or `/search` command). Selecting data sources in the UI only marks availability; the backend orchestrator routes to RAG mode only when `selected_data_sources` is non-empty, so the frontend must gate what it sends.
+
 **Event Flow:**
 ```
 User Input -> ChatContext -> WebSocket -> Backend ChatService
