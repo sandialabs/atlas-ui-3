@@ -225,13 +225,14 @@ export const ChatProvider = ({ children }) => {
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
-		// - If user has selected specific sources, use those
-		// - If forceRag is true and no sources selected, use all sources as fallback
-		// - ragEnabled flag controls whether RAG UI is shown, but we respect user's selections
+		// RAG is only invoked when explicitly activated via the search button (ragEnabled)
+		// or the /search command (forceRag). Data source selection alone just marks
+		// availability -- it does not trigger RAG.
+		const ragActivated = forceRag || ragEnabled
 		const hasSelectedSources = selectedDataSources.size > 0
-		const dataSourcesToSend = hasSelectedSources
-			? [...selectedDataSources]
-			: (forceRag ? getAllRagSourceIds() : [])
+		const dataSourcesToSend = ragActivated
+			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
+			: []
 
 		sendMessage({
 			type: 'chat',
@@ -249,7 +250,7 @@ export const ChatProvider = ({ children }) => {
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
 			compliance_level_filter: selections.complianceLevelFilter,
 		})
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds])
 
 	const clearChat = useCallback(() => {
 		resetMessages()
