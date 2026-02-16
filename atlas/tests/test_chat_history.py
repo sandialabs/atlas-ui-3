@@ -173,12 +173,15 @@ class TestList:
             user_email="user@test.com",
             title=None,
             model="gpt-4",
-            messages=[{"role": "user", "content": "This is a preview test message"}],
+            messages=[
+                {"role": "user", "content": "This is a preview test message"},
+                {"role": "assistant", "content": "Here is the preview test reply"},
+            ],
         )
         result = repo.list_conversations("user@test.com")
         assert len(result) == 1
         assert "preview" in result[0]
-        assert "preview test" in result[0]["preview"]
+        assert "preview test reply" in result[0]["preview"]
 
 
 class TestDelete:
