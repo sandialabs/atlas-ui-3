@@ -247,12 +247,12 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                   <div
                     key={conv.id}
                     onClick={() => handleLoadConversation(conv)}
-                    className={`px-3 py-2 cursor-pointer border-l-2 transition-colors ${
+                    className={`px-3 py-2 cursor-pointer border-l-2 border-b border-b-gray-700/50 transition-colors ${
                       conv._optimistic
-                        ? 'bg-gray-750 border-blue-400 opacity-80'
+                        ? 'bg-gray-750 border-l-blue-400 opacity-80'
                         : activeConversationId === conv.id
-                          ? 'bg-gray-700 border-blue-500'
-                          : 'border-transparent hover:bg-gray-750 hover:border-gray-600'
+                          ? 'bg-gray-700 border-l-blue-500'
+                          : 'border-l-transparent hover:bg-gray-750 hover:border-l-gray-600'
                     }`}
                   >
                     <div className="min-w-0 overflow-hidden">
