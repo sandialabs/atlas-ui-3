@@ -96,6 +96,14 @@ alembic revision --autogenerate -m "description"
 
 **Important**: `alembic.ini` and the `alembic/` directory are both at the project root. If you run Alembic from a different directory, it will fail with "No config file 'alembic.ini' found."
 
+**If tables already exist** (e.g., the backend ran first and `init_database()` created them via `create_all`), `alembic upgrade head` will fail with `DuplicateTable`. In that case, stamp the existing database without re-running the migration:
+
+```bash
+alembic stamp 001
+```
+
+This tells Alembic "the DB is already at revision 001" so future migrations will work correctly.
+
 For development with DuckDB, Alembic is **not required** -- `init_database()` creates all tables automatically on startup via `Base.metadata.create_all`.
 
 ## REST API
