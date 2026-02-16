@@ -201,7 +201,7 @@ class ConversationRepository:
                 try:
                     conv_metadata = json.loads(conv.metadata_json)
                 except json.JSONDecodeError:
-                    pass
+                    logger.warning("Corrupt metadata_json for conversation %s", conv.id)
 
             return {
                 "id": conv.id,
