@@ -8,6 +8,7 @@ WORKDIR /app
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Install system dependencies including Python
+# --allowerasing needed on UBI9 because curl-minimal conflicts with full curl
 RUN dnf update -y && dnf install -y --allowerasing \
     python3 \
     python3-pip \
@@ -21,7 +22,7 @@ RUN dnf module enable nodejs:20 -y && \
     dnf install -y nodejs && \
     dnf clean all
 
-# Install uv for better Python dependency management
+# Install uv via pip to avoid curl-based installs at build time
 RUN pip3 install uv && \
     mkdir -p /root/.local/bin && \
     ln -sf /usr/local/bin/uv /root/.local/bin/uv && \
