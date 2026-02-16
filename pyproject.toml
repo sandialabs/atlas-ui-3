@@ -23,6 +23,7 @@ dependencies = [
     "beautifulsoup4",
     "boto3>=1.34.0",
     "cryptography",
+    "duckdb-engine",
     "duckduckgo-search",
     "fastapi",
     "fastmcp>=2.10.0,<3.0.0",
@@ -50,6 +51,7 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "seaborn",
+    "sqlalchemy>=2.0",
     "uvicorn[standard]",
     "websockets",
 ]
