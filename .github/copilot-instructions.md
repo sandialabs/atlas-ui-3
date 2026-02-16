@@ -259,6 +259,7 @@ Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.
 5. **Missing tools**: Check MCP transport/URL and server logs
 6. **Empty lists**: Check auth groups and compliance filtering
 7. **Host binding ignored**: `agent_start.sh` and the Dockerfile both use `ATLAS_HOST` env var for host binding; `main.py` also reads it directly -- keep all three in sync when changing network configuration
+8. **DuckDB FK constraints**: DuckDB does not support CASCADE or UPDATE on foreign-key-constrained tables; the `chat_history` module avoids all database-level ForeignKey constraints and enforces referential integrity manually in the repository layer instead
 
 ## Critical Restrictions
 

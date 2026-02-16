@@ -58,6 +58,7 @@ from atlas.routes.admin_routes import admin_router
 
 # Import essential routes
 from atlas.routes.config_routes import router as config_router
+from atlas.routes.conversation_routes import router as conversation_router
 from atlas.routes.feedback_routes import feedback_router
 from atlas.routes.files_routes import router as files_router
 from atlas.routes.health_routes import router as health_router
@@ -221,6 +222,7 @@ app.include_router(health_router)
 app.include_router(feedback_router)
 app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
+app.include_router(conversation_router)
 
 # Serve frontend build (Vite)
 # PyPI package bundles frontend into atlas/static/; local dev uses frontend/dist/
@@ -413,7 +415,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             temperature=data.get("temperature", 0.7),
                             agent_loop_strategy=data.get("agent_loop_strategy"),
                             update_callback=lambda message: websocket_update_callback(websocket, message),
-                            files=data.get("files")
+                            files=data.get("files"),
+                            incognito=data.get("incognito", False),
+                            conversation_id=data.get("conversation_id"),
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
@@ -472,6 +476,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 response = await chat_service.handle_download_file(
                     session_id=session_id,
                     filename=data.get("filename", ""),
+                    user_email=user_email
+                )
+                await websocket.send_json(response)
+
+            elif message_type == "restore_conversation":
+                # Restore a saved conversation into the current session
+                response = await chat_service.handle_restore_conversation(
+                    session_id=session_id,
+                    conversation_id=data.get("conversation_id", ""),
+                    messages=data.get("messages", []),
                     user_email=user_email
                 )
                 await websocket.send_json(response)

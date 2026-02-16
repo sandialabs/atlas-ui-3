@@ -6,7 +6,7 @@ from uuid import UUID
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.errors import DomainError
-from atlas.domain.messages.models import MessageType, ToolResult
+from atlas.domain.messages.models import Message, MessageRole, MessageType, ToolResult
 from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
@@ -52,6 +52,7 @@ class ChatService:
         agent_loop_factory: Optional[AgentLoopFactory] = None,
         event_publisher: Optional[EventPublisher] = None,
         session_repository: Optional[SessionRepository] = None,
+        conversation_repository: Optional[Any] = None,
     ):
         """
         Initialize chat service with dependencies.
@@ -90,6 +91,12 @@ class ChatService:
             # Create default in-memory repository
             from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
             self.session_repository = InMemorySessionRepository()
+
+        # Chat history persistence (None when feature disabled)
+        self.conversation_repository = conversation_repository
+
+        # Track incognito sessions
+        self._incognito_sessions: set = set()
 
         # Legacy sessions dict - deprecated, use session_repository instead
         # Kept temporarily for backward compatibility
@@ -239,10 +246,22 @@ class ChatService:
                 # Sync to legacy dict
                 self.sessions[session_id] = session
 
+        # Check incognito mode
+        incognito = kwargs.pop("incognito", False)
+        if incognito:
+            self._incognito_sessions.add(session_id)
+
+        # Track conversation_id for continuing saved conversations
+        conversation_id = kwargs.pop("conversation_id", None)
+        if conversation_id:
+            session = self.sessions.get(session_id)
+            if session:
+                session.context["conversation_id"] = conversation_id
+
         try:
             # Delegate to orchestrator
             orchestrator = self._get_orchestrator()
-            return await orchestrator.execute(
+            result = await orchestrator.execute(
                 session_id=session_id,
                 content=content,
                 model=model,
@@ -257,6 +276,19 @@ class ChatService:
                 update_callback=update_callback,
                 **kwargs
             )
+
+            # Persist conversation (if not incognito and feature enabled)
+            if (
+                self.conversation_repository is not None
+                and session_id not in self._incognito_sessions
+                and user_email
+            ):
+                try:
+                    self._save_conversation(session_id, user_email, model)
+                except Exception as e:
+                    logger.error("Failed to persist conversation: %s", e, exc_info=True)
+
+            return result
         except DomainError:
             # Let domain-level errors (e.g., LLM / rate limit / validation) bubble up
             # so transport layers (WebSocket/HTTP) can handle them consistently.
@@ -264,6 +296,52 @@ class ChatService:
         except Exception as e:
             # Fallback for unexpected errors in HTTP-style callers
             return error_handler.handle_chat_message_error(e, "chat message handling")
+
+    async def handle_restore_conversation(
+        self,
+        session_id: UUID,
+        conversation_id: str,
+        messages: List[Dict[str, Any]],
+        user_email: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Restore a saved conversation into the current session.
+
+        Resets the session, loads previous messages into history,
+        and maps the session to the original conversation_id so
+        subsequent saves update the same conversation.
+        """
+        # Reset the session
+        self.end_session(session_id)
+        await self.create_session(session_id, user_email)
+
+        session = self.sessions.get(session_id)
+        if session:
+            # Store the conversation_id mapping
+            session.context["conversation_id"] = conversation_id
+
+            # Load previous messages into session history for LLM context
+            for msg_data in messages:
+                role = msg_data.get("role", "user")
+                content = msg_data.get("content", "")
+                msg = Message(
+                    role=MessageRole(role),
+                    content=content,
+                )
+                session.history.add_message(msg)
+
+        logger.info(
+            "Restored conversation %s into session %s for user %s (%d messages)",
+            sanitize_for_logging(conversation_id),
+            sanitize_for_logging(str(session_id)),
+            sanitize_for_logging(user_email),
+            len(messages),
+        )
+
+        return {
+            "type": "conversation_restored",
+            "conversation_id": conversation_id,
+            "message_count": len(messages),
+        }
 
     async def handle_reset_session(
         self,
@@ -443,6 +521,41 @@ class ChatService:
         except Exception as e:
             logger.error(f"Failed to update session from tool results: {e}", exc_info=True)
 
+    def _save_conversation(self, session_id: UUID, user_email: str, model: str) -> None:
+        """Persist the current session's conversation history to the database."""
+        session = self.sessions.get(session_id)
+        if not session or not session.history.messages:
+            return
+
+        messages = []
+        for msg in session.history.messages:
+            msg_dict = msg.to_dict()
+            # Preserve message_type from metadata if available
+            msg_dict["message_type"] = msg.metadata.get("message_type", "chat")
+            messages.append(msg_dict)
+
+        # Generate title from first user message
+        title = None
+        for msg in session.history.messages:
+            if msg.role.value == "user" and msg.content:
+                title = msg.content[:200]
+                break
+
+        # Use stored conversation_id if continuing a saved conversation,
+        # otherwise use the session_id as the conversation_id
+        conv_id = session.context.get("conversation_id", str(session_id))
+
+        self.conversation_repository.save_conversation(
+            conversation_id=conv_id,
+            user_email=user_email,
+            title=title,
+            model=model,
+            messages=messages,
+            metadata={
+                "agent_mode": bool(session.context.get("agent_mode")),
+            },
+        )
+
     def get_session(self, session_id: UUID) -> Optional[Session]:
         """Get session by ID."""
         return self.sessions.get(session_id)
@@ -451,4 +564,5 @@ class ChatService:
         """End a session."""
         if session_id in self.sessions:
             self.sessions[session_id].active = False
+            self._incognito_sessions.discard(session_id)
             logger.info(f"Ended session {sanitize_for_logging(str(session_id))}")
