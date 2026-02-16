@@ -75,22 +75,28 @@ Four tables are created:
 
 ## Alembic Migrations
 
-For production PostgreSQL deployments, use Alembic for schema migrations:
+For production PostgreSQL deployments, use Alembic for schema migrations.
+All Alembic commands must be run **from the project root** (where `alembic.ini` lives):
 
 ```bash
-# Apply migrations
+cd /path/to/atlas-ui-3   # project root, same directory as alembic.ini
+
+# Set the database URL (or have it in your .env)
+export CHAT_HISTORY_DB_URL=postgresql://atlas:atlas@localhost:5432/atlas_chat_history
+
+# Apply all migrations to bring the database up to date
 alembic upgrade head
 
-# Check current revision
+# Check which migration the database is currently on
 alembic current
 
-# Create a new migration (PostgreSQL only; DuckDB does not support autogenerate)
+# Create a new migration after changing models.py (PostgreSQL only; DuckDB does not support autogenerate)
 alembic revision --autogenerate -m "description"
 ```
 
-The `alembic.ini` is at the project root. Set `CHAT_HISTORY_DB_URL` in your environment before running Alembic commands.
+**Important**: `alembic.ini` and the `alembic/` directory are both at the project root. If you run Alembic from a different directory, it will fail with "No config file 'alembic.ini' found."
 
-For development with DuckDB, `init_database()` handles table creation automatically -- Alembic is not required.
+For development with DuckDB, Alembic is **not required** -- `init_database()` creates all tables automatically on startup via `Base.metadata.create_all`.
 
 ## REST API
 
