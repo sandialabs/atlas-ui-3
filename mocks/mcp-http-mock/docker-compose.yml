@@ -4,12 +4,12 @@
 version: '3.8'
 
 services:
-  # Ubuntu-based MCP server
-  mcp-server-ubuntu:
+  # RHEL 9-based MCP server
+  mcp-server-rhel9:
     build:
       context: .
       dockerfile: Dockerfile.ubuntu
-    container_name: mcp-server-ubuntu
+    container_name: mcp-server-rhel9
     ports:
       - "8005:8005"
     environment:

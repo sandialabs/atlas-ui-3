@@ -1,5 +1,5 @@
 # Test-specific Dockerfile with simple E2E testing dependencies
-FROM fedora:latest
+FROM registry.access.redhat.com/ubi9/ubi:latest
 
 # Build argument for debug mode (default: true for backward compatibility)
 ARG DEBUG_MODE=true
@@ -11,10 +11,9 @@ WORKDIR /app
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Install system dependencies
-RUN dnf update -y && dnf install -y \
+RUN dnf update -y && dnf install -y --allowerasing \
     python3 \
     python3-pip \
-    python3-virtualenv \
     curl \
     hostname \
     wget \
@@ -22,14 +21,16 @@ RUN dnf update -y && dnf install -y \
     dos2unix \
     && dnf clean all
 
-# Install Node.js 20.x from NodeSource
-RUN curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && \
+# Install Node.js 20.x from RHEL module stream
+RUN dnf module enable nodejs:20 -y && \
     dnf install -y nodejs && \
     dnf clean all
 
 # Install uv for better Python dependency management
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mkdir -p /root/.local/bin
+RUN pip3 install uv && \
+    mkdir -p /root/.local/bin && \
+    ln -sf /usr/local/bin/uv /root/.local/bin/uv && \
+    ln -sf /usr/local/bin/uvx /root/.local/bin/uvx
 ENV PATH="/root/.local/bin:$PATH"
 
 # Copy requirements first
@@ -68,7 +69,7 @@ RUN find /app -type f \( -name "*.js" -o -name "*.json" -o -name "*.sh" -o -name
 RUN find /app -type f -name "*.sh" -exec chmod +x {} \;
 
 # Install requests for simple E2E testing using dnf
-RUN dnf install -y python3-requests && dnf clean all
+RUN dnf install -y --allowerasing python3-requests && dnf clean all
 
 # Switch back to app directory and create required directories
 WORKDIR /app
@@ -93,7 +94,8 @@ RUN echo "# Development mode - skip authentication when true" > /app/.env && \
 
 # Set up uv for appuser
 RUN mkdir -p /home/appuser/.local/bin && \
-    if [ -f "/root/.local/bin/uv" ]; then cp /root/.local/bin/uv /home/appuser/.local/bin/; fi && \
+    cp /usr/local/bin/uv /home/appuser/.local/bin/uv && \
+    cp /usr/local/bin/uvx /home/appuser/.local/bin/uvx 2>/dev/null || true && \
     mkdir -p /home/appuser/.cache && \
     chown -R appuser:appuser /home/appuser/.local /home/appuser/.cache
 
