@@ -39,7 +39,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 cd atlas-ui-3-11
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-uv pip install -r requirements.txt
+uv pip install -e ".[dev]"
 ```
 
 ### 2. Configure environment

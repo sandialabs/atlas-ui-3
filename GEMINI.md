@@ -1,6 +1,6 @@
 # Gemini Guide: Atlas UI 3
 
-Last updated: 2026-02-08
+Last updated: 2026-02-13
 
 This file provides guidance to Google Gemini AI assistants when working with code in this repository.
 
@@ -16,6 +16,8 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 
 **PyPI Packaging**: The CI workflow bundles the frontend into `atlas/static/` before building the wheel; at runtime `atlas/main.py` checks `atlas/static/` first (package install) then falls back to `frontend/dist/` (local dev), so both paths work transparently.
 
+**Dependency Management**: All Python dependencies are defined in `pyproject.toml` (the single source of truth); there is no `requirements.txt` -- always use `uv pip install -e ".[dev]"` for development.
+
 ## Do This First
 
 ```bash
@@ -24,7 +26,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Setup and run
 uv venv && source .venv/bin/activate
-uv pip install -r requirements.txt
+uv pip install -e ".[dev]"
 bash agent_start.sh   # builds frontend, starts backend, seeds/mocks
 ```
 
