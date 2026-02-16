@@ -42,7 +42,10 @@ class ConversationRepository:
         Upsert: if conversation exists, replaces all messages.
         """
         with self._get_session() as session:
-            existing = session.get(ConversationRecord, conversation_id)
+            existing = session.query(ConversationRecord).filter(
+                ConversationRecord.id == conversation_id,
+                ConversationRecord.user_email == user_email,
+            ).first()
 
             if existing:
                 existing.title = title or existing.title

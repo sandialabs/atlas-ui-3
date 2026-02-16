@@ -6,12 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Issue #281 - 2026-02-15
+### PR #344 - 2026-02-16
 - **Feature**: Chat history persistence with DuckDB (local) and PostgreSQL (production) support. Conversations, messages, and tags are saved to a database and can be browsed, searched, loaded, and deleted from the sidebar.
-- **Feature**: Incognito mode prevents conversation saving, with a clear visual indicator in the sidebar.
+- **Feature**: Incognito mode prevents conversation saving, with a clear visual indicator in the header.
 - **Feature**: Alembic migration framework for chat history schema (no FK constraints for DuckDB compatibility).
 - **API**: New REST endpoints at `/api/conversations` for listing, searching, CRUD, tagging, and bulk deletion.
-- **Frontend**: Rebuilt sidebar with conversation list, search, tag filtering, multi-select delete, and incognito toggle.
+- **Frontend**: Rebuilt sidebar with conversation list, search, tag filtering, and delete all. Incognito toggle in header.
 - **Config**: New `FEATURE_CHAT_HISTORY_ENABLED` (default: false) and `CHAT_HISTORY_DB_URL` settings.
 
 ### PR #335 - 2026-02-14

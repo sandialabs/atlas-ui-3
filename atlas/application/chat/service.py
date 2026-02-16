@@ -247,9 +247,12 @@ class ChatService:
                 self.sessions[session_id] = session
 
         # Check incognito mode
-        incognito = kwargs.pop("incognito", False)
-        if incognito:
+        _incognito_sentinel = object()
+        incognito = kwargs.pop("incognito", _incognito_sentinel)
+        if incognito is True:
             self._incognito_sessions.add(session_id)
+        elif incognito is False:
+            self._incognito_sessions.discard(session_id)
 
         # Track conversation_id for continuing saved conversations
         conversation_id = kwargs.pop("conversation_id", None)
@@ -310,6 +313,17 @@ class ChatService:
         and maps the session to the original conversation_id so
         subsequent saves update the same conversation.
         """
+        # Validate conversation ownership before restoring
+        if user_email and getattr(self, "conversation_repository", None) is not None:
+            conv = self.conversation_repository.get_conversation(conversation_id, user_email)
+            if conv is None:
+                logger.warning(
+                    "Rejected restore for conversation %s: not found for user %s",
+                    sanitize_for_logging(conversation_id),
+                    sanitize_for_logging(user_email),
+                )
+                return {"type": "error", "error": "Conversation not found"}
+
         # Reset the session
         self.end_session(session_id)
         await self.create_session(session_id, user_email)
@@ -321,10 +335,19 @@ class ChatService:
 
             # Load previous messages into session history for LLM context
             for msg_data in messages:
-                role = msg_data.get("role", "user")
+                role_value = msg_data.get("role", "user") or "user"
                 content = msg_data.get("content", "")
+                try:
+                    message_role = MessageRole(role_value)
+                except ValueError:
+                    logger.warning(
+                        "Skipping message with invalid role %s in conversation %s",
+                        sanitize_for_logging(str(role_value)),
+                        sanitize_for_logging(conversation_id),
+                    )
+                    continue
                 msg = Message(
-                    role=MessageRole(role),
+                    role=message_role,
                     content=content,
                 )
                 session.history.add_message(msg)
@@ -534,16 +557,17 @@ class ChatService:
             msg_dict["message_type"] = msg.metadata.get("message_type", "chat")
             messages.append(msg_dict)
 
-        # Generate title from first user message
-        title = None
-        for msg in session.history.messages:
-            if msg.role.value == "user" and msg.content:
-                title = msg.content[:200]
-                break
-
         # Use stored conversation_id if continuing a saved conversation,
         # otherwise use the session_id as the conversation_id
         conv_id = session.context.get("conversation_id", str(session_id))
+
+        # Only generate title for new conversations; existing ones keep their title
+        title = None
+        if conv_id == str(session_id):
+            for msg in session.history.messages:
+                if msg.role.value == "user" and msg.content:
+                    title = msg.content[:200]
+                    break
 
         self.conversation_repository.save_conversation(
             conversation_id=conv_id,

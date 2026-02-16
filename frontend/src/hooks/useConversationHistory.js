@@ -114,9 +114,11 @@ export function useConversationHistory() {
       })
       if (!res.ok) return null
       const data = await res.json()
-      // Update local state to reflect new tag
+      // Update local state to reflect new tag (deduplicate)
       setConversations(prev => prev.map(c =>
-        c.id === conversationId ? { ...c, tags: [...(c.tags || []), tagName] } : c
+        c.id === conversationId
+          ? { ...c, tags: [...new Set([...(c.tags || []), tagName])] }
+          : c
       ))
       return data.tag_id
     } catch (e) {

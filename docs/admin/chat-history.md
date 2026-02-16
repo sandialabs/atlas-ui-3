@@ -141,9 +141,10 @@ The sidebar shows:
 - **Conversation list** with title, preview, timestamp, message count, and tags
 - **Search bar** for filtering by title or content
 - **Tag filter** buttons for quick filtering
-- **Multi-select** checkboxes for bulk deletion
-- **Incognito toggle** with clear visual indicator
 - **Delete All** button in the footer
+
+The **Header** includes:
+- **Incognito toggle** with clear visual indicator (Saving/Incognito)
 
 Loading a saved conversation replaces the current chat view with the saved messages.
 

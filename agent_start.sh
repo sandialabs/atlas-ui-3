@@ -148,7 +148,17 @@ setup_chat_history_db() {
             cd "$PROJECT_ROOT"
             $COMPOSE_CMD up -d postgres
             echo "Waiting for PostgreSQL to be ready..."
-            sleep 5
+            max_wait=60
+            waited=0
+            until $COMPOSE_CMD exec -T postgres pg_isready >/dev/null 2>&1; do
+                if [ "$waited" -ge "$max_wait" ]; then
+                    echo "PostgreSQL did not become ready within ${max_wait}s."
+                    exit 1
+                fi
+                sleep 2
+                waited=$((waited + 2))
+            done
+            echo "PostgreSQL is ready."
         else
             echo "PostgreSQL is already running"
         fi
@@ -157,7 +167,7 @@ setup_chat_history_db() {
         # Ensure data directory exists for DuckDB file
         mkdir -p "$PROJECT_ROOT/data"
     else
-        echo "Chat history: custom DB URL ($db_url)"
+        echo "Chat history: custom DB URL configured"
     fi
     cd "$PROJECT_ROOT"
 }

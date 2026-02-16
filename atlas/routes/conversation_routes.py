@@ -3,7 +3,7 @@
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from atlas.core.log_sanitizer import get_current_user
@@ -86,7 +86,7 @@ async def get_conversation(
 
     conversation = repo.get_conversation(conversation_id, current_user)
     if not conversation:
-        return {"error": "Conversation not found"}
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
 
 
