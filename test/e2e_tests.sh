@@ -72,15 +72,27 @@ fi
 export PYTHONPATH="$PROJECT_ROOT"
 echo "PYTHONPATH set to: $PYTHONPATH"
 
-# Check if port 8000 is already in use
-if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    echo "Port 8000 is already in use. Attempting to continue with existing service..."
+# Read port from .env file, default to 8000
+E2E_PORT=8000
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    ENV_PORT=$(grep -E '^PORT=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
+    if [ -n "$ENV_PORT" ]; then
+        E2E_PORT="$ENV_PORT"
+        echo "Using port $E2E_PORT from .env file"
+    fi
+fi
+export E2E_PORT
+echo "E2E test port: $E2E_PORT"
+
+# Check if port is already in use
+if lsof -Pi :"$E2E_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo "Port $E2E_PORT is already in use. Attempting to continue with existing service..."
     # Get the PID of the existing process for potential cleanup
-    EXISTING_PID=$(lsof -Pi :8000 -sTCP:LISTEN -t 2>/dev/null | head -1)
+    EXISTING_PID=$(lsof -Pi :"$E2E_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)
     echo "Existing service PID: ${EXISTING_PID:-unknown}"
 else
     echo "Starting uvicorn server..."
-    uvicorn main:app --host 0.0.0.0 --port 8000 &
+    uvicorn main:app --host 0.0.0.0 --port "$E2E_PORT" &
     BACKEND_PID=$!
 
     # Give the server a moment to start
@@ -106,7 +118,7 @@ for i in $(seq 1 $MAX_RETRIES); do
     # DEBUG_MODE=true and DEBUG_MODE=false environments.
     if curl --silent --fail \
         -H "X-User-Email: test@test.com" \
-        http://127.0.0.1:8000/api/config >/dev/null 2>&1; then
+        "http://127.0.0.1:${E2E_PORT}/api/config" >/dev/null 2>&1; then
         echo "Backend is up (after $i attempt(s))"
         SUCCESS=true
         break

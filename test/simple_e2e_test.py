@@ -3,12 +3,14 @@
 Simple E2E tests using requests.
 Tests basic functionality without complex browser automation.
 """
+import os
 import requests
 import time
 import sys
 
 
 AUTH_HEADERS = {"X-User-Email": "test@test.com"}
+BASE_URL = f"http://127.0.0.1:{os.environ.get('E2E_PORT', '8000')}"
 
 
 def wait_for_server(url, max_retries=30, delay=2):
@@ -35,8 +37,8 @@ def test_health_endpoint():
     """Test the health endpoint."""
     print("Testing health endpoint...")
     try:
-        response = requests.get("http://127.0.0.1:8000/api/config", headers=AUTH_HEADERS, timeout=10)
-        print(f"✅ Health endpoint responded with status {response.status_code}")
+        response = requests.get(f"{BASE_URL}/api/config", headers=AUTH_HEADERS, timeout=10)
+        print(f"Health endpoint responded with status {response.status_code}")
         return True
     except Exception as e:
         print(f"❌ Health endpoint failed: {e}")
@@ -48,7 +50,7 @@ def test_static_files():
     print("Testing static file serving...")
     try:
         # Test the main page (in DEBUG_MODE=true, should serve directly without auth redirect)
-        response = requests.get("http://127.0.0.1:8000/", timeout=10, allow_redirects=True)
+        response = requests.get(f"{BASE_URL}/", timeout=10, allow_redirects=True)
         if response.status_code == 200:
             # Check for basic HTML content (simple string checks)
             content = response.text
@@ -82,9 +84,9 @@ def test_api_endpoints():
     
     # Test config endpoint
     try:
-        response = requests.get("http://127.0.0.1:8000/api/config", headers=AUTH_HEADERS, timeout=10)
+        response = requests.get(f"{BASE_URL}/api/config", headers=AUTH_HEADERS, timeout=10)
         if response.status_code == 200:
-            print("✅ /api/config endpoint is accessible")
+            print("/api/config endpoint is accessible")
             config_works = True
         else:
             print(f"⚠️  /api/config returned status {response.status_code}")
@@ -95,9 +97,9 @@ def test_api_endpoints():
     
     # Test banners endpoint
     try:
-        response = requests.get("http://127.0.0.1:8000/api/banners", headers=AUTH_HEADERS, timeout=10)
+        response = requests.get(f"{BASE_URL}/api/banners", headers=AUTH_HEADERS, timeout=10)
         if response.status_code == 200:
-            print("✅ /api/banners endpoint is accessible")
+            print("/api/banners endpoint is accessible")
             banners_works = True
         else:
             print(f"⚠️  /api/banners returned status {response.status_code}")
@@ -115,7 +117,7 @@ def run_tests():
     print("=" * 40)
     
     # Wait for server
-    if not wait_for_server("http://127.0.0.1:8000"):
+    if not wait_for_server(BASE_URL):
         print("💥 Server not ready, aborting tests")
         return False
     
