@@ -619,6 +619,158 @@ class TestRoutesSecurity:
         assert resp.json()["conversations"] == []
 
 
+class TestSessionResetConversationIsolation:
+    """Tests for Finding #1: session reset must create a new conversation_id."""
+
+    @pytest.fixture
+    def chat_service(self, repo):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from atlas.application.chat.service import ChatService
+
+        llm = MagicMock()
+        service = ChatService(
+            llm=llm,
+            conversation_repository=repo,
+        )
+        return service
+
+    @pytest.mark.asyncio
+    async def test_reset_generates_new_conversation_id(self, chat_service):
+        """After reset, the session should have a different conversation_id."""
+        from uuid import UUID as UUIDType, uuid4
+
+        session_id = uuid4()
+        await chat_service.create_session(session_id, "user@test.com")
+
+        session = chat_service.sessions.get(session_id)
+        conv_id_before = session.context.get("conversation_id")
+
+        await chat_service.handle_reset_session(session_id, "user@test.com")
+
+        session = chat_service.sessions.get(session_id)
+        conv_id_after = session.context.get("conversation_id")
+
+        assert conv_id_after is not None
+        assert conv_id_after != conv_id_before
+        # Verify it's a valid UUID string
+        UUIDType(conv_id_after)
+
+    @pytest.mark.asyncio
+    async def test_save_after_reset_creates_new_conversation(self, chat_service, repo):
+        """Saving after reset should not overwrite the previous conversation."""
+        from uuid import uuid4
+
+        from atlas.domain.messages.models import Message, MessageRole
+
+        session_id = uuid4()
+        user = "user@test.com"
+
+        # First conversation
+        await chat_service.create_session(session_id, user)
+        session = chat_service.sessions.get(session_id)
+        session.history.add_message(Message(role=MessageRole.USER, content="First question"))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="First answer"))
+        chat_service._save_conversation(session_id, user, "gpt-4")
+
+        first_conv_id = session.context.get("conversation_id", str(session_id))
+        first_conv = repo.get_conversation(first_conv_id, user)
+        assert first_conv is not None
+        assert len(first_conv["messages"]) == 2
+
+        # Reset and start second conversation
+        await chat_service.handle_reset_session(session_id, user)
+        session = chat_service.sessions.get(session_id)
+        second_conv_id = session.context.get("conversation_id")
+        assert second_conv_id != first_conv_id
+
+        session.history.add_message(Message(role=MessageRole.USER, content="Second question"))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="Second answer"))
+        chat_service._save_conversation(session_id, user, "gpt-4")
+
+        # Verify both conversations exist independently
+        first_after = repo.get_conversation(first_conv_id, user)
+        second_after = repo.get_conversation(second_conv_id, user)
+
+        assert first_after is not None
+        assert second_after is not None
+        assert first_after["messages"][0]["content"] == "First question"
+        assert second_after["messages"][0]["content"] == "Second question"
+        assert len(first_after["messages"]) == 2
+        assert len(second_after["messages"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_multiple_resets_create_separate_conversations(self, chat_service, repo):
+        """Multiple reset cycles should each produce a separate conversation."""
+        from uuid import uuid4
+
+        from atlas.domain.messages.models import Message, MessageRole
+
+        session_id = uuid4()
+        user = "user@test.com"
+        conv_ids = []
+
+        for i in range(3):
+            if i == 0:
+                await chat_service.create_session(session_id, user)
+            else:
+                await chat_service.handle_reset_session(session_id, user)
+
+            session = chat_service.sessions.get(session_id)
+            session.history.add_message(Message(role=MessageRole.USER, content=f"Question {i}"))
+            chat_service._save_conversation(session_id, user, "gpt-4")
+            conv_ids.append(session.context.get("conversation_id", str(session_id)))
+
+        # All conversation_ids should be unique
+        assert len(set(conv_ids)) == 3
+
+        # All should exist in the database
+        all_convs = repo.list_conversations(user)
+        assert len(all_convs) == 3
+
+    @pytest.mark.asyncio
+    async def test_restore_then_reset_preserves_original(self, chat_service, repo):
+        """Restoring a conversation, then resetting, should not destroy the original."""
+        from uuid import uuid4
+
+        from atlas.domain.messages.models import Message, MessageRole
+
+        session_id = uuid4()
+        user = "user@test.com"
+
+        # Save an initial conversation directly
+        repo.save_conversation(
+            conversation_id="original-conv",
+            user_email=user,
+            title="Original",
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Original question"}],
+        )
+
+        # Restore it
+        await chat_service.handle_restore_conversation(
+            session_id, "original-conv",
+            [{"role": "user", "content": "Original question"}],
+            user,
+        )
+
+        # Reset to start a new conversation
+        await chat_service.handle_reset_session(session_id, user)
+        session = chat_service.sessions.get(session_id)
+        new_conv_id = session.context.get("conversation_id")
+        assert new_conv_id != "original-conv"
+
+        # Save the new conversation
+        session.history.add_message(Message(role=MessageRole.USER, content="New question"))
+        chat_service._save_conversation(session_id, user, "gpt-4")
+
+        # Original should still be intact
+        original = repo.get_conversation("original-conv", user)
+        assert original is not None
+        assert original["title"] == "Original"
+        assert original["messages"][0]["content"] == "Original question"
+
+
 class TestConversationRoutes:
     """Test the REST API routes for conversation history."""
 

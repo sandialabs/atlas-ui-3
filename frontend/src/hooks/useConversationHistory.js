@@ -32,7 +32,8 @@ export function useConversationHistory() {
   const searchConversations = useCallback(async (query) => {
     if (!query || !query.trim()) {
       setSearchQuery('')
-      return fetchConversations()
+      // Respect active tag filter when clearing search
+      return fetchConversations(activeTag ? { tag: activeTag } : {})
     }
     setSearchQuery(query)
     setLoading(true)
@@ -50,7 +51,7 @@ export function useConversationHistory() {
     } finally {
       setLoading(false)
     }
-  }, [fetchConversations])
+  }, [fetchConversations, activeTag])
 
   const loadConversation = useCallback(async (conversationId) => {
     try {

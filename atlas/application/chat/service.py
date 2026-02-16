@@ -2,7 +2,7 @@
 
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.errors import DomainError
@@ -330,8 +330,9 @@ class ChatService:
 
         session = self.sessions.get(session_id)
         if session:
-            # Store the conversation_id mapping
+            # Store the conversation_id mapping and mark as restored
             session.context["conversation_id"] = conversation_id
+            session.context["_restored"] = True
 
             # Load previous messages into session history for LLM context
             for msg_data in messages:
@@ -371,12 +372,21 @@ class ChatService:
         session_id: UUID,
         user_email: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Handle session reset request from frontend."""
+        """Handle session reset request from frontend.
+
+        Generates a new conversation_id so the next conversation
+        does not overwrite the previous one (session_id stays the
+        same for the lifetime of the WebSocket connection).
+        """
         # End the current session
         self.end_session(session_id)
 
-        # Create a new session
+        # Create a new session with a fresh conversation_id
         await self.create_session(session_id, user_email)
+        session = self.sessions.get(session_id)
+        if session:
+            new_conv_id = str(uuid4())
+            session.context["conversation_id"] = new_conv_id
 
         logger.info(f"Reset session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
 
@@ -557,13 +567,12 @@ class ChatService:
             msg_dict["message_type"] = msg.metadata.get("message_type", "chat")
             messages.append(msg_dict)
 
-        # Use stored conversation_id if continuing a saved conversation,
-        # otherwise use the session_id as the conversation_id
+        # Use stored conversation_id if set, otherwise use session_id
         conv_id = session.context.get("conversation_id", str(session_id))
 
-        # Only generate title for new conversations; existing ones keep their title
+        # Only generate title for new conversations (not restored ones)
         title = None
-        if conv_id == str(session_id):
+        if not session.context.get("_restored"):
             for msg in session.history.messages:
                 if msg.role.value == "user" and msg.content:
                     title = msg.content[:200]

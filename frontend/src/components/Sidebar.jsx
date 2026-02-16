@@ -43,12 +43,12 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     if (currentCount > prevCount && currentCount > 0) {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       refreshTimerRef.current = setTimeout(() => {
-        history.fetchConversations()
+        history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
       }, 1500)
     }
 
     if (currentCount === 0 && prevCount > 0) {
-      history.fetchConversations()
+      history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
     }
 
     return () => {
