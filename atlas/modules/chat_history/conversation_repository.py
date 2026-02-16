@@ -36,10 +36,11 @@ class ConversationRepository:
         model: Optional[str],
         messages: List[Dict[str, Any]],
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> ConversationRecord:
+    ) -> Optional[ConversationRecord]:
         """Save or update a conversation with all its messages.
 
-        Upsert: if conversation exists, replaces all messages.
+        Upsert: if conversation exists for this user, replaces all messages.
+        Returns None if the conversation_id belongs to a different user.
         """
         with self._get_session() as session:
             existing = session.query(ConversationRecord).filter(
@@ -80,6 +81,15 @@ class ConversationRepository:
                 session.commit()
                 return existing
             else:
+                # Reject if the id already exists for a different user
+                other = session.get(ConversationRecord, conversation_id)
+                if other:
+                    logger.warning(
+                        "Rejected save: conversation %s belongs to a different user",
+                        conversation_id,
+                    )
+                    return None
+
                 conv = ConversationRecord(
                     id=conversation_id,
                     user_email=user_email,

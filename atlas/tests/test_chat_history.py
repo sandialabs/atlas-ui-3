@@ -399,6 +399,226 @@ class TestUserIsolation:
         assert repo.get_conversation("conv-nd", "alice@test.com") is not None
 
 
+class TestSaveConversationSecurity:
+    """Tests for cross-user save_conversation protections."""
+
+    def test_save_cannot_overwrite_other_users_conversation(self, repo):
+        """A user who knows another user's conversation_id cannot overwrite it."""
+        repo.save_conversation(
+            conversation_id="shared-id",
+            user_email="alice@test.com",
+            title="Alice Original",
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Alice secret message"}],
+        )
+        # Bob tries to save using the same conversation_id - should be rejected
+        result = repo.save_conversation(
+            conversation_id="shared-id",
+            user_email="bob@test.com",
+            title="Bob Hijack",
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Bob overwrote you"}],
+        )
+        assert result is None
+
+        # Alice's conversation should be unchanged
+        alice_conv = repo.get_conversation("shared-id", "alice@test.com")
+        assert alice_conv is not None
+        assert alice_conv["title"] == "Alice Original"
+        assert alice_conv["messages"][0]["content"] == "Alice secret message"
+
+        # Bob should have no conversation
+        bob_conv = repo.get_conversation("shared-id", "bob@test.com")
+        assert bob_conv is None
+
+    def test_upsert_only_updates_own_conversation(self, repo):
+        """Upsert with matching id but different user creates a new record."""
+        repo.save_conversation(
+            conversation_id="upsert-id",
+            user_email="alice@test.com",
+            title="Alice V1",
+            model="gpt-4",
+            messages=_make_messages(2),
+        )
+        # Alice updates her own conversation - should work
+        repo.save_conversation(
+            conversation_id="upsert-id",
+            user_email="alice@test.com",
+            title="Alice V2",
+            model="gpt-4",
+            messages=_make_messages(4),
+        )
+        alice_conv = repo.get_conversation("upsert-id", "alice@test.com")
+        assert alice_conv["title"] == "Alice V2"
+        assert alice_conv["message_count"] == 4
+
+    def test_save_preserves_title_on_update_when_none(self, repo):
+        """Updating a conversation with title=None preserves existing title."""
+        repo.save_conversation(
+            conversation_id="title-keep",
+            user_email="user@test.com",
+            title="Custom Title",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        repo.save_conversation(
+            conversation_id="title-keep",
+            user_email="user@test.com",
+            title=None,
+            model="gpt-4",
+            messages=_make_messages(2),
+        )
+        result = repo.get_conversation("title-keep", "user@test.com")
+        assert result["title"] == "Custom Title"
+        assert result["message_count"] == 2
+
+    def test_user_cannot_search_others_conversations(self, repo):
+        """Search is scoped by user_email."""
+        repo.save_conversation(
+            conversation_id="search-secret",
+            user_email="alice@test.com",
+            title="Alice Secret Project",
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Classified information"}],
+        )
+        result = repo.search_conversations("bob@test.com", "Secret")
+        assert result == []
+
+    def test_user_cannot_tag_others_conversation(self, repo):
+        """Tags cannot be added to another user's conversation."""
+        repo.save_conversation(
+            conversation_id="tag-priv",
+            user_email="alice@test.com",
+            title="Alice Chat",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        tag_id = repo.add_tag("tag-priv", "hacked", "bob@test.com")
+        assert tag_id is None
+
+    def test_user_cannot_update_others_title(self, repo):
+        """Title update is scoped by user_email."""
+        repo.save_conversation(
+            conversation_id="title-priv",
+            user_email="alice@test.com",
+            title="Alice Title",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        assert repo.update_title("title-priv", "Hacked Title", "bob@test.com") is False
+        alice_conv = repo.get_conversation("title-priv", "alice@test.com")
+        assert alice_conv["title"] == "Alice Title"
+
+    def test_delete_all_only_affects_own_conversations(self, repo):
+        """delete_all_conversations only deletes the requesting user's data."""
+        repo.save_conversation(
+            conversation_id="da-alice",
+            user_email="alice@test.com",
+            title="Alice Chat",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        repo.save_conversation(
+            conversation_id="da-bob",
+            user_email="bob@test.com",
+            title="Bob Chat",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        count = repo.delete_all_conversations("alice@test.com")
+        assert count == 1
+        # Bob's conversation should survive
+        assert repo.get_conversation("da-bob", "bob@test.com") is not None
+
+    def test_bulk_delete_only_affects_own_conversations(self, repo):
+        """delete_conversations only deletes ids belonging to the requesting user."""
+        repo.save_conversation(
+            conversation_id="bd-alice",
+            user_email="alice@test.com",
+            title="Alice Chat",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        repo.save_conversation(
+            conversation_id="bd-bob",
+            user_email="bob@test.com",
+            title="Bob Chat",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        # Alice tries to delete both
+        count = repo.delete_conversations(["bd-alice", "bd-bob"], "alice@test.com")
+        assert count == 1
+        assert repo.get_conversation("bd-bob", "bob@test.com") is not None
+
+
+class TestRoutesSecurity:
+    """Test REST API route-level security and error handling."""
+
+    @pytest.fixture
+    def client(self, repo):
+        from unittest.mock import patch
+
+        from main import app
+        from starlette.testclient import TestClient
+
+        with patch("atlas.routes.conversation_routes._get_repo", return_value=repo):
+            yield TestClient(app)
+
+    def test_get_nonexistent_returns_404(self, client):
+        resp = client.get(
+            "/api/conversations/does-not-exist",
+            headers={"X-User-Email": "test@test.com"},
+        )
+        assert resp.status_code == 404
+
+    def test_get_other_users_conversation_returns_404(self, client, repo):
+        repo.save_conversation(
+            conversation_id="priv-conv",
+            user_email="alice@test.com",
+            title="Private",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        resp = client.get(
+            "/api/conversations/priv-conv",
+            headers={"X-User-Email": "bob@test.com"},
+        )
+        assert resp.status_code == 404
+
+    def test_delete_other_users_conversation(self, client, repo):
+        repo.save_conversation(
+            conversation_id="del-priv",
+            user_email="alice@test.com",
+            title="Alice Only",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        resp = client.delete(
+            "/api/conversations/del-priv",
+            headers={"X-User-Email": "bob@test.com"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is False
+        # Verify Alice's conversation still exists
+        assert repo.get_conversation("del-priv", "alice@test.com") is not None
+
+    def test_search_isolated_by_user(self, client, repo):
+        repo.save_conversation(
+            conversation_id="search-iso",
+            user_email="alice@test.com",
+            title="Alice Secret",
+            model="gpt-4",
+            messages=[{"role": "user", "content": "secret data"}],
+        )
+        resp = client.get(
+            "/api/conversations/search?q=secret",
+            headers={"X-User-Email": "bob@test.com"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["conversations"] == []
+
+
 class TestConversationRoutes:
     """Test the REST API routes for conversation history."""
 
