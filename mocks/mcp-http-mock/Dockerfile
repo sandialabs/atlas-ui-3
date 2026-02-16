@@ -1,10 +1,7 @@
-# Ubuntu-based Dockerfile for MCP HTTP Mock Server
+# RHEL UBI 9-based Dockerfile for MCP HTTP Mock Server
 # This Dockerfile creates a containerized MCP server for testing and demonstration
 
-FROM ubuntu:24.04
-
-# Prevent interactive prompts during package installation
-ENV DEBIAN_FRONTEND=noninteractive
+FROM registry.access.redhat.com/ubi9/ubi:latest
 
 # Set working directory
 WORKDIR /app
@@ -13,15 +10,13 @@ WORKDIR /app
 RUN groupadd -r mcpuser && useradd -r -g mcpuser mcpuser
 
 # Install system dependencies
-RUN apt-get update && \
-    apt-get install -y \
-        python3 \
-        python3-pip \
-        python3-venv \
+RUN dnf update -y && \
+    dnf install -y --allowerasing \
+        python3.11 \
+        python3.11-pip \
         curl \
-        ca-certificates \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+        hostname \
+    && dnf clean all
 
 # Copy application files
 COPY main.py .
@@ -33,7 +28,7 @@ COPY README.md .
 RUN echo "fastmcp>=2.10.6" > requirements.txt
 
 # Create virtual environment and install dependencies as root first
-RUN python3 -m venv /app/venv && \
+RUN python3.11 -m venv /app/venv && \
     /app/venv/bin/pip install --no-cache-dir --upgrade pip && \
     /app/venv/bin/pip install --no-cache-dir -r requirements.txt
 

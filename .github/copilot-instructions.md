@@ -187,6 +187,8 @@ ruff check atlas/ || (uv pip install ruff && ruff check atlas/)
 cd frontend && npm run lint
 ```
 
+**Container uses RHEL 9 UBI** (`registry.access.redhat.com/ubi9/ubi:latest`); Node.js and uv are installed via package managers (dnf module streams and pip), not curl scripts.
+
 **Logs:** `project_root/logs/app.jsonl` (override with `APP_LOG_DIR`). Use `/admin/logs/*`.
 
 ## PR Validation Scripts (Required)

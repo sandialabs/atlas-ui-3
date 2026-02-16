@@ -227,6 +227,8 @@ docker build -t atlas-ui-3 .
 docker run -p 8000:8000 atlas-ui-3
 ```
 
+**Container uses RHEL 9 UBI** (`registry.access.redhat.com/ubi9/ubi:latest`); Node.js and uv are installed via package managers (dnf module streams and pip), not curl scripts.
+
 ## PR Validation Scripts (Required)
 
 **Any PR that changes backend code MUST include a validation script** in `test/pr-validation/` before the code is committed, the PR is created, or the PR is reviewed/merged.

@@ -1,5 +1,5 @@
-# Use Fedora as base image
-FROM fedora:latest
+# Use RHEL 9 UBI as base image
+FROM registry.access.redhat.com/ubi9/ubi:latest
 
 # Set working directory
 WORKDIR /app
@@ -8,16 +8,25 @@ WORKDIR /app
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Install system dependencies including Python
-RUN dnf update -y && dnf install -y     python3     python3-pip     python3-virtualenv     curl     hostname     sudo     && dnf clean all
+# --allowerasing needed on UBI9 because curl-minimal conflicts with full curl
+RUN dnf update -y && dnf install -y --allowerasing \
+    python3 \
+    python3-pip \
+    curl \
+    hostname \
+    sudo \
+    && dnf clean all
 
-# Install Node.js 20.x from NodeSource
-RUN curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && \
+# Install Node.js 20.x from RHEL module stream
+RUN dnf module enable nodejs:20 -y && \
     dnf install -y nodejs && \
     dnf clean all
 
-# Install uv for better Python dependency management
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mkdir -p /root/.local/bin
+# Install uv via pip to avoid curl-based installs at build time
+RUN pip3 install uv && \
+    mkdir -p /root/.local/bin && \
+    ln -sf /usr/local/bin/uv /root/.local/bin/uv && \
+    ln -sf /usr/local/bin/uvx /root/.local/bin/uvx
 ENV PATH="/root/.local/bin:$PATH"
 
 # Copy requirements first
@@ -66,8 +75,8 @@ RUN echo "appuser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
 # Set up uv for appuser
 RUN mkdir -p /home/appuser/.local/bin && \
-    cp /root/.local/bin/uv /home/appuser/.local/bin/uv && \
-    cp /root/.local/bin/uvx /home/appuser/.local/bin/uvx && \
+    cp /usr/local/bin/uv /home/appuser/.local/bin/uv && \
+    cp /usr/local/bin/uvx /home/appuser/.local/bin/uvx 2>/dev/null || true && \
     mkdir -p /home/appuser/.cache && \
     chown -R appuser:appuser /home/appuser/.local /home/appuser/.cache
 

@@ -319,7 +319,7 @@ docker build -t atlas-ui-3 .
 docker run -p 8000:8000 atlas-ui-3
 ```
 
-**Container uses Fedora latest** (note: GitHub Actions use Ubuntu runners).
+**Container uses RHEL 9 UBI** (note: GitHub Actions use Ubuntu runners).
 
 ## Agent Modes
 
