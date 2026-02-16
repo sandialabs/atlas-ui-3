@@ -147,11 +147,9 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     const userMessages = messages?.filter(m => m.role === 'user') || []
     if (!activeConversationId && userMessages.length > 0 && chatHistoryEnabled && !isIncognito) {
       const firstUserMsg = userMessages[0]?.content || ''
-      const title = firstUserMsg.length > 40
-        ? firstUserMsg.substring(0, 40) + '...'
-        : firstUserMsg
+      const title = firstUserMsg.substring(0, 200)
       const alreadyExists = list.some(c =>
-        c.title === title || c.title === firstUserMsg
+        c.title === title || c.title === firstUserMsg || c.title === firstUserMsg.substring(0, 200)
       )
       if (!alreadyExists) {
         list.unshift({

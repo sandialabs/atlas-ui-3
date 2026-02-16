@@ -538,7 +538,7 @@ class ChatService:
         title = None
         for msg in session.history.messages:
             if msg.role.value == "user" and msg.content:
-                title = msg.content[:80]
+                title = msg.content[:200]
                 break
 
         # Use stored conversation_id if continuing a saved conversation,

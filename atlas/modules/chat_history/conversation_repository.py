@@ -145,13 +145,13 @@ class ConversationRepository:
 
                 preview = ""
                 if first_msg and first_msg.content:
-                    preview = first_msg.content[:150]
+                    preview = first_msg.content[:300]
 
                 tag_names = self._get_tag_names(session, conv.id)
 
                 results.append({
                     "id": conv.id,
-                    "title": conv.title or preview[:80] or "Untitled",
+                    "title": conv.title or preview[:200] or "Untitled",
                     "model": conv.model,
                     "created_at": conv.created_at.isoformat() if conv.created_at else None,
                     "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
@@ -296,11 +296,11 @@ class ConversationRepository:
                     MessageRecord.conversation_id == conv.id,
                     MessageRecord.role == "user",
                 ).order_by(MessageRecord.sequence_number).first()
-                preview = first_msg.content[:150] if first_msg and first_msg.content else ""
+                preview = first_msg.content[:300] if first_msg and first_msg.content else ""
 
                 results.append({
                     "id": conv.id,
-                    "title": conv.title or preview[:80] or "Untitled",
+                    "title": conv.title or preview[:200] or "Untitled",
                     "model": conv.model,
                     "created_at": conv.created_at.isoformat() if conv.created_at else None,
                     "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
