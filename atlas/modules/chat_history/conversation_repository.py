@@ -137,15 +137,15 @@ class ConversationRepository:
 
             results = []
             for conv in conversations:
-                # Get first user message as preview
-                first_msg = session.query(MessageRecord).filter(
+                # Get first assistant message as preview (title already shows user question)
+                first_reply = session.query(MessageRecord).filter(
                     MessageRecord.conversation_id == conv.id,
-                    MessageRecord.role == "user",
+                    MessageRecord.role == "assistant",
                 ).order_by(MessageRecord.sequence_number).first()
 
                 preview = ""
-                if first_msg and first_msg.content:
-                    preview = first_msg.content[:300]
+                if first_reply and first_reply.content:
+                    preview = first_reply.content[:300]
 
                 tag_names = self._get_tag_names(session, conv.id)
 
@@ -292,11 +292,11 @@ class ConversationRepository:
 
             results = []
             for conv in conversations:
-                first_msg = session.query(MessageRecord).filter(
+                first_reply = session.query(MessageRecord).filter(
                     MessageRecord.conversation_id == conv.id,
-                    MessageRecord.role == "user",
+                    MessageRecord.role == "assistant",
                 ).order_by(MessageRecord.sequence_number).first()
-                preview = first_msg.content[:300] if first_msg and first_msg.content else ""
+                preview = first_reply.content[:300] if first_reply and first_reply.content else ""
 
                 results.append({
                     "id": conv.id,
