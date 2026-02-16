@@ -77,11 +77,13 @@ function ChatInterface() {
 
       {/* Below banner: sidebar + main content side by side */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Sidebar */}
-        <Sidebar
-          mobileOpen={sidebarMobileOpen}
-          onMobileClose={() => setSidebarMobileOpen(false)}
-        />
+        {/* Sidebar - only when chat history is enabled */}
+        {features?.chat_history && (
+          <Sidebar
+            mobileOpen={sidebarMobileOpen}
+            onMobileClose={() => setSidebarMobileOpen(false)}
+          />
+        )}
 
         {/* RAG Data Sources Panel */}
         {features?.rag && (
