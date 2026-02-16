@@ -178,14 +178,14 @@ setup_environment() {
     # Check if .venv exists
     if [ ! -d "$PROJECT_ROOT/.venv" ]; then
         echo "Error: Virtual environment not found at $PROJECT_ROOT/.venv"
-        echo "Please run: uv venv && uv pip install -r requirements.txt"
+        echo "Please run: uv venv && uv pip install -e '.[dev]'"
         exit 1
     fi
-    
+
     # Check if uvicorn is installed
     if [ ! -f "$PROJECT_ROOT/.venv/bin/uvicorn" ]; then
         echo "Error: uvicorn not found in virtual environment"
-        echo "Please run: uv pip install -r requirements.txt"
+        echo "Please run: uv pip install -e '.[dev]'"
         exit 1
     fi
     
@@ -248,11 +248,12 @@ start_backend() {
     local host="${2:-127.0.0.1}"
 
     cd "$PROJECT_ROOT/atlas"
-    # Set PYTHONPATH so atlas package imports work
+    # The atlas package is installed in editable mode (pip install -e .), so
+    # PYTHONPATH is no longer needed for atlas imports to work.
     # Set APP_CONFIG_DIR so user overrides in <project_root>/config/ take
     # precedence over package defaults in atlas/config/ (CWD is atlas/).
     APP_CONFIG_DIR="${APP_CONFIG_DIR:-$PROJECT_ROOT/config}" \
-    PYTHONPATH="$PROJECT_ROOT" "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" &
+    "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" &
     echo "Backend server started on $host:$port"
     cd "$PROJECT_ROOT"
 }

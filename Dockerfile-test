@@ -34,8 +34,8 @@ RUN pip3 install uv && \
     ln -sf /usr/local/bin/uvx /root/.local/bin/uvx
 ENV PATH="/root/.local/bin:$PATH"
 
-# Copy requirements first
-COPY requirements.txt .
+# Copy pyproject.toml for dependency installation
+COPY pyproject.toml .
 
 # Files needed by env-sync tests
 COPY .env.example .
@@ -63,7 +63,6 @@ COPY test/ ./test/
 COPY test_e2e/ ./test_e2e/
 COPY mocks/ ./mocks/
 COPY prompts/ ./prompts/
-COPY pyproject.toml ./
 
 # Fix line endings for the entire app directory and set permissions BEFORE any npm/npx commands
 RUN find /app -type f \( -name "*.js" -o -name "*.json" -o -name "*.sh" -o -name "*.md" -o -name "*.txt" -o -name "*.py" \) -exec dos2unix {} \;
@@ -113,12 +112,11 @@ RUN /home/appuser/.local/bin/uv venv venv --python 3.12
 ENV VIRTUAL_ENV=/app/venv
 ENV PATH="/app/venv/bin:$PATH"
 
-# Install Python dependencies using uv
-RUN /home/appuser/.local/bin/uv pip install -r requirements.txt
+# Install atlas package and all dependencies (editable mode + dev extras)
+RUN /home/appuser/.local/bin/uv pip install -e ".[dev]"
 
-# Set environment variables
-ENV PYTHONPATH=/app \
-    NODE_ENV=test \
+# Set environment variables (PYTHONPATH not needed: atlas installed as package)
+ENV NODE_ENV=test \
     APP_CONFIG_DIR=/app/config \
     RUNTIME_LOG_DIR=/app/runtime/logs \
     RUNTIME_FEEDBACK_DIR=/app/runtime/feedback

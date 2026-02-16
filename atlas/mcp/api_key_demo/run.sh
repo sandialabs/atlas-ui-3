@@ -14,7 +14,7 @@ PYTHON="$PROJECT_ROOT/.venv/bin/python"
 # Verify python exists
 if [ ! -f "$PYTHON" ]; then
     echo "Error: Python not found at $PYTHON"
-    echo "Run from project root: uv venv && uv pip install -r requirements.txt"
+    echo "Run from project root: uv venv && uv pip install -e '.[dev]'"
     exit 1
 fi
 

@@ -454,14 +454,8 @@ cd atlas-ui-3
 # Create virtual environment
 uv venv && source .venv/bin/activate
 
-# Install dependencies
-uv pip install -r requirements.txt
-
-# Install atlas package in editable mode
-uv pip install -e .
-
-# Or with pip
-pip install -e .
+# Install atlas package in editable mode (with dev dependencies)
+uv pip install -e ".[dev]"
 ```
 
 ### What Editable Mode Does

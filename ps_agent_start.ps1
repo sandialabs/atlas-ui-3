@@ -198,7 +198,7 @@ function Initialize-Environment {
     # Check if .venv exists
     if (-not (Test-Path "$PROJECT_ROOT/.venv")) {
         Write-Error "Virtual environment not found at $PROJECT_ROOT/.venv"
-        Write-Host "Please run: uv venv && uv pip install -r requirements.txt"
+        Write-Host "Please run: uv venv && uv pip install -e '.[dev]'"
         exit 1
     }
 
@@ -206,7 +206,7 @@ function Initialize-Environment {
     $uvicornPath = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
     if (-not (Test-Path $uvicornPath)) {
         Write-Error "uvicorn not found in virtual environment"
-        Write-Host "Please run: uv pip install -r requirements.txt"
+        Write-Host "Please run: uv pip install -e '.[dev]'"
         exit 1
     }
 
@@ -279,8 +279,8 @@ function Start-Backend {
     )
 
     Set-Location "$PROJECT_ROOT/atlas"
-    # Set PYTHONPATH so atlas package imports work correctly
-    $env:PYTHONPATH = $PROJECT_ROOT
+    # The atlas package is installed in editable mode (pip install -e .), so
+    # PYTHONPATH is no longer needed for atlas imports to work.
     $uvicornExe = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
     $arguments = "main:app --host $HostName --port $Port"
 

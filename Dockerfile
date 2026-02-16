@@ -29,8 +29,8 @@ RUN pip3 install uv && \
     ln -sf /usr/local/bin/uvx /root/.local/bin/uvx
 ENV PATH="/root/.local/bin:$PATH"
 
-# Copy requirements first
-COPY requirements.txt .
+# Copy pyproject.toml early for dependency layer caching
+COPY pyproject.toml .
 
 # Copy and install frontend dependencies (for caching)
 COPY frontend/package*.json ./frontend/
@@ -50,24 +50,19 @@ ENV VITE_FEATURE_POWERED_BY_ATLAS=${VITE_FEATURE_POWERED_BY_ATLAS}
 # build and delete the node_modules
 RUN  npm run build && rm -rf node_modules
 
-# Switch back to app directory and copy atlas package code
+# Switch back to app directory
 WORKDIR /app
-COPY atlas/ ./atlas/
 
-# Copy other necessary files
-COPY docs/ ./docs/
-COPY test/ ./test/
-COPY prompts/ ./prompts/
-COPY pyproject.toml ./
+# Create stub atlas package so uv can resolve dependencies from pyproject.toml
+RUN mkdir -p atlas && touch atlas/__init__.py
 
-# Create required runtime & config directories and seed config from package defaults
+# Create required runtime & config directories
 RUN mkdir -p \
         /app/atlas/logs \
         /app/config \
         /app/runtime/logs \
         /app/runtime/feedback \
         /app/runtime/uploads && \
-    cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/config/ 2>/dev/null || true && \
     touch /app/runtime/logs/.gitkeep /app/runtime/feedback/.gitkeep /app/runtime/uploads/.gitkeep
 
 # Configure sudo for appuser (needed for Playwright browser installation)
@@ -93,15 +88,26 @@ RUN /home/appuser/.local/bin/uv venv .venv --python 3.12
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Install Python dependencies using uv
-RUN /home/appuser/.local/bin/uv pip install -r requirements.txt
+# Install dependencies from pyproject.toml (cached unless pyproject.toml changes)
+RUN /home/appuser/.local/bin/uv pip install .
+
+# Copy actual source code (invalidates cache only from here down)
+COPY --chown=appuser:appuser atlas/ ./atlas/
+COPY --chown=appuser:appuser docs/ ./docs/
+COPY --chown=appuser:appuser test/ ./test/
+COPY --chown=appuser:appuser prompts/ ./prompts/
+
+# Seed config from package defaults
+RUN cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/config/ 2>/dev/null || true
+
+# Register package in editable mode (no dependency downloads needed)
+RUN /home/appuser/.local/bin/uv pip install --no-deps -e .
 
 # Expose port
 EXPOSE 8000
 
-# Set environment variables
-ENV PYTHONPATH=/app \
-    NODE_ENV=production \
+# Set environment variables (PYTHONPATH not needed: atlas installed as package)
+ENV NODE_ENV=production \
     APP_CONFIG_DIR=/app/config \
     RUNTIME_LOG_DIR=/app/runtime/logs \
     RUNTIME_FEEDBACK_DIR=/app/runtime/feedback

@@ -60,8 +60,8 @@ source .venv/bin/activate
 # On Windows:
 .venv\Scripts\activate
 
-# Install Python dependencies
-uv pip install -r requirements.txt
+# Install atlas package in editable mode (with dev dependencies)
+uv pip install -e ".[dev]"
 ```
 
 ### 3. Configure Your Environment

@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Frontend**: Rebuilt sidebar with conversation list, search, tag filtering, and delete all. Incognito toggle in header.
 - **Config**: New `FEATURE_CHAT_HISTORY_ENABLED` (default: false) and `CHAT_HISTORY_DB_URL` settings.
 
+### PR #337 - 2026-02-13
+- **Breaking**: Remove `requirements.txt` and consolidate all Python dependencies into `pyproject.toml` as the single source of truth. Development setup now uses `uv pip install -e ".[dev]"` instead of `uv pip install -r requirements.txt`.
+- **Fix**: Remove eager `S3StorageClient()` instantiation from `atlas/modules/file_storage/__init__.py` that created an unnecessary S3 connection at import time regardless of the `USE_MOCK_S3` setting.
+- **Fix**: Remove `PYTHONPATH` workaround from `agent_start.sh` and Dockerfiles -- editable install makes it unnecessary.
+
 ### PR #335 - 2026-02-14
 - **Fix**: RAG no longer triggers automatically when data sources are selected. Selecting data sources now only marks availability; RAG is invoked only when explicitly activated via the search button toggle or the `/search` command.
 
