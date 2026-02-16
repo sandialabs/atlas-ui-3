@@ -254,8 +254,9 @@ export const ChatProvider = ({ children }) => {
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
 			compliance_level_filter: selections.complianceLevelFilter,
 			incognito: isIncognito,
+			conversation_id: activeConversationId || undefined,
 		})
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, isIncognito])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, isIncognito, activeConversationId])
 
 	const clearChat = useCallback(() => {
 		resetMessages()
@@ -285,11 +286,6 @@ export const ChatProvider = ({ children }) => {
 		setActiveConversationId(conversationData.id)
 		setIsWelcomeVisible(false)
 
-		// Notify backend to create a new session for this conversation
-		if (sendMessage) {
-			sendMessage({ type: 'reset_session' })
-		}
-
 		// Load messages into the chat view
 		const loadedMessages = conversationData.messages.map(msg => ({
 			role: msg.role,
@@ -300,6 +296,19 @@ export const ChatProvider = ({ children }) => {
 		}))
 		if (loadedMessages.length > 0) {
 			bulkAdd(loadedMessages)
+		}
+
+		// Notify backend to restore this conversation's context
+		// Sends the conversation_id and messages so the LLM has prior context
+		if (sendMessage) {
+			sendMessage({
+				type: 'restore_conversation',
+				conversation_id: conversationData.id,
+				messages: conversationData.messages.map(msg => ({
+					role: msg.role,
+					content: msg.content || '',
+				})),
+			})
 		}
 	}, [resetMessages, files, sendMessage, bulkAdd])
 

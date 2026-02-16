@@ -28,6 +28,7 @@ function ChatInterface() {
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false)
   const [, setCanvasPanelWidth] = useState(0)
   const [filesPanelOpen, setFilesPanelOpen] = useState(false)
+  const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false)
   const { canvasContent, customUIContent, canvasFiles, features, pendingElicitation } = useChat()
 
   // Auto-open tools panel when returning from marketplace
@@ -70,88 +71,95 @@ function ChatInterface() {
   }, [canvasFiles])
 
   return (
-    <div className="flex h-screen w-full bg-gray-900 text-gray-200 overflow-hidden">
-      {/* RAG Data Sources Panel */}
-      {features?.rag && (
-        <RagPanel 
-          isOpen={ragPanelOpen} 
-          onClose={() => setRagPanelOpen(false)} 
-        />
-      )}
+    <div className="flex flex-col h-screen w-full bg-gray-900 text-gray-200 overflow-hidden">
+      {/* Banner Panel - full width across the top */}
+      <BannerPanel />
 
-      {/* Main Content Area */}
-      <div className="flex flex-col flex-1 min-w-0 relative">
-        {/* Banner Panel - positioned at the very top */}
-        <BannerPanel />
-
-        {/* Header */}
-        <Header 
-          onToggleRag={() => setRagPanelOpen(!ragPanelOpen)}
-          onToggleTools={() => {
-            // If tools panel is opening, close other panels
-            if (!toolsPanelOpen) {
-              setCanvasPanelOpen(false)
-              setFilesPanelOpen(false)
-            }
-            setToolsPanelOpen(!toolsPanelOpen)
-          }}
-          onToggleFiles={() => {
-            // If files panel is opening, close other panels
-            if (!filesPanelOpen) {
-              setCanvasPanelOpen(false)
-              setToolsPanelOpen(false)
-            }
-            setFilesPanelOpen(!filesPanelOpen)
-          }}
-          onToggleCanvas={() => {
-            // If canvas panel is opening, close other panels
-            if (!canvasPanelOpen) {
-              setToolsPanelOpen(false)
-              setFilesPanelOpen(false)
-            }
-            setCanvasPanelOpen(!canvasPanelOpen)
-          }}
-          onToggleSettings={() => setSettingsPanelOpen(!settingsPanelOpen)}
-          onCloseCanvas={() => setCanvasPanelOpen(false)}
+      {/* Below banner: sidebar + main content side by side */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* Sidebar */}
+        <Sidebar
+          mobileOpen={sidebarMobileOpen}
+          onMobileClose={() => setSidebarMobileOpen(false)}
         />
 
-        {/* Content Area - Chat and Canvas side by side */}
-        <div className="flex flex-1 overflow-hidden min-h-0">
-          {/* Chat Area */}
-          <ChatArea />
-
-          {/* Canvas Panel */}
-          <CanvasPanel 
-            isOpen={canvasPanelOpen}
-            onClose={() => setCanvasPanelOpen(false)}
-            onWidthChange={setCanvasPanelWidth}
-          />
-        </div>
-      </div>
-
-      {/* Tools Panel Overlay */}
-      {features?.tools && (
-        <ToolsPanel 
-          isOpen={toolsPanelOpen} 
-          onClose={() => setToolsPanelOpen(false)} 
-        />
-      )}
-
-      {/* Settings Panel Overlay */}
-      <SettingsPanel 
-        isOpen={settingsPanelOpen} 
-        onClose={() => setSettingsPanelOpen(false)} 
-      />
-
-      {/* Right Side Panels Container */}
-      <div className="relative flex-shrink-0">        
-        {/* File Manager Panel */}
-        {features?.files_panel && (
-          <FileManagerPanel 
-            isOpen={filesPanelOpen} 
-            onClose={() => setFilesPanelOpen(false)} 
+        {/* RAG Data Sources Panel */}
+        {features?.rag && (
+          <RagPanel
+            isOpen={ragPanelOpen}
+            onClose={() => setRagPanelOpen(false)}
           />
         )}
+
+        {/* Main Content Area */}
+        <div className="flex flex-col flex-1 min-w-0 relative">
+          {/* Header */}
+          <Header
+            onToggleSidebar={() => setSidebarMobileOpen(!sidebarMobileOpen)}
+            onToggleRag={() => setRagPanelOpen(!ragPanelOpen)}
+            onToggleTools={() => {
+              if (!toolsPanelOpen) {
+                setCanvasPanelOpen(false)
+                setFilesPanelOpen(false)
+              }
+              setToolsPanelOpen(!toolsPanelOpen)
+            }}
+            onToggleFiles={() => {
+              if (!filesPanelOpen) {
+                setCanvasPanelOpen(false)
+                setToolsPanelOpen(false)
+              }
+              setFilesPanelOpen(!filesPanelOpen)
+            }}
+            onToggleCanvas={() => {
+              if (!canvasPanelOpen) {
+                setToolsPanelOpen(false)
+                setFilesPanelOpen(false)
+              }
+              setCanvasPanelOpen(!canvasPanelOpen)
+            }}
+            onToggleSettings={() => setSettingsPanelOpen(!settingsPanelOpen)}
+            onCloseCanvas={() => setCanvasPanelOpen(false)}
+          />
+
+          {/* Content Area - Chat and Canvas side by side */}
+          <div className="flex flex-1 overflow-hidden min-h-0">
+            {/* Chat Area */}
+            <ChatArea />
+
+            {/* Canvas Panel */}
+            <CanvasPanel
+              isOpen={canvasPanelOpen}
+              onClose={() => setCanvasPanelOpen(false)}
+              onWidthChange={setCanvasPanelWidth}
+            />
+          </div>
+        </div>
+
+        {/* Tools Panel Overlay */}
+        {features?.tools && (
+          <ToolsPanel
+            isOpen={toolsPanelOpen}
+            onClose={() => setToolsPanelOpen(false)}
+          />
+        )}
+
+        {/* Settings Panel Overlay */}
+        <SettingsPanel
+          isOpen={settingsPanelOpen}
+          onClose={() => setSettingsPanelOpen(false)}
+        />
+
+        {/* Right Side Panels Container */}
+        <div className="relative flex-shrink-0">
+          {/* File Manager Panel */}
+          {features?.files_panel && (
+            <FileManagerPanel
+              isOpen={filesPanelOpen}
+              onClose={() => setFilesPanelOpen(false)}
+            />
+          )}
+        </div>
       </div>
 
       {/* Feedback Button */}

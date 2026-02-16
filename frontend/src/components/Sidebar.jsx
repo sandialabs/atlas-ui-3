@@ -1,18 +1,26 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useConversationHistory } from '../hooks/useConversationHistory'
+import { usePersistentState } from '../hooks/chat/usePersistentState'
 
-const Sidebar = () => {
+const MIN_WIDTH = 200
+const MAX_WIDTH = 480
+const DEFAULT_WIDTH = 256
+
+const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const {
-    clearChat, features, isIncognito, setIsIncognito,
-    activeConversationId, loadSavedConversation,
+    features, activeConversationId, loadSavedConversation, messages, isIncognito,
   } = useChat()
 
   const chatHistoryEnabled = features?.chat_history
-  const [isCollapsed, setIsCollapsed] = useState(false)
-  const [selectedIds, setSelectedIds] = useState(new Set())
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null) // 'selected' | 'all' | null
+  const [sidebarWidth, setSidebarWidth] = usePersistentState('chatui-sidebar-width', DEFAULT_WIDTH)
+  const [isCollapsed, setIsCollapsed] = usePersistentState('chatui-sidebar-collapsed', false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
+  const [isResizing, setIsResizing] = useState(false)
   const searchTimerRef = useRef(null)
+  const prevMessageCountRef = useRef(0)
+  const refreshTimerRef = useRef(null)
+  const panelRef = useRef(null)
 
   const history = useConversationHistory()
 
@@ -25,6 +33,81 @@ const Sidebar = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatHistoryEnabled])
 
+  // Auto-refresh conversation list when messages change
+  useEffect(() => {
+    if (!chatHistoryEnabled || isIncognito) return
+    const currentCount = messages?.length || 0
+    const prevCount = prevMessageCountRef.current
+    prevMessageCountRef.current = currentCount
+
+    if (currentCount > prevCount && currentCount > 0) {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = setTimeout(() => {
+        history.fetchConversations()
+      }, 1500)
+    }
+
+    if (currentCount === 0 && prevCount > 0) {
+      history.fetchConversations()
+    }
+
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages?.length, chatHistoryEnabled])
+
+  // --- Resize logic (left-side panel: width = clientX - rect.left) ---
+  const startResize = useCallback((e) => {
+    setIsResizing(true)
+    e.preventDefault()
+  }, [])
+
+  const stopResize = useCallback(() => {
+    setIsResizing(false)
+  }, [])
+
+  const resize = useCallback((e) => {
+    if (isResizing && panelRef.current) {
+      const rect = panelRef.current.getBoundingClientRect()
+      const newWidth = e.clientX - rect.left
+      const clamped = Math.min(Math.max(newWidth, MIN_WIDTH), MAX_WIDTH)
+      setSidebarWidth(clamped)
+    }
+  }, [isResizing, setSidebarWidth])
+
+  useEffect(() => {
+    if (!isResizing) {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      return
+    }
+    const onMove = (e) => resize(e)
+    const onUp = () => stopResize()
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isResizing, resize, stopResize])
+
+  // Clamp width if window shrinks
+  useEffect(() => {
+    const onWindowResize = () => {
+      if (sidebarWidth > window.innerWidth * 0.5) {
+        setSidebarWidth(Math.max(MIN_WIDTH, Math.floor(window.innerWidth * 0.4)))
+      }
+    }
+    window.addEventListener('resize', onWindowResize)
+    return () => window.removeEventListener('resize', onWindowResize)
+  }, [sidebarWidth, setSidebarWidth])
+
+  // --- Handlers ---
   const handleSearch = useCallback((e) => {
     const query = e.target.value
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
@@ -34,48 +117,17 @@ const Sidebar = () => {
   }, [history])
 
   const handleLoadConversation = useCallback(async (conv) => {
+    if (conv._optimistic) return
     const fullConv = await history.loadConversation(conv.id)
     if (fullConv && !fullConv.error) {
       loadSavedConversation(fullConv)
+      onMobileClose?.()
     }
-  }, [history, loadSavedConversation])
-
-  const toggleSelect = useCallback((id, e) => {
-    e.stopPropagation()
-    setSelectedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
-
-  const handleDeleteSelected = useCallback(async () => {
-    if (selectedIds.size === 0) return
-    await history.deleteMultiple([...selectedIds])
-    setSelectedIds(new Set())
-    setShowDeleteConfirm(null)
-  }, [selectedIds, history])
+  }, [history, loadSavedConversation, onMobileClose])
 
   const handleDeleteAll = useCallback(async () => {
     await history.deleteAll()
-    setSelectedIds(new Set())
     setShowDeleteConfirm(null)
-  }, [history])
-
-  const handleNewConversation = useCallback(() => {
-    clearChat()
-    setSelectedIds(new Set())
-  }, [clearChat])
-
-  const refreshList = useCallback(() => {
-    if (history.activeTag) {
-      history.filterByTag(history.activeTag)
-    } else if (history.searchQuery) {
-      history.searchConversations(history.searchQuery)
-    } else {
-      history.fetchConversations()
-    }
   }, [history])
 
   const formatDate = (dateStr) => {
@@ -90,86 +142,68 @@ const Sidebar = () => {
     return d.toLocaleDateString()
   }
 
-  if (isCollapsed) {
-    return (
-      <div className="w-12 bg-gray-800 border-r border-gray-700 p-2 flex flex-col gap-2">
-        <button
-          onClick={() => setIsCollapsed(false)}
-          className="w-full p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-gray-300"
-          title="Expand sidebar"
-        >
-          &gt;
-        </button>
-        {isIncognito && (
-          <div
-            className="w-full p-1 rounded bg-red-900 text-red-200 text-xs text-center"
-            title="Incognito mode active"
-          >
-            IC
-          </div>
-        )}
-      </div>
-    )
+  const getDisplayConversations = () => {
+    const list = [...history.conversations]
+    const userMessages = messages?.filter(m => m.role === 'user') || []
+    if (!activeConversationId && userMessages.length > 0 && chatHistoryEnabled && !isIncognito) {
+      const firstUserMsg = userMessages[0]?.content || ''
+      const title = firstUserMsg.length > 40
+        ? firstUserMsg.substring(0, 40) + '...'
+        : firstUserMsg
+      const alreadyExists = list.some(c =>
+        c.title === title || c.title === firstUserMsg
+      )
+      if (!alreadyExists) {
+        list.unshift({
+          id: '__current__',
+          title: title || 'New conversation',
+          preview: 'Saving...',
+          updated_at: new Date().toISOString(),
+          message_count: messages.length,
+          _optimistic: true,
+        })
+      }
+    }
+    return list
   }
 
-  return (
-    <aside className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col h-full">
+  // --- Shared sidebar content ---
+  const displayConversations = chatHistoryEnabled ? getDisplayConversations() : []
+
+  const sidebarContent = (
+    <>
       {/* Header */}
-      <div className="p-3 border-b border-gray-700 flex items-center justify-between">
+      <div className="p-3 border-b border-gray-700 flex items-center justify-between flex-shrink-0">
         <h2 className="text-sm font-semibold text-gray-100">Conversations</h2>
         <div className="flex items-center gap-1">
+          {/* Hide button - desktop only (mobile uses backdrop to close) */}
           <button
-            onClick={refreshList}
-            className="p-1.5 rounded hover:bg-gray-700 transition-colors text-gray-400 hover:text-gray-200"
-            title="Refresh"
+            onClick={() => {
+              setIsCollapsed(true)
+              onMobileClose?.()
+            }}
+            className="hidden md:block px-2 py-1 rounded text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors"
+            title="Hide sidebar"
+          >
+            Hide
+          </button>
+          {/* Close button - mobile only */}
+          <button
+            onClick={() => onMobileClose?.()}
+            className="md:hidden p-1.5 rounded hover:bg-gray-700 transition-colors text-gray-400 hover:text-gray-200"
+            title="Close"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-          </button>
-          <button
-            onClick={() => setIsCollapsed(true)}
-            className="p-1.5 rounded hover:bg-gray-700 transition-colors text-gray-400 hover:text-gray-200"
-            title="Collapse sidebar"
-          >
-            &lt;
           </button>
         </div>
       </div>
 
-      {/* Incognito Toggle */}
-      <div className={`px-3 py-2 border-b ${isIncognito ? 'bg-red-950 border-red-800' : 'border-gray-700'}`}>
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={isIncognito}
-            onChange={(e) => setIsIncognito(e.target.checked)}
-            className="rounded border-gray-600 bg-gray-700 text-red-500 focus:ring-red-500"
-          />
-          <span className={`text-xs font-medium ${isIncognito ? 'text-red-300' : 'text-gray-400'}`}>
-            Incognito Mode
-          </span>
-          {isIncognito && (
-            <span className="text-xs text-red-400 ml-auto">Not saving</span>
-          )}
-        </label>
-      </div>
-
-      {/* New Conversation Button */}
-      <div className="p-3 border-b border-gray-700">
-        <button
-          onClick={handleNewConversation}
-          className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
-        >
-          + New Conversation
-        </button>
-      </div>
-
-      {/* Only show list/search when chat history is enabled */}
       {chatHistoryEnabled ? (
         <>
           {/* Search */}
-          <div className="px-3 py-2 border-b border-gray-700">
+          <div className="px-3 py-2 border-b border-gray-700 flex-shrink-0">
             <input
               type="text"
               placeholder="Search conversations..."
@@ -180,7 +214,7 @@ const Sidebar = () => {
 
           {/* Tag filter */}
           {history.tags.length > 0 && (
-            <div className="px-3 py-2 border-b border-gray-700 flex flex-wrap gap-1">
+            <div className="px-3 py-2 border-b border-gray-700 flex flex-wrap gap-1 flex-shrink-0">
               <button
                 onClick={() => history.filterByTag(null)}
                 className={`text-xs px-2 py-0.5 rounded ${!history.activeTag ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
@@ -199,75 +233,50 @@ const Sidebar = () => {
             </div>
           )}
 
-          {/* Bulk actions */}
-          {selectedIds.size > 0 && (
-            <div className="px-3 py-2 border-b border-gray-700 flex items-center gap-2">
-              <span className="text-xs text-gray-400">{selectedIds.size} selected</span>
-              <button
-                onClick={() => setShowDeleteConfirm('selected')}
-                className="text-xs px-2 py-1 bg-red-700 hover:bg-red-600 text-white rounded"
-              >
-                Delete
-              </button>
-              <button
-                onClick={() => setSelectedIds(new Set())}
-                className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded ml-auto"
-              >
-                Clear
-              </button>
-            </div>
-          )}
-
           {/* Conversation list */}
-          <div className="flex-1 overflow-y-auto">
-            {history.loading ? (
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {history.loading && displayConversations.length === 0 ? (
               <div className="p-4 text-center text-gray-500 text-sm">Loading...</div>
-            ) : history.conversations.length === 0 ? (
+            ) : displayConversations.length === 0 ? (
               <div className="p-4 text-center text-gray-500 text-sm">
                 {history.searchQuery ? 'No matching conversations' : 'No saved conversations'}
               </div>
             ) : (
               <div className="py-1">
-                {history.conversations.map(conv => (
+                {displayConversations.map(conv => (
                   <div
                     key={conv.id}
                     onClick={() => handleLoadConversation(conv)}
                     className={`px-3 py-2 cursor-pointer border-l-2 transition-colors ${
-                      activeConversationId === conv.id
-                        ? 'bg-gray-700 border-blue-500'
-                        : 'border-transparent hover:bg-gray-750 hover:border-gray-600'
+                      conv._optimistic
+                        ? 'bg-gray-750 border-blue-400 opacity-80'
+                        : activeConversationId === conv.id
+                          ? 'bg-gray-700 border-blue-500'
+                          : 'border-transparent hover:bg-gray-750 hover:border-gray-600'
                     }`}
                   >
-                    <div className="flex items-start gap-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(conv.id)}
-                        onChange={(e) => toggleSelect(conv.id, e)}
-                        className="mt-1 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm text-gray-200 truncate" title={conv.title}>
-                          {conv.title || 'Untitled'}
-                        </div>
-                        {conv.preview && (
-                          <div className="text-xs text-gray-500 truncate mt-0.5">
-                            {conv.preview}
-                          </div>
-                        )}
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs text-gray-600">{formatDate(conv.updated_at)}</span>
-                          <span className="text-xs text-gray-600">{conv.message_count} msgs</span>
-                        </div>
-                        {conv.tags && conv.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {conv.tags.map(tag => (
-                              <span key={tag} className="text-xs bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                    <div className="min-w-0 overflow-hidden">
+                      <div className="text-sm text-gray-200 truncate" title={conv.title}>
+                        {conv.title || 'Untitled'}
                       </div>
+                      {conv.preview && (
+                        <div className={`text-xs truncate mt-0.5 ${conv._optimistic ? 'text-blue-400' : 'text-gray-500'}`}>
+                          {conv.preview}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-gray-600">{formatDate(conv.updated_at)}</span>
+                        <span className="text-xs text-gray-600">{conv.message_count} msgs</span>
+                      </div>
+                      {conv.tags && conv.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {conv.tags.map(tag => (
+                            <span key={tag} className="text-xs bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -275,9 +284,9 @@ const Sidebar = () => {
             )}
           </div>
 
-          {/* Footer actions */}
-          {history.conversations.length > 0 && (
-            <div className="p-2 border-t border-gray-700">
+          {/* Footer */}
+          {displayConversations.length > 0 && (
+            <div className="p-2 border-t border-gray-700 flex-shrink-0">
               <button
                 onClick={() => setShowDeleteConfirm('all')}
                 className="w-full text-xs px-2 py-1.5 text-red-400 hover:bg-red-900/30 rounded transition-colors"
@@ -302,10 +311,7 @@ const Sidebar = () => {
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDeleteConfirm(null)}>
           <div className="bg-gray-800 border border-gray-600 rounded-lg p-4 m-4 max-w-sm" onClick={e => e.stopPropagation()}>
             <p className="text-gray-200 text-sm mb-4">
-              {showDeleteConfirm === 'all'
-                ? 'Delete ALL conversations? This cannot be undone.'
-                : `Delete ${selectedIds.size} selected conversation(s)? This cannot be undone.`
-              }
+              Delete ALL conversations? This cannot be undone.
             </p>
             <div className="flex gap-2 justify-end">
               <button
@@ -315,7 +321,7 @@ const Sidebar = () => {
                 Cancel
               </button>
               <button
-                onClick={showDeleteConfirm === 'all' ? handleDeleteAll : handleDeleteSelected}
+                onClick={handleDeleteAll}
                 className="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-500 text-white rounded"
               >
                 Delete
@@ -324,7 +330,57 @@ const Sidebar = () => {
           </div>
         </div>
       )}
-    </aside>
+    </>
+  )
+
+  // --- Desktop: collapsed view (skip if mobile overlay is open) ---
+  if (isCollapsed && !mobileOpen) {
+    return (
+      <div className="hidden md:flex w-10 bg-gray-800 border-r border-gray-700 flex-col items-center pt-2 flex-shrink-0">
+        <button
+          onClick={() => setIsCollapsed(false)}
+          className="p-1.5 rounded hover:bg-gray-700 transition-colors text-gray-400 hover:text-gray-200"
+          title="Show conversations"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M6 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {/* Mobile overlay: slide-in from left */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => onMobileClose?.()}
+        />
+      )}
+      <aside
+        ref={panelRef}
+        className={`
+          bg-gray-800 border-r border-gray-700 flex flex-col h-full flex-shrink-0
+          fixed md:relative inset-y-0 left-0 z-50 md:z-auto
+          transition-transform duration-200 ease-in-out md:transition-none md:translate-x-0
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}
+        style={{ width: `${sidebarWidth}px`, maxWidth: '85vw' }}
+      >
+        {sidebarContent}
+
+        {/* Resize handle on right edge (desktop only) */}
+        <div
+          className="hidden md:block absolute right-0 top-0 w-1.5 h-full cursor-col-resize bg-transparent hover:bg-blue-500/50 transition-colors group"
+          onMouseDown={startResize}
+          style={{ transform: 'translateX(50%)' }}
+        >
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-12 bg-gray-600 group-hover:bg-blue-500 transition-colors rounded-sm" />
+        </div>
+      </aside>
+    </>
   )
 }
 

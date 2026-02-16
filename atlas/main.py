@@ -58,11 +58,11 @@ from atlas.routes.admin_routes import admin_router
 
 # Import essential routes
 from atlas.routes.config_routes import router as config_router
+from atlas.routes.conversation_routes import router as conversation_router
 from atlas.routes.feedback_routes import feedback_router
 from atlas.routes.files_routes import router as files_router
 from atlas.routes.health_routes import router as health_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
-from atlas.routes.conversation_routes import router as conversation_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.version import VERSION
 
@@ -417,6 +417,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             update_callback=lambda message: websocket_update_callback(websocket, message),
                             files=data.get("files"),
                             incognito=data.get("incognito", False),
+                            conversation_id=data.get("conversation_id"),
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
@@ -475,6 +476,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 response = await chat_service.handle_download_file(
                     session_id=session_id,
                     filename=data.get("filename", ""),
+                    user_email=user_email
+                )
+                await websocket.send_json(response)
+
+            elif message_type == "restore_conversation":
+                # Restore a saved conversation into the current session
+                response = await chat_service.handle_restore_conversation(
+                    session_id=session_id,
+                    conversation_id=data.get("conversation_id", ""),
+                    messages=data.get("messages", []),
                     user_email=user_email
                 )
                 await websocket.send_json(response)

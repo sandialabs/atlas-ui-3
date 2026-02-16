@@ -6,7 +6,7 @@ from uuid import UUID
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.errors import DomainError
-from atlas.domain.messages.models import MessageType, ToolResult
+from atlas.domain.messages.models import Message, MessageRole, MessageType, ToolResult
 from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
@@ -251,6 +251,13 @@ class ChatService:
         if incognito:
             self._incognito_sessions.add(session_id)
 
+        # Track conversation_id for continuing saved conversations
+        conversation_id = kwargs.pop("conversation_id", None)
+        if conversation_id:
+            session = self.sessions.get(session_id)
+            if session:
+                session.context["conversation_id"] = conversation_id
+
         try:
             # Delegate to orchestrator
             orchestrator = self._get_orchestrator()
@@ -289,6 +296,52 @@ class ChatService:
         except Exception as e:
             # Fallback for unexpected errors in HTTP-style callers
             return error_handler.handle_chat_message_error(e, "chat message handling")
+
+    async def handle_restore_conversation(
+        self,
+        session_id: UUID,
+        conversation_id: str,
+        messages: List[Dict[str, Any]],
+        user_email: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Restore a saved conversation into the current session.
+
+        Resets the session, loads previous messages into history,
+        and maps the session to the original conversation_id so
+        subsequent saves update the same conversation.
+        """
+        # Reset the session
+        self.end_session(session_id)
+        await self.create_session(session_id, user_email)
+
+        session = self.sessions.get(session_id)
+        if session:
+            # Store the conversation_id mapping
+            session.context["conversation_id"] = conversation_id
+
+            # Load previous messages into session history for LLM context
+            for msg_data in messages:
+                role = msg_data.get("role", "user")
+                content = msg_data.get("content", "")
+                msg = Message(
+                    role=MessageRole(role),
+                    content=content,
+                )
+                session.history.add_message(msg)
+
+        logger.info(
+            "Restored conversation %s into session %s for user %s (%d messages)",
+            sanitize_for_logging(conversation_id),
+            sanitize_for_logging(str(session_id)),
+            sanitize_for_logging(user_email),
+            len(messages),
+        )
+
+        return {
+            "type": "conversation_restored",
+            "conversation_id": conversation_id,
+            "message_count": len(messages),
+        }
 
     async def handle_reset_session(
         self,
@@ -488,8 +541,12 @@ class ChatService:
                 title = msg.content[:80]
                 break
 
+        # Use stored conversation_id if continuing a saved conversation,
+        # otherwise use the session_id as the conversation_id
+        conv_id = session.context.get("conversation_id", str(session_id))
+
         self.conversation_repository.save_conversation(
-            conversation_id=str(session_id),
+            conversation_id=conv_id,
             user_email=user_email,
             title=title,
             model=model,
