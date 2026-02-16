@@ -1,6 +1,11 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { calculateBackoffDelay } from '../hooks/usePollingWithBackoff'
 
 const WSContext = createContext()
+
+// Health check backoff configuration
+const INITIAL_HEALTH_CHECK_INTERVAL = 5000 // 5 seconds for first retry
+const MAX_HEALTH_CHECK_INTERVAL = 300000 // 5 minutes max
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const useWS = () => {
@@ -16,6 +21,8 @@ export const WSProvider = ({ children }) => {
   const [connectionStatus, setConnectionStatus] = useState('Disconnected')
   const wsRef = useRef(null)
   const messageHandlersRef = useRef([])
+  const healthCheckFailuresRef = useRef(0)
+  const healthCheckTimeoutRef = useRef(null)
 
   const connectWebSocket = () => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -102,29 +109,56 @@ export const WSProvider = ({ children }) => {
     }
   }, [])
 
-  // Separate effect for periodic health check to avoid infinite loops
+  // Separate effect for health check with exponential backoff
   useEffect(() => {
+    const scheduleHealthCheck = (delay) => {
+      if (healthCheckTimeoutRef.current) clearTimeout(healthCheckTimeoutRef.current)
+      healthCheckTimeoutRef.current = setTimeout(checkBackendAndReconnect, delay)
+    }
+
     const checkBackendAndReconnect = async () => {
       // Only check if WebSocket is disconnected and not already attempting to connect
       if (wsRef.current && wsRef.current.readyState !== WebSocket.OPEN && wsRef.current.readyState !== WebSocket.CONNECTING) {
         try {
-          const response = await fetch('/api/config', { timeout: 5000 })
+          const response = await fetch('/api/config', { signal: AbortSignal.timeout(5000) })
           if (response.ok) {
             console.log('Backend is alive but WebSocket is disconnected, attempting reconnection...')
+            healthCheckFailuresRef.current = 0
             reconnectWebSocket()
+            // After successful reconnection attempt, check again at initial interval
+            scheduleHealthCheck(INITIAL_HEALTH_CHECK_INTERVAL)
+            return
           }
         } catch {
           // Backend is down, don't attempt reconnection
-          console.log('Backend health check failed, not attempting WebSocket reconnection')
         }
+        // Failure path: increase backoff
+        healthCheckFailuresRef.current += 1
+        const delay = calculateBackoffDelay(
+          healthCheckFailuresRef.current,
+          INITIAL_HEALTH_CHECK_INTERVAL,
+          MAX_HEALTH_CHECK_INTERVAL
+        )
+        console.log(
+          `Backend health check failed (${healthCheckFailuresRef.current}x), ` +
+          `next check in ${(delay / 1000).toFixed(1)}s`
+        )
+        scheduleHealthCheck(delay)
+      } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        // WebSocket is connected, reset failures and check at normal interval
+        healthCheckFailuresRef.current = 0
+        scheduleHealthCheck(INITIAL_HEALTH_CHECK_INTERVAL)
+      } else {
+        // Still connecting, check again soon
+        scheduleHealthCheck(INITIAL_HEALTH_CHECK_INTERVAL)
       }
     }
 
-    // Set up periodic health check every 30 seconds
-    const healthCheckInterval = setInterval(checkBackendAndReconnect, 30000)
-    
+    // Start health check cycle
+    scheduleHealthCheck(INITIAL_HEALTH_CHECK_INTERVAL)
+
     return () => {
-      clearInterval(healthCheckInterval)
+      if (healthCheckTimeoutRef.current) clearTimeout(healthCheckTimeoutRef.current)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

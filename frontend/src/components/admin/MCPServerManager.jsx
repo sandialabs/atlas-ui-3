@@ -11,31 +11,30 @@ const MCPServerManager = ({ addNotification }) => {
   const loadServers = useCallback(async () => {
     try {
       setLoading(true)
-      
+
       // Load available servers
       const availableResponse = await fetch('/admin/mcp/available-servers')
       if (!availableResponse.ok) {
         throw new Error(`Failed to load available servers: ${availableResponse.status}`)
       }
       const availableData = await availableResponse.json()
-      
+
       // Load active servers
       const activeResponse = await fetch('/admin/mcp/active-servers')
       if (!activeResponse.ok) {
         throw new Error(`Failed to load active servers: ${activeResponse.status}`)
       }
       const activeData = await activeResponse.json()
-      
+
       setAvailableServers(availableData.available_servers || {})
       setActiveServers(activeData.active_servers || {})
-      
+
     } catch (err) {
       console.error('Error loading MCP servers:', err)
-      addNotification('Error loading MCP servers: ' + err.message, 'error')
     } finally {
       setLoading(false)
     }
-  }, [addNotification])
+  }, [])
 
   useEffect(() => {
     loadServers()
