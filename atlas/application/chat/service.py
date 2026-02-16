@@ -52,6 +52,7 @@ class ChatService:
         agent_loop_factory: Optional[AgentLoopFactory] = None,
         event_publisher: Optional[EventPublisher] = None,
         session_repository: Optional[SessionRepository] = None,
+        conversation_repository: Optional[Any] = None,
     ):
         """
         Initialize chat service with dependencies.
@@ -90,6 +91,12 @@ class ChatService:
             # Create default in-memory repository
             from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
             self.session_repository = InMemorySessionRepository()
+
+        # Chat history persistence (None when feature disabled)
+        self.conversation_repository = conversation_repository
+
+        # Track incognito sessions
+        self._incognito_sessions: set = set()
 
         # Legacy sessions dict - deprecated, use session_repository instead
         # Kept temporarily for backward compatibility
@@ -239,10 +246,15 @@ class ChatService:
                 # Sync to legacy dict
                 self.sessions[session_id] = session
 
+        # Check incognito mode
+        incognito = kwargs.pop("incognito", False)
+        if incognito:
+            self._incognito_sessions.add(session_id)
+
         try:
             # Delegate to orchestrator
             orchestrator = self._get_orchestrator()
-            return await orchestrator.execute(
+            result = await orchestrator.execute(
                 session_id=session_id,
                 content=content,
                 model=model,
@@ -257,6 +269,19 @@ class ChatService:
                 update_callback=update_callback,
                 **kwargs
             )
+
+            # Persist conversation (if not incognito and feature enabled)
+            if (
+                self.conversation_repository is not None
+                and session_id not in self._incognito_sessions
+                and user_email
+            ):
+                try:
+                    self._save_conversation(session_id, user_email, model)
+                except Exception as e:
+                    logger.error("Failed to persist conversation: %s", e, exc_info=True)
+
+            return result
         except DomainError:
             # Let domain-level errors (e.g., LLM / rate limit / validation) bubble up
             # so transport layers (WebSocket/HTTP) can handle them consistently.
@@ -443,6 +468,37 @@ class ChatService:
         except Exception as e:
             logger.error(f"Failed to update session from tool results: {e}", exc_info=True)
 
+    def _save_conversation(self, session_id: UUID, user_email: str, model: str) -> None:
+        """Persist the current session's conversation history to the database."""
+        session = self.sessions.get(session_id)
+        if not session or not session.history.messages:
+            return
+
+        messages = []
+        for msg in session.history.messages:
+            msg_dict = msg.to_dict()
+            # Preserve message_type from metadata if available
+            msg_dict["message_type"] = msg.metadata.get("message_type", "chat")
+            messages.append(msg_dict)
+
+        # Generate title from first user message
+        title = None
+        for msg in session.history.messages:
+            if msg.role.value == "user" and msg.content:
+                title = msg.content[:80]
+                break
+
+        self.conversation_repository.save_conversation(
+            conversation_id=str(session_id),
+            user_email=user_email,
+            title=title,
+            model=model,
+            messages=messages,
+            metadata={
+                "agent_mode": bool(session.context.get("agent_mode")),
+            },
+        )
+
     def get_session(self, session_id: UUID) -> Optional[Session]:
         """Get session by ID."""
         return self.sessions.get(session_id)
@@ -451,4 +507,5 @@ class ChatService:
         """End a session."""
         if session_id in self.sessions:
             self.sessions[session_id].active = False
+            self._incognito_sessions.discard(session_id)
             logger.info(f"Ended session {sanitize_for_logging(str(session_id))}")

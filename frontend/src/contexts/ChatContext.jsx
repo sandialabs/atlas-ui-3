@@ -32,7 +32,7 @@ export const ChatProvider = ({ children }) => {
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
-	const { messages, addMessage, mapMessages, resetMessages } = useMessages()
+	const { messages, addMessage, bulkAdd, mapMessages, resetMessages } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
@@ -42,6 +42,10 @@ export const ChatProvider = ({ children }) => {
 	const [attachments, setAttachments] = useState(new Set())
 	const [, setPendingFileEvents] = useState(new Map())
 	const [pendingElicitation, setPendingElicitation] = useState(null)
+
+	// Chat history: incognito mode and active conversation tracking
+	const [isIncognito, setIsIncognito] = useState(false)
+	const [activeConversationId, setActiveConversationId] = useState(null)
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {
@@ -249,21 +253,55 @@ export const ChatProvider = ({ children }) => {
 			temperature: settings.llmTemperature || 0.7,
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
 			compliance_level_filter: selections.complianceLevelFilter,
+			incognito: isIncognito,
 		})
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, isIncognito])
 
 	const clearChat = useCallback(() => {
 		resetMessages()
 		setIsWelcomeVisible(true)
+		setActiveConversationId(null)
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
-		
+
 		// Notify backend to create a new session
 		if (sendMessage) {
 			sendMessage({ type: 'reset_session' })
 		}
 	}, [resetMessages, files, sendMessage])
+
+	// Load a saved conversation from history into the chat view
+	const loadSavedConversation = useCallback(async (conversationData) => {
+		if (!conversationData || !conversationData.messages) return
+
+		// Clear current state
+		resetMessages()
+		files.setCanvasContent('')
+		files.setCustomUIContent(null)
+		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
+
+		// Track the loaded conversation
+		setActiveConversationId(conversationData.id)
+		setIsWelcomeVisible(false)
+
+		// Notify backend to create a new session for this conversation
+		if (sendMessage) {
+			sendMessage({ type: 'reset_session' })
+		}
+
+		// Load messages into the chat view
+		const loadedMessages = conversationData.messages.map(msg => ({
+			role: msg.role,
+			content: msg.content || '',
+			timestamp: msg.timestamp,
+			type: msg.message_type || 'chat',
+			...(msg.metadata || {}),
+		}))
+		if (loadedMessages.length > 0) {
+			bulkAdd(loadedMessages)
+		}
+	}, [resetMessages, files, sendMessage, bulkAdd])
 
 	const downloadFile = useCallback((filename) => {
 		if (!files.sessionFiles.files.find(f => f.filename === filename)) return
@@ -509,7 +547,11 @@ export const ChatProvider = ({ children }) => {
 		sendApprovalResponse: sendMessage,
 		pendingElicitation,
 		setPendingElicitation,
-		refreshConfig: config.refreshConfig
+		refreshConfig: config.refreshConfig,
+		isIncognito,
+		setIsIncognito,
+		activeConversationId,
+		loadSavedConversation,
 	}
 
 	return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

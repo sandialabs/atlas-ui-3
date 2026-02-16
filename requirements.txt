@@ -36,3 +36,8 @@ opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-httpx
 python-pptx
 podman-compose
+sqlalchemy>=2.0
+alembic
+duckdb
+duckdb-engine
+psycopg2-binary

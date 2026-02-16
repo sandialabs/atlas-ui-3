@@ -461,7 +461,16 @@ class AppSettings(BaseSettings):
     feature_tools_enabled: bool = False
     feature_marketplace_enabled: bool = False
     feature_files_panel_enabled: bool = False
-    feature_chat_history_enabled: bool = False
+    feature_chat_history_enabled: bool = Field(
+        False,
+        description="Enable conversation history persistence (DuckDB local, PostgreSQL production)",
+        validation_alias=AliasChoices("FEATURE_CHAT_HISTORY_ENABLED"),
+    )
+    chat_history_db_url: str = Field(
+        default="duckdb:///data/chat_history.db",
+        description="Database URL for chat history. Use duckdb:///path for local, postgresql://... for production",
+        validation_alias="CHAT_HISTORY_DB_URL",
+    )
     # Compliance level filtering feature gate
     feature_compliance_levels_enabled: bool = Field(
         False,

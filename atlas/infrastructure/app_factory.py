@@ -70,6 +70,23 @@ class AppFactory:
         # Shared session repository for all ChatService instances
         self.session_repository = InMemorySessionRepository()
 
+        # Chat history persistence (feature-flagged)
+        self.conversation_repository = None
+        if self.config_manager.app_settings.feature_chat_history_enabled:
+            try:
+                from atlas.modules.chat_history import (
+                    ConversationRepository,
+                    get_session_factory,
+                    init_database,
+                )
+                db_url = self.config_manager.app_settings.chat_history_db_url
+                init_database(db_url)
+                session_factory = get_session_factory()
+                self.conversation_repository = ConversationRepository(session_factory)
+                logger.info("Chat history persistence initialized")
+            except Exception as e:
+                logger.error("Failed to initialize chat history: %s", e, exc_info=True)
+
         logger.info("AppFactory initialized")
 
     async def initialize(self) -> None:
@@ -92,6 +109,7 @@ class AppFactory:
             config_manager=self.config_manager,
             file_manager=self.file_manager,
             session_repository=self.session_repository,
+            conversation_repository=self.conversation_repository,
         )
 
     def create_headless_chat_service(
@@ -106,6 +124,7 @@ class AppFactory:
             file_manager=self.file_manager,
             session_repository=self.session_repository,
             event_publisher=event_publisher,
+            conversation_repository=self.conversation_repository,
         )
 
     # Accessors
