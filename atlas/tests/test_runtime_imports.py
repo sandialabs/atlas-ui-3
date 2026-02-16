@@ -25,8 +25,8 @@ def run_subprocess(code: str, cwd: Path, project_root: Path = None):
 def test_backend_dir_imports_work_without_project_root_in_path():
     """
     Ensure imports work when running from the atlas directory (the supported run mode).
-    The atlas package requires the project root on PYTHONPATH for proper package imports.
-    This mirrors `bash agent_start.sh` which sets PYTHONPATH before running from ./atlas.
+    The atlas package is installed editably via `uv pip install -e .`, so PYTHONPATH is
+    not required. The project_root is still passed here to verify imports work either way.
     """
     atlas_dir = Path(__file__).resolve().parents[1]
     project_root = atlas_dir.parent

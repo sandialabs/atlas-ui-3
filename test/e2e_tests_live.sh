@@ -25,9 +25,7 @@ fi
 PASS=0
 FAIL=0
 
-# Ensure atlas package is importable (needed for CLI tests that run
-# atlas_chat_cli.py from inside the atlas/ directory).
-export PYTHONPATH="${PYTHONPATH:-}:$PROJECT_ROOT"
+# atlas package is installed editably (uv pip install -e .), so no PYTHONPATH needed
 
 # Use a minimal MCP config with just the calculator server
 export MCP_CONFIG_FILE="$SCRIPT_DIR/fixtures/mcp-live-test.json"
