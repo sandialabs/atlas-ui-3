@@ -59,6 +59,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "alembic",
     "podman-compose",
     "pytest",
     "pytest-asyncio",
@@ -76,6 +77,16 @@ Homepage = "https://github.com/sandialabs/atlas"
 Documentation = "https://github.com/sandialabs/atlas/tree/main/docs"
 Repository = "https://github.com/sandialabs/atlas"
 Issues = "https://github.com/sandialabs/atlas/issues"
+
+[dependency-groups]
+dev = [
+    "alembic",
+    "podman-compose",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-mock",
+    "ruff",
+]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

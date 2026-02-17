@@ -49,6 +49,6 @@ if [ -f tests/test_config_module.py ] || [ -f tests/test_file_storage_module.py 
 fi
 
 echo "Running pytest on atlas/tests directory"
-timeout 300 python -m pytest tests -v --tb=short
+timeout --foreground 300 python -u -m pytest tests -v --tb=short
 
 echo "Atlas tests completed"
