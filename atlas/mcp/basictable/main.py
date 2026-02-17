@@ -144,4 +144,4 @@ def analyze_spreadsheet(
 
 if __name__ == "__main__":
     print("Starting CSV/XLSX Analyzer MCP server...")
-    mcp.run()
+    mcp.run(show_banner=False)

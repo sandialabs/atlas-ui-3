@@ -219,4 +219,4 @@ def list_available_prompts() -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)
