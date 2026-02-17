@@ -39,6 +39,7 @@ dependencies = [
     "opentelemetry-instrumentation-logging",
     "opentelemetry-sdk",
     "pandas",
+    "psycopg2-binary",
     "pydantic",
     "PyJWT",
     "PyPDF2",
