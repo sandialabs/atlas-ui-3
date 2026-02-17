@@ -305,4 +305,4 @@ def plan_with_tools(
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)

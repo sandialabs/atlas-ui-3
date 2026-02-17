@@ -391,4 +391,4 @@ def generate_report_about_pdf(
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)

@@ -46,5 +46,5 @@ def {tool_name}(input_data: str = "default") -> str:
 """)
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)
 

@@ -231,4 +231,4 @@ async def translate_and_explain(text: str, target_language: str, ctx: Context) -
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)

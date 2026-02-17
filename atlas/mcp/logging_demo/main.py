@@ -100,4 +100,4 @@ async def test_logging(operation: str, ctx: Context) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)

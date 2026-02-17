@@ -196,4 +196,4 @@ def demonstrate_env_usage(operation: str = "info") -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)

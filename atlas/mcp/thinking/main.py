@@ -74,4 +74,4 @@ def thinking(list_of_thoughts: List[str]) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)
