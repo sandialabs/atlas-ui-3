@@ -3,19 +3,56 @@ import { useChat } from '../contexts/ChatContext'
 import { useConversationHistory } from '../hooks/useConversationHistory'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 
+const ContextMenu = ({ x, y, onDelete, onClose }) => {
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) onClose()
+    }
+    const handleEscape = (e) => { if (e.key === 'Escape') onClose() }
+    const handleScroll = () => onClose()
+
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+    document.addEventListener('scroll', handleScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+      document.removeEventListener('scroll', handleScroll, true)
+    }
+  }, [onClose])
+
+  return (
+    <div
+      ref={menuRef}
+      className="fixed bg-gray-800 border border-gray-600 rounded shadow-lg py-1 z-[100]"
+      style={{ left: x, top: y }}
+    >
+      <button
+        onClick={onDelete}
+        className="w-full text-left px-4 py-1.5 text-sm text-red-400 hover:bg-gray-700 transition-colors"
+      >
+        Delete Conversation
+      </button>
+    </div>
+  )
+}
+
 const MIN_WIDTH = 200
 const MAX_WIDTH = 480
 const DEFAULT_WIDTH = 256
 
 const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const {
-    features, activeConversationId, loadSavedConversation, messages, isIncognito,
+    features, activeConversationId, loadSavedConversation, messages, isIncognito, clearChat,
   } = useChat()
 
   const chatHistoryEnabled = features?.chat_history
   const [sidebarWidth, setSidebarWidth] = usePersistentState('chatui-sidebar-width', DEFAULT_WIDTH)
   const [isCollapsed, setIsCollapsed] = usePersistentState('chatui-sidebar-collapsed', false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
+  const [contextMenu, setContextMenu] = useState(null)
   const [isResizing, setIsResizing] = useState(false)
   const searchTimerRef = useRef(null)
   const prevMessageCountRef = useRef(0)
@@ -129,6 +166,21 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     await history.deleteAll()
     setShowDeleteConfirm(null)
   }, [history])
+
+  const handleContextMenu = useCallback((e, conv) => {
+    if (conv._optimistic) return
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, conversationId: conv.id })
+  }, [])
+
+  const handleDeleteConversation = useCallback(async () => {
+    if (!contextMenu) return
+    const { conversationId } = contextMenu
+    const wasActive = activeConversationId === conversationId
+    await history.deleteConversation(conversationId)
+    setContextMenu(null)
+    if (wasActive) clearChat()
+  }, [contextMenu, activeConversationId, history, clearChat])
 
   const formatDate = (dateStr) => {
     if (!dateStr) return ''
@@ -245,6 +297,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                   <div
                     key={conv.id}
                     onClick={() => handleLoadConversation(conv)}
+                    onContextMenu={(e) => handleContextMenu(e, conv)}
                     className={`px-3 py-2 cursor-pointer border-l-2 border-b border-b-gray-700/50 transition-colors ${
                       conv._optimistic
                         ? 'bg-gray-750 border-l-blue-400 opacity-80'
@@ -302,6 +355,16 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
             Set FEATURE_CHAT_HISTORY_ENABLED=true to enable.
           </span>
         </div>
+      )}
+
+      {/* Context menu for individual conversation */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onDelete={handleDeleteConversation}
+          onClose={() => setContextMenu(null)}
+        />
       )}
 
       {/* Delete confirmation modal */}
