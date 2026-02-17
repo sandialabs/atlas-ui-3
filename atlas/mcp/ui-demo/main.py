@@ -483,4 +483,4 @@ Overall: {"NEEDS ATTENTION" if p99_lat > 10 or gc_pause > 200 or oom_kills > 0 e
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)

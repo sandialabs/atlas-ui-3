@@ -33,23 +33,16 @@ VERBOSE = False
 
 # Configure logging to use main app log with prefix
 current_dir = Path(__file__).parent
-print(f"Current dir: {current_dir.absolute()}")
 atlas_dir = current_dir.parent.parent
-print(f"Atlas dir: {atlas_dir.absolute()}")
 project_root = atlas_dir.parent
-print(f"Project root: {project_root.absolute()}")
 logs_dir = project_root / 'logs'
-print(f"Logs dir: {logs_dir.absolute()}")
+logs_dir.mkdir(parents=True, exist_ok=True)
 main_log_path = logs_dir / 'app.jsonl'
-print(f"Log path: {main_log_path.absolute()}")
-print(f"Log path exists: {main_log_path.exists()}")
-print(f"Logs dir exists: {logs_dir.exists()}")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - CODE_EXECUTOR - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(main_log_path),
-        logging.StreamHandler()
+        logging.FileHandler(main_log_path)
     ]
 )
 logger = logging.getLogger(__name__)
@@ -525,4 +518,4 @@ def execute_python_code_with_file(
             }
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)

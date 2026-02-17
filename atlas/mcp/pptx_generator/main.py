@@ -35,35 +35,20 @@ from pptx.util import Inches, Pt
 # Configuration
 VERBOSE = True
 
-# Configure logging first
+# Configure logging (file-only to avoid polluting stdio)
+current_dir = Path(__file__).parent
+atlas_dir = current_dir.parent.parent
+logs_dir = atlas_dir.parent / 'logs'
+logs_dir.mkdir(parents=True, exist_ok=True)
+main_log_path = logs_dir / 'app.jsonl'
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - PPTX_GENERATOR - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler()
+        logging.FileHandler(main_log_path)
     ]
 )
 logger = logging.getLogger(__name__)
-
-# Configure paths and add file handler if available
-current_dir = Path(__file__).parent
-logger.info(f"Current dir: {current_dir.absolute()}")
-atlas_dir = current_dir.parent.parent
-logger.info(f"Atlas dir: {atlas_dir.absolute()}")
-project_root = atlas_dir.parent
-logger.info(f"Project root: {project_root.absolute()}")
-logs_dir = project_root / 'logs'
-logger.info(f"Logs dir: {logs_dir.absolute()}")
-main_log_path = logs_dir / 'app.jsonl'
-logger.info(f"Log path: {main_log_path.absolute()}")
-logger.info(f"Log path exists: {main_log_path.exists()}")
-logger.info(f"Logs dir exists: {logs_dir.exists()}")
-
-# Add file handler if log path exists
-if main_log_path.exists():
-    file_handler = logging.FileHandler(main_log_path)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - PPTX_GENERATOR - %(name)s - %(levelname)s - %(message)s'))
-    logger.addHandler(file_handler)
 
 mcp = FastMCP("pptx_generator")
 
@@ -853,4 +838,4 @@ def markdown_to_pptx(
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(show_banner=False)

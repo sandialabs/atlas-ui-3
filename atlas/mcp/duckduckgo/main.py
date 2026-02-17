@@ -179,4 +179,4 @@ def search_and_fetch(query: str, max_results: Union[str, int] = 3) -> Dict[str, 
 if __name__ == "__main__":
     # To run this server, you need to install the required libraries:
     # pip install fastmcp duckduckgo-search requests beautifulsoup4
-    mcp.run()
+    mcp.run(show_banner=False)

@@ -169,4 +169,4 @@ if __name__ == "__main__":
     print(f"Valid API key count: {len(API_KEY_USERS)} (use list_valid_keys tool to see them)")
     print("\nTo test, set your API key in Atlas UI or use the FastMCP client.")
 
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=port, show_banner=False)
