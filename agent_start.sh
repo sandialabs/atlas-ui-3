@@ -115,6 +115,63 @@ setup_minio() {
     cd "$PROJECT_ROOT"
 }
 
+setup_chat_history_db() {
+    local chat_history_enabled="false"
+    local db_url=""
+
+    # Read settings from .env
+    if [ -f "$PROJECT_ROOT/.env" ]; then
+        chat_history_enabled=$(grep -E "^FEATURE_CHAT_HISTORY_ENABLED=" "$PROJECT_ROOT/.env" | cut -d '=' -f2)
+        db_url=$(grep -E "^CHAT_HISTORY_DB_URL=" "$PROJECT_ROOT/.env" | cut -d '=' -f2)
+    fi
+
+    if [ "$chat_history_enabled" != "true" ]; then
+        echo "Chat history disabled (FEATURE_CHAT_HISTORY_ENABLED != true)"
+        return
+    fi
+
+    # Default to DuckDB if no URL specified
+    if [ -z "$db_url" ]; then
+        db_url="duckdb:///data/chat_history.db"
+    fi
+
+    if echo "$db_url" | grep -q "^postgresql"; then
+        echo "Chat history: PostgreSQL mode"
+        if [ -z "$CONTAINER_CMD" ]; then
+            echo "Error: PostgreSQL requires Docker/Podman. Install one or switch to DuckDB."
+            echo "  DuckDB: CHAT_HISTORY_DB_URL=duckdb:///data/chat_history.db"
+            exit 1
+        fi
+
+        if ! $CONTAINER_CMD ps | grep -q atlas-postgres; then
+            echo "PostgreSQL is not running. Starting with $COMPOSE_CMD..."
+            cd "$PROJECT_ROOT"
+            $COMPOSE_CMD up -d postgres
+            echo "Waiting for PostgreSQL to be ready..."
+            max_wait=60
+            waited=0
+            until $COMPOSE_CMD exec -T postgres pg_isready >/dev/null 2>&1; do
+                if [ "$waited" -ge "$max_wait" ]; then
+                    echo "PostgreSQL did not become ready within ${max_wait}s."
+                    exit 1
+                fi
+                sleep 2
+                waited=$((waited + 2))
+            done
+            echo "PostgreSQL is ready."
+        else
+            echo "PostgreSQL is already running"
+        fi
+    elif echo "$db_url" | grep -q "^duckdb"; then
+        echo "Chat history: DuckDB mode"
+        # Ensure data directory exists for DuckDB file
+        mkdir -p "$PROJECT_ROOT/data"
+    else
+        echo "Chat history: custom DB URL configured"
+    fi
+    cd "$PROJECT_ROOT"
+}
+
 setup_environment() {
     cd "$PROJECT_ROOT"
     
@@ -240,7 +297,8 @@ main() {
     setup_environment
     setup_container_runtime
     setup_minio
-    
+    setup_chat_history_db
+
     # Handle frontend-only mode
     if [ "$ONLY_FRONTEND" = true ]; then
         build_frontend

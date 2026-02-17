@@ -35,19 +35,9 @@ from pptx.util import Inches, Pt
 # Configuration
 VERBOSE = True
 
-# Configure logging (file-only to avoid polluting stdio)
 current_dir = Path(__file__).parent
 atlas_dir = current_dir.parent.parent
-logs_dir = atlas_dir.parent / 'logs'
-logs_dir.mkdir(parents=True, exist_ok=True)
-main_log_path = logs_dir / 'app.jsonl'
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - PPTX_GENERATOR - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(main_log_path)
-    ]
-)
+project_root = atlas_dir.parent
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("pptx_generator")

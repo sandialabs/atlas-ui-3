@@ -121,6 +121,16 @@ This installs the `atlas` package in **editable mode**, meaning:
 PYTHONPATH=/path/to/atlas-ui-3 python atlas/main.py
 ```
 
+### Local Experimentation and MCP Testing
+
+If you cloned the repo and want to run tests, experiment locally, or test MCP servers, sync the dev dependencies:
+
+```bash
+uv sync --dev
+```
+
+This installs pytest, ruff, and other development tools into your virtual environment.
+
 ### Running the Application
 
 **Linux/macOS:**

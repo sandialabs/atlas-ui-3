@@ -886,7 +886,7 @@ const ChatArea = () => {
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Type a message... (/ or @ for help)"
+                placeholder={isMobile ? "Type a message..." : "Type a message... (/ or @ for help)"}
                 rows={1}
                 className={`w-full px-4 py-3 bg-gray-800 rounded-lg text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:border-transparent ${
                   hasSearchCommand

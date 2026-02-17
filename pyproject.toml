@@ -23,6 +23,7 @@ dependencies = [
     "beautifulsoup4",
     "boto3>=1.34.0",
     "cryptography",
+    "duckdb-engine",
     "duckduckgo-search",
     "fastapi",
     "fastmcp>=2.10.0,<3.0.0",
@@ -38,6 +39,7 @@ dependencies = [
     "opentelemetry-instrumentation-logging",
     "opentelemetry-sdk",
     "pandas",
+    "psycopg2-binary",
     "pydantic",
     "PyJWT",
     "PyPDF2",
@@ -50,12 +52,14 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "seaborn",
+    "sqlalchemy>=2.0",
     "uvicorn[standard]",
     "websockets",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "alembic",
     "podman-compose",
     "pytest",
     "pytest-asyncio",
@@ -73,6 +77,16 @@ Homepage = "https://github.com/sandialabs/atlas"
 Documentation = "https://github.com/sandialabs/atlas/tree/main/docs"
 Repository = "https://github.com/sandialabs/atlas"
 Issues = "https://github.com/sandialabs/atlas/issues"
+
+[dependency-groups]
+dev = [
+    "alembic",
+    "podman-compose",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-mock",
+    "ruff",
+]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

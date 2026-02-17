@@ -5,9 +5,9 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft } from 'lucide-react'
 
-const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
+const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()
   const {
     user,
@@ -17,6 +17,8 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
     agentModeAvailable,
     agentModeEnabled,
     setAgentModeEnabled,
+    isIncognito,
+    setIsIncognito,
     downloadChat,
     downloadChatAsText,
     messages,
@@ -101,6 +103,17 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
     <header className="flex items-center justify-between p-2 sm:p-4 bg-gray-800 border-b border-gray-700">
       {/* Left section */}
       <div className="flex items-center gap-2 sm:gap-4">
+        {/* Mobile sidebar toggle */}
+        {features?.chat_history && (
+          <button
+            onClick={onToggleSidebar}
+            className="md:hidden p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-gray-200"
+            title="Conversations"
+          >
+            <PanelLeft className="w-5 h-5" />
+          </button>
+        )}
+
         {features?.rag && (
           <button
             onClick={onToggleRag}
@@ -236,6 +249,29 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
           <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
           <span className="text-gray-400 hidden sm:inline">{connectionStatus}</span>
         </div>
+
+        {/* Incognito Toggle - Database icon shows save state */}
+        {features?.chat_history && (
+          <button
+            onClick={() => setIsIncognito(!isIncognito)}
+            className={`flex items-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              isIncognito
+                ? 'bg-red-700 hover:bg-red-600 text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-gray-400'
+            }`}
+            title={isIncognito ? 'Incognito mode ON - conversations not saved (click to disable)' : 'Conversations are being saved (click for incognito)'}
+          >
+            <span className="relative inline-flex items-center justify-center w-4 h-4">
+              <Database className="w-4 h-4" />
+              {isIncognito && (
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <span className="block w-5 h-0.5 bg-current rotate-45 rounded" />
+                </span>
+              )}
+            </span>
+            <span className="hidden sm:inline">{isIncognito ? 'Incognito' : 'Saving'}</span>
+          </button>
+        )}
 
         {/* Desktop-only buttons (hidden on mobile, shown in hamburger menu) */}
         <div className="hidden lg:flex items-center gap-2">
@@ -464,6 +500,31 @@ const Header = ({ onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onC
                     ))}
                   </select>
                 </div>
+              )}
+
+              {/* Incognito Toggle (Mobile) */}
+              {features?.chat_history && (
+                <button
+                  onClick={() => {
+                    setIsIncognito(!isIncognito)
+                    setMobileMenuOpen(false)
+                  }}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                    isIncognito
+                      ? 'bg-red-700 hover:bg-red-600 text-white'
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                  }`}
+                >
+                  <span className="relative inline-flex items-center justify-center w-5 h-5">
+                    <Database className="w-5 h-5" />
+                    {isIncognito && (
+                      <span className="absolute inset-0 flex items-center justify-center">
+                        <span className="block w-6 h-0.5 bg-current rotate-45 rounded" />
+                      </span>
+                    )}
+                  </span>
+                  <span>{isIncognito ? 'Incognito' : 'Saving'}</span>
+                </button>
               )}
 
               {/* Agent Mode Toggle */}

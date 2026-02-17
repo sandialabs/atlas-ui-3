@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+export PYTHONUNBUFFERED=1
 
 echo "Starting Test Suite"
 echo "===================="

@@ -104,7 +104,7 @@ const FeedbackButton = () => {
       {/* Feedback Button */}
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-4 right-4 z-40 p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all duration-200 hover:scale-105"
+        className="fixed bottom-32 min-[1102px]:bottom-4 right-4 z-40 p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all duration-200 hover:scale-105"
         title="Give feedback"
       >
         <MessageCircle className="w-5 h-5" />

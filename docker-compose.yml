@@ -35,6 +35,25 @@ services:
     networks:
       - atlas-network
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: atlas-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas
+      POSTGRES_DB: atlas_chat_history
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas_chat_history"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - atlas-network
+
   atlas-ui:
     build:
       context: .
@@ -77,6 +96,10 @@ services:
       - FEATURE_MARKETPLACE_ENABLED=true
       - FEATURE_FILES_PANEL_ENABLED=true
       - FEATURE_CHAT_HISTORY_ENABLED=false
+      # Chat history DB (uncomment one):
+      # DuckDB (default): duckdb:///data/chat_history.db
+      # PostgreSQL: postgresql://atlas:atlas@postgres:5432/atlas_chat_history
+      # - CHAT_HISTORY_DB_URL=postgresql://atlas:atlas@postgres:5432/atlas_chat_history
       - FEATURE_COMPLIANCE_LEVELS_ENABLED=false
       - FEATURE_METRICS_LOGGING_ENABLED=false
       - FEATURE_SPLASH_SCREEN_ENABLED=false
@@ -127,3 +150,4 @@ networks:
 
 volumes:
   minio-data:
+  postgres-data:
