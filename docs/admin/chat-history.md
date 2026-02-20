@@ -1,12 +1,12 @@
 # Chat History Persistence
 
-Last updated: 2026-02-15
+Last updated: 2026-02-20
 
 ## Overview
 
 Atlas can persist conversation history to a database, allowing users to browse, search, reload, and manage past conversations. This feature supports both DuckDB (lightweight, local file) and PostgreSQL (production, multi-user).
 
-The feature is **disabled by default** and controlled by a feature flag.
+The feature is **enabled by default** with DuckDB storage and controlled by a feature flag.
 
 ## Configuration
 
