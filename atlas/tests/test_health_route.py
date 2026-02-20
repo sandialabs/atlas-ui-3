@@ -1,9 +1,33 @@
-"""Unit tests for health check endpoint."""
+"""Unit tests for health check and heartbeat endpoints."""
 
 from datetime import datetime
 
 from main import app
 from starlette.testclient import TestClient
+
+
+def test_heartbeat_endpoint_returns_200():
+    """Test that heartbeat endpoint returns 200 status."""
+    client = TestClient(app)
+    resp = client.get("/api/heartbeat")
+    assert resp.status_code == 200
+
+
+def test_heartbeat_endpoint_no_auth_required():
+    """Test that heartbeat endpoint works without authentication."""
+    client = TestClient(app)
+    resp = client.get("/api/heartbeat")
+    assert resp.status_code == 200
+
+
+def test_heartbeat_endpoint_response_structure():
+    """Test that heartbeat endpoint returns minimal response."""
+    client = TestClient(app)
+    resp = client.get("/api/heartbeat")
+    assert resp.status_code == 200
+
+    data = resp.json()
+    assert data == {"status": "ok"}
 
 
 def test_health_endpoint_returns_200():

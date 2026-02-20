@@ -45,9 +45,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Log request
         logger.debug("Request: %s %s", request.method, request.url.path)
 
-        # Skip auth for static files, health check, and configured auth endpoint
+        # Skip auth for static files, health/heartbeat check, and configured auth endpoint
         if (request.url.path.startswith('/static') or
             request.url.path == '/api/health' or
+            request.url.path == '/api/heartbeat' or
             request.url.path == self.auth_redirect_url):
             return await call_next(request)
 

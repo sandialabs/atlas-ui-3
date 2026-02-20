@@ -377,3 +377,59 @@ def test_health_endpoint_bypasses_auth():
     assert other_resp.status_code == 401
     assert "Unauthorized" in other_resp.json()["detail"]
 
+
+def test_heartbeat_endpoint_bypasses_auth():
+    """Test that /api/heartbeat endpoint bypasses authentication middleware."""
+    app = FastAPI()
+
+    @app.get("/api/heartbeat")
+    def heartbeat():
+        return {"status": "ok"}
+
+    @app.get("/api/other")
+    def other():
+        return {"data": "test"}
+
+    @app.get("/auth")
+    def auth():
+        return {"login": True}
+
+    app.add_middleware(AuthMiddleware, debug_mode=False)
+    client = TestClient(app)
+
+    # Heartbeat should work without auth header
+    resp = client.get("/api/heartbeat")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+    # Other API endpoints should still require auth
+    other_resp = client.get("/api/other")
+    assert other_resp.status_code == 401
+
+
+def test_heartbeat_bypasses_auth_with_proxy_secret():
+    """Test that heartbeat bypasses both auth and proxy secret validation."""
+    app = FastAPI()
+
+    @app.get("/api/heartbeat")
+    def heartbeat():
+        return {"status": "ok"}
+
+    @app.get("/auth")
+    def auth():
+        return {"login": True}
+
+    app.add_middleware(
+        AuthMiddleware,
+        debug_mode=False,
+        proxy_secret_enabled=True,
+        proxy_secret_header="X-Proxy-Secret",
+        proxy_secret="my-secret-123"
+    )
+    client = TestClient(app)
+
+    # Heartbeat should work without proxy secret or auth header
+    resp = client.get("/api/heartbeat")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
