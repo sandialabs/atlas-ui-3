@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #350 - 2026-02-20
 - **Feature**: Add `/api/heartbeat` endpoint for lightweight uptime monitoring. Bypasses authentication but is rate-limited to prevent abuse.
 
+### PR #347 - 2026-02-20
+- **Config**: Enable chat history with DuckDB by default in `.env.example` so new setups get conversation persistence out of the box.
+
 ### PR #344 - 2026-02-16
 - **Feature**: Chat history persistence with DuckDB (local) and PostgreSQL (production) support. Conversations, messages, and tags are saved to a database and can be browsed, searched, loaded, and deleted from the sidebar.
 - **Feature**: Incognito mode prevents conversation saving, with a clear visual indicator in the header.

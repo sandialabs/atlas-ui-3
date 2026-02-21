@@ -95,10 +95,11 @@ services:
       - FEATURE_TOOLS_ENABLED=true
       - FEATURE_MARKETPLACE_ENABLED=true
       - FEATURE_FILES_PANEL_ENABLED=true
-      - FEATURE_CHAT_HISTORY_ENABLED=false
-      # Chat history DB (uncomment one):
-      # DuckDB (default): duckdb:///data/chat_history.db
-      # PostgreSQL: postgresql://atlas:atlas@postgres:5432/atlas_chat_history
+      - FEATURE_CHAT_HISTORY_ENABLED=true
+      # Chat history DB (choose one):
+      # DuckDB (default, no extra services required):
+      - CHAT_HISTORY_DB_URL=duckdb:///data/chat_history.db
+      # PostgreSQL (production / multi-user):
       # - CHAT_HISTORY_DB_URL=postgresql://atlas:atlas@postgres:5432/atlas_chat_history
       - FEATURE_COMPLIANCE_LEVELS_ENABLED=false
       - FEATURE_METRICS_LOGGING_ENABLED=false
