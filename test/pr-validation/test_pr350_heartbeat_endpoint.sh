@@ -1,5 +1,5 @@
 #!/bin/bash
-# PR #349 Validation Script: Add heartbeat endpoint
+# PR #350 Validation Script: Add heartbeat endpoint
 # Tests that /api/heartbeat returns 200 without auth and is rate-limited.
 
 set -e
@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 echo "=========================================="
-echo "PR #349 Validation: Heartbeat Endpoint"
+echo "PR #350 Validation: Heartbeat Endpoint"
 echo "=========================================="
 
 cd "$PROJECT_ROOT"
@@ -43,8 +43,12 @@ fi
 echo ""
 echo "3. Start backend and test heartbeat endpoint"
 echo "---------------------------------------------"
-# Find an available port
+# Find an available port (verify nothing is already listening)
 PORT=8199
+if curl -sf "http://127.0.0.1:$PORT/api/health" > /dev/null 2>&1; then
+    echo "FAILED: Port $PORT is already in use by another process"
+    exit 1
+fi
 export PORT=$PORT
 export ATLAS_HOST="127.0.0.1"
 
@@ -54,8 +58,13 @@ python main.py &
 BACKEND_PID=$!
 
 # Wait for backend to become ready (up to 30s)
-echo "  Waiting for backend to start on port $PORT..."
+echo "  Waiting for backend to start on port $PORT (PID $BACKEND_PID)..."
 for i in $(seq 1 30); do
+    # Verify our process is still running
+    if ! kill -0 $BACKEND_PID 2>/dev/null; then
+        echo "FAILED: Backend process (PID $BACKEND_PID) exited unexpectedly"
+        exit 1
+    fi
     if curl -sf "http://127.0.0.1:$PORT/api/health" > /dev/null 2>&1; then
         echo "  Backend ready after ${i}s"
         break
@@ -69,8 +78,9 @@ for i in $(seq 1 30); do
 done
 
 # Test heartbeat returns 200 and correct body (no auth header)
-HEARTBEAT_RESP=$(curl -sf "http://127.0.0.1:$PORT/api/heartbeat")
-HEARTBEAT_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/heartbeat")
+# Use -s (silent) without -f (fail) so non-2xx doesn't abort under set -e
+HEARTBEAT_RESP=$(curl -s "http://127.0.0.1:$PORT/api/heartbeat")
+HEARTBEAT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/heartbeat")
 
 if [ "$HEARTBEAT_STATUS" = "200" ]; then
     echo "PASSED: /api/heartbeat returned HTTP 200"
@@ -101,5 +111,5 @@ echo "PASSED: Backend tests passed"
 
 echo ""
 echo "=========================================="
-echo "All PR #349 validation checks PASSED"
+echo "All PR #350 validation checks PASSED"
 echo "=========================================="

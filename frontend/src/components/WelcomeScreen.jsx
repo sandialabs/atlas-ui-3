@@ -9,7 +9,7 @@ const WelcomeScreen = () => {
         <img
           src="/logo.png"
           alt={`${appName} Logo`}
-          className="max-w-48 max-h-48 sm:max-w-80 sm:max-h-80 md:w-128 md:h-128 mx-auto mb-4 object-contain"
+          className="max-w-48 sm:max-w-80 md:max-w-4xl mx-auto mb-4 object-contain"
           onError={(e) => {
             // Fallback to letter avatar if logo fails to load
             e.target.style.display = 'none'
