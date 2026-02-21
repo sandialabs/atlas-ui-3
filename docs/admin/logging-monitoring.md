@@ -1,6 +1,6 @@
 # Logging and Monitoring
 
-Last updated: 2026-01-19
+Last updated: 2026-02-21
 
 The application produces structured logs in JSON Lines format (`.jsonl`), which makes them easy to parse and analyze.
 
@@ -71,10 +71,16 @@ For development or QA environments where verbose logging is needed:
 
 ## Health Monitoring
 
-The application provides a public health check endpoint at `/api/health` specifically designed for monitoring tools, load balancers, and orchestration platforms. This endpoint requires no authentication and returns a JSON response containing the service status, version, and current timestamp in ISO-8601 format. 
+The application provides two public endpoints for monitoring, both unauthenticated but rate-limited:
 
-You can integrate this endpoint into your monitoring infrastructure (such as Kubernetes liveness/readiness probes, AWS ELB health checks, or Prometheus monitoring) to verify that the backend service is running and responding correctly. 
+### Heartbeat (`GET /api/heartbeat`)
 
-The endpoint is lightweight and does not check database connectivity or external dependencies, making it ideal for high-frequency health polling without impacting application performance. 
+A minimal endpoint that returns `{"status": "ok"}`. Use this for high-frequency uptime polling by load balancers, Kubernetes liveness probes, or external monitoring services. It has no dependencies and the smallest possible response payload.
+
+### Health Check (`GET /api/health`)
+
+Returns a richer JSON response containing the service status, name, version, and current timestamp in ISO-8601 format. Use this for readiness probes or dashboards that need version and timestamp information.
+
+You can integrate either endpoint into your monitoring infrastructure (Kubernetes liveness/readiness probes, AWS ELB health checks, Prometheus monitoring). Neither endpoint checks database connectivity or external dependencies.
 
 For more detailed system status information that includes configuration and component health, admin users can access the `/admin/system-status` endpoint, which requires authentication and admin group membership.
