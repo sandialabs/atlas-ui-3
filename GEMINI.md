@@ -193,6 +193,7 @@ Request -> SecurityHeaders -> RateLimit -> Auth -> Route
 ```
 
 - Rate limiting before auth to prevent abuse
+- To bypass auth for a new endpoint, add it to the path check in `AuthMiddleware.dispatch()` (`atlas/core/middleware.py`); rate limiting still applies to bypassed routes
 - Prompt injection risk detection in `atlas/core/prompt_risk.py`
 - Group-based MCP server access control
 - Auth: In prod, reverse proxy injects `X-User-Email`; dev falls back to test user

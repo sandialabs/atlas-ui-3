@@ -247,6 +247,8 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 - `intermediate_update` - Files, images, etc.
 
 ### REST API
+- `/api/heartbeat` - Minimal uptime check (`{"status":"ok"}`), no auth, rate-limited
+- `/api/health` - Service status with version and timestamp, no auth, rate-limited
 - `/api/config` - Models, tools, prompts, data_sources, rag_servers, features
 - `/api/compliance-levels` - Compliance level definitions
 - `/api/feedback` - Submit (POST) and view (GET, admin) user feedback; conversation history is stored inline in the feedback JSON when the user opts in
@@ -359,6 +361,7 @@ All prompts are loaded from the directory specified by `prompt_base_path` (defau
 Request -> SecurityHeaders -> RateLimit -> Auth -> Route
 ```
 - Rate limiting before auth to prevent abuse
+- To bypass auth for a new endpoint, add it to the path check in `AuthMiddleware.dispatch()` (`atlas/core/middleware.py`); rate limiting still applies to bypassed routes
 - Prompt injection risk detection in `atlas/core/prompt_risk.py`
 - Group-based MCP server access control
 

@@ -274,7 +274,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         )}
 
         {/* Desktop-only buttons (hidden on mobile, shown in hamburger menu) */}
-        <div className="hidden lg:flex items-center gap-2">
+        <div className="hidden min-[1200px]:flex items-center gap-2">
           {/* User Info */}
           <div className="text-sm text-gray-300">
             {user}
@@ -422,7 +422,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         {/* Hamburger Menu Button - Only visible on mobile/tablet */}
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="lg:hidden p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+          className="min-[1200px]:hidden p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
           title="Menu"
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-menu"
@@ -437,12 +437,12 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         <>
           {/* Backdrop */}
           <div 
-            className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" 
+            className="fixed inset-0 bg-black bg-opacity-50 z-40 min-[1200px]:hidden" 
             onClick={() => setMobileMenuOpen(false)}
           />
           
           {/* Menu Panel */}
-          <div id="mobile-menu" className="fixed top-[57px] sm:top-[65px] right-0 w-64 bg-gray-800 border-l border-gray-700 shadow-lg z-50 lg:hidden max-h-[calc(100vh-57px)] sm:max-h-[calc(100vh-65px)] overflow-y-auto">
+          <div id="mobile-menu" className="fixed top-[57px] sm:top-[65px] right-0 w-64 bg-gray-800 border-l border-gray-700 shadow-lg z-50 min-[1200px]:hidden max-h-[calc(100vh-57px)] sm:max-h-[calc(100vh-65px)] overflow-y-auto">
             <div className="p-4 space-y-2">
               {/* User Info */}
               <div className="px-3 py-2 text-sm text-gray-300 bg-gray-700 rounded-lg">
