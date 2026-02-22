@@ -35,10 +35,10 @@ START_TIME=$(python3 -c "import time; print(time.monotonic())")
 python3 -m atlas.init_cli --help > /dev/null 2>&1
 END_TIME=$(python3 -c "import time; print(time.monotonic())")
 
-ELAPSED=$(python3 -c "print(f'{$END_TIME - $START_TIME:.2f}')")
+ELAPSED=$(python3 -c "start=$START_TIME; end=$END_TIME; print(f'{end - start:.2f}')")
 echo "  Elapsed: ${ELAPSED}s"
 
-if python3 -c "exit(0 if $END_TIME - $START_TIME < 2.0 else 1)"; then
+if python3 -c "import sys; exit(0 if float(sys.argv[1]) < 2.0 else 1)" "$ELAPSED"; then
     pass "atlas-init --help completed in ${ELAPSED}s (<2s)"
 else
     fail "atlas-init --help took ${ELAPSED}s (expected <2s)"
