@@ -27,7 +27,6 @@ CLI tools (after pip install):
     atlas-server --port 8000
 """
 
-from atlas.atlas_client import AtlasClient, ChatResult
 from atlas.version import VERSION
 
 __version__ = VERSION
@@ -37,3 +36,13 @@ __all__ = [
     "VERSION",
     "__version__",
 ]
+
+
+def __getattr__(name):
+    if name in ("AtlasClient", "ChatResult"):
+        from atlas.atlas_client import AtlasClient, ChatResult
+
+        globals()["AtlasClient"] = AtlasClient
+        globals()["ChatResult"] = ChatResult
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

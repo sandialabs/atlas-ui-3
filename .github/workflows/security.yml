@@ -244,51 +244,94 @@ jobs:
     - name: Download all artifacts
       uses: actions/download-artifact@v7
 
+    - name: Install jq
+      run: sudo apt-get install -y jq
+
     - name: Generate Security Summary
       run: |
         echo "# Security Scan Summary" > security-summary.md
         echo "" >> security-summary.md
-        echo "## Scan Results" >> security-summary.md
+
+        # --- Python Dependencies (Safety) ---
+        echo "### Python Dependencies (Safety)" >> security-summary.md
+        REPORT="dependency-scan-reports/safety-report.json"
+        if [ -f "$REPORT" ] && [ -s "$REPORT" ]; then
+          VULN_COUNT=$(jq '[.vulnerabilities // [] | length] | add // 0' "$REPORT" 2>/dev/null || echo "0")
+          if [ "$VULN_COUNT" -gt 0 ] 2>/dev/null; then
+            echo "**$VULN_COUNT vulnerabilities found**" >> security-summary.md
+            echo "" >> security-summary.md
+            echo "| Package | Installed | Vuln ID | Severity | Description |" >> security-summary.md
+            echo "|---------|-----------|---------|----------|-------------|" >> security-summary.md
+            jq -r '.vulnerabilities[]? | "| \(.package_name // "?") | \(.analyzed_version // "?") | \(.vulnerability_id // "?") | \(.severity // "?") | \(.advisory[0:80] // "?") |"' "$REPORT" 2>/dev/null >> security-summary.md || true
+          else
+            echo "No known vulnerabilities found." >> security-summary.md
+          fi
+        else
+          echo "Report not available." >> security-summary.md
+        fi
         echo "" >> security-summary.md
-        
-        # Check for dependency vulnerabilities
-        if [ -f dependency-scan-reports/safety-report.json ]; then
-          echo "### Python Dependencies (Safety)" >> security-summary.md
-          if [ -s dependency-scan-reports/safety-report.json ]; then
-            echo "⚠️ Vulnerabilities found in Python dependencies" >> security-summary.md
+
+        # --- Node.js Dependencies (npm audit) ---
+        echo "### Node.js Dependencies (npm audit)" >> security-summary.md
+        REPORT="dependency-scan-reports/npm-audit-report.json"
+        if [ -f "$REPORT" ] && [ -s "$REPORT" ]; then
+          TOTAL=$(jq '.metadata.vulnerabilities // {} | to_entries | map(.value) | add // 0' "$REPORT" 2>/dev/null || echo "0")
+          if [ "$TOTAL" -gt 0 ] 2>/dev/null; then
+            CRIT=$(jq '.metadata.vulnerabilities.critical // 0' "$REPORT" 2>/dev/null)
+            HIGH=$(jq '.metadata.vulnerabilities.high // 0' "$REPORT" 2>/dev/null)
+            MOD=$(jq '.metadata.vulnerabilities.moderate // 0' "$REPORT" 2>/dev/null)
+            LOW=$(jq '.metadata.vulnerabilities.low // 0' "$REPORT" 2>/dev/null)
+            echo "**$TOTAL vulnerabilities:** $CRIT critical, $HIGH high, $MOD moderate, $LOW low" >> security-summary.md
+            echo "" >> security-summary.md
+            # List top-level vulnerable packages
+            echo "| Package | Severity | Via | Fix Available |" >> security-summary.md
+            echo "|---------|----------|----|---------------|" >> security-summary.md
+            jq -r '.vulnerabilities // {} | to_entries[] | "| \(.key) | \(.value.severity // "?") | \(.value.via | if type == "array" then [.[] | if type == "string" then . else .name // "?" end] | join(", ") else "?" end) | \(if .value.fixAvailable then "Yes" else "No" end) |"' "$REPORT" 2>/dev/null | head -20 >> security-summary.md || true
           else
-            echo "✅ No vulnerabilities found in Python dependencies" >> security-summary.md
+            echo "No vulnerabilities found." >> security-summary.md
           fi
-          echo "" >> security-summary.md
+        else
+          echo "Report not available." >> security-summary.md
         fi
-        
-        if [ -f dependency-scan-reports/npm-audit-report.json ]; then
-          echo "### Node.js Dependencies (npm audit)" >> security-summary.md
-          if [ -s dependency-scan-reports/npm-audit-report.json ]; then
-            echo "⚠️ Vulnerabilities found in Node.js dependencies" >> security-summary.md
+        echo "" >> security-summary.md
+
+        # --- Python SAST (Bandit) ---
+        echo "### Python SAST (Bandit)" >> security-summary.md
+        REPORT="sast-reports/bandit-report.json"
+        if [ -f "$REPORT" ] && [ -s "$REPORT" ]; then
+          ISSUE_COUNT=$(jq '.results | length' "$REPORT" 2>/dev/null || echo "0")
+          if [ "$ISSUE_COUNT" -gt 0 ] 2>/dev/null; then
+            HIGH_SEV=$(jq '[.results[] | select(.issue_severity == "HIGH")] | length' "$REPORT" 2>/dev/null || echo "0")
+            MED_SEV=$(jq '[.results[] | select(.issue_severity == "MEDIUM")] | length' "$REPORT" 2>/dev/null || echo "0")
+            LOW_SEV=$(jq '[.results[] | select(.issue_severity == "LOW")] | length' "$REPORT" 2>/dev/null || echo "0")
+            echo "**$ISSUE_COUNT issues:** $HIGH_SEV high, $MED_SEV medium, $LOW_SEV low severity" >> security-summary.md
+            echo "" >> security-summary.md
+            # Show high/medium issues with file locations
+            HIGH_MED=$(jq '[.results[] | select(.issue_severity == "HIGH" or .issue_severity == "MEDIUM")] | length' "$REPORT" 2>/dev/null || echo "0")
+            if [ "$HIGH_MED" -gt 0 ] 2>/dev/null; then
+              echo "**High/Medium severity issues:**" >> security-summary.md
+              echo "" >> security-summary.md
+              echo "| Severity | Confidence | File | Line | Issue |" >> security-summary.md
+              echo "|----------|------------|------|------|-------|" >> security-summary.md
+              jq -r '.results[] | select(.issue_severity == "HIGH" or .issue_severity == "MEDIUM") | "| \(.issue_severity) | \(.issue_confidence) | \(.filename | split("/") | .[-2:] | join("/")) | \(.line_number) | \(.issue_text[0:80]) |"' "$REPORT" 2>/dev/null | head -30 >> security-summary.md || true
+            fi
           else
-            echo "✅ No vulnerabilities found in Node.js dependencies" >> security-summary.md
+            echo "No security issues found." >> security-summary.md
           fi
-          echo "" >> security-summary.md
+        else
+          echo "Report not available." >> security-summary.md
         fi
-        
-        # Check SAST results
-        if [ -f sast-reports/bandit-report.json ]; then
-          echo "### Python SAST (Bandit)" >> security-summary.md
-          if [ -s sast-reports/bandit-report.json ]; then
-            echo "⚠️ Security issues found in Python code" >> security-summary.md
-          else
-            echo "✅ No security issues found in Python code" >> security-summary.md
-          fi
-          echo "" >> security-summary.md
-        fi
-        
-        echo "## Recommendations" >> security-summary.md
-        echo "- Review all SARIF files uploaded to GitHub Security tab" >> security-summary.md
-        echo "- Address high and critical severity vulnerabilities immediately" >> security-summary.md
-        echo "- Run \`npm audit fix\` and \`pip-audit\` locally to fix dependencies" >> security-summary.md
-        echo "- Consider implementing additional security controls" >> security-summary.md
-        
+        echo "" >> security-summary.md
+
+        # --- Job Status ---
+        echo "### Scan Status" >> security-summary.md
+        echo "| Scan | Status |" >> security-summary.md
+        echo "|------|--------|" >> security-summary.md
+        echo "| Dependency Scan | ${{ needs.dependency-scan.result }} |" >> security-summary.md
+        echo "| SAST Scan | ${{ needs.sast-scan.result }} |" >> security-summary.md
+        echo "| Secrets Scan | ${{ needs.secrets-scan.result }} |" >> security-summary.md
+        echo "| Container Scan | ${{ needs.container-scan.result }} |" >> security-summary.md
+
         cat security-summary.md
 
     - name: Upload Security Summary
@@ -306,9 +349,27 @@ jobs:
           const fs = require('fs');
           const summary = fs.readFileSync('security-summary.md', 'utf8');
           
-          github.rest.issues.createComment({
+          // Find and update existing security comment, or create a new one
+          const comments = await github.rest.issues.listComments({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: `## 🔒 Security Scan Results\n\n${summary}`
           });
+          const marker = '<!-- security-scan-summary -->';
+          const body = `${marker}\n## Security Scan Results\n\n${summary}`;
+          const existing = comments.data.find(c => c.body.includes(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body: body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body,
+            });
+          }
