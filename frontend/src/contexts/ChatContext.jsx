@@ -32,7 +32,7 @@ export const ChatProvider = ({ children }) => {
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
-	const { messages, addMessage, bulkAdd, mapMessages, resetMessages } = useMessages()
+	const { messages, addMessage, bulkAdd, mapMessages, resetMessages, streamToken, streamEnd } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
@@ -110,11 +110,13 @@ export const ChatProvider = ({ children }) => {
 			triggerFileDownload,
 			addAttachment,
 			resolvePendingFileEvent,
-			setPendingElicitation
+			setPendingElicitation,
+			streamToken,
+			streamEnd,
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, streamToken, streamEnd])
 
 	// Validate persisted data sources against current config and remove stale ones
 	useEffect(() => {

@@ -46,6 +46,8 @@ class ThinkActAgentLoop(AgentLoopProtocol):
         max_steps: int,
         temperature: float,
         event_handler: AgentEventHandler,
+        streaming: bool = False,
+        event_publisher=None,
     ) -> AgentResult:
         await event_handler(AgentEvent(type="agent_start", payload={"max_steps": max_steps, "strategy": "think-act"}))
 
@@ -165,7 +167,31 @@ class ThinkActAgentLoop(AgentLoopProtocol):
                 break
 
         if not final_answer:
-            final_answer = await self.llm.call_plain(model, messages, temperature=temperature, user_email=context.user_email)
+            if streaming and event_publisher:
+                final_answer = await self._stream_final_answer(
+                    model, messages, temperature, context.user_email, event_publisher,
+                )
+            else:
+                final_answer = await self.llm.call_plain(model, messages, temperature=temperature, user_email=context.user_email)
 
         await event_handler(AgentEvent(type="agent_completion", payload={"steps": steps}))
         return AgentResult(final_answer=final_answer, steps=steps, metadata={"agent_mode": True, "strategy": "think-act"})
+
+    async def _stream_final_answer(self, model, messages, temperature, user_email, event_publisher) -> str:
+        """Stream the final answer via event_publisher.publish_token_stream."""
+        accumulated = ""
+        is_first = True
+        try:
+            async for token in self.llm.stream_plain(model, messages, temperature=temperature, user_email=user_email):
+                await event_publisher.publish_token_stream(token=token, is_first=is_first, is_last=False)
+                accumulated += token
+                is_first = False
+            if accumulated:
+                await event_publisher.publish_token_stream(token="", is_first=False, is_last=True)
+            else:
+                accumulated = await self.llm.call_plain(model, messages, temperature=temperature, user_email=user_email)
+        except Exception:
+            await event_publisher.publish_token_stream(token="", is_first=False, is_last=True)
+            if not accumulated:
+                accumulated = await self.llm.call_plain(model, messages, temperature=temperature, user_email=user_email)
+        return accumulated

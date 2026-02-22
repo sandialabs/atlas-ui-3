@@ -43,4 +43,6 @@ class AgentLoopProtocol(Protocol):
         max_steps: int,
         temperature: float,
         event_handler: AgentEventHandler,
+        streaming: bool = False,
+        event_publisher: Any = None,
     ) -> AgentResult: ...

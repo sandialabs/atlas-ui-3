@@ -12,6 +12,31 @@ function messagesReducer(state, action) {
       return action.mapper(state)
     case 'RESET':
       return []
+    case 'STREAM_TOKEN': {
+      const last = state[state.length - 1]
+      if (last && last._streaming) {
+        // Append token to existing streaming message
+        const updated = [...state]
+        updated[updated.length - 1] = { ...last, content: last.content + action.token }
+        return updated
+      }
+      // Create new streaming assistant message
+      return [...state, {
+        role: 'assistant',
+        content: action.token,
+        timestamp: new Date().toISOString(),
+        _streaming: true,
+      }]
+    }
+    case 'STREAM_END': {
+      const last = state[state.length - 1]
+      if (last && last._streaming) {
+        const updated = [...state]
+        updated[updated.length - 1] = { ...last, _streaming: false }
+        return updated
+      }
+      return state
+    }
     default:
       return state
   }
@@ -25,6 +50,8 @@ export function useMessages() {
   const mapMessages = useCallback(mapper => dispatch({ type: 'MAP', mapper }), [])
   const updateToolResult = useCallback((tool_call_id, patch) => dispatch({ type: 'UPDATE_TOOL_RESULT', tool_call_id, patch }), [])
   const resetMessages = useCallback(() => dispatch({ type: 'RESET' }), [])
+  const streamToken = useCallback(token => dispatch({ type: 'STREAM_TOKEN', token }), [])
+  const streamEnd = useCallback(() => dispatch({ type: 'STREAM_END' }), [])
 
-  return { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages }
+  return { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd }
 }

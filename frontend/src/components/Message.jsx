@@ -1188,6 +1188,10 @@ const renderContent = () => {
           )}
         </div>
         {renderContent()}
+        {/* Streaming cursor indicator */}
+        {message._streaming && (
+          <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" aria-label="Generating response..." />
+        )}
       </div>
     </div>
   )

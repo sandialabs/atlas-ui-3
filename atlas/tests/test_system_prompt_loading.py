@@ -145,6 +145,10 @@ async def test_system_prompt_sent_to_llm():
                 captured["messages"] = messages
                 return "Hello! I'm here to help."
 
+            async def stream_plain(self, model_name, messages, temperature=0.7, **kwargs):
+                captured["messages"] = messages
+                yield "Hello! I'm here to help."
+
         # Create chat service
         from atlas.application.chat.service import ChatService
 

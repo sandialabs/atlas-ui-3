@@ -103,6 +103,19 @@ class CLIEventPublisher:
     ) -> None:
         self._collected.canvas_content = content
 
+    async def publish_token_stream(
+        self,
+        token: str,
+        is_first: bool = False,
+        is_last: bool = False,
+    ) -> None:
+        """Stream tokens to stdout in CLI mode."""
+        if token:
+            self._collected.message += token
+            if self.streaming:
+                sys.stdout.write(token)
+                sys.stdout.flush()
+
     async def send_json(self, data: Dict[str, Any]) -> None:
         self._collected.raw_events.append(data)
         msg_type = data.get("type", "")

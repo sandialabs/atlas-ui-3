@@ -105,6 +105,13 @@ class AgentEventRelay:
                 steps=p.get("steps"),
             )
 
+        elif et == "agent_token_stream":
+            await self.event_publisher.publish_token_stream(
+                token=p.get("token", ""),
+                is_first=p.get("is_first", False),
+                is_last=p.get("is_last", False),
+            )
+
         elif et == "agent_error":
             await self.event_publisher.publish_agent_update(
                 update_type="agent_error",

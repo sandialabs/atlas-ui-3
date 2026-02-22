@@ -104,6 +104,22 @@ class EventPublisher(Protocol):
         """
         pass
 
+    async def publish_token_stream(
+        self,
+        token: str,
+        is_first: bool = False,
+        is_last: bool = False,
+    ) -> None:
+        """
+        Publish a streaming token chunk.
+
+        Args:
+            token: Text chunk from LLM
+            is_first: Whether this is the first token in the stream
+            is_last: Whether this is the last token (stream complete)
+        """
+        pass
+
     async def send_json(self, data: Dict[str, Any]) -> None:
         """
         Send raw JSON message.

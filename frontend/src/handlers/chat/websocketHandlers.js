@@ -3,6 +3,15 @@
 // Default sandbox permissions for iframes (restrictive by default)
 const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
 
+// Module-level token stream state.  The handler closure is recreated by
+// useMemo whenever React dependencies change (e.g. setIsThinking triggers a
+// re-render).  Keeping the buffer / timer here ensures a stale timer from a
+// previous handler incarnation won't create an orphaned streaming message.
+let _tokenBuffer = ''
+let _tokenFlushTimer = null
+let _streamActive = false
+const FLUSH_INTERVAL_MS = 30
+
 export function createWebSocketHandler(deps) {
   const {
     addMessage,
@@ -22,8 +31,28 @@ export function createWebSocketHandler(deps) {
     addAttachment,
     resolvePendingFileEvent,
     setPendingElicitation,
-    setIsSynthesizing
+    setIsSynthesizing,
+    streamToken,
+    streamEnd,
   } = deps
+
+  function flushTokenBuffer() {
+    if (_tokenBuffer && typeof streamToken === 'function') {
+      streamToken(_tokenBuffer)
+      _tokenBuffer = ''
+    }
+    _tokenFlushTimer = null
+  }
+
+  function endTokenStream() {
+    _streamActive = false
+    if (_tokenFlushTimer) {
+      clearTimeout(_tokenFlushTimer)
+      _tokenFlushTimer = null
+    }
+    flushTokenBuffer()
+    if (typeof streamEnd === 'function') streamEnd()
+  }
 
   const handleAgentUpdate = (data) => {
     try {
@@ -353,6 +382,26 @@ export function createWebSocketHandler(deps) {
         case 'response_complete': {
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+          endTokenStream()
+          break
+        }
+        case 'token_stream': {
+          if (data.is_first) {
+            _streamActive = true
+            setIsThinking(false)
+          }
+          if (data.is_last) {
+            endTokenStream()
+            if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+          } else if (data.token) {
+            _tokenBuffer += data.token
+            if (!_tokenFlushTimer) {
+              _tokenFlushTimer = setTimeout(() => {
+                if (_streamActive) flushTokenBuffer()
+                else _tokenFlushTimer = null
+              }, FLUSH_INTERVAL_MS)
+            }
+          }
           break
         }
         case 'chat_response':
@@ -363,6 +412,7 @@ export function createWebSocketHandler(deps) {
         case 'error':
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+          endTokenStream()
           addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
           break
         case 'agent_step_update':

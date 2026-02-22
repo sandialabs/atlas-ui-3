@@ -79,3 +79,58 @@ class RagModeRunner:
         await self.event_publisher.publish_response_complete()
 
         return event_notifier.create_chat_response(response_content)
+
+    async def run_streaming(
+        self,
+        session: Session,
+        model: str,
+        messages: List[Dict[str, str]],
+        data_sources: List[str],
+        user_email: str,
+        temperature: float = 0.7,
+    ) -> Dict[str, Any]:
+        """Execute RAG mode with token streaming."""
+        accumulated = ""
+        is_first = True
+
+        try:
+            async for token in self.llm.stream_with_rag(
+                model, messages, data_sources, user_email, temperature=temperature,
+            ):
+                await self.event_publisher.publish_token_stream(
+                    token=token, is_first=is_first, is_last=False,
+                )
+                accumulated += token
+                is_first = False
+
+            if not accumulated:
+                accumulated = await self.llm.call_with_rag(
+                    model, messages, data_sources, user_email, temperature=temperature,
+                )
+                await self.event_publisher.publish_chat_response(
+                    message=accumulated, has_pending_tools=False,
+                )
+            else:
+                await self.event_publisher.publish_token_stream(
+                    token="", is_first=False, is_last=True,
+                )
+        except Exception as exc:
+            logger.error("RAG streaming error, sending partial content: %s", exc)
+            await self.event_publisher.publish_token_stream(
+                token="", is_first=False, is_last=True,
+            )
+            if not accumulated:
+                accumulated = f"Error generating response: {exc}"
+                await self.event_publisher.publish_chat_response(
+                    message=accumulated, has_pending_tools=False,
+                )
+
+        assistant_message = Message(
+            role=MessageRole.ASSISTANT,
+            content=accumulated,
+            metadata={"data_sources": data_sources},
+        )
+        session.history.add_message(assistant_message)
+        await self.event_publisher.publish_response_complete()
+
+        return event_notifier.create_chat_response(accumulated)
