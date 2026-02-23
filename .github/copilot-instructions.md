@@ -155,6 +155,8 @@ Three agent loop strategies selectable via `APP_AGENT_LOOP_STRATEGY`:
 - **Think-Act** (`atlas/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
 - **Act** (`atlas/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
 
+**Multi-Tool Calling**: All agent loops and the tools mode runner execute multiple tool calls from a single LLM response in parallel via `asyncio.gather` (`tool_executor.execute_multiple_tools`); individual failures are converted to error `ToolResult`s so other tools still succeed.
+
 ## Prompt System
 
 - **System Prompt**: `prompts/system_prompt.md` - Prepended to all conversations

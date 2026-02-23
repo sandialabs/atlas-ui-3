@@ -624,7 +624,7 @@ class TestSessionResetConversationIsolation:
 
     @pytest.fixture
     def chat_service(self, repo):
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
 
         from atlas.application.chat.service import ChatService
 
@@ -638,7 +638,8 @@ class TestSessionResetConversationIsolation:
     @pytest.mark.asyncio
     async def test_reset_generates_new_conversation_id(self, chat_service):
         """After reset, the session should have a different conversation_id."""
-        from uuid import UUID as UUIDType, uuid4
+        from uuid import UUID as UUIDType
+        from uuid import uuid4
 
         session_id = uuid4()
         await chat_service.create_session(session_id, "user@test.com")
