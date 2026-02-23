@@ -9,6 +9,7 @@ from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 
 from ..utilities import event_notifier
+from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
 
@@ -90,40 +91,16 @@ class RagModeRunner:
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
         """Execute RAG mode with token streaming."""
-        accumulated = ""
-        is_first = True
-
-        try:
-            async for token in self.llm.stream_with_rag(
+        accumulated = await stream_and_accumulate(
+            token_generator=self.llm.stream_with_rag(
                 model, messages, data_sources, user_email, temperature=temperature,
-            ):
-                await self.event_publisher.publish_token_stream(
-                    token=token, is_first=is_first, is_last=False,
-                )
-                accumulated += token
-                is_first = False
-
-            if not accumulated:
-                accumulated = await self.llm.call_with_rag(
-                    model, messages, data_sources, user_email, temperature=temperature,
-                )
-                await self.event_publisher.publish_chat_response(
-                    message=accumulated, has_pending_tools=False,
-                )
-            else:
-                await self.event_publisher.publish_token_stream(
-                    token="", is_first=False, is_last=True,
-                )
-        except Exception as exc:
-            logger.error("RAG streaming error, sending partial content: %s", exc)
-            await self.event_publisher.publish_token_stream(
-                token="", is_first=False, is_last=True,
-            )
-            if not accumulated:
-                accumulated = f"Error generating response: {exc}"
-                await self.event_publisher.publish_chat_response(
-                    message=accumulated, has_pending_tools=False,
-                )
+            ),
+            event_publisher=self.event_publisher,
+            fallback_fn=lambda: self.llm.call_with_rag(
+                model, messages, data_sources, user_email, temperature=temperature,
+            ),
+            context_label="RAG",
+        )
 
         assistant_message = Message(
             role=MessageRole.ASSISTANT,

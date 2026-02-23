@@ -9,6 +9,7 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
+from .streaming_final_answer import stream_final_answer
 
 
 class ActAgentLoop(AgentLoopProtocol):
@@ -176,30 +177,12 @@ class ActAgentLoop(AgentLoopProtocol):
         # Fallback if no final answer after max steps
         if not final_answer:
             if streaming and event_publisher:
-                final_answer = await self._stream_final_answer(
-                    model, messages, temperature, context.user_email, event_publisher,
+                final_answer = await stream_final_answer(
+                    self.llm, event_publisher, model, messages,
+                    temperature, context.user_email,
                 )
             else:
                 final_answer = await self.llm.call_plain(model, messages, temperature=temperature, user_email=context.user_email)
 
         await event_handler(AgentEvent(type="agent_completion", payload={"steps": steps}))
         return AgentResult(final_answer=final_answer, steps=steps, metadata={"agent_mode": True, "strategy": "act"})
-
-    async def _stream_final_answer(self, model, messages, temperature, user_email, event_publisher) -> str:
-        """Stream the final answer via event_publisher.publish_token_stream."""
-        accumulated = ""
-        is_first = True
-        try:
-            async for token in self.llm.stream_plain(model, messages, temperature=temperature, user_email=user_email):
-                await event_publisher.publish_token_stream(token=token, is_first=is_first, is_last=False)
-                accumulated += token
-                is_first = False
-            if accumulated:
-                await event_publisher.publish_token_stream(token="", is_first=False, is_last=True)
-            else:
-                accumulated = await self.llm.call_plain(model, messages, temperature=temperature, user_email=user_email)
-        except Exception:
-            await event_publisher.publish_token_stream(token="", is_first=False, is_last=True)
-            if not accumulated:
-                accumulated = await self.llm.call_plain(model, messages, temperature=temperature, user_email=user_email)
-        return accumulated

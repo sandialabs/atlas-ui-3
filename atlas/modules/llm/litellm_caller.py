@@ -14,8 +14,20 @@ fallbacks, cost tracking, and provider-specific optimizations.
 import asyncio
 import logging
 import os
+import warnings
 from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
+
+# Suppress Pydantic deprecation warnings from litellm's response processing.
+# litellm accesses Pydantic v2.11+ deprecated instance attributes
+# (model_fields, model_computed_fields) on every streaming chunk, generating
+# thousands of warnings per response.  These are cosmetic -- litellm handles
+# them correctly -- and the spam can mask real issues in logs.
+try:
+    from pydantic import PydanticDeprecatedSince211
+    warnings.filterwarnings("ignore", category=PydanticDeprecatedSince211)
+except ImportError:
+    pass
 
 import litellm
 from litellm import acompletion
@@ -184,9 +196,17 @@ class LiteLLMCaller:
         model_config = self.llm_config.models[model_name]
         model_id = model_config.model_name
 
-        # Map common providers to LiteLLM format
+        # Map common providers to LiteLLM format.
+        # Order matters: check specific providers (groq, openrouter) before
+        # generic ones (openai) since some URLs contain "openai" in the path
+        # (e.g. api.groq.com/openai/v1).
         if "openrouter" in model_config.model_url:
             return f"openrouter/{model_id}"
+        elif "groq" in model_config.model_url:
+            # Groq uses OpenAI-compatible endpoints; use openai/ prefix with
+            # api_base override (set in _get_model_kwargs) so litellm routes
+            # to the correct base URL.
+            return f"openai/{model_id}"
         elif "openai" in model_config.model_url:
             return f"openai/{model_id}"
         elif "anthropic" in model_config.model_url:
@@ -269,6 +289,8 @@ class LiteLLMCaller:
 
             if "openrouter" in model_config.model_url:
                 _set_env_var_if_needed("OPENROUTER_API_KEY", api_key)
+            elif "groq" in model_config.model_url:
+                _set_env_var_if_needed("GROQ_API_KEY", api_key)
             elif "openai" in model_config.model_url:
                 _set_env_var_if_needed("OPENAI_API_KEY", api_key)
             elif "anthropic" in model_config.model_url:
@@ -704,11 +726,30 @@ class LiteLLMCaller:
                 **model_kwargs,
             )
 
+            chunk_count = 0
+            total_chunks_seen = 0
             async for chunk in response:
+                total_chunks_seen += 1
                 delta = chunk.choices[0].delta if chunk.choices else None
+                if total_chunks_seen <= 3:
+                    logger.debug(
+                        "Stream chunk #%d for %s: choices=%s, delta=%s, content=%r",
+                        total_chunks_seen, model_name,
+                        bool(chunk.choices), type(delta).__name__ if delta else None,
+                        getattr(delta, "content", "<missing>") if delta else None,
+                    )
                 if delta and delta.content:
                     yield delta.content
+                    chunk_count += 1
+                    # Yield control periodically to prevent backpressure buildup
+                    if chunk_count % 50 == 0:
+                        await asyncio.sleep(0)
 
+            if chunk_count == 0 and total_chunks_seen > 0:
+                logger.warning(
+                    "Stream for %s received %d chunks but yielded 0 tokens",
+                    model_name, total_chunks_seen,
+                )
             log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
 
         except Exception as exc:
@@ -756,6 +797,7 @@ class LiteLLMCaller:
 
             accumulated_content = ""
             accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
+            chunk_count = 0
 
             async for chunk in response:
                 delta = chunk.choices[0].delta if chunk.choices else None
@@ -766,6 +808,10 @@ class LiteLLMCaller:
                 if delta.content:
                     accumulated_content += delta.content
                     yield delta.content
+                    chunk_count += 1
+                    # Yield control periodically to prevent backpressure buildup
+                    if chunk_count % 50 == 0:
+                        await asyncio.sleep(0)
 
                 # Accumulate tool call fragments
                 if hasattr(delta, "tool_calls") and delta.tool_calls:

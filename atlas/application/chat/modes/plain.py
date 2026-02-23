@@ -9,6 +9,7 @@ from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 
 from ..utilities import event_notifier
+from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
 
@@ -84,41 +85,16 @@ class PlainModeRunner:
         user_email: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute plain LLM mode with token streaming."""
-        accumulated = ""
-        is_first = True
-
-        try:
-            async for token in self.llm.stream_plain(
-                model, messages, temperature=temperature, user_email=user_email
-            ):
-                await self.event_publisher.publish_token_stream(
-                    token=token, is_first=is_first, is_last=False,
-                )
-                accumulated += token
-                is_first = False
-
-            if not accumulated:
-                # Empty stream fallback
-                accumulated = await self.llm.call_plain(
-                    model, messages, temperature=temperature, user_email=user_email
-                )
-                await self.event_publisher.publish_chat_response(
-                    message=accumulated, has_pending_tools=False,
-                )
-            else:
-                await self.event_publisher.publish_token_stream(
-                    token="", is_first=False, is_last=True,
-                )
-        except Exception as exc:
-            logger.error("Streaming error, sending partial content: %s", exc)
-            await self.event_publisher.publish_token_stream(
-                token="", is_first=False, is_last=True,
-            )
-            if not accumulated:
-                accumulated = f"Error generating response: {exc}"
-                await self.event_publisher.publish_chat_response(
-                    message=accumulated, has_pending_tools=False,
-                )
+        accumulated = await stream_and_accumulate(
+            token_generator=self.llm.stream_plain(
+                model, messages, temperature=temperature, user_email=user_email,
+            ),
+            event_publisher=self.event_publisher,
+            fallback_fn=lambda: self.llm.call_plain(
+                model, messages, temperature=temperature, user_email=user_email,
+            ),
+            context_label="plain",
+        )
 
         assistant_message = Message(
             role=MessageRole.ASSISTANT,

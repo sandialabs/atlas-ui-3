@@ -12,6 +12,7 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..preprocessors.message_builder import build_session_context
 from ..utilities import error_handler, event_notifier, tool_executor
+from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,7 @@ class ToolsModeRunner:
         accumulated_content = ""
         final_llm_response: Optional[LLMResponse] = None
         is_first = True
+        streaming_error: Optional[Exception] = None
 
         try:
             if selected_data_sources:
@@ -214,10 +216,24 @@ class ToolsModeRunner:
                     final_llm_response = item
         except Exception as exc:
             logger.error("Streaming tools error: %s", exc)
-            if accumulated_content:
-                await self.event_publisher.publish_token_stream(
-                    token="", is_first=False, is_last=True,
-                )
+            streaming_error = exc
+            # Always send stream-end to prevent stuck UI cursor
+            await self.event_publisher.publish_token_stream(
+                token="", is_first=False, is_last=True,
+            )
+
+        # If streaming failed and we got no content, send the error to the frontend
+        if streaming_error and not accumulated_content:
+            _error_class, user_msg, log_msg = error_handler.classify_llm_error(
+                streaming_error,
+            )
+            logger.error("Streaming tools classified error: %s", log_msg)
+            await self.event_publisher.send_json({
+                "type": "error",
+                "message": user_msg,
+            })
+            await self.event_publisher.publish_response_complete()
+            return event_notifier.create_chat_response(user_msg)
 
         # No tool calls -> treat as plain streamed content
         if not final_llm_response or not final_llm_response.has_tool_calls():
@@ -354,40 +370,16 @@ class ToolsModeRunner:
             if prompt_text:
                 synthesis_messages.append({"role": "system", "content": prompt_text})
 
-        # Stream synthesis response
-        accumulated = ""
-        is_first = True
-        try:
-            async for token in self.llm.stream_plain(
+        return await stream_and_accumulate(
+            token_generator=self.llm.stream_plain(
                 model, synthesis_messages, user_email=user_email,
-            ):
-                await self.event_publisher.publish_token_stream(
-                    token=token, is_first=is_first, is_last=False,
-                )
-                accumulated += token
-                is_first = False
-
-            if accumulated:
-                await self.event_publisher.publish_token_stream(
-                    token="", is_first=False, is_last=True,
-                )
-            else:
-                accumulated = await self.llm.call_plain(model, synthesis_messages, user_email=user_email)
-                await self.event_publisher.publish_chat_response(
-                    message=accumulated, has_pending_tools=False,
-                )
-        except Exception as exc:
-            logger.error("Synthesis streaming error: %s", exc)
-            await self.event_publisher.publish_token_stream(
-                token="", is_first=False, is_last=True,
-            )
-            if not accumulated:
-                accumulated = await self.llm.call_plain(model, synthesis_messages, user_email=user_email)
-                await self.event_publisher.publish_chat_response(
-                    message=accumulated, has_pending_tools=False,
-                )
-
-        return accumulated
+            ),
+            event_publisher=self.event_publisher,
+            fallback_fn=lambda: self.llm.call_plain(
+                model, synthesis_messages, user_email=user_email,
+            ),
+            context_label="synthesis",
+        )
 
     def _get_send_json(self) -> Optional[UpdateCallback]:
         """Get send_json callback from event publisher if available."""
