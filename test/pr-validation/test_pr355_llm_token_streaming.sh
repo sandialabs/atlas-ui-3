@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+n#!/usr/bin/env bash
 # PR #355 - Add LLM token streaming for progressive response display
 #
 # Validates:
@@ -194,7 +194,7 @@ echo "Test 10: CLI streaming path exercised"
 # the key validation is that the streaming imports and initialization
 # succeed without import errors or missing methods.
 CLI_OUTPUT=$(python3 "$PROJECT_ROOT/atlas/atlas_chat_cli.py" \
-    "Hello" --model gpt-4.1-nano --no-stream 2>&1 || true)
+    "Hello" --model gpt-4.1-nano 2>&1 || true)
 if echo "$CLI_OUTPUT" | grep -qiE "error|response|result|failed|content"; then
     pass "CLI invocation exercised streaming code path"
 else
