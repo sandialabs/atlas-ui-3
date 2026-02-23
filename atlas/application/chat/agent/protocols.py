@@ -5,6 +5,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 from uuid import UUID
 
 from atlas.domain.messages.models import ConversationHistory
+from atlas.interfaces.events import EventPublisher
 
 
 @dataclass
@@ -44,5 +45,5 @@ class AgentLoopProtocol(Protocol):
         temperature: float,
         event_handler: AgentEventHandler,
         streaming: bool = False,
-        event_publisher: Any = None,
+        event_publisher: Optional[EventPublisher] = None,
     ) -> AgentResult: ...

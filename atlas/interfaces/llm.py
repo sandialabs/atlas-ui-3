@@ -76,3 +76,27 @@ class LLMProtocol(Protocol):
     ) -> AsyncGenerator[Union[str, LLMResponse], None]:
         """Stream LLM with tools. Yields str chunks then final LLMResponse."""
         ...
+
+    def stream_with_rag(
+        self,
+        model_name: str,
+        messages: List[Dict[str, str]],
+        data_sources: List[str],
+        user_email: str,
+        temperature: float = 0.7,
+    ) -> AsyncGenerator[str, None]:
+        """Stream LLM response with RAG integration."""
+        ...
+
+    def stream_with_rag_and_tools(
+        self,
+        model_name: str,
+        messages: List[Dict[str, str]],
+        data_sources: List[str],
+        tools_schema: List[Dict],
+        user_email: str,
+        tool_choice: str = "auto",
+        temperature: float = 0.7,
+    ) -> AsyncGenerator[Union[str, LLMResponse], None]:
+        """Stream LLM with both RAG and tools."""
+        ...

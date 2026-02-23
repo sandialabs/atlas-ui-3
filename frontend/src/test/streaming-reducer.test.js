@@ -93,4 +93,42 @@ describe('useMessages - STREAM_TOKEN / STREAM_END actions', () => {
     expect(result.current.messages[1].content).toBe('second')
     expect(result.current.messages[1]._streaming).toBe(true)
   })
+
+  it('STREAM_TOKEN finds streaming message even when interleaved with other messages', () => {
+    const { result } = renderHook(() => useMessages())
+
+    // Start streaming
+    act(() => { result.current.streamToken('Hello') })
+
+    // Interleaved tool message appended after the streaming message
+    act(() => {
+      result.current.addMessage({
+        role: 'system',
+        content: 'Tool Call: search',
+        type: 'tool_call',
+      })
+    })
+
+    // Continue streaming - should find the _streaming message, not create a new one
+    act(() => { result.current.streamToken(' World') })
+
+    expect(result.current.messages).toHaveLength(2)
+    expect(result.current.messages[0].content).toBe('Hello World')
+    expect(result.current.messages[0]._streaming).toBe(true)
+    expect(result.current.messages[1].type).toBe('tool_call')
+  })
+
+  it('STREAM_END finds streaming message even when it is not the last message', () => {
+    const { result } = renderHook(() => useMessages())
+
+    act(() => { result.current.streamToken('content') })
+    act(() => {
+      result.current.addMessage({ role: 'system', content: 'interleaved' })
+    })
+    act(() => { result.current.streamEnd() })
+
+    expect(result.current.messages).toHaveLength(2)
+    expect(result.current.messages[0].content).toBe('content')
+    expect(result.current.messages[0]._streaming).toBe(false)
+  })
 })

@@ -194,7 +194,7 @@ class ToolsModeRunner:
         streaming_error: Optional[Exception] = None
 
         try:
-            if selected_data_sources:
+            if selected_data_sources and user_email:
                 stream = self.llm.stream_with_rag_and_tools(
                     model, messages, selected_data_sources, tools_schema,
                     user_email, tool_choice, temperature=temperature,

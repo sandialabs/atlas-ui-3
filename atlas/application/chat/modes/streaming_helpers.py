@@ -6,10 +6,9 @@ LLM responses token-by-token.
 """
 
 import logging
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 
 from atlas.interfaces.events import EventPublisher
-from atlas.interfaces.llm import LLMProtocol
 
 from ..utilities.error_handler import classify_llm_error
 

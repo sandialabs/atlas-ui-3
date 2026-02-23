@@ -13,11 +13,12 @@ function messagesReducer(state, action) {
     case 'RESET':
       return []
     case 'STREAM_TOKEN': {
-      const last = state[state.length - 1]
-      if (last && last._streaming) {
-        // Append token to existing streaming message
+      // Find the streaming message anywhere in the array (not just last)
+      // to handle interleaved tool_start/progress messages mid-stream
+      const idx = state.findLastIndex(m => m._streaming)
+      if (idx >= 0) {
         const updated = [...state]
-        updated[updated.length - 1] = { ...last, content: last.content + action.token }
+        updated[idx] = { ...state[idx], content: state[idx].content + action.token }
         return updated
       }
       // Create new streaming assistant message
@@ -29,10 +30,10 @@ function messagesReducer(state, action) {
       }]
     }
     case 'STREAM_END': {
-      const last = state[state.length - 1]
-      if (last && last._streaming) {
+      const idx = state.findLastIndex(m => m._streaming)
+      if (idx >= 0) {
         const updated = [...state]
-        updated[updated.length - 1] = { ...last, _streaming: false }
+        updated[idx] = { ...state[idx], _streaming: false }
         return updated
       }
       return state

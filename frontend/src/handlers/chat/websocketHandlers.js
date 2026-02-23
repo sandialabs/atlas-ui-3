@@ -435,8 +435,12 @@ export function createWebSocketHandler(deps) {
             _tokenBuffer += data.token
             if (!_tokenFlushTimer) {
               _tokenFlushTimer = setTimeout(() => {
-                if (_streamActive) flushTokenBuffer()
-                else _tokenFlushTimer = null
+                if (_streamActive) {
+                  flushTokenBuffer()
+                } else {
+                  _tokenBuffer = ''
+                  _tokenFlushTimer = null
+                }
               }, FLUSH_INTERVAL_MS)
             }
           }

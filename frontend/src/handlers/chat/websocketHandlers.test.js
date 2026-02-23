@@ -237,4 +237,14 @@ describe('createWebSocketHandler - token streaming', () => {
     expect(deps.streamEnd).toHaveBeenCalledTimes(1)
     expect(deps.setIsThinking).toHaveBeenCalledWith(false)
   })
+
+  it('clears synthesizing state on is_last', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'token_stream', token: 'done', is_first: true })
+    handler({ type: 'token_stream', is_last: true })
+
+    expect(deps.setIsSynthesizing).toHaveBeenCalledWith(false)
+  })
 })

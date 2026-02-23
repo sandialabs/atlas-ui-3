@@ -385,6 +385,94 @@ async def test_tools_run_streaming_partial_content_after_error_not_lost():
     assert result.get("message") == "partial content"
 
 
+# -- SimpleNamespace-to-dict conversion in tools streaming -------------------
+
+@pytest.mark.asyncio
+async def test_tools_streaming_tool_call_dict_conversion():
+    """Tool calls from streaming (SimpleNamespace) are converted to plain dicts."""
+    from types import SimpleNamespace
+    from atlas.application.chat.modes.tools import ToolsModeRunner
+    from atlas.interfaces.llm import LLMResponse
+
+    # Simulate a stream that yields text then an LLMResponse with tool_calls
+    tool_call_ns = SimpleNamespace(
+        id="call-abc",
+        type="function",
+        function=SimpleNamespace(
+            name="server_tool",
+            arguments='{"q":"test"}',
+        ),
+    )
+    llm_response = LLMResponse(
+        content="I'll search that for you.",
+        tool_calls=[tool_call_ns],
+        model_used="test-model",
+    )
+
+    async def _stream(*args, **kwargs):
+        yield "I'll search"
+        yield " that for you."
+        yield llm_response
+
+    llm = MagicMock()
+    llm.stream_with_tools = _stream
+
+    tool_manager = MagicMock()
+    tool_manager.get_tools_schema = MagicMock(return_value=[{"type": "function"}])
+
+    # Mock the tool execution to capture the messages list
+    captured_messages = []
+    async def _mock_execute_single(tool_call, session_context, tool_manager, update_callback, config_manager=None, skip_approval=False):
+        from atlas.domain.messages.models import ToolResult
+        return ToolResult(tool_call_id=tool_call.id, content="result", success=True)
+
+    pub = AsyncMock()
+    pub.publish_token_stream = AsyncMock()
+    pub.publish_chat_response = AsyncMock()
+    pub.publish_response_complete = AsyncMock()
+    pub.send_json = AsyncMock()
+
+    session = MagicMock()
+    session.history = MagicMock()
+    session.history.add_message = MagicMock()
+    session.session_id = "test-session"
+    session.files = {}
+
+    runner = ToolsModeRunner(
+        llm=llm,
+        tool_manager=tool_manager,
+        event_publisher=pub,
+    )
+
+    messages = [{"role": "user", "content": "search for test"}]
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_single_tool = _mock_execute_single
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+
+        # Mock stream_plain for synthesis
+        async def _synth_stream(*args, **kwargs):
+            yield "Here are the results."
+
+        llm.stream_plain = _synth_stream
+        llm.call_plain = AsyncMock(return_value="Here are the results.")
+
+        result = await runner.run_streaming(
+            session=session,
+            model="test-model",
+            messages=messages,
+            selected_tools=["server_tool"],
+        )
+
+    # Verify the appended assistant message has dict tool_calls, not SimpleNamespace
+    assistant_msg = next(m for m in messages if m.get("role") == "assistant" and "tool_calls" in m)
+    for tc in assistant_msg["tool_calls"]:
+        assert isinstance(tc, dict), f"Expected dict, got {type(tc)}"
+        assert tc["id"] == "call-abc"
+        assert tc["function"]["name"] == "server_tool"
+        assert tc["function"]["arguments"] == '{"q":"test"}'
+
+
 # -- CLI event publisher streaming -------------------------------------------
 
 @pytest.mark.asyncio
