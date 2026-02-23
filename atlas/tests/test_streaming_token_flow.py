@@ -14,7 +14,6 @@ import pytest
 from atlas.application.chat.agent.streaming_final_answer import stream_final_answer
 from atlas.application.chat.modes.streaming_helpers import stream_and_accumulate
 
-
 # -- Helpers -----------------------------------------------------------------
 
 async def _async_gen(*tokens):
@@ -134,7 +133,7 @@ async def test_stream_and_accumulate_error_no_tokens_with_fallback():
 
     async def _immediate_error():
         raise RuntimeError("immediate")
-        yield  # noqa: unreachable - makes this an async generator
+        yield  # makes this an async generator
 
     fallback = AsyncMock(return_value="error fallback")
 
@@ -216,7 +215,7 @@ async def test_stream_and_accumulate_error_no_tokens_no_fallback_sends_user_mess
 
     async def _auth_error():
         raise RuntimeError("AuthenticationError: invalid api key")
-        yield  # noqa: unreachable - makes this an async generator
+        yield  # makes this an async generator
 
     result = await stream_and_accumulate(
         token_generator=_auth_error(),
@@ -239,7 +238,7 @@ async def test_stream_and_accumulate_error_fallback_also_fails():
 
     async def _immediate_error():
         raise RuntimeError("Failed to stream LLM: invalid api key")
-        yield  # noqa: unreachable
+        yield  # makes this an async generator
 
     fallback = AsyncMock(side_effect=RuntimeError("also fails"))
 
@@ -263,7 +262,7 @@ async def test_stream_final_answer_both_stream_and_fallback_fail():
 
     async def _err_stream(*args, **kwargs):
         raise RuntimeError("Failed to stream LLM: AuthenticationError: invalid api key")
-        yield  # noqa: unreachable
+        yield  # makes this an async generator
 
     llm.stream_plain = _err_stream
     llm.call_plain = AsyncMock(side_effect=RuntimeError("also fails"))
@@ -293,7 +292,7 @@ async def test_tools_run_streaming_auth_error_sends_error_to_frontend():
 
     async def _err_stream(*args, **kwargs):
         raise RuntimeError("Failed to stream LLM with tools: AuthenticationError: invalid api key")
-        yield  # noqa: unreachable
+        yield  # makes this an async generator
 
     llm.stream_with_tools = _err_stream
 
@@ -389,6 +388,7 @@ async def test_tools_run_streaming_partial_content_after_error_not_lost():
 async def test_tools_streaming_tool_call_dict_conversion():
     """Tool calls from streaming (SimpleNamespace) are converted to plain dicts."""
     from types import SimpleNamespace
+
     from atlas.application.chat.modes.tools import ToolsModeRunner
     from atlas.interfaces.llm import LLMResponse
 
@@ -418,8 +418,6 @@ async def test_tools_streaming_tool_call_dict_conversion():
     tool_manager = MagicMock()
     tool_manager.get_tools_schema = MagicMock(return_value=[{"type": "function"}])
 
-    # Mock the tool execution to capture the messages list
-    captured_messages = []
     async def _mock_execute_single(tool_call, session_context, tool_manager, update_callback, config_manager=None, skip_approval=False):
         from atlas.domain.messages.models import ToolResult
         return ToolResult(tool_call_id=tool_call.id, content="result", success=True)
@@ -446,6 +444,14 @@ async def test_tools_streaming_tool_call_dict_conversion():
 
     with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
         mock_te.execute_single_tool = _mock_execute_single
+
+        async def _mock_execute_multiple(tool_calls, session_context, tool_manager, update_callback=None, config_manager=None, skip_approval=False):
+            results = []
+            for tc in tool_calls:
+                results.append(await _mock_execute_single(tc, session_context, tool_manager, update_callback, config_manager, skip_approval))
+            return results
+
+        mock_te.execute_multiple_tools = _mock_execute_multiple
         mock_te.build_files_manifest = MagicMock(return_value=None)
 
         # Mock stream_plain for synthesis
@@ -455,7 +461,7 @@ async def test_tools_streaming_tool_call_dict_conversion():
         llm.stream_plain = _synth_stream
         llm.call_plain = AsyncMock(return_value="Here are the results.")
 
-        result = await runner.run_streaming(
+        await runner.run_streaming(
             session=session,
             model="test-model",
             messages=messages,

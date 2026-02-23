@@ -16,7 +16,7 @@ class ThinkActAgentLoop(AgentLoopProtocol):
 
     Differences vs ReActAgentLoop:
     - Single "think" function used for both planning and observation phases.
-    - Executes at most one tool per action step.
+    - Executes all tool calls per action step in parallel.
     - Does not reuse the existing MCP think functions; uses internal prompts via LLM tools.
     """
 
@@ -132,13 +132,13 @@ class ThinkActAgentLoop(AgentLoopProtocol):
                     )
 
                 if llm_response.has_tool_calls():
-                    first_call = (llm_response.tool_calls or [None])[0]
-                    if first_call is None:
+                    valid_calls = [tc for tc in (llm_response.tool_calls or []) if tc is not None]
+                    if not valid_calls:
                         final_answer = llm_response.content or ""
                         break
-                    messages.append({"role": "assistant", "content": llm_response.content, "tool_calls": [first_call]})
-                    result = await tool_executor.execute_single_tool(
-                        tool_call=first_call,
+                    messages.append({"role": "assistant", "content": llm_response.content, "tool_calls": valid_calls})
+                    results = await tool_executor.execute_multiple_tools(
+                        tool_calls=valid_calls,
                         session_context={
                             "session_id": context.session_id,
                             "user_email": context.user_email,
@@ -149,9 +149,10 @@ class ThinkActAgentLoop(AgentLoopProtocol):
                         config_manager=self.config_manager,
                         skip_approval=self.skip_approval,
                     )
-                    messages.append({"role": "tool", "content": result.content, "tool_call_id": result.tool_call_id})
+                    for result in results:
+                        messages.append({"role": "tool", "content": result.content, "tool_call_id": result.tool_call_id})
                     # Notify service to ingest artifacts
-                    await event_handler(AgentEvent(type="agent_tool_results", payload={"results": [result]}))
+                    await event_handler(AgentEvent(type="agent_tool_results", payload={"results": results}))
                 else:
                     if llm_response.content:
                         final_answer = llm_response.content

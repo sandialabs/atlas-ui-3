@@ -339,6 +339,8 @@ Three agent loop strategies implement different reasoning patterns:
 
 Change agent loop: set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.
 
+**Multi-Tool Calling**: All agent loops and the tools mode runner execute multiple tool calls from a single LLM response in parallel via `asyncio.gather` (`tool_executor.execute_multiple_tools`); individual failures are converted to error `ToolResult`s so other tools still succeed.
+
 ## Prompt System
 
 The application uses a prompt system to manage various LLM prompts:

@@ -55,6 +55,73 @@ def _try_repair_json(raw: str) -> Optional[Dict[str, Any]]:
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
 
+async def execute_multiple_tools(
+    tool_calls: list,
+    session_context: Dict[str, Any],
+    tool_manager,
+    update_callback: Optional[UpdateCallback] = None,
+    config_manager=None,
+    skip_approval: bool = False,
+) -> List[ToolResult]:
+    """Execute multiple tool calls concurrently using asyncio.gather.
+
+    Each tool call runs as an independent coroutine so that IO-bound MCP
+    tool executions (HTTP, subprocess, etc.) overlap rather than serialize.
+    Results are returned in the same order as the input *tool_calls* list.
+    """
+    if not tool_calls:
+        return []
+
+    if len(tool_calls) == 1:
+        result = await execute_single_tool(
+            tool_call=tool_calls[0],
+            session_context=session_context,
+            tool_manager=tool_manager,
+            update_callback=update_callback,
+            config_manager=config_manager,
+            skip_approval=skip_approval,
+        )
+        return [result]
+
+    logger.info("Executing %d tool calls in parallel", len(tool_calls))
+
+    coros = [
+        execute_single_tool(
+            tool_call=tc,
+            session_context=session_context,
+            tool_manager=tool_manager,
+            update_callback=update_callback,
+            config_manager=config_manager,
+            skip_approval=skip_approval,
+        )
+        for tc in tool_calls
+    ]
+
+    results = await asyncio.gather(*coros, return_exceptions=True)
+
+    # Convert exceptions to error ToolResults so callers always get a list
+    final: List[ToolResult] = []
+    for idx, res in enumerate(results):
+        if isinstance(res, Exception):
+            tc = tool_calls[idx]
+            tc_id = getattr(tc, "id", None) or (tc.get("id") if isinstance(tc, dict) else f"unknown-{idx}")
+            tc_name = ""
+            try:
+                tc_name = tc.function.name
+            except Exception:
+                tc_name = str(tc.get("function", {}).get("name", "unknown") if isinstance(tc, dict) else "unknown")
+            logger.error("Parallel tool execution failed for %s: %s", tc_name, res)
+            final.append(ToolResult(
+                tool_call_id=tc_id,
+                content=f"Tool execution failed: {res}",
+                success=False,
+                error=str(res),
+            ))
+        else:
+            final.append(res)
+    return final
+
+
 async def execute_tools_workflow(
     llm_response: LLMResponse,
     messages: List[Dict],
@@ -81,18 +148,15 @@ async def execute_tools_workflow(
         "tool_calls": llm_response.tool_calls
     })
 
-    # Execute all tool calls
-    tool_results: List[ToolResult] = []
-    for tool_call in llm_response.tool_calls:
-        result = await execute_single_tool(
-            tool_call=tool_call,
-            session_context=session_context,
-            tool_manager=tool_manager,
-            update_callback=update_callback,
-            config_manager=config_manager,
-            skip_approval=skip_approval,
-        )
-        tool_results.append(result)
+    # Execute all tool calls in parallel
+    tool_results = await execute_multiple_tools(
+        tool_calls=llm_response.tool_calls,
+        session_context=session_context,
+        tool_manager=tool_manager,
+        update_callback=update_callback,
+        config_manager=config_manager,
+        skip_approval=skip_approval,
+    )
 
     # Add tool results to messages
     for result in tool_results:
