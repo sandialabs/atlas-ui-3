@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-import { createWebSocketHandler } from './websocketHandlers'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createWebSocketHandler, cleanupStreamState } from './websocketHandlers'
 
 const makeDeps = () => {
   return {
@@ -22,6 +22,9 @@ const makeDeps = () => {
     triggerFileDownload: vi.fn(),
     addAttachment: vi.fn(),
     resolvePendingFileEvent: vi.fn(),
+    setIsSynthesizing: vi.fn(),
+    streamToken: vi.fn(),
+    streamEnd: vi.fn(),
   }
 }
 
@@ -151,5 +154,102 @@ describe('createWebSocketHandler – intermediate updates', () => {
 
     // Should open the canvas panel when display.open_canvas is true
     expect(deps.setIsCanvasOpen).toHaveBeenCalledWith(true)
+  })
+})
+
+describe('createWebSocketHandler - token streaming', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    cleanupStreamState()
+  })
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
+  it('buffers tokens and flushes after FLUSH_INTERVAL_MS', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'token_stream', token: 'Hello', is_first: true })
+    handler({ type: 'token_stream', token: ' world' })
+
+    // Not flushed yet
+    expect(deps.streamToken).not.toHaveBeenCalled()
+
+    // Advance past flush interval (30ms)
+    vi.advanceTimersByTime(35)
+
+    expect(deps.streamToken).toHaveBeenCalledTimes(1)
+    expect(deps.streamToken).toHaveBeenCalledWith('Hello world')
+  })
+
+  it('calls streamEnd on is_last and flushes remaining buffer', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'token_stream', token: 'Hi', is_first: true })
+    handler({ type: 'token_stream', token: ' there' })
+    handler({ type: 'token_stream', is_last: true })
+
+    // is_last triggers immediate flush + streamEnd
+    expect(deps.streamToken).toHaveBeenCalledWith('Hi there')
+    expect(deps.streamEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears thinking state on first token', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'token_stream', token: 'X', is_first: true })
+
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+  })
+
+  it('calls streamEnd on response_complete', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'token_stream', token: 'partial', is_first: true })
+    handler({ type: 'response_complete' })
+
+    expect(deps.streamToken).toHaveBeenCalledWith('partial')
+    expect(deps.streamEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('cleanupStreamState clears pending timer', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'token_stream', token: 'leaked', is_first: true })
+
+    // Timer is pending but not fired
+    cleanupStreamState()
+    vi.advanceTimersByTime(35)
+
+    // streamToken should NOT have been called because cleanup cleared the timer
+    expect(deps.streamToken).not.toHaveBeenCalled()
+  })
+
+  it('calls streamEnd on error event', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'token_stream', token: 'start', is_first: true })
+    handler({ type: 'error', message: 'auth failed' })
+
+    expect(deps.streamEnd).toHaveBeenCalledTimes(1)
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+  })
+
+  it('clears synthesizing state on is_last', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'token_stream', token: 'done', is_first: true })
+    handler({ type: 'token_stream', is_last: true })
+
+    expect(deps.setIsSynthesizing).toHaveBeenCalledWith(false)
   })
 })

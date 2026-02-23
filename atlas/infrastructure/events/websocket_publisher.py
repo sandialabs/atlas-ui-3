@@ -115,6 +115,21 @@ class WebSocketEventPublisher:
                 **kwargs
             })
 
+    async def publish_token_stream(
+        self,
+        token: str,
+        is_first: bool = False,
+        is_last: bool = False,
+    ) -> None:
+        """Publish a streaming token chunk."""
+        if self.connection:
+            await event_notifier.notify_token_stream(
+                token=token,
+                is_first=is_first,
+                is_last=is_last,
+                update_callback=self.connection.send_json,
+            )
+
     async def send_json(self, data: Dict[str, Any]) -> None:
         """Send raw JSON message."""
         if self.connection:

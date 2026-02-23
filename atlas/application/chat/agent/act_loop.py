@@ -9,6 +9,7 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
+from .streaming_final_answer import stream_final_answer
 
 
 class ActAgentLoop(AgentLoopProtocol):
@@ -69,6 +70,8 @@ class ActAgentLoop(AgentLoopProtocol):
         max_steps: int,
         temperature: float,
         event_handler: AgentEventHandler,
+        streaming: bool = False,
+        event_publisher=None,
     ) -> AgentResult:
         await event_handler(AgentEvent(type="agent_start", payload={"max_steps": max_steps, "strategy": "act"}))
 
@@ -173,7 +176,13 @@ class ActAgentLoop(AgentLoopProtocol):
 
         # Fallback if no final answer after max steps
         if not final_answer:
-            final_answer = await self.llm.call_plain(model, messages, temperature=temperature, user_email=context.user_email)
+            if streaming and event_publisher:
+                final_answer = await stream_final_answer(
+                    self.llm, event_publisher, model, messages,
+                    temperature, context.user_email,
+                )
+            else:
+                final_answer = await self.llm.call_plain(model, messages, temperature=temperature, user_email=context.user_email)
 
         await event_handler(AgentEvent(type="agent_completion", payload={"steps": steps}))
         return AgentResult(final_answer=final_answer, steps=steps, metadata={"agent_mode": True, "strategy": "act"})

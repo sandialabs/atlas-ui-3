@@ -7,12 +7,11 @@ must NOT trigger RAG mode.
 """
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from atlas.application.chat.orchestrator import ChatOrchestrator
-from atlas.domain.messages.models import Message, MessageRole
 from atlas.domain.sessions.models import Session
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 
@@ -33,13 +32,13 @@ def _make_orchestrator(
     tools = tools_mock or AsyncMock(return_value={"mode": "tools"})
     agent = agent_mock or AsyncMock(return_value={"mode": "agent"})
 
-    # Create runner-like objects whose .run() is the mock
+    # Create runner-like objects with run_streaming mocks
     plain_runner = MagicMock()
-    plain_runner.run = plain
+    plain_runner.run_streaming = plain
     rag_runner = MagicMock()
-    rag_runner.run = rag
+    rag_runner.run_streaming = rag
     tools_runner = MagicMock()
-    tools_runner.run = tools
+    tools_runner.run_streaming = tools
     agent_runner = MagicMock()
     agent_runner.run = agent
 

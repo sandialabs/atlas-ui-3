@@ -9,6 +9,7 @@ from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 
 from ..utilities import event_notifier
+from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
 
@@ -79,3 +80,34 @@ class RagModeRunner:
         await self.event_publisher.publish_response_complete()
 
         return event_notifier.create_chat_response(response_content)
+
+    async def run_streaming(
+        self,
+        session: Session,
+        model: str,
+        messages: List[Dict[str, str]],
+        data_sources: List[str],
+        user_email: str,
+        temperature: float = 0.7,
+    ) -> Dict[str, Any]:
+        """Execute RAG mode with token streaming."""
+        accumulated = await stream_and_accumulate(
+            token_generator=self.llm.stream_with_rag(
+                model, messages, data_sources, user_email, temperature=temperature,
+            ),
+            event_publisher=self.event_publisher,
+            fallback_fn=lambda: self.llm.call_with_rag(
+                model, messages, data_sources, user_email, temperature=temperature,
+            ),
+            context_label="RAG",
+        )
+
+        assistant_message = Message(
+            role=MessageRole.ASSISTANT,
+            content=accumulated,
+            metadata={"data_sources": data_sources},
+        )
+        session.history.add_message(assistant_message)
+        await self.event_publisher.publish_response_complete()
+
+        return event_notifier.create_chat_response(accumulated)

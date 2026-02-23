@@ -864,7 +864,7 @@ class MCPToolManager:
                 self._clear_server_failure(server_name)
                 logger.info(f"Successfully initialized client for {server_name}")
                 if is_new:
-                    print(f"  MCP connected: {server_name}")
+                    print(f"  MCP connected: {server_name}", file=__import__('sys').stderr)
             else:
                 self._record_server_failure(server_name, "Initialization returned None")
                 logger.warning(f"Failed to initialize client for {server_name}")

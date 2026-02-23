@@ -14,7 +14,19 @@ fallbacks, cost tracking, and provider-specific optimizations.
 import asyncio
 import logging
 import os
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
+
+# Suppress Pydantic deprecation warnings from litellm's response processing.
+# litellm accesses Pydantic v2.11+ deprecated instance attributes
+# (model_fields, model_computed_fields) on every streaming chunk, generating
+# thousands of warnings per response.  These are cosmetic -- litellm handles
+# them correctly -- and the spam can mask real issues in logs.
+try:
+    from pydantic import PydanticDeprecatedSince211
+    warnings.filterwarnings("ignore", category=PydanticDeprecatedSince211)
+except ImportError:
+    pass  # Pydantic <2.11 does not define this category; suppression not needed
 
 import litellm
 from litellm import acompletion
@@ -22,6 +34,7 @@ from litellm import acompletion
 from atlas.core.metrics_logger import log_metric
 from atlas.modules.config.config_manager import resolve_env_var
 
+from .litellm_streaming import LiteLLMStreamingMixin
 from .models import LLMResponse
 
 logger = logging.getLogger(__name__)
@@ -30,7 +43,7 @@ logger = logging.getLogger(__name__)
 litellm.drop_params = True  # Drop unsupported params instead of erroring
 
 
-class LiteLLMCaller:
+class LiteLLMCaller(LiteLLMStreamingMixin):
     """Clean interface for all LLM calling patterns using LiteLLM.
 
     Note: this class may set provider-specific LLM API key environment
@@ -183,9 +196,17 @@ class LiteLLMCaller:
         model_config = self.llm_config.models[model_name]
         model_id = model_config.model_name
 
-        # Map common providers to LiteLLM format
+        # Map common providers to LiteLLM format.
+        # Order matters: check specific providers (groq, openrouter) before
+        # generic ones (openai) since some URLs contain "openai" in the path
+        # (e.g. api.groq.com/openai/v1).
         if "openrouter" in model_config.model_url:
             return f"openrouter/{model_id}"
+        elif "groq" in model_config.model_url:
+            # Groq uses OpenAI-compatible endpoints; use openai/ prefix with
+            # api_base override (set in _get_model_kwargs) so litellm routes
+            # to the correct base URL.
+            return f"openai/{model_id}"
         elif "openai" in model_config.model_url:
             return f"openai/{model_id}"
         elif "anthropic" in model_config.model_url:
@@ -268,6 +289,8 @@ class LiteLLMCaller:
 
             if "openrouter" in model_config.model_url:
                 _set_env_var_if_needed("OPENROUTER_API_KEY", api_key)
+            elif "groq" in model_config.model_url:
+                _set_env_var_if_needed("GROQ_API_KEY", api_key)
             elif "openai" in model_config.model_url:
                 _set_env_var_if_needed("OPENAI_API_KEY", api_key)
             elif "anthropic" in model_config.model_url:
@@ -349,7 +372,7 @@ class LiteLLMCaller:
 
         except Exception as exc:
             logger.error("Error calling LLM: %s", exc, exc_info=True)
-            raise Exception(f"Failed to call LLM: {exc}")
+            raise Exception(f"Failed to call LLM: {exc}") from exc
 
     async def call_with_rag(
         self,
@@ -543,10 +566,10 @@ class LiteLLMCaller:
                     )
                 except Exception as retry_exc:
                     logger.error("Retry with tool_choice='auto' also failed: %s", retry_exc, exc_info=True)
-                    raise Exception(f"Failed to call LLM with tools: {retry_exc}")
+                    raise Exception(f"Failed to call LLM with tools: {retry_exc}") from retry_exc
 
             logger.error("Error calling LLM with tools: %s", exc, exc_info=True)
-            raise Exception(f"Failed to call LLM with tools: {exc}")
+            raise Exception(f"Failed to call LLM with tools: {exc}") from exc
 
     async def call_with_rag_and_tools(
         self,

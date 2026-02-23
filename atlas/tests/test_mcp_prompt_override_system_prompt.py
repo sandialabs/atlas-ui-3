@@ -38,6 +38,10 @@ async def test_selected_mcp_prompt_overrides_system_prompt(monkeypatch):
             captured["messages"] = messages
             return "ok"
 
+        async def stream_plain(self, model_name, messages, temperature=0.7, **kwargs):
+            captured["messages"] = messages
+            yield "ok"
+
         async def call_with_tools(self, model_name, messages, tools_schema, tool_choice="auto", temperature=0.7, **kwargs):
             captured["messages"] = messages
             class R:

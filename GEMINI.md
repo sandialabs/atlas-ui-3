@@ -1,6 +1,6 @@
 # Gemini Guide: Atlas UI 3
 
-Last updated: 2026-02-13
+Last updated: 2026-02-22
 
 This file provides guidance to Google Gemini AI assistants when working with code in this repository.
 
@@ -19,6 +19,8 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 **Dependency Management**: All Python dependencies are defined in `pyproject.toml` (the single source of truth); there is no `requirements.txt` -- always use `uv pip install -e ".[dev]"` for development.
 
 **Lazy Imports**: `atlas/__init__.py` uses `__getattr__` to lazily import `AtlasClient` and `ChatResult` so that lightweight CLIs like `atlas-init` do not pay the cost of loading the full dependency chain.
+
+**LLM Streaming**: Token streaming uses `LiteLLMStreamingMixin` (in `litellm_streaming.py`) mixed into `LiteLLMCaller`; the frontend buffers tokens with `setTimeout(30ms)` -- never use `requestAnimationFrame` for token flushing as it breaks progressive rendering.
 
 ## Do This First
 

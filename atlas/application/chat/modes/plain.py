@@ -9,6 +9,7 @@ from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 
 from ..utilities import event_notifier
+from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
 
@@ -74,3 +75,32 @@ class PlainModeRunner:
         await self.event_publisher.publish_response_complete()
 
         return event_notifier.create_chat_response(response_content)
+
+    async def run_streaming(
+        self,
+        session: Session,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        user_email: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute plain LLM mode with token streaming."""
+        accumulated = await stream_and_accumulate(
+            token_generator=self.llm.stream_plain(
+                model, messages, temperature=temperature, user_email=user_email,
+            ),
+            event_publisher=self.event_publisher,
+            fallback_fn=lambda: self.llm.call_plain(
+                model, messages, temperature=temperature, user_email=user_email,
+            ),
+            context_label="plain",
+        )
+
+        assistant_message = Message(
+            role=MessageRole.ASSISTANT,
+            content=accumulated,
+        )
+        session.history.add_message(assistant_message)
+        await self.event_publisher.publish_response_complete()
+
+        return event_notifier.create_chat_response(accumulated)

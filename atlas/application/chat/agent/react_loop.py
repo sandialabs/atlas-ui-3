@@ -11,6 +11,7 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, file_processor, tool_executor
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
+from .streaming_final_answer import stream_final_answer
 
 
 class ReActAgentLoop(AgentLoopProtocol):
@@ -101,6 +102,8 @@ class ReActAgentLoop(AgentLoopProtocol):
         max_steps: int,
         temperature: float,
         event_handler: AgentEventHandler,
+        streaming: bool = False,
+        event_publisher=None,
     ) -> AgentResult:
         # Agent start
         await event_handler(AgentEvent(type="agent_start", payload={"max_steps": max_steps, "strategy": "react"}))
@@ -333,6 +336,12 @@ class ReActAgentLoop(AgentLoopProtocol):
             last_observation = observe_visible_text
 
         if not final_response:
-            final_response = await self.llm.call_plain(model, messages, temperature=temperature, user_email=context.user_email)
+            if streaming and event_publisher:
+                final_response = await stream_final_answer(
+                    self.llm, event_publisher, model, messages,
+                    temperature, context.user_email,
+                )
+            else:
+                final_response = await self.llm.call_plain(model, messages, temperature=temperature, user_email=context.user_email)
 
         return AgentResult(final_answer=final_response, steps=steps, metadata={"agent_mode": True})

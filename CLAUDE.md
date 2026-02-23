@@ -18,6 +18,8 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 
 **Lazy Imports**: `atlas/__init__.py` uses `__getattr__` to lazily import `AtlasClient` and `ChatResult` so that lightweight CLIs like `atlas-init` do not pay the cost of loading the full dependency chain (SQLAlchemy, litellm, FastAPI, etc.).
 
+**LLM Streaming**: Token streaming uses `LiteLLMStreamingMixin` (in `litellm_streaming.py`) mixed into `LiteLLMCaller` to keep files under 400 lines; the frontend buffers tokens with `setTimeout(30ms)` -- never use `requestAnimationFrame` for token flushing as it breaks progressive rendering.
+
 ## Installation
 
 ### As a Python Package (Recommended for Users)

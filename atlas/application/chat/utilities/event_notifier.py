@@ -375,6 +375,24 @@ async def notify_tool_error(
     })
 
 
+async def notify_token_stream(
+    token: str,
+    is_first: bool = False,
+    is_last: bool = False,
+    update_callback: Optional[UpdateCallback] = None,
+) -> None:
+    """Send a streaming token chunk to the client."""
+    if not update_callback:
+        return
+
+    await safe_notify(update_callback, {
+        "type": "token_stream",
+        "token": token,
+        "is_first": is_first,
+        "is_last": is_last,
+    })
+
+
 async def notify_chat_response(
     message: str,
     has_pending_tools: bool = False,

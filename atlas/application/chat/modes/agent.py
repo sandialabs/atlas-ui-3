@@ -96,7 +96,7 @@ class AgentModeRunner:
             artifact_processor=process_artifacts,
         )
 
-        # Run the loop
+        # Run the loop (always streaming final answer)
         result = await agent_loop.run(
             model=model,
             messages=messages,
@@ -106,6 +106,8 @@ class AgentModeRunner:
             max_steps=max_steps,
             temperature=temperature,
             event_handler=event_relay.handle_event,
+            streaming=True,
+            event_publisher=self.event_publisher,
         )
 
         # Append final message

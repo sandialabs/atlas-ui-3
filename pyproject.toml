@@ -28,7 +28,7 @@ dependencies = [
     "fastapi",
     "fastmcp>=2.10.0,<3.0.0",
     "httpx",
-    "litellm",
+    "litellm>=1.81.14",
     "matplotlib",
     "numpy",
     "openpyxl",

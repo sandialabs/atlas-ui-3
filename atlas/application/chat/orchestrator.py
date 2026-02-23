@@ -166,7 +166,7 @@ class ChatOrchestrator:
             selected_prompts=selected_prompts
         )
 
-        # Route to appropriate mode
+        # Route to appropriate mode (always streaming)
         if agent_mode and self.agent_mode:
             return await self.agent_mode.run(
                 session=session,
@@ -184,7 +184,7 @@ class ChatOrchestrator:
                 selected_tools=selected_tools,
                 user_email=user_email
             )
-            return await self.tools_mode.run(
+            return await self.tools_mode.run_streaming(
                 session=session,
                 model=model,
                 messages=messages,
@@ -196,7 +196,7 @@ class ChatOrchestrator:
                 temperature=temperature,
             )
         elif selected_data_sources:
-            return await self.rag_mode.run(
+            return await self.rag_mode.run_streaming(
                 session=session,
                 model=model,
                 messages=messages,
@@ -205,7 +205,7 @@ class ChatOrchestrator:
                 temperature=temperature,
             )
         else:
-            return await self.plain_mode.run(
+            return await self.plain_mode.run_streaming(
                 session=session,
                 model=model,
                 messages=messages,

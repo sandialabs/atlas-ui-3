@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #355 - 2026-02-22
+- **Feature**: LLM token streaming for progressive response display. Tokens stream from the LLM provider through WebSocket `token_stream` events to the frontend, where they are buffered at 30ms intervals for smooth ~33fps rendering.
+- **Refactor**: Extract streaming methods (`stream_plain`, `stream_with_tools`, `stream_with_rag`, `stream_with_rag_and_tools`) from `litellm_caller.py` into `LiteLLMStreamingMixin` in `litellm_streaming.py`, reducing the caller from 1009 to 726 lines.
+- **Feature**: Add `stream_and_accumulate` shared helper for mode runners and `stream_final_answer` shared helper for agent loops to eliminate duplicated streaming+fallback logic.
+- **Fix**: Handle `STREAM_TOKEN` interleaving with tool messages by using `findLastIndex(m => m._streaming)` instead of assuming the last message is the streaming target.
+- **Fix**: Add error classification and propagation to frontend for streaming failures (rate limit, auth, timeout).
+
 ### PR #351 - 2026-02-21
 - **Performance**: Make `atlas-init` start in <0.5s (down from ~4s) by using lazy `__getattr__` imports in `atlas/__init__.py`. The heavy dependency chain (SQLAlchemy, litellm, FastAPI) is now only loaded when `AtlasClient` or `ChatResult` is actually accessed.
 
