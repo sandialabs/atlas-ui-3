@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createWebSocketHandler, cleanupStreamState } from './websocketHandlers'
 
 const makeDeps = () => {
@@ -161,6 +161,11 @@ describe('createWebSocketHandler - token streaming', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     cleanupStreamState()
+  })
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
   })
 
   it('buffers tokens and flushes after FLUSH_INTERVAL_MS', () => {

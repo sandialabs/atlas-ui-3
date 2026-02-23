@@ -287,7 +287,6 @@ async def test_tools_run_streaming_auth_error_sends_error_to_frontend():
     """When tools streaming fails with auth error, an error message is sent
     to the frontend via send_json instead of sending empty content."""
     from atlas.application.chat.modes.tools import ToolsModeRunner
-    from atlas.interfaces.llm import LLMResponse
 
     # Set up mock dependencies
     llm = MagicMock()
@@ -343,7 +342,6 @@ async def test_tools_run_streaming_partial_content_after_error_not_lost():
     """When tools streaming fails AFTER receiving some tokens, the partial
     content should still be delivered (not replaced with error)."""
     from atlas.application.chat.modes.tools import ToolsModeRunner
-    from atlas.interfaces.llm import LLMResponse
 
     llm = MagicMock()
 

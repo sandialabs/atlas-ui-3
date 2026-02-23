@@ -425,6 +425,12 @@ export function createWebSocketHandler(deps) {
         }
         case 'token_stream': {
           if (data.is_first) {
+            // Reset stale state from any previous abnormal stream end
+            _tokenBuffer = ''
+            if (_tokenFlushTimer) {
+              clearTimeout(_tokenFlushTimer)
+              _tokenFlushTimer = null
+            }
             _streamActive = true
             setIsThinking(false)
           }

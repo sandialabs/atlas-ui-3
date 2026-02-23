@@ -66,10 +66,10 @@ class LiteLLMStreamingMixin:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if total_chunks_seen <= 3:
                     logger.debug(
-                        "Stream chunk #%d for %s: choices=%s, delta=%s, content=%r",
+                        "Stream chunk #%d for %s: choices=%s, delta=%s, content_len=%s",
                         total_chunks_seen, model_name,
                         bool(chunk.choices), type(delta).__name__ if delta else None,
-                        getattr(delta, "content", "<missing>") if delta else None,
+                        len(delta.content) if delta and delta.content else 0,
                     )
                 if delta and delta.content:
                     yield delta.content

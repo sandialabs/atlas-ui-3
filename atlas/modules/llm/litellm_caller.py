@@ -26,7 +26,7 @@ try:
     from pydantic import PydanticDeprecatedSince211
     warnings.filterwarnings("ignore", category=PydanticDeprecatedSince211)
 except ImportError:
-    pass
+    pass  # Pydantic <2.11 does not define this category; suppression not needed
 
 import litellm
 from litellm import acompletion

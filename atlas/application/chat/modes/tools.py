@@ -355,7 +355,7 @@ class ToolsModeRunner:
             try:
                 await update_callback({"type": "tool_synthesis_start"})
             except Exception:
-                pass
+                pass  # Best-effort UI notification; synthesis proceeds regardless
 
         # Build synthesis messages
         user_question = ""
