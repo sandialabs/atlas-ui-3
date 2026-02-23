@@ -264,7 +264,7 @@ class ToolsModeRunner:
         if effective_callback is None:
             effective_callback = self._get_send_json()
 
-        # Execute tools
+        # Execute tools in parallel
         # Convert tool_calls to plain dicts for API serialization
         # (streaming yields SimpleNamespace objects for attribute access
         # but litellm needs dicts when re-sending messages to the LLM)
@@ -284,17 +284,14 @@ class ToolsModeRunner:
             "content": final_llm_response.content,
             "tool_calls": tool_calls_dicts,
         })
-        tool_results: List[ToolResult] = []
-        for tool_call in final_llm_response.tool_calls:
-            result = await tool_executor.execute_single_tool(
-                tool_call=tool_call,
-                session_context=session_context,
-                tool_manager=self.tool_manager,
-                update_callback=effective_callback,
-                config_manager=self.config_manager,
-                skip_approval=self.skip_approval,
-            )
-            tool_results.append(result)
+        tool_results = await tool_executor.execute_multiple_tools(
+            tool_calls=final_llm_response.tool_calls,
+            session_context=session_context,
+            tool_manager=self.tool_manager,
+            update_callback=effective_callback,
+            config_manager=self.config_manager,
+            skip_approval=self.skip_approval,
+        )
         for result in tool_results:
             messages.append({
                 "role": "tool",

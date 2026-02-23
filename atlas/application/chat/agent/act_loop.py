@@ -128,28 +128,27 @@ class ActAgentLoop(AgentLoopProtocol):
                 if final_answer:
                     break
 
-                # Execute first non-finished tool call
-                first_call = None
+                # Collect all non-finished tool calls
+                actionable_calls = []
                 for tc in tool_calls:
                     f = tc.get("function") if isinstance(tc, dict) else None
                     if f and f.get("name") != "finished":
-                        first_call = tc
-                        break
+                        actionable_calls.append(tc)
 
-                if first_call is None:
+                if not actionable_calls:
                     # Only finished tool or no valid tools
                     final_answer = llm_response.content or "Task completed."
                     break
 
-                # Execute the tool
+                # Execute all actionable tools in parallel
                 messages.append({
                     "role": "assistant",
                     "content": llm_response.content,
-                    "tool_calls": [first_call],
+                    "tool_calls": actionable_calls,
                 })
 
-                result = await tool_executor.execute_single_tool(
-                    tool_call=first_call,
+                results = await tool_executor.execute_multiple_tools(
+                    tool_calls=actionable_calls,
                     session_context={
                         "session_id": context.session_id,
                         "user_email": context.user_email,
@@ -161,14 +160,15 @@ class ActAgentLoop(AgentLoopProtocol):
                     skip_approval=self.skip_approval,
                 )
 
-                messages.append({
-                    "role": "tool",
-                    "content": result.content,
-                    "tool_call_id": result.tool_call_id,
-                })
+                for result in results:
+                    messages.append({
+                        "role": "tool",
+                        "content": result.content,
+                        "tool_call_id": result.tool_call_id,
+                    })
 
                 # Emit tool results for artifact ingestion
-                await event_handler(AgentEvent(type="agent_tool_results", payload={"results": [result]}))
+                await event_handler(AgentEvent(type="agent_tool_results", payload={"results": results}))
             else:
                 # No tool calls - treat content as final answer
                 final_answer = llm_response.content or "Task completed."

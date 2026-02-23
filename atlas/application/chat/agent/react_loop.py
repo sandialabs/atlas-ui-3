@@ -15,11 +15,11 @@ from .streaming_final_answer import stream_final_answer
 
 
 class ReActAgentLoop(AgentLoopProtocol):
-    """Default Reason–Act–Observe agent loop extracted from ChatService._handle_agent_mode.
+    """Default Reason-Act-Observe agent loop extracted from ChatService._handle_agent_mode.
 
-    Behavior matches existing implementation, including:
+    Behavior:
     - Reason/Observe via control tool calls with JSON fallback
-    - Single tool call per Act step
+    - Parallel execution of all tool calls per Act step
     - Optional RAG integration
     - Streaming via emitted AgentEvents (adapter maps to notification_utils)
     - User input request & stop polling using connection-driven event handler
@@ -230,19 +230,18 @@ class ReActAgentLoop(AgentLoopProtocol):
                     )
 
                 if llm_response.has_tool_calls():
-                    # Execute only first call
-                    first_call = (llm_response.tool_calls or [None])[0]
-                    if first_call is None:
+                    valid_calls = [tc for tc in (llm_response.tool_calls or []) if tc is not None]
+                    if not valid_calls:
                         if llm_response.content:
                             final_response = llm_response.content
                             break
                     messages.append({
                         "role": "assistant",
                         "content": llm_response.content,
-                        "tool_calls": [first_call],
+                        "tool_calls": valid_calls,
                     })
-                    result = await tool_executor.execute_single_tool(
-                        tool_call=first_call,
+                    results = await tool_executor.execute_multiple_tools(
+                        tool_calls=valid_calls,
                         session_context={
                             "session_id": context.session_id,
                             "user_email": context.user_email,
@@ -253,12 +252,13 @@ class ReActAgentLoop(AgentLoopProtocol):
                         config_manager=self.config_manager,
                         skip_approval=self.skip_approval,
                     )
-                    tool_results.append(result)
-                    messages.append({
-                        "role": "tool",
-                        "content": result.content,
-                        "tool_call_id": result.tool_call_id,
-                    })
+                    tool_results.extend(results)
+                    for result in results:
+                        messages.append({
+                            "role": "tool",
+                            "content": result.content,
+                            "tool_call_id": result.tool_call_id,
+                        })
 
                     # Emit an internal event with actual ToolResult(s) for the service to ingest artifacts
                     await event_handler(AgentEvent(type="agent_tool_results", payload={"results": tool_results}))
@@ -269,17 +269,18 @@ class ReActAgentLoop(AgentLoopProtocol):
 
             # ----- Observe -----
             summaries: List[str] = []
-            # We already emitted tool_complete with results above for ingestion; here just build readable summary text.
-            # If needed, we can reconstruct from last messages.
+            # Collect summaries from all tool messages added in this Act step.
             if messages:
-                # crude extraction of last tool message
                 for msg in reversed(messages):
                     if msg.get("role") == "tool":
                         content_preview = (msg.get("content") or "").strip()
                         if len(content_preview) > 400:
                             content_preview = content_preview[:400] + "..."
                         summaries.append(content_preview)
+                    elif msg.get("role") == "assistant":
+                        # Stop at the assistant message that preceded the tool calls
                         break
+            summaries.reverse()  # restore chronological order
             tool_summaries_text = "\n".join(summaries) if summaries else "No tools were executed."
 
             observe_prompt = None

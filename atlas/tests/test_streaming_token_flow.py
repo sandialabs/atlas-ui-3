@@ -446,6 +446,14 @@ async def test_tools_streaming_tool_call_dict_conversion():
 
     with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
         mock_te.execute_single_tool = _mock_execute_single
+
+        async def _mock_execute_multiple(tool_calls, session_context, tool_manager, update_callback=None, config_manager=None, skip_approval=False):
+            results = []
+            for tc in tool_calls:
+                results.append(await _mock_execute_single(tc, session_context, tool_manager, update_callback, config_manager, skip_approval))
+            return results
+
+        mock_te.execute_multiple_tools = _mock_execute_multiple
         mock_te.build_files_manifest = MagicMock(return_value=None)
 
         # Mock stream_plain for synthesis

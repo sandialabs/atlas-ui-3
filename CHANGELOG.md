@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #358 - 2026-02-22
+- **Feature**: Parallel multi-tool calling support (issue #353). When an LLM returns multiple tool calls in a single response, all calls now execute concurrently via `asyncio.gather` instead of sequentially or only the first. Applies to all three agent loops (ReAct, Think-Act, Act) and the non-agent tools mode.
+
 ### PR #355 - 2026-02-22
 - **Feature**: LLM token streaming for progressive response display. Tokens stream from the LLM provider through WebSocket `token_stream` events to the frontend, where they are buffered at 30ms intervals for smooth ~33fps rendering.
 - **Refactor**: Extract streaming methods (`stream_plain`, `stream_with_tools`, `stream_with_rag`, `stream_with_rag_and_tools`) from `litellm_caller.py` into `LiteLLMStreamingMixin` in `litellm_streaming.py`, reducing the caller from 1009 to 726 lines.
