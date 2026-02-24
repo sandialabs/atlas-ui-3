@@ -86,9 +86,9 @@ class AtlasRAGClient:
                 response.raise_for_status()
                 data = response.json()
 
-                # Response format: {user_name: str, accessible_data_sources: [{name, compliance_level}]}
-                accessible_sources = data.get("accessible_data_sources", [])
-                data_sources = [DataSource(**src) for src in accessible_sources]
+                # Response format: {data_sources: [{id, label, compliance_level, description}]}
+                sources_list = data.get("data_sources", [])
+                data_sources = [DataSource(**src) for src in sources_list]
 
                 logger.info(
                     "Discovered %d data sources for user %s",

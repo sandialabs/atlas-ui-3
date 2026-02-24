@@ -168,8 +168,10 @@ class UnifiedRAGService:
             # Build UI sources array
             ui_sources = [
                 {
-                    "id": ds.name,
-                    "name": ds.name,
+                    "id": ds.id,
+                    "name": ds.label,
+                    "label": ds.label,
+                    "description": ds.description,
                     "authRequired": True,
                     "selected": False,
                     "complianceLevel": ds.compliance_level,

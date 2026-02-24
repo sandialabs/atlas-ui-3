@@ -91,24 +91,26 @@ class TestAtlasRAGIntegration:
 
         assert len(sources) > 0
         # test@test.com has employee, engineering, devops, admin groups - sees all sources
-        source_names = [s.name for s in sources]
-        assert "company-policies" in source_names
-        assert "technical-docs" in source_names
-        assert "product-knowledge" in source_names  # Public
+        source_ids = [s.id for s in sources]
+        assert "company-policies" in source_ids
+        assert "technical-docs" in source_ids
+        assert "product-knowledge" in source_ids  # Public
 
-        # Check compliance levels are returned
+        # Check compliance levels and labels are returned
         for source in sources:
             assert source.compliance_level in ["Internal", "Public"]
+            assert source.label  # Label should be non-empty
+            assert source.description  # Description should be non-empty
 
     @pytest.mark.asyncio
     async def test_discover_data_sources_unknown_user(self, mock_service, client):
         """Test discovering data sources for an unknown user returns only public sources."""
         sources = await client.discover_data_sources("unknown@example.com")
         # Unknown users get public sources only
-        source_names = [s.name for s in sources]
-        assert "product-knowledge" in source_names
-        assert "company-policies" not in source_names
-        assert "technical-docs" not in source_names
+        source_ids = [s.id for s in sources]
+        assert "product-knowledge" in source_ids
+        assert "company-policies" not in source_ids
+        assert "technical-docs" not in source_ids
 
     @pytest.mark.asyncio
     async def test_discover_data_sources_limited_access(self, mock_service, client):
@@ -116,11 +118,11 @@ class TestAtlasRAGIntegration:
         # bob@example.com has employee and sales groups
         sources = await client.discover_data_sources("bob@example.com")
 
-        source_names = [s.name for s in sources]
-        assert "company-policies" in source_names  # requires employee
-        assert "product-knowledge" in source_names  # Public
+        source_ids = [s.id for s in sources]
+        assert "company-policies" in source_ids  # requires employee
+        assert "product-knowledge" in source_ids  # Public
         # Should NOT have access to technical-docs (requires engineering or devops)
-        assert "technical-docs" not in source_names
+        assert "technical-docs" not in source_ids
 
     @pytest.mark.asyncio
     async def test_query_rag_success(self, mock_service, client):

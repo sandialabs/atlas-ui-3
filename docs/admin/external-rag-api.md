@@ -1,6 +1,6 @@
 # RAG Configuration
 
-Last updated: 2026-01-22
+Last updated: 2026-02-23
 
 This guide explains how to configure RAG (Retrieval-Augmented Generation) in Atlas UI.
 
@@ -155,10 +155,9 @@ Authorization: Bearer {token}
 **Response:**
 ```json
 {
-  "user_name": "user@example.com",
-  "accessible_data_sources": [
-    {"name": "technical-docs", "compliance_level": "Internal"},
-    {"name": "company-wiki", "compliance_level": "Public"}
+  "data_sources": [
+    {"id": "technical-docs", "label": "Technical Documentation", "compliance_level": "Internal", "description": "Engineering docs covering API auth, database schema, and deployment"},
+    {"id": "company-wiki", "label": "Company Wiki", "compliance_level": "Public", "description": "Public company knowledge base"}
   ]
 }
 ```
