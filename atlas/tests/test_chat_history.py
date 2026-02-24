@@ -552,6 +552,79 @@ class TestSaveConversationSecurity:
         assert repo.get_conversation("bd-bob", "bob@test.com") is not None
 
 
+class TestExportAll:
+    """Tests for exporting all conversations with full messages."""
+
+    def test_export_empty(self, repo):
+        result = repo.export_all_conversations("user@test.com")
+        assert result == []
+
+    def test_export_returns_all_conversations_with_messages(self, repo):
+        for i in range(3):
+            repo.save_conversation(
+                conversation_id=f"export-{i}",
+                user_email="user@test.com",
+                title=f"Export Conv {i}",
+                model="gpt-4",
+                messages=_make_messages(2),
+                metadata={"agent_mode": i == 1},
+            )
+        result = repo.export_all_conversations("user@test.com")
+        assert len(result) == 3
+        for conv in result:
+            assert "messages" in conv
+            assert len(conv["messages"]) == 2
+            assert "id" in conv
+            assert "title" in conv
+            assert "model" in conv
+            assert "tags" in conv
+
+    def test_export_includes_tags(self, repo):
+        repo.save_conversation(
+            conversation_id="export-tagged",
+            user_email="user@test.com",
+            title="Tagged Export",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        repo.add_tag("export-tagged", "important", "user@test.com")
+        result = repo.export_all_conversations("user@test.com")
+        assert len(result) == 1
+        assert "important" in result[0]["tags"]
+
+    def test_export_user_isolation(self, repo):
+        repo.save_conversation(
+            conversation_id="export-alice",
+            user_email="alice@test.com",
+            title="Alice Export",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        repo.save_conversation(
+            conversation_id="export-bob",
+            user_email="bob@test.com",
+            title="Bob Export",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        alice_export = repo.export_all_conversations("alice@test.com")
+        assert len(alice_export) == 1
+        assert alice_export[0]["title"] == "Alice Export"
+
+    def test_export_includes_metadata(self, repo):
+        repo.save_conversation(
+            conversation_id="export-meta",
+            user_email="user@test.com",
+            title="Meta Export",
+            model="gpt-4",
+            messages=_make_messages(1),
+            metadata={"agent_mode": True, "tools": ["search"]},
+        )
+        result = repo.export_all_conversations("user@test.com")
+        assert len(result) == 1
+        assert result[0]["metadata"]["agent_mode"] is True
+
+
 class TestRoutesSecurity:
     """Test REST API route-level security and error handling."""
 
@@ -772,6 +845,45 @@ class TestSessionResetConversationIsolation:
         assert original["messages"][0]["content"] == "Original question"
 
 
+class TestConversationSavedEvent:
+    """Tests for the conversation_saved WebSocket event sent after save."""
+
+    @pytest.fixture
+    def chat_service(self, repo):
+        from unittest.mock import MagicMock
+
+        from atlas.application.chat.service import ChatService
+
+        llm = MagicMock()
+        service = ChatService(
+            llm=llm,
+            conversation_repository=repo,
+        )
+        return service
+
+    def test_save_conversation_returns_conv_id(self, chat_service, repo):
+        """After saving, the conversation_id should be retrievable from session context."""
+        import asyncio
+        from uuid import uuid4
+
+        from atlas.domain.messages.models import Message, MessageRole
+
+        session_id = uuid4()
+        asyncio.get_event_loop().run_until_complete(
+            chat_service.create_session(session_id, "user@test.com")
+        )
+        session = chat_service.sessions.get(session_id)
+        session.history.add_message(Message(role=MessageRole.USER, content="Hello"))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="Hi"))
+
+        chat_service._save_conversation(session_id, "user@test.com", "gpt-4")
+
+        conv_id = session.context.get("conversation_id", str(session_id))
+        saved = repo.get_conversation(conv_id, "user@test.com")
+        assert saved is not None
+        assert len(saved["messages"]) == 2
+
+
 class TestConversationRoutes:
     """Test the REST API routes for conversation history."""
 
@@ -890,6 +1002,45 @@ class TestConversationRoutes:
         )
         assert resp.status_code == 200
         assert resp.json()["name"] == "important"
+
+    def test_export_all(self, client, repo):
+        for i in range(2):
+            repo.save_conversation(
+                conversation_id=f"api-export-{i}",
+                user_email="test@test.com",
+                title=f"Export {i}",
+                model="gpt-4",
+                messages=_make_messages(2),
+            )
+        resp = client.get("/api/conversations/export", headers={"X-User-Email": "test@test.com"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["conversation_count"] == 2
+        assert len(data["conversations"]) == 2
+        assert "export_date" in data
+        assert "user_email" in data
+        for conv in data["conversations"]:
+            assert "messages" in conv
+            assert len(conv["messages"]) == 2
+
+    def test_export_empty(self, client):
+        resp = client.get("/api/conversations/export", headers={"X-User-Email": "test@test.com"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["conversation_count"] == 0
+        assert data["conversations"] == []
+
+    def test_export_user_isolation(self, client, repo):
+        repo.save_conversation(
+            conversation_id="api-export-priv",
+            user_email="alice@test.com",
+            title="Alice Only",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        resp = client.get("/api/conversations/export", headers={"X-User-Email": "bob@test.com"})
+        assert resp.status_code == 200
+        assert resp.json()["conversation_count"] == 0
 
     def test_feature_disabled_returns_empty(self, repo):
         """When repo returns None, endpoints return empty results gracefully."""

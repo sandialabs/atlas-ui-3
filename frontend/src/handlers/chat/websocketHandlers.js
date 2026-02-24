@@ -46,6 +46,7 @@ export function cleanupStreamState() {
  * @param {Function} [deps.resolvePendingFileEvent] - Resolve a pending file event.
  * @param {Function} [deps.setPendingElicitation] - Set pending elicitation request.
  * @param {Function} [deps.setIsSynthesizing] - Set the "synthesizing" indicator state.
+ * @param {Function} [deps.setActiveConversationId] - Set the active conversation ID for chat history tracking.
  * @param {Function} deps.streamToken - Dispatch a STREAM_TOKEN action with a text chunk.
  * @param {Function} deps.streamEnd - Dispatch a STREAM_END action to finalize streaming.
  * @returns {Function} A handler function that processes incoming WebSocket messages.
@@ -70,6 +71,7 @@ export function createWebSocketHandler(deps) {
     resolvePendingFileEvent,
     setPendingElicitation,
     setIsSynthesizing,
+    setActiveConversationId,
     streamToken,
     streamEnd,
   } = deps
@@ -421,6 +423,12 @@ export function createWebSocketHandler(deps) {
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           endTokenStream()
+          break
+        }
+        case 'conversation_saved': {
+          if (data.conversation_id && typeof setActiveConversationId === 'function') {
+            setActiveConversationId(data.conversation_id)
+          }
           break
         }
         case 'token_stream': {

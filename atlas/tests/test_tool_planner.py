@@ -17,8 +17,9 @@ _spec.loader.exec_module(_mod)
 format_tools_for_llm = _mod.format_tools_for_llm
 build_planning_prompt = _mod.build_planning_prompt
 _build_artifact_response = _mod._build_artifact_response
-# plan_with_tools is wrapped by @mcp.tool into a FunctionTool; get the raw fn
-_plan_with_tools_fn = _mod.plan_with_tools.fn
+# plan_with_tools may be wrapped by @mcp.tool into a FunctionTool (.fn attr)
+# or left as a plain function depending on the fastmcp version
+_plan_with_tools_fn = getattr(_mod.plan_with_tools, 'fn', _mod.plan_with_tools)
 
 
 def _decode_artifact(result: dict) -> str:
