@@ -348,7 +348,9 @@ async def with_retry(
             logger.warning(f"Operation failed (attempt {attempt + 1}/{max_retries + 1}): {e}")
 
     # If we get here, all retries failed
-    raise last_error
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Operation failed: no retry attempts were made")
 
 
 def sanitize_kwargs_for_logging(kwargs: Dict[str, Any]) -> Dict[str, Any]:

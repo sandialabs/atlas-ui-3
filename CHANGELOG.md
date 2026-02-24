@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #362 - 2026-02-24
+- **Fix**: Conversation save/display duplication bug (issue #356). Backend now sends a `conversation_saved` WebSocket event with the `conversation_id` after persisting, so the frontend can track the active conversation and avoid optimistic UI duplicates in the sidebar.
+- **Feature**: Download all conversations (issue #354). New "Download All Conversations" button in the sidebar exports all saved conversations with full messages as a JSON file via `GET /api/conversations/export`.
+
 ### PR #359 - 2026-02-23
 - **Feature**: Update RAG discovery API to v2 format. Data sources now return `id`, `label`, `compliance_level`, and `description` fields. The `label` and `description` are displayed in the data sources panel with a more compact layout.
 
