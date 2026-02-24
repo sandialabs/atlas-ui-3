@@ -521,7 +521,7 @@ class AppSettings(BaseSettings):
     # Security headers toggles (HSTS intentionally omitted)
     security_csp_enabled: bool = Field(default=True, validation_alias="SECURITY_CSP_ENABLED")
     security_csp_value: str | None = Field(
-        default="default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self'",
+        default="default-src 'self'; img-src 'self' data:; font-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self'",
         validation_alias="SECURITY_CSP_VALUE",
     )
     security_xfo_enabled: bool = Field(default=True, validation_alias="SECURITY_XFO_ENABLED")
