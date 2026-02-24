@@ -196,14 +196,19 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
 
   const getDisplayConversations = () => {
     const list = [...history.conversations]
+
+    // Show optimistic "Saving..." entry only when:
+    // 1. No activeConversationId yet (backend hasn't confirmed save)
+    // 2. There are user messages in the current chat
+    // 3. Chat history is enabled and not incognito
     const userMessages = messages?.filter(m => m.role === 'user') || []
     if (!activeConversationId && userMessages.length > 0 && chatHistoryEnabled && !isIncognito) {
       const firstUserMsg = userMessages[0]?.content || ''
       const title = firstUserMsg.substring(0, 200)
-      const alreadyExists = list.some(c =>
-        c.title === title || c.title === firstUserMsg || c.title === firstUserMsg.substring(0, 200)
-      )
-      if (!alreadyExists) {
+      // Check if this conversation already appears in the fetched list
+      // (can happen when backend saves before frontend receives the conversation_saved event)
+      const alreadyInList = list.some(c => c.title === title)
+      if (!alreadyInList) {
         list.unshift({
           id: '__current__',
           title: title || 'New conversation',
@@ -337,7 +342,13 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
 
           {/* Footer */}
           {displayConversations.length > 0 && (
-            <div className="p-2 border-t border-gray-700 flex-shrink-0">
+            <div className="p-2 border-t border-gray-700 flex-shrink-0 flex flex-col gap-1">
+              <button
+                onClick={() => history.downloadAll()}
+                className="w-full text-xs px-2 py-1.5 text-blue-400 hover:bg-blue-900/30 rounded transition-colors"
+              >
+                Download All Conversations
+              </button>
               <button
                 onClick={() => setShowDeleteConfirm('all')}
                 className="w-full text-xs px-2 py-1.5 text-red-400 hover:bg-red-900/30 rounded transition-colors"

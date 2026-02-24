@@ -255,6 +255,55 @@ class ConversationRepository:
             session.commit()
             return count
 
+    def export_all_conversations(self, user_email: str) -> List[Dict[str, Any]]:
+        """Export all conversations with their full messages for a user."""
+        with self._get_session() as session:
+            convs = session.query(ConversationRecord).filter(
+                ConversationRecord.user_email == user_email,
+            ).order_by(desc(ConversationRecord.updated_at)).all()
+
+            results = []
+            for conv in convs:
+                msgs = session.query(MessageRecord).filter(
+                    MessageRecord.conversation_id == conv.id,
+                ).order_by(MessageRecord.sequence_number).all()
+
+                messages = []
+                for msg in msgs:
+                    msg_data = {
+                        "role": msg.role,
+                        "content": msg.content or "",
+                        "message_type": msg.message_type,
+                        "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+                    }
+                    if msg.metadata_json:
+                        try:
+                            msg_data["metadata"] = json.loads(msg.metadata_json)
+                        except json.JSONDecodeError:
+                            pass
+                    messages.append(msg_data)
+
+                conv_metadata = {}
+                if conv.metadata_json:
+                    try:
+                        conv_metadata = json.loads(conv.metadata_json)
+                    except json.JSONDecodeError:
+                        pass
+
+                results.append({
+                    "id": conv.id,
+                    "title": conv.title,
+                    "model": conv.model,
+                    "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                    "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+                    "message_count": conv.message_count,
+                    "metadata": conv_metadata,
+                    "tags": self._get_tag_names(session, conv.id),
+                    "messages": messages,
+                })
+
+            return results
+
     def delete_all_conversations(self, user_email: str) -> int:
         """Delete all conversations for a user. Returns count deleted."""
         with self._get_session() as session:

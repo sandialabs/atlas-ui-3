@@ -249,6 +249,7 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 - `tool_start` / `tool_progress` / `tool_complete` - Direct tool lifecycle events with status transitions (`calling` -> `in_progress` -> `completed`/`failed`); Message.jsx renders spinners and elapsed timers for active states
 - `canvas_content` - HTML/markdown for canvas
 - `intermediate_update` - Files, images, etc.
+- `conversation_saved` - Sent after backend persists a conversation; carries `conversation_id` so the frontend can set `activeConversationId` and avoid duplicate sidebar entries
 
 ### REST API
 - `/api/heartbeat` - Minimal uptime check (`{"status":"ok"}`), no auth, rate-limited
@@ -256,6 +257,7 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 - `/api/config` - Models, tools, prompts, data_sources, rag_servers, features
 - `/api/compliance-levels` - Compliance level definitions
 - `/api/feedback` - Submit (POST) and view (GET, admin) user feedback; conversation history is stored inline in the feedback JSON when the user opts in
+- `/api/conversations/export` - Download all conversations with full messages as JSON (GET, auth required)
 - `/admin/*` - Configs and logs (admin group required)
 
 ## Development Commands
