@@ -43,6 +43,7 @@ dependencies = [
     "pydantic",
     "PyJWT",
     "PyPDF2",
+    "pytz",
     "python-dotenv",
     "python-multipart",
     "python-pptx",
