@@ -9,6 +9,7 @@ from atlas.interfaces.transport import ChatConnectionProtocol
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from .act_loop import ActAgentLoop
+from .agentic_loop import AgenticLoop
 from .protocols import AgentLoopProtocol
 from .react_loop import ReActAgentLoop
 from .think_act_loop import ThinkActAgentLoop
@@ -56,6 +57,7 @@ class AgentLoopFactory:
             "think_act": ThinkActAgentLoop,
             "thinkact": ThinkActAgentLoop,
             "act": ActAgentLoop,
+            "agentic": AgenticLoop,
         }
 
         # Cache of instantiated loops for performance
@@ -125,6 +127,8 @@ class AgentLoopFactory:
                 unique_strategies.add("think-act")
             elif strategy in ("act",):
                 unique_strategies.add("act")
+            elif strategy in ("agentic",):
+                unique_strategies.add("agentic")
         return sorted(unique_strategies)
 
     def register_strategy(self, name: str, loop_class: type[AgentLoopProtocol]) -> None:

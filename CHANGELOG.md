@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #359 - 2026-02-23
+- **Feature**: New `agentic` agent loop strategy (`APP_AGENT_LOOP_STRATEGY=agentic`) that mirrors the Claude Code / Claude Desktop tool-use pattern. Uses `tool_choice="auto"` with zero control tools (no `finished`, `agent_decide_next`, etc.), resulting in 1 LLM call per step instead of 3 (ReAct). Best suited for Anthropic models but compatible with all providers.
+
 ### PR #358 - 2026-02-22
 - **Feature**: Parallel multi-tool calling support (issue #353). When an LLM returns multiple tool calls in a single response, all calls now execute concurrently via `asyncio.gather` instead of sequentially or only the first. Applies to all three agent loops (ReAct, Think-Act, Act) and the non-agent tools mode.
 

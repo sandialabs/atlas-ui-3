@@ -58,7 +58,7 @@ atlas/
    application/
       chat/
          service.py     # ChatService - main orchestrator and streaming
-         agent/         # ReAct, Think-Act, and Act agent loops
+         agent/         # ReAct, Think-Act, Act, and Agentic agent loops
    domain/
       messages/         # Message and conversation models
       sessions/         # Session models
@@ -149,11 +149,14 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 
 ## Agent Modes
 
-Three agent loop strategies selectable via `APP_AGENT_LOOP_STRATEGY`:
+Four agent loop strategies selectable via `APP_AGENT_LOOP_STRATEGY`:
 
+- **Agentic** (`atlas/application/chat/agent/agentic_loop.py`): Claude-native loop with zero control tools and `tool_choice="auto"`. Model decides when to call tools and when to respond with text. 1 LLM call per step. Best for Anthropic models.
 - **ReAct** (`atlas/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
 - **Think-Act** (`atlas/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
 - **Act** (`atlas/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
+
+**Agentic vs Scaffolded Loops**: The `agentic` strategy uses no control tools and lets the model manage its own control flow (text-only response = done), while `react`/`think-act`/`act` use scaffolding tools like `finished` and `agent_decide_next` to force structure -- choose `agentic` for Anthropic models where native tool-use training makes scaffolding counterproductive.
 
 **Multi-Tool Calling**: All agent loops and the tools mode runner execute multiple tool calls from a single LLM response in parallel via `asyncio.gather` (`tool_executor.execute_multiple_tools`); individual failures are converted to error `ToolResult`s so other tools still succeed.
 
@@ -257,7 +260,7 @@ Edit `config/mcp.json` (your local config, created by `atlas-init`). Set `groups
 Edit `config/rag-sources.json` (your local config). For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
 
 **Change agent loop:**
-Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.
+Set `APP_AGENT_LOOP_STRATEGY` to `agentic | react | think-act | act`.
 
 ## Common Issues
 
