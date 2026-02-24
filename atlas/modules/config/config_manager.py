@@ -84,8 +84,13 @@ class ModelConfig(BaseModel):
     extra_headers: Optional[Dict[str, str]] = None
     # Compliance/security level (e.g., "External", "Internal", "Public")
     compliance_level: Optional[str] = None
-    # API key source: "system" uses env var resolution, "user" requires per-user key from token storage
+    # API key source: "system" uses env var resolution, "user" requires per-user key from token storage,
+    # "globus" uses Globus OAuth token for the configured scope (requires globus_scope)
     api_key_source: str = "system"
+    # Globus scope identifier for models using api_key_source: "globus"
+    # This is the resource_server UUID from the Globus token response other_tokens
+    # Example for ALCF: "681c10cc-f684-4540-bcd7-0b4df3bc26ef"
+    globus_scope: Optional[str] = None
 
 
 class LLMConfig(BaseModel):
@@ -444,6 +449,38 @@ class AppSettings(BaseSettings):
         default="/auth",
         description="URL to redirect to when authentication fails",
         validation_alias="AUTH_REDIRECT_URL"
+    )
+
+    # Globus OAuth settings
+    feature_globus_auth_enabled: bool = Field(
+        default=False,
+        description="Enable Globus OAuth authentication for ALCF and other Globus-scoped services",
+        validation_alias=AliasChoices("FEATURE_GLOBUS_AUTH_ENABLED"),
+    )
+    globus_client_id: Optional[str] = Field(
+        default=None,
+        description="Globus OAuth client ID (register at app.globus.org/settings/developers)",
+        validation_alias="GLOBUS_CLIENT_ID",
+    )
+    globus_client_secret: Optional[str] = Field(
+        default=None,
+        description="Globus OAuth client secret",
+        validation_alias="GLOBUS_CLIENT_SECRET",
+    )
+    globus_redirect_uri: Optional[str] = Field(
+        default=None,
+        description="Globus OAuth redirect URI (e.g. http://localhost:8000/auth/globus/callback)",
+        validation_alias="GLOBUS_REDIRECT_URI",
+    )
+    globus_scopes: str = Field(
+        default="openid profile email",
+        description="Space-separated Globus OAuth scopes to request (include service-specific scopes for ALCF etc.)",
+        validation_alias="GLOBUS_SCOPES",
+    )
+    globus_session_secret: str = Field(
+        default="atlas-globus-session-change-me",
+        description="Secret key for Globus session middleware",
+        validation_alias="GLOBUS_SESSION_SECRET",
     )
 
     # S3/MinIO storage settings
