@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useConversationHistory } from '../hooks/useConversationHistory'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
+import { getDisplayConversations } from '../utils/getDisplayConversations'
 
 const ContextMenu = ({ x, y, onDelete, onClose }) => {
   const menuRef = useRef(null)
@@ -94,6 +95,19 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages?.length, chatHistoryEnabled])
 
+  // Immediately refresh when a conversation is saved (activeConversationId changes from null to a value)
+  const prevActiveIdRef = useRef(activeConversationId)
+  useEffect(() => {
+    const prevId = prevActiveIdRef.current
+    prevActiveIdRef.current = activeConversationId
+    if (!prevId && activeConversationId && chatHistoryEnabled && !isIncognito) {
+      // Cancel any pending delayed refresh since we're fetching now
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConversationId, chatHistoryEnabled])
+
   // --- Resize logic (left-side panel: width = clientX - rect.left) ---
   const startResize = useCallback((e) => {
     setIsResizing(true)
@@ -155,12 +169,14 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
 
   const handleLoadConversation = useCallback(async (conv) => {
     if (conv._optimistic) return
+    // Don't reload the conversation we're already viewing
+    if (activeConversationId && conv.id === activeConversationId) return
     const fullConv = await history.loadConversation(conv.id)
     if (fullConv && !fullConv.error) {
       loadSavedConversation(fullConv)
       onMobileClose?.()
     }
-  }, [history, loadSavedConversation, onMobileClose])
+  }, [history, loadSavedConversation, onMobileClose, activeConversationId])
 
   const handleDeleteAll = useCallback(async () => {
     await history.deleteAll()
@@ -194,36 +210,16 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     return d.toLocaleDateString()
   }
 
-  const getDisplayConversations = () => {
-    const list = [...history.conversations]
-
-    // Show optimistic "Saving..." entry only when:
-    // 1. No activeConversationId yet (backend hasn't confirmed save)
-    // 2. There are user messages in the current chat
-    // 3. Chat history is enabled and not incognito
-    const userMessages = messages?.filter(m => m.role === 'user') || []
-    if (!activeConversationId && userMessages.length > 0 && chatHistoryEnabled && !isIncognito) {
-      const firstUserMsg = userMessages[0]?.content || ''
-      const title = firstUserMsg.substring(0, 200)
-      // Check if this conversation already appears in the fetched list
-      // (can happen when backend saves before frontend receives the conversation_saved event)
-      const alreadyInList = list.some(c => c.title === title)
-      if (!alreadyInList) {
-        list.unshift({
-          id: '__current__',
-          title: title || 'New conversation',
-          preview: 'Saving...',
-          updated_at: new Date().toISOString(),
-          message_count: messages.length,
-          _optimistic: true,
-        })
-      }
-    }
-    return list
-  }
-
   // --- Shared sidebar content ---
-  const displayConversations = chatHistoryEnabled ? getDisplayConversations() : []
+  const displayConversations = chatHistoryEnabled
+    ? getDisplayConversations({
+        conversations: history.conversations,
+        messages,
+        activeConversationId,
+        chatHistoryEnabled,
+        isIncognito,
+      })
+    : []
 
   const sidebarContent = (
     <>
