@@ -39,9 +39,9 @@ class TestInitCliStartup:
             [
                 sys.executable,
                 "-c",
-                "import atlas; import sys; "
-                "assert 'atlas.atlas_client' not in sys.modules, "
-                "'atlas.atlas_client was eagerly imported'",
+                ("import atlas; import sys; "
+                 "assert 'atlas.atlas_client' not in sys.modules, "
+                 "'atlas.atlas_client was eagerly imported'"),
             ],
             capture_output=True,
             text=True,
@@ -106,9 +106,9 @@ class TestInitCliStartup:
             [
                 sys.executable,
                 "-c",
-                "import atlas; print(atlas.__version__); print(atlas.VERSION); "
-                "import sys; "
-                "assert 'atlas.atlas_client' not in sys.modules",
+                ("import atlas; print(atlas.__version__); print(atlas.VERSION); "
+                 "import sys; "
+                 "assert 'atlas.atlas_client' not in sys.modules"),
             ],
             capture_output=True,
             text=True,
