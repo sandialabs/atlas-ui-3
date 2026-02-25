@@ -57,9 +57,25 @@ hljs.registerLanguage('sh', bash)
 export const preProcessLatex = (content) => {
   const placeholders = []
 
-  // Temporarily pull out fenced code blocks so we never touch their contents.
+  // Render ```latex / ```tex / ```math code blocks as KaTeX display math
+  // instead of treating them as regular code blocks.
+  const renderLatex = (latex, displayMode) => {
+    try {
+      return katex.renderToString(latex.trim(), { displayMode, throwOnError: false, output: 'html' })
+    } catch {
+      return latex
+    }
+  }
+
+  let result = content.replace(/```(?:latex|tex|math)\s*\n([\s\S]*?)```/gi, (_, latex) => {
+    const id = `LATEX_${placeholders.length}_LATEXEND`
+    placeholders.push(renderLatex(latex, true))
+    return id
+  })
+
+  // Temporarily pull out remaining fenced code blocks so we never touch their contents.
   const codeBlocks = []
-  let result = content.replace(/```[\s\S]*?```/g, (match) => {
+  result = result.replace(/```[\s\S]*?```/g, (match) => {
     const id = `CODEBLOCK_${codeBlocks.length}_CODEEND`
     codeBlocks.push(match)
     return id
@@ -72,14 +88,6 @@ export const preProcessLatex = (content) => {
     inlineCodes.push(match)
     return id
   })
-
-  const renderLatex = (latex, displayMode) => {
-    try {
-      return katex.renderToString(latex.trim(), { displayMode, throwOnError: false, output: 'html' })
-    } catch {
-      return latex
-    }
-  }
 
   // Display math: \[...\]
   result = result.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {

@@ -42,14 +42,29 @@ describe('preProcessLatex', () => {
     expect(placeholders[0]).toContain('katex')
   })
 
-  it('does not render LaTeX inside fenced code blocks', () => {
-    const input = '```latex\n\\[x^2\\]\n```'
+  it('renders ```latex code blocks as KaTeX display math', () => {
+    const input = '```latex\nax^{2}+bx+c=0\n```'
     const { result, placeholders } = preProcessLatex(input)
 
-    // No LaTeX should have been extracted
+    expect(placeholders).toHaveLength(1)
+    expect(placeholders[0]).toContain('katex')
+    expect(result).toContain('LATEX_0_LATEXEND')
+  })
+
+  it('renders ```tex code blocks as KaTeX display math', () => {
+    const input = '```tex\nx = \\frac{-b}{2a}\n```'
+    const { result, placeholders } = preProcessLatex(input)
+
+    expect(placeholders).toHaveLength(1)
+    expect(placeholders[0]).toContain('katex')
+  })
+
+  it('does not render LaTeX inside non-latex fenced code blocks', () => {
+    const input = '```python\n# $x^2$\n```'
+    const { result, placeholders } = preProcessLatex(input)
+
     expect(placeholders).toHaveLength(0)
-    // The code block should be returned unchanged
-    expect(result).toContain('\\[x^2\\]')
+    expect(result).toContain('# $x^2$')
   })
 
   it('does not render LaTeX inside inline code spans', () => {
