@@ -38,7 +38,7 @@ describe('getDisplayConversations', () => {
       messages: makeMessages(['Hello', 'Hi there']),
       activeConversationId: null,
       chatHistoryEnabled: true,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result).toHaveLength(1)
@@ -54,7 +54,7 @@ describe('getDisplayConversations', () => {
       messages: makeMessages(['Hello', 'Hi there']),
       activeConversationId: null,
       chatHistoryEnabled: true,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result).toHaveLength(1)
@@ -70,7 +70,7 @@ describe('getDisplayConversations', () => {
       messages: makeMessages(['Hello', 'Hi there']),
       activeConversationId: 'conv-uuid-123',
       chatHistoryEnabled: true,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result).toHaveLength(1)
@@ -86,7 +86,7 @@ describe('getDisplayConversations', () => {
       messages: makeMessages(['New question', 'Answer']),
       activeConversationId: 'new-conv-id',
       chatHistoryEnabled: true,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result).toHaveLength(2)
@@ -105,7 +105,7 @@ describe('getDisplayConversations', () => {
       messages: makeMessages(['Hello', 'Hi there']),
       activeConversationId: 'conv-uuid-123',
       chatHistoryEnabled: true,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result).toHaveLength(1)
@@ -118,7 +118,7 @@ describe('getDisplayConversations', () => {
 
   it('transitions cleanly through all three states without gaps', () => {
     const msgs = makeMessages(['My question', 'The answer'])
-    const base = { chatHistoryEnabled: true, isIncognito: false }
+    const base = { chatHistoryEnabled: true, saveMode: 'server' }
 
     // State 1: User just sent a message, backend hasn't saved yet
     const state1 = getDisplayConversations({
@@ -165,7 +165,7 @@ describe('getDisplayConversations', () => {
       messages: makeMessages(['Hello']),
       activeConversationId: null,
       chatHistoryEnabled: false,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result).toHaveLength(1)
@@ -173,13 +173,13 @@ describe('getDisplayConversations', () => {
     expect(result[0]._optimistic).toBeUndefined()
   })
 
-  it('returns fetched list as-is in incognito mode', () => {
+  it('returns fetched list as-is when saveMode is none (incognito)', () => {
     const result = getDisplayConversations({
       conversations: [],
       messages: makeMessages(['Secret question']),
       activeConversationId: null,
       chatHistoryEnabled: true,
-      isIncognito: true,
+      saveMode: 'none',
     })
 
     expect(result).toHaveLength(0)
@@ -192,7 +192,7 @@ describe('getDisplayConversations', () => {
       messages: [],
       activeConversationId: null,
       chatHistoryEnabled: true,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result).toHaveLength(1)
@@ -205,7 +205,7 @@ describe('getDisplayConversations', () => {
       messages: null,
       activeConversationId: null,
       chatHistoryEnabled: true,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result).toHaveLength(0)
@@ -218,7 +218,7 @@ describe('getDisplayConversations', () => {
       messages: makeMessages([longMsg]),
       activeConversationId: null,
       chatHistoryEnabled: true,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result[0].title).toBe('A'.repeat(200))
@@ -230,7 +230,7 @@ describe('getDisplayConversations', () => {
       messages: [{ role: 'user', content: '' }],
       activeConversationId: null,
       chatHistoryEnabled: true,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result[0].title).toBe('New conversation')
@@ -243,7 +243,7 @@ describe('getDisplayConversations', () => {
       messages: msgs,
       activeConversationId: null,
       chatHistoryEnabled: true,
-      isIncognito: false,
+      saveMode: 'server',
     })
 
     expect(result[0].message_count).toBe(4)

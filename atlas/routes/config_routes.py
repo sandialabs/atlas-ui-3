@@ -323,6 +323,7 @@ async def get_config(
             "files_panel": app_settings.feature_files_panel_enabled,
             "chat_history": app_settings.feature_chat_history_enabled,
             "chat_history_storage": _get_chat_history_storage_label(app_settings) if app_settings.feature_chat_history_enabled else None,
+            "chat_history_save_modes": ["none", "local", "server"] if app_settings.feature_chat_history_enabled else [],
             "compliance_levels": app_settings.feature_compliance_levels_enabled,
             "splash_screen": app_settings.feature_splash_screen_enabled,
             "file_content_extraction": app_settings.feature_file_content_extraction_enabled

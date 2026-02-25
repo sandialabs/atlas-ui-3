@@ -5,7 +5,33 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud } from 'lucide-react'
+import { nextSaveMode } from '../utils/saveModeConfig'
+
+// Save mode display config: label, icon component, button classes, title text
+const SAVE_MODE_CONFIG = {
+  none: {
+    label: 'Incognito',
+    Icon: Database,
+    strikethrough: true,
+    btnClass: 'bg-red-700 hover:bg-red-600 text-white',
+    title: 'Incognito -- conversations not saved anywhere (click to cycle)',
+  },
+  local: {
+    label: 'Saved Locally',
+    Icon: HardDrive,
+    strikethrough: false,
+    btnClass: 'bg-gray-700 hover:bg-gray-600 text-blue-300',
+    title: 'Conversations saved in your browser (click to cycle)',
+  },
+  server: {
+    label: 'Saved to Server',
+    Icon: Cloud,
+    strikethrough: false,
+    btnClass: 'bg-gray-700 hover:bg-gray-600 text-green-400',
+    title: 'Conversations saved to server (click to cycle)',
+  },
+}
 
 const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()
@@ -17,8 +43,8 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
     agentModeAvailable,
     agentModeEnabled,
     setAgentModeEnabled,
-    isIncognito,
-    setIsIncognito,
+    saveMode,
+    setSaveMode,
     downloadChat,
     downloadChatAsText,
     messages,
@@ -250,36 +276,28 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
           <span className="text-gray-400 hidden sm:inline">{connectionStatus}</span>
         </div>
 
-        {/* Incognito Toggle - Database icon shows save state */}
-        {features?.chat_history && (
-          <div className="relative group">
+        {/* Save Mode Toggle - cycles: Incognito -> Saved Locally -> Saved to Server */}
+        {features?.chat_history && (() => {
+          const cfg = SAVE_MODE_CONFIG[saveMode] || SAVE_MODE_CONFIG.server
+          const { Icon } = cfg
+          return (
             <button
-              onClick={() => setIsIncognito(!isIncognito)}
-              className={`flex items-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isIncognito
-                  ? 'bg-red-700 hover:bg-red-600 text-white'
-                  : 'bg-gray-700 hover:bg-gray-600 text-gray-400'
-              }`}
-              title={isIncognito ? 'Incognito mode ON - conversations not saved (click to disable)' : `Conversations are being saved${features.chat_history_storage ? ` to ${features.chat_history_storage}` : ''} (click for incognito)`}
+              onClick={() => setSaveMode(nextSaveMode(saveMode))}
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg text-sm font-medium transition-colors ${cfg.btnClass}`}
+              title={cfg.title}
             >
               <span className="relative inline-flex items-center justify-center w-4 h-4">
-                <Database className="w-4 h-4" />
-                {isIncognito && (
+                <Icon className="w-4 h-4" />
+                {cfg.strikethrough && (
                   <span className="absolute inset-0 flex items-center justify-center">
                     <span className="block w-5 h-0.5 bg-current rotate-45 rounded" />
                   </span>
                 )}
               </span>
-              <span className="hidden sm:inline">{isIncognito ? 'Incognito' : 'Saving'}</span>
+              <span className="hidden sm:inline">{cfg.label}</span>
             </button>
-            {/* Storage location indicator - shown on hover when saving */}
-            {!isIncognito && features.chat_history_storage && (
-              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 bg-gray-900 border border-gray-600 rounded text-xs text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                {features.chat_history_storage}
-              </div>
-            )}
-          </div>
-        )}
+          )
+        })()}
 
         {/* Desktop-only buttons (hidden on mobile, shown in hamburger menu) */}
         <div className="hidden min-[1200px]:flex items-center gap-2">
@@ -510,35 +528,30 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 </div>
               )}
 
-              {/* Incognito Toggle (Mobile) */}
-              {features?.chat_history && (
-                <button
-                  onClick={() => {
-                    setIsIncognito(!isIncognito)
-                    setMobileMenuOpen(false)
-                  }}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                    isIncognito
-                      ? 'bg-red-700 hover:bg-red-600 text-white'
-                      : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-                  }`}
-                >
-                  <span className="relative inline-flex items-center justify-center w-5 h-5">
-                    <Database className="w-5 h-5" />
-                    {isIncognito && (
-                      <span className="absolute inset-0 flex items-center justify-center">
-                        <span className="block w-6 h-0.5 bg-current rotate-45 rounded" />
-                      </span>
-                    )}
-                  </span>
-                  <div className="flex flex-col items-start">
-                    <span>{isIncognito ? 'Incognito' : 'Saving'}</span>
-                    {!isIncognito && features.chat_history_storage && (
-                      <span className="text-xs text-gray-500">{features.chat_history_storage}</span>
-                    )}
-                  </div>
-                </button>
-              )}
+              {/* Save Mode Toggle (Mobile) */}
+              {features?.chat_history && (() => {
+                const cfg = SAVE_MODE_CONFIG[saveMode] || SAVE_MODE_CONFIG.server
+                const { Icon } = cfg
+                return (
+                  <button
+                    onClick={() => {
+                      setSaveMode(nextSaveMode(saveMode))
+                      setMobileMenuOpen(false)
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${cfg.btnClass}`}
+                  >
+                    <span className="relative inline-flex items-center justify-center w-5 h-5">
+                      <Icon className="w-5 h-5" />
+                      {cfg.strikethrough && (
+                        <span className="absolute inset-0 flex items-center justify-center">
+                          <span className="block w-6 h-0.5 bg-current rotate-45 rounded" />
+                        </span>
+                      )}
+                    </span>
+                    <span>{cfg.label}</span>
+                  </button>
+                )
+              })()}
 
               {/* Agent Mode Toggle */}
               {agentModeAvailable && (

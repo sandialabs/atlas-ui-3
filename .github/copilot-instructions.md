@@ -89,6 +89,8 @@ frontend/src/
 
 **RAG Activation vs Selection:** In `ChatContext.sendChatMessage`, data sources are only sent to the backend when RAG is explicitly activated (`ragEnabled` toggle or `/search` command). Selecting data sources in the UI only marks availability; the backend orchestrator routes to RAG mode only when `selected_data_sources` is non-empty, so the frontend must gate what it sends.
 
+**3-State Save Mode:** Chat history uses a 3-state `saveMode` (`none`/`local`/`server`) persisted via `usePersistentState`. "local" mode saves conversations to IndexedDB in the browser (`localConversationDB.js`), "server" saves to the backend database, and "none" is incognito. The Sidebar calls both history hooks unconditionally (React rules of hooks) then picks the active one based on `saveMode`.
+
 ## Configuration and Feature Flags
 
 **Two-layer config**: User config in `config/` (created by `atlas-init`, set `APP_CONFIG_DIR` to customize) overrides package defaults in `atlas/config/`.

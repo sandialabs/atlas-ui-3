@@ -13,12 +13,16 @@ export function getDisplayConversations({
   messages,
   activeConversationId,
   chatHistoryEnabled,
+  saveMode,
+  // Backward compat: accept isIncognito and derive saveMode from it
   isIncognito,
 }) {
   const list = [...conversations]
   const userMessages = messages?.filter(m => m.role === 'user') || []
+  // Resolve effective save mode (support old callers passing isIncognito)
+  const effectiveMode = saveMode ?? (isIncognito ? 'none' : 'server')
 
-  if (userMessages.length > 0 && chatHistoryEnabled && !isIncognito) {
+  if (userMessages.length > 0 && chatHistoryEnabled && effectiveMode !== 'none') {
     const firstUserMsg = userMessages[0]?.content || ''
     const title = firstUserMsg.substring(0, 200)
 
