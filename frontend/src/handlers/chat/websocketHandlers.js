@@ -347,7 +347,6 @@ export function createWebSocketHandler(deps) {
 
   const handleWebSocketMessage = (data) => {
     try {
-      console.log(`WebSocket message from backend: ${data.type || 'unknown'}`)
   switch (data.type) {
         // Direct tool lifecycle events (new simplified callback path)
         case 'tool_start': {
@@ -546,12 +545,6 @@ export function createWebSocketHandler(deps) {
           break
         case 'elicitation_request':
           // Handle elicitation request - set pending elicitation state
-          console.log('[ELICITATION] Received elicitation_request:', {
-            elicitation_id: data.elicitation_id,
-            tool_name: data.tool_name,
-            message: data.message,
-            has_setPendingElicitation: typeof setPendingElicitation === 'function'
-          })
           try { setIsThinking(false) } catch { /* no-op */ }
           if (typeof setPendingElicitation === 'function') {
             setPendingElicitation({
@@ -561,9 +554,8 @@ export function createWebSocketHandler(deps) {
               message: data.message,
               response_schema: data.response_schema
             })
-            console.log('[ELICITATION] setPendingElicitation called successfully')
           } else {
-            console.error('[ELICITATION] setPendingElicitation is not a function!', typeof setPendingElicitation)
+            console.error('setPendingElicitation is not available')
           }
           break
         case 'intermediate_update':
@@ -577,7 +569,7 @@ export function createWebSocketHandler(deps) {
             // legacy wrapping
             handleAgentUpdate(data.data)
           } else {
-            console.log('Unknown WebSocket message type:', data)
+            console.warn('Unknown WebSocket message type:', data.type)
           }
           break
       }
