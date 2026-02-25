@@ -178,14 +178,14 @@ setup_environment() {
     # Check if .venv exists
     if [ ! -d "$PROJECT_ROOT/.venv" ]; then
         echo "Error: Virtual environment not found at $PROJECT_ROOT/.venv"
-        echo "Please run: uv venv && uv pip install -e '.[dev]'"
+        echo "Please run: uv sync --dev"
         exit 1
     fi
 
     # Check if uvicorn is installed
     if [ ! -f "$PROJECT_ROOT/.venv/bin/uvicorn" ]; then
         echo "Error: uvicorn not found in virtual environment"
-        echo "Please run: uv pip install -e '.[dev]'"
+        echo "Please run: uv sync --dev"
         exit 1
     fi
     

@@ -36,11 +36,10 @@ curl -H "Authorization: Bearer test-atlas-rag-token" \
 **Response:**
 ```json
 {
-  "user_name": "test@test.com",
-  "accessible_data_sources": [
-    {"name": "engineering-docs", "compliance_level": "Internal"},
-    {"name": "financial-reports", "compliance_level": "CUI"},
-    {"name": "company-wiki", "compliance_level": "Public"}
+  "data_sources": [
+    {"id": "company-policies", "label": "Company Policies", "compliance_level": "Internal", "description": "HR policies including remote work, expenses, PTO, and code of conduct"},
+    {"id": "technical-docs", "label": "Technical Documentation", "compliance_level": "Internal", "description": "Engineering docs covering API auth, database schema, deployment, and architecture"},
+    {"id": "product-knowledge", "label": "Product Knowledge Base", "compliance_level": "Public", "description": "Public product docs with getting started, troubleshooting, features, and API reference"}
   ]
 }
 ```
@@ -131,23 +130,19 @@ test-atlas-rag-token
 
 | User | Groups |
 |------|--------|
-| alice@example.com | engineering, data-science |
-| bob@example.com | sales, marketing |
-| charlie@example.com | engineering, devops |
-| diana@example.com | finance, executive |
-| test@test.com | engineering, finance, admin |
-| guest@example.com | public |
+| alice@example.com | employee, engineering |
+| bob@example.com | employee, sales |
+| charlie@example.com | employee, engineering, devops |
+| test@test.com | employee, engineering, devops, admin |
+| guest@example.com | (none) |
 
 ### Available Corpora
 
-| Corpus | Required Groups | Compliance |
-|--------|----------------|------------|
-| engineering-docs | engineering | Internal |
-| sales-playbook | sales, marketing | Internal |
-| kubernetes-runbooks | engineering, devops | CUI |
-| financial-reports | finance, executive | CUI |
-| company-wiki | (public) | Public |
-| research-papers | data-science, engineering | Internal |
+| Corpus | Label | Required Groups | Compliance |
+|--------|-------|----------------|------------|
+| company-policies | Company Policies | employee | Internal |
+| technical-docs | Technical Documentation | engineering, devops | Internal |
+| product-knowledge | Product Knowledge Base | (public) | Public |
 
 ## Using with Atlas UI
 

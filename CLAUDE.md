@@ -218,6 +218,7 @@ Models in `llmconfig.yml` can set `api_key_source: "user"` to require per-user A
 - RAG MCP tools expected: `rag_discover_resources`, `rag_get_raw_results`, optional `rag_get_synthesized_results`
 - RAG resources and servers may include `complianceLevel`
 - `domain/rag_mcp_service.py` handles RAG discovery/search/synthesis
+- HTTP RAG discovery (ATLAS RAG API v2) returns `{data_sources: [{id, label, compliance_level, description}]}`; the `DataSource` model in `client.py` mirrors this schema and `UnifiedRAGService` maps `label`/`description` into the UI sources array
 
 ### PPTX Generator MCP Server
 The `pptx_generator` MCP server (`atlas/mcp/pptx_generator/main.py`) uses a three-tier layout strategy: custom template file (via `PPTX_TEMPLATE_PATH` env var or search paths) -> built-in Office "Title and Content" layout -> blank layout with manual textboxes.

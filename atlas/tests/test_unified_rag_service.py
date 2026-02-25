@@ -213,8 +213,8 @@ class TestDiscoverHTTPSource:
 
         mock_client = AsyncMock()
         mock_client.discover_data_sources.return_value = [
-            DataSource(name="corpus1", compliance_level="Internal"),
-            DataSource(name="corpus2", compliance_level="Public"),
+            DataSource(id="corpus1", label="Corpus One", compliance_level="Internal", description="First corpus"),
+            DataSource(id="corpus2", label="Corpus Two", compliance_level="Public", description="Second corpus"),
         ]
 
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
@@ -227,6 +227,9 @@ class TestDiscoverHTTPSource:
         assert result["displayName"] == "Test HTTP RAG"
         assert len(result["sources"]) == 2
         assert result["sources"][0]["id"] == "corpus1"
+        assert result["sources"][0]["name"] == "Corpus One"
+        assert result["sources"][0]["label"] == "Corpus One"
+        assert result["sources"][0]["description"] == "First corpus"
         assert result["sources"][1]["id"] == "corpus2"
 
     @pytest.mark.asyncio

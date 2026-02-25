@@ -79,10 +79,9 @@ class TestDiscoverDataSources:
         """Test successful data source discovery."""
         mock_response = MagicMock()
         mock_response.json.return_value = {
-            "user_name": "test-user",
-            "accessible_data_sources": [
-                {"name": "corpus1", "compliance_level": "CUI"},
-                {"name": "corpus2", "compliance_level": "Public"},
+            "data_sources": [
+                {"id": "corpus1", "label": "Corpus One", "compliance_level": "CUI", "description": "First corpus"},
+                {"id": "corpus2", "label": "Corpus Two", "compliance_level": "Public", "description": "Second corpus"},
             ],
         }
         mock_response.raise_for_status = MagicMock()
@@ -98,9 +97,12 @@ class TestDiscoverDataSources:
 
         assert len(result) == 2
         assert isinstance(result[0], DataSource)
-        assert result[0].name == "corpus1"
+        assert result[0].id == "corpus1"
+        assert result[0].label == "Corpus One"
         assert result[0].compliance_level == "CUI"
-        assert result[1].name == "corpus2"
+        assert result[0].description == "First corpus"
+        assert result[1].id == "corpus2"
+        assert result[1].label == "Corpus Two"
         assert result[1].compliance_level == "Public"
 
         # Verify correct URL and params
@@ -115,8 +117,7 @@ class TestDiscoverDataSources:
         """Test discovery with no accessible data sources."""
         mock_response = MagicMock()
         mock_response.json.return_value = {
-            "user_name": "test-user",
-            "accessible_data_sources": [],
+            "data_sources": [],
         }
         mock_response.raise_for_status = MagicMock()
 

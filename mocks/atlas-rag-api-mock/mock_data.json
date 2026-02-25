@@ -2,6 +2,7 @@
   "data_sources": {
     "company-policies": {
       "name": "Company Policies",
+      "description": "HR policies including remote work, expenses, PTO, and code of conduct",
       "compliance_level": "Internal",
       "required_groups": ["employee"],
       "documents": [
@@ -33,6 +34,7 @@
     },
     "technical-docs": {
       "name": "Technical Documentation",
+      "description": "Engineering docs covering API auth, database schema, deployment, and architecture",
       "compliance_level": "Internal",
       "required_groups": ["engineering", "devops"],
       "documents": [
@@ -64,6 +66,7 @@
     },
     "product-knowledge": {
       "name": "Product Knowledge Base",
+      "description": "Public product docs with getting started, troubleshooting, features, and API reference",
       "compliance_level": "Public",
       "required_groups": [],
       "documents": [
