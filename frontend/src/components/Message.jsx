@@ -1,5 +1,7 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import 'katex/dist/katex.min.css'
+import { preProcessLatex, restoreLatexPlaceholders } from '../utils/latexPreprocessor'
 import { useChat } from '../contexts/ChatContext'
 import { useState, memo, useEffect, useRef } from 'react'
 import { Copy } from 'lucide-react'
@@ -44,6 +46,14 @@ hljs.registerLanguage('sql', sql)
 hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('shell', bash)
 hljs.registerLanguage('sh', bash)
+
+// DOMPurify configuration that permits KaTeX-generated HTML.
+// KaTeX renders almost exclusively with <span> (allowed by default) but also
+// uses <svg>, <path>, and a handful of MathML elements for some symbols.
+const DOMPURIFY_CONFIG = {
+  ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext'],
+  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace'],
+}
 
 // Helper function to highlight @file references in message content
 const processFileReferences = (content) => {
@@ -1134,8 +1144,10 @@ const renderContent = () => {
     const content = processMessageContent(message.content)
 
     try {
-      const markdownHtml = marked.parse(content)
-      const sanitizedHtml = DOMPurify.sanitize(markdownHtml)
+      const { result: latexProcessed, placeholders } = preProcessLatex(content)
+      const markdownHtml = marked.parse(latexProcessed)
+      const latexRestoredHtml = restoreLatexPlaceholders(markdownHtml, placeholders)
+      const sanitizedHtml = DOMPurify.sanitize(latexRestoredHtml, DOMPURIFY_CONFIG)
 
       return (
         <div
