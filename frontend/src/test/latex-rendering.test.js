@@ -1,8 +1,8 @@
 /**
- * Tests for LaTeX pre-processing helpers exported from Message.jsx.
+ * Tests for LaTeX pre-processing helpers.
  */
 import { describe, it, expect } from 'vitest'
-import { preProcessLatex, restoreLatexPlaceholders } from '../components/Message.jsx'
+import { preProcessLatex, restoreLatexPlaceholders } from '../utils/latexPreprocessor'
 
 describe('preProcessLatex', () => {
   it('renders display math with \\[...\\] delimiters', () => {
@@ -28,7 +28,7 @@ describe('preProcessLatex', () => {
 
   it('renders inline math with \\(...\\) delimiters', () => {
     const input = 'The value is \\(x^2\\) units.'
-    const { result, placeholders } = preProcessLatex(input)
+    const { placeholders } = preProcessLatex(input)
 
     expect(placeholders).toHaveLength(1)
     expect(placeholders[0]).toContain('katex')
@@ -36,7 +36,7 @@ describe('preProcessLatex', () => {
 
   it('renders inline math with single $...$ delimiters', () => {
     const input = 'The value is $x^2$ units.'
-    const { result, placeholders } = preProcessLatex(input)
+    const { placeholders } = preProcessLatex(input)
 
     expect(placeholders).toHaveLength(1)
     expect(placeholders[0]).toContain('katex')
@@ -53,7 +53,7 @@ describe('preProcessLatex', () => {
 
   it('renders ```tex code blocks as KaTeX display math', () => {
     const input = '```tex\nx = \\frac{-b}{2a}\n```'
-    const { result, placeholders } = preProcessLatex(input)
+    const { placeholders } = preProcessLatex(input)
 
     expect(placeholders).toHaveLength(1)
     expect(placeholders[0]).toContain('katex')
