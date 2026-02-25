@@ -73,15 +73,9 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   // Handle hotkey for new chat (Ctrl+Alt+N)
   useEffect(() => {
     const handleKeyDown = (event) => {
-      // Debug logging
-      if (event.ctrlKey && event.altKey) {
-        console.log('Ctrl+Alt pressed with key:', event.key, event.code)
-      }
-
       if (event.ctrlKey && event.altKey && (event.key === 'N' || event.key === 'n')) {
         event.preventDefault()
         event.stopPropagation()
-        console.log('New chat hotkey triggered!')
         clearChat()
         onCloseCanvas()
         // Focus the message input after a brief delay
