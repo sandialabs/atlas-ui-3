@@ -1,5 +1,5 @@
 #!/bin/bash
-# PR #359 - RAG API v2 data source discovery format
+# PR #368 - RAG API v2 data source discovery format
 # Validates that the RAG discovery API returns v2 format with id, label,
 # compliance_level, description fields and that the backend maps them correctly.
 set -e
@@ -10,7 +10,7 @@ PASS=0
 FAIL=0
 
 echo "=========================================="
-echo "PR #359 Validation: RAG API v2 DataSources"
+echo "PR #368 Validation: RAG API v2 DataSources"
 echo "=========================================="
 echo ""
 

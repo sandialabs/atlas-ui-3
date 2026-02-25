@@ -18,7 +18,6 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
-from atlas.modules.rag.client import DataSource
 
 MOCK_URL = "http://localhost:8002"
 MOCK_TOKEN = "test-atlas-rag-token"
