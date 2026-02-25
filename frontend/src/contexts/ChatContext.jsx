@@ -7,6 +7,7 @@ import { useAgentMode } from '../hooks/chat/useAgentMode'
 import { useMessages } from '../hooks/chat/useMessages'
 import { useFiles } from '../hooks/chat/useFiles'
 import { useSettings } from '../hooks/useSettings'
+import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
 
 // Generate cryptographically secure random string
@@ -43,8 +44,8 @@ export const ChatProvider = ({ children }) => {
 	const [, setPendingFileEvents] = useState(new Map())
 	const [pendingElicitation, setPendingElicitation] = useState(null)
 
-	// Chat history: incognito mode and active conversation tracking
-	const [isIncognito, setIsIncognito] = useState(false)
+	// Chat history: incognito mode persists across refreshes via localStorage
+	const [isIncognito, setIsIncognito] = usePersistentState('chatui-incognito-mode', false)
 	const [activeConversationId, setActiveConversationId] = useState(null)
 
 	// Method to add a file to attachments

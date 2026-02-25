@@ -252,25 +252,33 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
 
         {/* Incognito Toggle - Database icon shows save state */}
         {features?.chat_history && (
-          <button
-            onClick={() => setIsIncognito(!isIncognito)}
-            className={`flex items-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              isIncognito
-                ? 'bg-red-700 hover:bg-red-600 text-white'
-                : 'bg-gray-700 hover:bg-gray-600 text-gray-400'
-            }`}
-            title={isIncognito ? 'Incognito mode ON - conversations not saved (click to disable)' : 'Conversations are being saved (click for incognito)'}
-          >
-            <span className="relative inline-flex items-center justify-center w-4 h-4">
-              <Database className="w-4 h-4" />
-              {isIncognito && (
-                <span className="absolute inset-0 flex items-center justify-center">
-                  <span className="block w-5 h-0.5 bg-current rotate-45 rounded" />
-                </span>
-              )}
-            </span>
-            <span className="hidden sm:inline">{isIncognito ? 'Incognito' : 'Saving'}</span>
-          </button>
+          <div className="relative group">
+            <button
+              onClick={() => setIsIncognito(!isIncognito)}
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                isIncognito
+                  ? 'bg-red-700 hover:bg-red-600 text-white'
+                  : 'bg-gray-700 hover:bg-gray-600 text-gray-400'
+              }`}
+              title={isIncognito ? 'Incognito mode ON - conversations not saved (click to disable)' : `Conversations are being saved${features.chat_history_storage ? ` to ${features.chat_history_storage}` : ''} (click for incognito)`}
+            >
+              <span className="relative inline-flex items-center justify-center w-4 h-4">
+                <Database className="w-4 h-4" />
+                {isIncognito && (
+                  <span className="absolute inset-0 flex items-center justify-center">
+                    <span className="block w-5 h-0.5 bg-current rotate-45 rounded" />
+                  </span>
+                )}
+              </span>
+              <span className="hidden sm:inline">{isIncognito ? 'Incognito' : 'Saving'}</span>
+            </button>
+            {/* Storage location indicator - shown on hover when saving */}
+            {!isIncognito && features.chat_history_storage && (
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 bg-gray-900 border border-gray-600 rounded text-xs text-gray-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                {features.chat_history_storage}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Desktop-only buttons (hidden on mobile, shown in hamburger menu) */}
@@ -523,7 +531,12 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                       </span>
                     )}
                   </span>
-                  <span>{isIncognito ? 'Incognito' : 'Saving'}</span>
+                  <div className="flex flex-col items-start">
+                    <span>{isIncognito ? 'Incognito' : 'Saving'}</span>
+                    {!isIncognito && features.chat_history_storage && (
+                      <span className="text-xs text-gray-500">{features.chat_history_storage}</span>
+                    )}
+                  </div>
                 </button>
               )}
 
