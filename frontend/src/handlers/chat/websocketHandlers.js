@@ -555,7 +555,10 @@ export function createWebSocketHandler(deps) {
               response_schema: data.response_schema
             })
           } else {
-            console.error('setPendingElicitation is not available')
+            console.error('setPendingElicitation is not available', {
+              toolName: data && data.tool_name,
+              setPendingElicitationType: typeof setPendingElicitation
+            })
           }
           break
         case 'intermediate_update':
@@ -569,7 +572,7 @@ export function createWebSocketHandler(deps) {
             // legacy wrapping
             handleAgentUpdate(data.data)
           } else {
-            console.warn('Unknown WebSocket message type:', data.type)
+            console.warn('Unknown WebSocket message type:', data.type, Object.keys(data || {}))
           }
           break
       }

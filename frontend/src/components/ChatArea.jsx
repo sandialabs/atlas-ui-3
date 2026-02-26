@@ -206,7 +206,8 @@ const ChatArea = () => {
           } else {
             fileRefs[filename] = `[Error loading file: ${filename}]`
           }
-        } catch {
+        } catch (error) {
+          console.error(`Error fetching @file ${filename}:`, error)
           fileRefs[filename] = `[Error loading file: ${filename}]`
         }
       } else {
