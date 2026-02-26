@@ -5,6 +5,7 @@ and load balancers to verify service availability.
 """
 
 import logging
+import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -13,6 +14,34 @@ from fastapi import APIRouter
 from atlas.version import VERSION
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_git_commit() -> str:
+    """Read the short git commit hash.
+
+    Checks GIT_COMMIT env var first (set during Docker build), then
+    falls back to running git, then to 'unknown'.
+    """
+    import os
+
+    from_env = os.environ.get("GIT_COMMIT", "").strip()
+    if from_env:
+        return from_env
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return "unknown"
+
+
+GIT_COMMIT = _resolve_git_commit()
 
 router = APIRouter(prefix="/api", tags=["health"])
 
@@ -47,5 +76,6 @@ async def health_check() -> Dict[str, Any]:
         "status": "healthy",
         "service": "atlas-ui-3-backend",
         "version": VERSION,
+        "git_commit": GIT_COMMIT,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }

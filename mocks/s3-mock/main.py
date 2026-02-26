@@ -192,11 +192,6 @@ async def list_objects_v2(bucket: str, request: Request):
     """List Objects V2 endpoint."""
     bucket_root = get_bucket_root(bucket)
 
-    # Check if bucket exists (has any objects)
-    if not any(bucket_root.rglob("*")):
-        error_xml = create_error_xml("NoSuchBucket", "The specified bucket does not exist.", f"/{bucket}")
-        raise HTTPException(status_code=404, detail=error_xml)
-
     prefix = request.query_params.get("prefix", "")
     max_keys = int(request.query_params.get("max-keys", "1000"))
 

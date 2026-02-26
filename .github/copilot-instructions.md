@@ -260,6 +260,8 @@ Edit `config/rag-sources.json` (your local config). For MCP RAG servers, set `ty
 **Change agent loop:**
 Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.
 
+**Build-time constants**: `vite.config.js` injects `__APP_VERSION__`, `__GIT_HASH__`, and `__BUILD_TIME__` via `define`; in Docker these come from `GIT_HASH`/`APP_VERSION` build args since `.git/` and `atlas/version.py` are unavailable during the frontend build stage.
+
 ## Common Issues
 
 1. **"uv not found"**: Install uv package manager
