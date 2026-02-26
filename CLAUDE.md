@@ -205,6 +205,10 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 
 Models in `llmconfig.yml` can set `api_key_source: "user"` to require per-user API keys instead of system env vars. The `MCPTokenStorage` is reused with `"llm:{model_name}"` as the server_name key, and `user_email` is threaded through all LLM call paths (`LLMProtocol`, `LiteLLMCaller`, agent loops, orchestrator). REST endpoints live at `/api/llm/auth/` and the frontend reuses `TokenInputModal`.
 
+## Globus OAuth for ALCF Endpoints
+
+Models can also set `api_key_source: "globus"` with a `globus_scope` field (the Globus resource server UUID) to use tokens obtained via Globus OAuth. The Globus auth flow stores scoped tokens in MCPTokenStorage keyed as `"globus:{resource_server}"`. Browser-facing OAuth routes at `/auth/globus/` are excluded from the AuthMiddleware and require SessionMiddleware for CSRF state.
+
 ## MCP and RAG Conventions
 
 ### MCP Servers

@@ -109,6 +109,7 @@ services:
       - MCP_DISCOVERY_TIMEOUT=30
       - MCP_CALL_TIMEOUT=120
       - FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=false
+      - FEATURE_GLOBUS_AUTH_ENABLED=false
 
       # Agent mode configuration
       - AGENT_MAX_STEPS=30
