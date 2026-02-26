@@ -111,12 +111,13 @@ export const ChatProvider = ({ children }) => {
 			addAttachment,
 			resolvePendingFileEvent,
 			setPendingElicitation,
+			setActiveConversationId,
 			streamToken,
 			streamEnd,
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, streamToken, streamEnd])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd])
 
 	// Validate persisted data sources against current config and remove stale ones
 	useEffect(() => {
@@ -133,7 +134,7 @@ export const ChatProvider = ({ children }) => {
 		const staleSourceIds = [...selectedDataSources].filter(id => !validSourceIds.has(id))
 
 		if (staleSourceIds.length > 0) {
-			console.warn('Removing stale data sources from selection:', staleSourceIds)
+			// Remove stale data sources that no longer exist in config
 			// Remove stale sources by keeping only valid ones
 			const validSelections = [...selectedDataSources].filter(id => validSourceIds.has(id))
 			selections.clearDataSources()
@@ -160,7 +161,7 @@ export const ChatProvider = ({ children }) => {
 		const staleToolKeys = [...selectedTools].filter(key => !validToolKeys.has(key))
 
 		if (staleToolKeys.length > 0) {
-			console.warn('Removing stale tools from selection:', staleToolKeys)
+			// Remove stale tools that no longer exist in config
 			selections.removeTools(staleToolKeys)
 		}
 	// Only run when tools config changes, not on every selectedTools change
@@ -182,13 +183,13 @@ export const ChatProvider = ({ children }) => {
 		const stalePromptKeys = [...selectedPrompts].filter(key => !validPromptKeys.has(key))
 
 		if (stalePromptKeys.length > 0) {
-			console.warn('Removing stale prompts from selection:', stalePromptKeys)
+			// Remove stale prompts that no longer exist in config
 			selections.removePrompts(stalePromptKeys)
 		}
 
 		// Clear active prompt if it no longer exists in config
 		if (selections.activePromptKey && !validPromptKeys.has(selections.activePromptKey)) {
-			console.warn('Clearing stale active prompt:', selections.activePromptKey)
+			// Clear stale active prompt that no longer exists in config
 			selections.clearActivePrompt()
 		}
 	// Only run when prompts config changes, not on every selectedPrompts change

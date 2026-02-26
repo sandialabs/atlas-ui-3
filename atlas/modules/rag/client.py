@@ -11,8 +11,10 @@ from atlas.core.http_client import create_rag_client
 
 class DataSource(BaseModel):
     """Represents a RAG data source with compliance information."""
-    name: str
-    compliance_level: str
+    id: str
+    label: str
+    compliance_level: str = "CUI"
+    description: str = ""
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +78,8 @@ class RAGClient:
 
         try:
             data = await self.http_client.get(f"/v1/discover/datasources/{user_name}")
-            accessible_sources_data = data.get("accessible_data_sources", [])
+            # Support both v1 (accessible_data_sources) and v2 (data_sources) response formats
+            sources_list = data.get("data_sources", data.get("accessible_data_sources", []))
         except HTTPException as exc:
             logger.warning("HTTP error discovering data sources for %s: %s", user_name, exc.detail)
             return []
@@ -84,7 +87,7 @@ class RAGClient:
             logger.error("Unexpected error while discovering data sources for %s: %s", user_name, exc, exc_info=True)
             return []
 
-        return [DataSource(**source_data) for source_data in accessible_sources_data]
+        return [DataSource(**source_data) for source_data in sources_list]
 
     async def query_rag(self, user_name: str, data_source: str, messages: List[Dict]) -> RAGResponse:
         """Query RAG endpoint for a response with metadata.

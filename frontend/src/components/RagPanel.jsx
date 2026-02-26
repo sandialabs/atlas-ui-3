@@ -42,9 +42,10 @@ const RagPanel = ({ isOpen, onClose }) => {
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase()
       sources = sources.filter(source => {
-        const name = (source.name || '').toLowerCase()
+        const label = (source.label || source.name || '').toLowerCase()
+        const description = (source.description || '').toLowerCase()
         const serverName = (source.serverDisplayName || source.serverName || '').toLowerCase()
-        return name.includes(query) || serverName.includes(query)
+        return label.includes(query) || description.includes(query) || serverName.includes(query)
       })
     }
 
@@ -145,32 +146,38 @@ const RagPanel = ({ isOpen, onClose }) => {
           {filteredDataSources.length === 0 ? (
             <div className="text-gray-400 text-center py-8">No data sources available</div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-1.5">
               {filteredDataSources.map(dataSource => {
                 const selectionKey = `${dataSource.serverName}:${dataSource.id}`
                 const isSelected = selectedDataSources.has(selectionKey)
+                const displayLabel = dataSource.label || dataSource.name || dataSource.id
 
                 return (
                   <div
                     key={selectionKey}
                     onClick={() => toggleDataSource(selectionKey)}
-                    className={`p-4 rounded-lg border cursor-pointer transition-colors ${
+                    className={`px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
                       isSelected
                         ? 'bg-green-700 border-green-600 text-white'
                         : 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600'
                     }`}
                   >
-                    <div className="font-medium flex items-center justify-between">
-                      <span>
-                        {dataSource.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-sm truncate">
+                        {displayLabel}
                       </span>
                       {complianceLevelsEnabled && dataSource.complianceLevel && (
-                        <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${getComplianceBadgeColor(dataSource.complianceLevel)}`}>
+                        <span className={`px-1.5 py-0.5 text-xs font-semibold rounded-full whitespace-nowrap ${getComplianceBadgeColor(dataSource.complianceLevel)}`}>
                           {dataSource.complianceLevel}
                         </span>
                       )}
                     </div>
-                    <div className="text-sm mt-1 opacity-80">
+                    {dataSource.description && (
+                      <div className={`text-xs mt-0.5 line-clamp-2 ${isSelected ? 'opacity-80' : 'text-gray-400'}`}>
+                        {dataSource.description}
+                      </div>
+                    )}
+                    <div className={`text-xs mt-0.5 ${isSelected ? 'opacity-60' : 'text-gray-500'}`}>
                       {dataSource.serverDisplayName}
                     </div>
                   </div>

@@ -145,6 +145,7 @@ Note: ChatContext validates persisted localStorage selections (tools, prompts, d
 - Expected tools: `rag_discover_resources`, `rag_get_raw_results`, optional `rag_get_synthesized_results`
 - Resources and servers may include `complianceLevel`
 - `domain/rag_mcp_service.py` handles RAG discovery/search/synthesis
+- HTTP RAG discovery (ATLAS RAG API v2) returns `{data_sources: [{id, label, compliance_level, description}]}`; the `DataSource` model in `client.py` mirrors this schema and `UnifiedRAGService` maps `label`/`description` into the UI sources array
 
 **PPTX Generator MCP Server:** The `pptx_generator` MCP server (`atlas/mcp/pptx_generator/main.py`) uses a three-tier layout strategy: custom template file (via `PPTX_TEMPLATE_PATH` env var or search paths) -> built-in Office "Title and Content" layout -> blank layout with manual textboxes.
 
@@ -164,7 +165,7 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 
 **WebSocket API (`/ws`):**
 - Client messages: `chat`, `download_file`, `reset_session`, `attach_file`
-- Server messages: `token_stream`, `tool_use`, `tool_start`/`tool_progress`/`tool_complete` (direct tool lifecycle with spinner/timer in Message.jsx), `canvas_content`, `intermediate_update`
+- Server messages: `token_stream`, `tool_use`, `tool_start`/`tool_progress`/`tool_complete` (direct tool lifecycle with spinner/timer in Message.jsx), `canvas_content`, `intermediate_update`, `conversation_saved` (sends `conversation_id` so frontend tracks active conversation)
 
 **REST API:**
 - `/api/config` - Models, tools, prompts, data_sources, rag_servers, features

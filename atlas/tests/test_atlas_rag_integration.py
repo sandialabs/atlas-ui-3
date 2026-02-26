@@ -1,13 +1,15 @@
-"""Integration tests for AtlasRAGClient with the mock service.
+"""Tests for AtlasRAGClient.
 
-These tests require the atlas-rag-api-mock service to be running.
-They can be skipped if the mock service is not available.
+Unit tests mock HTTP responses so no external service is needed.
+Integration tests that require the atlas-rag-api-mock are skipped when
+the mock service is not available.
 """
 
 import os
 import subprocess
 import sys
 import time
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -81,46 +83,147 @@ def client():
     )
 
 
+def _mock_discover_response(sources):
+    """Build an httpx.Response for a discover_data_sources call."""
+    resp = httpx.Response(
+        200,
+        json={"data_sources": sources},
+        request=httpx.Request("GET", f"{MOCK_URL}/discover/datasources"),
+    )
+    return resp
+
+
+class TestDiscoverDataSourcesUnit:
+    """Unit tests for discover_data_sources (no external service needed)."""
+
+    @pytest.mark.asyncio
+    async def test_discover_data_sources_success(self):
+        """Test discovering data sources for a known user."""
+        client = AtlasRAGClient(base_url=MOCK_URL, bearer_token=MOCK_TOKEN)
+        mock_sources = [
+            {"id": "company-policies", "label": "Company Policies", "compliance_level": "Internal", "description": "Internal company policies"},
+            {"id": "technical-docs", "label": "Technical Docs", "compliance_level": "Internal", "description": "Technical documentation"},
+            {"id": "product-knowledge", "label": "Product Knowledge", "compliance_level": "Public", "description": "Public product info"},
+        ]
+        mock_resp = _mock_discover_response(mock_sources)
+
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+            sources = await client.discover_data_sources("test@test.com")
+
+        assert len(sources) > 0
+        source_ids = [s.id for s in sources]
+        assert "company-policies" in source_ids
+        assert "technical-docs" in source_ids
+        assert "product-knowledge" in source_ids
+
+        for source in sources:
+            assert source.compliance_level in ["Internal", "Public"]
+            assert source.label
+            assert source.description
+
+    @pytest.mark.asyncio
+    async def test_discover_data_sources_unknown_user(self):
+        """Test discovering data sources for an unknown user returns only public sources."""
+        client = AtlasRAGClient(base_url=MOCK_URL, bearer_token=MOCK_TOKEN)
+        mock_sources = [
+            {"id": "product-knowledge", "label": "Product Knowledge", "compliance_level": "Public", "description": "Public product info"},
+        ]
+        mock_resp = _mock_discover_response(mock_sources)
+
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+            sources = await client.discover_data_sources("unknown@example.com")
+
+        source_ids = [s.id for s in sources]
+        assert "product-knowledge" in source_ids
+        assert "company-policies" not in source_ids
+        assert "technical-docs" not in source_ids
+
+    @pytest.mark.asyncio
+    async def test_discover_data_sources_limited_access(self):
+        """Test that users only see corpora they have access to."""
+        client = AtlasRAGClient(base_url=MOCK_URL, bearer_token=MOCK_TOKEN)
+        mock_sources = [
+            {"id": "company-policies", "label": "Company Policies", "compliance_level": "Internal", "description": "Internal company policies"},
+            {"id": "product-knowledge", "label": "Product Knowledge", "compliance_level": "Public", "description": "Public product info"},
+        ]
+        mock_resp = _mock_discover_response(mock_sources)
+
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+            sources = await client.discover_data_sources("bob@example.com")
+
+        source_ids = [s.id for s in sources]
+        assert "company-policies" in source_ids
+        assert "product-knowledge" in source_ids
+        assert "technical-docs" not in source_ids
+
+    @pytest.mark.asyncio
+    async def test_discover_connection_error_returns_empty(self):
+        """Test that connection errors return empty list gracefully."""
+        client = AtlasRAGClient(base_url="http://localhost:99999", bearer_token=MOCK_TOKEN)
+        sources = await client.discover_data_sources("test@test.com")
+        assert sources == []
+
+    @pytest.mark.asyncio
+    async def test_discover_http_error_returns_empty(self):
+        """Test that HTTP errors return empty list gracefully."""
+        client = AtlasRAGClient(base_url=MOCK_URL, bearer_token=MOCK_TOKEN)
+        mock_resp = httpx.Response(
+            401,
+            json={"detail": "Unauthorized"},
+            request=httpx.Request("GET", f"{MOCK_URL}/discover/datasources"),
+        )
+
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+            sources = await client.discover_data_sources("test@test.com")
+
+        assert sources == []
+
+
+@pytest.mark.skipif(
+    not os.environ.get("RUN_RAG_INTEGRATION"),
+    reason="Requires atlas-rag-api-mock service; set RUN_RAG_INTEGRATION=1 to run",
+)
 class TestAtlasRAGIntegration:
-    """Integration tests for AtlasRAGClient with the mock service."""
+    """Integration tests that require the atlas-rag-api-mock service.
+
+    Skipped by default. Run with: RUN_RAG_INTEGRATION=1 pytest ...
+    """
 
     @pytest.mark.asyncio
     async def test_discover_data_sources_success(self, mock_service, client):
-        """Test discovering data sources for a known user."""
+        """Test discovering data sources for a known user against live mock."""
         sources = await client.discover_data_sources("test@test.com")
 
         assert len(sources) > 0
-        # test@test.com has employee, engineering, devops, admin groups - sees all sources
-        source_names = [s.name for s in sources]
-        assert "company-policies" in source_names
-        assert "technical-docs" in source_names
-        assert "product-knowledge" in source_names  # Public
+        source_ids = [s.id for s in sources]
+        assert "company-policies" in source_ids
+        assert "technical-docs" in source_ids
+        assert "product-knowledge" in source_ids
 
-        # Check compliance levels are returned
         for source in sources:
             assert source.compliance_level in ["Internal", "Public"]
+            assert source.label
+            assert source.description
 
     @pytest.mark.asyncio
     async def test_discover_data_sources_unknown_user(self, mock_service, client):
-        """Test discovering data sources for an unknown user returns only public sources."""
+        """Test discovering data sources for an unknown user against live mock."""
         sources = await client.discover_data_sources("unknown@example.com")
-        # Unknown users get public sources only
-        source_names = [s.name for s in sources]
-        assert "product-knowledge" in source_names
-        assert "company-policies" not in source_names
-        assert "technical-docs" not in source_names
+        source_ids = [s.id for s in sources]
+        assert "product-knowledge" in source_ids
+        assert "company-policies" not in source_ids
+        assert "technical-docs" not in source_ids
 
     @pytest.mark.asyncio
     async def test_discover_data_sources_limited_access(self, mock_service, client):
-        """Test that users only see corpora they have access to."""
-        # bob@example.com has employee and sales groups
+        """Test limited access against live mock."""
         sources = await client.discover_data_sources("bob@example.com")
 
-        source_names = [s.name for s in sources]
-        assert "company-policies" in source_names  # requires employee
-        assert "product-knowledge" in source_names  # Public
+        source_ids = [s.id for s in sources]
+        assert "company-policies" in source_ids  # requires employee
+        assert "product-knowledge" in source_ids  # Public
         # Should NOT have access to technical-docs (requires engineering or devops)
-        assert "technical-docs" not in source_names
+        assert "technical-docs" not in source_ids
 
     @pytest.mark.asyncio
     async def test_query_rag_success(self, mock_service, client):
@@ -196,8 +299,12 @@ class TestAtlasRAGIntegration:
         assert "404" in str(exc_info.value) or "not found" in str(exc_info.value).lower()
 
 
+@pytest.mark.skipif(
+    not os.environ.get("RUN_RAG_INTEGRATION"),
+    reason="Requires atlas-rag-api-mock service; set RUN_RAG_INTEGRATION=1 to run",
+)
 class TestAtlasRAGAuthFailures:
-    """Test authentication failure scenarios."""
+    """Test authentication failure scenarios (requires live mock)."""
 
     @pytest.mark.asyncio
     async def test_missing_token(self, mock_service):

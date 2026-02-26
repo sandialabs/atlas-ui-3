@@ -128,13 +128,14 @@ async def verify_token_middleware(request, call_next):
 # ------------------------------------------------------------------------------
 
 class DataSourceInfo(BaseModel):
-    name: str
-    compliance_level: str = "Internal"
+    id: str
+    label: str
+    compliance_level: str = "CUI"
+    description: str = ""
 
 
 class DataSourceDiscoveryResponse(BaseModel):
-    user_name: str
-    accessible_data_sources: List[DataSourceInfo]
+    data_sources: List[DataSourceInfo]
 
 
 class ChatMessage(BaseModel):
@@ -286,8 +287,10 @@ def get_accessible_corpora(user_name: str) -> List[DataSourceInfo]:
         # Public if no required groups, or user has at least one required group
         if not required or (user_groups & required):
             accessible.append(DataSourceInfo(
-                name=corpus_id,
-                compliance_level=corpus.get("compliance_level", "Internal"),
+                id=corpus_id,
+                label=corpus.get("name", corpus_id),
+                compliance_level=corpus.get("compliance_level", "CUI"),
+                description=corpus.get("description", ""),
             ))
 
     return accessible
@@ -319,8 +322,7 @@ async def discover_data_sources(as_user: str = Query(...)):
     logger.info("User %s can access %d data sources", as_user, len(accessible))
 
     return DataSourceDiscoveryResponse(
-        user_name=as_user,
-        accessible_data_sources=accessible,
+        data_sources=accessible,
     )
 
 
@@ -333,7 +335,7 @@ async def rag_completions(request: RagRequest, as_user: str = Query(...)):
     logger.info("RAG query from user: %s, corpora: %s", as_user, request.corpora)
 
     # Determine corpora to search
-    corpora_to_search = request.corpora or [c.name for c in get_accessible_corpora(as_user)]
+    corpora_to_search = request.corpora or [c.id for c in get_accessible_corpora(as_user)]
 
     # Validate access
     for corpus in corpora_to_search:

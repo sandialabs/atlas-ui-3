@@ -28,14 +28,10 @@ export const WSProvider = ({ children }) => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/ws`
     
-    console.log('Attempting WebSocket connection to:', wsUrl)
-    console.log('Current location:', window.location.host)
-    
     try {
       wsRef.current = new WebSocket(wsUrl)
 
       wsRef.current.onopen = () => {
-        console.log('WebSocket connected')
         setIsConnected(true)
         setConnectionStatus('Connected')
       }
@@ -52,12 +48,10 @@ export const WSProvider = ({ children }) => {
           })
         } catch (error) {
           console.error('Error parsing WebSocket message:', error)
-          console.log('Raw message that failed to parse:', event.data)
         }
       }
 
       wsRef.current.onclose = (event) => {
-        console.log('WebSocket disconnected, code:', event.code, 'reason:', event.reason)
         setIsConnected(false)
         // Check if closed due to authentication failure (1008 = Policy Violation)
         if (event.code === 1008) {
@@ -68,27 +62,20 @@ export const WSProvider = ({ children }) => {
       }
 
       wsRef.current.onerror = () => {
-        console.log('WebSocket connection failed')
         setIsConnected(false)
         setConnectionStatus('Connection Failed')
       }
     } catch {
-      console.log('WebSocket not available')
       setIsConnected(false)
       setConnectionStatus('Connection Failed')
     }
   }
 
   const sendMessage = (message) => {
-    console.log('[WSContext] sendMessage called with:', JSON.stringify(message, null, 2))
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('[WSContext] WebSocket is open, sending message')
-      const messageStr = JSON.stringify(message)
-      console.log('[WSContext] Message as JSON string:', messageStr)
-      wsRef.current.send(messageStr)
-      console.log('[WSContext] Message sent successfully')
+      wsRef.current.send(JSON.stringify(message))
     } else {
-      console.error('[WSContext] WebSocket is not connected, readyState:', wsRef.current?.readyState)
+      console.error('WebSocket is not connected, readyState:', wsRef.current?.readyState)
     }
   }
 
@@ -122,7 +109,6 @@ export const WSProvider = ({ children }) => {
         try {
           const response = await fetch('/api/config', { signal: AbortSignal.timeout(5000) })
           if (response.ok) {
-            console.log('Backend is alive but WebSocket is disconnected, attempting reconnection...')
             healthCheckFailuresRef.current = 0
             reconnectWebSocket()
             // After successful reconnection attempt, check again at initial interval
@@ -138,10 +124,6 @@ export const WSProvider = ({ children }) => {
           healthCheckFailuresRef.current,
           INITIAL_HEALTH_CHECK_INTERVAL,
           MAX_HEALTH_CHECK_INTERVAL
-        )
-        console.log(
-          `Backend health check failed (${healthCheckFailuresRef.current}x), ` +
-          `next check in ${(delay / 1000).toFixed(1)}s`
         )
         scheduleHealthCheck(delay)
       } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -164,7 +146,6 @@ export const WSProvider = ({ children }) => {
   }, [])
 
   const reconnectWebSocket = () => {
-    console.log('Manually reconnecting WebSocket...')
     if (wsRef.current) {
       wsRef.current.close()
     }

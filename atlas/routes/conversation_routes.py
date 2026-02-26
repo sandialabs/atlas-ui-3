@@ -1,9 +1,11 @@
 """REST API routes for conversation history management."""
 
 import logging
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from atlas.core.log_sanitizer import get_current_user
@@ -72,6 +74,34 @@ async def search_conversations(
         limit=limit,
     )
     return {"conversations": conversations}
+
+
+@router.get("/export")
+async def export_all_conversations(
+    current_user: str = Depends(get_current_user),
+):
+    """Export all conversations with full messages for the authenticated user.
+
+    Returns a JSON document containing all conversations and their messages,
+    suitable for download/backup.
+    """
+    repo = _get_repo()
+    if repo is None:
+        return {"error": "Chat history is not enabled"}
+
+    conversations = repo.export_all_conversations(current_user)
+    export_data = {
+        "export_date": datetime.now(timezone.utc).isoformat(),
+        "user_email": current_user,
+        "conversation_count": len(conversations),
+        "conversations": conversations,
+    }
+    return JSONResponse(
+        content=export_data,
+        headers={
+            "Content-Disposition": "attachment; filename=conversations-export.json",
+        },
+    )
 
 
 @router.get("/{conversation_id}")
