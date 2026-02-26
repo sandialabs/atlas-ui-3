@@ -116,7 +116,6 @@ describe('MCPConfigurationCard', () => {
       // Mock fetch to fail
       global.fetch.mockRejectedValue(new Error('Network error'))
 
-      const consoleLogSpy = vi.spyOn(console, 'log')
       vi.spyOn(console, 'error').mockImplementation(() => {}) // Suppress error logs
 
       await act(async () => {
@@ -131,9 +130,6 @@ describe('MCPConfigurationCard', () => {
       })
 
       expect(global.fetch).toHaveBeenCalledTimes(1)
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('1 consecutive failure(s), next retry in 1.0s')
-      )
 
       // Verify backoff delays retry - should NOT have retried after 500ms
       await act(async () => {
@@ -146,9 +142,6 @@ describe('MCPConfigurationCard', () => {
         await vi.advanceTimersByTimeAsync(500)
       })
       expect(global.fetch).toHaveBeenCalledTimes(2)
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('2 consecutive failure(s), next retry in 2.0s')
-      )
 
       // Should NOT retry before 2s
       await act(async () => {
@@ -161,11 +154,6 @@ describe('MCPConfigurationCard', () => {
         await vi.advanceTimersByTimeAsync(1000)
       })
       expect(global.fetch).toHaveBeenCalledTimes(3)
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('3 consecutive failure(s), next retry in 4.0s')
-      )
-
-      consoleLogSpy.mockRestore()
     })
 
     it('resets backoff delay after successful request', async () => {
@@ -272,7 +260,6 @@ describe('MCPConfigurationCard', () => {
       // Mock fetch to fail consistently
       global.fetch.mockRejectedValue(new Error('Network error'))
 
-      const consoleLogSpy = vi.spyOn(console, 'log')
       vi.spyOn(console, 'error').mockImplementation(() => {}) // Suppress error logs
 
       await act(async () => {
@@ -299,14 +286,12 @@ describe('MCPConfigurationCard', () => {
         expect(global.fetch).toHaveBeenCalledTimes(i + 2)
       }
 
-      // Verify the last delay is capped at 5 minutes
-      const lastLogCall = consoleLogSpy.mock.calls.find(call =>
-        call[0].includes('10 consecutive failure(s)')
-      )
-      expect(lastLogCall).toBeTruthy()
-      expect(lastLogCall[0]).toContain('next retry in 300.0s')
-
-      consoleLogSpy.mockRestore()
+      // Verify backoff is capped: after 10 failures, the next retry should
+      // still be at 300s (not growing further)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300000)
+      })
+      expect(global.fetch).toHaveBeenCalledTimes(delays.length + 2)
     })
   } else {
     it('skips React component tests in CI/CD', () => {

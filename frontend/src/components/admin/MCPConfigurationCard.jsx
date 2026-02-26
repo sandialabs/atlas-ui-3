@@ -98,7 +98,6 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         // Increment failure count and schedule next poll with backoff (includes jitter)
         failureCountRef.current += 1
         const delay = calculateBackoffDelay(failureCountRef.current, 1000, MAX_BACKOFF_DELAY)
-        console.log(`MCP status polling: ${failureCountRef.current} consecutive failure(s), next retry in ${(delay / 1000).toFixed(1)}s`)
         scheduleNextPoll(delay)
       } finally {
         setStatusLoading(false)

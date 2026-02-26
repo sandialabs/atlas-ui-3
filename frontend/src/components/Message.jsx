@@ -529,42 +529,21 @@ const ToolApprovalMessage = ({ message }) => {
   }, [settings?.autoApproveTools, message.admin_required, message.status, message.tool_call_id, message.arguments, sendApprovalResponse])
 
   const handleApprove = () => {
-    console.log('[ToolApproval] Approve button clicked', {
-      tool_call_id: message.tool_call_id,
-      tool_name: message.tool_name,
-      isEditing,
-      arguments: isEditing ? editedArgs : message.arguments
-    })
-    
-    const response = {
+    sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: true,
       arguments: isEditing ? editedArgs : message.arguments,
-    }
-    
-    console.log('[ToolApproval] Sending approval response:', JSON.stringify(response, null, 2))
-    sendApprovalResponse(response)
-    console.log('[ToolApproval] Approval response sent')
+    })
   }
 
   const handleReject = () => {
-    console.log('[ToolApproval] Reject button clicked', {
-      tool_call_id: message.tool_call_id,
-      tool_name: message.tool_name,
-      reason
-    })
-    
-    const response = {
+    sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: false,
       reason: reason || 'User rejected the tool call',
-    }
-    
-    console.log('[ToolApproval] Sending rejection response:', JSON.stringify(response, null, 2))
-    sendApprovalResponse(response)
-    console.log('[ToolApproval] Rejection response sent')
+    })
   }
 
   const handleArgumentChange = (key, value) => {

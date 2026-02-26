@@ -78,10 +78,6 @@ export function usePollingWithBackoff(fetchFn, {
           1000,
           maxBackoffDelay
         )
-        console.log(
-          `Polling backoff: ${failureCountRef.current} consecutive failure(s), ` +
-          `next retry in ${(delay / 1000).toFixed(1)}s`
-        )
         scheduleNext(delay)
       }
     }

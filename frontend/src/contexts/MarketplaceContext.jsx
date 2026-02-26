@@ -79,7 +79,6 @@ export const MarketplaceProvider = ({ children }) => {
         if (!allServers.has(s)) {
           next.delete(s)
           changed = true
-          console.warn('Removing stale marketplace server from selection:', s)
         }
       }
 
