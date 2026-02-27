@@ -155,7 +155,7 @@ const AnimatedLogo = ({ appName }) => {
     startedRef.current.add(id)
     const anims = el.querySelectorAll('animate')
     anims.forEach(a => {
-      try { a.beginElement() } catch (_) { /* ignore */ }
+      try { a.beginElement() } catch { /* ignore */ }
     })
   }, [])
 
