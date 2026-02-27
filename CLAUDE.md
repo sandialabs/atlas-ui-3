@@ -203,6 +203,7 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 - `FEATURE_RAG_MCP_ENABLED` - Enable/disable RAG over MCP
 - `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Enable/disable compliance level enforcement
 - `FEATURE_AGENT_MODE_AVAILABLE` - Enable/disable agent mode UI toggle
+- `VITE_FEATURE_ANIMATED_LOGO` - Enable/disable animated logo on welcome screen (build-time Vite flag; must also be added to `Dockerfile` ARG and to the `test_docker_env_sync.py` exclusion list when introducing new `VITE_FEATURE_*` flags)
 
 ## Per-User LLM API Keys
 

@@ -110,6 +110,7 @@ frontend/src/
 - `FEATURE_RAG_MCP_ENABLED` - Enable/disable RAG over MCP
 - `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Enable/disable compliance level enforcement
 - `FEATURE_AGENT_MODE_AVAILABLE` - Enable/disable agent mode UI toggle
+- `VITE_FEATURE_ANIMATED_LOGO` - Enable/disable animated logo on welcome screen (build-time Vite flag; new `VITE_FEATURE_*` flags must be added to `Dockerfile` ARG and the `test_docker_env_sync.py` exclusion list)
 
 ## MCP and RAG Conventions
 
