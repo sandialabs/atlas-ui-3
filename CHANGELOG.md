@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #367 - 2026-02-25
+- **Feature**: 3-state chat save mode (issue #367). Users cycle between Incognito (nothing saved), Saved Locally (IndexedDB in browser), and Saved to Server (backend database). The selected mode persists across page refreshes via `usePersistentState`. New `localConversationDB.js` IndexedDB wrapper and `useLocalConversationHistory` hook provide browser-local conversation storage with the same API shape as the server-backed hook.
+
+### PR #348 - 2026-02-24
+- **Feature**: LaTeX rendering in assistant messages using KaTeX. Display math (`\[...\]`, `$$...$$`) and inline math (`\(...\)`, `$...$`) are rendered as formatted equations. LaTeX inside fenced code blocks and inline code spans is left as-is.
+
+### PR #362 - 2026-02-24
+- **Fix**: Conversation save/display duplication bug (issue #356). Backend now sends a `conversation_saved` WebSocket event with the `conversation_id` after persisting, so the frontend can track the active conversation and avoid optimistic UI duplicates in the sidebar.
+- **Feature**: Download all conversations (issue #354). New "Download All Conversations" button in the sidebar exports all saved conversations with full messages as a JSON file via `GET /api/conversations/export`.
+
+### PR #368 - 2026-02-23
+- **Feature**: Update RAG discovery API to v2 format. Data sources now return `id`, `label`, `compliance_level`, and `description` fields. The `label` and `description` are displayed in the data sources panel with a more compact layout.
+
 ### PR #363 - 2026-02-23
 - **Feature**: New `agentic` agent loop strategy (`APP_AGENT_LOOP_STRATEGY=agentic`) that mirrors the Claude Code / Claude Desktop tool-use pattern. Uses `tool_choice="auto"` with zero control tools (no `finished`, `agent_decide_next`, etc.), resulting in 1 LLM call per step instead of 3 (ReAct). Best suited for Anthropic models but compatible with all providers.
 

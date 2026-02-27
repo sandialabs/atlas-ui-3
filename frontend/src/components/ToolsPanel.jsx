@@ -369,74 +369,27 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const isServerSelected = (serverName) => isServerAllSelected(serverName)
 
   const toggleServerItems = (serverName) => {
-    console.debug('[TOOLS_PANEL] toggleServerItems invoked', { serverName })
     const server = getServerByName(serverName)
-    if (!server) {
-      console.debug('[TOOLS_PANEL] server not found, aborting', { serverName })
-      return
-    }
+    if (!server) return
+
     const { toolKeys, promptKeys } = getServerKeys(server)
     const currentlySelected = isServerSelected(serverName)
-    console.debug('[TOOLS_PANEL] current state snapshot BEFORE', {
-      serverName,
-      toolKeys,
-      promptKeys,
-      selectedTools: Array.from(selectedTools),
-      selectedPrompts: Array.from(selectedPrompts),
-      currentlySelected
-    })
 
     if (currentlySelected) {
-      console.debug('[TOOLS_PANEL] Deselecting all items for server', { serverName })
       const toolsToRemove = toolKeys.filter(k => selectedTools.has(k))
       const promptsToRemove = promptKeys.filter(k => selectedPrompts.has(k))
-      if (toolsToRemove.length) {
-        console.debug('[TOOLS_PANEL] batch remove tools', toolsToRemove)
-        removeTools(toolsToRemove)
-      }
-      if (promptsToRemove.length) {
-        console.debug('[TOOLS_PANEL] batch remove prompts', promptsToRemove)
-        removePrompts(promptsToRemove)
-      }
-      // Log after microtask so state updates propagate
-      setTimeout(() => {
-        console.debug('[TOOLS_PANEL] state AFTER deselect', {
-          serverName,
-            selectedTools: Array.from(selectedTools),
-            selectedPrompts: Array.from(selectedPrompts),
-            serverSelectedNow: isServerSelected(serverName)
-        })
-      }, 0)
+      if (toolsToRemove.length) removeTools(toolsToRemove)
+      if (promptsToRemove.length) removePrompts(promptsToRemove)
       return
     }
 
-    console.debug('[TOOLS_PANEL] Selecting all tools for server', { serverName })
     const toolsToAdd = toolKeys.filter(k => !selectedTools.has(k))
-    if (toolsToAdd.length) {
-      console.debug('[TOOLS_PANEL] batch add tools', toolsToAdd)
-      addTools(toolsToAdd)
-    }
+    if (toolsToAdd.length) addTools(toolsToAdd)
 
-    // Add all prompts for this server
     if (promptKeys.length > 0) {
       const promptsToAdd = promptKeys.filter(k => !selectedPrompts.has(k))
-      console.debug('[TOOLS_PANEL] handling prompts for server', { serverName, promptKeys, promptsToAdd })
-      if (promptsToAdd.length) {
-        console.debug('[TOOLS_PANEL] batch add prompts', promptsToAdd)
-        addPrompts(promptsToAdd)
-      }
-    } else {
-      console.debug('[TOOLS_PANEL] no prompts for this server', { serverName })
+      if (promptsToAdd.length) addPrompts(promptsToAdd)
     }
-
-    setTimeout(() => {
-      console.debug('[TOOLS_PANEL] state AFTER select', {
-        serverName,
-        selectedTools: Array.from(selectedTools),
-        selectedPrompts: Array.from(selectedPrompts),
-        serverSelectedNow: isServerSelected(serverName)
-      })
-    }, 0)
   }
 
 

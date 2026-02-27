@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useConversationHistory } from '../hooks/useConversationHistory'
+import { useLocalConversationHistory } from '../hooks/useLocalConversationHistory'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
+import { getDisplayConversations } from '../utils/getDisplayConversations'
 
 const ContextMenu = ({ x, y, onDelete, onClose }) => {
   const menuRef = useRef(null)
@@ -45,7 +47,7 @@ const DEFAULT_WIDTH = 256
 
 const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const {
-    features, activeConversationId, loadSavedConversation, messages, isIncognito, clearChat,
+    features, activeConversationId, loadSavedConversation, messages, saveMode, clearChat,
   } = useChat()
 
   const chatHistoryEnabled = features?.chat_history
@@ -59,20 +61,23 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const refreshTimerRef = useRef(null)
   const panelRef = useRef(null)
 
-  const history = useConversationHistory()
+  // Both hooks are always called (React rules), but only the active one is used
+  const serverHistory = useConversationHistory()
+  const localHistory = useLocalConversationHistory()
+  const history = saveMode === 'local' ? localHistory : serverHistory
 
-  // Fetch conversations on mount and when feature is enabled
+  // Fetch conversations on mount, when feature is enabled, or when save mode changes
   useEffect(() => {
-    if (chatHistoryEnabled) {
+    if (chatHistoryEnabled && saveMode !== 'none') {
       history.fetchConversations()
       history.fetchTags()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatHistoryEnabled])
+  }, [chatHistoryEnabled, saveMode])
 
   // Auto-refresh conversation list when messages change
   useEffect(() => {
-    if (!chatHistoryEnabled || isIncognito) return
+    if (!chatHistoryEnabled || saveMode === 'none') return
     const currentCount = messages?.length || 0
     const prevCount = prevMessageCountRef.current
     prevMessageCountRef.current = currentCount
@@ -93,6 +98,19 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages?.length, chatHistoryEnabled])
+
+  // Immediately refresh when a conversation is saved (activeConversationId changes from null to a value)
+  const prevActiveIdRef = useRef(activeConversationId)
+  useEffect(() => {
+    const prevId = prevActiveIdRef.current
+    prevActiveIdRef.current = activeConversationId
+    if (!prevId && activeConversationId && chatHistoryEnabled && saveMode !== 'none') {
+      // Cancel any pending delayed refresh since we're fetching now
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConversationId, chatHistoryEnabled])
 
   // --- Resize logic (left-side panel: width = clientX - rect.left) ---
   const startResize = useCallback((e) => {
@@ -155,12 +173,14 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
 
   const handleLoadConversation = useCallback(async (conv) => {
     if (conv._optimistic) return
+    // Don't reload the conversation we're already viewing
+    if (activeConversationId && conv.id === activeConversationId) return
     const fullConv = await history.loadConversation(conv.id)
     if (fullConv && !fullConv.error) {
       loadSavedConversation(fullConv)
       onMobileClose?.()
     }
-  }, [history, loadSavedConversation, onMobileClose])
+  }, [history, loadSavedConversation, onMobileClose, activeConversationId])
 
   const handleDeleteAll = useCallback(async () => {
     await history.deleteAll()
@@ -194,31 +214,16 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     return d.toLocaleDateString()
   }
 
-  const getDisplayConversations = () => {
-    const list = [...history.conversations]
-    const userMessages = messages?.filter(m => m.role === 'user') || []
-    if (!activeConversationId && userMessages.length > 0 && chatHistoryEnabled && !isIncognito) {
-      const firstUserMsg = userMessages[0]?.content || ''
-      const title = firstUserMsg.substring(0, 200)
-      const alreadyExists = list.some(c =>
-        c.title === title || c.title === firstUserMsg || c.title === firstUserMsg.substring(0, 200)
-      )
-      if (!alreadyExists) {
-        list.unshift({
-          id: '__current__',
-          title: title || 'New conversation',
-          preview: 'Saving...',
-          updated_at: new Date().toISOString(),
-          message_count: messages.length,
-          _optimistic: true,
-        })
-      }
-    }
-    return list
-  }
-
   // --- Shared sidebar content ---
-  const displayConversations = chatHistoryEnabled ? getDisplayConversations() : []
+  const displayConversations = chatHistoryEnabled
+    ? getDisplayConversations({
+        conversations: history.conversations,
+        messages,
+        activeConversationId,
+        chatHistoryEnabled,
+        saveMode,
+      })
+    : []
 
   const sidebarContent = (
     <>
@@ -337,7 +342,13 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
 
           {/* Footer */}
           {displayConversations.length > 0 && (
-            <div className="p-2 border-t border-gray-700 flex-shrink-0">
+            <div className="p-2 border-t border-gray-700 flex-shrink-0 flex flex-col gap-1">
+              <button
+                onClick={() => history.downloadAll()}
+                className="w-full text-xs px-2 py-1.5 text-blue-400 hover:bg-blue-900/30 rounded transition-colors"
+              >
+                Download All Conversations
+              </button>
               <button
                 onClick={() => setShowDeleteConfirm('all')}
                 className="w-full text-xs px-2 py-1.5 text-red-400 hover:bg-red-900/30 rounded transition-colors"

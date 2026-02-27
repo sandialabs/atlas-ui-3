@@ -288,6 +288,14 @@ class ChatService:
             ):
                 try:
                     self._save_conversation(session_id, user_email, model)
+                    # Notify frontend of the conversation_id so it can track the active conversation
+                    session = self.sessions.get(session_id)
+                    conv_id = session.context.get("conversation_id", str(session_id)) if session else str(session_id)
+                    if update_callback:
+                        await update_callback({
+                            "type": "conversation_saved",
+                            "conversation_id": conv_id,
+                        })
                 except Exception as e:
                     logger.error("Failed to persist conversation: %s", e, exc_info=True)
 

@@ -74,7 +74,7 @@ def calculate_prompt_injection_risk(message: str, *, mode: str = "general") -> D
 
     # 3) Statistical anomalies
     # Delimiter density (triple quotes, fences, etc.)
-    delimiters = len(re.findall(r"[#*\-_=]{3,}|[\"\"\"''']{3,}", message or ""))
+    delimiters = len(re.findall(r"[#*\-_=]{3,}|[\"']{3,}", message or ""))
     if delimiters >= 3:
         score += 25
         triggers.append("excessive_delimiters")

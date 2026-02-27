@@ -106,6 +106,28 @@ export function useConversationHistory() {
     }
   }, [])
 
+  const downloadAll = useCallback(async () => {
+    try {
+      const res = await fetch('/api/conversations/export')
+      if (!res.ok) return false
+      const data = await res.json()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      a.download = `conversations-export-${ts}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      return true
+    } catch (e) {
+      console.error('Failed to download all conversations:', e)
+      return false
+    }
+  }, [])
+
   const addTag = useCallback(async (conversationId, tagName) => {
     try {
       const res = await fetch(`/api/conversations/${conversationId}/tags`, {
@@ -188,6 +210,7 @@ export function useConversationHistory() {
     deleteConversation,
     deleteMultiple,
     deleteAll,
+    downloadAll,
     addTag,
     removeTag,
     updateTitle,

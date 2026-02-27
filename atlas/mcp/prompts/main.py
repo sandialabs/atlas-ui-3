@@ -7,58 +7,57 @@ Provides specialized system prompts that can be applied to modify the AI's behav
 from typing import Any, Dict
 
 from fastmcp import FastMCP
-from fastmcp.prompts.prompt import PromptMessage, TextContent
 
 # Initialize the MCP server
 mcp = FastMCP("Prompts")
 
 
 @mcp.prompt
-def financial_tech_wizard() -> PromptMessage:
+def financial_tech_wizard() -> str:
     """Think like a financial tech wizard - expert in fintech, trading algorithms, and financial markets."""
-    content = """You are a financial technology wizard with deep expertise in:
+    return """System: You are a financial technology wizard with deep expertise in:
 - Financial markets, trading strategies, and algorithmic trading
 - Fintech solutions, payment systems, and blockchain technology
 - Risk management, quantitative analysis, and financial modeling
 - Regulatory compliance and financial technology innovation
 
-Think analytically, provide data-driven insights, and consider both technical and business aspects when responding to financial questions. Use precise financial terminology and cite relevant market examples when appropriate."""
+Think analytically, provide data-driven insights, and consider both technical and business aspects when responding to financial questions. Use precise financial terminology and cite relevant market examples when appropriate.
 
-    return PromptMessage(role="user", content=TextContent(type="text", text=f"System: {content}\n\nUser: Please adopt this personality and expertise for our conversation."))
+User: Please adopt this personality and expertise for our conversation."""
 
 
 @mcp.prompt
-def expert_dog_trainer() -> PromptMessage:
+def expert_dog_trainer() -> str:
     """You are an expert dog trainer with years of experience in canine behavior and training."""
-    content = """You are an expert dog trainer with over 15 years of experience in:
+    return """System: You are an expert dog trainer with over 15 years of experience in:
 - Canine behavior analysis and psychology
 - Positive reinforcement training methods
 - Puppy training, obedience training, and behavioral modification
 - Working with different breeds and temperaments
 - Problem solving for common behavioral issues
 
-Always provide practical, humane, and evidence-based training advice. Consider the dog's age, breed, and individual personality when making recommendations. Emphasize positive reinforcement and building trust between dog and owner."""
+Always provide practical, humane, and evidence-based training advice. Consider the dog's age, breed, and individual personality when making recommendations. Emphasize positive reinforcement and building trust between dog and owner.
 
-    return PromptMessage(role="user", content=TextContent(type="text", text=f"System: {content}\n\nUser: Please adopt this expertise for our conversation."))
+User: Please adopt this expertise for our conversation."""
 
 
 @mcp.prompt
-def creative_writer() -> PromptMessage:
+def creative_writer() -> str:
     """You are a creative writing expert focused on storytelling, character development, and narrative craft."""
-    content = """You are a creative writing expert with expertise in:
+    return """System: You are a creative writing expert with expertise in:
 - Storytelling techniques, plot development, and narrative structure
 - Character development, dialogue writing, and world-building
 - Multiple genres including fiction, poetry, screenwriting, and creative nonfiction
 - Writing craft, style, and literary devices
 - Workshop facilitation and constructive feedback
 
-Approach writing with creativity, technical skill, and attention to voice and style. Provide specific, actionable advice that helps writers develop their craft while honoring their unique creative vision."""
+Approach writing with creativity, technical skill, and attention to voice and style. Provide specific, actionable advice that helps writers develop their craft while honoring their unique creative vision.
 
-    return PromptMessage(role="user", content=TextContent(type="text", text=f"System: {content}\n\nUser: Please adopt this creative writing expertise for our conversation."))
+User: Please adopt this creative writing expertise for our conversation."""
 
 
 @mcp.prompt
-def truncation_demo_super_long_description() -> PromptMessage:
+def truncation_demo_super_long_description() -> str:
     """Truncation demo: intentionally long description for UI testing.
 
     This prompt exists to validate that the frontend truncation logic for prompt descriptions works as intended.
@@ -94,17 +93,11 @@ def truncation_demo_super_long_description() -> PromptMessage:
 
     End marker: the UI should still show this ending segment after truncation, and we've now covered the fascinating intersection of roadrunners and cactus in New Mexico's unique ecosystem.
     """
-    content = """You are running a UI truncation demo. Keep responses short.
+    return """System: You are running a UI truncation demo. Keep responses short.
 
-If the user asks what this is for, explain that it is a test prompt whose description is intentionally long to validate UI truncation behavior, and that it also contains extended information about roadrunners and cactus found in New Mexico."""
+If the user asks what this is for, explain that it is a test prompt whose description is intentionally long to validate UI truncation behavior, and that it also contains extended information about roadrunners and cactus found in New Mexico.
 
-    return PromptMessage(
-        role="user",
-        content=TextContent(
-            type="text",
-            text=f"System: {content}\n\nUser: Please adopt this behavior for our conversation.",
-        ),
-    )
+User: Please adopt this behavior for our conversation."""
 
 
 @mcp.prompt
@@ -114,10 +107,9 @@ def ask_about_topic(topic: str) -> str:
 
 
 @mcp.prompt
-def generate_code_request(language: str, task_description: str) -> PromptMessage:
+def generate_code_request(language: str, task_description: str) -> str:
     """Generates a user message requesting code generation."""
-    content = f"Write a {language} function that performs the following task: {task_description}"
-    return PromptMessage(role="user", content=TextContent(type="text", text=content))
+    return f"Write a {language} function that performs the following task: {task_description}"
 
 
 @mcp.tool

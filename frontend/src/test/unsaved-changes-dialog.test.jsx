@@ -233,10 +233,8 @@ describe('ToolsPanel - Unsaved Changes Dialog', () => {
 
     // Click Cancel in the dialog (not the main panel)
     const allCancelButtons = screen.getAllByText('Cancel')
-    console.log('Found Cancel buttons:', allCancelButtons.length)
     // The dialog button should be the second one (index 1)
     const dialogCancelButton = allCancelButtons[1]
-    console.log('Clicking dialog cancel button')
     fireEvent.click(dialogCancelButton)
 
     // Should not close the panel

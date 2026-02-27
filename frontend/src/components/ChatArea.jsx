@@ -140,20 +140,14 @@ const ChatArea = () => {
   const handleSubmit = async (e) => {
     e.preventDefault()
     let message = inputValue.trim()
-    if (!message || !currentModel || !isConnected) {
-      console.debug('Submit blocked:', { message: !!message, currentModel: !!currentModel, isConnected })
-      return
-    }
+    if (!message || !currentModel || !isConnected) return
 
     // Check for /search command - strip prefix and force RAG
     let forceRag = false
     if (message.toLowerCase().startsWith('/search ')) {
       message = message.substring(8).trim() // Remove '/search ' prefix
       forceRag = true
-      if (!message) {
-        console.debug('Empty search query after stripping /search prefix')
-        return
-      }
+      if (!message) return
     }
 
     try {
@@ -189,7 +183,6 @@ const ChatArea = () => {
     
     // Early return if sessionFiles is not properly initialized
     if (!sessionFiles || !sessionFiles.files || !Array.isArray(sessionFiles.files)) {
-      console.debug('Session files not available for @file processing')
       return fileRefs
     }
     
@@ -210,9 +203,7 @@ const ChatArea = () => {
           if (response.ok) {
             const fileData = await response.json()
             fileRefs[filename] = fileData.content_base64
-            console.log(`Loaded content for @file ${filename}`)
           } else {
-            console.warn(`Failed to load @file ${filename}:`, response.status)
             fileRefs[filename] = `[Error loading file: ${filename}]`
           }
         } catch (error) {
@@ -220,7 +211,6 @@ const ChatArea = () => {
           fileRefs[filename] = `[Error loading file: ${filename}]`
         }
       } else {
-        console.warn(`@file ${filename} not found in session files`)
         fileRefs[filename] = `[File not found: ${filename}]`
       }
     }

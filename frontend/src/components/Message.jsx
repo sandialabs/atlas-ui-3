@@ -1,5 +1,7 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import 'katex/dist/katex.min.css'
+import { preProcessLatex, restoreLatexPlaceholders } from '../utils/latexPreprocessor'
 import { useChat } from '../contexts/ChatContext'
 import { useState, memo, useEffect, useRef } from 'react'
 import { Copy } from 'lucide-react'
@@ -44,6 +46,14 @@ hljs.registerLanguage('sql', sql)
 hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('shell', bash)
 hljs.registerLanguage('sh', bash)
+
+// DOMPurify configuration that permits KaTeX-generated HTML.
+// KaTeX renders almost exclusively with <span> (allowed by default) but also
+// uses <svg>, <path>, and a handful of MathML elements for some symbols.
+const DOMPURIFY_CONFIG = {
+  ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext'],
+  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace'],
+}
 
 // Helper function to highlight @file references in message content
 const processFileReferences = (content) => {
@@ -519,42 +529,21 @@ const ToolApprovalMessage = ({ message }) => {
   }, [settings?.autoApproveTools, message.admin_required, message.status, message.tool_call_id, message.arguments, sendApprovalResponse])
 
   const handleApprove = () => {
-    console.log('[ToolApproval] Approve button clicked', {
-      tool_call_id: message.tool_call_id,
-      tool_name: message.tool_name,
-      isEditing,
-      arguments: isEditing ? editedArgs : message.arguments
-    })
-    
-    const response = {
+    sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: true,
       arguments: isEditing ? editedArgs : message.arguments,
-    }
-    
-    console.log('[ToolApproval] Sending approval response:', JSON.stringify(response, null, 2))
-    sendApprovalResponse(response)
-    console.log('[ToolApproval] Approval response sent')
+    })
   }
 
   const handleReject = () => {
-    console.log('[ToolApproval] Reject button clicked', {
-      tool_call_id: message.tool_call_id,
-      tool_name: message.tool_name,
-      reason
-    })
-    
-    const response = {
+    sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: false,
       reason: reason || 'User rejected the tool call',
-    }
-    
-    console.log('[ToolApproval] Sending rejection response:', JSON.stringify(response, null, 2))
-    sendApprovalResponse(response)
-    console.log('[ToolApproval] Rejection response sent')
+    })
   }
 
   const handleArgumentChange = (key, value) => {
@@ -1134,8 +1123,10 @@ const renderContent = () => {
     const content = processMessageContent(message.content)
 
     try {
-      const markdownHtml = marked.parse(content)
-      const sanitizedHtml = DOMPurify.sanitize(markdownHtml)
+      const { result: latexProcessed, placeholders } = preProcessLatex(content)
+      const markdownHtml = marked.parse(latexProcessed)
+      const latexRestoredHtml = restoreLatexPlaceholders(markdownHtml, placeholders)
+      const sanitizedHtml = DOMPurify.sanitize(latexRestoredHtml, DOMPURIFY_CONFIG)
 
       return (
         <div
