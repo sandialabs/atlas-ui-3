@@ -20,6 +20,7 @@ const logViteEnv = () => {
   const varsToLog = {
     VITE_APP_NAME: process.env.VITE_APP_NAME,
     VITE_FEATURE_POWERED_BY_ATLAS: process.env.VITE_FEATURE_POWERED_BY_ATLAS,
+    VITE_FEATURE_ANIMATED_LOGO: process.env.VITE_FEATURE_ANIMATED_LOGO,
   }
 
   console.log('\n[atlas-ui-3] Vite build-time environment:')

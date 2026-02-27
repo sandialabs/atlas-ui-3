@@ -1495,3 +1495,36 @@ table th, table td,
         transform: translateY(100%);
     }
 }
+
+/* Animated Logo */
+.animated-logo-container {
+    position: relative;
+    display: inline-block;
+    user-select: none;
+    cursor: default;
+}
+
+.animated-logo-glow {
+    position: absolute;
+    inset: 0;
+    border-radius: 1rem;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 15% 50%, rgba(0, 188, 212, 0.4) 0%, transparent 60%);
+    filter: blur(25px);
+    transform: scale(1.3);
+    transition: opacity 0.5s ease;
+}
+
+.animated-logo-float {
+    animation: animated-logo-float 6s ease-in-out infinite;
+}
+
+.animated-logo-scale {
+    transition: transform 0.35s ease;
+}
+
+@keyframes animated-logo-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+}
+

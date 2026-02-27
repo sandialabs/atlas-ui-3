@@ -47,6 +47,9 @@ ENV VITE_APP_NAME=${VITE_APP_NAME}
 # Set default whether to display powered by atlas logo on welcome screen (can be overridden via build arg)
 ARG VITE_FEATURE_POWERED_BY_ATLAS="false"
 ENV VITE_FEATURE_POWERED_BY_ATLAS=${VITE_FEATURE_POWERED_BY_ATLAS}
+# Enable animated logo on welcome screen (can be overridden via build arg)
+ARG VITE_FEATURE_ANIMATED_LOGO="true"
+ENV VITE_FEATURE_ANIMATED_LOGO=${VITE_FEATURE_ANIMATED_LOGO}
 # build and delete the node_modules
 RUN  npm run build && rm -rf node_modules
 
