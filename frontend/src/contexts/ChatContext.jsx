@@ -261,7 +261,7 @@ export const ChatProvider = ({ children }) => {
 			agent_mode: agent.agentModeEnabled,
 			agent_max_steps: settings.maxIterations || agent.agentMaxSteps,
 			temperature: settings.llmTemperature || 0.7,
-			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
+			agent_loop_strategy: undefined,
 			compliance_level_filter: selections.complianceLevelFilter,
 			save_mode: saveMode,
 			// Backward compat: backend still checks incognito for older clients

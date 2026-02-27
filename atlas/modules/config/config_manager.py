@@ -326,7 +326,7 @@ class AppSettings(BaseSettings):
     agent_max_steps: int = 10
     agent_loop_strategy: str = Field(
         default="think-act",
-        description="Agent loop strategy selector (react, think-act)",
+        description="Agent loop strategy selector (react, think-act, act, agentic)",
         validation_alias=AliasChoices("AGENT_LOOP_STRATEGY"),
     )
     # Backward compatibility: support old AGENT_MODE_AVAILABLE env if present
