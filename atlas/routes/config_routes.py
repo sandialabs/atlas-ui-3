@@ -322,12 +322,31 @@ async def get_config(
             "marketplace": app_settings.feature_marketplace_enabled,
             "files_panel": app_settings.feature_files_panel_enabled,
             "chat_history": app_settings.feature_chat_history_enabled,
+            "chat_history_storage": _get_chat_history_storage_label(app_settings) if app_settings.feature_chat_history_enabled else None,
+            "chat_history_save_modes": ["none", "local", "server"] if app_settings.feature_chat_history_enabled else [],
             "compliance_levels": app_settings.feature_compliance_levels_enabled,
             "splash_screen": app_settings.feature_splash_screen_enabled,
             "file_content_extraction": app_settings.feature_file_content_extraction_enabled
         },
         "file_extraction": _get_file_extraction_config(config_manager)
     }
+
+
+def _get_chat_history_storage_label(app_settings) -> str:
+    """Return a human-readable label for the chat history storage backend."""
+    db_url = app_settings.chat_history_db_url
+    if not db_url:
+        return "Local"
+    if db_url.startswith("duckdb"):
+        # Extract path from duckdb:///path/to/file.db
+        path = db_url.split("///", 1)[-1] if "///" in db_url else db_url
+        return f"DuckDB ({path})"
+    if "postgresql" in db_url or "postgres" in db_url:
+        return "PostgreSQL"
+    if "sqlite" in db_url:
+        path = db_url.split("///", 1)[-1] if "///" in db_url else db_url
+        return f"SQLite ({path})"
+    return "Database"
 
 
 def _get_file_extraction_config(config_manager) -> dict:

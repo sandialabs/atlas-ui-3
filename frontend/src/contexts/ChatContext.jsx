@@ -1,5 +1,5 @@
 // Slim ChatContext (clean refactor)
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { useWS } from './WSContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
 import { useSelections } from '../hooks/chat/useSelections'
@@ -7,7 +7,12 @@ import { useAgentMode } from '../hooks/chat/useAgentMode'
 import { useMessages } from '../hooks/chat/useMessages'
 import { useFiles } from '../hooks/chat/useFiles'
 import { useSettings } from '../hooks/useSettings'
+import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
+import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
+
+// Save mode constants: 'none' (incognito), 'local' (browser), 'server' (backend DB)
+const SAVE_MODES = ['none', 'local', 'server']
 
 // Generate cryptographically secure random string
 const generateSecureRandomString = (length = 9) => {
@@ -43,9 +48,11 @@ export const ChatProvider = ({ children }) => {
 	const [, setPendingFileEvents] = useState(new Map())
 	const [pendingElicitation, setPendingElicitation] = useState(null)
 
-	// Chat history: incognito mode and active conversation tracking
-	const [isIncognito, setIsIncognito] = useState(false)
+	// Chat history: 3-state save mode persists across refreshes via localStorage
+	// 'none' = incognito (nothing saved), 'local' = browser IndexedDB, 'server' = backend DB
+	const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'server')
 	const [activeConversationId, setActiveConversationId] = useState(null)
+	const localSaveTimerRef = useRef(null)
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {
@@ -256,10 +263,12 @@ export const ChatProvider = ({ children }) => {
 			temperature: settings.llmTemperature || 0.7,
 			agent_loop_strategy: settings.agentLoopStrategy || 'think-act',
 			compliance_level_filter: selections.complianceLevelFilter,
-			incognito: isIncognito,
+			save_mode: saveMode,
+			// Backward compat: backend still checks incognito for older clients
+			incognito: saveMode !== 'server',
 			conversation_id: activeConversationId || undefined,
 		})
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, isIncognito, activeConversationId])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId])
 
 	const clearChat = useCallback(() => {
 		resetMessages()
@@ -457,6 +466,38 @@ export const ChatProvider = ({ children }) => {
 		})
 	}, [sessionId, sendMessage, config.user])
 
+	// Auto-save to browser IndexedDB when saveMode is 'local'
+	useEffect(() => {
+		if (saveMode !== 'local') return
+		const userMessages = messages.filter(m => m.role === 'user')
+		if (userMessages.length === 0) return
+
+		if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current)
+		localSaveTimerRef.current = setTimeout(() => {
+			const convId = activeConversationId || `local_${Date.now()}_${generateSecureRandomString()}`
+			if (!activeConversationId) setActiveConversationId(convId)
+			const firstUserMsg = userMessages[0]?.content || ''
+			saveLocalConv({
+				id: convId,
+				title: firstUserMsg.substring(0, 200) || 'Untitled',
+				model: currentModel,
+				created_at: messages[0]?.timestamp || new Date().toISOString(),
+				messages: messages.map(m => ({
+					role: m.role,
+					content: m.content || '',
+					timestamp: m.timestamp,
+					message_type: m.type || 'chat',
+				})),
+				tags: [],
+			}).catch(e => console.error('Failed to save conversation locally:', e))
+		}, 1000)
+
+		return () => {
+			if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current)
+		}
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [messages?.length, saveMode, activeConversationId, currentModel])
+
 	// addSystemEvent: adds a system event message to the chat timeline
 	const addSystemEvent = useCallback((subtype, text, meta = {}) => {
 		const eventId = `system_${Date.now()}_${generateSecureRandomString()}`
@@ -560,8 +601,8 @@ export const ChatProvider = ({ children }) => {
 		pendingElicitation,
 		setPendingElicitation,
 		refreshConfig: config.refreshConfig,
-		isIncognito,
-		setIsIncognito,
+		saveMode,
+		setSaveMode,
 		activeConversationId,
 		loadSavedConversation,
 	}

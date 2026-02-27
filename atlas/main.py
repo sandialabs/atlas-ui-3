@@ -416,7 +416,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             agent_loop_strategy=data.get("agent_loop_strategy"),
                             update_callback=lambda message: websocket_update_callback(websocket, message),
                             files=data.get("files"),
-                            incognito=data.get("incognito", False),
+                            incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
                             conversation_id=data.get("conversation_id"),
                         )
                     except RateLimitError as e:
