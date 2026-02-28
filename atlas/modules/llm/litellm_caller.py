@@ -325,6 +325,20 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         return kwargs
 
+    @staticmethod
+    def _sanitize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Strip empty tool_calls arrays from messages.
+
+        OpenAI rejects messages where tool_calls is present but empty ([]).
+        The field must either be omitted or contain at least one item.
+        """
+        sanitized = []
+        for msg in messages:
+            if "tool_calls" in msg and not msg["tool_calls"]:
+                msg = {k: v for k, v in msg.items() if k != "tool_calls"}
+            sanitized.append(msg)
+        return sanitized
+
     async def call_plain(
         self,
         model_name: str,
@@ -355,7 +369,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             response = await acompletion(
                 model=litellm_model,
-                messages=messages,
+                messages=self._sanitize_messages(messages),
                 **model_kwargs
             )
 
@@ -523,7 +537,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             response = await acompletion(
                 model=litellm_model,
-                messages=messages,
+                messages=self._sanitize_messages(messages),
                 tools=tools_schema,
                 tool_choice=final_tool_choice,
                 **model_kwargs
@@ -552,7 +566,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 try:
                     response = await acompletion(
                         model=litellm_model,
-                        messages=messages,
+                        messages=self._sanitize_messages(messages),
                         tools=tools_schema,
                         tool_choice="auto",
                         **model_kwargs

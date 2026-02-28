@@ -160,7 +160,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             <div className="flex items-center justify-between">
               <label className="text-white font-medium">Agent Loop Strategy</label>
               <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
-                {settings.agentLoopStrategy === 'react' ? 'ReAct' : settings.agentLoopStrategy === 'act' ? 'Act' : 'Think-Act'}
+                {settings.agentLoopStrategy === 'agentic' ? 'Agentic' : settings.agentLoopStrategy === 'react' ? 'ReAct' : settings.agentLoopStrategy === 'act' ? 'Act' : 'Think-Act'}
               </span>
             </div>
             <div className="space-y-2">
@@ -169,10 +169,15 @@ const SettingsPanel = ({ isOpen, onClose }) => {
                 onChange={(e) => handleSettingChange('agentLoopStrategy', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
               >
-                <option value="think-act">Think-Act (Recommended)</option>
+                <option value="agentic">Agentic (Recommended)</option>
+                <option value="think-act">Think-Act</option>
                 <option value="react">ReAct</option>
                 <option value="act">Act</option>
               </select>
+              <p className="text-sm text-gray-400">
+                <strong className="text-gray-300">Agentic:</strong> Claude-native loop with no control tools and tool_choice=auto.
+                The model decides when to call tools and when to respond. Best for Anthropic models.
+              </p>
               <p className="text-sm text-gray-400">
                 <strong className="text-gray-300">Think-Act:</strong> Concise, unified reasoning approach.
                 Faster iterations with fewer LLM calls. Better for most workflows and quick tasks.

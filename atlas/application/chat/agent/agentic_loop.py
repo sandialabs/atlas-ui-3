@@ -91,6 +91,13 @@ class AgenticLoop(AgentLoopProtocol):
 
         while steps < max_steps:
             steps += 1
+
+            # Sanitize messages: OpenAI rejects empty tool_calls arrays
+            for i, msg in enumerate(messages):
+                if isinstance(msg, dict) and "tool_calls" in msg and not msg["tool_calls"]:
+                    logger.warning("Stripping empty tool_calls from messages[%d]", i)
+                    del msg["tool_calls"]
+
             await event_handler(AgentEvent(
                 type="agent_turn_start", payload={"step": steps},
             ))
