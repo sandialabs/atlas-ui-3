@@ -54,7 +54,7 @@ class LiteLLMStreamingMixin:
 
             response = await acompletion(
                 model=litellm_model,
-                messages=messages,
+                messages=self._sanitize_messages(messages),
                 stream=True,
                 **model_kwargs,
             )
@@ -121,7 +121,7 @@ class LiteLLMStreamingMixin:
 
             response = await acompletion(
                 model=litellm_model,
-                messages=messages,
+                messages=self._sanitize_messages(messages),
                 tools=tools_schema,
                 tool_choice=tool_choice,
                 stream=True,
