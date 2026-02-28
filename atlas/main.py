@@ -377,6 +377,7 @@ async def websocket_endpoint(websocket: WebSocket):
     )
 
     session_id = uuid4()
+    active_chat_task = {"task": None}
 
     # Create connection adapter with authenticated user and chat service
     connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
@@ -451,6 +452,21 @@ async def websocket_endpoint(websocket: WebSocket):
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "validation"
                         })
+                    except asyncio.CancelledError:
+                        logger.info("Chat task cancelled by user (stop_streaming)")
+                        try:
+                            await websocket.send_json({
+                                "type": "token_stream",
+                                "token": "",
+                                "is_first": False,
+                                "is_last": True,
+                            })
+                            await websocket.send_json({
+                                "type": "response_complete",
+                            })
+                        except Exception:
+                            pass  # WebSocket may already be closed
+                        return
                     except DomainError as e:
                         logger.error(f"Domain error in chat handler: {e}", exc_info=True)
                         log_metric("error", user_email, error_type="domain")
@@ -469,7 +485,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
 
                 # Start chat handling in background
-                asyncio.create_task(handle_chat())
+                active_chat_task["task"] = asyncio.create_task(handle_chat())
 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection)
@@ -536,6 +552,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
+
+            elif message_type == "stop_streaming":
+                task = active_chat_task.get("task")
+                if task and not task.done():
+                    logger.info("Cancelling active chat task (stop_streaming)")
+                    task.cancel()
 
             elif message_type == "elicitation_response":
                 # Handle elicitation response
