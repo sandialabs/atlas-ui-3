@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-const TILT_MAX = 5
 const PULL_MAX = 5
 const LERP_SPEED = 0.08
 
@@ -160,9 +159,7 @@ const AnimatedLogo = ({ appName }) => {
     })
   }, [])
 
-  // Compute transforms
-  const tiltX = (renderPos.x - 0.5) * TILT_MAX * 2
-  const tiltY = -(renderPos.y - 0.5) * TILT_MAX * 2
+  // Compute pull offset toward cursor
   const pullX = (renderPos.x - 0.5) * PULL_MAX * 2
   const pullY = (renderPos.y - 0.5) * PULL_MAX * 2
   const showPulse = logoLoaded && imgDims.width > 0
@@ -171,7 +168,6 @@ const AnimatedLogo = ({ appName }) => {
     <div
       ref={containerRef}
       className="animated-logo-container"
-      style={{ perspective: '800px' }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -181,11 +177,10 @@ const AnimatedLogo = ({ appName }) => {
         style={{ opacity: isHovering ? 0.5 : 0.12 }}
       />
 
-      {/* Tilt + pull wrapper */}
+      {/* Pull wrapper - shifts logo toward cursor */}
       <div
         style={{
-          transform: `translate(${pullX}px, ${pullY}px) rotateY(${tiltX}deg) rotateX(${tiltY}deg)`,
-          transformStyle: 'preserve-3d',
+          transform: `translate(${pullX}px, ${pullY}px)`,
           willChange: 'transform',
         }}
       >
