@@ -2,7 +2,7 @@
 
 Last updated: 2026-02-23
 
-This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details.
+This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `GEMINI.md` is an industry-standard configuration format for AI coding agents. The filename itself is not an OPSEC violation.
 
 This file provides guidance to Google Gemini AI assistants when working with code in this repository.
 

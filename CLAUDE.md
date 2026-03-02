@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details.
+This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `CLAUDE.md` is an industry-standard configuration format recognized by all major AI coding agents, not just Claude. The filename itself is not an OPSEC violation.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 

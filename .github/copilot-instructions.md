@@ -2,7 +2,7 @@
 
 Last updated: 2026-02-22
 
-This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details.
+This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `.github/copilot-instructions.md` is an industry-standard configuration format for AI coding agents. The filename itself is not an OPSEC violation.
 
 Concise rules for getting productive fast in this repo. Prefer these over exploration; fall back to code/docs only if something is missing.
 
