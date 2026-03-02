@@ -1515,16 +1515,4 @@ table th, table td,
     transition: opacity 0.5s ease;
 }
 
-.animated-logo-float {
-    animation: animated-logo-float 6s ease-in-out infinite;
-}
-
-.animated-logo-scale {
-    transition: transform 0.35s ease;
-}
-
-@keyframes animated-logo-float {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-6px); }
-}
 
