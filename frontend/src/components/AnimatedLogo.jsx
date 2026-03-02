@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-const TILT_MAX = 5
+const PULL_MAX = 5
 const LERP_SPEED = 0.08
 
 function lerp(a, b, t) {
@@ -159,16 +159,15 @@ const AnimatedLogo = ({ appName }) => {
     })
   }, [])
 
-  // Compute transforms
-  const tiltX = (renderPos.x - 0.5) * TILT_MAX * 2
-  const tiltY = -(renderPos.y - 0.5) * TILT_MAX * 2
+  // Compute pull offset toward cursor
+  const pullX = (renderPos.x - 0.5) * PULL_MAX * 2
+  const pullY = (renderPos.y - 0.5) * PULL_MAX * 2
   const showPulse = logoLoaded && imgDims.width > 0
 
   return (
     <div
       ref={containerRef}
       className="animated-logo-container"
-      style={{ perspective: '800px' }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -178,21 +177,13 @@ const AnimatedLogo = ({ appName }) => {
         style={{ opacity: isHovering ? 0.5 : 0.12 }}
       />
 
-      {/* Float wrapper */}
-      <div className="animated-logo-float">
-        {/* Scale wrapper */}
-        <div
-          className="animated-logo-scale"
-          style={{ transform: `scale(${isHovering ? 1.03 : 1})` }}
-        >
-          {/* Tilt wrapper */}
-          <div
-            style={{
-              transform: `rotateY(${tiltX}deg) rotateX(${tiltY}deg)`,
-              transformStyle: 'preserve-3d',
-              willChange: 'transform',
-            }}
-          >
+      {/* Pull wrapper - shifts logo toward cursor */}
+      <div
+        style={{
+          transform: `translate(${pullX}px, ${pullY}px)`,
+          willChange: 'transform',
+        }}
+      >
             {/* Image + pulse overlay wrapper */}
             <div className="relative inline-block">
               <img
@@ -258,8 +249,6 @@ const AnimatedLogo = ({ appName }) => {
                   ))}
                 </svg>
               )}
-            </div>
-          </div>
         </div>
       </div>
     </div>
