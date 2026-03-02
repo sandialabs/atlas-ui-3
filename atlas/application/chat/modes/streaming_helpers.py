@@ -5,6 +5,7 @@ PlainModeRunner, RagModeRunner, and ToolsModeRunner when streaming
 LLM responses token-by-token.
 """
 
+import asyncio
 import logging
 from typing import AsyncGenerator
 
@@ -63,6 +64,12 @@ async def stream_and_accumulate(
             await event_publisher.publish_token_stream(
                 token="", is_first=False, is_last=True,
             )
+    except asyncio.CancelledError:
+        logger.info("%s stream cancelled by user", context_label)
+        await event_publisher.publish_token_stream(
+            token="", is_first=False, is_last=True,
+        )
+        raise
     except Exception as exc:
         logger.error("%s streaming error, sending partial content: %s", context_label, exc)
         await event_publisher.publish_token_stream(

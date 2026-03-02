@@ -8,7 +8,7 @@ import { useMessages } from '../hooks/chat/useMessages'
 import { useFiles } from '../hooks/chat/useFiles'
 import { useSettings } from '../hooks/useSettings'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
-import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
+import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 
 // Save mode constants: 'none' (incognito), 'local' (browser), 'server' (backend DB)
@@ -39,6 +39,8 @@ export const ChatProvider = ({ children }) => {
 	const files = useFiles()
 	const { messages, addMessage, bulkAdd, mapMessages, resetMessages, streamToken, streamEnd } = useMessages()
 	const { settings, updateSettings } = useSettings()
+
+	const isStreaming = messages.some(m => m._streaming === true)
 
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
 	const [isThinking, setIsThinking] = useState(false)
@@ -334,6 +336,14 @@ export const ChatProvider = ({ children }) => {
 			if (sendMessage) sendMessage({ type: 'agent_control', action: 'stop' })
 		}, [sendMessage])
 
+		// Stop non-agent streaming
+		const stopStreaming = useCallback(() => {
+			cleanupStreamState()
+			streamEnd()
+			setIsThinking(false)
+			if (sendMessage) sendMessage({ type: 'stop_streaming' })
+		}, [sendMessage, streamEnd])
+
 			const answerAgentQuestion = useCallback((content) => {
 			if (!content || !content.trim()) return
 				// Show immediately in UI
@@ -570,6 +580,8 @@ export const ChatProvider = ({ children }) => {
 		sendChatMessage,
 		clearChat,
 		stopAgent,
+		stopStreaming,
+		isStreaming,
 		answerAgentQuestion,
 		downloadChat,
 		downloadChatAsText,
