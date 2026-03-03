@@ -15,7 +15,6 @@ Updated: 2026-02-24
 """
 
 import logging
-import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -100,12 +99,16 @@ async def globus_callback(
     tokens from 'other_tokens', stores them in MCPTokenStorage, and
     redirects back to the app.
     """
-    # Handle OAuth errors - sanitize user-controlled values before logging/redirect
+    # Handle OAuth errors - use allowlisted codes to prevent log injection / open redirect
     if error:
-        safe_error = re.sub(r"[^a-zA-Z0-9_\-]", "", error or "")[:64]
-        safe_desc = re.sub(r"[^a-zA-Z0-9_ \-.]", "", error_description or "")[:128]
-        logger.warning("Globus OAuth error: %s - %s", safe_error, safe_desc)
-        return RedirectResponse(f"/?globus_error={safe_error}", status_code=302)
+        known_errors = {
+            "access_denied", "invalid_request", "unauthorized_client",
+            "unsupported_response_type", "invalid_scope", "server_error",
+            "temporarily_unavailable", "consent_required", "login_required",
+        }
+        error_code = error if error in known_errors else "unknown_error"
+        logger.warning("Globus OAuth error: %s", error_code)
+        return RedirectResponse(f"/?globus_error={error_code}", status_code=302)
 
     if not code or not state:
         logger.warning("Globus callback missing code or state")

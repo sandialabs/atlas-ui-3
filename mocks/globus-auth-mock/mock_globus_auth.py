@@ -50,25 +50,27 @@ async def authorize(
     In a real flow, the user would log in and consent.
     Here we auto-approve and redirect back immediately.
     """
-    # Validate redirect_uri is a localhost URL (mock server only)
+    # Validate and reconstruct redirect_uri from parsed components (mock server only)
     parsed = urlparse(redirect_uri)
     if parsed.hostname not in ("localhost", "127.0.0.1"):
         return JSONResponse(
             {"error": "invalid_redirect_uri", "error_description": "Only localhost allowed"},
             status_code=400,
         )
+    # Reconstruct from validated components to break taint chain
+    safe_uri = f"{parsed.scheme}://{parsed.hostname}:{parsed.port}{parsed.path}"
 
     code = secrets.token_urlsafe(32)
     PENDING_CODES[code] = {
         "client_id": client_id,
-        "redirect_uri": redirect_uri,
+        "redirect_uri": safe_uri,
         "scope": scope,
         "created_at": time.time(),
     }
 
     # Auto-redirect back to Atlas with the auth code
     params = urlencode({"code": code, "state": state})
-    return RedirectResponse(f"{redirect_uri}?{params}", status_code=302)
+    return RedirectResponse(f"{safe_uri}?{params}", status_code=302)
 
 
 @app.post("/v2/oauth2/token")
