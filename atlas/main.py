@@ -137,6 +137,15 @@ async def lifespan(app: FastAPI):
                 "Authentication will fail for all requests."
             )
 
+    # SECURITY WARNING: Check for weak Globus session secret
+    if config.app_settings.feature_globus_auth_enabled:
+        if config.app_settings.globus_session_secret == "atlas-globus-session-change-me":
+            logger.warning(
+                "SECURITY WARNING: Globus auth is enabled but GLOBUS_SESSION_SECRET "
+                "is still the default value. Set a strong random secret in .env to "
+                "protect OAuth CSRF state."
+            )
+
     logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
     logger.info(f"MCP servers configured: {len(config.mcp_config.servers)}")
 
