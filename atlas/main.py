@@ -61,6 +61,8 @@ from atlas.routes.config_routes import router as config_router
 from atlas.routes.conversation_routes import router as conversation_router
 from atlas.routes.feedback_routes import feedback_router
 from atlas.routes.files_routes import router as files_router
+from atlas.routes.globus_auth_routes import api_router as globus_api_router
+from atlas.routes.globus_auth_routes import browser_router as globus_browser_router
 from atlas.routes.health_routes import router as health_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
@@ -195,6 +197,15 @@ RateLimit first to cheaply throttle abusive traffic before heavier logic.
 """
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
+# Session middleware for Globus OAuth state (CSRF protection during login flow)
+if config.app_settings.feature_globus_auth_enabled:
+    from starlette.middleware.sessions import SessionMiddleware
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=config.app_settings.globus_session_secret,
+        https_only=False,
+        same_site="lax",
+    )
 # Domain whitelist check (if enabled) - add before Auth so it runs after
 if config.app_settings.feature_domain_whitelist_enabled:
     app.add_middleware(
@@ -223,6 +234,9 @@ app.include_router(feedback_router)
 app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
+# Globus OAuth routes (browser-facing login/callback + JSON API)
+app.include_router(globus_browser_router)
+app.include_router(globus_api_router)
 
 # Serve frontend build (Vite)
 # PyPI package bundles frontend into atlas/static/; local dev uses frontend/dist/
