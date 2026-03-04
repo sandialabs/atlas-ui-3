@@ -1,6 +1,7 @@
-import { X, RotateCcw } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { X, RotateCcw, LogIn, LogOut, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
+import { useGlobusAuth } from '../hooks/useGlobusAuth'
 
 const SettingsPanel = ({ isOpen, onClose }) => {
   // Default settings
@@ -15,7 +16,48 @@ const SettingsPanel = ({ isOpen, onClose }) => {
   const [hasChanges, setHasChanges] = useState(false)
 
   // Also get live settings from ChatContext for always-in-sync fields
-  const { settings: ctxSettings, updateSettings: updateCtxSettings } = useChat()
+  const { settings: ctxSettings, updateSettings: updateCtxSettings, features } = useChat()
+
+  // Globus auth state
+  const {
+    authStatus: globusStatus,
+    loading: globusLoading,
+    error: globusError,
+    fetchAuthStatus: fetchGlobusStatus,
+    login: globusLogin,
+    logout: globusLogout,
+    isAuthenticated: globusAuthenticated,
+  } = useGlobusAuth()
+
+  // Fetch Globus status when panel opens and feature is enabled
+  const fetchGlobusIfEnabled = useCallback(() => {
+    if (isOpen && features?.globus_auth) {
+      fetchGlobusStatus()
+    }
+  }, [isOpen, features?.globus_auth, fetchGlobusStatus])
+
+  useEffect(() => {
+    fetchGlobusIfEnabled()
+  }, [fetchGlobusIfEnabled])
+
+  // Check for Globus auth callback params in URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const globusAuth = params.get('globus_auth')
+    const globusError = params.get('globus_error')
+    if (globusAuth || globusError) {
+      // Clean up URL params
+      const url = new URL(window.location)
+      url.searchParams.delete('globus_auth')
+      url.searchParams.delete('globus_error')
+      window.history.replaceState({}, '', url)
+
+      // Refresh status after auth callback
+      if (globusAuth === 'success') {
+        fetchGlobusStatus()
+      }
+    }
+  }, [fetchGlobusStatus])
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -215,6 +257,88 @@ const SettingsPanel = ({ isOpen, onClose }) => {
               </p>
             )}
           </div>
+
+          {/* Globus Authentication Section (only shown when feature is enabled) */}
+          {features?.globus_auth && (
+            <div className="bg-gray-700 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <label className="text-white font-medium">Globus Authentication</label>
+                <div className="flex items-center gap-2">
+                  {globusAuthenticated ? (
+                    <span className="flex items-center gap-1 text-sm text-green-400">
+                      <CheckCircle className="w-4 h-4" />
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-sm text-gray-400">
+                      <AlertCircle className="w-4 h-4" />
+                      Not connected
+                    </span>
+                  )}
+                </div>
+              </div>
+              <p className="text-sm text-gray-400 mb-3">
+                Log in with Globus to automatically authenticate with ALCF inference endpoints
+                and other Globus-scoped services. Your tokens are stored securely on the server.
+              </p>
+
+              {globusError && (
+                <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm mb-3">
+                  {globusError}
+                </div>
+              )}
+
+              {/* Show resource servers with token status */}
+              {globusAuthenticated && globusStatus?.resource_servers?.length > 0 && (
+                <div className="space-y-2 mb-3">
+                  {globusStatus.resource_servers.map((rs) => (
+                    <div
+                      key={rs.resource_server}
+                      className="flex items-center justify-between p-2 bg-gray-600 rounded text-sm"
+                    >
+                      <span className="text-gray-300 font-mono text-xs truncate max-w-[200px]" title={rs.resource_server}>
+                        {rs.resource_server}
+                      </span>
+                      <span className={rs.is_expired ? 'text-red-400' : 'text-green-400'}>
+                        {rs.is_expired ? 'Expired' : 'Valid'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                {!globusAuthenticated ? (
+                  <button
+                    onClick={globusLogin}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors text-sm font-medium"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    Log in with Globus
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={globusLogout}
+                      disabled={globusLoading}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600/80 hover:bg-red-600 text-white transition-colors text-sm font-medium"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Disconnect
+                    </button>
+                    <button
+                      onClick={fetchGlobusStatus}
+                      disabled={globusLoading}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors text-sm"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${globusLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Future Settings Placeholder */}
           <div className="pt-4 border-t border-gray-700">
