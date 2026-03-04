@@ -440,6 +440,8 @@ atlas-server --port 8080 --host 0.0.0.0
 atlas-server --env /path/to/.env --config-folder /path/to/config
 ```
 
+> **Auto-detection**: If a `config/` directory exists next to the loaded `.env` file, `atlas-server` automatically uses it as the config directory. You do not need to pass `--config-folder` or set `APP_CONFIG_DIR` unless you want to override this default.
+
 ## Development Installation (Editable Mode)
 
 For development, install the package in **editable mode** (`pip install -e .`). This creates a symlink from your Python environment to your local source code directory, allowing you to modify the code and see changes immediately without reinstalling.

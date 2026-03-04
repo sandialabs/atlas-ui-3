@@ -95,7 +95,7 @@ frontend/src/
 
 ## Configuration and Feature Flags
 
-**Two-layer config**: User config in `config/` (created by `atlas-init`, set `APP_CONFIG_DIR` to customize) overrides package defaults in `atlas/config/`.
+**Two-layer config**: User config in `config/` (created by `atlas-init`, set `APP_CONFIG_DIR` to customize) overrides package defaults in `atlas/config/`. `atlas-server` auto-detects `config/` next to the loaded `.env`, so package installs find user configs without explicit flags.
 
 **Files:**
 - `llmconfig.yml` - LLM model configurations

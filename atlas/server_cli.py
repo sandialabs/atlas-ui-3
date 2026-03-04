@@ -151,7 +151,9 @@ def main() -> None:
         # Auto-detect config/ next to the .env that was loaded
         config_candidate = env_dir / "config"
         if config_candidate.is_dir():
-            os.environ["APP_CONFIG_DIR"] = str(config_candidate.resolve())
+            resolved = str(config_candidate.resolve())
+            os.environ["APP_CONFIG_DIR"] = resolved
+            print(f"Auto-detected config directory: {resolved}")
 
     sys.exit(run_server(args))
 

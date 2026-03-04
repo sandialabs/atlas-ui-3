@@ -116,7 +116,7 @@ Note: ChatContext validates persisted localStorage selections (tools, prompts, d
 
 ## Configuration and Feature Flags
 
-**Two-layer config**: User config in `config/` (created by `atlas-init`, set `APP_CONFIG_DIR` to customize) overrides package defaults in `atlas/config/`.
+**Two-layer config**: User config in `config/` (created by `atlas-init`, set `APP_CONFIG_DIR` to customize) overrides package defaults in `atlas/config/`. `atlas-server` auto-detects `config/` next to the loaded `.env`, so package installs find user configs without explicit flags.
 
 **Configuration Files:**
 - `llmconfig.yml` - LLM model configurations
