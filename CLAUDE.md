@@ -187,7 +187,7 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 
 3. **MCP Transport Auto-Detection**: Automatically detects stdio, HTTP, or SSE based on config
 
-4. **Two-Layer Configuration**: User config in `config/` (created by `atlas-init`) overrides package defaults in `atlas/config/`. Set `APP_CONFIG_DIR` to customize the user config directory.
+4. **Two-Layer Configuration**: User config in `config/` (created by `atlas-init`) overrides package defaults in `atlas/config/`. Set `APP_CONFIG_DIR` to customize the user config directory. `atlas-server` auto-detects a `config/` directory next to the loaded `.env` file, so package installs work without explicit `--config-folder` flags.
 
 ## Configuration and Feature Flags
 

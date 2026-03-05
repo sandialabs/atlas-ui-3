@@ -90,10 +90,9 @@ PORT=8000
 DEBUG_MODE=true
 
 # =============================================================================
-# Optional: Custom config location
-# Uncomment and set if you have custom config files
+# Custom config location (auto-detected by atlas-server if config/ exists)
 # =============================================================================
-# APP_CONFIG_DIR=./config
+APP_CONFIG_DIR=./config
 
 # =============================================================================
 # Optional: RAG Configuration
