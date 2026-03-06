@@ -36,7 +36,7 @@ def _resolve_git_commit() -> str:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired, OSError):
         pass
     return "unknown"
 
