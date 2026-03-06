@@ -87,6 +87,8 @@ class S3StorageClient:
                     logger.warning(f"Failed to create bucket '{self.bucket_name}': {create_err}")
             else:
                 logger.warning(f"Could not check bucket '{self.bucket_name}': {e}")
+        except Exception as e:
+            logger.warning(f"Could not reach S3 endpoint to check bucket '{self.bucket_name}': {e}")
 
     def _generate_s3_key(self, user_email: str, filename: str, source_type: str = "user") -> str:
         """Generate an S3-style key with user isolation."""
