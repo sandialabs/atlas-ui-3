@@ -126,22 +126,34 @@ def main() -> None:
         sys.exit(0)
 
     # Apply env file first (before any other imports that might use env vars)
+    env_dir = None
     if args.env_file:
-        _apply_env_file(Path(args.env_file).expanduser())
+        env_path = Path(args.env_file).expanduser()
+        _apply_env_file(env_path)
+        env_dir = env_path.resolve().parent
     else:
         # Try to find .env in current directory or package root
         cwd_env = Path.cwd() / ".env"
         if cwd_env.exists():
             _apply_env_file(cwd_env)
+            env_dir = cwd_env.resolve().parent
         else:
             # Check package root (parent of atlas/)
             pkg_root_env = Path(__file__).resolve().parents[1] / ".env"
             if pkg_root_env.exists():
                 _apply_env_file(pkg_root_env)
+                env_dir = pkg_root_env.resolve().parent
 
     # Apply config folder if specified
     if args.config_folder:
         _apply_config_folder(Path(args.config_folder).expanduser())
+    elif not os.environ.get("APP_CONFIG_DIR") and env_dir is not None:
+        # Auto-detect config/ next to the .env that was loaded
+        config_candidate = env_dir / "config"
+        if config_candidate.is_dir():
+            resolved = str(config_candidate.resolve())
+            os.environ["APP_CONFIG_DIR"] = resolved
+            print(f"Auto-detected config directory: {resolved}")
 
     sys.exit(run_server(args))
 

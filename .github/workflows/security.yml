@@ -86,7 +86,7 @@ jobs:
 
     # Upload dependency scan artifacts
     - name: Upload dependency scan reports
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       if: always()
       with:
         name: dependency-scan-reports
@@ -151,7 +151,7 @@ jobs:
 
     # Upload SAST artifacts
     - name: Upload SAST reports
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       if: always()
       with:
         name: sast-reports
@@ -226,7 +226,7 @@ jobs:
 
     # Upload container scan artifacts
     - name: Upload container scan reports
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       if: always()
       with:
         name: container-scan-reports
@@ -242,7 +242,7 @@ jobs:
     if: always()
     steps:
     - name: Download all artifacts
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
 
     - name: Install jq
       run: sudo apt-get install -y jq
@@ -335,7 +335,7 @@ jobs:
         cat security-summary.md
 
     - name: Upload Security Summary
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: security-summary
         path: security-summary.md

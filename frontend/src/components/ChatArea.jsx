@@ -44,6 +44,8 @@ const ChatArea = () => {
     agentPendingQuestion,
     setAgentPendingQuestion,
     stopAgent,
+    stopStreaming,
+    isStreaming,
     answerAgentQuestion,
     fileExtraction,
     ragEnabled,
@@ -946,17 +948,28 @@ const ChatArea = () => {
                 </div>
               )}
             </div>
-            <button
-              type="submit"
-              disabled={!canSend}
-              className={`px-4 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
-                canSend 
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white' 
-                  : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              <Send className="w-5 h-5" />
-            </button>
+            {(isThinking || isStreaming) && !agentModeEnabled ? (
+              <button
+                type="button"
+                onClick={stopStreaming}
+                className="px-4 py-3 bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                title="Stop streaming"
+              >
+                <Square className="w-5 h-5" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!canSend}
+                className={`px-4 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
+                  canSend
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            )}
           </div>
           </form>
           

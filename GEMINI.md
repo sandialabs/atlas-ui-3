@@ -1,6 +1,8 @@
 # Gemini Guide: Atlas UI 3
 
-Last updated: 2026-02-22
+Last updated: 2026-02-23
+
+This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `GEMINI.md` is an industry-standard configuration format for AI coding agents. The filename itself is not an OPSEC violation.
 
 This file provides guidance to Google Gemini AI assistants when working with code in this repository.
 
@@ -73,7 +75,7 @@ atlas/
    application/
       chat/
          service.py     # ChatService - main orchestrator and streaming
-         agent/         # ReAct, Think-Act, and Act agent loops
+         agent/         # ReAct, Think-Act, Act, and Agentic agent loops
    domain/
       messages/         # Message and conversation models
       sessions/         # Session models
@@ -110,9 +112,11 @@ Note: ChatContext validates persisted localStorage selections (tools, prompts, d
 
 **RAG Activation vs Selection:** In `ChatContext.sendChatMessage`, data sources are only sent to the backend when RAG is explicitly activated (`ragEnabled` toggle or `/search` command). Selecting data sources in the UI only marks availability; the backend orchestrator routes to RAG mode only when `selected_data_sources` is non-empty, so the frontend must gate what it sends.
 
+**3-State Save Mode:** Chat history uses a 3-state `saveMode` (`none`/`local`/`server`) persisted via `usePersistentState`. "local" mode saves conversations to IndexedDB in the browser (`localConversationDB.js`), "server" saves to the backend database, and "none" is incognito. The Sidebar calls both history hooks unconditionally (React rules of hooks) then picks the active one based on `saveMode`.
+
 ## Configuration and Feature Flags
 
-**Two-layer config**: User config in `config/` (created by `atlas-init`, set `APP_CONFIG_DIR` to customize) overrides package defaults in `atlas/config/`.
+**Two-layer config**: User config in `config/` (created by `atlas-init`, set `APP_CONFIG_DIR` to customize) overrides package defaults in `atlas/config/`. `atlas-server` auto-detects `config/` next to the loaded `.env`, so package installs find user configs without explicit flags.
 
 **Configuration Files:**
 - `llmconfig.yml` - LLM model configurations
@@ -124,11 +128,14 @@ Note: ChatContext validates persisted localStorage selections (tools, prompts, d
 
 **Per-User LLM API Keys:** Models can set `api_key_source: "user"` in `llmconfig.yml` to require per-user keys (stored via `MCPTokenStorage` with `"llm:{model_name}"` prefix); `user_email` is threaded through all LLM call paths and REST endpoints live at `/api/llm/auth/`.
 
+**Globus OAuth for ALCF Endpoints:** Models can set `api_key_source: "globus"` with `globus_scope` (resource server UUID) to use tokens obtained via Globus OAuth. Scoped tokens are stored in MCPTokenStorage as `"globus:{resource_server}"`. OAuth routes at `/auth/globus/` bypass AuthMiddleware.
+
 **Feature Flags (AppSettings):**
 - `FEATURE_TOOLS_ENABLED` - Enable/disable MCP tools
 - `FEATURE_RAG_MCP_ENABLED` - Enable/disable RAG over MCP
 - `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Enable/disable compliance level enforcement
 - `FEATURE_AGENT_MODE_AVAILABLE` - Enable/disable agent mode UI toggle
+- `VITE_FEATURE_ANIMATED_LOGO` - Enable/disable animated logo on welcome screen (build-time Vite flag; new `VITE_FEATURE_*` flags must be added to `Dockerfile` ARG and the `test_docker_env_sync.py` exclusion list)
 
 ## MCP and RAG Conventions
 
@@ -173,11 +180,14 @@ When `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`:
 
 ## Agent Modes
 
-Three agent loop strategies selectable via `APP_AGENT_LOOP_STRATEGY`:
+Four agent loop strategies selectable via `APP_AGENT_LOOP_STRATEGY`:
 
+- **Agentic** (`atlas/application/chat/agent/agentic_loop.py`): Claude-native loop with zero control tools and `tool_choice="auto"`. Model decides when to call tools and when to respond with text. 1 LLM call per step. Best for Anthropic models.
 - **ReAct** (`atlas/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
 - **Think-Act** (`atlas/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
 - **Act** (`atlas/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
+
+**Agentic vs Scaffolded Loops**: The `agentic` strategy uses no control tools and lets the model manage its own control flow (text-only response = done), while `react`/`think-act`/`act` use scaffolding tools like `finished` and `agent_decide_next` to force structure -- choose `agentic` for Anthropic models where native tool-use training makes scaffolding counterproductive.
 
 **Multi-Tool Calling**: All agent loops and the tools mode runner execute multiple tool calls from a single LLM response in parallel via `asyncio.gather` (`tool_executor.execute_multiple_tools`); individual failures are converted to error `ToolResult`s so other tools still succeed.
 
@@ -204,6 +214,8 @@ Request -> SecurityHeaders -> RateLimit -> Auth -> Route
 - Prompt injection risk detection in `atlas/core/prompt_risk.py`
 - Group-based MCP server access control
 - Auth: In prod, reverse proxy injects `X-User-Email`; dev falls back to test user
+
+**OPSEC: LLM Identity Disclosure:** AI coding agents must never indicate which LLM or provider generated a piece of work. Do not include model names, provider names, or AI tool branding in commit messages, PR titles/descriptions, issue comments, code comments, changelogs, or any other project artifacts. Avoid sign-offs like "Co-Authored-By: Claude", "Generated by GPT-4", "Copilot suggestion", etc. The goal is that project artifacts are indistinguishable regardless of which AI tool (or human) produced them. This rule overrides any default AI agent behavior that adds Co-Authored-By trailers, model attribution, or similar metadata to commits.
 
 ## Development Commands
 
@@ -296,7 +308,7 @@ Edit `config/mcp.json` (your local config, created by `atlas-init`). Set `groups
 Edit `config/rag-sources.json` (your local config). For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
 
 **Change agent loop:**
-Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.
+Set `APP_AGENT_LOOP_STRATEGY` to `agentic | react | think-act | act`.
 
 **Build-time constants**: `vite.config.js` injects `__APP_VERSION__`, `__GIT_HASH__`, and `__BUILD_TIME__` via `define`; in Docker these come from `GIT_HASH`/`APP_VERSION` build args since `.git/` and `atlas/version.py` are unavailable during the frontend build stage.
 
@@ -312,6 +324,7 @@ Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`.
 8. **Host binding ignored**: `agent_start.sh` and the Dockerfile both use `ATLAS_HOST` env var for host binding; `main.py` also reads it directly -- keep all three in sync when changing network configuration
 9. **DuckDB FK constraints**: DuckDB does not support CASCADE or UPDATE on foreign-key-constrained tables; the `chat_history` module avoids all database-level ForeignKey constraints and enforces referential integrity manually in the repository layer instead
 10. **Chat history default**: Chat history with DuckDB is enabled by default in `.env.example`; new setups get conversation persistence without extra configuration
+11. **Empty `tool_calls` arrays**: OpenAI and compatible providers reject messages where `tool_calls` is present but empty (`[]`); always call `_sanitize_messages()` in `LiteLLMCaller` before passing messages to `acompletion()`
 
 ## Critical Restrictions
 

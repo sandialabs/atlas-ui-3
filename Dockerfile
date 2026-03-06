@@ -47,6 +47,9 @@ ENV VITE_APP_NAME=${VITE_APP_NAME}
 # Set default whether to display powered by atlas logo on welcome screen (can be overridden via build arg)
 ARG VITE_FEATURE_POWERED_BY_ATLAS="false"
 ENV VITE_FEATURE_POWERED_BY_ATLAS=${VITE_FEATURE_POWERED_BY_ATLAS}
+# Enable animated logo on welcome screen (can be overridden via build arg)
+ARG VITE_FEATURE_ANIMATED_LOGO="true"
+ENV VITE_FEATURE_ANIMATED_LOGO=${VITE_FEATURE_ANIMATED_LOGO}
 # Git hash and version injected at build time for console/health display
 ARG GIT_HASH="unknown"
 ARG APP_VERSION="unknown"

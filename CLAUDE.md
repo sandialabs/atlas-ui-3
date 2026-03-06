@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `CLAUDE.md` is an industry-standard configuration format recognized by all major AI coding agents, not just Claude. The filename itself is not an OPSEC violation.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
@@ -120,7 +122,7 @@ atlas/
    application/
       chat/
          service.py     # ChatService - main orchestrator and streaming
-         agent/         # ReAct, Think-Act, and Act agent loops
+         agent/         # ReAct, Think-Act, Act, and Agentic agent loops
          utilities/     # Helper functions
    domain/
       messages/         # Message and conversation models
@@ -165,6 +167,8 @@ frontend/src/
 
 **RAG Activation vs Selection:** In `ChatContext.sendChatMessage`, data sources are only sent to the backend when RAG is explicitly activated (`ragEnabled` toggle or `/search` command). Selecting data sources in the UI only marks availability; the backend orchestrator routes to RAG mode only when `selected_data_sources` is non-empty, so the frontend must gate what it sends.
 
+**3-State Save Mode:** Chat history uses a 3-state `saveMode` (`none`/`local`/`server`) persisted via `usePersistentState`. "local" mode saves conversations to IndexedDB in the browser (`localConversationDB.js`), "server" saves to the backend database, and "none" is incognito. The Sidebar calls both `useConversationHistory` and `useLocalConversationHistory` hooks unconditionally (React rules of hooks) then picks the active one based on `saveMode`.
+
 **Event Flow:**
 ```
 User Input -> ChatContext -> WebSocket -> Backend ChatService
@@ -175,14 +179,15 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 
 1. **Protocol-Based Dependency Injection**: Uses Python `Protocol` (structural subtyping) instead of ABC inheritance for loose coupling
 
-2. **Agent Loop Strategy Pattern**: Three implementations selectable via `APP_AGENT_LOOP_STRATEGY`:
+2. **Agent Loop Strategy Pattern**: Four implementations selectable via `APP_AGENT_LOOP_STRATEGY`:
+   - `agentic`: Claude-native loop, no control tools, `tool_choice="auto"` (best for Anthropic models)
    - `react`: Reason-Act-Observe cycle (structured reasoning)
    - `think-act`: Extended thinking (slower, complex reasoning)
    - `act`: Pure action loop (fastest, minimal overhead)
 
 3. **MCP Transport Auto-Detection**: Automatically detects stdio, HTTP, or SSE based on config
 
-4. **Two-Layer Configuration**: User config in `config/` (created by `atlas-init`) overrides package defaults in `atlas/config/`. Set `APP_CONFIG_DIR` to customize the user config directory.
+4. **Two-Layer Configuration**: User config in `config/` (created by `atlas-init`) overrides package defaults in `atlas/config/`. Set `APP_CONFIG_DIR` to customize the user config directory. `atlas-server` auto-detects a `config/` directory next to the loaded `.env` file, so package installs work without explicit `--config-folder` flags.
 
 ## Configuration and Feature Flags
 
@@ -200,10 +205,15 @@ User Input -> ChatContext -> WebSocket -> Backend ChatService
 - `FEATURE_RAG_MCP_ENABLED` - Enable/disable RAG over MCP
 - `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Enable/disable compliance level enforcement
 - `FEATURE_AGENT_MODE_AVAILABLE` - Enable/disable agent mode UI toggle
+- `VITE_FEATURE_ANIMATED_LOGO` - Enable/disable animated logo on welcome screen (build-time Vite flag; must also be added to `Dockerfile` ARG and to the `test_docker_env_sync.py` exclusion list when introducing new `VITE_FEATURE_*` flags)
 
 ## Per-User LLM API Keys
 
 Models in `llmconfig.yml` can set `api_key_source: "user"` to require per-user API keys instead of system env vars. The `MCPTokenStorage` is reused with `"llm:{model_name}"` as the server_name key, and `user_email` is threaded through all LLM call paths (`LLMProtocol`, `LiteLLMCaller`, agent loops, orchestrator). REST endpoints live at `/api/llm/auth/` and the frontend reuses `TokenInputModal`.
+
+## Globus OAuth for ALCF Endpoints
+
+Models can also set `api_key_source: "globus"` with a `globus_scope` field (the Globus resource server UUID) to use tokens obtained via Globus OAuth. The Globus auth flow stores scoped tokens in MCPTokenStorage keyed as `"globus:{resource_server}"`. Browser-facing OAuth routes at `/auth/globus/` are excluded from the AuthMiddleware and require SessionMiddleware for CSRF state.
 
 ## MCP and RAG Conventions
 
@@ -334,13 +344,16 @@ docker run -p 8000:8000 atlas-ui-3
 
 ## Agent Modes
 
-Three agent loop strategies implement different reasoning patterns:
+Four agent loop strategies implement different reasoning patterns:
 
+- **Agentic** (`atlas/application/chat/agent/agentic_loop.py`): Claude-native loop with zero control tools and `tool_choice="auto"`. The model decides when to call tools and when to respond with text. 1 LLM call per step. Best for Anthropic models but works with all providers via LiteLLM.
 - **ReAct** (`atlas/application/chat/agent/react_loop.py`): Reason-Act-Observe cycle, good for tool-heavy tasks with structured reasoning
 - **Think-Act** (`atlas/application/chat/agent/think_act_loop.py`): Deep reasoning with explicit thinking steps, slower but more thoughtful
 - **Act** (`atlas/application/chat/agent/act_loop.py`): Pure action loop without explicit reasoning steps, fastest with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool
 
-Change agent loop: set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.
+Change agent loop: set `APP_AGENT_LOOP_STRATEGY` to `agentic | react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.
+
+**Agentic vs Scaffolded Loops**: The `agentic` strategy uses no control tools and lets the model manage its own control flow (text-only response = done), while `react`/`think-act`/`act` use scaffolding tools like `finished` and `agent_decide_next` to force structure -- choose `agentic` for Anthropic models where native tool-use training makes scaffolding counterproductive.
 
 **Multi-Tool Calling**: All agent loops and the tools mode runner execute multiple tool calls from a single LLM response in parallel via `asyncio.gather` (`tool_executor.execute_multiple_tools`); individual failures are converted to error `ToolResult`s so other tools still succeed.
 
@@ -374,6 +387,11 @@ Request -> SecurityHeaders -> RateLimit -> Auth -> Route
 - Prompt injection risk detection in `atlas/core/prompt_risk.py`
 - Group-based MCP server access control
 
+### OPSEC: LLM Identity Disclosure
+For operational security, AI coding agents must never indicate which LLM or provider generated a piece of work. Do not include model names, provider names, or AI tool branding in commit messages, PR titles/descriptions, issue comments, code comments, changelogs, or any other project artifacts. Avoid sign-offs like "Co-Authored-By: Claude", "Generated by GPT-4", "Copilot suggestion", etc. The goal is that project artifacts are indistinguishable regardless of which AI tool (or human) produced them.
+
+**Important**: This rule overrides any default AI agent behavior that adds Co-Authored-By trailers, model attribution, or similar metadata to commits. Claude Code's built-in system instructions include a `Co-Authored-By` trailer on commits -- do NOT include it for this project. The same applies to any equivalent attribution from Copilot, Gemini, or other AI tools.
+
 ### Auth Assumption
 In production, reverse proxy injects `X-User-Email` (after stripping client headers); dev falls back to test user.
 
@@ -386,7 +404,7 @@ Edit `config/mcp.json` (your local config, created by `atlas-init`). Set `groups
 Edit `config/rag-sources.json` (your local config). For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
 
 **Change agent loop:**
-Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.
+Set `APP_AGENT_LOOP_STRATEGY` to `agentic | react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.
 
 **Build-time constants**: `vite.config.js` injects `__APP_VERSION__`, `__GIT_HASH__`, and `__BUILD_TIME__` via `define`; in Docker these come from `GIT_HASH`/`APP_VERSION` build args since `.git/` and `atlas/version.py` are unavailable during the frontend build stage.
 
@@ -402,6 +420,7 @@ Set `APP_AGENT_LOOP_STRATEGY` to `react | think-act | act`; ChatService uses `ap
 8. **Host binding ignored**: `agent_start.sh` and the Dockerfile both use `ATLAS_HOST` env var for host binding; `main.py` also reads it directly -- keep all three in sync when changing network configuration
 9. **DuckDB FK constraints**: DuckDB does not support CASCADE or UPDATE on foreign-key-constrained tables; the `chat_history` module avoids all database-level ForeignKey constraints and enforces referential integrity manually in the repository layer instead
 10. **Chat history default**: Chat history with DuckDB is enabled by default in `.env.example`; new setups get conversation persistence without extra configuration
+11. **Empty `tool_calls` arrays**: OpenAI and compatible providers reject messages where `tool_calls` is present but empty (`[]`); always call `_sanitize_messages()` in `LiteLLMCaller` before passing messages to `acompletion()`
 
 ## PR Validation Scripts (Required)
 

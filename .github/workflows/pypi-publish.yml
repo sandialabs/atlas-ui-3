@@ -54,7 +54,7 @@ jobs:
         run: twine check dist/*
 
       - name: Upload distribution artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: python-package-distributions
           path: dist/
@@ -69,7 +69,7 @@ jobs:
       url: https://test.pypi.org/p/atlas-chat
     steps:
       - name: Download distribution artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: python-package-distributions
           path: dist/
@@ -90,7 +90,7 @@ jobs:
       url: https://pypi.org/p/atlas-chat
     steps:
       - name: Download distribution artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: python-package-distributions
           path: dist/
@@ -109,7 +109,7 @@ jobs:
       contents: write
     steps:
       - name: Download distribution artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: python-package-distributions
           path: dist/

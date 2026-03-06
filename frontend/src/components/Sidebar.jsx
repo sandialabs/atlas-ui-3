@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useConversationHistory } from '../hooks/useConversationHistory'
+import { useLocalConversationHistory } from '../hooks/useLocalConversationHistory'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { getDisplayConversations } from '../utils/getDisplayConversations'
 
@@ -46,7 +47,7 @@ const DEFAULT_WIDTH = 256
 
 const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const {
-    features, activeConversationId, loadSavedConversation, messages, isIncognito, clearChat,
+    features, activeConversationId, loadSavedConversation, messages, saveMode, clearChat,
   } = useChat()
 
   const chatHistoryEnabled = features?.chat_history
@@ -60,20 +61,23 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const refreshTimerRef = useRef(null)
   const panelRef = useRef(null)
 
-  const history = useConversationHistory()
+  // Both hooks are always called (React rules), but only the active one is used
+  const serverHistory = useConversationHistory()
+  const localHistory = useLocalConversationHistory()
+  const history = saveMode === 'local' ? localHistory : serverHistory
 
-  // Fetch conversations on mount and when feature is enabled
+  // Fetch conversations on mount, when feature is enabled, or when save mode changes
   useEffect(() => {
-    if (chatHistoryEnabled) {
+    if (chatHistoryEnabled && saveMode !== 'none') {
       history.fetchConversations()
       history.fetchTags()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatHistoryEnabled])
+  }, [chatHistoryEnabled, saveMode])
 
   // Auto-refresh conversation list when messages change
   useEffect(() => {
-    if (!chatHistoryEnabled || isIncognito) return
+    if (!chatHistoryEnabled || saveMode === 'none') return
     const currentCount = messages?.length || 0
     const prevCount = prevMessageCountRef.current
     prevMessageCountRef.current = currentCount
@@ -100,7 +104,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   useEffect(() => {
     const prevId = prevActiveIdRef.current
     prevActiveIdRef.current = activeConversationId
-    if (!prevId && activeConversationId && chatHistoryEnabled && !isIncognito) {
+    if (!prevId && activeConversationId && chatHistoryEnabled && saveMode !== 'none') {
       // Cancel any pending delayed refresh since we're fetching now
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
@@ -217,7 +221,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
         messages,
         activeConversationId,
         chatHistoryEnabled,
-        isIncognito,
+        saveMode,
       })
     : []
 

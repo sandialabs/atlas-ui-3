@@ -1,5 +1,6 @@
 # Agent loop package exports
 
+from .agentic_loop import AgenticLoop as AgenticLoop
 from .factory import AgentLoopFactory as AgentLoopFactory
 from .protocols import AgentContext as AgentContext
 from .protocols import AgentEvent as AgentEvent

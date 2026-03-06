@@ -240,6 +240,35 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
         return stored.token_value
 
+    @staticmethod
+    def _resolve_globus_api_key(model_name: str, globus_scope: str, user_email: Optional[str]) -> str:
+        """Look up a Globus-provided token for a specific resource server.
+
+        Globus OAuth stores scoped tokens keyed as 'globus:{resource_server}'.
+        Models configure which scope to use via the 'globus_scope' field.
+
+        Raises ValueError when the token is missing so callers surface a clear
+        authentication-required error to the user.
+        """
+        if not user_email:
+            raise ValueError(
+                f"Model '{model_name}' requires Globus authentication but no user_email was provided."
+            )
+        if not globus_scope:
+            raise ValueError(
+                f"Model '{model_name}' has api_key_source='globus' but no globus_scope configured."
+            )
+        from atlas.modules.mcp_tools.token_storage import get_token_storage
+        token_storage = get_token_storage()
+        storage_key = f"globus:{globus_scope}"
+        stored = token_storage.get_valid_token(user_email, storage_key)
+        if stored is None:
+            raise ValueError(
+                f"Model '{model_name}' requires Globus authentication for scope '{globus_scope}'. "
+                f"Please log in via Globus to obtain the required access token."
+            )
+        return stored.token_value
+
     def _get_model_kwargs(
         self, model_name: str, temperature: Optional[float] = None, user_email: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -262,6 +291,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         api_key_source = getattr(model_config, "api_key_source", "system")
         if api_key_source == "user":
             api_key = self._resolve_user_api_key(model_name, user_email)
+        elif api_key_source == "globus":
+            globus_scope = getattr(model_config, "globus_scope", None)
+            api_key = self._resolve_globus_api_key(model_name, globus_scope, user_email)
         else:
             # Set API key - resolve environment variables
             try:
@@ -325,6 +357,20 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         return kwargs
 
+    @staticmethod
+    def _sanitize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Strip empty tool_calls arrays from messages.
+
+        OpenAI rejects messages where tool_calls is present but empty ([]).
+        The field must either be omitted or contain at least one item.
+        """
+        sanitized = []
+        for msg in messages:
+            if "tool_calls" in msg and not msg["tool_calls"]:
+                msg = {k: v for k, v in msg.items() if k != "tool_calls"}
+            sanitized.append(msg)
+        return sanitized
+
     async def call_plain(
         self,
         model_name: str,
@@ -355,7 +401,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             response = await acompletion(
                 model=litellm_model,
-                messages=messages,
+                messages=self._sanitize_messages(messages),
                 **model_kwargs
             )
 
@@ -523,7 +569,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             response = await acompletion(
                 model=litellm_model,
-                messages=messages,
+                messages=self._sanitize_messages(messages),
                 tools=tools_schema,
                 tool_choice=final_tool_choice,
                 **model_kwargs
@@ -552,7 +598,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 try:
                     response = await acompletion(
                         model=litellm_model,
-                        messages=messages,
+                        messages=self._sanitize_messages(messages),
                         tools=tools_schema,
                         tool_choice="auto",
                         **model_kwargs

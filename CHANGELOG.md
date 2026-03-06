@@ -6,9 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #384 - 2026-03-04
+- **Fix**: Package install no longer silently ignores user config files. `atlas-server` now auto-detects a `config/` directory next to the loaded `.env` file when neither `--config-folder` nor `APP_CONFIG_DIR` is set. `atlas-init --minimal` now sets `APP_CONFIG_DIR=./config` in the generated `.env` by default.
+
+### PR #373 - 2026-03-06
+- **Fix**: Agentic loop strategy now appears in the Settings panel dropdown and the selected strategy is correctly sent to the backend via WebSocket (was previously undefined).
+- **Fix**: Strip empty `tool_calls` arrays from messages before sending to LLM providers; OpenAI rejects messages where `tool_calls` is present but empty, which caused the agentic loop to fail when tools were enabled.
+
 ### PR #371 - 2026-02-26
 - **Feature**: App version and git commit hash logged to browser console on startup (e.g. `Atlas v0.1.3 (a3f8b2c) | Built 2026-02-26T15:30:00Z`). Version injected at build time via Vite `define`, with Docker build-arg support. `/api/health` now includes `git_commit` field.
 - **Fix**: Sync `atlas/version.py` to `0.1.3` to match `pyproject.toml`.
+
+### PR #372 - 2026-02-27
+- **Feature**: Animated logo on the welcome screen with 3D mouse-tracking tilt, floating bob, ambient glow, and paired energy pulse rings radiating from the thunderbird icon. Controlled by the `VITE_FEATURE_ANIMATED_LOGO` build-time flag (enabled by default).
+
+### PR #367 - 2026-02-25
+- **Feature**: 3-state chat save mode (issue #367). Users cycle between Incognito (nothing saved), Saved Locally (IndexedDB in browser), and Saved to Server (backend database). The selected mode persists across page refreshes via `usePersistentState`. New `localConversationDB.js` IndexedDB wrapper and `useLocalConversationHistory` hook provide browser-local conversation storage with the same API shape as the server-backed hook.
+
+### PR #365 - 2026-02-24
+- **Feature**: Globus OAuth integration for ALCF inference endpoints (issue #361). Users log in via Globus Auth to automatically obtain access tokens for ALCF and other Globus-scoped services, eliminating manual token copy-paste.
+- **Feature**: New `api_key_source: "globus"` option for LLM models with `globus_scope` field to identify which Globus resource server token to use.
 
 ### PR #348 - 2026-02-24
 - **Feature**: LaTeX rendering in assistant messages using KaTeX. Display math (`\[...\]`, `$$...$$`) and inline math (`\(...\)`, `$...$`) are rendered as formatted equations. LaTeX inside fenced code blocks and inline code spans is left as-is.
@@ -19,6 +36,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #368 - 2026-02-23
 - **Feature**: Update RAG discovery API to v2 format. Data sources now return `id`, `label`, `compliance_level`, and `description` fields. The `label` and `description` are displayed in the data sources panel with a more compact layout.
+
+### PR #363 - 2026-02-23
+- **Feature**: New `agentic` agent loop strategy (`APP_AGENT_LOOP_STRATEGY=agentic`) that mirrors the Claude Code / Claude Desktop tool-use pattern. Uses `tool_choice="auto"` with zero control tools (no `finished`, `agent_decide_next`, etc.), resulting in 1 LLM call per step instead of 3 (ReAct). Best suited for Anthropic models but compatible with all providers.
 
 ### PR #358 - 2026-02-22
 - **Feature**: Parallel multi-tool calling support (issue #353). When an LLM returns multiple tool calls in a single response, all calls now execute concurrently via `asyncio.gather` instead of sequentially or only the first. Applies to all three agent loops (ReAct, Think-Act, Act) and the non-agent tools mode.

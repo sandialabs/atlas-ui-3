@@ -1,6 +1,6 @@
 [project]
 name = "atlas-chat"
-version = "0.1.3"
+version = "0.1.4"
 description = "Full-stack LLM chat interface with Model Context Protocol (MCP) integration"
 readme = "README.md"
 license = { text = "MIT" }
@@ -28,6 +28,7 @@ dependencies = [
     "fastapi",
     "fastmcp>=2.10.0,<4.0.0",
     "httpx",
+    "itsdangerous",
     "litellm>=1.81.14",
     "matplotlib",
     "numpy",
