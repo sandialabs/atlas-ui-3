@@ -217,8 +217,8 @@ const SettingsPanel = ({ isOpen, onClose }) => {
                 <option value="act">Act</option>
               </select>
               <p className="text-sm text-gray-400">
-                <strong className="text-gray-300">Agentic:</strong> Claude-native loop with no control tools and tool_choice=auto.
-                The model decides when to call tools and when to respond. Best for Anthropic models.
+                <strong className="text-gray-300">Agentic:</strong> Native agentic loop with no control tools and tool_choice=auto.
+                The model decides when to call tools and when to respond. Best for models with strong native tool-use training.
               </p>
               <p className="text-sm text-gray-400">
                 <strong className="text-gray-300">Think-Act:</strong> Concise, unified reasoning approach.
