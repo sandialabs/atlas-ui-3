@@ -242,7 +242,7 @@ jobs:
     if: always()
     steps:
     - name: Download all artifacts
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
 
     - name: Install jq
       run: sudo apt-get install -y jq
