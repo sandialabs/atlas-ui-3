@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import { useState, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom' // Import Link
 import { ChatProvider, useChat } from './contexts/ChatContext'
@@ -20,6 +21,11 @@ import FileManagerPanel from './components/FileManagerPanel'
 import FilesPage from './components/FilesPage'
 import SplashScreen from './components/SplashScreen'
 import ElicitationDialog from './components/ElicitationDialog'
+
+// Log build info to browser console on startup
+console.info(
+  `Atlas v${__APP_VERSION__} (${__GIT_HASH__}) | Built ${__BUILD_TIME__}`
+)
 
 function ChatInterface() {
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
