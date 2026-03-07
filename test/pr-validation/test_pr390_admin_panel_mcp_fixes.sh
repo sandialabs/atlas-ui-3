@@ -1,5 +1,5 @@
 #!/bin/bash
-# PR #389 - Fix admin panel MCP server status, reload, and config path display
+# PR #390 - Fix admin panel MCP server status, reload, and config path display
 # Date: 2026-03-07
 
 set -euo pipefail
@@ -15,7 +15,7 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 cd "$PROJECT_ROOT"
 source .venv/bin/activate 2>/dev/null || true
 
-echo "=== PR #389: Admin Panel MCP Fixes ==="
+echo "=== PR #390: Admin Panel MCP Fixes ==="
 echo ""
 
 # 1. Verify reload_servers() is NOT called anywhere in admin_routes.py
