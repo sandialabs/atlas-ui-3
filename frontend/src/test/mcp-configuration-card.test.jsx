@@ -59,7 +59,7 @@ describe('MCPConfigurationCard', () => {
         await vi.advanceTimersByTimeAsync(0)
       })
 
-      expect(screen.getByText('Connected servers')).toBeInTheDocument()
+      expect(screen.getByText('Connected servers (1)')).toBeInTheDocument()
       expect(screen.getByText((content, element) => {
         return element.tagName === 'SPAN' && content.includes('live-server')
       })).toBeInTheDocument()
@@ -68,7 +68,7 @@ describe('MCPConfigurationCard', () => {
       })).toBeNull()
     })
 
-    it('opens a read-only View MCP Config modal with current config', async () => {
+    it('opens a combined MCP Details modal with config and status', async () => {
       global.fetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -79,10 +79,16 @@ describe('MCPConfigurationCard', () => {
       })
 
       const mcpConfig = { servers: { example: { transport: 'stdio' } } }
+      const statusData = { configured_servers: ['example'], connected_servers: ['example'], failed_servers: {} }
 
+      // viewMCPDetails fetches both endpoints in parallel
       global.fetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ mcp_config: mcpConfig }),
+      })
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => statusData,
       })
 
       await act(async () => {
@@ -96,7 +102,7 @@ describe('MCPConfigurationCard', () => {
         await vi.advanceTimersByTimeAsync(0)
       })
 
-      const viewButton = screen.getByText('View MCP Config')
+      const viewButton = screen.getByText('View MCP Details')
 
       await act(async () => {
         viewButton.click()
@@ -106,10 +112,11 @@ describe('MCPConfigurationCard', () => {
       expect(openModal).toHaveBeenCalled()
       const [title, options] = openModal.mock.calls[0]
 
-      expect(title).toBe('View MCP Configuration')
-      expect(options.type).toBe('textarea')
-      expect(options.readOnly).toBe(true)
-      expect(options.value).toContain('example')
+      expect(title).toBe('MCP Configuration & Status')
+      expect(options.type).toBe('mcp-details')
+      expect(options.readonly).toBe(true)
+      expect(options.servers).toHaveProperty('example')
+      expect(options.status).toHaveProperty('connected_servers')
     })
 
     it('applies exponential backoff when status requests fail', async () => {

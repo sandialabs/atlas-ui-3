@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #389 - 2026-03-07
+- **Fix**: Admin panel MCP server status now correctly excludes failed servers from connected list, shows per-server tool/prompt counts, and displays the active `mcp.json` file path so admins know which config file is being read and written.
+- **Fix**: Add/remove server endpoints now properly reload MCP config instead of calling non-existent `reload_servers()` method; removed servers are cleaned up from clients, tools, and prompts caches.
+
 ### PR #388 - 2026-03-06
 - **Fix**: Remove `auth_request` from `/api/files/download/` nginx location block; the endpoint uses application-layer HMAC capability tokens for auth, and the nginx `auth_request` was causing 302 redirects for MCP servers and other non-browser clients.
 

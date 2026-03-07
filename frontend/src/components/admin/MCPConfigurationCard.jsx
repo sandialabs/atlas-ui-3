@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { Settings, RefreshCw, RotateCcw, Activity } from 'lucide-react'
+import { Settings, RefreshCw, RotateCcw } from 'lucide-react'
 import { useChat } from '../../contexts/ChatContext'
 import { calculateBackoffDelay } from '../../hooks/usePollingWithBackoff'
 
@@ -12,6 +12,9 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   const [mcpStatus, setMcpStatus] = useState({
     connected_servers: [],
     failed_servers: {},
+    tool_counts: {},
+    prompt_counts: {},
+    mcp_config_path: '',
   })
   const [statusLoading, setStatusLoading] = useState(false)
   const [reloadLoading, setReloadLoading] = useState(false)
@@ -23,7 +26,23 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   const isMountedRef = useRef(true)
   const pollFnRef = useRef(null)
 
-  // Manual refresh function for button clicks (doesn't affect polling schedule)
+  // Helper to normalize status response into component state
+  const normalizeStatus = (data) => {
+    const configured = new Set(data.configured_servers || [])
+    const freshConnected = (data.connected_servers || []).filter((name) => configured.has(name))
+    const freshFailedEntries = Object.entries(data.failed_servers || {}).filter(
+      ([name]) => configured.has(name)
+    )
+    return {
+      connected_servers: freshConnected,
+      failed_servers: Object.fromEntries(freshFailedEntries),
+      tool_counts: data.tool_counts || {},
+      prompt_counts: data.prompt_counts || {},
+      mcp_config_path: data.mcp_config_path || '',
+    }
+  }
+
+  // Manual refresh function for button clicks (does not affect polling schedule)
   const loadMCPStatus = async () => {
     try {
       setStatusLoading(true)
@@ -32,15 +51,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         throw new Error(`HTTP ${response.status}`)
       }
       const data = await response.json()
-      const configured = new Set(data.configured_servers || [])
-      const freshConnected = (data.connected_servers || []).filter((name) => configured.has(name))
-      const freshFailedEntries = Object.entries(data.failed_servers || {}).filter(
-        ([name]) => configured.has(name)
-      )
-      setMcpStatus({
-        connected_servers: freshConnected,
-        failed_servers: Object.fromEntries(freshFailedEntries),
-      })
+      setMcpStatus(normalizeStatus(data))
     } catch (err) {
       console.error('Error loading MCP status for card:', err)
     } finally {
@@ -74,19 +85,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
           throw new Error(`HTTP ${response.status}`)
         }
         const data = await response.json()
-        // Normalize status so we don't show stale servers that no longer exist
-        const configured = new Set(data.configured_servers || [])
-
-        const freshConnected = (data.connected_servers || []).filter((name) => configured.has(name))
-
-        const freshFailedEntries = Object.entries(data.failed_servers || {}).filter(
-          ([name]) => configured.has(name)
-        )
-
-        setMcpStatus({
-          connected_servers: freshConnected,
-          failed_servers: Object.fromEntries(freshFailedEntries),
-        })
+        setMcpStatus(normalizeStatus(data))
 
         // Reset failure count on success and schedule next poll at normal interval
         failureCountRef.current = 0
@@ -119,42 +118,28 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
     }
   }, [])
 
-  const manageMCP = async () => {
+  const viewMCPDetails = async () => {
     try {
-      const response = await fetch('/admin/config/view')
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      const data = await response.json()
+      const [configRes, statusRes] = await Promise.all([
+        fetch('/admin/config/view'),
+        fetch('/admin/mcp/status'),
+      ])
+      if (!configRes.ok) throw new Error(`Config HTTP ${configRes.status}`)
+      if (!statusRes.ok) throw new Error(`Status HTTP ${statusRes.status}`)
 
-      const mcpConfigJson = JSON.stringify(data.mcp_config || {}, null, 2)
+      const configData = await configRes.json()
+      const statusData = await statusRes.json()
 
-      openModal('View MCP Configuration', {
-        type: 'textarea',
-        value: mcpConfigJson,
-        readOnly: true,
-        description: 'Current MCP servers and their properties, as loaded from config/mcp.json. To make changes, edit that file directly and then use the controls below to hot-reload.',
-      }, 'mcp-config')
+      const configPath = mcpStatus.mcp_config_path || 'config/mcp.json'
+      openModal('MCP Configuration & Status', {
+        type: 'mcp-details',
+        readonly: true,
+        configPath,
+        servers: configData.mcp_config?.servers || {},
+        status: statusData,
+      }, 'mcp-config', 'mcp-config')
     } catch (err) {
-      addNotification('Error loading MCP configuration: ' + err.message, 'error')
-    }
-  }
-
-  const viewMCPStatus = async () => {
-    try {
-      const response = await fetch('/admin/mcp/status')
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      const data = await response.json()
-
-      openModal('MCP Status', {
-        type: 'textarea',
-        value: JSON.stringify(data, null, 2),
-        description: 'You don’t need to restart after editing mcp.json.\n\n- POST /admin/mcp/reload applies config changes and rediscover tools/prompts.\n- GET /admin/mcp/status shows which servers are connected or failing.\n- POST /admin/mcp/reconnect (plus the auto-reconnect feature flag) retries failed servers with exponential backoff.'
-      })
-    } catch (err) {
-      addNotification('Error loading MCP status: ' + err.message, 'error')
+      addNotification('Error loading MCP details: ' + err.message, 'error')
     }
   }
 
@@ -232,26 +217,37 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
       <div className={`px-3 py-1 rounded text-sm font-medium mb-4 ${getStatusColor(systemStatus.overall_status || 'healthy')}`}>
         {statusLoading ? 'Updating MCP status…' : (systemStatus.overall_status || 'Ready')}
       </div>
+      {/* Config file path */}
+      {mcpStatus.mcp_config_path && (
+        <div className="mb-3 px-3 py-2 bg-gray-900/50 rounded text-xs text-gray-400 font-mono break-all">
+          Config: {mcpStatus.mcp_config_path}
+        </div>
+      )}
       {/* Inline MCP server status */}
       <div className="mb-4 space-y-2 text-sm">
         {mcpStatus.connected_servers.length > 0 && (
           <div>
-            <div className="text-gray-400 mb-1">Connected servers</div>
+            <div className="text-gray-400 mb-1">Connected servers ({mcpStatus.connected_servers.length})</div>
             <div className="flex flex-wrap gap-1">
-              {mcpStatus.connected_servers.map((name) => (
-                <span
-                  key={name}
-                  className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-green-900/40 text-green-300 border border-green-700/60"
-                >
-                  ● {name}
-                </span>
-              ))}
+              {mcpStatus.connected_servers.map((name) => {
+                const tools = mcpStatus.tool_counts[name] || 0
+                const prompts = mcpStatus.prompt_counts[name] || 0
+                return (
+                  <span
+                    key={name}
+                    className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-green-900/40 text-green-300 border border-green-700/60"
+                    title={`${tools} tools, ${prompts} prompts`}
+                  >
+                    {name} ({tools}t/{prompts}p)
+                  </span>
+                )
+              })}
             </div>
           </div>
         )}
         {Object.keys(mcpStatus.failed_servers).length > 0 && (
           <div>
-            <div className="text-gray-400 mb-1">Failed servers</div>
+            <div className="text-gray-400 mb-1">Failed servers ({Object.keys(mcpStatus.failed_servers).length})</div>
             <div className="flex flex-wrap gap-1">
               {Object.entries(mcpStatus.failed_servers).map(([name, info]) => (
                 <span
@@ -259,7 +255,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
                   className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-red-900/40 text-red-300 border border-red-700/60"
                   title={info?.error || 'Failed to connect'}
                 >
-                  ● {name}
+                  {name}{info?.attempt_count > 1 ? ` (${info.attempt_count} attempts)` : ''}
                 </span>
               ))}
             </div>
@@ -270,19 +266,12 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         )}
       </div>
       <div className="space-y-2">
-        <button 
-          onClick={manageMCP}
+        <button
+          onClick={viewMCPDetails}
           className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           <Settings className="w-4 h-4" />
-          View MCP Config
-        </button>
-        <button
-          onClick={viewMCPStatus}
-          className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors flex items-center justify-center gap-2"
-        >
-          <Activity className="w-4 h-4" />
-          View MCP Status
+          View MCP Details
         </button>
         <div className="grid grid-cols-2 gap-2">
           <button
