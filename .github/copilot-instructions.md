@@ -286,6 +286,7 @@ Set `APP_AGENT_LOOP_STRATEGY` to `agentic | react | think-act | act`.
 8. **DuckDB FK constraints**: DuckDB does not support CASCADE or UPDATE on foreign-key-constrained tables; the `chat_history` module avoids all database-level ForeignKey constraints and enforces referential integrity manually in the repository layer instead
 9. **Chat history default**: Chat history with DuckDB is enabled by default in `.env.example`; new setups get conversation persistence without extra configuration
 10. **Empty `tool_calls` arrays**: OpenAI and compatible providers reject messages where `tool_calls` is present but empty (`[]`); always call `_sanitize_messages()` in `LiteLLMCaller` before passing messages to `acompletion()`
+11. **Nginx `auth_request` vs HMAC tokens**: Do not apply nginx `auth_request` to endpoints that use application-layer HMAC capability tokens (e.g., `/api/files/download/`); non-browser clients like MCP servers lack session cookies and will get 302 redirects instead of the resource
 
 ## Critical Restrictions
 
