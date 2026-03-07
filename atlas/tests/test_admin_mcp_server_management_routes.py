@@ -54,7 +54,8 @@ def test_admin_mcp_active_servers_empty_when_no_override_file(monkeypatch, tmp_p
     )
     assert response.status_code == 200
     data = response.json()
-    assert data == {"active_servers": {}}
+    assert data["active_servers"] == {}
+    assert "config_path" in data
 
 
 def test_admin_mcp_add_server_persists_to_overrides(monkeypatch, tmp_path):
