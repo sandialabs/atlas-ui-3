@@ -292,12 +292,11 @@ class LiteLLMStreamingMixin:
         if len(data_sources) == 1:
             display_source, rag_response = source_responses[0]
             if rag_response.is_completion:
-                yield LLMResponse(
-                    content=self._build_rag_completion_response(rag_response, display_source),
-                )
-                return
-            rag_content = rag_response.content
-            context_label = f"Retrieved context from {display_source}"
+                rag_content = self._build_rag_completion_response(rag_response, display_source)
+                context_label = f"Pre-synthesized answer from {display_source}"
+            else:
+                rag_content = rag_response.content
+                context_label = f"Retrieved context from {display_source}"
         else:
             rag_content, _ = self._combine_rag_contexts(source_responses)
             context_label = f"Retrieved context from {len(source_responses)} RAG sources"

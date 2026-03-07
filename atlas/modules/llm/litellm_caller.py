@@ -686,18 +686,14 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
                 if rag_response.is_completion:
                     logger.info(
-                        "[LLM+RAG+Tools] RAG returned chat completion - returning directly without LLM processing"
+                        "[LLM+RAG+Tools] RAG returned completion - injecting as context (tools still available)"
                     )
-                    final_response = self._build_rag_completion_response(rag_response, display_source)
-                    logger.info(
-                        "[LLM+RAG+Tools] Returning RAG completion directly: response_length=%d",
-                        len(final_response),
-                    )
-                    return LLMResponse(content=final_response)
-
-                rag_content = rag_response.content
+                    rag_content = self._build_rag_completion_response(rag_response, display_source)
+                    context_label = f"Pre-synthesized answer from {display_source}"
+                else:
+                    rag_content = rag_response.content
+                    context_label = f"Retrieved context from {display_source}"
                 rag_metadata = rag_response.metadata
-                context_label = f"Retrieved context from {display_source}"
             else:
                 # Multiple sources: combine all as raw context
                 rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
