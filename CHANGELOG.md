@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #389 - 2026-03-06
+- **Fix**: RAG `is_completion` responses no longer bypass tools when both RAG and tools are active. The pre-synthesized RAG answer is injected as context so the LLM can still use available tools.
+
 ### PR #384 - 2026-03-04
 - **Fix**: Package install no longer silently ignores user config files. `atlas-server` now auto-detects a `config/` directory next to the loaded `.env` file when neither `--config-folder` nor `APP_CONFIG_DIR` is set. `atlas-init --minimal` now sets `APP_CONFIG_DIR=./config` in the generated `.env` by default.
 
