@@ -4,6 +4,7 @@ import { Plus, Minus, RefreshCw, Server, CheckCircle, XCircle, AlertCircle, Sear
 const MCPServerManager = ({ addNotification }) => {
   const [availableServers, setAvailableServers] = useState({})
   const [activeServers, setActiveServers] = useState({})
+  const [configPath, setConfigPath] = useState('')
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState({})
   const [searchQuery, setSearchQuery] = useState('')
@@ -28,6 +29,9 @@ const MCPServerManager = ({ addNotification }) => {
 
       setAvailableServers(availableData.available_servers || {})
       setActiveServers(activeData.active_servers || {})
+      if (activeData.config_path) {
+        setConfigPath(activeData.config_path)
+      }
 
     } catch (err) {
       console.error('Error loading MCP servers:', err)
@@ -173,9 +177,14 @@ const MCPServerManager = ({ addNotification }) => {
         </button>
       </div>
       
-      <p className="text-gray-400 mb-4">
-        Manage MCP servers by adding them from available configurations (loaded from the <code className="text-gray-300">config/mcp-example-configs/</code> folder) or removing them from active use.
+      <p className="text-gray-400 mb-2">
+        Add servers from example configurations or remove them from active use.
       </p>
+      {configPath && (
+        <div className="mb-3 px-3 py-2 bg-gray-900/50 rounded text-xs text-gray-400 font-mono break-all">
+          Writes to: {configPath}
+        </div>
+      )}
 
       {/* Search input */}
       <div className="relative mb-4">

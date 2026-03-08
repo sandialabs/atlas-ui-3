@@ -534,10 +534,16 @@ class MCPToolManager:
 
         new_servers = set(self.servers_config.keys())
 
-        # Clear failed servers tracking for removed servers
+        # Clean up removed servers from clients, failures, and tool/prompt caches
         removed_servers = previous_servers - new_servers
         for server_name in removed_servers:
             self._failed_servers.pop(server_name, None)
+            if hasattr(self, 'clients'):
+                self.clients.pop(server_name, None)
+            if hasattr(self, 'available_tools'):
+                self.available_tools.pop(server_name, None)
+            if hasattr(self, 'available_prompts'):
+                self.available_prompts.pop(server_name, None)
 
         added_servers = new_servers - previous_servers
         unchanged_servers = previous_servers & new_servers
@@ -1160,16 +1166,17 @@ class MCPToolManager:
 
             if isinstance(result, Exception):
                 logger.error(f"Exception during tool discovery for {server_name}: {result}", exc_info=True)
-                # Record failure and set empty tools list for failed server
                 self._record_server_failure(server_name, f"Exception during tool discovery: {result}")
                 self.available_tools[server_name] = {
                     'tools': [],
                     'config': self.servers_config.get(server_name),
                 }
             else:
-                # Clear any previous discovery failure on success
-                self._clear_server_failure(server_name)
                 self.available_tools[server_name] = result
+                # Do NOT call _clear_server_failure here.
+                # _discover_tools_for_server already calls
+                # _record_server_failure on error and returns an empty
+                # tools list; clearing here would erase that failure.
 
         total_tools = sum(len(server_data.get('tools', [])) for server_data in self.available_tools.values())
         logger.info(
@@ -1293,15 +1300,16 @@ class MCPToolManager:
 
             if isinstance(result, Exception):
                 logger.error(f"Exception during prompt discovery for {server_name}: {result}", exc_info=True)
-                # Record failure and set empty prompts list for failed server
                 self._record_server_failure(server_name, f"Exception during prompt discovery: {result}")
                 self.available_prompts[server_name] = {
                     'prompts': [],
                     'config': self.servers_config.get(server_name),
                 }
             else:
-                # Clear any previous discovery failure on success
-                self._clear_server_failure(server_name)
+                # Do NOT call _clear_server_failure here.
+                # _discover_prompts_for_server already calls
+                # _record_server_failure on error and returns an empty
+                # prompts list; clearing here would erase that failure.
                 self.available_prompts[server_name] = result
 
         total_prompts = sum(len(server_data.get('prompts', [])) for server_data in self.available_prompts.values())

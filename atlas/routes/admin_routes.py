@@ -267,13 +267,23 @@ async def reload_mcp_servers(admin_user: str = Depends(require_admin)):
         await mcp.discover_tools()
         await mcp.discover_prompts()
 
+        configured_set = set(mcp.servers_config.keys())
         return {
             "message": "MCP servers reloaded from disk configuration",
             "config_changes": config_changes,
-            "servers": list(mcp.clients.keys()),
+            "servers": [s for s in mcp.clients.keys() if s in configured_set],
             "failed_servers": list(mcp.get_failed_servers().keys()),
-            "tool_counts": {k: len(v.get("tools", [])) for k, v in mcp.available_tools.items()},
-            "prompt_counts": {k: len(v.get("prompts", [])) for k, v in mcp.available_prompts.items()},
+            "tool_counts": {
+                k: len(v.get("tools", []))
+                for k, v in mcp.available_tools.items()
+                if k in configured_set
+            },
+            "prompt_counts": {
+                k: len(v.get("prompts", []))
+                for k, v in mcp.available_prompts.items()
+                if k in configured_set
+            },
+            "mcp_config_path": str(get_admin_config_path("mcp.json")),
             "reloaded_by": admin_user,
         }
     except Exception as e:  # noqa: BLE001
@@ -336,24 +346,44 @@ async def get_mcp_status(admin_user: str = Depends(require_admin)):
             }
 
         # A server is considered "connected" only if it has a client AND
-        # at least one tool or prompt discovered (or explicitly marked as
-        # having zero tools/prompts but no recorded failure). This prevents
-        # HTTP/SSE/SSL discovery failures from showing as connected.
+        # is not in the failed servers list AND has at least one tool or
+        # prompt discovered (or explicitly zero with no recorded failure).
+        configured_set = set(mcp.servers_config.keys())
         connected_servers: List[str] = []
         for server_name in mcp.clients.keys():
+            if server_name not in configured_set:
+                continue
+            if server_name in failed_servers:
+                continue
             tools = mcp.available_tools.get(server_name, {}).get("tools", [])
             prompts = mcp.available_prompts.get(server_name, {}).get("prompts", [])
             if tools or prompts:
                 connected_servers.append(server_name)
-            elif server_name not in failed_servers_with_timing:
+            else:
                 # No tools/prompts but also no recorded failure; treat as connected
                 # to preserve behavior for servers that legitimately expose nothing.
                 connected_servers.append(server_name)
+
+        # Only include tool/prompt counts for currently configured servers
+        tool_counts = {
+            k: len(v.get("tools", []))
+            for k, v in mcp.available_tools.items()
+            if k in configured_set
+        }
+        prompt_counts = {
+            k: len(v.get("prompts", []))
+            for k, v in mcp.available_prompts.items()
+            if k in configured_set
+        }
+
+        # Resolve the active mcp.json path so admins know which file is loaded
+        mcp_config_path = str(get_admin_config_path("mcp.json"))
 
         return {
             "connected_servers": connected_servers,
             "configured_servers": list(mcp.servers_config.keys()),
             "failed_servers": failed_servers_with_timing,
+            "mcp_config_path": mcp_config_path,
             "auto_reconnect": {
                 "enabled": app_settings.feature_mcp_auto_reconnect_enabled,
                 "base_interval": app_settings.mcp_reconnect_interval,
@@ -361,8 +391,8 @@ async def get_mcp_status(admin_user: str = Depends(require_admin)):
                 "backoff_multiplier": app_settings.mcp_reconnect_backoff_multiplier,
                 "running": mcp._reconnect_running,
             },
-            "tool_counts": {k: len(v.get("tools", [])) for k, v in mcp.available_tools.items()},
-            "prompt_counts": {k: len(v.get("prompts", [])) for k, v in mcp.available_prompts.items()},
+            "tool_counts": tool_counts,
+            "prompt_counts": prompt_counts,
         }
     except Exception as e:  # noqa: BLE001
         logger.error(f"Error getting MCP status: {e}", exc_info=True)
@@ -696,12 +726,12 @@ async def get_active_mcp_servers(
         mcp_config_path = get_admin_config_path("mcp.json")
 
         if not mcp_config_path.exists():
-            return {"active_servers": {}}
+            return {"active_servers": {}, "config_path": str(mcp_config_path)}
 
         with mcp_config_path.open("r", encoding="utf-8") as f:
             active_config = json.load(f)
 
-        return {"active_servers": active_config}
+        return {"active_servers": active_config, "config_path": str(mcp_config_path)}
 
     except Exception as e:
         logger.error(f"Error getting active MCP servers: {e}")
@@ -767,11 +797,19 @@ async def add_mcp_server(
         sanitized_server_name = sanitize_for_logging(server_name)
         logger.info(f"Admin {sanitized_admin_user} added MCP server '{sanitized_server_name}' to active configuration")
 
-        # Trigger MCP reload to apply changes
+        # Reload MCP config and reinitialize to apply changes
+        reload_result = None
         try:
             mcp_manager = app_factory.get_mcp_manager()
             if mcp_manager:
-                await mcp_manager.reload_servers()
+                mcp_manager.reload_config()
+                await mcp_manager.initialize_clients()
+                await mcp_manager.discover_tools()
+                await mcp_manager.discover_prompts()
+                reload_result = {
+                    "servers": list(mcp_manager.clients.keys()),
+                    "failed_servers": list(mcp_manager.get_failed_servers().keys()),
+                }
         except Exception as reload_error:
             sanitized_server_name = sanitize_for_logging(server_name)
             logger.warning(f"Failed to reload MCP servers after adding '{sanitized_server_name}': {reload_error}")
@@ -779,7 +817,8 @@ async def add_mcp_server(
         return {
             "message": f"Server '{server_name}' added successfully",
             "server_name": server_name,
-            "config": server_config
+            "config": server_config,
+            "reload_result": reload_result,
         }
 
     except HTTPException:
@@ -830,11 +869,19 @@ async def remove_mcp_server(
         sanitized_server_name = sanitize_for_logging(server_name)
         logger.info(f"Admin {sanitized_admin_user} removed MCP server '{sanitized_server_name}' from active configuration")
 
-        # Trigger MCP reload to apply changes
+        # Reload MCP config and reinitialize to apply changes
+        reload_result = None
         try:
             mcp_manager = app_factory.get_mcp_manager()
             if mcp_manager:
-                await mcp_manager.reload_servers()
+                mcp_manager.reload_config()
+                await mcp_manager.initialize_clients()
+                await mcp_manager.discover_tools()
+                await mcp_manager.discover_prompts()
+                reload_result = {
+                    "servers": list(mcp_manager.clients.keys()),
+                    "failed_servers": list(mcp_manager.get_failed_servers().keys()),
+                }
         except Exception as reload_error:
             sanitized_server_name = sanitize_for_logging(server_name)
             logger.warning(f"Failed to reload MCP servers after removing '{sanitized_server_name}': {reload_error}")
@@ -842,7 +889,8 @@ async def remove_mcp_server(
         return {
             "message": f"Server '{server_name}' removed successfully",
             "server_name": server_name,
-            "removed_config": removed_config
+            "removed_config": removed_config,
+            "reload_result": reload_result,
         }
 
     except HTTPException:

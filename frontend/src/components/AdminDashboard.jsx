@@ -83,8 +83,8 @@ const AdminDashboard = () => {
     loadDashboard()
   }, [loadDashboard])
 
-  const openModal = (title, content, endpoint = null) => {
-    setModalData({ title, content })
+  const openModal = (title, content, endpoint = null, contentCategory = null) => {
+    setModalData({ title, content, contentCategory })
     setCurrentEndpoint(endpoint)
     setModalOpen(true)
   }
