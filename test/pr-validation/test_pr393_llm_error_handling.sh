@@ -21,63 +21,45 @@ echo "PR #393 - LLM Error Handling Validation"
 echo "============================================"
 
 # -------------------------------------------------------------------
-# 1. Verify LiteLLMCaller raises domain errors instead of generic Exception
+# 1. Behavioral: _raise_llm_domain_error maps litellm errors correctly
 # -------------------------------------------------------------------
 echo ""
-echo "--- Test 1: LiteLLMCaller imports domain error classes ---"
-if python -c "
-from atlas.modules.llm.litellm_caller import LiteLLMCaller
-import inspect
-src = inspect.getsource(LiteLLMCaller._raise_llm_domain_error)
-assert 'RateLimitError' in src, 'Missing RateLimitError'
-assert 'LLMTimeoutError' in src, 'Missing LLMTimeoutError'
-assert 'LLMAuthenticationError' in src, 'Missing LLMAuthenticationError'
-assert 'LLMServiceError' in src, 'Missing LLMServiceError'
-print('_raise_llm_domain_error handles all expected error types')
-"; then
-    pass "LiteLLMCaller._raise_llm_domain_error handles all domain error types"
-else
-    fail "LiteLLMCaller._raise_llm_domain_error missing error types"
-fi
-
-# -------------------------------------------------------------------
-# 2. Verify _raise_llm_domain_error raises correct domain errors
-# -------------------------------------------------------------------
-echo ""
-echo "--- Test 2: _raise_llm_domain_error maps litellm errors correctly ---"
+echo "--- Test 1: _raise_llm_domain_error maps litellm errors correctly ---"
 if python -c "
 import litellm
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 from atlas.domain.errors import RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError
 
-caller = LiteLLMCaller.__new__(LiteLLMCaller)
-
 # Test rate limit
 try:
-    caller._raise_llm_domain_error(litellm.RateLimitError('rate limit exceeded', 'model', None, None))
+    LiteLLMCaller._raise_llm_domain_error(litellm.RateLimitError('rate limit exceeded', 'model', None, None))
     assert False, 'Should have raised'
-except RateLimitError:
+except RateLimitError as e:
+    assert 'high traffic' in str(e).lower(), f'Bad message: {e}'
     print('  Rate limit -> RateLimitError: OK')
 
 # Test timeout
 try:
-    caller._raise_llm_domain_error(litellm.Timeout('request timed out', 'model', None))
+    LiteLLMCaller._raise_llm_domain_error(litellm.Timeout('request timed out', 'model', None))
     assert False, 'Should have raised'
-except LLMTimeoutError:
+except LLMTimeoutError as e:
+    assert 'timed out' in str(e).lower(), f'Bad message: {e}'
     print('  Timeout -> LLMTimeoutError: OK')
 
 # Test auth error
 try:
-    caller._raise_llm_domain_error(litellm.AuthenticationError('invalid api key', 'model', None, None))
+    LiteLLMCaller._raise_llm_domain_error(litellm.AuthenticationError('invalid api key', 'model', None, None))
     assert False, 'Should have raised'
-except LLMAuthenticationError:
+except LLMAuthenticationError as e:
+    assert 'authentication' in str(e).lower(), f'Bad message: {e}'
     print('  AuthenticationError -> LLMAuthenticationError: OK')
 
 # Test generic error
 try:
-    caller._raise_llm_domain_error(Exception('something went wrong'))
+    LiteLLMCaller._raise_llm_domain_error(Exception('something went wrong'))
     assert False, 'Should have raised'
-except LLMServiceError:
+except LLMServiceError as e:
+    assert 'try again' in str(e).lower(), f'Bad message: {e}'
     print('  Generic Exception -> LLMServiceError: OK')
 
 print('All error mappings correct')
@@ -88,66 +70,183 @@ else
 fi
 
 # -------------------------------------------------------------------
-# 3. Verify call_plain no longer raises generic Exception
+# 2. Behavioral: call_plain raises domain errors on LLM failure
+#    Uses mock to patch acompletion and _get_litellm_model_name
 # -------------------------------------------------------------------
 echo ""
-echo "--- Test 3: call_plain raises domain errors, not generic Exception ---"
+echo "--- Test 2: call_plain raises domain errors on LLM failure ---"
 if python -c "
-import inspect
+import asyncio
+from unittest.mock import patch, AsyncMock, MagicMock
+import litellm
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
-src = inspect.getsource(LiteLLMCaller.call_plain)
-# Should use _raise_llm_domain_error, not 'raise Exception'
-assert '_raise_llm_domain_error' in src, 'call_plain should use _raise_llm_domain_error'
-assert 'raise Exception' not in src, 'call_plain should not raise generic Exception'
-print('call_plain uses domain error classification')
+from atlas.domain.errors import RateLimitError, LLMServiceError
+
+caller = LiteLLMCaller.__new__(LiteLLMCaller)
+caller.llm_config = MagicMock()
+caller.debug_mode = False
+caller.rag_service = None
+
+async def test_call_plain_rate_limit():
+    with patch.object(caller, '_get_litellm_model_name', return_value='openai/test'), \
+         patch.object(caller, '_get_model_kwargs', return_value={}), \
+         patch.object(caller, '_sanitize_messages', return_value=[{'role': 'user', 'content': 'hi'}]), \
+         patch('atlas.modules.llm.litellm_caller.acompletion',
+               new_callable=AsyncMock,
+               side_effect=litellm.RateLimitError('rate limit', 'model', None, None)):
+        try:
+            await caller.call_plain('test-model', [{'role': 'user', 'content': 'hi'}])
+            assert False, 'Should have raised'
+        except RateLimitError:
+            print('  call_plain + RateLimitError: OK')
+        except Exception as e:
+            assert False, f'Wrong error type: {type(e).__name__}: {e}'
+
+async def test_call_plain_generic():
+    with patch.object(caller, '_get_litellm_model_name', return_value='openai/test'), \
+         patch.object(caller, '_get_model_kwargs', return_value={}), \
+         patch.object(caller, '_sanitize_messages', return_value=[{'role': 'user', 'content': 'hi'}]), \
+         patch('atlas.modules.llm.litellm_caller.acompletion',
+               new_callable=AsyncMock,
+               side_effect=Exception('connection refused')):
+        try:
+            await caller.call_plain('test-model', [{'role': 'user', 'content': 'hi'}])
+            assert False, 'Should have raised'
+        except LLMServiceError:
+            print('  call_plain + generic Exception -> LLMServiceError: OK')
+        except Exception as e:
+            assert False, f'Wrong error type: {type(e).__name__}: {e}'
+
+asyncio.run(test_call_plain_rate_limit())
+asyncio.run(test_call_plain_generic())
+print('call_plain raises domain errors correctly')
 "; then
-    pass "call_plain raises domain errors"
+    pass "call_plain raises domain errors on LLM failure"
 else
-    fail "call_plain still raises generic Exception"
+    fail "call_plain does not raise domain errors"
 fi
 
 # -------------------------------------------------------------------
-# 4. Verify call_with_tools no longer raises generic Exception
+# 3. Behavioral: call_with_tools raises domain errors on LLM failure
 # -------------------------------------------------------------------
 echo ""
-echo "--- Test 4: call_with_tools raises domain errors, not generic Exception ---"
+echo "--- Test 3: call_with_tools raises domain errors on LLM failure ---"
 if python -c "
-import inspect
+import asyncio
+from unittest.mock import patch, AsyncMock, MagicMock
+import litellm
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
-src = inspect.getsource(LiteLLMCaller.call_with_tools)
-# Should use _raise_llm_domain_error, not 'raise Exception'
-assert '_raise_llm_domain_error' in src, 'call_with_tools should use _raise_llm_domain_error'
-assert 'raise Exception' not in src, 'call_with_tools should not raise generic Exception'
-print('call_with_tools uses domain error classification')
+from atlas.domain.errors import LLMTimeoutError
+
+caller = LiteLLMCaller.__new__(LiteLLMCaller)
+caller.llm_config = MagicMock()
+caller.debug_mode = False
+caller.rag_service = None
+
+async def test_call_with_tools_timeout():
+    with patch.object(caller, '_get_litellm_model_name', return_value='openai/test'), \
+         patch.object(caller, '_get_model_kwargs', return_value={}), \
+         patch.object(caller, '_sanitize_messages', return_value=[{'role': 'user', 'content': 'hi'}]), \
+         patch('atlas.modules.llm.litellm_caller.acompletion',
+               new_callable=AsyncMock,
+               side_effect=litellm.Timeout('timed out', 'model', None)):
+        try:
+            await caller.call_with_tools(
+                'test-model',
+                [{'role': 'user', 'content': 'hi'}],
+                [{'type': 'function', 'function': {'name': 'test', 'parameters': {}}}],
+            )
+            assert False, 'Should have raised'
+        except LLMTimeoutError:
+            print('  call_with_tools + Timeout -> LLMTimeoutError: OK')
+        except Exception as e:
+            assert False, f'Wrong error type: {type(e).__name__}: {e}'
+
+asyncio.run(test_call_with_tools_timeout())
+print('call_with_tools raises domain errors correctly')
 "; then
-    pass "call_with_tools raises domain errors"
+    pass "call_with_tools raises domain errors on LLM failure"
 else
-    fail "call_with_tools still raises generic Exception"
+    fail "call_with_tools does not raise domain errors"
 fi
 
 # -------------------------------------------------------------------
-# 5. Verify AgentModeRunner has error handling
+# 4. Behavioral: AgentModeRunner sends agent_completion on error
 # -------------------------------------------------------------------
 echo ""
-echo "--- Test 5: AgentModeRunner catches errors and sends agent_completion ---"
+echo "--- Test 4: AgentModeRunner sends agent_completion on error ---"
 if python -c "
-import inspect
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 from atlas.application.chat.modes.agent import AgentModeRunner
-src = inspect.getsource(AgentModeRunner.run)
-assert 'except Exception' in src, 'AgentModeRunner.run should catch exceptions'
-assert 'agent_completion' in src, 'AgentModeRunner.run should send agent_completion on error'
-print('AgentModeRunner has proper error handling')
+from atlas.application.chat.agent import AgentLoopFactory
+from atlas.domain.errors import LLMServiceError
+from atlas.domain.sessions.models import Session
+
+# Track whether agent_completion was published
+completion_events = []
+
+async def mock_publish_agent_update(**kwargs):
+    completion_events.append(kwargs)
+
+# Create a mock agent loop that raises
+mock_loop = MagicMock()
+mock_loop.run = AsyncMock(side_effect=LLMServiceError('test error'))
+
+# Create factory that returns the mock loop
+mock_factory = MagicMock(spec=AgentLoopFactory)
+mock_factory.create.return_value = mock_loop
+
+# Create event publisher
+mock_publisher = MagicMock()
+mock_publisher.publish_agent_update = mock_publish_agent_update
+
+runner = AgentModeRunner(
+    agent_loop_factory=mock_factory,
+    event_publisher=mock_publisher,
+)
+
+# Create a mock session
+mock_session = MagicMock(spec=Session)
+mock_session.id = 'test-session'
+mock_session.user_email = 'test@test.com'
+mock_session.context = {'files': {}}
+mock_session.history = MagicMock()
+
+async def test():
+    try:
+        await runner.run(
+            session=mock_session,
+            model='test-model',
+            messages=[],
+            selected_tools=[],
+            selected_data_sources=[],
+            max_steps=5,
+            temperature=0.7,
+        )
+        assert False, 'Should have raised'
+    except LLMServiceError:
+        pass
+
+    # Verify agent_completion was sent
+    completion = [e for e in completion_events if e.get('update_type') == 'agent_completion']
+    assert len(completion) == 1, f'Expected 1 agent_completion event, got {len(completion)}'
+    assert completion[0]['steps'] == 0, 'Steps should be 0 on error'
+    print('  AgentModeRunner sends agent_completion before re-raising: OK')
+
+asyncio.run(test())
+print('AgentModeRunner error cleanup works correctly')
 "; then
-    pass "AgentModeRunner handles errors and cleans up UI state"
+    pass "AgentModeRunner sends agent_completion on error"
 else
-    fail "AgentModeRunner missing error handling"
+    fail "AgentModeRunner does not send agent_completion on error"
 fi
 
 # -------------------------------------------------------------------
-# 6. Verify frontend error handler resets agent state
+# 5. Verify frontend error handler resets agent state
 # -------------------------------------------------------------------
 echo ""
-echo "--- Test 6: Frontend error handler resets agent state ---"
+echo "--- Test 5: Frontend error handler resets agent state ---"
 HANDLER_FILE="$PROJECT_ROOT/frontend/src/handlers/chat/websocketHandlers.js"
 if grep -A 5 "case 'error':" "$HANDLER_FILE" | grep -q "setCurrentAgentStep(0)"; then
     pass "Frontend error handler resets currentAgentStep"
@@ -162,10 +261,10 @@ else
 fi
 
 # -------------------------------------------------------------------
-# 7. Verify frontend thinking timeout exists
+# 6. Verify frontend thinking timeout exists
 # -------------------------------------------------------------------
 echo ""
-echo "--- Test 7: Frontend has thinking timeout ---"
+echo "--- Test 6: Frontend has thinking timeout ---"
 CONTEXT_FILE="$PROJECT_ROOT/frontend/src/contexts/ChatContext.jsx"
 if grep -q "THINKING_TIMEOUT_MS" "$CONTEXT_FILE"; then
     pass "Frontend has thinking timeout constant"
@@ -177,6 +276,43 @@ if grep -q "thinkingTimeoutRef" "$CONTEXT_FILE"; then
     pass "Frontend has thinking timeout ref and effect"
 else
     fail "Frontend missing thinking timeout implementation"
+fi
+
+# -------------------------------------------------------------------
+# 7. Behavioral: string-based error detection (keyword fallback)
+# -------------------------------------------------------------------
+echo ""
+echo "--- Test 7: _raise_llm_domain_error detects errors by string content ---"
+if python -c "
+from atlas.modules.llm.litellm_caller import LiteLLMCaller
+from atlas.domain.errors import RateLimitError, LLMTimeoutError, LLMAuthenticationError
+
+# Rate limit via string (not litellm type)
+try:
+    LiteLLMCaller._raise_llm_domain_error(Exception('rate limit exceeded for this model'))
+    assert False
+except RateLimitError:
+    print('  String \"rate limit\" -> RateLimitError: OK')
+
+# Timeout via string
+try:
+    LiteLLMCaller._raise_llm_domain_error(Exception('request timeout after 30s'))
+    assert False
+except LLMTimeoutError:
+    print('  String \"timeout\" -> LLMTimeoutError: OK')
+
+# Auth via string
+try:
+    LiteLLMCaller._raise_llm_domain_error(Exception('invalid api key provided'))
+    assert False
+except LLMAuthenticationError:
+    print('  String \"invalid api key\" -> LLMAuthenticationError: OK')
+
+print('String-based error detection works correctly')
+"; then
+    pass "String-based error detection works as fallback"
+else
+    fail "String-based error detection is broken"
 fi
 
 # -------------------------------------------------------------------

@@ -14,6 +14,9 @@ import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 // Save mode constants: 'none' (incognito), 'local' (browser), 'server' (backend DB)
 const SAVE_MODES = ['none', 'local', 'server']
 
+// Safety timeout for stuck thinking state (no backend response)
+const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+
 // Generate cryptographically secure random string
 const generateSecureRandomString = (length = 9) => {
   const array = new Uint8Array(length)
@@ -131,7 +134,6 @@ export const ChatProvider = ({ children }) => {
 	// Safety timeout: if isThinking stays true for too long without any response
 	// from the backend, reset it and show an error so the user is not stuck forever.
 	const thinkingTimeoutRef = useRef(null)
-	const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
 	useEffect(() => {
 		if (isThinking) {
