@@ -423,6 +423,7 @@ Set `APP_AGENT_LOOP_STRATEGY` to `agentic | react | think-act | act`; ChatServic
 11. **Empty `tool_calls` arrays**: OpenAI and compatible providers reject messages where `tool_calls` is present but empty (`[]`); always call `_sanitize_messages()` in `LiteLLMCaller` before passing messages to `acompletion()`
 12. **Nginx `auth_request` vs HMAC tokens**: Do not apply nginx `auth_request` to endpoints that use application-layer HMAC capability tokens (e.g., `/api/files/download/`); non-browser clients like MCP servers lack session cookies and will get 302 redirects instead of the resource
 13. **Admin MCP reload after add/remove**: The admin add-server/remove-server endpoints must call `reload_config()` + `initialize_clients()` + `discover_tools()` + `discover_prompts()` in sequence; there is no single `reload_servers()` method on `MCPToolManager`. Also, `reload_config()` must clean up removed servers from `clients`, `available_tools`, and `available_prompts` dicts to prevent stale data
+14. **LLM errors must raise domain errors**: `LiteLLMCaller` must raise domain-specific errors (`RateLimitError`, `LLMTimeoutError`, `LLMAuthenticationError`, `LLMServiceError`) instead of generic `Exception` so the WebSocket handler can send typed error messages to the frontend; use `_raise_llm_domain_error()` in all except blocks
 
 ## PR Validation Scripts (Required)
 

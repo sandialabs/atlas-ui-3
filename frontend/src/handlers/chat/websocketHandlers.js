@@ -467,6 +467,8 @@ export function createWebSocketHandler(deps) {
         case 'error':
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+          setCurrentAgentStep(0)
+          if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
           endTokenStream()
           addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
           break

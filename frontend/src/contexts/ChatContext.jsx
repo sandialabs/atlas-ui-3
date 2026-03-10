@@ -128,6 +128,38 @@ export const ChatProvider = ({ children }) => {
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd])
 
+	// Safety timeout: if isThinking stays true for too long without any response
+	// from the backend, reset it and show an error so the user is not stuck forever.
+	const thinkingTimeoutRef = useRef(null)
+	const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+
+	useEffect(() => {
+		if (isThinking) {
+			thinkingTimeoutRef.current = setTimeout(() => {
+				setIsThinking(false)
+				setIsSynthesizing(false)
+				agent.setCurrentAgentStep(0)
+				addMessage({
+					role: 'system',
+					content: 'Error: The request timed out without a response from the server. Please try again or select a different model.',
+					timestamp: new Date().toISOString()
+				})
+			}, THINKING_TIMEOUT_MS)
+		} else {
+			if (thinkingTimeoutRef.current) {
+				clearTimeout(thinkingTimeoutRef.current)
+				thinkingTimeoutRef.current = null
+			}
+		}
+		return () => {
+			if (thinkingTimeoutRef.current) {
+				clearTimeout(thinkingTimeoutRef.current)
+				thinkingTimeoutRef.current = null
+			}
+		}
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isThinking])
+
 	// Validate persisted data sources against current config and remove stale ones
 	useEffect(() => {
 		if (!config.ragServers || config.ragServers.length === 0) return

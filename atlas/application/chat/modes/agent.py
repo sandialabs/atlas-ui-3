@@ -97,18 +97,31 @@ class AgentModeRunner:
         )
 
         # Run the loop (always streaming final answer)
-        result = await agent_loop.run(
-            model=model,
-            messages=messages,
-            context=agent_context,
-            selected_tools=selected_tools,
-            data_sources=selected_data_sources,
-            max_steps=max_steps,
-            temperature=temperature,
-            event_handler=event_relay.handle_event,
-            streaming=True,
-            event_publisher=self.event_publisher,
-        )
+        try:
+            result = await agent_loop.run(
+                model=model,
+                messages=messages,
+                context=agent_context,
+                selected_tools=selected_tools,
+                data_sources=selected_data_sources,
+                max_steps=max_steps,
+                temperature=temperature,
+                event_handler=event_relay.handle_event,
+                streaming=True,
+                event_publisher=self.event_publisher,
+            )
+        except Exception:
+            # Send agent completion event so the frontend clears agent UI state
+            # (currentAgentStep, thinking indicator, etc.) before the error
+            # message arrives via the WebSocket error handler.
+            try:
+                await self.event_publisher.publish_agent_update(
+                    update_type="agent_completion",
+                    steps=0,
+                )
+            except Exception:
+                pass  # best-effort UI cleanup
+            raise
 
         # Append final message
         assistant_message = Message(

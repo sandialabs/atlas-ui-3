@@ -32,6 +32,12 @@ import litellm
 from litellm import acompletion
 
 from atlas.core.metrics_logger import log_metric
+from atlas.domain.errors import (
+    LLMAuthenticationError,
+    LLMServiceError,
+    LLMTimeoutError,
+    RateLimitError,
+)
 from atlas.modules.config.config_manager import resolve_env_var
 
 from .litellm_streaming import LiteLLMStreamingMixin
@@ -78,6 +84,42 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             litellm.set_verbose = False
         else:
             litellm.set_verbose = debug_mode
+
+    @staticmethod
+    def _raise_llm_domain_error(exc: Exception) -> None:
+        """Classify a litellm exception and raise the corresponding domain error.
+
+        This ensures the WebSocket handler receives specific error types
+        (RateLimitError, LLMTimeoutError, etc.) instead of a generic Exception,
+        which allows it to send meaningful error messages to the frontend.
+        """
+        error_str = str(exc)
+        error_type = type(exc).__name__
+
+        # Map litellm exception types to domain errors
+        if isinstance(exc, litellm.RateLimitError) or "rate limit" in error_str.lower():
+            raise RateLimitError(
+                "The AI service is experiencing high traffic. Please try again in a moment."
+            ) from exc
+        if isinstance(exc, litellm.Timeout) or "timeout" in error_str.lower():
+            raise LLMTimeoutError(
+                "The AI service request timed out. Please try again."
+            ) from exc
+        if isinstance(exc, litellm.AuthenticationError) or any(
+            kw in error_str.lower()
+            for kw in ("unauthorized", "authentication", "invalid api key", "invalid_api_key")
+        ):
+            raise LLMAuthenticationError(
+                "There was an authentication issue with the AI service. "
+                "Please check your API key or contact your administrator."
+            ) from exc
+
+        # All other LLM errors get a generic but user-friendly message
+        # Include the original error type in the log-level message for debugging
+        logger.error("LLM call failed (%s): %s", error_type, error_str)
+        raise LLMServiceError(
+            "The AI service encountered an error. Please try again or select a different model."
+        ) from exc
 
     @staticmethod
     def _parse_qualified_data_source(qualified_data_source: str) -> str:
@@ -418,7 +460,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         except Exception as exc:
             logger.error("Error calling LLM: %s", exc, exc_info=True)
-            raise Exception(f"Failed to call LLM: {exc}") from exc
+            self._raise_llm_domain_error(exc)
 
     async def call_with_rag(
         self,
@@ -612,10 +654,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     )
                 except Exception as retry_exc:
                     logger.error("Retry with tool_choice='auto' also failed: %s", retry_exc, exc_info=True)
-                    raise Exception(f"Failed to call LLM with tools: {retry_exc}") from retry_exc
+                    self._raise_llm_domain_error(retry_exc)
 
             logger.error("Error calling LLM with tools: %s", exc, exc_info=True)
-            raise Exception(f"Failed to call LLM with tools: {exc}") from exc
+            self._raise_llm_domain_error(exc)
 
     async def call_with_rag_and_tools(
         self,

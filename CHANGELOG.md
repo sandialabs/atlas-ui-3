@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #393 - 2026-03-10
+- **Fix**: LLM errors (rate limit, timeout, auth, bad request) now propagate as domain-specific errors through the WebSocket to the frontend instead of causing the chat to hang indefinitely.
+- **Fix**: Frontend error handler now resets agent UI state (step counter, pending question) and includes a 5-minute safety timeout that clears the stuck "thinking" indicator.
+
 ### PR #390 - 2026-03-07
 - **Fix**: Admin panel MCP server status now correctly excludes failed servers from connected list, shows per-server tool/prompt counts, and displays the active `mcp.json` file path so admins know which config file is being read and written.
 - **Fix**: Add/remove server endpoints now properly reload MCP config instead of calling non-existent `reload_servers()` method; removed servers are cleaned up from clients, tools, and prompts caches.
