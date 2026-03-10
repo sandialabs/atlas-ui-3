@@ -50,7 +50,7 @@ User: 🤷 *No idea what's happening*
 User sends message → Rate limit hit → Error displayed in chat
 UI shows: "The AI service is experiencing high traffic. Please try again in a moment."
 Backend logs: "Rate limit error: litellm.RateLimitError: CerebrasException - We're experiencing high traffic..."
-User: ✅ *Knows to wait and try again*
+User: Knows to wait and try again
 ```
 
 ## Error Messages

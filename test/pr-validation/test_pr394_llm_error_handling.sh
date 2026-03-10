@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PR #393 - LLM errors cause chat to hang indefinitely instead of returning error to user
+# PR #394 - LLM errors cause chat to hang indefinitely instead of returning error to user
 # Validates that LLM errors are properly classified and propagated to the frontend.
 set -euo pipefail
 
@@ -17,7 +17,7 @@ source "$PROJECT_ROOT/.venv/bin/activate"
 export PYTHONPATH="$PROJECT_ROOT"
 
 echo "============================================"
-echo "PR #393 - LLM Error Handling Validation"
+echo "PR #394 - LLM Error Handling Validation"
 echo "============================================"
 
 # -------------------------------------------------------------------
