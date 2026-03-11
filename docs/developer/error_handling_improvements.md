@@ -83,6 +83,16 @@ Added `_raise_llm_domain_error()` static method to `LiteLLMCaller` that maps lit
 
 The timeout is cleared whenever `isThinking` becomes false (normal completion or error).
 
+### 8. Auto-Retry for Transient LLM Errors (2026-03-10)
+
+`LiteLLMCaller._acompletion_with_retry()` wraps litellm `acompletion` calls with automatic retry and exponential backoff. Transient errors (rate limit, timeout, 5xx server errors) are retried up to `MAX_LLM_RETRIES` (3) times. Auth errors and other non-transient errors raise immediately without retry.
+
+- `_is_retryable_error()` classifies exceptions: rate limits, timeouts, and server errors (502/503/429) are retryable; auth errors are not
+- Backoff: `RETRY_BASE_DELAY_SECONDS * 2^attempt + jitter` (1s, 2s, 4s base with random 0-0.5s jitter)
+- Each retry attempt is logged at WARNING level for observability
+- `call_with_rag` and `call_with_rag_and_tools` now re-raise LLM domain errors instead of masking them with RAG fallback retries
+- Mock flaky LLM (`atlas/tests/mocks/mock_flaky_llm.py`) available for testing retry scenarios
+
 ## Security & Privacy
 - Sensitive details (API keys, etc.) NOT exposed to users
 - Full error details logged for admin debugging
