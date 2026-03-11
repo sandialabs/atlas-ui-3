@@ -24,6 +24,8 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 
 **LLM Streaming**: Token streaming uses `LiteLLMStreamingMixin` (in `litellm_streaming.py`) mixed into `LiteLLMCaller`; the frontend buffers tokens with `setTimeout(30ms)` -- never use `requestAnimationFrame` for token flushing as it breaks progressive rendering.
 
+**Code Block Rendering**: Code blocks use `.code-block-header` with `position: sticky` and the container uses `max-height: 80vh` with `overflow-y: auto`; the `.copy-button` is flex-positioned inside the header (not absolute).
+
 ## Do This First
 
 ```bash

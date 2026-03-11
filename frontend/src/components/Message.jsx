@@ -147,10 +147,10 @@ renderer.code = function(code, language) {
   }
   
   return `<div class="code-block-container relative bg-gray-900 rounded-lg my-4 border border-gray-700">
-    <div class="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
+    <div class="code-block-header flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
       <span class="text-xs text-gray-400 font-medium uppercase tracking-wider">${actualLanguage || 'text'}</span>
-      <button 
-        class="copy-button bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 px-3 py-1 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500" 
+      <button
+        class="copy-button bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 px-3 py-1 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
         data-action="copy-code"
         title="Copy code to clipboard"
         type="button"

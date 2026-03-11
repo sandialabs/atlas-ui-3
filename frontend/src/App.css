@@ -592,12 +592,18 @@
 
 .code-block-container {
     position: relative;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.code-block-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    border-radius: 0.5rem 0.5rem 0 0;
 }
 
 .copy-button {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
     background: #4b5563; /* gray-600 */
     border: 1px solid #6b7280; /* gray-500 */
     color: #e5e7eb; /* gray-200 */
