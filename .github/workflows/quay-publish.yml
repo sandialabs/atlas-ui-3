@@ -44,7 +44,7 @@ jobs:
           type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
     - name: Build and push to Quay.io
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       with:
         context: .
         file: ./Dockerfile
