@@ -119,8 +119,8 @@ class AgentModeRunner:
                     update_type="agent_completion",
                     steps=0,
                 )
-            except Exception:
-                pass  # best-effort UI cleanup
+            except Exception as cleanup_exc:
+                logger.warning("Failed to send agent_completion cleanup event: %s", cleanup_exc)
             raise
 
         # Append final message
