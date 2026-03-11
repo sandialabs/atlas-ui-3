@@ -281,8 +281,10 @@ def _sanitize_filename(filename: str, max_length: int = 50) -> str:
     return cleaned_filename[:max_length] if cleaned_filename else "presentation"
 
 def _is_backend_download_path(s: str) -> bool:
-    """Detect backend-relative download paths like /api/files/download/...."""
-    return isinstance(s, str) and s.startswith("/api/files/download/")
+    """Detect backend-relative download paths like /mcp/files/download/ or /api/files/download/."""
+    return isinstance(s, str) and (
+        s.startswith("/mcp/files/download/") or s.startswith("/api/files/download/")
+    )
 
 
 def _backend_base_url() -> str:

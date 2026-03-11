@@ -54,6 +54,31 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.url.path == self.auth_redirect_url):
             return await call_next(request)
 
+        # MCP file download path: authenticate exclusively via HMAC capability tokens.
+        # This path bypasses both proxy secret and header-based auth because MCP servers
+        # and other non-browser clients lack session cookies and nginx auth headers.
+        # In nginx, /mcp/ paths skip auth_request entirely.
+        if request.url.path.startswith('/mcp/files/download/'):
+            token = request.query_params.get('token')
+            if token:
+                claims = verify_file_token(token)
+                if claims:
+                    user_email = claims.get('u')
+                    if user_email:
+                        logger.debug("MCP download authenticated via capability token for user: %s", user_email)
+                        request.state.user_email = user_email
+                        return await call_next(request)
+                    else:
+                        logger.warning("Valid MCP token but missing user email claim")
+                else:
+                    logger.warning("Invalid MCP capability token provided")
+            else:
+                logger.warning("MCP download path requires a capability token")
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized: valid capability token required"}
+            )
+
         # Validate proxy secret if enabled (skip in debug mode for local development)
         if self.proxy_secret_enabled and self.proxy_secret and not self.debug_mode:
             proxy_secret_value = request.headers.get(self.proxy_secret_header)
@@ -69,17 +94,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 else:
                     return RedirectResponse(url=self.auth_redirect_url, status_code=302)
 
-        # Check for capability token in download URLs (allows MCP servers to access files)
+        # Check for capability token in /api/files/download/ (backward compatibility).
+        # Browser requests normally authenticate via X-User-Email from nginx, but
+        # tokens are still accepted on the /api/ path for legacy clients.
         if request.url.path.startswith('/api/files/download/'):
             token = request.query_params.get('token')
             if token:
                 claims = verify_file_token(token)
                 if claims:
-                    # Valid capability token - extract user from token and allow request
-                    # Note: We only validate token authenticity here (authentication).
-                    # The route handler validates that token's file key matches the requested
-                    # file (authorization). This separation of concerns keeps middleware focused
-                    # on authentication while route handlers handle resource-specific authorization.
                     user_email = claims.get('u')
                     if user_email:
                         logger.debug("Authenticated via capability token for user: %s", user_email)
@@ -117,7 +139,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
             if not user_email:
                 # Distinguish between API endpoints (return 401) and browser endpoints (redirect)
-                if request.url.path.startswith('/api/'):
+                if request.url.path.startswith('/api/') or request.url.path.startswith('/mcp/'):
                     logger.warning(f"Missing authentication for API endpoint: {request.url.path}")
                     return JSONResponse(
                         status_code=401,

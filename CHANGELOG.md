@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #403 - 2026-03-11
+- **Feature**: Separate MCP and browser file download paths. MCP servers now use `/mcp/files/download/` (HMAC token auth, bypasses nginx `auth_request`) while browsers use `/api/files/download/` (nginx-injected `X-User-Email`). Fixes 401 errors when browser downloads went through the unauthenticated MCP path.
+
 ### PR #390 - 2026-03-07
 - **Fix**: Admin panel MCP server status now correctly excludes failed servers from connected list, shows per-server tool/prompt counts, and displays the active `mcp.json` file path so admins know which config file is being read and written.
 - **Fix**: Add/remove server endpoints now properly reload MCP config instead of calling non-existent `reload_servers()` method; removed servers are cleaned up from clients, tools, and prompts caches.

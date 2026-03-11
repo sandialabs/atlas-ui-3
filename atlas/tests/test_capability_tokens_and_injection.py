@@ -189,15 +189,15 @@ def test_injection_produces_tokenized_urls(client, monkeypatch):
 
     assert injected["username"] == "bob@example.com"
     assert injected["original_filename"] == "report.pdf"
-    # URL should include /api/files/download/abc123 and a token query param
-    assert injected["filename"].startswith("/api/files/download/abc123")
+    # URL should include /mcp/files/download/abc123 and a token query param
+    assert injected["filename"].startswith("/mcp/files/download/abc123")
     assert "?token=" in injected["filename"]
 
     # Multiple files
     args2 = {"file_names": ["report.pdf", "missing.txt"]}
     injected2 = inject_context_into_args(args2, session_context)
     assert injected2["original_file_names"] == ["report.pdf", "missing.txt"]
-    assert injected2["file_names"][0].startswith("/api/files/download/abc123")
+    assert injected2["file_names"][0].startswith("/mcp/files/download/abc123")
     assert "?token=" in injected2["file_names"][0]
     # Missing.txt doesn't resolve to key, kept as-is
     assert injected2["file_names"][1] == "missing.txt"

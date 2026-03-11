@@ -60,7 +60,7 @@ from atlas.routes.admin_routes import admin_router
 from atlas.routes.config_routes import router as config_router
 from atlas.routes.conversation_routes import router as conversation_router
 from atlas.routes.feedback_routes import feedback_router
-from atlas.routes.files_routes import router as files_router
+from atlas.routes.files_routes import mcp_files_router, router as files_router
 from atlas.routes.globus_auth_routes import api_router as globus_api_router
 from atlas.routes.globus_auth_routes import browser_router as globus_browser_router
 from atlas.routes.health_routes import router as health_router
@@ -238,6 +238,7 @@ app.add_middleware(
 app.include_router(config_router)
 app.include_router(admin_router)
 app.include_router(files_router)
+app.include_router(mcp_files_router)
 app.include_router(health_router)
 app.include_router(feedback_router)
 app.include_router(llm_auth_router)

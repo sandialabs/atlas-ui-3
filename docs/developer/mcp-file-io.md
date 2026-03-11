@@ -14,8 +14,10 @@ MCP tools can:
 
 When users upload files and the LLM passes them to your tool, the backend rewrites the filename to a secure download URL. This URL may be:
 
-- **Relative path**: `/api/files/download/abc123?token=xyz` (default behavior)
-- **Absolute URL**: `http://localhost:8000/api/files/download/abc123?token=xyz` (when `BACKEND_PUBLIC_URL` is configured)
+- **Relative path**: `/mcp/files/download/abc123?token=xyz` (default behavior)
+- **Absolute URL**: `http://localhost:8000/mcp/files/download/abc123?token=xyz` (when `BACKEND_PUBLIC_URL` is configured)
+
+Note: MCP servers use `/mcp/files/download/` which bypasses nginx `auth_request` and authenticates via HMAC tokens. Browsers use `/api/files/download/` which goes through nginx authentication.
 
 Your tool should handle both cases.
 
