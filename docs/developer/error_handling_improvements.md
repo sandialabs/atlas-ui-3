@@ -42,7 +42,7 @@ Enhanced error handling to:
 ```
 User sends message → Rate limit hit → UI sits there thinking forever
 Backend logs: "litellm.RateLimitError: CerebrasException - We're experiencing high traffic..."
-User: 🤷 *No idea what's happening*
+User: *No idea what's happening*
 ```
 
 ### After
