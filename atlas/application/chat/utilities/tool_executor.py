@@ -573,16 +573,18 @@ def _sanitize_args_for_ui(args: Dict[str, Any]) -> Dict[str, Any]:
     """
     cleaned = dict(args or {})
 
-    # Single filename
-    if isinstance(cleaned.get("filename"), str):
-        cleaned["filename"] = _sanitize_filename_value(cleaned["filename"])  # basename only
+    # Sanitize any parameter ending with _filename or named "filename"
+    for key in list(cleaned.keys()):
+        if (key == "filename" or key.endswith("_filename")) and isinstance(cleaned[key], str):
+            cleaned[key] = _sanitize_filename_value(cleaned[key])
 
-    # Multiple filenames
-    if isinstance(cleaned.get("file_names"), list):
-        cleaned["file_names"] = [
-            _sanitize_filename_value(x) if isinstance(x, str) else x
-            for x in cleaned["file_names"]
-        ]
+    # Sanitize any parameter ending with _file_names or named "file_names"
+    for key in list(cleaned.keys()):
+        if (key == "file_names" or key.endswith("_file_names")) and isinstance(cleaned[key], list):
+            cleaned[key] = [
+                _sanitize_filename_value(x) if isinstance(x, str) else x
+                for x in cleaned[key]
+            ]
 
     # If a tool schema (unexpectedly) exposes file_url(s), sanitize for display too
     if isinstance(cleaned.get("file_url"), str):
@@ -691,37 +693,40 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
                 logger.warning(f"Failed to fetch base64 content for file key {key}: {e}")
             return None
 
-        # Handle single filename
-        if "filename" in parsed_args and isinstance(parsed_args["filename"], str):
-            fname = parsed_args["filename"]
+        # Handle single filename parameters (e.g. "filename", "image_filename").
+        # Any parameter whose name equals or ends with "_filename" is rewritten.
+        filename_keys = [
+            k for k in parsed_args
+            if (k == "filename" or k.endswith("_filename"))
+            and isinstance(parsed_args[k], str)
+        ]
+        for key in filename_keys:
+            fname = parsed_args[key]
             ref = files_ctx.get(fname)
             if ref and ref.get("key"):
                 url = to_url(ref["key"])
                 # SECURITY: tokenized URLs can contain secrets; do not log them.
                 logger.debug(
-                    "Rewriting filename argument to tokenized URL (filename=%s)",
+                    "Rewriting %s argument to tokenized URL (filename=%s)",
+                    key,
                     _sanitize_filename_value(fname),
                 )
-                parsed_args.setdefault("original_filename", fname)
-                parsed_args["filename"] = url
-                parsed_args.setdefault("file_url", url)
+                parsed_args.setdefault(f"original_{key}", fname)
+                parsed_args[key] = url
+                if key == "filename":
+                    parsed_args.setdefault("file_url", url)
 
-                # Optionally inject base64 content as fallback
-                if include_base64:
-                    # Note: We can't make this function async, so we mark this for future enhancement
-                    # For now, just log that this feature requires additional integration
-                    logger.debug(
-                        "Base64 content injection requested but requires async context (filename=%s)",
-                        _sanitize_filename_value(fname),
-                    )
-                    # TODO: Implement async context support for base64 injection
-                    # For now, tools should use the URL-based approach
-
-        # Handle multiple filenames
-        if "file_names" in parsed_args and isinstance(parsed_args["file_names"], list):
+        # Handle multiple filenames parameters (e.g. "file_names", "image_file_names").
+        # Any parameter whose name equals or ends with "_file_names" is rewritten.
+        file_names_keys = [
+            k for k in parsed_args
+            if (k == "file_names" or k.endswith("_file_names"))
+            and isinstance(parsed_args[k], list)
+        ]
+        for key in file_names_keys:
             urls = []
             originals = []
-            for fname in parsed_args["file_names"]:
+            for fname in parsed_args[key]:
                 if not isinstance(fname, str):
                     continue
                 originals.append(fname)
@@ -731,10 +736,11 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
                 else:
                     urls.append(fname)
             if urls:
-                logger.debug("Rewriting file_names arguments to tokenized URLs (count=%d)", len(urls))
-                parsed_args.setdefault("original_file_names", originals)
-                parsed_args["file_names"] = urls
-                parsed_args.setdefault("file_urls", urls)
+                logger.debug("Rewriting %s arguments to tokenized URLs (count=%d)", key, len(urls))
+                parsed_args.setdefault(f"original_{key}", originals)
+                parsed_args[key] = urls
+                if key == "file_names":
+                    parsed_args.setdefault("file_urls", urls)
 
     except Exception as inj_err:
         logger.warning(f"Non-fatal: failed to inject tool args: {inj_err}")
