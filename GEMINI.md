@@ -327,6 +327,7 @@ Set `APP_AGENT_LOOP_STRATEGY` to `agentic | react | think-act | act`.
 11. **Empty `tool_calls` arrays**: OpenAI and compatible providers reject messages where `tool_calls` is present but empty (`[]`); always call `_sanitize_messages()` in `LiteLLMCaller` before passing messages to `acompletion()`
 12. **Dual file download paths**: MCP servers use `/mcp/files/download/` (HMAC token auth, bypasses nginx `auth_request`) while browsers use `/api/files/download/` (nginx-injected `X-User-Email`). `create_download_url()` in `capabilities.py` generates `/mcp/` URLs; the frontend uses `/api/` URLs directly. Both paths share `_handle_file_download()` in `files_routes.py`
 13. **Admin MCP reload after add/remove**: The admin add-server/remove-server endpoints must call `reload_config()` + `initialize_clients()` + `discover_tools()` + `discover_prompts()` in sequence; there is no single `reload_servers()` method on `MCPToolManager`. Also, `reload_config()` must clean up removed servers from `clients`, `available_tools`, and `available_prompts` dicts to prevent stale data
+14. **FastMCP 3.x compatibility**: The project requires `fastmcp>=3.0.0`; the codebase already uses the 3.x API (`list_tools()`, `list_prompts()`, `Client` constructor args), so no legacy `get_tools()`/`get_prompts()` calls should be introduced
 
 ## Critical Restrictions
 
