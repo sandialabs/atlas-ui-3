@@ -97,6 +97,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Check for capability token in /api/files/download/ (backward compatibility).
         # Browser requests normally authenticate via X-User-Email from nginx, but
         # tokens are still accepted on the /api/ path for legacy clients.
+        # Note: Middleware only validates token authenticity (authentication).
+        # The route handler validates that the token's file key matches the requested
+        # file (authorization), keeping middleware focused on authentication.
         if request.url.path.startswith('/api/files/download/'):
             token = request.query_params.get('token')
             if token:
@@ -139,6 +142,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
             if not user_email:
                 # Distinguish between API endpoints (return 401) and browser endpoints (redirect)
+                # /mcp/ paths are handled above (token-only auth), but included here
+                # defensively for any future /mcp/ endpoints that reach this point.
                 if request.url.path.startswith('/api/') or request.url.path.startswith('/mcp/'):
                     logger.warning(f"Missing authentication for API endpoint: {request.url.path}")
                     return JSONResponse(
