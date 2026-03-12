@@ -575,7 +575,7 @@ def _sanitize_args_for_ui(args: Dict[str, Any]) -> Dict[str, Any]:
 
     # Single filename
     if isinstance(cleaned.get("filename"), str):
-        cleaned["filename"] = _sanitize_filename_value(cleaned["filename"])  # basename only
+        cleaned["filename"] = _sanitize_filename_value(cleaned["filename"])
 
     # Multiple filenames
     if isinstance(cleaned.get("file_names"), list):
@@ -691,7 +691,7 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
                 logger.warning(f"Failed to fetch base64 content for file key {key}: {e}")
             return None
 
-        # Handle single filename
+        # Handle single filename (strict: only "filename" key)
         if "filename" in parsed_args and isinstance(parsed_args["filename"], str):
             fname = parsed_args["filename"]
             ref = files_ctx.get(fname)
@@ -706,18 +706,7 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
                 parsed_args["filename"] = url
                 parsed_args.setdefault("file_url", url)
 
-                # Optionally inject base64 content as fallback
-                if include_base64:
-                    # Note: We can't make this function async, so we mark this for future enhancement
-                    # For now, just log that this feature requires additional integration
-                    logger.debug(
-                        "Base64 content injection requested but requires async context (filename=%s)",
-                        _sanitize_filename_value(fname),
-                    )
-                    # TODO: Implement async context support for base64 injection
-                    # For now, tools should use the URL-based approach
-
-        # Handle multiple filenames
+        # Handle multiple filenames (strict: only "file_names" key)
         if "file_names" in parsed_args and isinstance(parsed_args["file_names"], list):
             urls = []
             originals = []

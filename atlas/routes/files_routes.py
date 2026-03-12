@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["files"])
 
+# Separate router for MCP file downloads (/mcp/files/download/...).
+# This path is designed to bypass nginx auth_request so MCP servers can
+# authenticate solely via HMAC capability tokens in the query string.
+mcp_files_router = APIRouter(prefix="/mcp", tags=["mcp-files"])
+
 
 class FileUploadRequest(BaseModel):
     filename: str
@@ -211,17 +216,8 @@ async def get_user_file_stats(
         raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
 
 
-@router.get("/files/download/{file_key:path}")
-async def download_file(
-    file_key: str,
-    token: str | None = Query(default=None, description="Capability token for headless access"),
-    current_user: str = Depends(get_current_user)
-):
-    """Download a file by key as raw bytes.
-
-    Returns a binary response with appropriate content type and filename.
-    This endpoint is used by the frontend CanvasPanel and can also be used by tools.
-    """
+async def _handle_file_download(file_key: str, token: str | None, current_user: str) -> Response:
+    """Shared download logic for both /api/ and /mcp/ file download endpoints."""
     try:
         s3_client = app_factory.get_file_storage()
 
@@ -272,3 +268,33 @@ async def download_file(
         if "Access denied" in str(e):
             raise HTTPException(status_code=403, detail="Access denied")
         raise HTTPException(status_code=500, detail=f"Failed to download file: {str(e)}")
+
+
+@router.get("/files/download/{file_key:path}")
+async def download_file(
+    file_key: str,
+    token: str | None = Query(default=None, description="Capability token for headless access"),
+    current_user: str = Depends(get_current_user)
+):
+    """Download a file by key as raw bytes (browser path).
+
+    This endpoint is used by the frontend CanvasPanel and browser requests.
+    In production, nginx applies auth_request to inject X-User-Email.
+    Also accepts capability tokens for backward compatibility.
+    """
+    return await _handle_file_download(file_key, token, current_user)
+
+
+@mcp_files_router.get("/files/download/{file_key:path}")
+async def mcp_download_file(
+    file_key: str,
+    token: str | None = Query(default=None, description="Capability token for headless access"),
+    current_user: str = Depends(get_current_user)
+):
+    """Download a file by key as raw bytes (MCP server path).
+
+    This endpoint is used by MCP servers and other non-browser clients.
+    In production, nginx skips auth_request for /mcp/ paths so that
+    HMAC capability tokens can authenticate without session cookies.
+    """
+    return await _handle_file_download(file_key, token, current_user)
