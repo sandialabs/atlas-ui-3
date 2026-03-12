@@ -1,6 +1,6 @@
 # MCP Tool File I/O Guide
 
-Last updated: 2026-01-25
+Last updated: 2026-03-11
 
 This guide explains how to accept files as input and return files as output from MCP tools using FastMCP. It is self-contained and can be used independently.
 
