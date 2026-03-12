@@ -392,7 +392,7 @@ def _add_image_to_slide(slide_obj, image_bytes: bytes,
 def markdown_to_pptx(
     markdown_content: Annotated[str, "Markdown content with headers (# or ##) as slide titles and content below each header"],
     file_name: Annotated[Optional[str], "Output file name (base name for generated files without extension)"] = None,
-    image_filename: Annotated[Optional[str], "Optional image filename to integrate into the presentation"] = "",
+    filename: Annotated[Optional[str], "Optional image filename to integrate into the presentation"] = "",
     image_data_base64: Annotated[Optional[str], "Framework may supply Base64 image content as fallback"] = ""
 ) -> Dict[str, Any]:
     """
@@ -404,7 +404,7 @@ def markdown_to_pptx(
     Args:
         markdown_content: Markdown content where headers (# or ##) become slide titles and content below becomes slide content
         file_name: Output file name (base name for generated files without extension)
-        image_filename: Optional image filename to integrate into the presentation
+        filename: Optional image filename to integrate into the presentation
         image_data_base64: Framework may supply Base64 image content as fallback
 
     Returns:
@@ -415,7 +415,7 @@ def markdown_to_pptx(
     logger.info("Starting markdown_to_pptx execution...")
     try:
         # Handle None values and sanitize the output filename
-        image_filename = image_filename or ""
+        filename = filename or ""
         image_data_base64 = image_data_base64 or ""
         # Use file_name if provided, otherwise use default "presentation"
         output_filename = _sanitize_filename(file_name or "presentation")
@@ -431,12 +431,12 @@ def markdown_to_pptx(
 
         # Load image if provided
         image_bytes = None
-        if image_filename:
-            image_bytes = _load_image_bytes(image_filename, image_data_base64)
+        if filename:
+            image_bytes = _load_image_bytes(filename, image_data_base64)
             if image_bytes:
                 logger.info("Image loaded: %d bytes", len(image_bytes))
             else:
-                logger.warning("Failed to load image from: %s", image_filename)
+                logger.warning("Failed to load image from: %s", filename)
 
         # Create presentation: try template file first, then built-in layouts
         template_path = _find_template_path()

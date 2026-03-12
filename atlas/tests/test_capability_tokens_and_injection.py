@@ -202,9 +202,7 @@ def test_injection_produces_tokenized_urls(client, monkeypatch):
     # Missing.txt doesn't resolve to key, kept as-is
     assert injected2["file_names"][1] == "missing.txt"
 
-    # Suffixed filename parameters (e.g. image_filename for pptx_generator)
+    # Non-standard parameter names are NOT rewritten (strict enforcement)
     args3 = {"image_filename": "report.pdf", "markdown_content": "# Hello"}
     injected3 = inject_context_into_args(args3, session_context)
-    assert injected3["original_image_filename"] == "report.pdf"
-    assert injected3["image_filename"].startswith("/mcp/files/download/abc123")
-    assert "?token=" in injected3["image_filename"]
+    assert injected3["image_filename"] == "report.pdf"  # unchanged
