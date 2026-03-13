@@ -43,8 +43,10 @@ def _is_http_url(s: str) -> bool:
 
 
 def _is_backend_download_path(s: str) -> bool:
-    """Detect backend-relative download paths like /api/files/download/...."""
-    return isinstance(s, str) and s.startswith("/api/files/download/")
+    """Detect backend-relative download paths like /mcp/files/download/ or /api/files/download/."""
+    return isinstance(s, str) and (
+        s.startswith("/mcp/files/download/") or s.startswith("/api/files/download/")
+    )
 
 
 def _backend_base_url() -> str:
