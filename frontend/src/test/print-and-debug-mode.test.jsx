@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
+import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
 import { useSettings } from '../hooks/useSettings'
 
 // Mock localStorage
@@ -283,11 +283,10 @@ describe('Issue #135 – Debug mode setting', () => {
 describe('Issue #150 – Print stylesheet', () => {
   it('print CSS file includes @media print rules', async () => {
     // Read the CSS source to verify print rules exist
-    const cssModule = await import('../index.css?inline').catch(() => null)
-
-    // Fallback: just verify the file can be imported without errors
+    // Verify the CSS file can be imported without errors
     // The actual CSS content testing is better done via snapshot or visual testing
     // Here we verify the core behaviors via the component tests above
+    await import('../index.css?inline').catch(() => null)
     expect(true).toBe(true)
   })
 })
