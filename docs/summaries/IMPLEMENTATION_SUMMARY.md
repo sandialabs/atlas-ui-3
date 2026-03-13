@@ -22,10 +22,10 @@ Users now see helpful messages instead of silence:
 
 | Situation | User Sees |
 |-----------|-----------|
-| Rate limit hit | "The AI service is experiencing high traffic. Please try again in a moment." |
-| Request timeout | "The AI service request timed out. Please try again." |
-| Auth failure | "There was an authentication issue with the AI service. Please contact your administrator." |
-| Other errors | "The AI service encountered an error. Please try again or contact support if the issue persists." |
+| Rate limit hit | "The LLM service is experiencing high traffic. Please try again in a moment." |
+| Request timeout | "The LLM service request timed out. Please try again." |
+| Auth failure | "There was an authentication issue with the LLM service. Please contact your administrator." |
+| Other errors | "The LLM service encountered an error. Please try again or contact support if the issue persists." |
 
 ### 3. Security & Privacy
 - ✅ No sensitive information (API keys, internal errors) exposed to users
@@ -93,7 +93,7 @@ User: 🤷 "Is it broken? Should I refresh? Wait?"
 User: *Sends a message*
 Backend: *Hits Cerebras rate limit*
 UI: *Shows error message in chat*
-  "The AI service is experiencing high traffic. 
+  "The LLM service is experiencing high traffic. 
    Please try again in a moment."
 Backend Logs: "Rate limit error: litellm.RateLimitError: ..."
 User: ✅ "OK, I'll wait a bit and try again"

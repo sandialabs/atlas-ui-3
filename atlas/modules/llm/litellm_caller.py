@@ -104,18 +104,18 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         # Map litellm exception types to domain errors
         if isinstance(exc, litellm.RateLimitError) or "rate limit" in error_str.lower():
             raise RateLimitError(
-                "The AI service is experiencing high traffic. Please try again in a moment."
+                "The LLM service is experiencing high traffic. Please try again in a moment."
             ) from exc
         if isinstance(exc, litellm.Timeout) or "timeout" in error_str.lower():
             raise LLMTimeoutError(
-                "The AI service request timed out. Please try again."
+                "The LLM service request timed out. Please try again."
             ) from exc
         if isinstance(exc, litellm.AuthenticationError) or any(
             kw in error_str.lower()
             for kw in ("unauthorized", "authentication", "invalid api key", "invalid_api_key")
         ):
             raise LLMAuthenticationError(
-                "There was an authentication issue with the AI service. "
+                "There was an authentication issue with the LLM service. "
                 "Please check your API key or contact your administrator."
             ) from exc
 
@@ -123,7 +123,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         # Include the original error type in the log-level message for debugging
         logger.error("LLM call failed (%s): %s", error_type, error_str)
         raise LLMServiceError(
-            "The AI service encountered an error. Please try again or select a different model."
+            "The LLM service encountered an error. Please try again or select a different model."
         ) from exc
 
     @staticmethod

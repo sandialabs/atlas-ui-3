@@ -48,7 +48,7 @@ User: *No idea what's happening*
 ### After
 ```
 User sends message → Rate limit hit → Error displayed in chat
-UI shows: "The AI service is experiencing high traffic. Please try again in a moment."
+UI shows: "The LLM service is experiencing high traffic. Please try again in a moment."
 Backend logs: "Rate limit error: litellm.RateLimitError: CerebrasException - We're experiencing high traffic..."
 User: Knows to wait and try again
 ```
@@ -57,10 +57,10 @@ User: Knows to wait and try again
 
 | Error Type | User Message | When It Happens |
 |------------|--------------|-----------------|
-| **RateLimitError** | "The AI service is experiencing high traffic. Please try again in a moment." | API rate limits exceeded |
-| **LLMTimeoutError** | "The AI service request timed out. Please try again." | Request takes too long |
-| **LLMAuthenticationError** | "There was an authentication issue with the AI service. Please contact your administrator." | Invalid API keys, auth failures |
-| **LLMServiceError** | "The AI service encountered an error. Please try again or contact support if the issue persists." | Generic LLM service errors |
+| **RateLimitError** | "The LLM service is experiencing high traffic. Please try again in a moment." | API rate limits exceeded |
+| **LLMTimeoutError** | "The LLM service request timed out. Please try again." | Request takes too long |
+| **LLMAuthenticationError** | "There was an authentication issue with the LLM service. Please contact your administrator." | Invalid API keys, auth failures |
+| **LLMServiceError** | "The LLM service encountered an error. Please try again or contact support if the issue persists." | Generic LLM service errors |
 
 ### 5. Domain Error Raising in LiteLLMCaller (2026-03-10)
 
