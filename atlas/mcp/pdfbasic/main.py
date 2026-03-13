@@ -131,11 +131,7 @@ def analyze_pdf(
     """
     Extract and analyze text content from PDF documents with comprehensive word frequency analysis.
 
-<<<<<<< HEAD
-    This  PDF processing tool provides detailed text analytics for PDF documents:
-=======
     This PDF processing tool provides detailed text analytics for PDF documents:
->>>>>>> main
 
     **PDF Text Extraction:**
     - Extracts text from all pages in PDF documents

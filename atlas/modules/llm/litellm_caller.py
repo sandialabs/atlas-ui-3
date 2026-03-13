@@ -14,6 +14,7 @@ fallbacks, cost tracking, and provider-specific optimizations.
 import asyncio
 import logging
 import os
+import random
 import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -32,6 +33,12 @@ import litellm
 from litellm import acompletion
 
 from atlas.core.metrics_logger import log_metric
+from atlas.domain.errors import (
+    LLMAuthenticationError,
+    LLMServiceError,
+    LLMTimeoutError,
+    RateLimitError,
+)
 from atlas.modules.config.config_manager import resolve_env_var
 
 from .litellm_streaming import LiteLLMStreamingMixin
@@ -41,6 +48,10 @@ logger = logging.getLogger(__name__)
 
 # Configure LiteLLM settings
 litellm.drop_params = True  # Drop unsupported params instead of erroring
+
+# Retry configuration for transient LLM errors
+MAX_LLM_RETRIES = 3
+RETRY_BASE_DELAY_SECONDS = 1.0
 
 
 class LiteLLMCaller(LiteLLMStreamingMixin):
@@ -78,6 +89,102 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             litellm.set_verbose = False
         else:
             litellm.set_verbose = debug_mode
+
+    @staticmethod
+    def _raise_llm_domain_error(exc: Exception) -> None:
+        """Classify a litellm exception and raise the corresponding domain error.
+
+        This ensures the WebSocket handler receives specific error types
+        (RateLimitError, LLMTimeoutError, etc.) instead of a generic Exception,
+        which allows it to send meaningful error messages to the frontend.
+        """
+        error_str = str(exc)
+        error_type = type(exc).__name__
+
+        # Map litellm exception types to domain errors
+        if isinstance(exc, litellm.RateLimitError) or "rate limit" in error_str.lower():
+            raise RateLimitError(
+                "The LLM service is experiencing high traffic. Please try again in a moment."
+            ) from exc
+        if isinstance(exc, litellm.Timeout) or "timeout" in error_str.lower():
+            raise LLMTimeoutError(
+                "The LLM service request timed out. Please try again."
+            ) from exc
+        if isinstance(exc, litellm.AuthenticationError) or any(
+            kw in error_str.lower()
+            for kw in ("unauthorized", "authentication", "invalid api key", "invalid_api_key")
+        ):
+            raise LLMAuthenticationError(
+                "There was an authentication issue with the LLM service. "
+                "Please check your API key or contact your administrator."
+            ) from exc
+
+        # All other LLM errors get a generic but user-friendly message
+        # Include the original error type in the log-level message for debugging
+        logger.error("LLM call failed (%s): %s", error_type, error_str)
+        raise LLMServiceError(
+            "The LLM service encountered an error. Please try again or select a different model."
+        ) from exc
+
+    @staticmethod
+    def _is_retryable_error(exc: Exception) -> bool:
+        """Check if an LLM error is transient and worth retrying.
+
+        Auth errors are never retryable. Rate limits, timeouts, and
+        generic service errors (5xx) are retried with backoff.
+        """
+        error_str = str(exc).lower()
+
+        # Auth errors will never succeed on retry
+        if isinstance(exc, litellm.AuthenticationError) or any(
+            kw in error_str
+            for kw in ("unauthorized", "authentication", "invalid api key", "invalid_api_key")
+        ):
+            return False
+
+        # Rate limit, timeout, and server errors are transient
+        if isinstance(exc, (litellm.RateLimitError, litellm.Timeout)):
+            return True
+        if any(
+            kw in error_str
+            for kw in ("rate limit", "timeout", "timed out", "server error", "503", "502", "429")
+        ):
+            return True
+
+        # ServiceUnavailableError if litellm exposes it
+        if hasattr(litellm, "ServiceUnavailableError") and isinstance(
+            exc, litellm.ServiceUnavailableError
+        ):
+            return True
+
+        return False
+
+    async def _acompletion_with_retry(self, **kwargs):
+        """Call litellm.acompletion with automatic retry for transient errors.
+
+        Retries up to MAX_LLM_RETRIES times with exponential backoff and jitter.
+        Auth errors are raised immediately without retry.
+        """
+        last_exc = None
+        for attempt in range(MAX_LLM_RETRIES + 1):
+            try:
+                return await acompletion(**kwargs)
+            except Exception as exc:
+                last_exc = exc
+                remaining = MAX_LLM_RETRIES - attempt
+                if remaining > 0 and self._is_retryable_error(exc):
+                    delay = RETRY_BASE_DELAY_SECONDS * (2 ** attempt) + random.uniform(0, 0.5)
+                    logger.warning(
+                        "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1,
+                        MAX_LLM_RETRIES + 1,
+                        delay,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+        raise last_exc  # pragma: no cover – loop always raises or returns
 
     @staticmethod
     def _parse_qualified_data_source(qualified_data_source: str) -> str:
@@ -399,7 +506,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
             logger.info(f"Plain LLM call: {len(messages)} messages, {total_chars} chars")
 
-            response = await acompletion(
+            response = await self._acompletion_with_retry(
                 model=litellm_model,
                 messages=self._sanitize_messages(messages),
                 **model_kwargs
@@ -418,7 +525,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         except Exception as exc:
             logger.error("Error calling LLM: %s", exc, exc_info=True)
-            raise Exception(f"Failed to call LLM: {exc}") from exc
+            self._raise_llm_domain_error(exc)
 
     async def call_with_rag(
         self,
@@ -538,6 +645,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
+        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError):
+            raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG] Falling back to plain LLM call due to RAG error")
@@ -567,7 +676,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
             logger.info(f"LLM call with tools: {len(messages)} messages, {total_chars} chars, {len(tools_schema)} tools")
 
-            response = await acompletion(
+            response = await self._acompletion_with_retry(
                 model=litellm_model,
                 messages=self._sanitize_messages(messages),
                 tools=tools_schema,
@@ -596,7 +705,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             if tool_choice == "required" and final_tool_choice == "required":
                 logger.warning(f"Tool choice 'required' failed, retrying with 'auto': {exc}")
                 try:
-                    response = await acompletion(
+                    response = await self._acompletion_with_retry(
                         model=litellm_model,
                         messages=self._sanitize_messages(messages),
                         tools=tools_schema,
@@ -612,10 +721,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     )
                 except Exception as retry_exc:
                     logger.error("Retry with tool_choice='auto' also failed: %s", retry_exc, exc_info=True)
-                    raise Exception(f"Failed to call LLM with tools: {retry_exc}") from retry_exc
+                    self._raise_llm_domain_error(retry_exc)
 
             logger.error("Error calling LLM with tools: %s", exc, exc_info=True)
-            raise Exception(f"Failed to call LLM with tools: {exc}") from exc
+            self._raise_llm_domain_error(exc)
 
     async def call_with_rag_and_tools(
         self,
@@ -738,6 +847,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
+        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError):
+            raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG+Tools] Falling back to tools-only call due to RAG error")
