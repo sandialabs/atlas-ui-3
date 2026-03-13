@@ -8,6 +8,7 @@ chat sessions, including user uploads and tool-generated artifacts.
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.core.capabilities import create_download_url
 from atlas.modules.file_storage.content_extractor import get_content_extractor
 
 logger = logging.getLogger(__name__)
@@ -292,16 +293,21 @@ async def notify_canvas_files(
                 }
 
         if uploaded_refs:
+            user_email = session_context.get("user_email")
             canvas_files = []
             for fname, meta in uploaded_refs.items():
                 if file_manager.should_display_in_canvas(fname):
                     file_ext = file_manager.get_file_extension(fname).lower()
-                    canvas_files.append({
+                    file_key = meta.get("key")
+                    entry = {
                         "filename": fname,
                         "type": file_manager.get_canvas_file_type(file_ext),
-                        "s3_key": meta.get("key"),
+                        "s3_key": file_key,
                         "size": meta.get("size", 0),
-                    })
+                    }
+                    if file_key and user_email:
+                        entry["download_url"] = create_download_url(file_key, user_email)
+                    canvas_files.append(entry)
 
             if canvas_files:
                 await update_callback({
@@ -479,6 +485,7 @@ async def notify_canvas_files_v2(
             return
 
         if uploaded_refs and artifact_names:
+            user_email = session_context.get("user_email")
             canvas_files = []
             for fname in artifact_names:
                 meta = uploaded_refs.get(fname)
@@ -488,13 +495,17 @@ async def notify_canvas_files_v2(
                     mime_type = artifact.get("mime")
 
                     file_ext = file_manager.get_file_extension(fname).lower()
-                    canvas_files.append({
+                    file_key = meta.get("key")
+                    entry = {
                         "filename": fname,
                         "type": file_manager.get_canvas_file_type(file_ext),
-                        "s3_key": meta.get("key"),
+                        "s3_key": file_key,
                         "size": meta.get("size", 0),
                         "mime_type": mime_type
-                    })
+                    }
+                    if file_key and user_email:
+                        entry["download_url"] = create_download_url(file_key, user_email)
+                    canvas_files.append(entry)
 
             if canvas_files:
                 # Reorder files to put primary_file first if provided

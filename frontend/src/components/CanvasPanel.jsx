@@ -177,8 +177,8 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
           return;
         }
 
-        // Fetch file content from the backend
-        const response = await fetch(`/api/files/download/${currentFile.s3_key}`, {
+        // Fetch file content using tokenized URL (bypasses nginx auth_request)
+        const response = await fetch(currentFile.download_url, {
           method: 'GET',
           credentials: 'include'
         });
