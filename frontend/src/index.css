@@ -371,6 +371,9 @@
   [class*="EnabledToolsIndicator"],
   [class*="PromptSelector"],
   [class*="WelcomeScreen"],
+  [class*="BannerPanel"],
+  [class*="SplashScreen"],
+  [class*="from-yellow-500"],
   button:not(.no-print-hide),
   input,
   textarea,
@@ -433,6 +436,11 @@
     overflow: visible !important;
     max-height: none !important;
     height: auto !important;
+  }
+
+  /* Show print-only elements */
+  .print\:block {
+    display: block !important;
   }
 
   /* Page setup */
