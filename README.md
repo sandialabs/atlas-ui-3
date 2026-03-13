@@ -190,6 +190,25 @@ If you are an AI agent working on this repository, please refer to the following
 *   **[GEMINI.md](./GEMINI.md)**: Gemini-specific instructions.
 *   **[.github/copilot-instructions.md](./.github/copilot-instructions.md)**: A compact guide for getting productive quickly.
 
+## Citing Atlas-UI-3
+
+If you use Atlas-UI-3 in a publication, please cite:
+
+> Melander, Darryl, Garland, Anthony, Lancaster, Caitlin, & Bernauer, Michael. *Atlas-UI-3*. Sandia National Laboratories (SNL-NM), Albuquerque, NM, 2025. https://doi.org/10.11578/dc.20260211.11
+
+BibTeX:
+
+```bibtex
+@misc{atlas_ui_3,
+  author = {Melander, Darryl and Garland, Anthony and Lancaster, Caitlin and Bernauer, Michael},
+  title = {Atlas-UI-3},
+  year = {2025},
+  month = {10},
+  doi = {10.11578/dc.20260211.11},
+  url = {https://www.osti.gov/biblio/code-175384}
+}
+```
+
 ## License
 
 Copyright 2025 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
