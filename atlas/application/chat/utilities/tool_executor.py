@@ -662,15 +662,6 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
         # Provide URL hints for filename/file_names fields
         files_ctx = session_context.get("files", {})
 
-        # Check if base64 content injection is enabled
-        include_base64 = False
-        try:
-            from atlas.modules.config import config_manager
-            settings = config_manager.app_settings
-            include_base64 = getattr(settings, "include_file_content_base64", False)
-        except Exception as e:
-            logger.debug(f"Could not check include_file_content_base64 setting: {e}")
-
         def to_url(key: str) -> str:
             # Use tokenized URL so tools can fetch without cookies
             return create_download_url(key, user_email)
