@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Download, Save, X, Check, ThumbsUp, ThumbsDown, Minus } from 'lucide-react'
+import { Download, Save, Check, ThumbsUp, ThumbsDown, Minus } from 'lucide-react'
 import 'highlight.js/styles/github-dark.css'
 import MCPDetailsView from './admin/MCPDetailsView'
 

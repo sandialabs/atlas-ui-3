@@ -100,17 +100,7 @@ def extract_pdf_text(pdf_bytes: bytes) -> tuple[str, dict]:
     Returns:
         Tuple of (extracted_text, metadata_dict)
     """
-    try:
-        from pypdf import PdfReader
-    except ImportError:
-        # Fall back to PyPDF2 if pypdf not available
-        try:
-            from PyPDF2 import PdfReader
-        except ImportError:
-            raise ImportError(
-                "PDF extraction requires 'pypdf' or 'PyPDF2'. "
-                "Install with: pip install pypdf"
-            )
+    from pypdf import PdfReader
 
     pdf_file = io.BytesIO(pdf_bytes)
     reader = PdfReader(pdf_file)

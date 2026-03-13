@@ -11,9 +11,6 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 
-// Save mode constants: 'none' (incognito), 'local' (browser), 'server' (backend DB)
-const SAVE_MODES = ['none', 'local', 'server']
-
 // Safety timeout for stuck thinking state (no backend response)
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
