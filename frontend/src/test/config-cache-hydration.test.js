@@ -1,5 +1,5 @@
 /**
- * Tests for config localStorage caching and two-phase loading.
+ * Tests for config localStorage caching and three-phase loading.
  *
  * Verifies that useChatConfig:
  * 1. Hydrates initial state from localStorage cache
@@ -9,8 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-
-const CONFIG_CACHE_KEY = 'chatui-config-cache'
+import { CONFIG_CACHE_KEY } from '../hooks/chat/useChatConfig'
 
 // Sample full config response
 const FULL_CONFIG = {
@@ -169,10 +168,9 @@ describe('Config Hydration Logic', () => {
       file_content_extraction: false
     }
 
+    // When no cache exists, features fall back to defaults without merging
     const cached = null
-    const features = cached?.features
-      ? { ...DEFAULT_FEATURES, ...cached.features }
-      : DEFAULT_FEATURES
+    const features = cached ? { ...DEFAULT_FEATURES, ...cached.features } : DEFAULT_FEATURES
 
     expect(features.rag).toBe(false)
     expect(features.tools).toBe(false)
@@ -249,10 +247,7 @@ describe('Shell Config Application', () => {
 
 describe('Full Config Reconciliation', () => {
   it('should overwrite cached tools with fresh data', () => {
-    // Start with cached tools
-    let tools = FULL_CONFIG.tools
-
-    // Fresh full config has updated tools
+    // Fresh full config has updated tools, overwriting whatever was previously cached
     const freshConfig = {
       ...FULL_CONFIG,
       tools: [
@@ -261,7 +256,7 @@ describe('Full Config Reconciliation', () => {
       ]
     }
 
-    tools = freshConfig.tools
+    const tools = freshConfig.tools
     expect(tools).toHaveLength(2)
     expect(tools[0].tools).toContain('test')
     expect(tools[1].server).toBe('data-tools')
