@@ -15,9 +15,9 @@ from typing import Annotated, Any, Dict, Optional
 import requests
 from fastmcp import FastMCP
 
-# This tool requires the PyPDF2 and reportlab libraries.
-# Install them using: pip install PyPDF2 reportlab
-from PyPDF2 import PdfReader
+# This tool requires the pypdf and reportlab libraries.
+# Install them using: pip install pypdf reportlab
+from pypdf import PdfReader
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
