@@ -1,11 +1,13 @@
 # Manual Test: RAG Completions Direct Output
 
+Last updated: 2026-03-10
+
 ## Overview
-This document describes how to test the new feature where RAG completions (LLM-interpreted results) are returned directly without further LLM processing.
+This document describes how to test the feature where RAG completions (LLM-interpreted results) are handled based on context. When only RAG is active (no tools), completions are returned directly without further LLM processing. When both RAG and tools are active, completions are injected as context so the LLM can still use tools (PR #389).
 
 ## What Changed
 - **Before**: When ATLAS RAG API returned chat completions (already interpreted by an LLM), Atlas UI would treat that as "raw context" and send it to the LLM again for processing.
-- **After**: Atlas UI now detects when RAG returns chat completions (`object: "chat.completion"`) and returns them directly to the user with a note indicating the response is from the RAG completions endpoint.
+- **After**: Atlas UI now detects when RAG returns chat completions (`object: "chat.completion"`). In RAG-only mode, these are returned directly to the user. When tools are also active, the completion is injected as context so the LLM can still use available tools.
 
 ## Prerequisites
 1. Atlas UI backend and frontend running
@@ -63,7 +65,7 @@ This scenario tests that chat completions from RAG are returned directly.
 6. Enter a query like: "What is our remote work policy?"
 7. Submit the query
 
-**Expected Result:**
+**Expected Result (RAG-only, no tools selected):**
 - The response should start with: `*Response from <source> (RAG completions endpoint):*`
 - The response should contain the RAG-interpreted answer directly
 - Below the response, there should be RAG metadata showing sources used
@@ -87,21 +89,43 @@ This scenario tests that chat completions from RAG are returned directly.
 - Should show retrieval method
 - Should show number of documents found
 
-### Scenario 3: Multiple Queries
+### Scenario 3: RAG + Tools Active Simultaneously (PR #389)
+This scenario tests that when both RAG and tools are active, RAG completions
+are injected as context rather than returned directly, so tools remain available.
+
 **Steps:**
-1. Make several different queries with RAG enabled
+1. Open Atlas UI at http://localhost:8000
+2. Select a RAG data source in the RAG panel
+3. Also select one or more MCP tools
+4. Enter a query like: "What is our remote work policy?"
+5. Submit the query
+
+**Expected Result:**
+- The LLM should be called with both the RAG completion as context AND tools available
+- Check backend logs for: `[LLM+RAG+Tools] RAG returned completion - injecting as context (tools still available)`
+- The context message should use label `Pre-synthesized answer from <source>`
+- The LLM may choose to use tools or respond with text incorporating the RAG context
+
+**What You Should NOT See (when tools are active):**
+- The RAG completion returned directly without LLM processing
+- Log message `returning directly without LLM processing` in the RAG+Tools path
+
+### Scenario 4: Multiple Queries
+**Steps:**
+1. Make several different queries with RAG enabled (no tools)
 2. Verify each response includes the RAG completions note
 3. Try queries that find results and queries that don't
 
 **Expected Result:**
-- All responses should be direct RAG outputs
-- No queries should trigger additional LLM processing when RAG returns completions
+- All responses should be direct RAG outputs (when no tools are selected)
+- No queries should trigger additional LLM processing when RAG returns completions in RAG-only mode
 
 ## Verification Checklist
 
 - [ ] RAG completions are detected (check `is_completion=True` in logs)
-- [ ] Responses include note about RAG completions endpoint
-- [ ] No additional LLM processing occurs for completions
+- [ ] RAG-only: responses include note about RAG completions endpoint
+- [ ] RAG-only: no additional LLM processing occurs for completions
+- [ ] RAG+Tools: completion is injected as context, LLM is called with tools
 - [ ] RAG metadata is properly displayed
 - [ ] Multiple data sources work correctly
 - [ ] The UI displays the response properly formatted
@@ -119,11 +143,13 @@ Look for these log messages:
 [LLM+RAG] Returning RAG completion directly: response_length=XXX
 ```
 
-### What You Should NOT See
-If RAG returns a completion, you should NOT see:
+### What You Should NOT See (RAG-only path)
+If RAG returns a completion and no tools are selected, you should NOT see:
 ```
 [LLM+RAG] Calling LLM with RAG-enriched context...
 ```
+
+Note: When tools ARE selected alongside RAG, the LLM IS called with context -- this is expected behavior (PR #389).
 
 ## Troubleshooting
 
