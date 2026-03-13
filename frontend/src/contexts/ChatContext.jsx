@@ -645,6 +645,7 @@ export const ChatProvider = ({ children }) => {
 		pendingElicitation,
 		setPendingElicitation,
 		refreshConfig: config.refreshConfig,
+		configReady: config.configReady,
 		saveMode,
 		setSaveMode,
 		activeConversationId,

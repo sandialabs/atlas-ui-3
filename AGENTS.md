@@ -165,6 +165,8 @@ frontend/src/
    handlers/         # WebSocket message handlers
 ```
 
+**Config Loading Strategy:** The frontend uses a three-phase startup: (1) instant hydration from localStorage-cached config, (2) fast `/api/config/shell` fetch for feature flags and models (no MCP/RAG discovery), (3) full `/api/config` for tools/prompts/RAG. The `configReady` flag on `useChatConfig` indicates when at least one source has loaded. New config fields that are UI-affecting should be included in the shell endpoint.
+
 **Stale Selection Cleanup:** ChatContext validates persisted tool/prompt selections against the current `/api/config` response and removes entries that no longer exist (e.g., removed servers, changed authorization). MarketplaceContext similarly prunes stale server selections. Follow this pattern when adding new persisted selections.
 
 **Polling with Backoff:** All frontend polling must use exponential backoff with jitter on failures to prevent backend DOS. Use the shared `usePollingWithBackoff` hook or `calculateBackoffDelay` from `hooks/usePollingWithBackoff.js`. Never use bare `setInterval` for backend polling.
