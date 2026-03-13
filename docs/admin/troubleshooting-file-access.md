@@ -1,6 +1,6 @@
 # Troubleshooting File Access for MCP Servers
 
-Last updated: 2026-02-02
+Last updated: 2026-03-11
 
 This guide helps resolve issues with MCP servers accessing attached files in Atlas UI.
 
@@ -8,8 +8,10 @@ This guide helps resolve issues with MCP servers accessing attached files in Atl
 
 When users attach files in Atlas UI, those files are stored in S3-compatible storage. MCP servers access these files via tokenized download URLs provided by the backend. The type of URL generated depends on your configuration:
 
-- **Local/stdio servers**: Can use relative URLs (`/api/files/download/...`) or localhost URLs
+- **Local/stdio servers**: Can use relative URLs (`/mcp/files/download/...`) or localhost URLs
 - **Remote HTTP/SSE servers**: Require absolute URLs with the backend's public address
+
+Note: MCP servers use the `/mcp/files/download/` path which bypasses nginx `auth_request` and authenticates solely via HMAC capability tokens. Browsers use `/api/files/download/` which goes through standard nginx authentication.
 
 ## Common Issues and Solutions
 

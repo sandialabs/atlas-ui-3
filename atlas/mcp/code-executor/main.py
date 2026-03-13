@@ -57,8 +57,10 @@ def _is_http_url(s: str) -> bool:
     return s.startswith("http://") or s.startswith("https://")
 
 def _is_backend_download_path(s: str) -> bool:
-    """Detect backend-relative download paths like /api/files/download/...."""
-    return isinstance(s, str) and s.startswith("/api/files/download/")
+    """Detect backend-relative download paths like /mcp/files/download/ or /api/files/download/."""
+    return isinstance(s, str) and (
+        s.startswith("/mcp/files/download/") or s.startswith("/api/files/download/")
+    )
 
 def _backend_base_url() -> str:
     """Resolve backend base URL from environment variable.
@@ -78,7 +80,7 @@ def _extract_clean_filename(filename: str) -> str:
     # First, remove query parameters (everything after ?)
     clean_path = filename.split('?')[0]
 
-    if clean_path.startswith('/api/files/download/'):
+    if clean_path.startswith('/mcp/files/download/') or clean_path.startswith('/api/files/download/'):
         url_basename = os.path.basename(clean_path)
         # Try to extract original filename from pattern: timestamp_hash_originalname.ext
         match = re.match(r'^\d+_[a-f0-9]+_(.+)$', url_basename)

@@ -184,11 +184,7 @@ Pre-built container images are available at `quay.io/agarlan-snl/atlas-ui-3:late
 
 ## For AI Agent Contributors
 
-If you are an AI agent working on this repository, please refer to the following documents for the most current and concise guidance:
-
-*   **[CLAUDE.md](./CLAUDE.md)**: Detailed architecture, workflows, and conventions.
-*   **[GEMINI.md](./GEMINI.md)**: Gemini-specific instructions.
-*   **[.github/copilot-instructions.md](./.github/copilot-instructions.md)**: A compact guide for getting productive quickly.
+If you are an AI agent working on this repository, please refer to **[AGENTS.md](./AGENTS.md)** for all project conventions, architecture, and development guidance.
 
 ## License
 

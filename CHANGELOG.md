@@ -6,10 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #403 - 2026-03-11
+- **Feature**: Separate MCP and browser file download paths. MCP servers now use `/mcp/files/download/` (HMAC token auth, bypasses nginx `auth_request`) while browsers use `/api/files/download/` (nginx-injected `X-User-Email`). Fixes 401 errors when browser downloads went through the unauthenticated MCP path.
+
 ### PR #394 - 2026-03-10
 - **Fix**: LLM errors (rate limit, timeout, auth, bad request) now propagate as domain-specific errors through the WebSocket to the frontend instead of causing the chat to hang indefinitely.
 - **Fix**: Frontend error handler now resets agent UI state (step counter, pending question) and includes a 5-minute safety timeout that clears the stuck "thinking" indicator.
 - **Enhancement**: Transient LLM errors (rate limit, timeout, 5xx) are now auto-retried up to 3 times with exponential backoff; auth errors raise immediately without retry.
+
+### PR #366 - 2026-03-10
+- **Upgrade**: Bump minimum FastMCP dependency from `>=2.10.0` to `>=3.0.0`. The codebase already used FastMCP 3.x-compatible APIs (`list_tools()`, `list_prompts()`, `Client` constructor), so no application code changes were needed.
 
 ### PR #390 - 2026-03-07
 - **Fix**: Admin panel MCP server status now correctly excludes failed servers from connected list, shows per-server tool/prompt counts, and displays the active `mcp.json` file path so admins know which config file is being read and written.

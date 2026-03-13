@@ -100,13 +100,16 @@ def create_download_url(file_key: str, user_email: Optional[str]) -> str:
     Returns:
         Download URL (absolute if BACKEND_PUBLIC_URL configured, relative otherwise)
     """
-    # Build relative path with token
+    # Build relative path with token using /mcp/ prefix for MCP server access.
+    # MCP servers use /mcp/files/download/ which bypasses nginx auth_request
+    # and authenticates via HMAC capability tokens instead.
+    # Browsers use /api/files/download/ which goes through nginx auth_request.
     if user_email:
         token = generate_file_token(user_email, file_key)
-        relative_path = f"/api/files/download/{file_key}?token={token}"
+        relative_path = f"/mcp/files/download/{file_key}?token={token}"
     else:
         # Fallback: no user context available
-        relative_path = f"/api/files/download/{file_key}"
+        relative_path = f"/mcp/files/download/{file_key}"
 
     # Check if we should use absolute URLs for remote MCP server access
     try:
