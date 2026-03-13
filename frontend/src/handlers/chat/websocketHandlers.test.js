@@ -157,6 +157,59 @@ describe('createWebSocketHandler – intermediate updates', () => {
   })
 })
 
+describe('createWebSocketHandler – agent message handling', () => {
+  it('agent_control messages are silently ignored (#54)', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    handler({ type: 'agent_control', action: 'stop' })
+
+    // Should NOT log an unknown message warning
+    expect(consoleSpy).not.toHaveBeenCalled()
+    // Should NOT add any message
+    expect(deps.addMessage).not.toHaveBeenCalled()
+    consoleSpy.mockRestore()
+  })
+
+  it('agent_completion clears state but does not add a message (#62)', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({
+      type: 'agent_update',
+      update_type: 'agent_completion',
+      steps: 3
+    })
+
+    // Should clear agent UI state
+    expect(deps.setCurrentAgentStep).toHaveBeenCalledWith(0)
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+    expect(deps.setIsSynthesizing).toHaveBeenCalledWith(false)
+    expect(deps.setAgentPendingQuestion).toHaveBeenCalledWith(null)
+    // Should NOT add a duplicate completion message
+    expect(deps.addMessage).not.toHaveBeenCalled()
+  })
+
+  it('agent_start adds a status message', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({
+      type: 'agent_update',
+      update_type: 'agent_start',
+      strategy: 'react',
+      max_steps: 10
+    })
+
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
+    const msg = deps.addMessage.mock.calls[0][0]
+    expect(msg.type).toBe('agent_status')
+    expect(msg.content).toContain('Agent Mode Started')
+    expect(msg.content).toContain('react')
+  })
+})
+
 describe('createWebSocketHandler - token streaming', () => {
   beforeEach(() => {
     vi.useFakeTimers()

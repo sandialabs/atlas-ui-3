@@ -144,7 +144,9 @@ export function createWebSocketHandler(deps) {
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
-          addMessage({ role: 'system', content: `Agent Completed in ${data.steps ?? '?'} step(s)`, type: 'agent_status', timestamp: new Date().toISOString(), agent_mode: true })
+          // Note: Do NOT add a chat message here — the final answer already
+          // arrives via token_stream / chat_response and contains step info.
+          // Adding a message here caused the "agent complete appears twice" bug (#62).
           break
         case 'agent_error':
           addMessage({ role: 'system', content: `Agent Error (Step ${data.turn}): ${data.message}`, type: 'agent_error', timestamp: new Date().toISOString() })
@@ -565,6 +567,9 @@ export function createWebSocketHandler(deps) {
           break
         case 'intermediate_update':
           handleIntermediateUpdate(data)
+          break
+        case 'agent_control':
+          // Client→server message type (e.g. stop). Silently ignore if echoed back (#54).
           break
         default:
           // New backend sends { type: 'agent_update', update_type: '...' }
