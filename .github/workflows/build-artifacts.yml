@@ -52,6 +52,7 @@ jobs:
         # Copy frontend build output
         cp -r frontend/dist build-artifacts/frontend
         # Copy atlas package (Python backend, includes config defaults)
+        cp .env.example atlas/.env.example
         cp -r atlas build-artifacts/
         # Copy docs
         cp -r docs build-artifacts/

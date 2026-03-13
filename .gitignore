@@ -3,6 +3,8 @@
 .ruff_cache
 # Environment variables
 .env
+# Auto-copied during build from root .env.example
+atlas/.env.example
 .claude
 
 .pytest_cache
