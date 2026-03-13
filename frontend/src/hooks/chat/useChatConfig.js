@@ -34,11 +34,25 @@ function readCachedConfig() {
 }
 
 /**
- * Write config response to localStorage cache.
+ * Fields safe to cache globally (not user/authorization-specific).
+ * User-specific data (tools, prompts, rag_servers, etc.) is excluded
+ * to prevent cross-user leakage in shared browser sessions.
+ */
+const SAFE_CACHE_FIELDS = [
+  'app_name', 'models', 'features', 'file_extraction',
+  'banner_enabled', 'agent_mode_available'
+]
+
+/**
+ * Write only non-sensitive config fields to localStorage cache.
  */
 function writeCachedConfig(cfg) {
   try {
-    localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(cfg))
+    const safe = {}
+    for (const key of SAFE_CACHE_FIELDS) {
+      if (key in cfg) safe[key] = cfg[key]
+    }
+    localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(safe))
   } catch (e) {
     console.warn('Failed to cache config to localStorage:', e)
   }
@@ -48,19 +62,15 @@ export function useChatConfig() {
   // Try to hydrate initial state from localStorage cache
   const cached = useRef(readCachedConfig())
 
+  // Cache only contains non-sensitive fields (app_name, models, features, etc.)
+  // User-specific fields (user, tools, prompts, rag_servers, etc.) are never cached.
   const [appName, setAppName] = useState(cached.current?.app_name || 'Chat UI')
-  const [user, setUser] = useState(cached.current?.user || 'Unknown')
+  const [user, setUser] = useState('Unknown')
   const [models, setModels] = useState(cached.current?.models || [])
-  const [tools, setTools] = useState(() => {
-    if (!cached.current?.tools) return []
-    return (cached.current.tools || []).map(server => ({
-      ...server,
-      tools: Array.from(new Set(server.tools))
-    }))
-  })
-  const [prompts, setPrompts] = useState(cached.current?.prompts || [])
-  const [dataSources, setDataSources] = useState(cached.current?.data_sources || [])
-  const [ragServers, setRagServers] = useState(cached.current?.rag_servers || [])
+  const [tools, setTools] = useState([])
+  const [prompts, setPrompts] = useState([])
+  const [dataSources, setDataSources] = useState([])
+  const [ragServers, setRagServers] = useState([])
   const [features, setFeatures] = useState(
     cached.current?.features
       ? { ...DEFAULT_FEATURES, ...cached.current.features }
@@ -82,11 +92,10 @@ export function useChatConfig() {
   const [agentModeAvailable, setAgentModeAvailable] = useState(
     cached.current ? !!cached.current.agent_mode_available : false
   )
-  const [isInAdminGroup, setIsInAdminGroup] = useState(
-    cached.current ? !!cached.current.is_in_admin_group : false
-  )
+  const [isInAdminGroup, setIsInAdminGroup] = useState(false)
   // Tracks whether we have received at least one config response (cache or network)
   const [configReady, setConfigReady] = useState(!!cached.current)
+  const configReadyRef = useRef(!!cached.current)
 
   // Apply a config response object to state.
   // When isShell=true, tools/prompts/RAG fields are not present and are left unchanged.
@@ -111,6 +120,7 @@ export function useChatConfig() {
     }
 
     setConfigReady(true)
+    configReadyRef.current = true
   }, [])
 
   // Phase 1: Fetch /api/config/shell (fast - no MCP/RAG discovery)
@@ -139,8 +149,8 @@ export function useChatConfig() {
       return cfg
     } catch (err) {
       console.error('Failed to fetch /api/config:', err)
-      // Only reset to unauthenticated if we have no cached data
-      if (!configReady) {
+      // Only reset to unauthenticated if we have no cached data and shell hasn't loaded
+      if (!configReadyRef.current) {
         setAppName('Chat UI (Unauthenticated)')
         setModels([])
         setTools([])
@@ -151,7 +161,7 @@ export function useChatConfig() {
       }
       return null
     }
-  }, [applyConfig, configReady])
+  }, [applyConfig])
 
   // Combined fetch: shell first (fast), then full config (slow)
   const fetchConfig = useCallback(async () => {
