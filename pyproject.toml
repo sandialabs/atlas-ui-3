@@ -48,6 +48,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Keep in sync with [dependency-groups] mcp-demos below
 mcp-demos = [
     "beautifulsoup4",
     "duckduckgo-search",
@@ -84,6 +85,7 @@ Repository = "https://github.com/sandialabs/atlas"
 Issues = "https://github.com/sandialabs/atlas/issues"
 
 [dependency-groups]
+# Keep in sync with [project.optional-dependencies] mcp-demos above
 mcp-demos = [
     "beautifulsoup4",
     "duckduckgo-search",
