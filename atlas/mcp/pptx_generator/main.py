@@ -828,4 +828,8 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", default="0.0.0.0")
     args = parser.parse_args()
-    mcp.run(transport=args.transport, host=args.host, port=args.port, show_banner=False)
+    kwargs = {}
+    if args.transport != "stdio":
+        kwargs["host"] = args.host
+        kwargs["port"] = args.port
+    mcp.run(transport=args.transport, show_banner=False, **kwargs)
