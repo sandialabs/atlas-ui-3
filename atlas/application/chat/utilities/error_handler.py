@@ -9,6 +9,7 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from atlas.domain.errors import (
+    ContextWindowExceededError,
     LLMAuthenticationError,
     LLMServiceError,
     LLMTimeoutError,
@@ -95,6 +96,12 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
         user_msg = "There was an authentication issue with the LLM service. Please contact your administrator."
         log_msg = f"Authentication error: {error_str}"
         return (LLMAuthenticationError, user_msg, log_msg)
+
+    # Check for context window exceeded errors
+    if any(keyword in error_str.lower() for keyword in ["context window exceeded", "context_length_exceeded", "maximum context length"]):
+        user_msg = "Your conversation is too long for this model's context window. Please start a new conversation or switch to a model with a larger context window."
+        log_msg = f"Context window exceeded: {error_str}"
+        return (ContextWindowExceededError, user_msg, log_msg)
 
     # Generic LLM service error (non-validation)
     user_msg = "The LLM service encountered an error. Please try again or contact support if the issue persists."

@@ -91,6 +91,11 @@ class LLMTimeoutError(LLMError):
     pass
 
 
+class ContextWindowExceededError(LLMError):
+    """Raised when input exceeds the LLM's context window limit."""
+    pass
+
+
 class LLMAuthenticationError(AuthenticationError):
     """Raised when LLM authentication fails."""
     pass

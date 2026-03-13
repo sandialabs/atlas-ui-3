@@ -34,6 +34,7 @@ from litellm import acompletion
 
 from atlas.core.metrics_logger import log_metric
 from atlas.domain.errors import (
+    ContextWindowExceededError,
     LLMAuthenticationError,
     LLMServiceError,
     LLMTimeoutError,
@@ -118,6 +119,14 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 "There was an authentication issue with the LLM service. "
                 "Please check your API key or contact your administrator."
             ) from exc
+        if isinstance(exc, litellm.ContextWindowExceededError) or any(
+            kw in error_str.lower()
+            for kw in ("context window exceeded", "context_length_exceeded", "maximum context length")
+        ):
+            raise ContextWindowExceededError(
+                "Your conversation is too long for this model's context window. "
+                "Please start a new conversation or switch to a model with a larger context window."
+            ) from exc
 
         # All other LLM errors get a generic but user-friendly message
         # Include the original error type in the log-level message for debugging
@@ -139,6 +148,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         if isinstance(exc, litellm.AuthenticationError) or any(
             kw in error_str
             for kw in ("unauthorized", "authentication", "invalid api key", "invalid_api_key")
+        ):
+            return False
+
+        # Context window errors will never succeed on retry
+        if isinstance(exc, litellm.ContextWindowExceededError) or any(
+            kw in error_str
+            for kw in ("context window exceeded", "context_length_exceeded", "maximum context length")
         ):
             return False
 
