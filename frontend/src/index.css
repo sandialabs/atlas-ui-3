@@ -360,6 +360,7 @@
 @media print {
   /* Hide non-content UI elements */
   header,
+  footer,
   nav,
   .sidebar,
   #mobile-menu,
@@ -367,6 +368,9 @@
   [class*="SettingsPanel"],
   [class*="Sidebar"],
   [class*="sidebar"],
+  [class*="EnabledToolsIndicator"],
+  [class*="PromptSelector"],
+  [class*="WelcomeScreen"],
   button:not(.no-print-hide),
   input,
   textarea,
