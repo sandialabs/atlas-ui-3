@@ -17,7 +17,7 @@ const DEFAULT_FILE_EXTRACTION = {
   supported_extensions: []
 }
 
-const CONFIG_CACHE_KEY = 'chatui-config-cache'
+export const CONFIG_CACHE_KEY = 'chatui-config-cache'
 
 /**
  * Try to read cached config from localStorage.
@@ -113,6 +113,10 @@ export function useChatConfig() {
   // Tracks whether we have received at least one config response (cache or network)
   const [configReady, setConfigReady] = useState(!!cached.current)
   const configReadyRef = useRef(!!cached.current)
+  // Tracks whether the full /api/config response has been applied.
+  // Shell responses must not overwrite state once full config has been applied,
+  // since shell data is less complete (no tools, no per-user model fields, etc.).
+  const fullConfigAppliedRef = useRef(false)
 
   // Apply a config response object to state.
   // When isShell=true, tools/prompts/RAG fields are not present and are left unchanged.
@@ -146,7 +150,11 @@ export function useChatConfig() {
       const res = await fetch('/api/config/shell')
       if (!res.ok) return null
       const cfg = await res.json()
-      applyConfig(cfg, true)
+      // Skip shell application if the full config has already been applied, to avoid
+      // overwriting more-complete data with partial shell data in a race.
+      if (!fullConfigAppliedRef.current) {
+        applyConfig(cfg, true)
+      }
       return cfg
     } catch (err) {
       console.warn('Failed to fetch /api/config/shell:', err)
@@ -160,6 +168,7 @@ export function useChatConfig() {
       const res = await fetch('/api/config')
       if (!res.ok) throw new Error(res.status)
       const cfg = await res.json()
+      fullConfigAppliedRef.current = true
       applyConfig(cfg, false)
       // Cache the full response for next page load
       writeCachedConfig(cfg)
