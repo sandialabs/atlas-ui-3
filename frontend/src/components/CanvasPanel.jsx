@@ -178,6 +178,9 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
         }
 
         // Fetch file content using tokenized URL (bypasses nginx auth_request)
+        if (!currentFile.download_url) {
+          throw new Error('File download URL is not available');
+        }
         const response = await fetch(currentFile.download_url, {
           method: 'GET',
           credentials: 'include'

@@ -113,7 +113,7 @@ async def handle_session_files(
 
         # Emit files update if successful uploads
         if uploaded_refs and update_callback:
-            organized = file_manager.organize_files_metadata(uploaded_refs)
+            organized = file_manager.organize_files_metadata(uploaded_refs, user_email=session_context.get("user_email"))
             logger.info(
                 "Emitting files_update for user uploads: total=%d",
                 len(organized.get('files', [])),
@@ -246,7 +246,7 @@ async def ingest_tool_files(
     # Emit files update if successful uploads
     if uploaded_refs and update_callback:
         try:
-            organized = file_manager.organize_files_metadata(uploaded_refs)
+            organized = file_manager.organize_files_metadata(uploaded_refs, user_email=session_context.get("user_email"))
             logger.info(
                 "Emitting files_update for tool uploads: total=%d",
                 len(organized.get('files', [])),
@@ -345,7 +345,7 @@ async def emit_files_update_from_context(
                 "tags": {"source": ref.get("source", "user")}
             }
 
-        organized = file_manager.organize_files_metadata(file_refs)
+        organized = file_manager.organize_files_metadata(file_refs, user_email=session_context.get("user_email"))
         logger.info(
             "Emitting files_update from context: total=%d",
             len(organized.get('files', [])),
@@ -413,7 +413,7 @@ async def ingest_v2_artifacts(
 
         # Emit files update if successful uploads
         if uploaded_refs and update_callback:
-            organized = file_manager.organize_files_metadata(uploaded_refs)
+            organized = file_manager.organize_files_metadata(uploaded_refs, user_email=session_context.get("user_email"))
             logger.info(
                 "Emitting files_update for v2 artifacts: total=%d",
                 len(organized.get('files', [])),
