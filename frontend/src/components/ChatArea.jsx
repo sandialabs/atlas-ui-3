@@ -50,6 +50,7 @@ const ChatArea = () => {
     fileExtraction,
     ragEnabled,
     toggleRagEnabled,
+    selectedDataSources,
     features,
     appName
   } = useChat()
@@ -853,11 +854,11 @@ const ChatArea = () => {
                   type="button"
                   onClick={toggleRagEnabled}
                   className={`px-3 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
-                    ragEnabled || hasSearchCommand
+                    ragEnabled || hasSearchCommand || selectedDataSources?.size > 0
                       ? 'bg-green-600 hover:bg-green-700 text-white'
                       : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                   }`}
-                  title={ragEnabled ? 'RAG enabled - click to disable' : hasSearchCommand ? 'RAG active for this search' : 'RAG disabled - click to enable'}
+                  title={ragEnabled ? 'RAG enabled - click to disable' : hasSearchCommand ? 'RAG active for this search' : selectedDataSources?.size > 0 ? 'RAG active via selected data sources' : 'RAG disabled - click to enable'}
                 >
                   <Search className="w-5 h-5" />
                 </button>
