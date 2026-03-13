@@ -44,13 +44,30 @@ const SAFE_CACHE_FIELDS = [
 ]
 
 /**
+ * Per-user fields that must be stripped from model objects before caching.
+ * These are derived from the current user's token storage and would leak
+ * credential state across sessions (e.g. whether a user has configured
+ * personal LLM API keys or Globus tokens).
+ */
+const PER_USER_MODEL_FIELDS = ['user_has_key', 'api_key_source', 'globus_scope']
+
+/**
  * Write only non-sensitive config fields to localStorage cache.
+ * Model objects are sanitized to remove per-user credential state.
  */
 function writeCachedConfig(cfg) {
   try {
     const safe = {}
     for (const key of SAFE_CACHE_FIELDS) {
       if (key in cfg) safe[key] = cfg[key]
+    }
+    // Strip per-user fields from cached model objects
+    if (safe.models) {
+      safe.models = safe.models.map(m => {
+        const cleaned = { ...m }
+        for (const field of PER_USER_MODEL_FIELDS) delete cleaned[field]
+        return cleaned
+      })
     }
     localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(safe))
   } catch (e) {
@@ -149,7 +166,11 @@ export function useChatConfig() {
       return cfg
     } catch (err) {
       console.error('Failed to fetch /api/config:', err)
-      // Only reset to unauthenticated if we have no cached data and shell hasn't loaded
+      // Only reset to unauthenticated on the initial startup fetch when no prior
+      // config source (cache or shell) has loaded. Once configReady is true, a
+      // failed refresh (e.g. after admin MCP reload) intentionally preserves the
+      // existing UI state rather than wiping to defaults — stale-but-functional
+      // is better UX than flashing to "Unauthenticated" on transient errors.
       if (!configReadyRef.current) {
         setAppName('Chat UI (Unauthenticated)')
         setModels([])
