@@ -41,7 +41,8 @@ describe('useSettings', () => {
         llmTemperature: 0.7,
         maxIterations: 10,
         agentLoopStrategy: 'agentic',
-        autoApproveTools: false
+        autoApproveTools: false,
+        debugMode: false
       })
       expect(result.current.isLoaded).toBe(true)
       expect(localStorageMock.getItem).toHaveBeenCalledWith('chatui-settings')
@@ -52,7 +53,8 @@ describe('useSettings', () => {
         llmTemperature: 0.5,
         maxIterations: 15,
         agentLoopStrategy: 'act-only',
-        autoApproveTools: true
+        autoApproveTools: true,
+        debugMode: false
       }
       localStorageMock.getItem.mockReturnValue(JSON.stringify(savedSettings))
 
@@ -75,7 +77,8 @@ describe('useSettings', () => {
         llmTemperature: 0.9,
         maxIterations: 20,
         agentLoopStrategy: 'agentic', // default value
-        autoApproveTools: false // default value
+        autoApproveTools: false, // default value
+        debugMode: false // default value
       })
     })
 
@@ -88,7 +91,8 @@ describe('useSettings', () => {
         llmTemperature: 0.7,
         maxIterations: 10,
         agentLoopStrategy: 'agentic',
-        autoApproveTools: false
+        autoApproveTools: false,
+        debugMode: false
       })
       expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to parse saved settings:', expect.any(Error))
     })
@@ -115,7 +119,8 @@ describe('useSettings', () => {
           llmTemperature: 0.8,
           maxIterations: 12,
           agentLoopStrategy: 'agentic',
-          autoApproveTools: false
+          autoApproveTools: false,
+          debugMode: false
         })
       })
 
@@ -123,7 +128,8 @@ describe('useSettings', () => {
         llmTemperature: 0.8,
         maxIterations: 12,
         agentLoopStrategy: 'agentic',
-        autoApproveTools: false
+        autoApproveTools: false,
+        debugMode: false
       })
 
       expect(localStorageMock.setItem).toHaveBeenCalledWith(
@@ -132,7 +138,8 @@ describe('useSettings', () => {
           llmTemperature: 0.8,
           maxIterations: 12,
           agentLoopStrategy: 'agentic',
-          autoApproveTools: false
+          autoApproveTools: false,
+          debugMode: false
         })
       )
     })
@@ -154,7 +161,8 @@ describe('useSettings', () => {
         llmTemperature: 0.8,
         maxIterations: 15,
         agentLoopStrategy: 'agentic',
-        autoApproveTools: false
+        autoApproveTools: false,
+        debugMode: false
       })
     })
 
@@ -169,7 +177,8 @@ describe('useSettings', () => {
         llmTemperature: 0.7,
         maxIterations: 10,
         agentLoopStrategy: 'agentic',
-        autoApproveTools: false
+        autoApproveTools: false,
+        debugMode: false
       })
     })
 
@@ -206,7 +215,8 @@ describe('useSettings', () => {
           llmTemperature: 0.7,
           maxIterations: 10,
           agentLoopStrategy: 'agentic',
-          autoApproveTools: false
+          autoApproveTools: false,
+          debugMode: false
         })
       })
 
@@ -214,7 +224,8 @@ describe('useSettings', () => {
         llmTemperature: 0.7,
         maxIterations: 10,
         agentLoopStrategy: 'agentic',
-        autoApproveTools: false
+        autoApproveTools: false,
+        debugMode: false
       })
 
       expect(localStorageMock.setItem).toHaveBeenLastCalledWith(
@@ -223,7 +234,8 @@ describe('useSettings', () => {
           llmTemperature: 0.7,
           maxIterations: 10,
           agentLoopStrategy: 'agentic',
-          autoApproveTools: false
+          autoApproveTools: false,
+          debugMode: false
         })
       )
     })
@@ -279,7 +291,8 @@ describe('useSettings', () => {
         llmTemperature: 0.7,
         maxIterations: 10,
         agentLoopStrategy: 'agentic',
-        autoApproveTools: false
+        autoApproveTools: false,
+        debugMode: false
       })
     })
 
@@ -304,6 +317,7 @@ describe('useSettings', () => {
         maxIterations: 10,
         agentLoopStrategy: 'agentic',
         autoApproveTools: false,
+        debugMode: false,
         customConfig: {
           nested: {
             value: 'test'
@@ -342,7 +356,8 @@ describe('useSettings', () => {
         llmTemperature: 0.8,
         maxIterations: 15,
         agentLoopStrategy: 'agentic',
-        autoApproveTools: true
+        autoApproveTools: true,
+        debugMode: false
       })
 
       // Reset
@@ -354,7 +369,8 @@ describe('useSettings', () => {
         llmTemperature: 0.7,
         maxIterations: 10,
         agentLoopStrategy: 'agentic',
-        autoApproveTools: false
+        autoApproveTools: false,
+        debugMode: false
       })
     })
 

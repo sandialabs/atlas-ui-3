@@ -4,7 +4,8 @@ const DEFAULT_SETTINGS = {
   llmTemperature: 0.7,
   maxIterations: 10,
   agentLoopStrategy: 'agentic',
-  autoApproveTools: false  // User-level auto-approval for non-admin-required tools
+  autoApproveTools: false,  // User-level auto-approval for non-admin-required tools
+  debugMode: false  // Show raw tool call input/output in chat (#135)
 }
 
 export function useSettings() {

@@ -263,6 +263,33 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             )}
           </div>
 
+          {/* Debug Mode Setting */}
+          <div className="bg-gray-700 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-white font-medium">Debug Mode</label>
+              <button
+                onClick={() => {
+                  const newVal = !settings.debugMode
+                  handleSettingChange('debugMode', newVal)
+                  saveSettings({ ...settings, debugMode: newVal })
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  settings.debugMode ? 'bg-green-600' : 'bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    settings.debugMode ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="text-sm text-gray-400">
+              When enabled, tool call messages will show raw input arguments and output results expanded by default,
+              making it easier to debug tool interactions.
+            </p>
+          </div>
+
           {/* Globus Authentication Section (only shown when feature is enabled) */}
           {features?.globus_auth && (
             <div className="bg-gray-700 rounded-lg p-4">

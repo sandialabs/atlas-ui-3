@@ -5,7 +5,7 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 
 // Save mode display config: label, icon component, button classes, title text
@@ -331,9 +331,19 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                     downloadChatAsText()
                     setDownloadDropdownOpen(false)
                   }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 last:rounded-b-lg"
+                  className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700"
                 >
                   Download as Text
+                </button>
+                <button
+                  onClick={() => {
+                    window.print()
+                    setDownloadDropdownOpen(false)
+                  }}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 last:rounded-b-lg flex items-center gap-2"
+                >
+                  <Printer className="w-4 h-4" />
+                  Print / Save as PDF
                 </button>
               </div>
             )}
@@ -500,6 +510,22 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
               >
                 <Download className="w-5 h-5" />
                 <span>Download as Text</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  window.print()
+                  setMobileMenuOpen(false)
+                }}
+                disabled={messages.length === 0}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  messages.length === 0
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                }`}
+              >
+                <Printer className="w-5 h-5" />
+                <span>Print / Save as PDF</span>
               </button>
 
               {/* Compliance Level */}

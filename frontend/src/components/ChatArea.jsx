@@ -52,7 +52,8 @@ const ChatArea = () => {
     toggleRagEnabled,
     selectedDataSources,
     features,
-    appName
+    appName,
+    user
   } = useChat()
   const { isConnected } = useWS()
 
@@ -692,6 +693,20 @@ const ChatArea = () => {
       )}
 
       {/* Messages */}
+      {/* Print-only metadata header */}
+      <div className="hidden print:block p-4 mb-4 border-b-2 border-gray-300">
+        <h1 className="text-xl font-bold mb-2">Chat Export - {appName}</h1>
+        <div className="text-sm space-y-1">
+          <div>Date: {new Date().toLocaleString()}</div>
+          <div>User: {user}</div>
+          <div>Model: {currentModel}</div>
+          <div>Selected Tools: {[...selectedTools].join(', ') || 'None'}</div>
+          {ragEnabled && <div>RAG Sources: {[...selectedDataSources].join(', ') || 'None selected'}</div>}
+          {agentModeEnabled && <div>Agent Mode: Enabled</div>}
+          <div>Messages: {messages.length}</div>
+        </div>
+      </div>
+
       <main
         ref={messagesRef}
         className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0"

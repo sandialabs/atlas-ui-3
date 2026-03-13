@@ -737,15 +737,19 @@ const ToolElapsedTime = ({ timestamp }) => {
 }
 
 const Message = ({ message }) => {
-  const { appName, downloadFile, isSynthesizing } = useChat()
-  
+  const { appName, downloadFile, isSynthesizing, settings } = useChat()
+  const debugMode = settings?.debugMode || false
+
   // State for collapsible sections with localStorage persistence
+  // In debug mode, default to expanded
   const [toolInputCollapsed, setToolInputCollapsed] = useState(() => {
+    if (debugMode) return false
     const saved = localStorage.getItem('toolInputCollapsed')
     return saved !== null ? JSON.parse(saved) : true // Start collapsed by default
   })
-  
+
   const [toolOutputCollapsed, setToolOutputCollapsed] = useState(() => {
+    if (debugMode) return false
     const saved = localStorage.getItem('toolOutputCollapsed')
     return saved !== null ? JSON.parse(saved) : true // Start collapsed by default
   })
@@ -875,9 +879,12 @@ const renderContent = () => {
                   Input Arguments {toolInputCollapsed ? `(${Object.keys(message.arguments).length} params)` : ''}
                 </button>
                 {!toolInputCollapsed && (
-                  <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-64 overflow-y-auto">
+                  <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
+                    {debugMode && (
+                      <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Arguments</div>
+                    )}
                     <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                      {JSON.stringify(filterArgumentsForDisplay(message.arguments), null, 2)}
+                      {JSON.stringify(debugMode ? message.arguments : filterArgumentsForDisplay(message.arguments), null, 2)}
                     </pre>
                   </div>
                 )}
@@ -1013,9 +1020,15 @@ const renderContent = () => {
 
                 {/* Output content - collapsible */}
                 {!toolOutputCollapsed && (
-                  <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-64 overflow-y-auto">
+                  <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
+                    {debugMode && (
+                      <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Output</div>
+                    )}
                     <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
                       {(() => {
+                        if (debugMode) {
+                          return typeof message.result === 'string' ? message.result : JSON.stringify(message.result, null, 2)
+                        }
                         const processedResult = processToolResult(message.result)
                         return typeof processedResult === 'string' ? processedResult : JSON.stringify(processedResult, null, 2)
                       })()}
@@ -1041,6 +1054,27 @@ const renderContent = () => {
     }
 
     if (isUser || isSystem) {
+      // Handle agent status messages (start, max_steps, etc.)
+      if (message.type === 'agent_status') {
+        return (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-600 text-white uppercase flex-shrink-0">
+              Agent
+            </span>
+            <span className="text-purple-300">{message.content}</span>
+          </div>
+        )
+      }
+
+      // Handle agent reasoning messages
+      if (message.type === 'agent_reason' || message.type === 'agent_observe') {
+        return (
+          <div className="text-sm text-gray-400 italic border-l-2 border-purple-500 pl-3">
+            {message.content}
+          </div>
+        )
+      }
+
       // Handle tool log messages with badges and colors
       if (message.type === 'tool_log') {
         const logLevel = message.log_level || message.subtype || 'info'
