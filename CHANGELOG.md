@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #412 - 2026-03-12
+- **Fix**: Eliminate UI flash on startup by caching the last `/api/config` response in localStorage for instant hydration on page load, then reconciling with fresh data.
+- **Enhancement**: Add `/api/config/shell` fast endpoint that returns feature flags, models, and app metadata without waiting for slow MCP tool/prompt and RAG source discovery.
+
 ### PR #409 - 2026-03-12
 - **Release**: Bump version from 0.1.4 to 0.1.5.
 
