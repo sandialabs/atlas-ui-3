@@ -73,6 +73,19 @@ else
   fi
 fi
 
+# --- GitHub Copilot CLI ---
+echo "--- Installing GitHub Copilot CLI ---"
+if command_exists copilot; then
+  echo "GitHub Copilot CLI is already installed."
+else
+  echo "Installing via npm..."
+  if npm install -g @github/copilot; then
+    echo "Success. Run 'copilot' and use /login to authenticate."
+  else
+    echo "Failed to install GitHub Copilot CLI." >&2
+  fi
+fi
+
 echo "Installing context 7 into claude code"
 npm install -g @anthropic-ai/claude-code
 claude mcp add screenshot-website-fast -s user -- npx -y @just-every/mcp-screenshot-website-fast
