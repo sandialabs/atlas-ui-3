@@ -129,7 +129,25 @@ If you cloned the repo and want to run tests, experiment locally, or test MCP se
 uv sync --dev
 ```
 
-This installs pytest, ruff, and other development tools into your virtual environment.
+This installs pytest, ruff, MCP demo server dependencies (matplotlib, pandas, etc.), and other development tools into your virtual environment.
+
+### Extract Pre-Built Frontend from PyPI Package
+
+On a machine without Node.js, you can extract the pre-built frontend assets from the published PyPI wheel instead of running `npm run build`.
+
+```bash
+# Create a throwaway venv and install the package into it
+uv venv ./tmp/atlas-extract --python 3.11
+uv pip install atlas-chat --target ./tmp/atlas-extract/site
+
+# Copy the static files into your cloned repo
+cp -r ./tmp/atlas-extract/site/atlas/static/ atlas/static/
+
+# Clean up
+rm -rf ./tmp/atlas-extract
+```
+
+The server checks `atlas/static/` first, then falls back to `frontend/dist/`. Once the files are in place, `bash agent_start.sh` will serve the frontend without needing Node.js.
 
 ### Running the Application
 

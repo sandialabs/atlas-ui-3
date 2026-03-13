@@ -97,7 +97,8 @@ ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Install dependencies from pyproject.toml (cached unless pyproject.toml changes)
-RUN /home/appuser/.local/bin/uv pip install .
+# Include mcp-demos extra so bundled MCP demo servers work out of the box
+RUN /home/appuser/.local/bin/uv pip install ".[mcp-demos]"
 
 # Copy actual source code (invalidates cache only from here down)
 COPY --chown=appuser:appuser atlas/ ./atlas/

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #XXX - 2026-03-12
+- **Enhancement**: Split Python dependencies into core vs. `mcp-demos` optional extra. Core install is now lighter; `uv sync --dev` or `pip install atlas-chat[mcp-demos]` pulls in matplotlib, pandas, numpy, and other demo-only packages.
+- **Docs**: Added README section for extracting pre-built frontend from PyPI wheel on machines without Node.js.
+
 ### PR #403 - 2026-03-11
 - **Feature**: Separate MCP and browser file download paths. MCP servers now use `/mcp/files/download/` (HMAC token auth, bypasses nginx `auth_request`) while browsers use `/api/files/download/` (nginx-injected `X-User-Email`). Fixes 401 errors when browser downloads went through the unauthenticated MCP path.
 
