@@ -1,9 +1,10 @@
 /**
- * Tests for RAG activation gating (GH #335)
+ * Tests for RAG activation gating (GH #335, #396)
  *
- * Verifies that selecting data sources alone does NOT trigger RAG.
- * RAG should only be invoked when explicitly activated via the search
- * button (ragEnabled toggle) or the /search command (forceRag flag).
+ * Verifies that RAG is activated when:
+ *   1. The ragEnabled toggle is on
+ *   2. The /search command is used (forceRag)
+ *   3. One or more data sources are selected
  */
 
 import { describe, it, expect } from 'vitest'
@@ -14,8 +15,8 @@ import { describe, it, expect } from 'vitest'
  * React context tree.
  */
 function computeDataSourcesToSend({ forceRag, ragEnabled, selectedDataSources, allRagSourceIds }) {
-  const ragActivated = forceRag || ragEnabled
   const hasSelectedSources = selectedDataSources.size > 0
+  const ragActivated = forceRag || ragEnabled || hasSelectedSources
   return ragActivated
     ? (hasSelectedSources ? [...selectedDataSources] : allRagSourceIds)
     : []
@@ -24,14 +25,14 @@ function computeDataSourcesToSend({ forceRag, ragEnabled, selectedDataSources, a
 describe('RAG activation gating', () => {
   const allSources = ['server:source1', 'server:source2', 'server:source3']
 
-  it('does NOT send data sources when sources are selected but RAG is not activated', () => {
+  it('sends selected data sources when sources are selected (even without ragEnabled toggle)', () => {
     const result = computeDataSourcesToSend({
       forceRag: false,
       ragEnabled: false,
       selectedDataSources: new Set(['server:source1', 'server:source2']),
       allRagSourceIds: allSources,
     })
-    expect(result).toEqual([])
+    expect(result).toEqual(['server:source1', 'server:source2'])
   })
 
   it('sends selected data sources when ragEnabled toggle is on', () => {

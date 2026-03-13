@@ -275,11 +275,12 @@ export const ChatProvider = ({ children }) => {
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
-		// RAG is only invoked when explicitly activated via the search button (ragEnabled)
-		// or the /search command (forceRag). Data source selection alone just marks
-		// availability -- it does not trigger RAG.
-		const ragActivated = forceRag || ragEnabled
+		// RAG is activated when any of these are true:
+		//   1. The RAG toggle is on (ragEnabled)
+		//   2. The /search command was used (forceRag)
+		//   3. One or more data sources are selected (hasSelectedSources)
 		const hasSelectedSources = selectedDataSources.size > 0
+		const ragActivated = forceRag || ragEnabled || hasSelectedSources
 		const dataSourcesToSend = ragActivated
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []
