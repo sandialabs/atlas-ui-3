@@ -11,6 +11,7 @@ import litellm
 import pytest
 
 from atlas.domain.errors import (
+    ContextWindowExceededError,
     LLMAuthenticationError,
     LLMTimeoutError,
     RateLimitError,
@@ -82,6 +83,12 @@ class TestIsRetryableError:
 
     def test_unauthorized_by_message_is_not_retryable(self):
         assert LiteLLMCaller._is_retryable_error(Exception("unauthorized access")) is False
+
+    def test_context_window_error_is_not_retryable(self):
+        assert LiteLLMCaller._is_retryable_error(Exception("maximum context length exceeded")) is False
+
+    def test_context_window_error_by_keyword_is_not_retryable(self):
+        assert LiteLLMCaller._is_retryable_error(Exception("context_length_exceeded")) is False
 
     def test_generic_error_is_not_retryable(self):
         assert LiteLLMCaller._is_retryable_error(Exception("something unexpected")) is False
@@ -305,6 +312,46 @@ class TestRagFallbackDoesNotMaskLLMErrors:
             ))
 
             with pytest.raises(LLMTimeoutError):
+                await caller.call_with_rag_and_tools(
+                    "test", [{"role": "user", "content": "hi"}],
+                    data_sources=["src"],
+                    tools_schema=[{"type": "function", "function": {"name": "t"}}],
+                    user_email="test@test.com",
+                )
+
+    @pytest.mark.asyncio
+    async def test_call_with_rag_reraises_context_window_exceeded(self, caller):
+        """Context window exceeded from inner call_plain should not trigger RAG fallback."""
+        with (
+            patch.object(caller, "call_plain", side_effect=ContextWindowExceededError("too long")),
+            patch.object(caller, "_get_litellm_model_name", return_value="test"),
+            patch.object(caller, "_get_model_kwargs", return_value={}),
+        ):
+            caller._rag_service = MagicMock()
+            caller._rag_service.query = AsyncMock(return_value=MagicMock(
+                content="rag content", metadata=None, is_completion=False,
+            ))
+
+            with pytest.raises(ContextWindowExceededError):
+                await caller.call_with_rag(
+                    "test", [{"role": "user", "content": "hi"}],
+                    data_sources=["src"], user_email="test@test.com",
+                )
+
+    @pytest.mark.asyncio
+    async def test_call_with_rag_and_tools_reraises_context_window_exceeded(self, caller):
+        """Context window exceeded from inner call_with_tools should not trigger RAG fallback."""
+        with (
+            patch.object(caller, "call_with_tools", side_effect=ContextWindowExceededError("too long")),
+            patch.object(caller, "_get_litellm_model_name", return_value="test"),
+            patch.object(caller, "_get_model_kwargs", return_value={}),
+        ):
+            caller._rag_service = MagicMock()
+            caller._rag_service.query = AsyncMock(return_value=MagicMock(
+                content="rag content", metadata=None, is_completion=False,
+            ))
+
+            with pytest.raises(ContextWindowExceededError):
                 await caller.call_with_rag_and_tools(
                     "test", [{"role": "user", "content": "hi"}],
                     data_sources=["src"],

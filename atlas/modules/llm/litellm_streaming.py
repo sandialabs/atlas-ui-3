@@ -87,7 +87,7 @@ class LiteLLMStreamingMixin:
 
         except Exception as exc:
             logger.error("Error in streaming LLM call: %s", exc, exc_info=True)
-            raise Exception(f"Failed to stream LLM: {exc}") from exc
+            self._raise_llm_domain_error(exc)
 
     async def stream_with_tools(
         self,
@@ -195,7 +195,7 @@ class LiteLLMStreamingMixin:
 
         except Exception as exc:
             logger.error("Error in streaming LLM call with tools: %s", exc, exc_info=True)
-            raise Exception(f"Failed to stream LLM with tools: {exc}") from exc
+            self._raise_llm_domain_error(exc)
 
     async def stream_with_rag(
         self,
