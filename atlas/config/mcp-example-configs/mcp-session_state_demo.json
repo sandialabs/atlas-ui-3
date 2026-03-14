@@ -1,16 +1,13 @@
 {
   "session_state_demo": {
-    "command": [
-      "python",
-      "mcp/session_state_demo/main.py"
-    ],
-    "cwd": "atlas",
+    "url": "http://127.0.0.1:8010/mcp",
+    "transport": "http",
     "groups": [
       "users"
     ],
-    "description": "Demonstrates FastMCP 3.x session state (ctx.get_state/ctx.set_state) using a shopping cart that persists across tool calls within a conversation. Shows add, view, remove, clear, and history tracking with session-scoped state.",
+    "description": "Shopping cart demo using FastMCP 3.x session state (ctx.get_state/ctx.set_state) — state persists across tool calls within a conversation, isolated per user via HTTP sessions",
     "author": "Atlas UI Team",
-    "short_description": "Session state demonstration",
+    "short_description": "Session state demo (HTTP)",
     "help_email": "support@example.com",
     "compliance_level": "Public"
   }

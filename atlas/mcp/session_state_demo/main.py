@@ -222,4 +222,6 @@ async def view_history(ctx: Context) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    mcp.run(show_banner=False)
+    import os
+    port = int(os.environ.get("MCP_SESSION_STATE_PORT", "8010"))
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=port, show_banner=False)
