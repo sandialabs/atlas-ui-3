@@ -41,10 +41,11 @@ class TestMCPClientEnvironmentVariables:
         assert mock_transport_class.called
         call_kwargs = mock_transport_class.call_args[1]
         assert "env" in call_kwargs
-        assert call_kwargs["env"] == {
-            "VAR1": "literal-value",
-            "VAR2": "another-literal"
-        }
+        env = call_kwargs["env"]
+        assert env["VAR1"] == "literal-value"
+        assert env["VAR2"] == "another-literal"
+        # PYTHONPATH is injected so STDIO servers can import atlas.mcp_shared
+        assert "PYTHONPATH" in env
 
     @pytest.mark.asyncio
     @patch('atlas.modules.mcp_tools.client.Client')
@@ -79,11 +80,11 @@ class TestMCPClientEnvironmentVariables:
         # Verify env vars were resolved
         assert mock_transport_class.called
         call_kwargs = mock_transport_class.call_args[1]
-        assert call_kwargs["env"] == {
-            "PROFILE": "my-profile-9",
-            "REGION": "us-east-7",
-            "LITERAL": "not-a-var"
-        }
+        env = call_kwargs["env"]
+        assert env["PROFILE"] == "my-profile-9"
+        assert env["REGION"] == "us-east-7"
+        assert env["LITERAL"] == "not-a-var"
+        assert "PYTHONPATH" in env
 
     @pytest.mark.asyncio
     @patch('atlas.modules.mcp_tools.client.Client')
@@ -106,10 +107,13 @@ class TestMCPClientEnvironmentVariables:
 
                 await manager._initialize_single_client("test-server", server_config)
 
-        # Verify env is None
+        # PYTHONPATH injection means env is no longer None — it contains
+        # the full os.environ plus PYTHONPATH
         assert mock_transport_class.called
         call_kwargs = mock_transport_class.call_args[1]
-        assert call_kwargs["env"] is None
+        env = call_kwargs["env"]
+        assert env is not None
+        assert "PYTHONPATH" in env
 
     @pytest.mark.asyncio
     async def test_stdio_client_missing_env_var_fails(self, caplog):
@@ -164,7 +168,9 @@ class TestMCPClientEnvironmentVariables:
         # Verify env was passed
         assert mock_transport_class.called
         call_kwargs = mock_transport_class.call_args[1]
-        assert call_kwargs["env"] == {"TEST_VAR": "my-value"}
+        env = call_kwargs["env"]
+        assert env["TEST_VAR"] == "my-value"
+        assert "PYTHONPATH" in env
 
     @pytest.mark.asyncio
     @patch('atlas.modules.mcp_tools.client.Client')
@@ -185,7 +191,8 @@ class TestMCPClientEnvironmentVariables:
 
             await manager._initialize_single_client("test-server", server_config)
 
-        # Empty dict should become empty dict (not None)
+        # Empty env dict still gets PYTHONPATH injected
         assert mock_transport_class.called
         call_kwargs = mock_transport_class.call_args[1]
-        assert call_kwargs["env"] == {}
+        env = call_kwargs["env"]
+        assert "PYTHONPATH" in env
