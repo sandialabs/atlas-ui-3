@@ -1662,7 +1662,7 @@ class MCPToolManager:
                 else:
                     try:
                         await asyncio.wait_for(
-                            tool_task.wait(timeout=call_timeout),
+                            tool_task.wait(),
                             timeout=task_timeout,
                         )
                         result = tool_task.result

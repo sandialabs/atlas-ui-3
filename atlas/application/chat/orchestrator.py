@@ -165,7 +165,7 @@ class ChatOrchestrator:
             messages=messages,
             selected_prompts=selected_prompts,
             user_email=user_email,
-            conversation_id=str(session_id),
+            conversation_id=session.context.get("conversation_id", str(session_id)),
         )
 
         # Route to appropriate mode (always streaming)
