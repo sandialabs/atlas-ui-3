@@ -1,0 +1,17 @@
+{
+  "structured_output_demo": {
+    "command": [
+      "python",
+      "mcp/structured_output_demo/main.py"
+    ],
+    "cwd": "atlas",
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates FastMCP 3.x structured output priority where the data field is prioritized over structured_content for clean UI display. Shows weather reports, system status, item comparisons, and user profiles as structured data.",
+    "author": "Atlas UI Team",
+    "short_description": "Structured output demonstration",
+    "help_email": "support@example.com",
+    "compliance_level": "Public"
+  }
+}
