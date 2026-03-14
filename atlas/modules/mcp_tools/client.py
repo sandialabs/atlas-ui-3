@@ -1807,10 +1807,11 @@ class MCPToolManager:
 
         # Attempt extraction in priority order
         try:
-            if hasattr(raw_result, "structured_content") and raw_result.structured_content:  # type: ignore[attr-defined]
+            if hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
+                # FastMCP 3.x validated/deserialized structured content (highest fidelity)
+                structured = raw_result.data if isinstance(raw_result.data, dict) else {"results": raw_result.data}  # type: ignore[attr-defined]
+            elif hasattr(raw_result, "structured_content") and raw_result.structured_content:  # type: ignore[attr-defined]
                 structured = raw_result.structured_content  # type: ignore[attr-defined]
-            elif hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
-                structured = raw_result.data  # type: ignore[attr-defined]
             else:
                 # Fallback: extract text content from content array
                 if hasattr(raw_result, "content"):
@@ -2035,14 +2036,14 @@ class MCPToolManager:
                     structured = raw_result
                 else:
                     structured = {}
-                    if hasattr(raw_result, "structured_content") and raw_result.structured_content:  # type: ignore[attr-defined]
-                        sc = raw_result.structured_content  # type: ignore[attr-defined]
-                        if isinstance(sc, dict):
-                            structured = sc
-                    elif hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
+                    if hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
                         dt = raw_result.data  # type: ignore[attr-defined]
                         if isinstance(dt, dict):
                             structured = dt
+                    elif hasattr(raw_result, "structured_content") and raw_result.structured_content:  # type: ignore[attr-defined]
+                        sc = raw_result.structured_content  # type: ignore[attr-defined]
+                        if isinstance(sc, dict):
+                            structured = sc
                     else:
                         # Fallback: parse first textual content if JSON-like
                         # This handles MCP responses that return data only in content[0].text
