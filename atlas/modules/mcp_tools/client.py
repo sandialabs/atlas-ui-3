@@ -279,11 +279,23 @@ class MCPToolManager:
             from mcp.types import ElicitRequestFormParams
 
             # Find routing context for this server (keyed by (server_name, tool_call_id))
-            routing = None
-            for (srv, _tcid), ctx in _ELICITATION_ROUTING.items():
-                if srv == server_name:
-                    routing = ctx
-                    break
+            tcid = None
+            if _context and hasattr(_context, 'meta') and _context.meta is not None:
+                tcid = getattr(_context.meta, 'model_extra', {}).get("tool_call_id")
+
+            routing = _ELICITATION_ROUTING.get((server_name, tcid))
+
+            if routing is None:
+                matches = [v for (srv, _), v in _ELICITATION_ROUTING.items() if srv == server_name]
+                if len(matches) == 1:
+                    routing = matches[0]
+                elif len(matches) > 1:
+                    logger.warning(
+                        "Ambiguous elicitation routing for server '%s' with %d entries — cancelling",
+                        server_name, len(matches),
+                    )
+                    return ElicitResult(action="cancel", content=None)
+
             if routing is None:
                 logger.warning(
                     f"Elicitation request for server '{server_name}' but no routing context - "
@@ -401,11 +413,23 @@ class MCPToolManager:
             from mcp.types import CreateMessageResult, SamplingMessage, TextContent
 
             # Find routing context for this server (keyed by (server_name, tool_call_id))
-            routing = None
-            for (srv, _tcid), ctx in _SAMPLING_ROUTING.items():
-                if srv == server_name:
-                    routing = ctx
-                    break
+            tcid = None
+            if context and hasattr(context, 'meta') and context.meta is not None:
+                tcid = getattr(context.meta, 'model_extra', {}).get("tool_call_id")
+
+            routing = _SAMPLING_ROUTING.get((server_name, tcid))
+
+            if routing is None:
+                matches = [v for (srv, _), v in _SAMPLING_ROUTING.items() if srv == server_name]
+                if len(matches) == 1:
+                    routing = matches[0]
+                elif len(matches) > 1:
+                    logger.warning(
+                        "Ambiguous sampling routing for server '%s' with %d entries — cancelling",
+                        server_name, len(matches),
+                    )
+                    raise Exception(f"Ambiguous sampling routing for server '{server_name}'")
+
             if routing is None:
                 logger.warning(
                     f"Sampling request for server '{server_name}' but no routing context - "
@@ -1518,6 +1542,7 @@ class MCPToolManager:
         progress_handler: Optional[Any] = None,
         elicitation_handler: Optional[Any] = None,
         user_email: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """Call a specific tool on an MCP server.
 
@@ -1580,6 +1605,8 @@ class MCPToolManager:
                 kwargs = {}
                 if progress_handler is not None:
                     kwargs["progress_handler"] = progress_handler
+                if meta is not None:
+                    kwargs["meta"] = meta
 
                 result = await asyncio.wait_for(
                     client.call_tool(tool_name, arguments, **kwargs),
@@ -1963,6 +1990,7 @@ class MCPToolManager:
                                 tool_call.arguments,
                                 progress_handler=_progress_handler,
                                 user_email=user_email,
+                                meta={"tool_call_id": tool_call.id},
                             )
             else:
                 async with self._use_elicitation_context(server_name, tool_call, update_cb):
@@ -1973,6 +2001,7 @@ class MCPToolManager:
                             tool_call.arguments,
                             progress_handler=_progress_handler,
                             user_email=user_email,
+                            meta={"tool_call_id": tool_call.id},
                         )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
