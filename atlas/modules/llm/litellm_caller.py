@@ -338,8 +338,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         elif "cerebras" in model_config.model_url:
             return f"cerebras/{model_id}"
         else:
-            # For custom endpoints, use the model_id directly
-            return model_id
+            # For custom endpoints (e.g. local mock LLM), use openai/ prefix
+            # so litellm routes via its OpenAI-compatible path with api_base.
+            return f"openai/{model_id}"
 
     @staticmethod
     def _resolve_user_api_key(model_name: str, user_email: Optional[str]) -> str:

@@ -192,6 +192,16 @@ def _check_forced_error():
         raise HTTPException(status_code=401, detail="Invalid API key provided")
     elif mode == "server_error":
         raise HTTPException(status_code=500, detail="Internal server error")
+    elif mode == "context_window_exceeded":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "litellm.ContextWindowExceededError: litellm.BadRequestError: "
+                "ContextWindowExceededError: OpenAIException - This model's maximum context length "
+                "is 128000 tokens. However, you requested 478376 tokens (468376 in the messages, "
+                "10000 in the completion). Please reduce the length of the messages or completion."
+            ),
+        )
 
 
 @app.post("/chat/completions")
