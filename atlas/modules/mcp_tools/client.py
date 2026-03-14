@@ -156,6 +156,9 @@ class MCPToolManager:
         from atlas.modules.mcp_tools.session_manager import MCPSessionManager
         self._session_manager = MCPSessionManager()
 
+        # Cache of which servers support background tasks
+        self._server_task_support: Dict[str, bool] = {}
+
     def _get_min_log_level(self) -> int:
         """Get the minimum log level from environment or config."""
         try:
@@ -1537,6 +1540,23 @@ class MCPToolManager:
                 del self._user_clients[cache_key]
                 logger.debug(f"Invalidated user client cache for server '{server_name}'")
 
+    def _supports_tasks(self, server_name: str, client: Any) -> bool:
+        """Check if a server supports background tasks (cached)."""
+        if server_name in self._server_task_support:
+            return self._server_task_support[server_name]
+
+        supports = False
+        try:
+            init_result = getattr(client, 'initialize_result', None)
+            if init_result and hasattr(init_result, 'capabilities'):
+                caps = init_result.capabilities
+                supports = getattr(caps, 'tasks', None) is not None
+        except Exception:
+            pass
+
+        self._server_task_support[server_name] = supports
+        return supports
+
     async def call_tool(
         self,
         server_name: str,
@@ -1548,6 +1568,7 @@ class MCPToolManager:
         user_email: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
         conversation_id: Optional[str] = None,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ) -> Any:
         """Call a specific tool on an MCP server.
 
@@ -1611,22 +1632,89 @@ class MCPToolManager:
             if meta is not None:
                 kwargs["meta"] = meta
 
+            task_timeout = float(os.getenv("MCP_TASK_TIMEOUT", "10"))
+
             if conversation_id:
                 # Use persistent session
                 session = await self._session_manager.acquire(
                     conversation_id, server_name, client
                 )
-                result = await asyncio.wait_for(
-                    session.client.call_tool(tool_name, arguments, **kwargs),
-                    timeout=call_timeout,
-                )
+                active_client = session.client
             else:
                 # Fallback: no conversation context, use per-call session
+                # Can't use task mode without a persistent session
                 async with client:
                     result = await asyncio.wait_for(
                         client.call_tool(tool_name, arguments, **kwargs),
                         timeout=call_timeout,
                     )
+                    logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
+                    return result
+
+            # With persistent session, try adaptive task mode
+            use_tasks = self._supports_tasks(server_name, active_client)
+
+            if use_tasks:
+                tool_task = await active_client.call_tool(tool_name, arguments, task=True, **kwargs)
+
+                if tool_task.returned_immediately:
+                    result = tool_task.result
+                else:
+                    try:
+                        await asyncio.wait_for(
+                            tool_task.wait(timeout=call_timeout),
+                            timeout=task_timeout,
+                        )
+                        result = tool_task.result
+                    except asyncio.TimeoutError:
+                        # Exceeded threshold -- notify UI and keep waiting
+                        if update_cb:
+                            await update_cb({
+                                "type": "tool_task_started",
+                                "tool_call_id": meta.get("tool_call_id") if meta else None,
+                                "tool_name": tool_name,
+                                "server_name": server_name,
+                            })
+
+                        if update_cb:
+                            async def _task_progress(status):
+                                try:
+                                    await update_cb({
+                                        "type": "tool_task_progress",
+                                        "tool_call_id": meta.get("tool_call_id") if meta else None,
+                                        "status": getattr(status, 'state', 'running'),
+                                        "progress": getattr(status, 'progress', None),
+                                        "total": getattr(status, 'total', None),
+                                        "message": getattr(status, 'message', None),
+                                    })
+                                except Exception:
+                                    logger.debug("Task progress callback failed", exc_info=True)
+                            tool_task.on_status_change(_task_progress)
+
+                        try:
+                            await tool_task.wait(timeout=call_timeout - task_timeout)
+                            result = tool_task.result
+                        except asyncio.CancelledError:
+                            await tool_task.cancel()
+                            raise
+                        finally:
+                            if update_cb:
+                                try:
+                                    await update_cb({
+                                        "type": "tool_task_completed",
+                                        "tool_call_id": meta.get("tool_call_id") if meta else None,
+                                    })
+                                except Exception:
+                                    pass
+                    except asyncio.CancelledError:
+                        await tool_task.cancel()
+                        raise
+            else:
+                result = await asyncio.wait_for(
+                    active_client.call_tool(tool_name, arguments, **kwargs),
+                    timeout=call_timeout,
+                )
+
             logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
             return result
         except asyncio.TimeoutError:
@@ -2010,6 +2098,7 @@ class MCPToolManager:
                                 user_email=user_email,
                                 meta={"tool_call_id": tool_call.id},
                                 conversation_id=conversation_id,
+                                update_cb=update_cb,
                             )
             else:
                 async with self._use_elicitation_context(server_name, tool_call, update_cb):
@@ -2022,6 +2111,7 @@ class MCPToolManager:
                             user_email=user_email,
                             meta={"tool_call_id": tool_call.id},
                             conversation_id=conversation_id,
+                            update_cb=update_cb,
                         )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
