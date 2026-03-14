@@ -2,7 +2,7 @@
 
 import pytest
 
-from atlas.mcp.shared.blocked_state import BlockedStateStore
+from atlas.mcp_shared.blocked_state import BlockedStateStore
 
 MSG_FRAGMENT = "not supported for STDIO"
 
