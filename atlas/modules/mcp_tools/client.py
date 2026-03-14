@@ -152,6 +152,10 @@ class MCPToolManager:
         self._user_clients: Dict[tuple, Client] = {}
         self._user_clients_lock = asyncio.Lock()
 
+        # Session manager for per-conversation session persistence
+        from atlas.modules.mcp_tools.session_manager import MCPSessionManager
+        self._session_manager = MCPSessionManager()
+
     def _get_min_log_level(self) -> int:
         """Get the minimum log level from environment or config."""
         try:
@@ -1543,6 +1547,7 @@ class MCPToolManager:
         elicitation_handler: Optional[Any] = None,
         user_email: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
     ) -> Any:
         """Call a specific tool on an MCP server.
 
@@ -1600,20 +1605,30 @@ class MCPToolManager:
             if elicitation_handler is not None:
                 client.set_elicitation_callback(elicitation_handler)
 
-            async with client:
-                # Pass progress handler if provided (fastmcp >= 2.3.5)
-                kwargs = {}
-                if progress_handler is not None:
-                    kwargs["progress_handler"] = progress_handler
-                if meta is not None:
-                    kwargs["meta"] = meta
+            kwargs = {}
+            if progress_handler is not None:
+                kwargs["progress_handler"] = progress_handler
+            if meta is not None:
+                kwargs["meta"] = meta
 
+            if conversation_id:
+                # Use persistent session
+                session = await self._session_manager.acquire(
+                    conversation_id, server_name, client
+                )
                 result = await asyncio.wait_for(
-                    client.call_tool(tool_name, arguments, **kwargs),
+                    session.client.call_tool(tool_name, arguments, **kwargs),
                     timeout=call_timeout,
                 )
-                logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
-                return result
+            else:
+                # Fallback: no conversation context, use per-call session
+                async with client:
+                    result = await asyncio.wait_for(
+                        client.call_tool(tool_name, arguments, **kwargs),
+                        timeout=call_timeout,
+                    )
+            logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
+            return result
         except asyncio.TimeoutError:
             error_msg = f"Tool call '{tool_name}' on server '{server_name}' timed out after {call_timeout}s"
             logger.error(error_msg)
@@ -1928,9 +1943,11 @@ class MCPToolManager:
         try:
             update_cb = None
             user_email = None
+            conversation_id = None
             if isinstance(context, dict):
                 update_cb = context.get("update_callback")
                 user_email = context.get("user_email")
+                conversation_id = context.get("conversation_id")
 
             if update_cb is None:
                 logger.warning(
@@ -1991,6 +2008,7 @@ class MCPToolManager:
                                 progress_handler=_progress_handler,
                                 user_email=user_email,
                                 meta={"tool_call_id": tool_call.id},
+                                conversation_id=conversation_id,
                             )
             else:
                 async with self._use_elicitation_context(server_name, tool_call, update_cb):
@@ -2002,6 +2020,7 @@ class MCPToolManager:
                             progress_handler=_progress_handler,
                             user_email=user_email,
                             meta={"tool_call_id": tool_call.id},
+                            conversation_id=conversation_id,
                         )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
