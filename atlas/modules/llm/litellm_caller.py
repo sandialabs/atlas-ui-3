@@ -16,7 +16,7 @@ import logging
 import os
 import random
 import warnings
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
 # Suppress Pydantic deprecation warnings from litellm's response processing.
 # litellm accesses Pydantic v2.11+ deprecated instance attributes
@@ -34,6 +34,7 @@ from litellm import acompletion
 
 from atlas.core.metrics_logger import log_metric
 from atlas.domain.errors import (
+    CONTEXT_WINDOW_KEYWORDS,
     ContextWindowExceededError,
     LLMAuthenticationError,
     LLMServiceError,
@@ -92,7 +93,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             litellm.set_verbose = debug_mode
 
     @staticmethod
-    def _raise_llm_domain_error(exc: Exception) -> None:
+    def _raise_llm_domain_error(exc: Exception) -> NoReturn:
         """Classify a litellm exception and raise the corresponding domain error.
 
         This ensures the WebSocket handler receives specific error types
@@ -120,8 +121,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 "Please check your API key or contact your administrator."
             ) from exc
         if isinstance(exc, litellm.ContextWindowExceededError) or any(
-            kw in error_str.lower()
-            for kw in ("context window exceeded", "context_length_exceeded", "maximum context length")
+            kw in error_str.lower() for kw in CONTEXT_WINDOW_KEYWORDS
         ):
             raise ContextWindowExceededError(
                 "Your conversation is too long for this model's context window. "
@@ -153,8 +153,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         # Context window errors will never succeed on retry
         if isinstance(exc, litellm.ContextWindowExceededError) or any(
-            kw in error_str
-            for kw in ("context window exceeded", "context_length_exceeded", "maximum context length")
+            kw in error_str for kw in CONTEXT_WINDOW_KEYWORDS
         ):
             return False
 
@@ -661,7 +660,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
-        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError):
+        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, ContextWindowExceededError):
             raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
@@ -859,7 +858,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
-        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError):
+        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, ContextWindowExceededError):
             raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)

@@ -1,6 +1,14 @@
 """Domain-level errors and exceptions."""
 
-from typing import Optional
+from typing import Optional, Tuple
+
+# Keywords used to detect context window exceeded errors from LLM providers.
+# Shared across error classification and retry logic to avoid duplication.
+CONTEXT_WINDOW_KEYWORDS: Tuple[str, ...] = (
+    "context window exceeded",
+    "context_length_exceeded",
+    "maximum context length",
+)
 
 
 class DomainError(Exception):
