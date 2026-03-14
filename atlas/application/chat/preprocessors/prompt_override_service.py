@@ -27,58 +27,65 @@ class PromptOverrideService:
         self,
         messages: List[Dict[str, Any]],
         selected_prompts: Optional[List[str]] = None,
+        *,
+        user_email: Optional[str] = None,
+        conversation_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Apply MCP prompt override if selected prompts are provided.
+        Apply MCP prompt overrides for all selected prompts.
 
-        Only the first valid prompt is applied, prepended as a system message.
+        All valid prompts are applied in selection order, each as a
+        separate system message prepended to the conversation.
 
         Args:
             messages: Current message history
             selected_prompts: List of prompt keys (format: "server_promptname")
+            user_email: Optional user email for meta context
+            conversation_id: Optional conversation ID for meta context
 
         Returns:
-            Messages with prompt override prepended (if applicable)
+            Messages with prompt overrides prepended (if applicable)
         """
         if not selected_prompts or not self.tool_manager:
             return messages
 
-        try:
-            # Iterate in order; when found, fetch prompt content and inject
-            for key in selected_prompts:
-                if not isinstance(key, str) or "_" not in key:
-                    continue
+        system_messages: List[Dict[str, Any]] = []
 
-                server, prompt_name = key.split("_", 1)
+        for key in selected_prompts:
+            if not isinstance(key, str) or "_" not in key:
+                continue
 
-                # Retrieve prompt from MCP
-                try:
-                    prompt_obj = await self.tool_manager.get_prompt(server, prompt_name)
-                    prompt_text = self._extract_prompt_text(prompt_obj)
+            server, prompt_name = key.split("_", 1)
 
-                    if prompt_text:
-                        # Prepend as system message override
-                        messages = [{"role": "system", "content": prompt_text}] + messages
-                        logger.info(
-                            "Applied MCP system prompt override (len=%d)",
-                            len(prompt_text),
-                        )
-                        break  # apply only one
+            try:
+                meta = {}
+                if user_email:
+                    meta["user_email"] = user_email
+                if conversation_id:
+                    meta["conversation_id"] = conversation_id
 
-                except Exception:
-                    logger.debug("Failed retrieving MCP prompt %s", key, exc_info=True)
+                prompt_obj = await self.tool_manager.get_prompt(
+                    server, prompt_name, meta=meta if meta else None
+                )
+                prompt_text = self._extract_prompt_text(prompt_obj)
 
-        except Exception:
-            logger.debug(
-                "Prompt override injection skipped due to non-fatal error",
-                exc_info=True
-            )
+                if prompt_text:
+                    system_messages.append({"role": "system", "content": prompt_text})
+                    logger.info(
+                        "Applied MCP prompt '%s' (len=%d)", key, len(prompt_text)
+                    )
+
+            except Exception:
+                logger.debug("Failed retrieving MCP prompt %s", key, exc_info=True)
+
+        if system_messages:
+            messages = system_messages + messages
 
         return messages
 
     def _extract_prompt_text(self, prompt_obj: Any) -> Optional[str]:
         """
-        Extract text content from various MCP prompt object formats.
+        Extract text content, concatenating all text content items.
 
         Args:
             prompt_obj: Prompt object from MCP (could be string or structured object)
@@ -96,9 +103,12 @@ class PromptOverrideService:
 
             # content could be list of objects with 'text'
             if isinstance(content_field, list) and content_field:
-                first = content_field[0]
-                if hasattr(first, "text") and isinstance(first.text, str):
-                    return first.text
+                texts = []
+                for item in content_field:
+                    if hasattr(item, "text") and isinstance(item.text, str):
+                        texts.append(item.text)
+                if texts:
+                    return "\n".join(texts)
 
         # Fallback: string dump
         return str(prompt_obj)

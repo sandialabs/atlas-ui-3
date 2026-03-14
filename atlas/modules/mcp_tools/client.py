@@ -1726,7 +1726,7 @@ class MCPToolManager:
             logger.error(f"Error calling {tool_name} on {server_name}: {e}")
             raise
 
-    async def get_prompt(self, server_name: str, prompt_name: str, arguments: Dict[str, Any] = None) -> Any:
+    async def get_prompt(self, server_name: str, prompt_name: str, arguments: Dict[str, Any] = None, *, meta: Optional[Dict[str, Any]] = None) -> Any:
         """Get a specific prompt from an MCP server."""
         if server_name not in self.clients:
             raise ValueError(f"No client available for server: {server_name}")
@@ -1734,10 +1734,13 @@ class MCPToolManager:
         client = self.clients[server_name]
         try:
             async with client:
+                kwargs = {}
+                if meta is not None:
+                    kwargs["meta"] = meta
                 if arguments:
-                    result = await client.get_prompt(prompt_name, arguments)
+                    result = await client.get_prompt(prompt_name, arguments, **kwargs)
                 else:
-                    result = await client.get_prompt(prompt_name)
+                    result = await client.get_prompt(prompt_name, **kwargs)
                 logger.info(f"Successfully retrieved prompt {prompt_name} from {server_name}")
                 return result
         except Exception as e:
