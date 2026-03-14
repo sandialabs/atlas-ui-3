@@ -69,6 +69,22 @@ class TestMultiPromptSupport:
         assert result[0]["content"] == "Good prompt."
 
     @pytest.mark.asyncio
+    async def test_meta_forwarded_to_get_prompt(self, service, mock_tool_manager):
+        """user_email and conversation_id are passed as meta dict."""
+        mock_tool_manager.get_prompt.return_value = "Personalized prompt."
+        messages = [{"role": "user", "content": "Hello"}]
+
+        await service.apply_prompt_override(
+            messages, ["server_wizard"],
+            user_email="alice@example.com",
+            conversation_id="conv-123",
+        )
+        mock_tool_manager.get_prompt.assert_called_once_with(
+            "server", "wizard",
+            meta={"user_email": "alice@example.com", "conversation_id": "conv-123"},
+        )
+
+    @pytest.mark.asyncio
     async def test_no_prompts_returns_unchanged(self, service):
         messages = [{"role": "user", "content": "Hello"}]
         result = await service.apply_prompt_override(messages, None)

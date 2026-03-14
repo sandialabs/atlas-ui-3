@@ -11,7 +11,7 @@ class PromptOverrideService:
     Service that handles MCP prompt override injection.
 
     Retrieves MCP-provided prompts and injects them as system messages,
-    applying only the first valid prompt found.
+    applying all selected prompts in order.
     """
 
     def __init__(self, tool_manager: Optional[Any] = None):
