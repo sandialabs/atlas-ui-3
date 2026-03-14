@@ -163,7 +163,8 @@ class ChatOrchestrator:
         # Apply MCP prompt override
         messages = await self.prompt_override.apply_prompt_override(
             messages=messages,
-            selected_prompts=selected_prompts
+            selected_prompts=selected_prompts,
+            user_email=user_email,
         )
 
         # Route to appropriate mode (always streaming)

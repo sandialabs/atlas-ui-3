@@ -729,6 +729,17 @@ class MCPToolManager:
                                 return None  # Skip this server if env var resolution fails
                         logger.debug("Environment variables specified for %s: %s", safe_server_name, list(resolved_env.keys()))
 
+                    # Add project root to PYTHONPATH so STDIO servers can import
+                    # atlas.mcp_shared (BlockedStateStore / create_stdio_server)
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+                    if resolved_env is None:
+                        resolved_env = dict(os.environ)
+                    existing_pypath = resolved_env.get("PYTHONPATH", "")
+                    if existing_pypath:
+                        resolved_env["PYTHONPATH"] = f"{project_root}:{existing_pypath}"
+                    else:
+                        resolved_env["PYTHONPATH"] = project_root
+
                     # Create log handler for this server
                     log_handler = self._create_log_handler(server_name)
 
@@ -1387,6 +1398,12 @@ class MCPToolManager:
             'mapping': server_tool_mapping
         }
 
+    def _is_http_server(self, server_name: str) -> bool:
+        """Check if a server uses HTTP/SSE transport (not STDIO)."""
+        config = self.servers_config.get(server_name, {})
+        transport = self._determine_transport_type(config)
+        return transport in ("http", "sse")
+
     def _requires_user_auth(self, server_name: str) -> bool:
         """Check if a server requires per-user authentication.
 
@@ -1509,6 +1526,56 @@ class MCPToolManager:
                 del self._user_clients[cache_key]
                 logger.debug(f"Invalidated user client cache for server '{server_name}'")
 
+    async def _get_or_create_user_http_client(
+        self,
+        server_name: str,
+        user_email: str,
+    ) -> Client:
+        """Get or create a per-user HTTP client for session isolation.
+
+        Unlike _get_user_client (which requires auth tokens), this creates
+        plain HTTP clients keyed by (user_email, server_name). Each user gets
+        their own MCP session ID, ensuring state isolation.
+
+        Args:
+            server_name: Name of the MCP server
+            user_email: User's email address
+
+        Returns:
+            FastMCP Client instance for this user+server pair
+        """
+        cache_key = (user_email.lower(), server_name)
+
+        async with self._user_clients_lock:
+            if cache_key in self._user_clients:
+                return self._user_clients[cache_key]
+
+            config = self.servers_config.get(server_name, {})
+            url = config.get("url", "")
+            if not url.startswith(("http://", "https://")):
+                url = f"http://{url}"
+
+            # Resolve admin auth token if configured (not per-user, just server-level)
+            raw_token = config.get("auth_token")
+            try:
+                token = resolve_env_var(raw_token)
+            except ValueError:
+                token = None
+
+            log_handler = self._create_log_handler(server_name)
+            client = Client(
+                url,
+                auth=token,
+                log_handler=log_handler,
+                elicitation_handler=self._create_elicitation_handler(server_name),
+                sampling_handler=self._create_sampling_handler(server_name),
+            )
+
+            self._user_clients[cache_key] = client
+
+        logger.info(f"Created per-user HTTP client for server '{server_name}' user='{user_email}'")
+        return client
+
     async def call_tool(
         self,
         server_name: str,
@@ -1562,8 +1629,11 @@ class MCPToolManager:
                     message=f"Server '{server_name}' requires authentication but no user context.",
                     oauth_start_url=f"/api/mcp/auth/{server_name}/oauth/start" if auth_type == "oauth" else None,
                 )
+        elif self._is_http_server(server_name) and user_email:
+            # HTTP servers get per-user clients for session state isolation
+            client = await self._get_or_create_user_http_client(server_name, user_email)
         else:
-            # Use shared client for servers without per-user auth
+            # STDIO servers use shared client (safe: BlockedStateStore prevents state use)
             if server_name not in self.clients:
                 raise ValueError(f"No client available for server: {server_name}")
             client = self.clients[server_name]
@@ -1596,12 +1666,21 @@ class MCPToolManager:
             logger.error(f"Error calling {tool_name} on {server_name}: {e}")
             raise
 
-    async def get_prompt(self, server_name: str, prompt_name: str, arguments: Dict[str, Any] = None) -> Any:
+    async def get_prompt(
+        self,
+        server_name: str,
+        prompt_name: str,
+        arguments: Dict[str, Any] = None,
+        *,
+        user_email: Optional[str] = None,
+    ) -> Any:
         """Get a specific prompt from an MCP server."""
-        if server_name not in self.clients:
+        if self._is_http_server(server_name) and user_email:
+            client = await self._get_or_create_user_http_client(server_name, user_email)
+        elif server_name not in self.clients:
             raise ValueError(f"No client available for server: {server_name}")
-
-        client = self.clients[server_name]
+        else:
+            client = self.clients[server_name]
         try:
             async with client:
                 if arguments:

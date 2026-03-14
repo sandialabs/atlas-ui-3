@@ -27,6 +27,8 @@ class PromptOverrideService:
         self,
         messages: List[Dict[str, Any]],
         selected_prompts: Optional[List[str]] = None,
+        *,
+        user_email: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Apply MCP prompt override if selected prompts are provided.
@@ -36,6 +38,7 @@ class PromptOverrideService:
         Args:
             messages: Current message history
             selected_prompts: List of prompt keys (format: "server_promptname")
+            user_email: User's email for per-user HTTP session isolation
 
         Returns:
             Messages with prompt override prepended (if applicable)
@@ -53,7 +56,7 @@ class PromptOverrideService:
 
                 # Retrieve prompt from MCP
                 try:
-                    prompt_obj = await self.tool_manager.get_prompt(server, prompt_name)
+                    prompt_obj = await self.tool_manager.get_prompt(server, prompt_name, user_email=user_email)
                     prompt_text = self._extract_prompt_text(prompt_obj)
 
                     if prompt_text:
