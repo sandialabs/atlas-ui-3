@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from atlas.domain.errors import LLMAuthenticationError, LLMTimeoutError, RateLimitError
+from atlas.domain.errors import ContextWindowExceededError, LLMAuthenticationError, LLMTimeoutError, RateLimitError
 
 
 class TestErrorFlowIntegration:
@@ -114,3 +114,43 @@ class TestErrorFlowIntegration:
 
         assert result == mock_response
         assert result.content == "Test response"
+
+    @pytest.mark.asyncio
+    async def test_context_window_exceeded_error_flow(self):
+        """Test that context window exceeded errors result in proper user-friendly messages."""
+        from atlas.application.chat.utilities.error_handler import safe_call_llm_with_tools
+
+        mock_llm = MagicMock()
+        mock_llm.call_with_tools = AsyncMock(
+            side_effect=ContextWindowExceededError("Your conversation is too long for this model's context window.")
+        )
+
+        with pytest.raises(ContextWindowExceededError) as exc_info:
+            await safe_call_llm_with_tools(
+                llm_caller=mock_llm,
+                model="test-model",
+                messages=[{"role": "user", "content": "test"}],
+                tools_schema=[],
+            )
+
+        error_msg = str(exc_info.value.message if hasattr(exc_info.value, 'message') else exc_info.value)
+        assert "too long" in error_msg.lower() or "context window" in error_msg.lower()
+
+
+class TestLiteLLMCallerErrorClassification:
+    """Test _raise_llm_domain_error and _is_retryable_error for context window errors."""
+
+    def test_raise_llm_domain_error_context_window_by_keyword(self):
+        """Test that _raise_llm_domain_error maps context window keywords."""
+        from atlas.modules.llm.litellm_caller import LiteLLMCaller
+
+        exc = Exception("This model's maximum context length is 128000 tokens")
+        with pytest.raises(ContextWindowExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_is_retryable_error_context_window_returns_false(self):
+        """Test that context window errors are not retryable."""
+        from atlas.modules.llm.litellm_caller import LiteLLMCaller
+
+        exc = Exception("maximum context length exceeded")
+        assert LiteLLMCaller._is_retryable_error(exc) is False

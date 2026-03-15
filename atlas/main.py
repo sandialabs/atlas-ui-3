@@ -49,7 +49,7 @@ from atlas.core.rate_limit_middleware import RateLimitMiddleware
 from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
 
 # Import domain errors
-from atlas.domain.errors import DomainError, LLMAuthenticationError, LLMTimeoutError, RateLimitError, ValidationError
+from atlas.domain.errors import ContextWindowExceededError, DomainError, LLMAuthenticationError, LLMTimeoutError, RateLimitError, ValidationError
 
 # Import from atlas.infrastructure
 from atlas.infrastructure.app_factory import app_factory
@@ -468,6 +468,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "authentication"
+                        })
+                    except ContextWindowExceededError as e:
+                        logger.warning(f"Context window exceeded in chat handler: {e}")
+                        log_metric("error", user_email, error_type="context_window_exceeded")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "context_window_exceeded"
                         })
                     except ValidationError as e:
                         logger.warning(f"Validation error in chat handler: {e}")

@@ -22,3 +22,9 @@ models:
     model_name: "openai/gpt-oss-120b"
     api_key: "${GROQ_API_KEY}"
     compliance_level: "External"
+  mock-model:
+    model_url: "http://127.0.0.1:8002/v1"
+    model_name: "openai/mock-model"
+    api_key: "mock"
+    description: "Local mock LLM for testing"
+    compliance_level: "Internal"
