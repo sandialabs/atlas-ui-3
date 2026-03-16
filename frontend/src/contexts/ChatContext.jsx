@@ -49,6 +49,7 @@ export const ChatProvider = ({ children }) => {
 	const [attachments, setAttachments] = useState(new Set())
 	const [, setPendingFileEvents] = useState(new Map())
 	const [pendingElicitation, setPendingElicitation] = useState(null)
+	const [followUpSuggestions, setFollowUpSuggestions] = useState([])
 
 	// Chat history: 3-state save mode persists across refreshes via localStorage
 	// 'none' = incognito (nothing saved), 'local' = browser IndexedDB, 'server' = backend DB
@@ -159,6 +160,48 @@ export const ChatProvider = ({ children }) => {
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isThinking])
 
+	// Fetch follow-up suggestions after a response completes
+	const prevIsThinkingRef = useRef(false)
+	const prevIsStreamingRef = useRef(false)
+
+	useEffect(() => {
+		const wasThinking = prevIsThinkingRef.current
+		const wasStreaming = prevIsStreamingRef.current
+
+		// Detect when the response has fully completed:
+		// - streaming mode: streaming transitions from true to false
+		// - non-streaming mode: thinking transitions from true to false (with no streaming)
+		const responseCompleted =
+			(wasStreaming && !isStreaming && !isThinking) ||
+			(wasThinking && !isThinking && !isStreaming && !wasStreaming)
+
+		if (responseCompleted && config.features?.followup_suggestions) {
+			const convMessages = messages
+				.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content)
+				.map(m => ({ role: m.role, content: m.content }))
+
+			const lastAssistant = convMessages.findLast(m => m.role === 'assistant')
+			if (lastAssistant && config.currentModel) {
+				fetch('/api/suggest_followups', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ messages: convMessages, model: config.currentModel }),
+				})
+					.then(r => (r.ok ? r.json() : null))
+					.then(data => {
+						if (data?.questions?.length > 0) {
+							setFollowUpSuggestions(data.questions)
+						}
+					})
+					.catch(e => console.debug('Follow-up suggestions unavailable:', e))
+			}
+		}
+
+		prevIsThinkingRef.current = isThinking
+		prevIsStreamingRef.current = isStreaming
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isThinking, isStreaming])
+
 	// Validate persisted data sources against current config and remove stale ones
 	useEffect(() => {
 		if (!config.ragServers || config.ragServers.length === 0) return
@@ -266,6 +309,7 @@ export const ChatProvider = ({ children }) => {
 	const sendChatMessage = useCallback((content, extraFiles = {}, forceRag = false) => {
 		if (!content.trim() || !currentModel) return
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
+		setFollowUpSuggestions([])
 		addMessage({ role: 'user', content, timestamp: new Date().toISOString() })
 		setIsThinking(true)
 		setIsSynthesizing(false)
@@ -308,6 +352,7 @@ export const ChatProvider = ({ children }) => {
 		resetMessages()
 		setIsWelcomeVisible(true)
 		setActiveConversationId(null)
+		setFollowUpSuggestions([])
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
@@ -650,6 +695,8 @@ export const ChatProvider = ({ children }) => {
 		setSaveMode,
 		activeConversationId,
 		loadSavedConversation,
+		followUpSuggestions,
+		setFollowUpSuggestions,
 	}
 
 	return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

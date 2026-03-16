@@ -53,7 +53,9 @@ const ChatArea = () => {
     selectedDataSources,
     features,
     appName,
-    user
+    user,
+    followUpSuggestions,
+    setFollowUpSuggestions,
   } = useChat()
   const { isConnected } = useWS()
 
@@ -284,7 +286,9 @@ const ChatArea = () => {
     const value = e.target.value
     setInputValue(value)
     autoResizeTextarea()
-    
+    if (value && followUpSuggestions.length > 0) {
+      setFollowUpSuggestions([])
+    }
     // Handle autocomplete for different command types
     handleAutoComplete(value)
   }
@@ -774,6 +778,28 @@ const ChatArea = () => {
         {/* Sentinel for auto-scroll */}
         <div ref={endRef} />
       </main>
+
+      {/* Follow-up suggestion buttons */}
+      {followUpSuggestions.length > 0 && !isThinking && !isStreaming && (
+        <div className="px-4 py-2 flex-shrink-0">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex flex-wrap gap-2">
+              {followUpSuggestions.map((question, idx) => (
+                <button
+                  key={`${idx}-${question.substring(0, 20)}`}
+                  onClick={() => {
+                    setFollowUpSuggestions([])
+                    sendChatMessage(question)
+                  }}
+                  className="text-sm px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-600 hover:border-gray-500 rounded-full transition-colors text-left"
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Input Area */}
   <footer 
