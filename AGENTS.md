@@ -241,6 +241,9 @@ Models can also set `api_key_source: "globus"` with a `globus_scope` field (the 
 ### PPTX Generator MCP Server
 The `pptx_generator` MCP server (`atlas/mcp/pptx_generator/main.py`) uses a three-tier layout strategy: custom template file (via `PPTX_TEMPLATE_PATH` env var or search paths) -> built-in Office "Title and Content" layout -> blank layout with manual textboxes.
 
+### MCP Image Content Handling
+MCP tools that return `ImageContent` objects have their base64 data extracted into artifacts (uploaded to file storage) and are **never** placed in the LLM context. Each tool call gets a call-ID-prefixed filename (e.g. `mcp_image_<call_id>_0.png`) to prevent filename collisions across repeated calls; `content_str` always includes `returned_file_names` so the LLM knows images were produced. Tool-result `content_str` values are capped at 20 000 chars to prevent accidental base64 leakage into the context window.
+
 ### Testing MCP Features
 When testing or developing MCP-related features, example configurations can be found in `atlas/config/mcp-example-configs/` with individual `mcp-{servername}.json` files for testing individual servers.
 

@@ -1846,7 +1846,13 @@ class MCPToolManager:
                     normalized.setdefault("results", str(pruned))
 
         if not normalized:
-            normalized = {"results": str(raw_result)}
+            # Fallback to string representation, truncated to prevent base64 data leakage
+            # into the LLM context (large base64 strings corrupt context for non-multimodal models)
+            raw_str = str(raw_result)
+            _MAX_FALLBACK = 500
+            if len(raw_str) > _MAX_FALLBACK:
+                raw_str = raw_str[:_MAX_FALLBACK] + "... [truncated - tool returned non-standard result]"
+            normalized = {"results": raw_str}
         return normalized
 
     async def execute_tool(
@@ -2065,10 +2071,13 @@ class MCPToolManager:
                                         continue
 
                                 if data and mime_type:
-                                    # Generate a filename based on image counter and mime type
-                                    # Use mcp_image_ prefix to avoid collisions with structured artifacts
+                                    # Generate a filename based on image counter and mime type.
+                                    # Include a short prefix derived from the tool call ID so that
+                                    # repeated calls to the same tool produce distinct filenames,
+                                    # preventing the LLM from confusing images from different calls.
                                     ext = mime_type.split("/")[-1] if "/" in mime_type else "bin"
-                                    filename = f"mcp_image_{image_counter}.{ext}"
+                                    call_prefix = (tool_call.id[:8] if tool_call.id else "img").ljust(8, "0")
+                                    filename = f"mcp_image_{call_prefix}_{image_counter}.{ext}"
 
                                     # Create artifact in the expected format
                                     artifact = {
@@ -2091,6 +2100,37 @@ class MCPToolManager:
                                     image_counter += 1
             except Exception:
                 logger.warning("Error extracting v2 MCP components from tool result", exc_info=True)
+
+            # Update content_str to reflect extracted image artifacts.
+            # This ensures the LLM knows images were returned even when the tool produces
+            # only ImageContent (no TextContent), preventing the LLM from receiving an empty
+            # tool result while image files silently appear in the session context.
+            if artifacts:
+                image_filenames = [a["name"] for a in artifacts if a.get("viewer") == "image"]
+                if image_filenames:
+                    try:
+                        content_dict = json.loads(content_str)
+                        existing_names = content_dict.get("returned_file_names")
+                        existing_list = list(existing_names) if isinstance(existing_names, list) else []
+                        new_names = [n for n in image_filenames if n not in existing_list]
+                        if new_names:
+                            content_dict["returned_file_names"] = existing_list + new_names
+                            content_str = json.dumps(content_dict, ensure_ascii=False)
+                    except Exception:
+                        logger.debug("Could not update content_str with image filenames", exc_info=True)
+
+            # Guard against oversized content_str reaching the LLM
+            # (e.g., if base64 data leaked via an unexpected path or a very verbose tool response).
+            _MAX_CONTENT_STR = 20000
+            if len(content_str) > _MAX_CONTENT_STR:
+                logger.warning(
+                    "Tool result content_str is %d chars (exceeds %d); truncating to protect LLM context",
+                    len(content_str), _MAX_CONTENT_STR,
+                )
+                content_str = json.dumps(
+                    {"results_truncated": True, "original_size": len(content_str)},
+                    ensure_ascii=False,
+                )
 
             log_metric("tool_call", user_email, tool_name=actual_tool_name)
 

@@ -4,6 +4,7 @@ These tests verify that Atlas can extract and process ImageContent items
 from MCP tool responses and convert them to artifacts for display.
 """
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -63,6 +64,7 @@ class TestImageContentHandling:
     @pytest.mark.asyncio
     async def test_extract_single_image_content(self):
         """Test extraction of a single ImageContent item."""
+        
         manager = MCPToolManager.__new__(MCPToolManager)
 
         # Mock tool object
@@ -99,16 +101,24 @@ class TestImageContentHandling:
             assert len(result.artifacts) == 1
 
             artifact = result.artifacts[0]
-            assert artifact["name"] == "mcp_image_0.png"
+            # Filename includes call ID prefix (first 8 chars of "test-call-1" → "test-cal")
+            expected_filename = "mcp_image_test-cal_0.png"
+            assert artifact["name"] == expected_filename
             assert artifact["b64"] == image_b64
             assert artifact["mime"] == "image/png"
             assert artifact["viewer"] == "image"
             assert "generate_image" in artifact["description"]
 
-            # Verify display config was auto-created
+            # Verify display config was auto-created with the correct unique filename
             assert result.display_config is not None
-            assert result.display_config["primary_file"] == "mcp_image_0.png"
+            assert result.display_config["primary_file"] == expected_filename
             assert result.display_config["open_canvas"] is True
+
+            # Verify content_str includes returned_file_names so the LLM knows images were produced
+            # (prevents context corruption for non-multimodal LLMs that get empty tool results)
+            content_dict = json.loads(result.content)
+            assert "returned_file_names" in content_dict
+            assert expected_filename in content_dict["returned_file_names"]
 
     @pytest.mark.asyncio
     async def test_extract_multiple_image_contents(self):
@@ -148,13 +158,21 @@ class TestImageContentHandling:
             # Verify all images were extracted
             assert len(result.artifacts) == 3
 
-            # Check each artifact
+            # Check each artifact - filename now includes call ID prefix
+            # "test-call-2"[:8] = "test-cal"
+            call_prefix = "test-cal"
             for i, (artifact, img) in enumerate(zip(result.artifacts, images)):
                 expected_ext = img["mime"].split("/")[-1]
-                assert artifact["name"] == f"mcp_image_{i}.{expected_ext}"
+                assert artifact["name"] == f"mcp_image_{call_prefix}_{i}.{expected_ext}"
                 assert artifact["b64"] == img["data"]
                 assert artifact["mime"] == img["mime"]
                 assert artifact["viewer"] == "image"
+
+            # Verify content_str includes all returned image filenames
+            
+            content_dict = json.loads(result.content)
+            assert "returned_file_names" in content_dict
+            assert len(content_dict["returned_file_names"]) == 3
 
     @pytest.mark.asyncio
     async def test_extract_mixed_content(self):
@@ -188,18 +206,23 @@ class TestImageContentHandling:
 
             result = await manager.execute_tool(tool_call, context={})
 
-            # Verify image was extracted (uses image counter, so first image is image_0)
+            # Verify image was extracted - filename includes call ID prefix
+            # "test-call-3"[:8] = "test-cal"
             assert len(result.artifacts) == 1
             artifact = result.artifacts[0]
-            assert artifact["name"] == "mcp_image_0.png"
+            expected_filename = "mcp_image_test-cal_0.png"
+            assert artifact["name"] == expected_filename
             assert artifact["b64"] == image_b64
 
             # Verify the text content was extracted and included in result.content
             # The content should be JSON containing the text in "results"
-            import json
+            
             content_dict = json.loads(result.content)
             assert "results" in content_dict
             assert text in content_dict["results"]
+            # returned_file_names should also be present
+            assert "returned_file_names" in content_dict
+            assert expected_filename in content_dict["returned_file_names"]
 
     @pytest.mark.asyncio
     async def test_no_image_content(self):
@@ -422,3 +445,138 @@ class TestImageContentHandling:
 
             # No artifacts should be created for invalid base64
             assert len(result.artifacts) == 0
+
+
+class TestContextCorruptionPrevention:
+    """Tests verifying that image content does not corrupt LLM context."""
+
+    @pytest.mark.asyncio
+    async def test_unique_filenames_per_tool_call(self):
+        """Two calls with different tool_call IDs produce different filenames.
+
+        This prevents the LLM from confusing images from different calls and
+        avoids the session-files manifest showing stale data after repeated calls.
+        """
+        
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+
+        class MockTool:
+            def __init__(self, name):
+                self.name = name
+
+        image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+
+        call_1 = ToolCall(id="aabbccdd-1111", name="gen_image", arguments={})
+        call_2 = ToolCall(id="eeff0011-2222", name="gen_image", arguments={})
+
+        manager._tool_index = {
+            "gen_image": {"server": "test-server", "tool": MockTool("gen_image")}
+        }
+
+        results = []
+        for tool_call in (call_1, call_2):
+            raw_result = MockMCPResultWithImage(image_b64)
+            with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
+                mock_call.return_value = raw_result
+                r = await manager.execute_tool(tool_call, context={})
+                results.append(r)
+
+        name_1 = results[0].artifacts[0]["name"]
+        name_2 = results[1].artifacts[0]["name"]
+
+        # Different call IDs must produce different filenames
+        assert name_1 != name_2
+        assert "aabbccdd" in name_1
+        assert "eeff0011" in name_2
+
+    @pytest.mark.asyncio
+    async def test_image_only_result_content_str_not_empty(self):
+        """Image-only tool result must include returned_file_names in content_str.
+
+        When a tool returns only ImageContent (no TextContent), the previous
+        behaviour produced {"results": {}} – telling the LLM nothing was returned.
+        This caused context corruption because the LLM saw an image appear in
+        session files without any corresponding tool-result explanation.
+        """
+        
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+
+        class MockTool:
+            def __init__(self, name):
+                self.name = name
+
+        tool_call = ToolCall(id="ctx-test-1", name="img_tool", arguments={})
+        image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+        raw_result = MockMCPResultWithImage(image_b64)
+
+        with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = raw_result
+            manager._tool_index = {
+                "img_tool": {"server": "srv", "tool": MockTool("img_tool")}
+            }
+            result = await manager.execute_tool(tool_call, context={})
+
+        content_dict = json.loads(result.content)
+        # The LLM must be told which files were returned
+        assert "returned_file_names" in content_dict
+        assert len(content_dict["returned_file_names"]) == 1
+        # Base64 data must NOT appear in the content string
+        assert image_b64 not in result.content
+
+    @pytest.mark.asyncio
+    async def test_content_str_size_guard(self):
+        """Oversized content_str must be replaced with a truncation notice.
+
+        Prevents large base64 strings or verbose tool results from corrupting
+        the LLM context window.
+        """
+        
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+
+        class MockTool:
+            def __init__(self, name):
+                self.name = name
+
+        tool_call = ToolCall(id="size-test-1", name="big_tool", arguments={})
+
+        # Build a raw result whose normalized text content exceeds 20 000 chars
+        huge_text = "X" * 25000
+
+        class MockHugeTextResult:
+            def __init__(self):
+                self.content = [MockTextContent(huge_text)]
+                self.structured_content = None
+                self.data = None
+                self.is_error = False
+
+        raw_result = MockHugeTextResult()
+
+        with patch.object(manager, 'call_tool', new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = raw_result
+            manager._tool_index = {
+                "big_tool": {"server": "srv", "tool": MockTool("big_tool")}
+            }
+            result = await manager.execute_tool(tool_call, context={})
+
+        # The truncation guard must have fired – content_str should be small
+        assert len(result.content) < 200
+        content_dict = json.loads(result.content)
+        assert content_dict.get("results_truncated") is True
+
+    @pytest.mark.asyncio
+    async def test_normalize_fallback_truncation(self):
+        """The str(raw_result) fallback must truncate to prevent base64 leakage."""
+        manager = MCPToolManager.__new__(MCPToolManager)
+
+        class WeirdResult:
+            """A result with no recognized structure attributes."""
+            def __str__(self):
+                return "A" * 2000  # Simulate a large non-dict raw result
+
+        result_str = manager._normalize_mcp_tool_result(WeirdResult())
+        assert "results" in result_str
+        # The truncated fallback must not exceed the 500-char limit (+small suffix)
+        assert len(result_str["results"]) <= 600

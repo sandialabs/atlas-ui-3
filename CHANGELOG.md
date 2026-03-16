@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #419 - 2026-03-16
+- **Fix**: Prevent context corruption after MCP tool returns PNG images. Image filenames now include a call-ID prefix so repeated calls produce unique names; `content_str` sent to the LLM now includes `returned_file_names` for image-only results; oversized tool-result content and the `str(raw_result)` fallback are now truncated to prevent base64 data from leaking into the LLM context window.
+
 ### PR #418 - 2026-03-13
 - **Fix**: Canvas file downloads no longer return 401 errors behind a reverse proxy. Canvas files now use HMAC-tokenized `/mcp/files/download/` URLs (bypassing nginx `auth_request`) instead of hardcoded `/api/files/download/` paths.
 
