@@ -266,14 +266,20 @@ def build_mcp_data(tool_manager) -> Dict[str, Any]:
 
     Returns a dict with server and tool information that planning tools
     can use to reason about available capabilities.
+
+    Only servers present in tool_manager.servers_config are included, ensuring
+    RAG-only servers (stored in rag_available_tools) never appear here.
     """
     available_servers = []
 
     if not tool_manager or not hasattr(tool_manager, "available_tools"):
         return {"available_servers": available_servers}
 
+    servers_config = getattr(tool_manager, "servers_config", None) or {}
+
     for server_name, server_data in tool_manager.available_tools.items():
-        if server_name == "canvas":
+        # Exclude canvas pseudo-server and servers not in servers_config (e.g. RAG-only servers)
+        if server_name == "canvas" or server_name not in servers_config:
             continue
 
         tools_list = server_data.get("tools", []) or []

@@ -64,18 +64,8 @@ class RAGMCPService:
         # Ensure RAG servers are initialized from rag_mcp_config, without polluting tool inventory
         try:
             rag_servers = self.config_manager.rag_mcp_config.servers
-            # If these servers aren't in mcp_manager.clients, initialize just these
-            missing = [name for name in rag_servers.keys() if name not in getattr(self.mcp_manager, "clients", {})]
-            if missing:
-                # Temporarily extend servers_config with rag servers and initialize them
-                original = dict(getattr(self.mcp_manager, "servers_config", {}))
-                try:
-                    self.mcp_manager.servers_config.update({name: cfg.model_dump() for name, cfg in rag_servers.items()})
-                    await self.mcp_manager.initialize_clients()
-                    await self.mcp_manager.discover_tools()
-                finally:
-                    # Restore original list for general tools panel separation
-                    self.mcp_manager.servers_config = original
+            rag_servers_config = {name: cfg.model_dump() for name, cfg in rag_servers.items()}
+            await self.mcp_manager.initialize_rag_servers(rag_servers_config)
         except Exception:
             # If anything goes wrong, fallback silently to existing clients
             pass
@@ -96,7 +86,8 @@ class RAGMCPService:
                 compliance_mgr = get_compliance_manager()
                 filtered_servers = []
                 for server in authorized_servers:
-                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
+                    rag_tools = getattr(self.mcp_manager, "rag_available_tools", {})
+                    cfg = (rag_tools.get(server) or {}).get("config", {})
                     server_compliance_level = cfg.get("compliance_level")
                     if compliance_mgr.is_accessible(
                         user_level=user_compliance_level, resource_level=server_compliance_level
@@ -118,7 +109,8 @@ class RAGMCPService:
             # Filter to servers that advertise the discovery tool
             servers_with_discovery: List[str] = []
             for server in authorized_servers:
-                server_data = self.mcp_manager.available_tools.get(server)
+                rag_tools = getattr(self.mcp_manager, "rag_available_tools", {})
+                server_data = rag_tools.get(server)
                 tool_list = (server_data or {}).get("tools", [])
                 if any(getattr(t, "name", None) == "rag_discover_resources" for t in tool_list):
                     servers_with_discovery.append(server)
@@ -184,15 +176,8 @@ class RAGMCPService:
         # Ensure RAG servers are initialized from rag_mcp_config, without polluting tool inventory
         try:
             rag_cfg_servers = self.config_manager.rag_mcp_config.servers
-            missing = [name for name in rag_cfg_servers.keys() if name not in getattr(self.mcp_manager, "clients", {})]
-            if missing:
-                original = dict(getattr(self.mcp_manager, "servers_config", {}))
-                try:
-                    self.mcp_manager.servers_config.update({name: cfg.model_dump() for name, cfg in rag_cfg_servers.items()})
-                    await self.mcp_manager.initialize_clients()
-                    await self.mcp_manager.discover_tools()
-                finally:
-                    self.mcp_manager.servers_config = original
+            rag_servers_config = {name: cfg.model_dump() for name, cfg in rag_cfg_servers.items()}
+            await self.mcp_manager.initialize_rag_servers(rag_servers_config)
         except Exception:
             # Fallback silently if RAG config init fails; we'll just return empty set
             pass
@@ -201,7 +186,6 @@ class RAGMCPService:
         try:
             compliance_mgr = get_compliance_manager() if user_compliance_level else None
 
-            # Use rag_mcp_config directly since servers_config was restored above
             rag_cfg_servers = self.config_manager.rag_mcp_config.servers
             authorized_servers: List[str] = await self._get_authorized_rag_servers(
                 username, rag_cfg_servers
@@ -211,7 +195,8 @@ class RAGMCPService:
             if compliance_mgr:
                 filtered_servers = []
                 for server in authorized_servers:
-                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
+                    rag_tools = getattr(self.mcp_manager, "rag_available_tools", {})
+                    cfg = (rag_tools.get(server) or {}).get("config", {})
                     server_compliance_level = cfg.get("compliance_level")
                     if compliance_mgr.is_accessible(
                         user_level=user_compliance_level, resource_level=server_compliance_level
@@ -228,7 +213,8 @@ class RAGMCPService:
             # -------------------------------------
 
             for server in authorized_servers:
-                server_data = self.mcp_manager.available_tools.get(server)
+                rag_tools = getattr(self.mcp_manager, "rag_available_tools", {})
+                server_data = rag_tools.get(server)
                 tools = (server_data or {}).get("tools", [])
                 if not any(getattr(t, "name", None) == "rag_discover_resources" for t in tools):
                     continue
@@ -282,7 +268,8 @@ class RAGMCPService:
                     })
 
                 # Optional config-driven icon/name and compliance level
-                cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
+                rag_tools = getattr(self.mcp_manager, "rag_available_tools", {})
+                cfg = (rag_tools.get(server) or {}).get("config", {})
                 display_name = cfg.get("displayName") or server
                 icon = (cfg.get("ui") or {}).get("icon") if isinstance(cfg.get("ui"), dict) else None
                 compliance_level = cfg.get("compliance_level")
@@ -337,7 +324,8 @@ class RAGMCPService:
             logger.debug("[MCP-RAG] search_raw processing server=%s, resource_ids=%s", server, rids)
             try:
                 # Check tool availability
-                server_data = self.mcp_manager.available_tools.get(server) or {}
+                rag_tools = getattr(self.mcp_manager, "rag_available_tools", {})
+                server_data = rag_tools.get(server) or {}
                 tool_list = server_data.get("tools", [])
                 if not any(getattr(t, "name", None) == "rag_get_raw_results" for t in tool_list):
                     logger.debug("[MCP-RAG] Server %s lacks rag_get_raw_results tool, skipping", server)
@@ -473,7 +461,8 @@ class RAGMCPService:
                 rids,
             )
             try:
-                server_data = self.mcp_manager.available_tools.get(server) or {}
+                rag_tools = getattr(self.mcp_manager, "rag_available_tools", {})
+                server_data = rag_tools.get(server) or {}
                 tool_list = server_data.get("tools", [])
                 tool_names = [getattr(t, "name", None) for t in tool_list]
                 logger.debug("[MCP-RAG] Server %s available tools: %s", server, tool_names)

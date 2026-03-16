@@ -42,7 +42,10 @@ async def test_rag_results_risk_logging(tmp_path, monkeypatch):
 
     class FakeMCP:
         def __init__(self):
-            self.available_tools = {"docsRag": {"tools": [types.SimpleNamespace(name="rag_get_raw_results")]}}
+            self.available_tools = {}
+            self.rag_available_tools = {"docsRag": {"tools": [types.SimpleNamespace(name="rag_get_raw_results")]}}
+        async def initialize_rag_servers(self, rag_servers_config):
+            pass
         async def call_tool(self, server_name, tool_name, arguments, **kwargs):
             return types.SimpleNamespace(structured_content={
                 "results": {

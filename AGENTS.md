@@ -92,6 +92,8 @@ Manual quick run (alternative):
 - Section header: `## Implementation Plan (2025-11-02)`
 - Status update: `Last updated: 2025-11-02 14:30`
 
+**RAG MCP Isolation**: `MCPToolManager` maintains a separate `rag_available_tools` dict for RAG-only servers; `RAGMCPService` uses `initialize_rag_servers()` to populate it without touching `servers_config` or `available_tools`, and `build_mcp_data()` filters out servers absent from `servers_config`.
+
 ## Claude Code Agents
 
 This project uses Claude Code agents to ensure quality and completeness. Use these agents frequently:

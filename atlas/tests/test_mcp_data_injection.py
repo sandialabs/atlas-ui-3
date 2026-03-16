@@ -27,7 +27,10 @@ class FakeTool:
 def _make_tool_manager(available_tools=None, schema_override=None):
     """Create a mock tool manager with the given available_tools dict."""
     manager = MagicMock()
-    manager.available_tools = available_tools or {}
+    available_tools = available_tools or {}
+    manager.available_tools = available_tools
+    # servers_config mirrors the keys of available_tools so build_mcp_data includes them
+    manager.servers_config = {name: {} for name in available_tools if name != "canvas"}
 
     def get_tools_schema(tool_names):
         if schema_override is not None:

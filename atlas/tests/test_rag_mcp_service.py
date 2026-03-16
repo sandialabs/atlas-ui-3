@@ -16,18 +16,24 @@ class FakeTool:
 
 class FakeMCP:
     def __init__(self):
-        # Simulate available tools config per server
-        self.available_tools: Dict[str, Dict[str, Any]] = {
+        # RAG servers are stored in rag_available_tools, NOT available_tools
+        self.servers_config: Dict[str, Any] = {}  # empty - RAG servers are separate
+        self.available_tools: Dict[str, Dict[str, Any]] = {}  # non-RAG tools only
+        self.rag_available_tools: Dict[str, Dict[str, Any]] = {
             "docsRag": {"tools": [FakeTool("rag_discover_resources"), FakeTool("rag_get_raw_results")], "config": {"ui": {"icon": "book"}}},
             "searchRag": {"tools": [FakeTool("rag_discover_resources"), FakeTool("rag_get_raw_results"), FakeTool("rag_get_synthesized_results")], "config": {}},
             "misc": {"tools": [FakeTool("other")], "config": {}},
         }
+        self.clients: Dict[str, Any] = {}
+
+    async def initialize_rag_servers(self, rag_servers_config: Dict[str, Any]) -> None:
+        """No-op in tests; rag_available_tools is pre-populated."""
 
     async def get_authorized_servers(self, user: str, _auth) -> List[str]:
         # User bob can see all, alice cannot see misc
         if user.startswith("alice"):
             return ["docsRag", "searchRag"]
-        return list(self.available_tools.keys())
+        return list(self.rag_available_tools.keys())
 
     async def call_tool(self, server_name: str, tool_name: str, arguments: Dict[str, Any], *_, **__):
         # Return minimal v2-structured payloads
@@ -69,6 +75,9 @@ class FakeMCPServerConfig:
     def __init__(self, enabled=True, groups=None):
         self.enabled = enabled
         self.groups = groups or []
+
+    def model_dump(self) -> Dict[str, Any]:
+        return {"enabled": self.enabled, "groups": self.groups}
 
 
 class FakeMCPConfig:
@@ -158,15 +167,19 @@ async def test_rag_authorization_uses_rag_config_not_mcp_servers_config():
     class MCPWithEmptyServersConfig:
         """MCP manager with empty servers_config (RAG servers only in rag_mcp_config)."""
         def __init__(self):
-            # Simulate RAG servers being initialized but NOT in servers_config
-            self.servers_config = {}  # Empty! RAG servers were temporarily added then removed
+            # Simulate RAG servers being initialized in rag_available_tools but NOT in servers_config
+            self.servers_config = {}  # Empty! RAG servers are separate
             self.clients = {"ragServer": object()}  # Client exists (was initialized)
-            self.available_tools = {
+            self.available_tools = {}  # RAG servers are NOT here
+            self.rag_available_tools = {
                 "ragServer": {
                     "tools": [FakeTool("rag_discover_resources")],
                     "config": {}
                 }
             }
+
+        async def initialize_rag_servers(self, rag_servers_config: Dict[str, Any]) -> None:
+            """No-op in tests; rag_available_tools is pre-populated."""
 
         async def get_authorized_servers(self, user: str, _auth) -> List[str]:
             # This would return [] because servers_config is empty

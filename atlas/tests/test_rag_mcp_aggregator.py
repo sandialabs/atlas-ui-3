@@ -78,8 +78,14 @@ def patch_mcp(monkeypatch):
         self.clients = {"docsRag": FakeClient("docsRag"), "notionRag": FakeClient("notionRag")}
 
     async def fake_discover_tools(self):
+        # Non-RAG available_tools stays empty; RAG servers go into rag_available_tools
+        self.available_tools = {}
+        # Also set servers config for UI fields (non-RAG only)
+        self.servers_config = {}
+
+    async def fake_initialize_rag_servers(self, rag_servers_config):
         # Expose RAG tools on docsRag; notionRag only discovery/raw
-        self.available_tools = {
+        self.rag_available_tools = {
             "docsRag": {
                 "tools": [FakeTool("rag_discover_resources"), FakeTool("rag_get_raw_results"), FakeTool("rag_get_synthesized_results")],
                 "config": {"description": "Docs RAG"},
@@ -88,11 +94,6 @@ def patch_mcp(monkeypatch):
                 "tools": [FakeTool("rag_discover_resources"), FakeTool("rag_get_raw_results")],
                 "config": {"description": "Notion RAG"},
             },
-        }
-        # Also set servers config for UI fields
-        self.servers_config = {
-            "docsRag": {"description": "Docs RAG", "ui": {"icon": "book"}},
-            "notionRag": {"description": "Notion", "ui": {"icon": "notion"}},
         }
 
     async def fake_discover_prompts(self):
@@ -107,6 +108,7 @@ def patch_mcp(monkeypatch):
 
     monkeypatch.setattr(MCPToolManager, "initialize_clients", fake_initialize_clients, raising=False)
     monkeypatch.setattr(MCPToolManager, "discover_tools", fake_discover_tools, raising=False)
+    monkeypatch.setattr(MCPToolManager, "initialize_rag_servers", fake_initialize_rag_servers, raising=False)
     monkeypatch.setattr(MCPToolManager, "discover_prompts", fake_discover_prompts, raising=False)
     monkeypatch.setattr(MCPToolManager, "get_authorized_servers", fake_get_authorized_servers, raising=False)
     monkeypatch.setattr(MCPToolManager, "call_tool", fake_call_tool, raising=False)

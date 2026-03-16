@@ -131,6 +131,10 @@ class MCPToolManager:
         self.clients = {}
         self.available_tools = {}
         self.available_prompts = {}
+        # Separate store for RAG-only server tools, kept isolated from the
+        # main available_tools so that RAG servers never appear in tool
+        # discovery outputs or _mcp_data injection.
+        self.rag_available_tools: Dict[str, Any] = {}
 
         # Track failed servers for reconnection with backoff
         self._failed_servers: Dict[str, Dict[str, Any]] = {}
@@ -884,6 +888,44 @@ class MCPToolManager:
         )
         logger.debug("MCP clients initialized: %s", list(self.clients.keys()))
         logger.debug("MCP clients failed to initialize: %s", failed_servers)
+
+    async def initialize_rag_servers(self, rag_servers_config: Dict[str, Any]) -> None:
+        """Initialize clients and discover tools for RAG-only servers.
+
+        Results are stored in ``rag_available_tools`` to keep them completely
+        isolated from the main ``available_tools`` used for the tools panel and
+        ``_mcp_data`` injection.  ``servers_config`` is never modified, so RAG
+        servers can never leak into tool discovery or build_mcp_data outputs.
+
+        Skips servers already present in ``rag_available_tools`` to avoid
+        redundant discovery on repeated calls within the same session.
+        """
+        discovery_timeout = config_manager.app_settings.mcp_discovery_timeout
+        for server_name, config in rag_servers_config.items():
+            if server_name in self.rag_available_tools:
+                continue
+
+            if server_name not in self.clients:
+                client = await self._initialize_single_client(server_name, config)
+                if client is None:
+                    logger.warning("Could not initialize RAG client for '%s'", server_name)
+                    self.rag_available_tools[server_name] = {"tools": [], "config": config}
+                    continue
+                self.clients[server_name] = client
+
+            client = self.clients[server_name]
+            try:
+                async with client:
+                    tools = await asyncio.wait_for(client.list_tools(), timeout=discovery_timeout)
+                self.rag_available_tools[server_name] = {"tools": tools, "config": config}
+                logger.debug(
+                    "RAG tool discovery complete for '%s': %d tools",
+                    server_name,
+                    len(tools),
+                )
+            except Exception as e:
+                logger.warning("RAG tool discovery failed for '%s': %s", server_name, e)
+                self.rag_available_tools[server_name] = {"tools": [], "config": config}
 
     async def reconnect_failed_servers(self, force: bool = False) -> Dict[str, Any]:
         """Attempt to reconnect to servers that previously failed.
