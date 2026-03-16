@@ -15,7 +15,7 @@ from typing import Annotated, Any, Dict, Optional
 import requests
 from execution_engine import execute_code_safely
 from execution_environment import CodeExecutionError, create_execution_environment, save_file_to_execution_dir
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 from result_processing import (
     create_visualization_html,
     detect_matplotlib_plots,
@@ -126,7 +126,7 @@ def _load_file_bytes(filename: str, file_data_base64: str = "") -> bytes:
     raise FileNotFoundError("No filename or file data provided")
 
 # Initialize the MCP server
-mcp = FastMCP("SecureCodeExecutor")
+mcp = create_stdio_server("SecureCodeExecutor")
 
 
 # Security checking functionality moved to security_checker.py

@@ -10,11 +10,11 @@ import os
 from typing import Annotated, Any, Dict
 
 import requests
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("File_Size_Test")
+mcp = create_stdio_server("File_Size_Test")
 
 
 @mcp.tool

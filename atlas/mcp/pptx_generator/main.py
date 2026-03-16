@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional
 
 import requests
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -37,7 +37,7 @@ atlas_dir = current_dir.parent.parent
 project_root = atlas_dir.parent
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("pptx_generator")
+mcp = create_stdio_server("pptx_generator")
 
 # Sandia National Laboratories color scheme
 SANDIA_BLUE = RGBColor(0, 51, 102)  # Dark blue - primary brand color

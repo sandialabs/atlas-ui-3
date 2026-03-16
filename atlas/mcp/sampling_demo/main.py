@@ -14,10 +14,11 @@ Supports:
 - Agentic workflows with tool use
 """
 
-from fastmcp import Context, FastMCP
+from fastmcp import Context
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("Sampling Demo")
+mcp = create_stdio_server("Sampling Demo")
 
 
 @mcp.tool

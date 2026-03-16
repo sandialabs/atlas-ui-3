@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("OrderDatabase")
+mcp = create_stdio_server("OrderDatabase")
 
 class OrderStatus(Enum):
     SUBMITTED = "submitted"

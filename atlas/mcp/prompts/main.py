@@ -6,10 +6,10 @@ Provides specialized system prompts that can be applied to modify the AI's behav
 
 from typing import Any, Dict
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("Prompts")
+mcp = create_stdio_server("Prompts")
 
 
 @mcp.prompt

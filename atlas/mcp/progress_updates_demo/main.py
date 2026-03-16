@@ -26,10 +26,11 @@ import base64
 import json
 from typing import Any, Dict
 
-from fastmcp import Context, FastMCP
+from fastmcp import Context
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("Progress Updates Demo")
+mcp = create_stdio_server("Progress Updates Demo")
 
 
 def create_progress_html(step: int, total: int, message: str) -> str:

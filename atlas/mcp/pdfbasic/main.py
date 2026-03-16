@@ -13,7 +13,7 @@ from collections import Counter
 from typing import Annotated, Any, Dict, Optional
 
 import requests
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # This tool requires the pypdf and reportlab libraries.
 # Install them using: pip install pypdf reportlab
@@ -24,7 +24,7 @@ from reportlab.pdfgen import canvas
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("PDF_Analyzer")
+mcp = create_stdio_server("PDF_Analyzer")
 
 
 def _analyze_pdf_content(instructions: str, filename: str, original_filename: Optional[str] = None) -> Dict[str, Any]:

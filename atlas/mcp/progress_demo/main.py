@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import asyncio
 
-from fastmcp import Context, FastMCP
+from fastmcp import Context
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("ProgressDemo")
+mcp = create_stdio_server("ProgressDemo")
 
 
 @mcp.tool

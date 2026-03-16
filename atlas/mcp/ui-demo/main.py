@@ -9,10 +9,10 @@ fields to modify the UI.
 import os
 from typing import Any, Dict
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Create the MCP server instance
-mcp = FastMCP("UI Demo Server")
+mcp = create_stdio_server("UI Demo Server")
 
 def load_template(template_name: str) -> str:
     """

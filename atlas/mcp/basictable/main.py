@@ -10,10 +10,10 @@ from typing import Annotated, Any, Dict
 
 import matplotlib.pyplot as plt
 import pandas as pd
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("CSV_XLSX_Analyzer")
+mcp = create_stdio_server("CSV_XLSX_Analyzer")
 
 @mcp.tool
 def analyze_spreadsheet(

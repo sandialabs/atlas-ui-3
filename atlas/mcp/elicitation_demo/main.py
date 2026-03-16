@@ -16,10 +16,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
-from fastmcp import Context, FastMCP
+from fastmcp import Context
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("Elicitation Demo")
+mcp = create_stdio_server("Elicitation Demo")
 
 
 @mcp.tool

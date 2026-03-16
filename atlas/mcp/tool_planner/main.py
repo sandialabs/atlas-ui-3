@@ -19,9 +19,10 @@ import base64
 import re
 from typing import Any, Dict, Optional
 
-from fastmcp import Context, FastMCP
+from fastmcp import Context
+from atlas.mcp_shared.server_factory import create_stdio_server
 
-mcp = FastMCP("Tool Planner")
+mcp = create_stdio_server("Tool Planner")
 
 
 PLANNER_SYSTEM_PROMPT = """\

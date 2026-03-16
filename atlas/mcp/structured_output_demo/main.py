@@ -19,9 +19,9 @@ from __future__ import annotations
 import time
 from typing import Any, Dict
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
-mcp = FastMCP("Structured Output Demo")
+mcp = create_stdio_server("Structured Output Demo")
 
 
 @mcp.tool

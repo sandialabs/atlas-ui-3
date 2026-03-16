@@ -27,9 +27,9 @@ import numpy as np
 import pandas as pd
 import requests
 import seaborn as sns
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
-mcp = FastMCP("CSV_Reporter")
+mcp = create_stdio_server("CSV_Reporter")
 
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))

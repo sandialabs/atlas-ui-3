@@ -21,10 +21,11 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from fastmcp import Context, FastMCP
+from fastmcp import Context
+from atlas.mcp_shared.server_factory import create_stdio_server
 from fastmcp.server.tasks.config import TaskConfig
 
-mcp = FastMCP("Task Demo")
+mcp = create_stdio_server("Task Demo")
 
 
 @mcp.tool(task=True)

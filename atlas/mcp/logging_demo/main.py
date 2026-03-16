@@ -8,10 +8,11 @@ import asyncio
 import time
 from typing import Any, Dict
 
-from fastmcp import Context, FastMCP
+from fastmcp import Context
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("Logging Demo")
+mcp = create_stdio_server("Logging Demo")
 
 
 @mcp.tool

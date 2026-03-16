@@ -20,10 +20,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("CorporateCars")
+mcp = create_stdio_server("CorporateCars")
 
 
 # --- In-memory data model ----------------------------------------------------
