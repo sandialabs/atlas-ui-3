@@ -529,7 +529,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     if old_conv_id:
                         try:
                             from atlas.modules.mcp_tools import mcp_tool_manager
-                            await mcp_tool_manager._session_manager.release_all(old_conv_id)
+                            await mcp_tool_manager.release_sessions(old_conv_id)
                         except Exception as e:
                             logger.debug("Error releasing MCP sessions on restore: %s", e)
 
@@ -632,7 +632,7 @@ async def websocket_endpoint(websocket: WebSocket):
             conv_id = session.context.get("conversation_id", str(session_id))
             try:
                 from atlas.modules.mcp_tools import mcp_tool_manager
-                await mcp_tool_manager._session_manager.release_all(conv_id)
+                await mcp_tool_manager.release_sessions(conv_id)
             except Exception as e:
                 logger.debug("Error releasing MCP sessions on disconnect: %s", e)
         chat_service.end_session(session_id)

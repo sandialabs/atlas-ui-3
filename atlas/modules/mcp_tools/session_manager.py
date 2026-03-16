@@ -66,6 +66,7 @@ class MCPSessionManager:
     def __init__(self) -> None:
         self._sessions: Dict[Tuple[str, str], ManagedSession] = {}
         self._lock = asyncio.Lock()
+        self._key_locks: Dict[Tuple[str, str], asyncio.Lock] = {}
 
     async def acquire(
         self,
@@ -76,17 +77,35 @@ class MCPSessionManager:
         """Get or create a session for (conversation_id, server_name).
 
         If a session already exists and is open, returns it.
-        Otherwise opens a new one.
+        Otherwise opens a new one.  Uses per-key locks so that opening
+        a session for one server doesn't block other servers.
         """
         key = (conversation_id, server_name)
+
+        # Fast path: check under global lock (no I/O)
         async with self._lock:
             existing = self._sessions.get(key)
             if existing is not None and existing.is_open:
                 return existing
+            # Get or create a per-key lock
+            if key not in self._key_locks:
+                self._key_locks[key] = asyncio.Lock()
+            key_lock = self._key_locks[key]
+
+        # Slow path: open session under per-key lock (network I/O)
+        async with key_lock:
+            # Re-check after acquiring per-key lock
+            async with self._lock:
+                existing = self._sessions.get(key)
+                if existing is not None and existing.is_open:
+                    return existing
 
             session = ManagedSession(client)
             await session.open()
-            self._sessions[key] = session
+
+            async with self._lock:
+                self._sessions[key] = session
+
             logger.debug(
                 "Opened MCP session for conversation=%s server=%s",
                 conversation_id,
@@ -99,6 +118,7 @@ class MCPSessionManager:
         key = (conversation_id, server_name)
         async with self._lock:
             session = self._sessions.pop(key, None)
+            self._key_locks.pop(key, None)
         if session is not None:
             await session.close()
             logger.debug(
@@ -116,6 +136,7 @@ class MCPSessionManager:
             ]
             for k in keys_to_remove:
                 session = self._sessions.pop(k)
+                self._key_locks.pop(k, None)
                 to_close.append(session)
 
         for session in to_close:

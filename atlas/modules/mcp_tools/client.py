@@ -159,6 +159,13 @@ class MCPToolManager:
         # Cache of which servers support background tasks
         self._server_task_support: Dict[str, bool] = {}
 
+        # Parse task timeout once at init (seconds before switching to polling)
+        try:
+            self._task_timeout = float(os.getenv("MCP_TASK_TIMEOUT", "10"))
+        except (ValueError, TypeError):
+            logger.warning("Invalid MCP_TASK_TIMEOUT, defaulting to 10s")
+            self._task_timeout = 10.0
+
     def _get_min_log_level(self) -> int:
         """Get the minimum log level from environment or config."""
         try:
@@ -286,22 +293,10 @@ class MCPToolManager:
             from mcp.types import ElicitRequestFormParams
 
             # Find routing context for this server (keyed by (server_name, tool_call_id))
-            tcid = None
-            if _context and hasattr(_context, 'meta') and _context.meta is not None:
-                tcid = getattr(_context.meta, 'model_extra', {}).get("tool_call_id")
+            routing = self._resolve_routing(_ELICITATION_ROUTING, server_name, _context)
 
-            routing = _ELICITATION_ROUTING.get((server_name, tcid))
-
-            if routing is None:
-                matches = [v for (srv, _), v in _ELICITATION_ROUTING.items() if srv == server_name]
-                if len(matches) == 1:
-                    routing = matches[0]
-                elif len(matches) > 1:
-                    logger.warning(
-                        "Ambiguous elicitation routing for server '%s' with %d entries — cancelling",
-                        server_name, len(matches),
-                    )
-                    return ElicitResult(action="cancel", content=None)
+            if routing == "ambiguous":
+                return ElicitResult(action="cancel", content=None)
 
             if routing is None:
                 logger.warning(
@@ -420,22 +415,10 @@ class MCPToolManager:
             from mcp.types import CreateMessageResult, SamplingMessage, TextContent
 
             # Find routing context for this server (keyed by (server_name, tool_call_id))
-            tcid = None
-            if context and hasattr(context, 'meta') and context.meta is not None:
-                tcid = getattr(context.meta, 'model_extra', {}).get("tool_call_id")
+            routing = self._resolve_routing(_SAMPLING_ROUTING, server_name, context)
 
-            routing = _SAMPLING_ROUTING.get((server_name, tcid))
-
-            if routing is None:
-                matches = [v for (srv, _), v in _SAMPLING_ROUTING.items() if srv == server_name]
-                if len(matches) == 1:
-                    routing = matches[0]
-                elif len(matches) > 1:
-                    logger.warning(
-                        "Ambiguous sampling routing for server '%s' with %d entries — cancelling",
-                        server_name, len(matches),
-                    )
-                    raise Exception(f"Ambiguous sampling routing for server '{server_name}'")
+            if routing == "ambiguous":
+                raise Exception(f"Ambiguous sampling routing for server '{server_name}'")
 
             if routing is None:
                 logger.warning(
@@ -1540,6 +1523,44 @@ class MCPToolManager:
                 del self._user_clients[cache_key]
                 logger.debug(f"Invalidated user client cache for server '{server_name}'")
 
+    async def release_sessions(self, conversation_id: str) -> None:
+        """Release all MCP sessions for a conversation.
+
+        Call this on WebSocket disconnect or conversation restore to clean up
+        persistent sessions held by the session manager.
+        """
+        await self._session_manager.release_all(conversation_id)
+
+    def _resolve_routing(
+        self,
+        routing_dict: Dict,
+        server_name: str,
+        context: Any,
+    ) -> Any:
+        """Resolve routing context from a routing dict using meta-based O(1) lookup.
+
+        Tries composite (server_name, tool_call_id) key first via context.meta,
+        then falls back to single-match scan. Returns None if unresolvable.
+        """
+        tcid = None
+        if context and hasattr(context, 'meta') and context.meta is not None:
+            tcid = getattr(context.meta, 'model_extra', {}).get("tool_call_id")
+
+        routing = routing_dict.get((server_name, tcid))
+
+        if routing is None:
+            matches = [v for (srv, _), v in routing_dict.items() if srv == server_name]
+            if len(matches) == 1:
+                routing = matches[0]
+            elif len(matches) > 1:
+                logger.warning(
+                    "Ambiguous routing for server '%s' with %d entries",
+                    server_name, len(matches),
+                )
+                return "ambiguous"
+
+        return routing
+
     def _supports_tasks(self, server_name: str, client: Any) -> bool:
         """Check if a server supports background tasks (cached)."""
         if server_name in self._server_task_support:
@@ -1572,6 +1593,15 @@ class MCPToolManager:
     ) -> Any:
         """Call a specific tool on an MCP server.
 
+        When ``conversation_id`` is provided, a persistent session is used (and
+        reused across calls within that conversation).  Servers that advertise
+        task support will be called in adaptive-polling mode: wait up to
+        ``MCP_TASK_TIMEOUT`` synchronously, then switch to polling with UI
+        progress notifications via ``update_cb``.
+
+        Without ``conversation_id``, a single-use session is opened and closed
+        per call (no task-mode support).
+
         Args:
             server_name: Name of the MCP server
             tool_name: Name of the tool to call
@@ -1580,6 +1610,9 @@ class MCPToolManager:
             elicitation_handler: Optional elicitation callback handler. Prefer the built-in
                 elicitation routing (registered at client creation time) for shared clients.
             user_email: User's email for per-user authentication (required for oauth/jwt servers)
+            meta: Optional metadata dict forwarded to the MCP server (e.g. tool_call_id)
+            conversation_id: If set, use a persistent session for this conversation
+            update_cb: Async callback for emitting task lifecycle events to the UI
         """
         # Determine which client to use
         client = None
@@ -1632,7 +1665,7 @@ class MCPToolManager:
             if meta is not None:
                 kwargs["meta"] = meta
 
-            task_timeout = float(os.getenv("MCP_TASK_TIMEOUT", "10"))
+            task_timeout = self._task_timeout
 
             if conversation_id:
                 # Use persistent session
@@ -1692,7 +1725,8 @@ class MCPToolManager:
                             tool_task.on_status_change(_task_progress)
 
                         try:
-                            await tool_task.wait(timeout=call_timeout - task_timeout)
+                            remaining = max(call_timeout - task_timeout, 1)
+                            await tool_task.wait(timeout=remaining)
                             result = tool_task.result
                         except asyncio.CancelledError:
                             await tool_task.cancel()
