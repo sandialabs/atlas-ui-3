@@ -4,7 +4,7 @@ import 'katex/dist/katex.min.css'
 import { preProcessLatex, restoreLatexPlaceholders } from '../utils/latexPreprocessor'
 import { useChat } from '../contexts/ChatContext'
 import { useState, memo, useEffect, useRef } from 'react'
-import { Copy } from 'lucide-react'
+import { Copy, Pencil, Check, X } from 'lucide-react'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 
@@ -736,9 +736,42 @@ const ToolElapsedTime = ({ timestamp }) => {
   )
 }
 
-const Message = ({ message }) => {
-  const { appName, downloadFile, isSynthesizing, settings } = useChat()
+const Message = ({ message, messageIndex, isLastUserMessage }) => {
+  const { appName, downloadFile, isSynthesizing, settings, editAndResubmit, isThinking, isStreaming } = useChat()
   const debugMode = settings?.debugMode || false
+
+  // Edit state for last user message
+  const [isEditing, setIsEditing] = useState(false)
+  const [editValue, setEditValue] = useState(message.content || '')
+  const editTextareaRef = useRef(null)
+
+  // Focus textarea when entering edit mode
+  useEffect(() => {
+    if (isEditing && editTextareaRef.current) {
+      editTextareaRef.current.focus()
+      const len = editTextareaRef.current.value.length
+      editTextareaRef.current.setSelectionRange(len, len)
+    }
+  }, [isEditing])
+
+  const handleEditSubmit = () => {
+    const trimmed = editValue.trim()
+    if (!trimmed) return
+    setIsEditing(false)
+    editAndResubmit(messageIndex, trimmed)
+  }
+
+  const handleEditKeyDown = (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      handleEditSubmit()
+    }
+    if (e.key === 'Escape') {
+      setIsEditing(false)
+      setEditValue(message.content || '')
+    }
+  }
+
 
   // State for collapsible sections with localStorage persistence
   // In debug mode, default to expanded
@@ -1200,22 +1233,72 @@ const renderContent = () => {
               </span>
             )}
           </div>
-          {/* Copy button for user and assistant messages */}
-          {!isSystem && (
-            <button
-              onClick={handleCopyMessage}
-              className="copy-message-button opacity-0 group-hover:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
-              title="Copy message to clipboard"
-              type="button"
-            >
-              <Copy className="w-3 h-3" />
-            </button>
-          )}
+          <div className="flex items-center gap-1">
+            {/* Edit button for the last user message */}
+            {isLastUserMessage && !isEditing && !isThinking && !isStreaming && (
+              <button
+                onClick={() => { setEditValue(message.content || ''); setIsEditing(true) }}
+                className="edit-message-button opacity-0 group-hover:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+                title="Edit message"
+                type="button"
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+            )}
+            {/* Copy button for user and assistant messages */}
+            {!isSystem && !isEditing && (
+              <button
+                onClick={handleCopyMessage}
+                className="copy-message-button opacity-0 group-hover:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
+                title="Copy message to clipboard"
+                type="button"
+              >
+                <Copy className="w-3 h-3" />
+              </button>
+            )}
+          </div>
         </div>
-        {renderContent()}
-        {/* Streaming cursor indicator */}
-        {message._streaming && (
-          <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" aria-label="Generating response..." />
+        {/* Inline edit UI */}
+        {isEditing ? (
+          <div className="flex flex-col gap-2">
+            <textarea
+              ref={editTextareaRef}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleEditKeyDown}
+              className="w-full bg-blue-700 text-white border border-blue-400 rounded p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-300 min-h-[60px]"
+              rows={Math.max(2, editValue.split('\n').length)}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setIsEditing(false); setEditValue(message.content || '') }}
+                className="flex items-center gap-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 rounded text-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+                type="button"
+                title="Cancel edit"
+              >
+                <X className="w-3 h-3" />
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSubmit}
+                disabled={!editValue.trim()}
+                className="flex items-center gap-1 px-2 py-1 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-300"
+                type="button"
+                title="Submit edited message (Ctrl+Enter)"
+              >
+                <Check className="w-3 h-3" />
+                Submit
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {renderContent()}
+            {/* Streaming cursor indicator */}
+            {message._streaming && (
+              <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" aria-label="Generating response..." />
+            )}
+          </>
         )}
       </div>
     </div>

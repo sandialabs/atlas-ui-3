@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #419 - 2026-03-16
+- **Enhancement**: Users can now edit the last submitted message and resubmit it; an inline edit UI appears on hover with a pencil button, and the prior response is replaced with the new one.
+
 ### PR #418 - 2026-03-13
 - **Fix**: Canvas file downloads no longer return 401 errors behind a reverse proxy. Canvas files now use HMAC-tokenized `/mcp/files/download/` URLs (bypassing nginx `auth_request`) instead of hardcoded `/api/files/download/` paths.
 

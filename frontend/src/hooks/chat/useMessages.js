@@ -10,6 +10,8 @@ function messagesReducer(state, action) {
       return state.map(m => m.tool_call_id === action.tool_call_id ? { ...m, ...action.patch } : m)
     case 'MAP':
       return action.mapper(state)
+    case 'TRUNCATE_AFTER':
+      return state.slice(0, action.index)
     case 'RESET':
       return []
     case 'STREAM_TOKEN': {
@@ -51,8 +53,9 @@ export function useMessages() {
   const mapMessages = useCallback(mapper => dispatch({ type: 'MAP', mapper }), [])
   const updateToolResult = useCallback((tool_call_id, patch) => dispatch({ type: 'UPDATE_TOOL_RESULT', tool_call_id, patch }), [])
   const resetMessages = useCallback(() => dispatch({ type: 'RESET' }), [])
+  const truncateAfter = useCallback(index => dispatch({ type: 'TRUNCATE_AFTER', index }), [])
   const streamToken = useCallback(token => dispatch({ type: 'STREAM_TOKEN', token }), [])
   const streamEnd = useCallback(() => dispatch({ type: 'STREAM_END' }), [])
 
-  return { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd }
+  return { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, truncateAfter, streamToken, streamEnd }
 }

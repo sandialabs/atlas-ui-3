@@ -37,7 +37,7 @@ export const ChatProvider = ({ children }) => {
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
-	const { messages, addMessage, bulkAdd, mapMessages, resetMessages, streamToken, streamEnd } = useMessages()
+	const { messages, addMessage, bulkAdd, mapMessages, resetMessages, truncateAfter, streamToken, streamEnd } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
 	const isStreaming = messages.some(m => m._streaming === true)
@@ -303,6 +303,15 @@ export const ChatProvider = ({ children }) => {
 			conversation_id: activeConversationId || undefined,
 		})
 	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId])
+
+	// Edit the last user message and resubmit: truncate from that message index, then send
+	const editAndResubmit = useCallback((messageIndex, newContent, extraFiles = {}) => {
+		if (!newContent.trim() || !currentModel) return
+		truncateAfter(messageIndex)
+		setIsThinking(false)
+		setIsSynthesizing(false)
+		sendChatMessage(newContent, extraFiles)
+	}, [truncateAfter, currentModel, sendChatMessage])
 
 	const clearChat = useCallback(() => {
 		resetMessages()
@@ -610,6 +619,7 @@ export const ChatProvider = ({ children }) => {
 		isThinking,
 		isSynthesizing,
 		sendChatMessage,
+		editAndResubmit,
 		clearChat,
 		stopAgent,
 		stopStreaming,
