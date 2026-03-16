@@ -674,7 +674,7 @@ const ChatArea = () => {
       )}
       
       {/* Welcome Screen */}
-      {isWelcomeVisible && <WelcomeScreen />}
+      {isWelcomeVisible && <WelcomeScreen onSuggestPrompt={setInputValue} />}
       
       {/* Powered by ATLAS logo - only shown on welcome screen */}
       {isWelcomeVisible && showPoweredByAtlas && (
