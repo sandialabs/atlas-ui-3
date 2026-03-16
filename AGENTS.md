@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-03-12
+Last updated: 2026-03-16
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -25,6 +25,8 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 **Lazy Imports**: `atlas/__init__.py` uses `__getattr__` to lazily import `AtlasClient` and `ChatResult` so that lightweight CLIs like `atlas-init` do not pay the cost of loading the full dependency chain (SQLAlchemy, litellm, FastAPI, etc.).
 
 **LLM Streaming**: Token streaming uses `LiteLLMStreamingMixin` (in `litellm_streaming.py`) mixed into `LiteLLMCaller` to keep files under 400 lines; the frontend buffers tokens with `setTimeout(30ms)` -- never use `requestAnimationFrame` for token flushing as it breaks progressive rendering.
+
+**Edit Last Message**: Users can hover over the last user message to reveal a pencil icon; clicking it opens an inline edit textarea. Submitting (button or Ctrl+Enter) calls `editAndResubmit` in `ChatContext`, which truncates messages from that index onward and re-sends the edited content.
 
 ## Installation
 

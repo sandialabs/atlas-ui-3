@@ -711,12 +711,17 @@ const ChatArea = () => {
         ref={messagesRef}
         className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0"
       >
-        {messages.map((message, index) => (
-          <Message
-            key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
-            message={message}
-          />
-        ))}
+        {(() => {
+          const lastUserIndex = messages.findLastIndex(m => m.role === 'user')
+          return messages.map((message, index) => (
+            <Message
+              key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
+              message={message}
+              messageIndex={index}
+              isLastUserMessage={message.role === 'user' && index === lastUserIndex}
+            />
+          ))
+        })()}
         {agentModeEnabled && agentPendingQuestion && (
           <div className="flex items-start gap-3 w-full">
             <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
