@@ -152,6 +152,20 @@ class MCPToolManager:
         self._user_clients: Dict[tuple, Client] = {}
         self._user_clients_lock = asyncio.Lock()
 
+        # Session manager for per-conversation session persistence
+        from atlas.modules.mcp_tools.session_manager import MCPSessionManager
+        self._session_manager = MCPSessionManager()
+
+        # Cache of which servers support background tasks
+        self._server_task_support: Dict[str, bool] = {}
+
+        # Parse task timeout once at init (seconds before switching to polling)
+        try:
+            self._task_timeout = float(os.getenv("MCP_TASK_TIMEOUT", "10"))
+        except (ValueError, TypeError):
+            logger.warning("Invalid MCP_TASK_TIMEOUT, defaulting to 10s")
+            self._task_timeout = 10.0
+
     def _get_min_log_level(self) -> int:
         """Get the minimum log level from environment or config."""
         try:
@@ -279,11 +293,11 @@ class MCPToolManager:
             from mcp.types import ElicitRequestFormParams
 
             # Find routing context for this server (keyed by (server_name, tool_call_id))
-            routing = None
-            for (srv, _tcid), ctx in _ELICITATION_ROUTING.items():
-                if srv == server_name:
-                    routing = ctx
-                    break
+            routing = self._resolve_routing(_ELICITATION_ROUTING, server_name, _context)
+
+            if routing == "ambiguous":
+                return ElicitResult(action="cancel", content=None)
+
             if routing is None:
                 logger.warning(
                     f"Elicitation request for server '{server_name}' but no routing context - "
@@ -401,11 +415,11 @@ class MCPToolManager:
             from mcp.types import CreateMessageResult, SamplingMessage, TextContent
 
             # Find routing context for this server (keyed by (server_name, tool_call_id))
-            routing = None
-            for (srv, _tcid), ctx in _SAMPLING_ROUTING.items():
-                if srv == server_name:
-                    routing = ctx
-                    break
+            routing = self._resolve_routing(_SAMPLING_ROUTING, server_name, context)
+
+            if routing == "ambiguous":
+                raise Exception(f"Ambiguous sampling routing for server '{server_name}'")
+
             if routing is None:
                 logger.warning(
                     f"Sampling request for server '{server_name}' but no routing context - "
@@ -1576,6 +1590,61 @@ class MCPToolManager:
         logger.info(f"Created per-user HTTP client for server '{server_name}' user='{user_email}'")
         return client
 
+    async def release_sessions(self, conversation_id: str) -> None:
+        """Release all MCP sessions for a conversation.
+
+        Call this on WebSocket disconnect or conversation restore to clean up
+        persistent sessions held by the session manager.
+        """
+        await self._session_manager.release_all(conversation_id)
+
+    def _resolve_routing(
+        self,
+        routing_dict: Dict,
+        server_name: str,
+        context: Any,
+    ) -> Any:
+        """Resolve routing context from a routing dict using meta-based O(1) lookup.
+
+        Tries composite (server_name, tool_call_id) key first via context.meta,
+        then falls back to single-match scan. Returns None if unresolvable.
+        """
+        tcid = None
+        if context and hasattr(context, 'meta') and context.meta is not None:
+            tcid = getattr(context.meta, 'model_extra', {}).get("tool_call_id")
+
+        routing = routing_dict.get((server_name, tcid))
+
+        if routing is None:
+            matches = [v for (srv, _), v in routing_dict.items() if srv == server_name]
+            if len(matches) == 1:
+                routing = matches[0]
+            elif len(matches) > 1:
+                logger.warning(
+                    "Ambiguous routing for server '%s' with %d entries",
+                    server_name, len(matches),
+                )
+                return "ambiguous"
+
+        return routing
+
+    def _supports_tasks(self, server_name: str, client: Any) -> bool:
+        """Check if a server supports background tasks (cached)."""
+        if server_name in self._server_task_support:
+            return self._server_task_support[server_name]
+
+        supports = False
+        try:
+            init_result = getattr(client, 'initialize_result', None)
+            if init_result and hasattr(init_result, 'capabilities'):
+                caps = init_result.capabilities
+                supports = getattr(caps, 'tasks', None) is not None
+        except Exception:
+            pass
+
+        self._server_task_support[server_name] = supports
+        return supports
+
     async def call_tool(
         self,
         server_name: str,
@@ -1585,8 +1654,20 @@ class MCPToolManager:
         progress_handler: Optional[Any] = None,
         elicitation_handler: Optional[Any] = None,
         user_email: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ) -> Any:
         """Call a specific tool on an MCP server.
+
+        When ``conversation_id`` is provided, a persistent session is used (and
+        reused across calls within that conversation).  Servers that advertise
+        task support will be called in adaptive-polling mode: wait up to
+        ``MCP_TASK_TIMEOUT`` synchronously, then switch to polling with UI
+        progress notifications via ``update_cb``.
+
+        Without ``conversation_id``, a single-use session is opened and closed
+        per call (no task-mode support).
 
         Args:
             server_name: Name of the MCP server
@@ -1596,6 +1677,9 @@ class MCPToolManager:
             elicitation_handler: Optional elicitation callback handler. Prefer the built-in
                 elicitation routing (registered at client creation time) for shared clients.
             user_email: User's email for per-user authentication (required for oauth/jwt servers)
+            meta: Optional metadata dict forwarded to the MCP server (e.g. tool_call_id)
+            conversation_id: If set, use a persistent session for this conversation
+            update_cb: Async callback for emitting task lifecycle events to the UI
         """
         # Determine which client to use
         client = None
@@ -1645,18 +1729,98 @@ class MCPToolManager:
             if elicitation_handler is not None:
                 client.set_elicitation_callback(elicitation_handler)
 
-            async with client:
-                # Pass progress handler if provided (fastmcp >= 2.3.5)
-                kwargs = {}
-                if progress_handler is not None:
-                    kwargs["progress_handler"] = progress_handler
+            kwargs = {}
+            if progress_handler is not None:
+                kwargs["progress_handler"] = progress_handler
+            if meta is not None:
+                kwargs["meta"] = meta
 
+            task_timeout = self._task_timeout
+
+            if conversation_id:
+                # Use persistent session
+                session = await self._session_manager.acquire(
+                    conversation_id, server_name, client
+                )
+                active_client = session.client
+            else:
+                # Fallback: no conversation context, use per-call session
+                # Can't use task mode without a persistent session
+                async with client:
+                    result = await asyncio.wait_for(
+                        client.call_tool(tool_name, arguments, **kwargs),
+                        timeout=call_timeout,
+                    )
+                    logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
+                    return result
+
+            # With persistent session, try adaptive task mode
+            use_tasks = self._supports_tasks(server_name, active_client)
+
+            if use_tasks:
+                tool_task = await active_client.call_tool(tool_name, arguments, task=True, **kwargs)
+
+                if tool_task.returned_immediately:
+                    result = tool_task.result
+                else:
+                    try:
+                        await asyncio.wait_for(
+                            tool_task.wait(),
+                            timeout=task_timeout,
+                        )
+                        result = tool_task.result
+                    except asyncio.TimeoutError:
+                        # Exceeded threshold -- notify UI and keep waiting
+                        if update_cb:
+                            await update_cb({
+                                "type": "tool_task_started",
+                                "tool_call_id": meta.get("tool_call_id") if meta else None,
+                                "tool_name": tool_name,
+                                "server_name": server_name,
+                            })
+
+                        if update_cb:
+                            async def _task_progress(status):
+                                try:
+                                    await update_cb({
+                                        "type": "tool_task_progress",
+                                        "tool_call_id": meta.get("tool_call_id") if meta else None,
+                                        "status": getattr(status, 'state', 'running'),
+                                        "progress": getattr(status, 'progress', None),
+                                        "total": getattr(status, 'total', None),
+                                        "message": getattr(status, 'message', None),
+                                    })
+                                except Exception:
+                                    logger.debug("Task progress callback failed", exc_info=True)
+                            tool_task.on_status_change(_task_progress)
+
+                        try:
+                            remaining = max(call_timeout - task_timeout, 1)
+                            await tool_task.wait(timeout=remaining)
+                            result = tool_task.result
+                        except asyncio.CancelledError:
+                            await tool_task.cancel()
+                            raise
+                        finally:
+                            if update_cb:
+                                try:
+                                    await update_cb({
+                                        "type": "tool_task_completed",
+                                        "tool_call_id": meta.get("tool_call_id") if meta else None,
+                                    })
+                                except Exception:
+                                    pass
+                    except asyncio.CancelledError:
+                        await tool_task.cancel()
+                        raise
+            else:
                 result = await asyncio.wait_for(
-                    client.call_tool(tool_name, arguments, **kwargs),
+                    active_client.call_tool(tool_name, arguments, **kwargs),
                     timeout=call_timeout,
                 )
-                logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
-                return result
+
+            logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
+            return result
         except asyncio.TimeoutError:
             error_msg = f"Tool call '{tool_name}' on server '{server_name}' timed out after {call_timeout}s"
             logger.error(error_msg)
@@ -1673,6 +1837,7 @@ class MCPToolManager:
         arguments: Dict[str, Any] = None,
         *,
         user_email: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """Get a specific prompt from an MCP server."""
         if self._is_http_server(server_name) and user_email:
@@ -1683,10 +1848,13 @@ class MCPToolManager:
             client = self.clients[server_name]
         try:
             async with client:
+                kwargs = {}
+                if meta is not None:
+                    kwargs["meta"] = meta
                 if arguments:
-                    result = await client.get_prompt(prompt_name, arguments)
+                    result = await client.get_prompt(prompt_name, arguments, **kwargs)
                 else:
-                    result = await client.get_prompt(prompt_name)
+                    result = await client.get_prompt(prompt_name, **kwargs)
                 logger.info(f"Successfully retrieved prompt {prompt_name} from {server_name}")
                 return result
         except Exception as e:
@@ -1844,10 +2012,11 @@ class MCPToolManager:
 
         # Attempt extraction in priority order
         try:
-            if hasattr(raw_result, "structured_content") and raw_result.structured_content:  # type: ignore[attr-defined]
+            if hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
+                # FastMCP 3.x validated/deserialized structured content (highest fidelity)
+                structured = raw_result.data if isinstance(raw_result.data, dict) else {"results": raw_result.data}  # type: ignore[attr-defined]
+            elif hasattr(raw_result, "structured_content") and raw_result.structured_content:  # type: ignore[attr-defined]
                 structured = raw_result.structured_content  # type: ignore[attr-defined]
-            elif hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
-                structured = raw_result.data  # type: ignore[attr-defined]
             else:
                 # Fallback: extract text content from content array
                 if hasattr(raw_result, "content"):
@@ -1980,9 +2149,11 @@ class MCPToolManager:
         try:
             update_cb = None
             user_email = None
+            conversation_id = None
             if isinstance(context, dict):
                 update_cb = context.get("update_callback")
                 user_email = context.get("user_email")
+                conversation_id = context.get("conversation_id")
 
             if update_cb is None:
                 logger.warning(
@@ -2042,6 +2213,9 @@ class MCPToolManager:
                                 tool_call.arguments,
                                 progress_handler=_progress_handler,
                                 user_email=user_email,
+                                meta={"tool_call_id": tool_call.id},
+                                conversation_id=conversation_id,
+                                update_cb=update_cb,
                             )
             else:
                 async with self._use_elicitation_context(server_name, tool_call, update_cb):
@@ -2052,6 +2226,9 @@ class MCPToolManager:
                             tool_call.arguments,
                             progress_handler=_progress_handler,
                             user_email=user_email,
+                            meta={"tool_call_id": tool_call.id},
+                            conversation_id=conversation_id,
+                            update_cb=update_cb,
                         )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False)
@@ -2066,14 +2243,14 @@ class MCPToolManager:
                     structured = raw_result
                 else:
                     structured = {}
-                    if hasattr(raw_result, "structured_content") and raw_result.structured_content:  # type: ignore[attr-defined]
-                        sc = raw_result.structured_content  # type: ignore[attr-defined]
-                        if isinstance(sc, dict):
-                            structured = sc
-                    elif hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
+                    if hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
                         dt = raw_result.data  # type: ignore[attr-defined]
                         if isinstance(dt, dict):
                             structured = dt
+                    elif hasattr(raw_result, "structured_content") and raw_result.structured_content:  # type: ignore[attr-defined]
+                        sc = raw_result.structured_content  # type: ignore[attr-defined]
+                        if isinstance(sc, dict):
+                            structured = sc
                     else:
                         # Fallback: parse first textual content if JSON-like
                         # This handles MCP responses that return data only in content[0].text

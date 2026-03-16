@@ -155,8 +155,10 @@ class FileManager:
 
         return uploaded_files
 
-    def organize_files_metadata(self, file_references: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def organize_files_metadata(self, file_references: Dict[str, Dict[str, Any]], user_email: Optional[str] = None) -> Dict[str, Any]:
         """Organize files metadata by category for UI display."""
+        from atlas.core.capabilities import create_download_url
+
         files_metadata = []
 
         for filename, file_metadata in file_references.items():
@@ -165,9 +167,10 @@ class FileManager:
             source_type = tags.get("source", "uploaded")
             source_tool = tags.get("source_tool", None)
 
+            file_key = file_metadata.get("key", "")
             file_info = {
                 'filename': filename,
-                's3_key': file_metadata.get("key", ""),
+                's3_key': file_key,
                 'size': file_metadata.get("size", 0),
                 'type': self.categorize_file_type(filename),
                 'source': source_type,
@@ -177,6 +180,8 @@ class FileManager:
                 'content_type': file_metadata.get("content_type", "application/octet-stream"),
                 'can_display_in_canvas': self.should_display_in_canvas(filename)
             }
+            if file_key and user_email:
+                file_info['download_url'] = create_download_url(file_key, user_email)
             files_metadata.append(file_info)
 
         # Group by category
