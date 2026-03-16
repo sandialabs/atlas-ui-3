@@ -3,6 +3,7 @@ import { MessageSquare, AlertCircle } from 'lucide-react'
 
 const BannerMessagesCard = ({ openModal, addNotification }) => {
   const [bannerEnabled, setBannerEnabled] = useState(false)
+  const [filePath, setFilePath] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -14,6 +15,7 @@ const BannerMessagesCard = ({ openModal, addNotification }) => {
         }
         const data = await response.json()
         setBannerEnabled(typeof data.banner_enabled === 'boolean' ? data.banner_enabled : false)
+        setFilePath(data.file_path || '')
       } catch (err) {
         console.error('Error fetching banner status:', err)
       } finally {
@@ -68,6 +70,11 @@ const BannerMessagesCard = ({ openModal, addNotification }) => {
       <div className={`px-3 py-1 rounded text-sm font-medium mb-4 ${bannerEnabled ? getStatusColor('healthy') : getStatusColor('warning')}`}>
         {bannerEnabled ? 'Ready' : 'Feature Disabled'}
       </div>
+      {filePath && (
+        <div className="mb-3 px-3 py-2 bg-gray-900/50 rounded text-xs text-gray-400 font-mono break-all">
+          Config: {filePath}
+        </div>
+      )}
       <button 
         onClick={manageBanners}
         disabled={!bannerEnabled || loading}
