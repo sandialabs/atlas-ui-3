@@ -67,6 +67,8 @@ RUN mkdir -p atlas && touch atlas/__init__.py
 # Create required runtime & config directories
 RUN mkdir -p \
         /app/atlas/logs \
+        /app/logs \
+        /app/data \
         /app/config \
         /app/runtime/logs \
         /app/runtime/feedback \
