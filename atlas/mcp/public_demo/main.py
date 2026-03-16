@@ -17,9 +17,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
-mcp = FastMCP("Public Demo")
+mcp = create_stdio_server("Public Demo")
 
 
 @mcp.tool

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #431 - 2026-03-15
+- **Feature**: Per-user MCP session isolation -- STDIO servers use `BlockedStateStore` to prevent cross-user state leakage; HTTP servers get per-user client routing for session isolation.
+- **Fix**: Concurrent elicitation/sampling routing (#295) -- O(1) composite key lookup replaces broken server-name-only iteration.
+- **Feature**: Session persistence per conversation with `MCPSessionManager`, adaptive background task polling, multi-prompt support with meta forwarding, and pluggable state backend (memory/redis).
+
 ### PR #420 - 2026-03-16
 - **Enhancement**: Banner Messages admin card now displays the exact config file save path (e.g. `Config: /path/to/messages.txt`), consistent with how MCP Configuration shows its config path.
 

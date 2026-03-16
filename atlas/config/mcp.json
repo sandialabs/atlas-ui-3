@@ -59,6 +59,51 @@
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
   },
+  "elicitation_demo": {
+    "command": ["python", "mcp/elicitation_demo/main.py"],
+    "cwd": "atlas",
+    "groups": ["users"],
+    "description": "User elicitation demo - string, number, boolean, enum, structured, multi-turn",
+    "author": "Chat UI Team",
+    "short_description": "Elicitation input demo",
+    "compliance_level": "Public"
+  },
+  "progress_demo": {
+    "command": ["python", "mcp/progress_demo/main.py"],
+    "cwd": "atlas",
+    "groups": ["users"],
+    "description": "Long-running tasks with deterministic progress tracking",
+    "author": "Chat UI Team",
+    "short_description": "Progress tracking demo",
+    "compliance_level": "Public"
+  },
+  "session_state_demo": {
+    "url": "http://127.0.0.1:8010/mcp",
+    "transport": "http",
+    "groups": ["users"],
+    "description": "Shopping cart demo using FastMCP 3.x session state (ctx.get_state/ctx.set_state) — state persists across tool calls within a conversation, isolated per user via HTTP sessions",
+    "author": "Chat UI Team",
+    "short_description": "Session state demo (HTTP)",
+    "compliance_level": "Public"
+  },
+  "structured_output_demo": {
+    "command": ["python", "mcp/structured_output_demo/main.py"],
+    "cwd": "atlas",
+    "groups": ["users"],
+    "description": "Demonstrates FastMCP 3.x structured output priority — returns data field for clean UI display instead of raw JSON",
+    "author": "Chat UI Team",
+    "short_description": "Structured output demo",
+    "compliance_level": "Public"
+  },
+  "task_demo": {
+    "command": ["python", "mcp/task_demo/main.py"],
+    "cwd": "atlas",
+    "groups": ["users"],
+    "description": "Demonstrates FastMCP 3.x adaptive task polling — tools that can run as background tasks with progress tracking",
+    "author": "Chat UI Team",
+    "short_description": "Background task demo",
+    "compliance_level": "Public"
+  },
   "username-override-demo": {
     "command": [
       "python",

@@ -5,7 +5,7 @@ Tests the dictionary-based routing system that allows elicitation requests
 from MCP tools to reach the correct WebSocket connection across async tasks.
 """
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -123,6 +123,24 @@ class TestElicitationRouting:
 
         assert routing_key not in _ELICITATION_ROUTING
 
+    @pytest.mark.asyncio
+    async def test_concurrent_same_server_routing(self, manager):
+        """Two concurrent tool calls to the same server route correctly."""
+        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
+        _ELICITATION_ROUTING.clear()
+
+        tool_call_1 = ToolCall(id="call_1", name="tool_a", arguments={})
+        tool_call_2 = ToolCall(id="call_2", name="tool_b", arguments={})
+        cb1 = AsyncMock()
+        cb2 = AsyncMock()
+
+        async with manager._use_elicitation_context("server-x", tool_call_1, cb1):
+            async with manager._use_elicitation_context("server-x", tool_call_2, cb2):
+                assert ("server-x", "call_1") in _ELICITATION_ROUTING
+                assert ("server-x", "call_2") in _ELICITATION_ROUTING
+                assert _ELICITATION_ROUTING[("server-x", "call_1")].update_cb is cb1
+                assert _ELICITATION_ROUTING[("server-x", "call_2")].update_cb is cb2
+
 
 class TestElicitationHandler:
     """Test per-server elicitation handler creation."""
@@ -191,6 +209,94 @@ class TestElicitationHandler:
         assert isinstance(result, ElicitResult)
         assert result.action == "cancel"
         assert result.content is None
+
+    @pytest.mark.asyncio
+    async def test_handler_routes_via_meta_tool_call_id(self, manager):
+        """Handler uses _context.meta.model_extra to find correct routing."""
+        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
+        _ELICITATION_ROUTING.clear()
+
+        tool_call_1 = ToolCall(id="call_1", name="tool_a", arguments={})
+        tool_call_2 = ToolCall(id="call_2", name="tool_b", arguments={})
+        cb1 = AsyncMock()
+        cb2 = AsyncMock()
+
+        handler = manager._create_elicitation_handler("server-x")
+
+        async with manager._use_elicitation_context("server-x", tool_call_1, cb1):
+            async with manager._use_elicitation_context("server-x", tool_call_2, cb2):
+                mock_context = MagicMock()
+                mock_meta = MagicMock()
+                mock_meta.model_extra = {"tool_call_id": "call_2"}
+                mock_context.meta = mock_meta
+
+                with patch('atlas.application.chat.elicitation_manager.get_elicitation_manager') as mock_get_mgr:
+                    mock_elicit_mgr = Mock()
+                    mock_request = AsyncMock()
+                    mock_request.wait_for_response = AsyncMock(return_value={
+                        "action": "accept",
+                        "data": "test_value"
+                    })
+                    mock_elicit_mgr.create_elicitation_request = Mock(return_value=mock_request)
+                    mock_elicit_mgr.cleanup_request = Mock()
+                    mock_get_mgr.return_value = mock_elicit_mgr
+
+                    # Handler should route to cb2, not cb1
+                    _result = await handler("Pick a color", str, None, mock_context)
+                    # cb2 should have been called (routed correctly), cb1 should not
+                    cb2.assert_called_once()
+                    cb1.assert_not_called()
+                    assert _ELICITATION_ROUTING[("server-x", "call_2")].update_cb is cb2
+
+    @pytest.mark.asyncio
+    async def test_handler_fallback_single_match_without_meta(self, manager):
+        """When meta is unavailable but only one routing entry exists, use it."""
+        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
+        _ELICITATION_ROUTING.clear()
+
+        tool_call = ToolCall(id="call_1", name="tool_a", arguments={})
+        cb = AsyncMock()
+
+        handler = manager._create_elicitation_handler("server-x")
+
+        async with manager._use_elicitation_context("server-x", tool_call, cb):
+            mock_context = MagicMock()
+            mock_context.meta = None
+
+            with patch('atlas.application.chat.elicitation_manager.get_elicitation_manager') as mock_get_mgr:
+                mock_elicit_mgr = Mock()
+                mock_request = AsyncMock()
+                mock_request.wait_for_response = AsyncMock(return_value={
+                    "action": "accept",
+                    "data": "test_value"
+                })
+                mock_elicit_mgr.create_elicitation_request = Mock(return_value=mock_request)
+                mock_elicit_mgr.cleanup_request = Mock()
+                mock_get_mgr.return_value = mock_elicit_mgr
+
+                _result = await handler("Pick a color", str, None, mock_context)
+                cb.assert_called_once()
+                assert _ELICITATION_ROUTING[("server-x", "call_1")].update_cb is cb
+
+    @pytest.mark.asyncio
+    async def test_handler_cancels_on_ambiguous_routing_without_meta(self, manager):
+        """When meta unavailable and multiple entries exist, cancel."""
+        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
+        _ELICITATION_ROUTING.clear()
+
+        tool_call_1 = ToolCall(id="call_1", name="tool_a", arguments={})
+        tool_call_2 = ToolCall(id="call_2", name="tool_b", arguments={})
+        cb1 = AsyncMock()
+        cb2 = AsyncMock()
+
+        handler = manager._create_elicitation_handler("server-x")
+
+        async with manager._use_elicitation_context("server-x", tool_call_1, cb1):
+            async with manager._use_elicitation_context("server-x", tool_call_2, cb2):
+                mock_context = MagicMock()
+                mock_context.meta = None
+                result = await handler("Pick a color", str, None, mock_context)
+                assert result.action == "cancel"
 
 
 class TestElicitationIntegration:

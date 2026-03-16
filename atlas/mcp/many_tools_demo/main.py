@@ -4,10 +4,10 @@ MCP Server with 64 tools for testing UI with many tools.
 Demonstrates that the collapsible UI can handle servers with large numbers of tools.
 """
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Create the MCP server
-mcp = FastMCP("ManyToolsDemo")
+mcp = create_stdio_server("ManyToolsDemo")
 
 # Generate 64 tools dynamically to test UI scalability
 # Categories: data, analytics, file, network, system, database, security, report
