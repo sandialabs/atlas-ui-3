@@ -1,6 +1,6 @@
 # Logging and Monitoring
 
-Last updated: 2026-02-21
+Last updated: 2026-03-16
 
 The application produces structured logs in JSON Lines format (`.jsonl`), which makes them easy to parse and analyze.
 
@@ -18,6 +18,7 @@ It is essential to configure the location where the `app.jsonl` file is stored, 
     APP_LOG_DIR=/var/logs/atlas-ui
     ```
 *   **Default**: If this variable is not set, the application will attempt to create a `logs` directory in the project's root, which may not be desirable or possible in a production deployment. Ensure the specified directory exists and the application has the necessary permissions to write to it.
+*   **Startup validation**: Atlas now fails fast at startup if the resolved log directory is not writable. This matters for Docker bind mounts and Kubernetes PVCs, where image-time `mkdir` or `chown` does not fix mounted-volume permissions.
 
 ## Configuring Log Levels
 
