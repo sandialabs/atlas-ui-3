@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #434 - 2026-03-16
+- **Fix**: Startup now validates that `APP_LOG_DIR` and DuckDB chat history storage are writable, failing fast with a mounted-volume permission hint instead of a vague runtime error.
+
 ### PR #420 - 2026-03-16
 - **Enhancement**: Banner Messages admin card now displays the exact config file save path (e.g. `Config: /path/to/messages.txt`), consistent with how MCP Configuration shows its config path.
 

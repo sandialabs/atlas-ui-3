@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-02-20
+Last updated: 2026-03-16
 
 ## Overview
 
@@ -29,6 +29,8 @@ CHAT_HISTORY_DB_URL=duckdb:///data/chat_history.db
 ```
 
 The path is relative to the project root. The `data/` directory is created automatically.
+
+Atlas validates the DuckDB parent directory at startup and fails fast with a clear error if the path is not writable. When running in Docker or Kubernetes, fix the mounted host/PVC permissions rather than relying on image-time directory creation.
 
 #### Option B: PostgreSQL (Production / Multi-User)
 

@@ -23,6 +23,8 @@ from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
 from opentelemetry.sdk.trace import TracerProvider
 
+from atlas.core.runtime_path_validation import ensure_writable_directory
+
 
 class JSONFormatter(logging.Formatter):
     """Format log records as JSON lines."""
@@ -86,17 +88,28 @@ class OpenTelemetryConfig:
     # ------------------------------------------------------------------
     def _get_logs_dir(self) -> Path:
         """Get logs directory from config manager or default to project_root/logs."""
+        configured_logs_dir: Optional[Path] = None
         try:
             from atlas.modules.config import config_manager
             if config_manager.app_settings.app_log_dir:
-                return Path(config_manager.app_settings.app_log_dir)
+                configured_logs_dir = Path(config_manager.app_settings.app_log_dir)
         except Exception:
             # Config manager may not be initialized during early startup or tests.
             # Fall back to default logs directory without logging (avoid circular deps).
             pass
+        if configured_logs_dir is not None:
+            return ensure_writable_directory(
+                configured_logs_dir,
+                setting_name="APP_LOG_DIR",
+                purpose="Application logging",
+            )
         # Fallback: project_root/logs
         project_root = Path(__file__).resolve().parents[2]
-        return project_root / "logs"
+        return ensure_writable_directory(
+            project_root / "logs",
+            setting_name="APP_LOG_DIR",
+            purpose="Application logging",
+        )
 
     def _is_development(self) -> bool:
         try:

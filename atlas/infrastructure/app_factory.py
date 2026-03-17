@@ -1,10 +1,12 @@
 """Application factory for dependency injection and wiring."""
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 from atlas.application.chat.service import ChatService
 from atlas.core.auth import is_user_in_group
+from atlas.core.runtime_path_validation import ensure_duckdb_parent_writable
 from atlas.domain.rag_mcp_service import RAGMCPService
 from atlas.domain.unified_rag_service import UnifiedRAGService
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
@@ -73,13 +75,17 @@ class AppFactory:
         # Chat history persistence (feature-flagged)
         self.conversation_repository = None
         if self.config_manager.app_settings.feature_chat_history_enabled:
+            db_url = self.config_manager.app_settings.chat_history_db_url
+            ensure_duckdb_parent_writable(
+                db_url,
+                project_root=Path(__file__).resolve().parents[2],
+            )
             try:
                 from atlas.modules.chat_history import (
                     ConversationRepository,
                     get_session_factory,
                     init_database,
                 )
-                db_url = self.config_manager.app_settings.chat_history_db_url
                 init_database(db_url)
                 session_factory = get_session_factory()
                 self.conversation_repository = ConversationRepository(session_factory)
