@@ -19,9 +19,9 @@
 #>
 
 param(
-    [switch]$FrontendOnly,
-    [switch]$BackendOnly,
-    [switch]$StartMcpMock
+    [Alias("f")][switch]$FrontendOnly,
+    [Alias("b")][switch]$BackendOnly,
+    [Alias("m")][switch]$StartMcpMock
 )
 
 # Store the project root directory
@@ -312,7 +312,9 @@ function Main {
         Stop-Processes
         Clear-Logs
         Start-McpMock
-        Start-Backend -Port 8000 -HostName "0.0.0.0"
+        $backendPort = if ($env:PORT) { [int]$env:PORT } else { 8000 }
+        $backendHost = if ($env:ATLAS_HOST) { $env:ATLAS_HOST } else { "127.0.0.1" }
+        Start-Backend -Port $backendPort -HostName $backendHost
         Write-Host "Backend server started."
         Write-Host "Press Ctrl+C to stop all services."
 
@@ -334,7 +336,9 @@ function Main {
     Clear-Logs
     Build-Frontend
     Start-McpMock
-    Start-Backend -Port 8000 -HostName "127.0.0.1"
+    $backendPort = if ($env:PORT) { [int]$env:PORT } else { 8000 }
+    $backendHost = if ($env:ATLAS_HOST) { $env:ATLAS_HOST } else { "127.0.0.1" }
+    Start-Backend -Port $backendPort -HostName $backendHost
 
     # Display MCP info if started
     if ($START_MCP_MOCK) {
