@@ -281,6 +281,11 @@ function Start-Backend {
     Set-Location "$PROJECT_ROOT/atlas"
     # The atlas package is installed in editable mode (pip install -e .), so
     # PYTHONPATH is no longer needed for atlas imports to work.
+    # Set APP_CONFIG_DIR so user overrides in <project_root>/config/ take
+    # precedence over package defaults in atlas/config/ (CWD is atlas/).
+    if (-not $env:APP_CONFIG_DIR) {
+        $env:APP_CONFIG_DIR = "$PROJECT_ROOT/config"
+    }
     $uvicornExe = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
     $arguments = "main:app --host $HostName --port $Port"
 
