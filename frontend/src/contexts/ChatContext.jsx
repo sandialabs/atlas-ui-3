@@ -296,6 +296,7 @@ export const ChatProvider = ({ children }) => {
 			agent_max_steps: settings.maxIterations || agent.agentMaxSteps,
 			temperature: settings.llmTemperature || 0.7,
 			agent_loop_strategy: settings.agentLoopStrategy || undefined,
+			selected_skill: agent.agentModeEnabled ? (agent.selectedSkill || undefined) : undefined,
 			compliance_level_filter: selections.complianceLevelFilter,
 			save_mode: saveMode,
 			// Backward compat: backend still checks incognito for older clients
@@ -561,6 +562,7 @@ export const ChatProvider = ({ children }) => {
 		models: config.models,
 		tools: config.tools,
 		prompts: config.prompts,
+		skills: config.skills,
 		dataSources: config.dataSources,
 		ragServers: config.ragServers, // Expose rich server structure
 		ragSources, // Expose flattened list of sources
@@ -603,6 +605,8 @@ export const ChatProvider = ({ children }) => {
 		currentAgentStep: agent.currentAgentStep,
 		agentPendingQuestion: agent.agentPendingQuestion,
 		setAgentPendingQuestion: agent.setAgentPendingQuestion,
+		selectedSkill: agent.selectedSkill,
+		setSelectedSkill: agent.setSelectedSkill,
 		isInAdminGroup: config.isInAdminGroup,
 		fileExtraction: config.fileExtraction,
 		messages,

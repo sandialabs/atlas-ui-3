@@ -362,6 +362,34 @@ async def get_config(
                 "allow_edit": approval_config.allow_edit
             }
 
+    # Build skills list (only enabled skills, respecting group access).
+    # Skills config is loaded unconditionally by ConfigManager (cached) but filtered
+    # here so only agent-mode-enabled deployments expose skills to the frontend.
+    skills_info = []
+    if app_settings.feature_agent_mode_available:
+        skills_config = config_manager.skills_config
+        for skill_id, skill in skills_config.skills.items():
+            if not skill.enabled:
+                continue
+            # If skill has group restrictions, check user membership
+            if skill.groups:
+                user_in_skill_group = False
+                for grp in skill.groups:
+                    if await is_user_in_group(current_user, grp):
+                        user_in_skill_group = True
+                        break
+                if not user_in_skill_group:
+                    continue
+            skills_info.append({
+                "id": skill_id,
+                "name": skill.name,
+                "description": skill.description,
+                "version": skill.version,
+                "author": skill.author,
+                "required_tools": skill.required_tools,
+                "compliance_level": skill.compliance_level,
+            })
+
     return {
         "app_name": app_settings.app_name,
         "models": models_list,
@@ -369,6 +397,7 @@ async def get_config(
         "prompts": prompts_info,  # Available prompts from authorized servers
         "data_sources": rag_data_sources,  # RAG data sources for the user
         "rag_servers": rag_servers,  # Optional richer structure for RAG UI
+        "skills": skills_info,  # Agent skills available to the user
         "user": current_user,
     "is_in_admin_group": await is_user_in_group(current_user, app_settings.admin_group),
         "active_sessions": 0,  # TODO: Implement session counting in ChatService

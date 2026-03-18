@@ -261,6 +261,20 @@ class ChatService:
             if session:
                 session.context["conversation_id"] = conversation_id
 
+        # Resolve selected_skill to a skill_prompt string so the orchestrator
+        # can inject it into the system prompt without needing config access.
+        selected_skill = kwargs.pop("selected_skill", None)
+        if selected_skill and self.config_manager:
+            try:
+                skill = self.config_manager.skills_config.skills.get(selected_skill)
+                if skill and skill.enabled and skill.prompt:
+                    kwargs["skill_prompt"] = skill.prompt
+                    logger.debug(
+                        "Resolved skill '%s' to prompt (len=%d)", selected_skill, len(skill.prompt)
+                    )
+            except Exception as e:
+                logger.warning("Failed to resolve skill '%s': %s", selected_skill, e)
+
         try:
             # Delegate to orchestrator
             orchestrator = self._get_orchestrator()

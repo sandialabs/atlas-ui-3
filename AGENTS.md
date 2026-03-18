@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-03-12
+Last updated: 2026-03-18
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -410,6 +410,9 @@ Edit `config/mcp.json` (your local config, created by `atlas-init`). Set `groups
 
 **Add a RAG provider:**
 Edit `config/rag-sources.json` (your local config). For MCP RAG servers, set `type: "mcp"` and ensure it exposes `rag_*` tools. For HTTP RAG APIs, set `type: "http"` with `url` and `bearer_token`. UI consumes `/api/config.rag_servers`.
+
+**Add an agent skill:**
+Edit `config/skills.json` (your local config). Each skill has a `name`, `description`, `prompt` (injected into the system prompt when active), and optional `groups`/`compliance_level`/`required_tools`. Skills are shown in the Agent Settings modal and sent as `selected_skill` in WebSocket chat messages. See `docs/admin/agent-skills.md` for full documentation.
 
 **Change agent loop:**
 Set `APP_AGENT_LOOP_STRATEGY` to `agentic | react | think-act | act`; ChatService uses `app_settings.agent_loop_strategy`.

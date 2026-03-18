@@ -50,6 +50,7 @@ class MessageBuilder:
         session: Session,
         include_files_manifest: bool = True,
         include_system_prompt: bool = True,
+        skill_prompt: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Build messages array from session history and context.
@@ -58,6 +59,7 @@ class MessageBuilder:
             session: Current chat session
             include_files_manifest: Whether to append files manifest
             include_system_prompt: Whether to prepend system prompt
+            skill_prompt: Optional agent skill instructions to append to the system prompt
 
         Returns:
             List of messages ready for LLM call
@@ -70,8 +72,17 @@ class MessageBuilder:
                 user_email=session.user_email
             )
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-                logger.debug(f"Added system prompt (len={len(system_prompt)})")
+                content = system_prompt
+                if skill_prompt:
+                    content = f"{system_prompt}\n\n{skill_prompt}"
+                messages.append({"role": "system", "content": content})
+                logger.debug(f"Added system prompt (len={len(content)})")
+            elif skill_prompt:
+                messages.append({"role": "system", "content": skill_prompt})
+                logger.debug(f"Added skill-only system prompt (len={len(skill_prompt)})")
+        elif skill_prompt:
+            messages.append({"role": "system", "content": skill_prompt})
+            logger.debug(f"Added skill-only system prompt (len={len(skill_prompt)})")
 
         # Get conversation history from session
         history_messages = session.history.get_messages_for_llm()

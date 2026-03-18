@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #433 - 2026-03-18
+- **Feature**: Add Agent Skills support following the agentskills.io specification. Skills are defined in `config/skills.json`, selectable in the Agent Settings modal, and inject domain-specific instructions into the system prompt when agent mode is active.
+
 ### PR #420 - 2026-03-16
 - **Enhancement**: Banner Messages admin card now displays the exact config file save path (e.g. `Config: /path/to/messages.txt`), consistent with how MCP Configuration shows its config path.
 

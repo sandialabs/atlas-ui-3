@@ -86,6 +86,7 @@ export function useChatConfig() {
   const [models, setModels] = useState(cached.current?.models || [])
   const [tools, setTools] = useState([])
   const [prompts, setPrompts] = useState([])
+  const [skills, setSkills] = useState([])
   const [dataSources, setDataSources] = useState([])
   const [ragServers, setRagServers] = useState([])
   const [features, setFeatures] = useState(
@@ -136,6 +137,7 @@ export function useChatConfig() {
       }))
       setTools(uniqueTools)
       setPrompts(cfg.prompts || [])
+      setSkills(cfg.skills || [])
       setDataSources(cfg.data_sources || [])
       setRagServers(cfg.rag_servers || [])
     }
@@ -236,6 +238,7 @@ export function useChatConfig() {
     models,
     tools,
     prompts,
+    skills,
     dataSources,
     ragServers,
     features,

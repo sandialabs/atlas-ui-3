@@ -6,6 +6,7 @@ export function useAgentMode(available = true) {
   const [agentMaxSteps, setAgentMaxSteps] = usePersistentState('chatui-agent-max-steps', 5)
   const [currentAgentStep, setCurrentAgentStep] = usePersistentState('chatui-agent-current-step', 0)
   const [agentPendingQuestion, setAgentPendingQuestion] = useState(null)
+  const [selectedSkill, setSelectedSkill] = usePersistentState('chatui-agent-selected-skill', null)
   const previousAvailable = useRef(available)
 
   // If availability turns off (but not on initial load), force-disable stored state
@@ -25,6 +26,8 @@ export function useAgentMode(available = true) {
     setCurrentAgentStep,
   agentPendingQuestion,
   setAgentPendingQuestion,
+    selectedSkill,
+    setSelectedSkill,
     agentModeAvailable: available
   }
 }

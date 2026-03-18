@@ -218,6 +218,42 @@ class RAGSourcesConfig(BaseModel):
         return v
 
 
+class SkillConfig(BaseModel):
+    """Configuration for a single agent skill.
+
+    Agent skills define reusable instruction packages that can be activated in
+    agent mode to give the model domain-specific expertise. Each skill's prompt
+    is appended to the system prompt when the skill is selected.
+
+    Skills follow the agentskills.io specification format:
+    https://agentskills.io/specification
+    """
+    name: str
+    description: str = ""
+    prompt: str = ""
+    version: str = "1.0.0"
+    author: Optional[str] = None
+    help_email: Optional[str] = None
+    required_tools: List[str] = Field(default_factory=list)
+    compliance_level: Optional[str] = None
+    groups: List[str] = Field(default_factory=list)
+    enabled: bool = True
+
+
+class SkillsConfig(BaseModel):
+    """Configuration for all agent skills."""
+    skills: Dict[str, SkillConfig] = Field(default_factory=dict)
+
+    @field_validator('skills', mode='before')
+    @classmethod
+    def validate_skills(cls, v):
+        """Convert dict values to SkillConfig objects."""
+        if isinstance(v, dict):
+            return {name: SkillConfig(**config) if isinstance(config, dict) else config
+                   for name, config in v.items()}
+        return v
+
+
 class ToolApprovalConfig(BaseModel):
     """Configuration for a single tool's approval settings."""
     require_approval: bool = False
@@ -584,6 +620,7 @@ class AppSettings(BaseSettings):
     tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
     splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
     file_extractors_config_file: str = Field(default="file-extractors.json", validation_alias="FILE_EXTRACTORS_CONFIG_FILE")
+    skills_config_file: str = Field(default="skills.json", validation_alias="SKILLS_CONFIG_FILE")
 
     # Config directory path (user customizations; falls back to atlas/config/ for defaults)
     app_config_dir: str = Field(default="config", validation_alias="APP_CONFIG_DIR")
@@ -635,6 +672,7 @@ class ConfigManager:
         self._rag_sources_config: Optional[RAGSourcesConfig] = None
         self._tool_approvals_config: Optional[ToolApprovalsConfig] = None
         self._file_extractors_config: Optional[FileExtractorsConfig] = None
+        self._skills_config: Optional[SkillsConfig] = None
 
     def _search_paths(self, file_name: str) -> List[Path]:
         """Generate search paths for a configuration file.
@@ -1034,6 +1072,33 @@ class ConfigManager:
         except Exception as e:
             logger.warning(f"Could not validate {config_type} compliance levels: {e}")
 
+    @property
+    def skills_config(self) -> SkillsConfig:
+        """Get agent skills configuration (cached)."""
+        if self._skills_config is None:
+            try:
+                skills_filename = self.app_settings.skills_config_file
+                file_paths = self._search_paths(skills_filename)
+                data = self._load_file_with_error_handling(file_paths, "JSON")
+
+                if data:
+                    skills_data = {"skills": data}
+                    self._skills_config = SkillsConfig(**skills_data)
+                    logger.info(
+                        "Loaded skills config with %d skills: %s",
+                        len(self._skills_config.skills),
+                        list(self._skills_config.skills.keys()),
+                    )
+                else:
+                    self._skills_config = SkillsConfig()
+                    logger.info("Created empty skills config (no configuration file found)")
+
+            except Exception as e:
+                logger.error("Failed to parse skills configuration: %s", e, exc_info=True)
+                self._skills_config = SkillsConfig()
+
+        return self._skills_config
+
     def reload_configs(self) -> None:
         """Reload all configurations from files."""
         self._app_settings = None
@@ -1043,6 +1108,7 @@ class ConfigManager:
         self._rag_sources_config = None
         self._tool_approvals_config = None
         self._file_extractors_config = None
+        self._skills_config = None
         logger.info("Configuration cache cleared, will reload on next access")
 
     def reload_mcp_config(self) -> MCPConfig:

@@ -8,7 +8,10 @@ const AgentModal = ({ isOpen, onClose }) => {
     agentMaxSteps,
     setAgentMaxSteps,
     currentAgentStep,
-    agentModeAvailable
+    agentModeAvailable,
+    selectedSkill,
+    setSelectedSkill,
+    skills,
   } = useChat()
 
   if (!agentModeAvailable) return null
@@ -92,6 +95,39 @@ const AgentModal = ({ isOpen, onClose }) => {
                   <span>10</span>
                 </div>
               </div>
+
+              {/* Agent Skills Selector */}
+              {skills && skills.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-gray-200">
+                      Agent Skill:
+                    </label>
+                  </div>
+                  <select
+                    value={selectedSkill || ''}
+                    onChange={(e) => setSelectedSkill(e.target.value || null)}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">No skill selected</option>
+                    {skills.map((skill) => (
+                      <option key={skill.id} value={skill.id}>
+                        {skill.name}
+                      </option>
+                    ))}
+                  </select>
+                  {(() => {
+                    const activeSkill = selectedSkill ? skills.find(s => s.id === selectedSkill) : null
+                    return activeSkill?.description ? (
+                      <p className="text-xs text-gray-400">{activeSkill.description}</p>
+                    ) : !selectedSkill ? (
+                      <p className="text-xs text-gray-400">
+                        Select a skill to give the agent domain-specific instructions.
+                      </p>
+                    ) : null
+                  })()}
+                </div>
+              )}
 
               {/* Agent Progress */}
               {currentAgentStep > 0 && (

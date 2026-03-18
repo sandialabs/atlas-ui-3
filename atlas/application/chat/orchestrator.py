@@ -157,7 +157,8 @@ class ChatOrchestrator:
         # Build messages with history and files manifest
         messages = await self.message_builder.build_messages(
             session=session,
-            include_files_manifest=True
+            include_files_manifest=True,
+            skill_prompt=kwargs.get("skill_prompt"),
         )
 
         # Apply MCP prompt override

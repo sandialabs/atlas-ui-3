@@ -440,6 +440,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             agent_max_steps=data.get("agent_max_steps", 10),
                             temperature=data.get("temperature", 0.7),
                             agent_loop_strategy=data.get("agent_loop_strategy"),
+                            selected_skill=data.get("selected_skill"),
                             update_callback=lambda message: websocket_update_callback(websocket, message),
                             files=data.get("files"),
                             incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
