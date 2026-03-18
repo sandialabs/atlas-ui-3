@@ -43,9 +43,10 @@ class ManagedSession:
         return self._opened and not self._closed
 
     async def open(self) -> None:
-        if not self._opened:
-            await self._client.__aenter__()
-            self._opened = True
+        if self._opened:
+            return
+        self._opened = True
+        await self._client.__aenter__()
 
     async def close(self) -> None:
         if self._opened and not self._closed:
@@ -67,6 +68,8 @@ class MCPSessionManager:
         self._sessions: Dict[Tuple[str, str], ManagedSession] = {}
         self._lock = asyncio.Lock()
         self._key_locks: Dict[Tuple[str, str], asyncio.Lock] = {}
+        # Reverse index: conversation_id → set of (conversation_id, server_name) keys
+        self._conv_index: Dict[str, set] = {}
 
     async def acquire(
         self,
@@ -105,6 +108,7 @@ class MCPSessionManager:
 
             async with self._lock:
                 self._sessions[key] = session
+                self._conv_index.setdefault(conversation_id, set()).add(key)
 
             logger.debug(
                 "Opened MCP session for conversation=%s server=%s",
@@ -119,6 +123,11 @@ class MCPSessionManager:
         async with self._lock:
             session = self._sessions.pop(key, None)
             self._key_locks.pop(key, None)
+            conv_keys = self._conv_index.get(conversation_id)
+            if conv_keys is not None:
+                conv_keys.discard(key)
+                if not conv_keys:
+                    del self._conv_index[conversation_id]
         if session is not None:
             await session.close()
             logger.debug(
@@ -128,16 +137,15 @@ class MCPSessionManager:
             )
 
     async def release_all(self, conversation_id: str) -> None:
-        """Close all sessions for a conversation."""
+        """Close all sessions for a conversation (O(1) lookup via reverse index)."""
         to_close: list[ManagedSession] = []
         async with self._lock:
-            keys_to_remove = [
-                k for k in self._sessions if k[0] == conversation_id
-            ]
+            keys_to_remove = self._conv_index.pop(conversation_id, set())
             for k in keys_to_remove:
-                session = self._sessions.pop(k)
+                session = self._sessions.pop(k, None)
                 self._key_locks.pop(k, None)
-                to_close.append(session)
+                if session is not None:
+                    to_close.append(session)
 
         for session in to_close:
             await session.close()

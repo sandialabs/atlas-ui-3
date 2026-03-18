@@ -382,6 +382,11 @@ class AppSettings(BaseSettings):
         description="Timeout in seconds for MCP tool calls (call_tool)",
         validation_alias="MCP_CALL_TIMEOUT"
     )
+    mcp_task_timeout: float = Field(
+        default=10.0,
+        description="Seconds to wait synchronously before switching to background task polling",
+        validation_alias="MCP_TASK_TIMEOUT"
+    )
 
     # MCP Token Storage settings
     mcp_token_storage_dir: Optional[str] = Field(

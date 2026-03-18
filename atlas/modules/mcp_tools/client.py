@@ -45,15 +45,18 @@ _ACTIVE_LOG_CALLBACK: contextvars.ContextVar[Optional[LogCallback]] = contextvar
     default=None,
 )
 
-# Dictionary-based routing for elicitation so a shared Client can still deliver
-# elicitation requests to the correct user's WebSocket.
-# Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
-# Note: Cannot use contextvars.ContextVar because MCP receive loop runs in a different task
-_ELICITATION_ROUTING: Dict[tuple, _ElicitationRoutingContext] = {}
+# Sentinel for ambiguous routing (replaces magic string)
+class _AmbiguousRouting:
+    """Sentinel indicating multiple routing entries matched without meta disambiguation."""
+    _instance = None
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    def __repr__(self):
+        return "AMBIGUOUS_ROUTING"
 
-# Dictionary-based routing for sampling requests (similar to elicitation)
-# Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
-_SAMPLING_ROUTING: Dict[tuple, "_SamplingRoutingContext"] = {}
+AMBIGUOUS_ROUTING = _AmbiguousRouting()
 
 
 class _SamplingRoutingContext:
@@ -152,6 +155,16 @@ class MCPToolManager:
         self._user_clients: Dict[tuple, Client] = {}
         self._user_clients_lock = asyncio.Lock()
 
+        # Dictionary-based routing for elicitation so a shared Client can still deliver
+        # elicitation requests to the correct user's WebSocket.
+        # Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
+        # Note: Cannot use contextvars.ContextVar because MCP receive loop runs in a different task
+        self._elicitation_routing: Dict[tuple, _ElicitationRoutingContext] = {}
+
+        # Dictionary-based routing for sampling requests (similar to elicitation)
+        # Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
+        self._sampling_routing: Dict[tuple, "_SamplingRoutingContext"] = {}
+
         # Session manager for per-conversation session persistence
         from atlas.modules.mcp_tools.session_manager import MCPSessionManager
         self._session_manager = MCPSessionManager()
@@ -159,12 +172,9 @@ class MCPToolManager:
         # Cache of which servers support background tasks
         self._server_task_support: Dict[str, bool] = {}
 
-        # Parse task timeout once at init (seconds before switching to polling)
-        try:
-            self._task_timeout = float(os.getenv("MCP_TASK_TIMEOUT", "10"))
-        except (ValueError, TypeError):
-            logger.warning("Invalid MCP_TASK_TIMEOUT, defaulting to 10s")
-            self._task_timeout = 10.0
+        # Task timeout: seconds before switching to background task polling
+        app_settings = config_manager.app_settings
+        self._task_timeout = app_settings.mcp_task_timeout
 
     def _get_min_log_level(self) -> int:
         """Get the minimum log level from environment or config."""
@@ -274,11 +284,11 @@ class MCPToolManager:
         """
         routing = _ElicitationRoutingContext(server_name, tool_call, update_cb)
         routing_key = (server_name, tool_call.id)
-        _ELICITATION_ROUTING[routing_key] = routing
+        self._elicitation_routing[routing_key] = routing
         try:
             yield
         finally:
-            _ELICITATION_ROUTING.pop(routing_key, None)
+            self._elicitation_routing.pop(routing_key, None)
 
     def _create_elicitation_handler(self, server_name: str):
         """
@@ -293,9 +303,9 @@ class MCPToolManager:
             from mcp.types import ElicitRequestFormParams
 
             # Find routing context for this server (keyed by (server_name, tool_call_id))
-            routing = self._resolve_routing(_ELICITATION_ROUTING, server_name, _context)
+            routing = self._resolve_routing(self._elicitation_routing, server_name, _context)
 
-            if routing == "ambiguous":
+            if routing is AMBIGUOUS_ROUTING:
                 return ElicitResult(action="cancel", content=None)
 
             if routing is None:
@@ -397,11 +407,11 @@ class MCPToolManager:
         """
         routing = _SamplingRoutingContext(server_name, tool_call, update_cb)
         routing_key = (server_name, tool_call.id)
-        _SAMPLING_ROUTING[routing_key] = routing
+        self._sampling_routing[routing_key] = routing
         try:
             yield
         finally:
-            _SAMPLING_ROUTING.pop(routing_key, None)
+            self._sampling_routing.pop(routing_key, None)
 
     def _create_sampling_handler(self, server_name: str):
         """
@@ -415,9 +425,9 @@ class MCPToolManager:
             from mcp.types import CreateMessageResult, SamplingMessage, TextContent
 
             # Find routing context for this server (keyed by (server_name, tool_call_id))
-            routing = self._resolve_routing(_SAMPLING_ROUTING, server_name, context)
+            routing = self._resolve_routing(self._sampling_routing, server_name, context)
 
-            if routing == "ambiguous":
+            if routing is AMBIGUOUS_ROUTING:
                 raise Exception(f"Ambiguous sampling routing for server '{server_name}'")
 
             if routing is None:
@@ -1517,11 +1527,14 @@ class MCPToolManager:
                     sampling_handler=self._create_sampling_handler(server_name),
                 )
 
-            # Cache the client
+            # Cache the client (re-check to avoid duplicate creation race)
             async with self._user_clients_lock:
+                if cache_key in self._user_clients:
+                    # Another coroutine created it while we were building ours
+                    return self._user_clients[cache_key]
                 self._user_clients[cache_key] = client
 
-            logger.info(
+            logger.debug(
                 f"Created user-specific client for server '{server_name}' (auth_type={auth_type})"
             )
             return client
@@ -1587,16 +1600,32 @@ class MCPToolManager:
 
             self._user_clients[cache_key] = client
 
-        logger.info(f"Created per-user HTTP client for server '{server_name}' user='{user_email}'")
+        logger.debug(f"Created per-user HTTP client for server '{server_name}'")
         return client
 
-    async def release_sessions(self, conversation_id: str) -> None:
+    async def release_sessions(self, conversation_id: str, user_email: str | None = None) -> None:
         """Release all MCP sessions for a conversation.
 
         Call this on WebSocket disconnect or conversation restore to clean up
-        persistent sessions held by the session manager.
+        persistent sessions held by the session manager. Also evicts per-user
+        HTTP clients for this user to prevent unbounded cache growth.
         """
         await self._session_manager.release_all(conversation_id)
+
+        # Evict per-user HTTP clients for this user to prevent unbounded growth
+        if user_email:
+            async with self._user_clients_lock:
+                keys_to_remove = [
+                    k for k in self._user_clients
+                    if k[0] == user_email.lower()
+                ]
+                for k in keys_to_remove:
+                    del self._user_clients[k]
+                if keys_to_remove:
+                    logger.debug(
+                        "Evicted %d per-user HTTP client(s) for conversation=%s",
+                        len(keys_to_remove), conversation_id,
+                    )
 
     def _resolve_routing(
         self,
@@ -1624,7 +1653,7 @@ class MCPToolManager:
                     "Ambiguous routing for server '%s' with %d entries",
                     server_name, len(matches),
                 )
-                return "ambiguous"
+                return AMBIGUOUS_ROUTING
 
         return routing
 
@@ -2383,6 +2412,19 @@ class MCPToolManager:
         return results
 
     async def cleanup(self):
-        """Cleanup all clients."""
+        """Cleanup all clients, persistent sessions, and per-user HTTP client cache."""
         logger.info("Cleaning up MCP clients")
-        # FastMCP clients handle cleanup automatically with context managers
+
+        # Close all persistent sessions
+        for key in list(self._session_manager._sessions.keys()):
+            try:
+                await self._session_manager.release(key[0], key[1])
+            except Exception as e:
+                logger.debug("Error releasing session %s: %s", key, e)
+
+        # Clear per-user HTTP client cache
+        async with self._user_clients_lock:
+            count = len(self._user_clients)
+            self._user_clients.clear()
+            if count:
+                logger.debug("Cleared %d per-user HTTP client(s)", count)

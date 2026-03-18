@@ -49,16 +49,15 @@ class TestSamplingIntegration:
         # Use the context manager
         async with manager._use_sampling_context("test_server", tool_call, update_cb):
             # Verify routing is set up with composite key (server_name, tool_call.id)
-            from atlas.modules.mcp_tools.client import _SAMPLING_ROUTING
             routing_key = ("test_server", "test_tool_call_1")
-            assert routing_key in _SAMPLING_ROUTING
-            routing = _SAMPLING_ROUTING[routing_key]
+            assert routing_key in manager._sampling_routing
+            routing = manager._sampling_routing[routing_key]
             assert routing.server_name == "test_server"
             assert routing.tool_call == tool_call
             assert routing.update_cb == update_cb
 
         # Verify routing is cleaned up
-        assert routing_key not in _SAMPLING_ROUTING
+        assert routing_key not in manager._sampling_routing
 
     @pytest.mark.asyncio
     async def test_sampling_handler_with_routing(self):

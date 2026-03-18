@@ -21,8 +21,12 @@ class TestGetStateStore:
         """When pykeyvalue[redis] is not installed, falls back to None."""
         from atlas.mcp.common.state import get_state_store
 
+        # Temporarily remove the redis store module to simulate missing dependency
         with patch.dict("os.environ", {"MCP_STATE_BACKEND": "redis"}):
-            with patch("builtins.__import__", side_effect=ImportError("no module")):
+            with patch.dict(
+                "sys.modules",
+                {"key_value.aio.stores.redis": None},
+            ):
                 assert get_state_store() is None
 
     def test_redis_connection_error_falls_back(self):

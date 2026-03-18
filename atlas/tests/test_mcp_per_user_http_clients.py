@@ -29,6 +29,8 @@ def manager():
         mgr._min_log_level = 20
         mgr._user_clients = {}
         mgr._user_clients_lock = asyncio.Lock()
+        mgr._elicitation_routing = {}
+        mgr._sampling_routing = {}
         return mgr
 
 

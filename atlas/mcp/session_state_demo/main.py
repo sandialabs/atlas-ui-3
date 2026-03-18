@@ -23,7 +23,9 @@ from typing import Any, Dict
 
 from fastmcp import Context, FastMCP
 
-mcp = FastMCP("Session State Demo")
+from atlas.mcp.common.state import get_state_store
+
+mcp = FastMCP("Session State Demo", session_state_store=get_state_store())
 
 CART_KEY = "shopping_cart"
 HISTORY_KEY = "action_history"

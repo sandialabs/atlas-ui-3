@@ -111,14 +111,16 @@ print('MCP_STATE_BACKEND=memory returns None (FastMCP default)')
 " 2>&1
 print_result $? "MCP_STATE_BACKEND=memory returns None"
 
-print_header "13. Feature flag: MCP_STATE_BACKEND=redis falls back gracefully"
-export MCP_STATE_BACKEND=redis
+print_header "13. Feature flag: MCP_STATE_BACKEND=redis import error falls back"
 cd "$ATLAS_DIR" && python -c "
+from unittest.mock import patch
 from atlas.mcp.common.state import get_state_store
-store = get_state_store()
-# Without redis installed or running, should fall back to None
-assert store is None, f'Expected None fallback, got {store}'
-print('MCP_STATE_BACKEND=redis falls back to None without redis')
+# Test the fallback path by simulating missing redis dependency
+with patch.dict('os.environ', {'MCP_STATE_BACKEND': 'redis'}):
+    with patch.dict('sys.modules', {'key_value.aio.stores.redis': None}):
+        store = get_state_store()
+        assert store is None, f'Expected None fallback, got {store}'
+print('MCP_STATE_BACKEND=redis falls back to None on import error')
 " 2>&1
 print_result $? "MCP_STATE_BACKEND=redis graceful fallback"
 unset MCP_STATE_BACKEND MCP_TASK_TIMEOUT
@@ -132,8 +134,8 @@ cd "$ATLAS_DIR" && python -c "
 from atlas.mcp_shared.server_factory import create_stdio_server
 from atlas.mcp_shared.blocked_state import BlockedStateStore
 mcp = create_stdio_server('test-server')
-assert isinstance(mcp._session_state_store, BlockedStateStore), \
-    f'Expected BlockedStateStore, got {type(mcp._session_state_store)}'
+assert isinstance(mcp._state_storage, BlockedStateStore), \
+    f'Expected BlockedStateStore, got {type(mcp._state_storage)}'
 print('create_stdio_server correctly wires BlockedStateStore')
 " 2>&1
 print_result $? "STDIO factory wires BlockedStateStore end-to-end"

@@ -38,52 +38,39 @@ class TestElicitationRouting:
     @pytest.mark.asyncio
     async def test_elicitation_context_sets_routing(self, manager, mock_tool_call, mock_update_callback):
         """Test that elicitation context correctly sets routing in dictionary."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
-
-        # Clear routing before test
-        _ELICITATION_ROUTING.clear()
-
         server_name = "test_server"
         routing_key = (server_name, mock_tool_call.id)
 
         # Use the context manager
         async with manager._use_elicitation_context(server_name, mock_tool_call, mock_update_callback):
             # Inside context: routing should exist with composite key
-            assert routing_key in _ELICITATION_ROUTING
-            routing = _ELICITATION_ROUTING[routing_key]
+            assert routing_key in manager._elicitation_routing
+            routing = manager._elicitation_routing[routing_key]
             assert routing.server_name == server_name
             assert routing.tool_call == mock_tool_call
             assert routing.update_cb == mock_update_callback
 
         # After context: routing should be cleaned up
-        assert routing_key not in _ELICITATION_ROUTING
+        assert routing_key not in manager._elicitation_routing
 
     @pytest.mark.asyncio
     async def test_elicitation_routing_cleanup_on_error(self, manager, mock_tool_call, mock_update_callback):
         """Test that routing is cleaned up even if error occurs."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
-
-        _ELICITATION_ROUTING.clear()
-
         server_name = "test_server"
         routing_key = (server_name, mock_tool_call.id)
 
         # Simulate an error inside the context
         with pytest.raises(RuntimeError):
             async with manager._use_elicitation_context(server_name, mock_tool_call, mock_update_callback):
-                assert routing_key in _ELICITATION_ROUTING
+                assert routing_key in manager._elicitation_routing
                 raise RuntimeError("Simulated error")
 
         # Routing should still be cleaned up
-        assert routing_key not in _ELICITATION_ROUTING
+        assert routing_key not in manager._elicitation_routing
 
     @pytest.mark.asyncio
     async def test_multiple_servers_routing(self, manager, mock_update_callback):
         """Test that multiple servers can have separate routing contexts."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
-
-        _ELICITATION_ROUTING.clear()
-
         tool_call_1 = ToolCall(id="call_1", name="tool_1", arguments={})
         tool_call_2 = ToolCall(id="call_2", name="tool_2", arguments={})
         routing_key_1 = ("server_1", "call_1")
@@ -93,42 +80,35 @@ class TestElicitationRouting:
         async with manager._use_elicitation_context("server_1", tool_call_1, mock_update_callback):
             async with manager._use_elicitation_context("server_2", tool_call_2, mock_update_callback):
                 # Both should exist simultaneously
-                assert routing_key_1 in _ELICITATION_ROUTING
-                assert routing_key_2 in _ELICITATION_ROUTING
-                assert _ELICITATION_ROUTING[routing_key_1].tool_call == tool_call_1
-                assert _ELICITATION_ROUTING[routing_key_2].tool_call == tool_call_2
+                assert routing_key_1 in manager._elicitation_routing
+                assert routing_key_2 in manager._elicitation_routing
+                assert manager._elicitation_routing[routing_key_1].tool_call == tool_call_1
+                assert manager._elicitation_routing[routing_key_2].tool_call == tool_call_2
 
             # server_2 cleaned up, server_1 still exists
-            assert routing_key_1 in _ELICITATION_ROUTING
-            assert routing_key_2 not in _ELICITATION_ROUTING
+            assert routing_key_1 in manager._elicitation_routing
+            assert routing_key_2 not in manager._elicitation_routing
 
         # Both cleaned up
-        assert routing_key_1 not in _ELICITATION_ROUTING
-        assert routing_key_2 not in _ELICITATION_ROUTING
+        assert routing_key_1 not in manager._elicitation_routing
+        assert routing_key_2 not in manager._elicitation_routing
 
     @pytest.mark.asyncio
     async def test_elicitation_with_none_callback(self, manager, mock_tool_call):
         """Test elicitation context with None callback (should still work)."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
-
-        _ELICITATION_ROUTING.clear()
-
         server_name = "test_server"
         routing_key = (server_name, mock_tool_call.id)
 
         # Use context with None callback
         async with manager._use_elicitation_context(server_name, mock_tool_call, None):
-            routing = _ELICITATION_ROUTING[routing_key]
+            routing = manager._elicitation_routing[routing_key]
             assert routing.update_cb is None
 
-        assert routing_key not in _ELICITATION_ROUTING
+        assert routing_key not in manager._elicitation_routing
 
     @pytest.mark.asyncio
     async def test_concurrent_same_server_routing(self, manager):
         """Two concurrent tool calls to the same server route correctly."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
-        _ELICITATION_ROUTING.clear()
-
         tool_call_1 = ToolCall(id="call_1", name="tool_a", arguments={})
         tool_call_2 = ToolCall(id="call_2", name="tool_b", arguments={})
         cb1 = AsyncMock()
@@ -136,10 +116,10 @@ class TestElicitationRouting:
 
         async with manager._use_elicitation_context("server-x", tool_call_1, cb1):
             async with manager._use_elicitation_context("server-x", tool_call_2, cb2):
-                assert ("server-x", "call_1") in _ELICITATION_ROUTING
-                assert ("server-x", "call_2") in _ELICITATION_ROUTING
-                assert _ELICITATION_ROUTING[("server-x", "call_1")].update_cb is cb1
-                assert _ELICITATION_ROUTING[("server-x", "call_2")].update_cb is cb2
+                assert ("server-x", "call_1") in manager._elicitation_routing
+                assert ("server-x", "call_2") in manager._elicitation_routing
+                assert manager._elicitation_routing[("server-x", "call_1")].update_cb is cb1
+                assert manager._elicitation_routing[("server-x", "call_2")].update_cb is cb2
 
 
 class TestElicitationHandler:
@@ -169,10 +149,6 @@ class TestElicitationHandler:
         """Test that handler returns cancel when routing not found."""
         from fastmcp.client.elicitation import ElicitResult
 
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
-
-        _ELICITATION_ROUTING.clear()
-
         handler = manager._create_elicitation_handler("test_server")
 
         # Call handler with no routing set
@@ -188,16 +164,14 @@ class TestElicitationHandler:
         from fastmcp.client.elicitation import ElicitResult
 
         from atlas.domain.messages.models import ToolCall
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING, _ElicitationRoutingContext
-
-        _ELICITATION_ROUTING.clear()
+        from atlas.modules.mcp_tools.client import _ElicitationRoutingContext
 
         server_name = "test_server"
         tool_call = ToolCall(id="call_123", name="test_tool", arguments={})
         routing_key = (server_name, tool_call.id)
 
         # Set routing with None callback using composite key
-        _ELICITATION_ROUTING[routing_key] = _ElicitationRoutingContext(
+        manager._elicitation_routing[routing_key] = _ElicitationRoutingContext(
             server_name=server_name,
             tool_call=tool_call,
             update_cb=None
@@ -213,9 +187,6 @@ class TestElicitationHandler:
     @pytest.mark.asyncio
     async def test_handler_routes_via_meta_tool_call_id(self, manager):
         """Handler uses _context.meta.model_extra to find correct routing."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
-        _ELICITATION_ROUTING.clear()
-
         tool_call_1 = ToolCall(id="call_1", name="tool_a", arguments={})
         tool_call_2 = ToolCall(id="call_2", name="tool_b", arguments={})
         cb1 = AsyncMock()
@@ -246,14 +217,11 @@ class TestElicitationHandler:
                     # cb2 should have been called (routed correctly), cb1 should not
                     cb2.assert_called_once()
                     cb1.assert_not_called()
-                    assert _ELICITATION_ROUTING[("server-x", "call_2")].update_cb is cb2
+                    assert manager._elicitation_routing[("server-x", "call_2")].update_cb is cb2
 
     @pytest.mark.asyncio
     async def test_handler_fallback_single_match_without_meta(self, manager):
         """When meta is unavailable but only one routing entry exists, use it."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
-        _ELICITATION_ROUTING.clear()
-
         tool_call = ToolCall(id="call_1", name="tool_a", arguments={})
         cb = AsyncMock()
 
@@ -276,14 +244,11 @@ class TestElicitationHandler:
 
                 _result = await handler("Pick a color", str, None, mock_context)
                 cb.assert_called_once()
-                assert _ELICITATION_ROUTING[("server-x", "call_1")].update_cb is cb
+                assert manager._elicitation_routing[("server-x", "call_1")].update_cb is cb
 
     @pytest.mark.asyncio
     async def test_handler_cancels_on_ambiguous_routing_without_meta(self, manager):
         """When meta unavailable and multiple entries exist, cancel."""
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING
-        _ELICITATION_ROUTING.clear()
-
         tool_call_1 = ToolCall(id="call_1", name="tool_a", arguments={})
         tool_call_2 = ToolCall(id="call_2", name="tool_b", arguments={})
         cb1 = AsyncMock()
@@ -312,9 +277,7 @@ class TestElicitationIntegration:
     async def test_elicitation_request_sent_to_callback(self, manager):
         """Test that elicitation request is sent to update callback."""
         from atlas.domain.messages.models import ToolCall
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING, _ElicitationRoutingContext
-
-        _ELICITATION_ROUTING.clear()
+        from atlas.modules.mcp_tools.client import _ElicitationRoutingContext
 
         server_name = "test_server"
         tool_call = ToolCall(id="call_123", name="test_tool", arguments={})
@@ -322,7 +285,7 @@ class TestElicitationIntegration:
         routing_key = (server_name, tool_call.id)
 
         # Set routing with mock callback using composite key
-        _ELICITATION_ROUTING[routing_key] = _ElicitationRoutingContext(
+        manager._elicitation_routing[routing_key] = _ElicitationRoutingContext(
             server_name=server_name,
             tool_call=tool_call,
             update_cb=mock_callback
@@ -363,16 +326,14 @@ class TestElicitationIntegration:
         Some UIs send placeholder payloads like {'none': ''}; we must not forward them.
         """
         from atlas.domain.messages.models import ToolCall
-        from atlas.modules.mcp_tools.client import _ELICITATION_ROUTING, _ElicitationRoutingContext
-
-        _ELICITATION_ROUTING.clear()
+        from atlas.modules.mcp_tools.client import _ElicitationRoutingContext
 
         server_name = "test_server"
         tool_call = ToolCall(id="call_123", name="test_tool", arguments={})
         mock_callback = AsyncMock()
         routing_key = (server_name, tool_call.id)
 
-        _ELICITATION_ROUTING[routing_key] = _ElicitationRoutingContext(
+        manager._elicitation_routing[routing_key] = _ElicitationRoutingContext(
             server_name=server_name,
             tool_call=tool_call,
             update_cb=mock_callback,
