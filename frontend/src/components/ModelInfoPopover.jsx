@@ -14,11 +14,9 @@ export default function ModelInfoPopover({ model }) {
 
   return (
     <div
-      className="absolute right-0 top-0 mt-0 w-64 bg-gray-900 border border-gray-600 rounded-lg shadow-xl p-3 text-sm z-[60]"
+      className="w-full bg-gray-900 border-t border-gray-700 px-4 py-2.5 text-sm"
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="font-medium text-gray-100 mb-1">{model.name}</div>
-
       {model.description && (
         <p className="text-gray-400 text-xs mb-2">{model.description}</p>
       )}
@@ -46,12 +44,6 @@ export default function ModelInfoPopover({ model }) {
               <Brain className="w-3 h-3" /> Reasoning
             </span>
           )}
-        </div>
-      )}
-
-      {model.compliance_level && (
-        <div className="text-xs text-gray-400 mb-2">
-          Compliance: <span className="text-blue-300">{model.compliance_level}</span>
         </div>
       )}
 

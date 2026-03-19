@@ -224,64 +224,66 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                     return (
                       <div
                         key={modelName}
-                        className="relative flex items-center first:rounded-t-lg last:rounded-b-lg"
+                        className="first:rounded-t-lg last:rounded-b-lg"
                       >
-                        <button
-                          onClick={() => !isDisabled && handleModelSelect(modelName)}
-                          className={`flex-1 text-left px-4 py-2 text-sm flex flex-col gap-0.5 ${
-                            isDisabled
-                              ? 'text-gray-500 cursor-not-allowed'
-                              : 'text-gray-200 hover:bg-gray-700'
-                          }`}
-                          disabled={isDisabled}
-                          title={isDisabled ? 'Configure your API key to use this model' : modelName}
-                        >
-                          <span className="flex items-center justify-between gap-2 w-full">
-                            <span className="flex items-center gap-1.5 truncate">
-                              <span className="truncate">{modelName}</span>
-                              {model.supports_vision && <Eye className="w-3 h-3 text-blue-400 flex-shrink-0" title="Supports vision" />}
-                              {model.supports_tools && <Wrench className="w-3 h-3 text-green-400 flex-shrink-0" title="Supports tools" />}
-                              {model.supports_reasoning && <Brain className="w-3 h-3 text-purple-400 flex-shrink-0" title="Supports reasoning" />}
+                        <div className="flex items-center">
+                          <button
+                            onClick={() => !isDisabled && handleModelSelect(modelName)}
+                            className={`flex-1 text-left px-4 py-2 text-sm flex flex-col gap-0.5 ${
+                              isDisabled
+                                ? 'text-gray-500 cursor-not-allowed'
+                                : 'text-gray-200 hover:bg-gray-700'
+                            }`}
+                            disabled={isDisabled}
+                            title={isDisabled ? 'Configure your API key to use this model' : modelName}
+                          >
+                            <span className="flex items-center justify-between gap-2 w-full">
+                              <span className="flex items-center gap-1.5 truncate">
+                                <span className="truncate">{modelName}</span>
+                                {model.supports_vision && <Eye className="w-3 h-3 text-blue-400 flex-shrink-0" title="Supports vision" />}
+                                {model.supports_tools && <Wrench className="w-3 h-3 text-green-400 flex-shrink-0" title="Supports tools" />}
+                                {model.supports_reasoning && <Brain className="w-3 h-3 text-purple-400 flex-shrink-0" title="Supports reasoning" />}
+                              </span>
+                              <span className="flex items-center gap-1 flex-shrink-0">
+                                {complianceEnabled && model.compliance_level && (
+                                  <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1">
+                                    <Shield className="w-3 h-3" />
+                                    {model.compliance_level}
+                                  </span>
+                                )}
+                              </span>
                             </span>
-                            <span className="flex items-center gap-1 flex-shrink-0">
-                              {complianceEnabled && model.compliance_level && (
-                                <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1">
-                                  <Shield className="w-3 h-3" />
-                                  {model.compliance_level}
-                                </span>
-                              )}
-                            </span>
-                          </span>
-                          {model.description && (
-                            <span className="text-xs text-gray-400 truncate w-full">{model.description}</span>
+                            {model.description && (
+                              <span className="text-xs text-gray-400 truncate w-full">{model.description}</span>
+                            )}
+                          </button>
+                          {(model.model_card_url || model.context_window) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setModelInfoPopover(modelInfoPopover === modelName ? null : modelName)
+                              }}
+                              className="px-2 py-2 hover:bg-gray-700 transition-colors flex-shrink-0"
+                              title="Model info"
+                            >
+                              <Info className="w-4 h-4 text-gray-400" />
+                            </button>
                           )}
-                        </button>
-                        {(model.model_card_url || model.context_window) && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setModelInfoPopover(modelInfoPopover === modelName ? null : modelName)
-                            }}
-                            className="px-2 py-2 hover:bg-gray-700 transition-colors flex-shrink-0"
-                            title="Model info"
-                          >
-                            <Info className="w-4 h-4 text-gray-400" />
-                          </button>
-                        )}
-                        {needsUserKey && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setLlmAuthModalModel(modelName)
-                              setDropdownOpen(false)
-                              setModelInfoPopover(null)
-                            }}
-                            className="px-2 py-2 hover:bg-gray-700 transition-colors"
-                            title={hasUserKey ? 'API key configured (click to change)' : 'Click to add your API key'}
-                          >
-                            <Key className={`w-4 h-4 ${hasUserKey ? 'text-green-400' : 'text-orange-400'}`} />
-                          </button>
-                        )}
+                          {needsUserKey && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setLlmAuthModalModel(modelName)
+                                setDropdownOpen(false)
+                                setModelInfoPopover(null)
+                              }}
+                              className="px-2 py-2 hover:bg-gray-700 transition-colors"
+                              title={hasUserKey ? 'API key configured (click to change)' : 'Click to add your API key'}
+                            >
+                              <Key className={`w-4 h-4 ${hasUserKey ? 'text-green-400' : 'text-orange-400'}`} />
+                            </button>
+                          )}
+                        </div>
                         {modelInfoPopover === modelName && (
                           <ModelInfoPopover model={model} />
                         )}
