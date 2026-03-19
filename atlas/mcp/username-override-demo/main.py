@@ -10,10 +10,10 @@ email. This prevents LLMs from impersonating other users.
 import time
 from typing import Any, Dict, Optional
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("Username Override Demo")
+mcp = create_stdio_server("Username Override Demo")
 
 
 @mcp.tool

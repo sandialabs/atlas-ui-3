@@ -11,10 +11,10 @@ import os
 import time
 from typing import Any, Dict
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("Environment Variable Demo")
+mcp = create_stdio_server("Environment Variable Demo")
 
 
 @mcp.tool
