@@ -133,7 +133,7 @@ function ChatInterface() {
           {/* Content Area - Chat and Canvas side by side */}
           <div className="flex flex-1 overflow-hidden min-h-0">
             {/* Chat Area */}
-            <ChatArea />
+            <ChatArea onOpenRagPanel={() => setRagPanelOpen(true)} />
 
             {/* Canvas Panel */}
             <CanvasPanel

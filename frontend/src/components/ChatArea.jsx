@@ -7,7 +7,7 @@ import WelcomeScreen from './WelcomeScreen'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
 
-const ChatArea = () => {
+const ChatArea = ({ onOpenRagPanel }) => {
   const [inputValue, setInputValue] = useState('')
   const [isMobile, setIsMobile] = useState(false)
   // uploadedFiles: { filename: { content: base64, extractMode: "full"|"preview"|"none" } }
@@ -51,6 +51,7 @@ const ChatArea = () => {
     ragEnabled,
     toggleRagEnabled,
     selectedDataSources,
+    clearDataSources,
     features,
     appName,
     user,
@@ -932,13 +933,22 @@ const ChatArea = () => {
               {features?.rag && (
                 <button
                   type="button"
-                  onClick={toggleRagEnabled}
+                  onClick={() => {
+                    if (ragEnabled || selectedDataSources?.size > 0) {
+                      // Turn off RAG: clear data sources and disable
+                      clearDataSources()
+                      if (ragEnabled) toggleRagEnabled()
+                    } else {
+                      // Turn on RAG: open the panel so user can select data sources
+                      onOpenRagPanel?.()
+                    }
+                  }}
                   className={`px-3 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
                     ragEnabled || hasSearchCommand || selectedDataSources?.size > 0
                       ? 'bg-green-600 hover:bg-green-700 text-white'
                       : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                   }`}
-                  title={ragEnabled ? 'RAG enabled - click to disable' : hasSearchCommand ? 'RAG active for this search' : selectedDataSources?.size > 0 ? 'RAG active via selected data sources' : 'RAG disabled - click to enable'}
+                  title={ragEnabled || selectedDataSources?.size > 0 ? 'Click to disable RAG and clear data sources' : 'Click to select data sources'}
                 >
                   <Search className="w-5 h-5" />
                 </button>

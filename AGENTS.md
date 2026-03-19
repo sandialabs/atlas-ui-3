@@ -177,6 +177,8 @@ frontend/src/
 
 **RAG+Tools `is_completion` Handling:** When both RAG and tools are active, RAG `is_completion=True` responses must NOT short-circuit the LLM call; instead inject the pre-synthesized content as context so tools remain available to the model.
 
+**RAG UI Toggle Pattern:** The chat input search-glass button and the header Sources button have distinct roles: the search glass controls RAG activation (green = active, click to clear; gray = inactive, click to open panel), while the header Sources button only toggles the Data Sources sidebar visibility without changing selection state. Panel-open callbacks from ChatArea to App.jsx are passed as props (`onOpenRagPanel`) since panel visibility lives in App.jsx state, not in ChatContext.
+
 **RAG Activation vs Selection:** In `ChatContext.sendChatMessage`, data sources are only sent to the backend when RAG is explicitly activated (`ragEnabled` toggle or `/search` command). Selecting data sources in the UI only marks availability; the backend orchestrator routes to RAG mode only when `selected_data_sources` is non-empty, so the frontend must gate what it sends.
 
 **3-State Save Mode:** Chat history uses a 3-state `saveMode` (`none`/`local`/`server`) persisted via `usePersistentState`. "local" mode saves conversations to IndexedDB in the browser (`localConversationDB.js`), "server" saves to the backend database, and "none" is incognito. The Sidebar calls both `useConversationHistory` and `useLocalConversationHistory` hooks unconditionally (React rules of hooks) then picks the active one based on `saveMode`.
