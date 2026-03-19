@@ -5,6 +5,7 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
+import ModelInfoPopover from './ModelInfoPopover'
 import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Eye, Brain, Info, ExternalLink } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 
@@ -223,7 +224,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                     return (
                       <div
                         key={modelName}
-                        className="flex items-center first:rounded-t-lg last:rounded-b-lg"
+                        className="relative flex items-center first:rounded-t-lg last:rounded-b-lg"
                       >
                         <button
                           onClick={() => !isDisabled && handleModelSelect(modelName)}
@@ -280,6 +281,9 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                           >
                             <Key className={`w-4 h-4 ${hasUserKey ? 'text-green-400' : 'text-orange-400'}`} />
                           </button>
+                        )}
+                        {modelInfoPopover === modelName && (
+                          <ModelInfoPopover model={model} />
                         )}
                       </div>
                     )
