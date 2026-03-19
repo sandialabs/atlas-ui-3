@@ -118,12 +118,21 @@ const ChatArea = ({ onOpenRagPanel }) => {
   }, [])
 
   // Scroll when messages list changes (initial render or new message)
+  // Only force-scroll when a genuinely new message appears (count increases).
+  // During streaming token updates (same message, content growing), respect
+  // the user's scroll position so they can read earlier output (#441).
   useEffect(() => {
     const newCount = messages.length
     const lastMsg = messages[messages.length - 1]
     const isNewMessage = newCount !== prevMessageCountRef.current
+    const isStreamingUpdate = lastMsg && lastMsg._streaming && !isNewMessage
     const force = isNewMessage && lastMsg && (lastMsg.role !== 'user')
     prevMessageCountRef.current = newCount
+    // During streaming token updates, only scroll if user hasn't scrolled away
+    if (isStreamingUpdate) {
+      requestAnimationFrame(() => scrollToBottom(false))
+      return
+    }
     requestAnimationFrame(() => {
       scrollToBottom(force)
       setTimeout(() => scrollToBottom(force), 80)
@@ -132,12 +141,14 @@ const ChatArea = ({ onOpenRagPanel }) => {
   }, [messages, isThinking, isSynthesizing, scrollToBottom])
 
   // Observe DOM mutations inside messages container (handles content expansion post-render)
+  // During streaming, never force-scroll — let users read earlier output (#441).
   useEffect(() => {
     const el = messagesRef.current
     if (!el) return
     const observer = new MutationObserver(() => {
       const lastMsg = messages[messages.length - 1]
-      const force = lastMsg && lastMsg.role !== 'user'
+      const isCurrentlyStreaming = lastMsg && lastMsg._streaming
+      const force = !isCurrentlyStreaming && lastMsg && lastMsg.role !== 'user'
       scrollToBottom(force)
     })
     observer.observe(el, { childList: true, subtree: true })
