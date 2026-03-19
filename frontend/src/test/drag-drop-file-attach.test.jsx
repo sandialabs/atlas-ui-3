@@ -31,7 +31,9 @@ describe('ChatArea - Drag and Drop File Attachment', () => {
     agentPendingQuestion: null,
     setAgentPendingQuestion: vi.fn(),
     stopAgent: vi.fn(),
-    answerAgentQuestion: vi.fn()
+    answerAgentQuestion: vi.fn(),
+    followUpSuggestions: [],
+    setFollowUpSuggestions: vi.fn()
   }
 
   const defaultWSContext = {
