@@ -19,9 +19,9 @@
 #>
 
 param(
-    [switch]$FrontendOnly,
-    [switch]$BackendOnly,
-    [switch]$StartMcpMock
+    [Alias("f")][switch]$FrontendOnly,
+    [Alias("b")][switch]$BackendOnly,
+    [Alias("m")][switch]$StartMcpMock
 )
 
 # Store the project root directory
@@ -281,6 +281,11 @@ function Start-Backend {
     Set-Location "$PROJECT_ROOT/atlas"
     # The atlas package is installed in editable mode (pip install -e .), so
     # PYTHONPATH is no longer needed for atlas imports to work.
+    # Set APP_CONFIG_DIR so user overrides in <project_root>/config/ take
+    # precedence over package defaults in atlas/config/ (CWD is atlas/).
+    if (-not $env:APP_CONFIG_DIR) {
+        $env:APP_CONFIG_DIR = "$PROJECT_ROOT/config"
+    }
     $uvicornExe = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
     $arguments = "main:app --host $HostName --port $Port"
 
@@ -312,7 +317,9 @@ function Main {
         Stop-Processes
         Clear-Logs
         Start-McpMock
-        Start-Backend -Port 8000 -HostName "0.0.0.0"
+        $backendPort = if ($env:PORT) { [int]$env:PORT } else { 8000 }
+        $backendHost = if ($env:ATLAS_HOST) { $env:ATLAS_HOST } else { "127.0.0.1" }
+        Start-Backend -Port $backendPort -HostName $backendHost
         Write-Host "Backend server started."
         Write-Host "Press Ctrl+C to stop all services."
 
@@ -334,7 +341,9 @@ function Main {
     Clear-Logs
     Build-Frontend
     Start-McpMock
-    Start-Backend -Port 8000 -HostName "127.0.0.1"
+    $backendPort = if ($env:PORT) { [int]$env:PORT } else { 8000 }
+    $backendHost = if ($env:ATLAS_HOST) { $env:ATLAS_HOST } else { "127.0.0.1" }
+    Start-Backend -Port $backendPort -HostName $backendHost
 
     # Display MCP info if started
     if ($START_MCP_MOCK) {
