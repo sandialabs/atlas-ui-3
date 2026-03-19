@@ -4,6 +4,9 @@ All notable changes to Atlas UI 3 will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+### PR - Fix logo overlapping text on wide-but-short screens - 2026-03-19
+- WelcomeScreen now switches to a horizontal row layout (logo left, text right) when in landscape orientation, preventing the logo from overlapping the help text on wide and short viewports.
+
 ## [Unreleased]
 
 ### PR #420 - 2026-03-16
