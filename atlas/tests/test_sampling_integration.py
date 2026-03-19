@@ -1,11 +1,21 @@
 """Integration test for MCP sampling functionality."""
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from atlas.domain.messages.models import ToolCall
 from atlas.modules.mcp_tools.client import MCPToolManager
+
+# Project root needed for PYTHONPATH so STDIO servers can import atlas.mcp_shared
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+def _stdio_env() -> dict:
+    """Build env dict with PYTHONPATH for STDIO subprocess."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = _PROJECT_ROOT + os.pathsep + env.get("PYTHONPATH", "")
+    return env
 
 
 class TestSamplingIntegration:
@@ -39,16 +49,15 @@ class TestSamplingIntegration:
         # Use the context manager
         async with manager._use_sampling_context("test_server", tool_call, update_cb):
             # Verify routing is set up with composite key (server_name, tool_call.id)
-            from atlas.modules.mcp_tools.client import _SAMPLING_ROUTING
             routing_key = ("test_server", "test_tool_call_1")
-            assert routing_key in _SAMPLING_ROUTING
-            routing = _SAMPLING_ROUTING[routing_key]
+            assert routing_key in manager._sampling_routing
+            routing = manager._sampling_routing[routing_key]
             assert routing.server_name == "test_server"
             assert routing.tool_call == tool_call
             assert routing.update_cb == update_cb
 
         # Verify routing is cleaned up
-        assert routing_key not in _SAMPLING_ROUTING
+        assert routing_key not in manager._sampling_routing
 
     @pytest.mark.asyncio
     async def test_sampling_handler_with_routing(self):
@@ -137,7 +146,8 @@ class TestSamplingDemoTools:
         # Use StdioTransport explicitly
         transport = StdioTransport(
             command=sys.executable,
-            args=[str(server_path)]
+            args=[str(server_path)],
+            env=_stdio_env(),
         )
         client = Client(transport, sampling_handler=mock_sampling_handler)
 
@@ -180,7 +190,8 @@ class TestSamplingDemoTools:
         server_path = Path(__file__).parent.parent / "mcp" / "sampling_demo" / "main.py"
         transport = StdioTransport(
             command=sys.executable,
-            args=[str(server_path)]
+            args=[str(server_path)],
+            env=_stdio_env(),
         )
         client = Client(transport, sampling_handler=mock_sampling_handler)
 
@@ -227,7 +238,8 @@ class TestSamplingDemoTools:
         server_path = Path(__file__).parent.parent / "mcp" / "sampling_demo" / "main.py"
         transport = StdioTransport(
             command=sys.executable,
-            args=[str(server_path)]
+            args=[str(server_path)],
+            env=_stdio_env(),
         )
         client = Client(transport, sampling_handler=mock_sampling_handler)
 
@@ -279,7 +291,8 @@ class TestSamplingDemoTools:
         server_path = Path(__file__).parent.parent / "mcp" / "sampling_demo" / "main.py"
         transport = StdioTransport(
             command=sys.executable,
-            args=[str(server_path)]
+            args=[str(server_path)],
+            env=_stdio_env(),
         )
         client = Client(transport, sampling_handler=mock_sampling_handler)
 
@@ -338,7 +351,8 @@ class TestSamplingDemoTools:
         server_path = Path(__file__).parent.parent / "mcp" / "sampling_demo" / "main.py"
         transport = StdioTransport(
             command=sys.executable,
-            args=[str(server_path)]
+            args=[str(server_path)],
+            env=_stdio_env(),
         )
         client = Client(transport, sampling_handler=mock_sampling_handler)
 
@@ -401,7 +415,8 @@ class TestSamplingDemoTools:
         server_path = Path(__file__).parent.parent / "mcp" / "sampling_demo" / "main.py"
         transport = StdioTransport(
             command=sys.executable,
-            args=[str(server_path)]
+            args=[str(server_path)],
+            env=_stdio_env(),
         )
         client = Client(transport, sampling_handler=mock_sampling_handler)
 
@@ -461,7 +476,8 @@ class TestSamplingDemoTools:
         server_path = Path(__file__).parent.parent / "mcp" / "sampling_demo" / "main.py"
         transport = StdioTransport(
             command=sys.executable,
-            args=[str(server_path)]
+            args=[str(server_path)],
+            env=_stdio_env(),
         )
         client = Client(transport, sampling_handler=mock_sampling_handler)
 

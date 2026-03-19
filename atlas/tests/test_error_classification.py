@@ -1,7 +1,13 @@
 """Tests for error classification and user-friendly error messages."""
 
 from atlas.application.chat.utilities.error_handler import classify_llm_error
-from atlas.domain.errors import ContextWindowExceededError, LLMAuthenticationError, LLMServiceError, LLMTimeoutError, RateLimitError
+from atlas.domain.errors import (
+    ContextWindowExceededError,
+    LLMAuthenticationError,
+    LLMServiceError,
+    LLMTimeoutError,
+    RateLimitError,
+)
 
 
 class TestErrorClassification:

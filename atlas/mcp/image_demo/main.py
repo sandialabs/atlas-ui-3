@@ -6,11 +6,12 @@ This is a test server to validate image display functionality.
 import base64
 from io import BytesIO
 
-from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 from mcp.types import ImageContent, TextContent
 
-mcp = FastMCP("Image Demo MCP")
+from atlas.mcp_shared.server_factory import create_stdio_server
+
+mcp = create_stdio_server("Image Demo MCP")
 
 
 @mcp.tool()

@@ -8,10 +8,10 @@ import math
 import time
 from typing import Any, Dict, Union
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("Calculator")
+mcp = create_stdio_server("Calculator")
 
 
 def to_float(value: Union[str, int, float]) -> float:

@@ -1,0 +1,17 @@
+{
+  "task_demo": {
+    "command": [
+      "python",
+      "mcp/task_demo/main.py"
+    ],
+    "cwd": "atlas",
+    "groups": [
+      "users"
+    ],
+    "description": "Demonstrates FastMCP 3.x adaptive task polling (ToolTask API) where long-running tools run as background tasks with client polling. Shows optional task mode, required task mode, and progress reporting during background execution.",
+    "author": "Atlas UI Team",
+    "short_description": "Background task demonstration",
+    "help_email": "support@example.com",
+    "compliance_level": "Public"
+  }
+}

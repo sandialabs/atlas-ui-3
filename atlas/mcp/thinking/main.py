@@ -6,10 +6,10 @@ Provides a thinking tool that processes thoughts and breaks down problems step b
 
 from typing import Any, Dict, List
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("Thinking")
+mcp = create_stdio_server("Thinking")
 
 
 @mcp.tool
