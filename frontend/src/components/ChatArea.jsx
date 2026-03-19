@@ -604,7 +604,7 @@ const ChatArea = () => {
     const pastedFiles = Array.from(items).filter(item => item.kind === 'file')
     if (pastedFiles.length === 0) return
     e.preventDefault()
-    pastedFiles.forEach(item => {
+    pastedFiles.forEach((item, idx) => {
       const file = item.getAsFile()
       if (!file) return
       const reader = new FileReader()
@@ -615,7 +615,7 @@ const ChatArea = () => {
         const isGenericName = !file.name || /^image\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name)
         const ext = file.type.includes('/') ? file.type.split('/')[1].split('+')[0] : 'bin'
         const rawName = isGenericName
-          ? `pasted_image_${Date.now()}.${ext}`
+          ? `pasted_image_${Date.now()}_${idx}.${ext}`
           : file.name
         const safeName = sanitizeFilename(rawName)
         const extractMode = canExtractFile(safeName) ? globalExtractMode : 'none'
@@ -626,6 +626,14 @@ const ChatArea = () => {
             extractMode
           }
         }))
+      }
+      reader.onerror = () => {
+        console.error('Failed to read pasted file', {
+          name: file.name,
+          type: file.type,
+          index: idx,
+          error: reader.error
+        })
       }
       reader.readAsDataURL(file)
     })
