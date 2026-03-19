@@ -88,6 +88,11 @@ async def get_config_shell(
         elif api_key_source == "globus":
             model_info["api_key_source"] = "globus"
             model_info["globus_scope"] = getattr(model_config, "globus_scope", None)
+        # Include capability metadata fields when set (for UI model cards)
+        for cap_field in ("supports_vision", "supports_tools", "supports_reasoning", "context_window", "model_card_url"):
+            val = getattr(model_config, cap_field, None)
+            if val is not None:
+                model_info[cap_field] = val
         models_list.append(model_info)
 
     return {
@@ -339,6 +344,11 @@ async def get_config(
                 model_info["user_has_key"] = stored is not None
             else:
                 model_info["user_has_key"] = False
+        # Include capability metadata fields when set (for UI model cards)
+        for cap_field in ("supports_vision", "supports_tools", "supports_reasoning", "context_window", "model_card_url"):
+            val = getattr(model_config, cap_field, None)
+            if val is not None:
+                model_info[cap_field] = val
         models_list.append(model_info)
 
     # Build tool approval settings - only include tools from authorized servers
