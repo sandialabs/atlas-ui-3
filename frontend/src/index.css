@@ -86,6 +86,15 @@
     scrollbar-color: #4b5563 #1f2937;
   }
 
+  /* Hidden scrollbar - still scrollable but no visible scrollbar */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
   /* Table borders override - must be in components layer */
   .prose table,
   .prose-invert table,
