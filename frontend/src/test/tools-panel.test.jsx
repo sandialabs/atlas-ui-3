@@ -9,9 +9,20 @@ import ToolsPanel from '../components/ToolsPanel'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 
-// Mock the contexts
+// Mock the contexts and hooks
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext')
+vi.mock('../hooks/useServerAuthStatus', () => ({
+  useServerAuthStatus: () => ({
+    authStatus: {},
+    loading: false,
+    error: null,
+    fetchAuthStatus: vi.fn(),
+    uploadToken: vi.fn(),
+    removeToken: vi.fn(),
+    getServerAuth: vi.fn(() => null)
+  })
+}))
 
 describe('ToolsPanel - Tool Selection', () => {
   let mockToggleTool

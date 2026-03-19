@@ -20,16 +20,28 @@ describe('MCPConfigurationCard', () => {
     const originalFetch = global.fetch
     const originalRandom = Math.random
 
+    const defaultStatusResponse = {
+      ok: true,
+      json: async () => ({
+        configured_servers: [],
+        connected_servers: [],
+        failed_servers: {},
+      }),
+    }
+
     beforeEach(() => {
       vi.clearAllMocks()
-      global.fetch = vi.fn()
+      // Default fetch returns empty success so scheduled polls during cleanup don't error
+      global.fetch = vi.fn().mockResolvedValue(defaultStatusResponse)
       vi.useFakeTimers({ shouldAdvanceTime: true })
       // Fix Math.random so jitter is deterministic (factor = 0.8 + 0.5*0.4 = 1.0)
       Math.random = () => 0.5
     })
 
-    afterEach(() => {
-      vi.runOnlyPendingTimers()
+    afterEach(async () => {
+      await act(async () => {
+        vi.runOnlyPendingTimers()
+      })
       vi.useRealTimers()
       global.fetch = originalFetch
       Math.random = originalRandom
