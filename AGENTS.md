@@ -26,6 +26,8 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 
 **LLM Streaming**: Token streaming uses `LiteLLMStreamingMixin` (in `litellm_streaming.py`) mixed into `LiteLLMCaller` to keep files under 400 lines; the frontend buffers tokens with `setTimeout(30ms)` -- never use `requestAnimationFrame` for token flushing as it breaks progressive rendering.
 
+**Follow-up Suggestions**: The `FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED` flag enables clickable follow-up question buttons after each assistant response; suggestions are generated via `POST /api/suggest_followups` and rendered in `ChatArea.jsx` above the input footer.
+
 **File Attachments**: The chat textarea supports click-to-upload, drag-and-drop, and paste (Ctrl+V / Cmd+V) for attaching images and documents; pasted files without a meaningful name receive a timestamped filename (e.g., `pasted_image_<timestamp>.png`).
 
 ## Installation

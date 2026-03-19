@@ -531,6 +531,12 @@ class AppSettings(BaseSettings):
         description="Enable automatic content extraction from uploaded files (PDFs, images)",
         validation_alias=AliasChoices("FEATURE_FILE_CONTENT_EXTRACTION_ENABLED"),
     )
+    # Follow-up question suggestions feature gate
+    feature_followup_suggestions_enabled: bool = Field(
+        False,
+        description="Enable AI-generated follow-up question suggestions after each chat response",
+        validation_alias=AliasChoices("FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""

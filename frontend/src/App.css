@@ -1499,7 +1499,9 @@ table th, table td,
 /* Animated Logo */
 .animated-logo-container {
     position: relative;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    max-height: 100%;
     user-select: none;
     cursor: default;
 }

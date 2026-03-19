@@ -74,6 +74,7 @@ from atlas.routes.globus_auth_routes import browser_router as globus_browser_rou
 from atlas.routes.health_routes import router as health_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
+from atlas.routes.suggestion_routes import suggestion_router
 from atlas.version import VERSION
 
 # Load environment variables from the parent directory
@@ -252,6 +253,7 @@ app.include_router(feedback_router)
 app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
+app.include_router(suggestion_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)

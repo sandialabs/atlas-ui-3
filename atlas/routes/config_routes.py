@@ -110,6 +110,7 @@ async def get_config_shell(
             "splash_screen": app_settings.feature_splash_screen_enabled,
             "file_content_extraction": app_settings.feature_file_content_extraction_enabled,
             "globus_auth": app_settings.feature_globus_auth_enabled,
+            "followup_suggestions": app_settings.feature_followup_suggestions_enabled,
         },
         "file_extraction": _get_file_extraction_config(config_manager),
     }
@@ -392,7 +393,8 @@ async def get_config(
             "compliance_levels": app_settings.feature_compliance_levels_enabled,
             "splash_screen": app_settings.feature_splash_screen_enabled,
             "file_content_extraction": app_settings.feature_file_content_extraction_enabled,
-            "globus_auth": app_settings.feature_globus_auth_enabled
+            "globus_auth": app_settings.feature_globus_auth_enabled,
+            "followup_suggestions": app_settings.feature_followup_suggestions_enabled,
         },
         "file_extraction": _get_file_extraction_config(config_manager)
     }

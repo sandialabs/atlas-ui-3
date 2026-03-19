@@ -117,6 +117,7 @@ services:
       - AGENT_MAX_STEPS=30
       - AGENT_DEFAULT_ENABLED=true
       - FEATURE_AGENT_MODE_AVAILABLE=true
+      - FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED=false
       - AGENT_LOOP_STRATEGY=think-act
       
       # Tool approval configuration
