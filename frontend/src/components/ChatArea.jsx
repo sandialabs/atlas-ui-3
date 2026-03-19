@@ -624,7 +624,12 @@ const ChatArea = () => {
         }))
       }
       reader.onerror = () => {
-        console.error('Failed to read pasted file:', file.name)
+        console.error('Failed to read pasted file', {
+          name: file.name,
+          type: file.type,
+          index: idx,
+          error: reader.error
+        })
       }
       reader.readAsDataURL(file)
     })
