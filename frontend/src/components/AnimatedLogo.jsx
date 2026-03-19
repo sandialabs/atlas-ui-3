@@ -190,7 +190,7 @@ const AnimatedLogo = ({ appName }) => {
                 ref={imgRef}
                 src="/logo.png"
                 alt={`${appName} Logo`}
-                className="max-w-48 sm:max-w-80 md:max-w-xl lg:max-w-3xl mx-auto object-contain"
+                className="max-w-48 sm:max-w-80 md:max-w-xl lg:max-w-3xl max-h-[50vh] mx-auto object-contain"
                 onLoad={handleImgLoad}
                 onError={(e) => { e.target.style.display = 'none' }}
                 draggable={false}
