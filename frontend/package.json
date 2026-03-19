@@ -14,7 +14,7 @@
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
     "@types/dompurify": "^3.2.0",
-    "dompurify": "^3.3.2",
+    "dompurify": "^3.3.3",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.38",
     "lucide-react": "^0.577.0",

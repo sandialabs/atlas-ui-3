@@ -9,6 +9,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #419 - 2026-03-16
 - **Feature**: Add AI-generated follow-up question suggestion buttons after each chat response. Enabled via `FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED=true`. Suggestions appear as clickable pill buttons below the messages and are cleared when a new message is sent.
 
+### PR #420 - 2026-03-16
+- **Enhancement**: Users can now paste images or documents directly into the chat input textarea to attach them, using the same flow as drag-and-drop file attachment.
+
+### PR #431 - 2026-03-15
+- **Feature**: Per-user MCP session isolation -- STDIO servers use `BlockedStateStore` to prevent cross-user state leakage; HTTP servers get per-user client routing for session isolation.
+- **Fix**: Concurrent elicitation/sampling routing (#295) -- O(1) composite key lookup replaces broken server-name-only iteration.
+- **Feature**: Session persistence per conversation with `MCPSessionManager`, adaptive background task polling, multi-prompt support with meta forwarding, and pluggable state backend (memory/redis).
+
+### PR #420 - 2026-03-16
+- **Enhancement**: Banner Messages admin card now displays the exact config file save path (e.g. `Config: /path/to/messages.txt`), consistent with how MCP Configuration shows its config path.
+
 ### PR #418 - 2026-03-13
 - **Fix**: Canvas file downloads no longer return 401 errors behind a reverse proxy. Canvas files now use HMAC-tokenized `/mcp/files/download/` URLs (bypassing nginx `auth_request`) instead of hardcoded `/api/files/download/` paths.
 

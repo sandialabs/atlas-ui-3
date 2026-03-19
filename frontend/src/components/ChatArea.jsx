@@ -598,6 +598,39 @@ const ChatArea = () => {
     fileInputRef.current?.click()
   }
 
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const pastedFiles = Array.from(items).filter(item => item.kind === 'file')
+    if (pastedFiles.length === 0) return
+    e.preventDefault()
+    pastedFiles.forEach(item => {
+      const file = item.getAsFile()
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const base64Data = event.target.result.split(',')[1]
+        // Browsers often assign generic names (e.g. "image.png") to pasted screenshots;
+        // detect those and replace with a unique timestamped name.
+        const isGenericName = !file.name || /^image\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name)
+        const ext = file.type.includes('/') ? file.type.split('/')[1].split('+')[0] : 'bin'
+        const rawName = isGenericName
+          ? `pasted_image_${Date.now()}.${ext}`
+          : file.name
+        const safeName = sanitizeFilename(rawName)
+        const extractMode = canExtractFile(safeName) ? globalExtractMode : 'none'
+        setUploadedFiles(prev => ({
+          ...prev,
+          [safeName]: {
+            content: base64Data,
+            extractMode
+          }
+        }))
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
   const handleDragEnter = (e) => {
     e.preventDefault()
     e.stopPropagation()
@@ -920,6 +953,7 @@ const ChatArea = () => {
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 placeholder={isMobile ? "Type a message..." : "Type a message... (/ or @ for help)"}
                 rows={1}
                 className={`w-full px-4 py-3 bg-gray-800 rounded-lg text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:border-transparent ${
