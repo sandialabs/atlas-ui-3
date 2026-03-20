@@ -105,25 +105,36 @@ const ChatArea = ({ onOpenRagPanel }) => {
     return () => el.removeEventListener('scroll', handleScroll)
   }, [])
 
-  // Function to perform smooth scroll to bottom respecting user scroll state
-  const scrollToBottom = useCallback((force = false) => {
+  // Function to perform scroll to bottom respecting user scroll state.
+  // Use smooth=false during streaming to avoid animation fighting user scroll.
+  const scrollToBottom = useCallback((force = false, smooth = true) => {
     const el = messagesRef.current
     if (!el) return
     if (userScrolledRef.current && !force) return
     if (endRef.current && typeof endRef.current.scrollIntoView === 'function') {
-      endRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      endRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', block: 'end' })
     } else {
       el.scrollTop = el.scrollHeight
     }
   }, [])
 
   // Scroll when messages list changes (initial render or new message)
+  // Only force-scroll when a genuinely new message appears (count increases).
+  // During streaming token updates (same message, content growing), respect
+  // the user's scroll position so they can read earlier output (#441).
   useEffect(() => {
     const newCount = messages.length
     const lastMsg = messages[messages.length - 1]
     const isNewMessage = newCount !== prevMessageCountRef.current
+    const isStreamingUpdate = lastMsg && lastMsg._streaming && !isNewMessage
     const force = isNewMessage && lastMsg && (lastMsg.role !== 'user')
     prevMessageCountRef.current = newCount
+    // During streaming token updates, only scroll if user hasn't scrolled away.
+    // Use instant scroll (no smooth animation) so users can break out easily.
+    if (isStreamingUpdate) {
+      requestAnimationFrame(() => scrollToBottom(false, false))
+      return
+    }
     requestAnimationFrame(() => {
       scrollToBottom(force)
       setTimeout(() => scrollToBottom(force), 80)
@@ -131,18 +142,18 @@ const ChatArea = ({ onOpenRagPanel }) => {
     })
   }, [messages, isThinking, isSynthesizing, scrollToBottom])
 
-  // Observe DOM mutations inside messages container (handles content expansion post-render)
+  // Observe DOM mutations inside messages container (handles content expansion post-render).
+  // Never force-scroll from mutations — if the user scrolled away to read, respect that.
+  // Only the message-change effect above should force-scroll (on genuinely new messages).
   useEffect(() => {
     const el = messagesRef.current
     if (!el) return
     const observer = new MutationObserver(() => {
-      const lastMsg = messages[messages.length - 1]
-      const force = lastMsg && lastMsg.role !== 'user'
-      scrollToBottom(force)
+      scrollToBottom(false)
     })
     observer.observe(el, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [scrollToBottom, messages])
+  }, [scrollToBottom])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
