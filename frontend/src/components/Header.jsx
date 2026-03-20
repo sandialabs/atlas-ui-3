@@ -6,7 +6,7 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
 import ModelInfoPopover from './ModelInfoPopover'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Eye, Brain, Info, ExternalLink } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Eye, Brain, Info } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 
 // Save mode display config: label, icon component, button classes, title text

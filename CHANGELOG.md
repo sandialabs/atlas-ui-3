@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #452 - 2026-03-19
+- **Feature**: Model dropdown now shows capability badges (vision, tools, reasoning), model descriptions, and an expandable info panel with context window size and model card links. Configured via optional fields in `llmconfig.yml`.
+
 ### PR #449 - 2026-03-18
 - **Fix**: Chat input search-glass button now clears all selected data sources and disables RAG when clicked while active (green), and opens the Data Sources sidebar when clicked while inactive (gray). Header Sources button only toggles sidebar visibility.
 

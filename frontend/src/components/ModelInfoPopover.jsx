@@ -1,7 +1,7 @@
 import { ExternalLink, Eye, Wrench, Brain } from 'lucide-react'
 
 function formatContextWindow(tokens) {
-  if (!tokens) return null
+  if (tokens == null) return null
   if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M tokens`
   if (tokens >= 1000) return `${Math.round(tokens / 1000)}K tokens`
   return `${tokens} tokens`
@@ -17,10 +17,6 @@ export default function ModelInfoPopover({ model }) {
       className="w-full bg-gray-900 border-t border-gray-700 px-4 py-2.5 text-sm"
       onClick={(e) => e.stopPropagation()}
     >
-      {model.description && (
-        <p className="text-gray-400 text-xs mb-2">{model.description}</p>
-      )}
-
       {contextStr && (
         <div className="text-gray-300 text-xs mb-2">
           Context: {contextStr}
