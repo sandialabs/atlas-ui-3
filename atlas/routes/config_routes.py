@@ -13,6 +13,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["config"])
 
+# Capability metadata fields exposed in model info dicts for UI model cards
+_CAPABILITY_FIELDS = ("supports_vision", "supports_tools", "supports_reasoning", "context_window", "model_card_url")
+
+
+def _add_capability_fields(model_info: dict, model_config) -> None:
+    """Add non-None capability metadata fields to a model info dict."""
+    for field in _CAPABILITY_FIELDS:
+        val = getattr(model_config, field, None)
+        if val is not None:
+            model_info[field] = val
+
 # Canvas tool description constant
 CANVAS_TOOL_DESCRIPTION = (
     "Display final rendered content in a visual canvas panel. "
@@ -88,6 +99,7 @@ async def get_config_shell(
         elif api_key_source == "globus":
             model_info["api_key_source"] = "globus"
             model_info["globus_scope"] = getattr(model_config, "globus_scope", None)
+        _add_capability_fields(model_info, model_config)
         models_list.append(model_info)
 
     return {
@@ -339,6 +351,7 @@ async def get_config(
                 model_info["user_has_key"] = stored is not None
             else:
                 model_info["user_has_key"] = False
+        _add_capability_fields(model_info, model_config)
         models_list.append(model_info)
 
     # Build tool approval settings - only include tools from authorized servers

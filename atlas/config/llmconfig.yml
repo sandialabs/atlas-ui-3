@@ -5,26 +5,47 @@ models:
     api_key: "${OPENROUTER_API_KEY}"
     description: "OpenRouter openai oss-120b"
     compliance_level: "External"
+    supports_vision: false
+    supports_tools: true
+    supports_reasoning: false
     extra_headers:
       X-Title: "chat-11"
   gpt-4.1:
     model_url: "https://api.openai.com/v1/chat/completions"
     model_name: "gpt-4.1"
     api_key: "${OPENAI_API_KEY}"
+    description: "OpenAI GPT-4.1 — strong general-purpose model"
     compliance_level: "External"
+    supports_vision: true
+    supports_tools: true
+    supports_reasoning: false
+    context_window: 1048576
+    model_card_url: "https://platform.openai.com/docs/models/gpt-4.1"
   gpt-4.1-nano:
     model_url: "https://api.openai.com/v1/chat/completions"
     model_name: "gpt-4.1-nano"
     api_key: "${OPENAI_API_KEY}"
+    description: "OpenAI GPT-4.1 Nano — fast and lightweight"
     compliance_level: "External"
+    supports_vision: true
+    supports_tools: true
+    supports_reasoning: false
+    context_window: 1048576
+    model_card_url: "https://platform.openai.com/docs/models/gpt-4.1-nano"
   groq-gpt-oss-120b:
     model_url: "https://api.groq.com/openai/v1"
     model_name: "openai/gpt-oss-120b"
     api_key: "${GROQ_API_KEY}"
+    description: "Groq-hosted GPT OSS 120B"
     compliance_level: "External"
+    supports_tools: true
   mock-model:
     model_url: "http://127.0.0.1:8002/v1"
     model_name: "openai/mock-model"
     api_key: "mock"
     description: "Local mock LLM for testing"
     compliance_level: "Internal"
+    supports_vision: false
+    supports_tools: false
+    supports_reasoning: false
+    context_window: 4096

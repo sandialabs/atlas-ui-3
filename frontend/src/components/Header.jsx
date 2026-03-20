@@ -5,7 +5,8 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer } from 'lucide-react'
+import ModelInfoPopover from './ModelInfoPopover'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Eye, Brain, Info } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 
 // Save mode display config: label, icon component, button classes, title text
@@ -61,6 +62,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [llmAuthModalModel, setLlmAuthModalModel] = useState(null)
+  const [modelInfoPopover, setModelInfoPopover] = useState(null)
   const llmAuth = useLLMAuthStatus()
 
   // Fetch LLM auth status on mount
@@ -75,6 +77,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   const handleModelSelect = (model) => {
     setCurrentModel(model)
     setDropdownOpen(false)
+    setModelInfoPopover(null)
   }
 
   // Close dropdowns when mobile menu opens
@@ -82,6 +85,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
     if (mobileMenuOpen) {
       setDropdownOpen(false)
       setDownloadDropdownOpen(false)
+      setModelInfoPopover(null)
     }
   }, [mobileMenuOpen])
 
@@ -177,7 +181,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         {/* Model Selection Dropdown - Always visible but more compact on mobile */}
         <div className="relative">
           <button
-            onClick={() => setDropdownOpen(!dropdownOpen)}
+            onClick={() => { setDropdownOpen(!dropdownOpen); if (dropdownOpen) setModelInfoPopover(null); }}
             className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors min-w-[80px] sm:min-w-[160px]"
           >
             <span className="text-xs sm:text-sm text-gray-200 truncate">
@@ -220,40 +224,68 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                     return (
                       <div
                         key={modelName}
-                        className="flex items-center first:rounded-t-lg last:rounded-b-lg"
+                        className="first:rounded-t-lg last:rounded-b-lg"
                       >
-                        <button
-                          onClick={() => !isDisabled && handleModelSelect(modelName)}
-                          className={`flex-1 text-left px-4 py-2 text-sm flex items-center justify-between gap-2 ${
-                            isDisabled
-                              ? 'text-gray-500 cursor-not-allowed'
-                              : 'text-gray-200 hover:bg-gray-700'
-                          }`}
-                          disabled={isDisabled}
-                          title={isDisabled ? 'Configure your API key to use this model' : modelName}
-                        >
-                          <span className="truncate">{modelName}</span>
-                          <span className="flex items-center gap-1 flex-shrink-0">
-                            {complianceEnabled && model.compliance_level && (
-                              <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1">
-                                <Shield className="w-3 h-3" />
-                                {model.compliance_level}
-                              </span>
-                            )}
-                          </span>
-                        </button>
-                        {needsUserKey && (
+                        <div className="flex items-center">
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setLlmAuthModalModel(modelName)
-                              setDropdownOpen(false)
-                            }}
-                            className="px-2 py-2 hover:bg-gray-700 transition-colors"
-                            title={hasUserKey ? 'API key configured (click to change)' : 'Click to add your API key'}
+                            onClick={() => !isDisabled && handleModelSelect(modelName)}
+                            className={`flex-1 text-left px-4 py-2 text-sm flex flex-col gap-0.5 ${
+                              isDisabled
+                                ? 'text-gray-500 cursor-not-allowed'
+                                : 'text-gray-200 hover:bg-gray-700'
+                            }`}
+                            disabled={isDisabled}
+                            title={isDisabled ? 'Configure your API key to use this model' : modelName}
                           >
-                            <Key className={`w-4 h-4 ${hasUserKey ? 'text-green-400' : 'text-orange-400'}`} />
+                            <span className="flex items-center justify-between gap-2 w-full">
+                              <span className="flex items-center gap-1.5 truncate">
+                                <span className="truncate">{modelName}</span>
+                                {model.supports_vision && <Eye className="w-3 h-3 text-blue-400 flex-shrink-0" title="Supports vision" />}
+                                {model.supports_tools && <Wrench className="w-3 h-3 text-green-400 flex-shrink-0" title="Supports tools" />}
+                                {model.supports_reasoning && <Brain className="w-3 h-3 text-purple-400 flex-shrink-0" title="Supports reasoning" />}
+                              </span>
+                              <span className="flex items-center gap-1 flex-shrink-0">
+                                {complianceEnabled && model.compliance_level && (
+                                  <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1">
+                                    <Shield className="w-3 h-3" />
+                                    {model.compliance_level}
+                                  </span>
+                                )}
+                              </span>
+                            </span>
+                            {model.description && (
+                              <span className="text-xs text-gray-400 truncate w-full">{model.description}</span>
+                            )}
                           </button>
+                          {(model.model_card_url || model.context_window) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setModelInfoPopover(modelInfoPopover === modelName ? null : modelName)
+                              }}
+                              className="px-2 py-2 hover:bg-gray-700 transition-colors flex-shrink-0"
+                              title="Model info"
+                            >
+                              <Info className="w-4 h-4 text-gray-400" />
+                            </button>
+                          )}
+                          {needsUserKey && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setLlmAuthModalModel(modelName)
+                                setDropdownOpen(false)
+                                setModelInfoPopover(null)
+                              }}
+                              className="px-2 py-2 hover:bg-gray-700 transition-colors"
+                              title={hasUserKey ? 'API key configured (click to change)' : 'Click to add your API key'}
+                            >
+                              <Key className={`w-4 h-4 ${hasUserKey ? 'text-green-400' : 'text-orange-400'}`} />
+                            </button>
+                          )}
+                        </div>
+                        {modelInfoPopover === modelName && (
+                          <ModelInfoPopover model={model} />
                         )}
                       </div>
                     )
@@ -677,10 +709,10 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
       {dropdownOpen && (
         <div 
           className="fixed inset-0 z-40" 
-          onClick={() => setDropdownOpen(false)}
+          onClick={() => { setDropdownOpen(false); setModelInfoPopover(null); }}
         />
       )}
-      
+
       {/* Close download dropdown when clicking outside */}
       {downloadDropdownOpen && (
         <div

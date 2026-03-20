@@ -298,6 +298,114 @@ class TestMCPServerConfig:
         assert config.auth_token is None
 
 
+class TestModelConfigCapabilityFields:
+    """Test ModelConfig capability and metadata fields."""
+
+    def test_capability_fields_default_to_none(self):
+        """New capability fields should default to None when not provided."""
+        from atlas.modules.config.config_manager import ModelConfig
+
+        config = ModelConfig(
+            model_name="test-model",
+            model_url="https://api.example.com/v1",
+        )
+        assert config.supports_vision is None
+        assert config.supports_tools is None
+        assert config.supports_reasoning is None
+        assert config.context_window is None
+        assert config.model_card_url is None
+
+    def test_capability_fields_accept_values(self):
+        """New capability fields should accept explicit values."""
+        from atlas.modules.config.config_manager import ModelConfig
+
+        config = ModelConfig(
+            model_name="gpt-4o",
+            model_url="https://api.openai.com/v1",
+            supports_vision=True,
+            supports_tools=True,
+            supports_reasoning=False,
+            context_window=128000,
+            model_card_url="https://platform.openai.com/docs/models/gpt-4o",
+        )
+        assert config.supports_vision is True
+        assert config.supports_tools is True
+        assert config.supports_reasoning is False
+        assert config.context_window == 128000
+        assert config.model_card_url == "https://platform.openai.com/docs/models/gpt-4o"
+
+    def test_capability_fields_false_values(self):
+        """Boolean capability fields should distinguish False from None."""
+        from atlas.modules.config.config_manager import ModelConfig
+
+        config = ModelConfig(
+            model_name="basic-model",
+            model_url="https://api.example.com/v1",
+            supports_vision=False,
+            supports_tools=False,
+            supports_reasoning=False,
+        )
+        assert config.supports_vision is False
+        assert config.supports_tools is False
+        assert config.supports_reasoning is False
+
+    def test_context_window_accepts_large_values(self):
+        """context_window should handle large token counts."""
+        from atlas.modules.config.config_manager import ModelConfig
+
+        config = ModelConfig(
+            model_name="claude-opus",
+            model_url="https://api.anthropic.com/v1",
+            context_window=1000000,
+        )
+        assert config.context_window == 1000000
+
+    def test_capability_fields_in_model_fields(self):
+        """All new fields should be registered in the Pydantic model."""
+        from atlas.modules.config.config_manager import ModelConfig
+
+        fields = ModelConfig.model_fields
+        assert "supports_vision" in fields
+        assert "supports_tools" in fields
+        assert "supports_reasoning" in fields
+        assert "context_window" in fields
+        assert "model_card_url" in fields
+
+    def test_capability_fields_serialization(self):
+        """Capability fields should serialize correctly via model_dump."""
+        from atlas.modules.config.config_manager import ModelConfig
+
+        config = ModelConfig(
+            model_name="test-model",
+            model_url="https://api.example.com/v1",
+            supports_vision=True,
+            context_window=32000,
+            model_card_url="https://example.com/model",
+        )
+        data = config.model_dump()
+        assert data["supports_vision"] is True
+        assert data["supports_tools"] is None
+        assert data["supports_reasoning"] is None
+        assert data["context_window"] == 32000
+        assert data["model_card_url"] == "https://example.com/model"
+
+    def test_capability_fields_from_dict(self):
+        """ModelConfig should accept capability fields when constructed from dict."""
+        from atlas.modules.config.config_manager import ModelConfig
+
+        data = {
+            "model_name": "test-model",
+            "model_url": "https://api.example.com/v1",
+            "supports_vision": True,
+            "supports_tools": False,
+            "context_window": 64000,
+        }
+        config = ModelConfig(**data)
+        assert config.supports_vision is True
+        assert config.supports_tools is False
+        assert config.context_window == 64000
+
+
 class TestLLMConfigEnvExpansion:
     """Test LLM configuration with environment variable expansion."""
 

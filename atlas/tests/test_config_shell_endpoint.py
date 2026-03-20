@@ -125,3 +125,64 @@ def test_config_shell_feature_flags_match_full_config():
         assert value == full_features[key], (
             f"Feature '{key}' mismatch: shell={value}, full={full_features[key]}"
         )
+
+
+def test_config_shell_includes_capability_fields_when_set():
+    """Shell endpoint should include capability metadata fields when configured on a model."""
+    from atlas.modules.config.config_manager import ModelConfig, LLMConfig
+
+    test_model = ModelConfig(
+        model_name="test-model",
+        model_url="http://localhost:8080",
+        description="Test model with capabilities",
+        supports_vision=True,
+        supports_tools=True,
+        supports_reasoning=False,
+        context_window=128000,
+        model_card_url="https://example.com/model-card",
+    )
+    test_llm_config = LLMConfig(models={"test-model": test_model})
+
+    config_manager = app_factory.get_config_manager()
+
+    with patch.object(config_manager, '_llm_config', test_llm_config):
+        client = TestClient(app)
+        resp = client.get("/api/config/shell", headers={"X-User-Email": "test@test.com"})
+        assert resp.status_code == 200
+        data = resp.json()
+
+        model = data["models"][0]
+        assert model["name"] == "test-model"
+        assert model["supports_vision"] is True
+        assert model["supports_tools"] is True
+        assert model["supports_reasoning"] is False
+        assert model["context_window"] == 128000
+        assert model["model_card_url"] == "https://example.com/model-card"
+
+
+def test_config_shell_omits_capability_fields_when_none():
+    """Shell endpoint should NOT include capability fields when they are None."""
+    from atlas.modules.config.config_manager import ModelConfig, LLMConfig
+
+    test_model = ModelConfig(
+        model_name="basic-model",
+        model_url="http://localhost:8080",
+        description="Basic model without capabilities",
+    )
+    test_llm_config = LLMConfig(models={"basic-model": test_model})
+
+    config_manager = app_factory.get_config_manager()
+
+    with patch.object(config_manager, '_llm_config', test_llm_config):
+        client = TestClient(app)
+        resp = client.get("/api/config/shell", headers={"X-User-Email": "test@test.com"})
+        assert resp.status_code == 200
+        data = resp.json()
+
+        model = data["models"][0]
+        assert model["name"] == "basic-model"
+        assert "supports_vision" not in model
+        assert "supports_tools" not in model
+        assert "supports_reasoning" not in model
+        assert "context_window" not in model
+        assert "model_card_url" not in model
