@@ -1,11 +1,15 @@
 /**
  * Tests for auto-scroll behavior during streaming (#441)
  *
+ * NOTE: These test extracted decision logic mirroring ChatArea.jsx, not the
+ * component itself. If the scroll logic in ChatArea is refactored, these
+ * helpers must be updated to match.
+ *
  * Validates that:
  * - New assistant messages trigger force-scroll (so user sees the response start)
  * - Streaming token updates do NOT force-scroll (user can read earlier output)
- * - MutationObserver-style updates don't force-scroll during streaming
- * - After streaming ends, normal force-scroll resumes for non-user messages
+ * - MutationObserver never force-scrolls (always respects user scroll position)
+ * - After streaming ends, user scroll position is still respected
  * - User scroll position is respected when they scroll up during streaming
  */
 
@@ -13,10 +17,10 @@ import { describe, it, expect } from 'vitest'
 
 /**
  * Extracted scroll decision logic from ChatArea.jsx.
- * These mirror the conditions in the useEffect hooks exactly.
+ * These mirror the conditions in the useEffect hooks.
  */
 
-// Mirrors the scroll-on-message-change effect (lines 120-141 in ChatArea.jsx)
+// Mirrors the scroll-on-message-change effect in ChatArea.jsx
 function computeMessageChangeScroll(messages, prevMessageCount) {
   const newCount = messages.length
   const lastMsg = messages[messages.length - 1]
@@ -30,15 +34,7 @@ function computeMessageChangeScroll(messages, prevMessageCount) {
   return { force, isStreamingUpdate: false }
 }
 
-// Mirrors the MutationObserver callback (lines 143-155 in ChatArea.jsx)
-function computeMutationScroll(messages) {
-  const lastMsg = messages[messages.length - 1]
-  const isCurrentlyStreaming = lastMsg && lastMsg._streaming
-  const force = !isCurrentlyStreaming && lastMsg && lastMsg.role !== 'user'
-  return { force }
-}
-
-// Mirrors scrollToBottom logic (lines 108-118 in ChatArea.jsx)
+// Mirrors scrollToBottom logic in ChatArea.jsx
 function shouldActuallyScroll(force, userScrolledAway) {
   if (userScrolledAway && !force) return false
   return true
@@ -87,23 +83,26 @@ describe('Auto-scroll during streaming (#441)', () => {
     })
   })
 
-  describe('Scenario 3: MutationObserver during streaming', () => {
-    it('should NOT force-scroll during streaming', () => {
-      const messages = [
-        { role: 'user', content: 'Hello' },
-        { role: 'assistant', content: 'Response with code...', _streaming: true },
-      ]
-      const result = computeMutationScroll(messages)
-      expect(result.force).toBe(false)
+  describe('Scenario 3: MutationObserver never force-scrolls', () => {
+    // The MutationObserver now always calls scrollToBottom(false), meaning it
+    // never overrides the user's scroll position. This prevents the stream-end
+    // yank where DOM mutations (cursor removal, etc.) would force-scroll.
+    it('should not force-scroll during streaming', () => {
+      // MutationObserver always passes force=false, so user scroll is respected
+      const result = shouldActuallyScroll(false, true)
+      expect(result).toBe(false)
     })
 
-    it('should force-scroll for completed assistant messages (post-render expansion)', () => {
-      const messages = [
-        { role: 'user', content: 'Hello' },
-        { role: 'assistant', content: 'Completed response', _streaming: false },
-      ]
-      const result = computeMutationScroll(messages)
-      expect(result.force).toBe(true)
+    it('should scroll if user is near bottom (any mutation)', () => {
+      const result = shouldActuallyScroll(false, false)
+      expect(result).toBe(true)
+    })
+
+    it('should not yank user to bottom after streaming ends', () => {
+      // Previously, MutationObserver would force=true after streaming ended,
+      // yanking users back to bottom. Now it always uses force=false.
+      const result = shouldActuallyScroll(false, true)
+      expect(result).toBe(false)
     })
   })
 
@@ -120,13 +119,10 @@ describe('Auto-scroll during streaming (#441)', () => {
       expect(result.isStreamingUpdate).toBe(false)
     })
 
-    it('MutationObserver should force-scroll after streaming ends', () => {
-      const messages = [
-        { role: 'user', content: 'Hello' },
-        { role: 'assistant', content: 'Full response', _streaming: false },
-      ]
-      const result = computeMutationScroll(messages)
-      expect(result.force).toBe(true)
+    it('should respect user scroll position after streaming ends', () => {
+      // User scrolled up during streaming — stream ends — should NOT yank back
+      const result = shouldActuallyScroll(false, true)
+      expect(result).toBe(false)
     })
   })
 
@@ -137,14 +133,6 @@ describe('Auto-scroll during streaming (#441)', () => {
       ]
       const prevCount = 0
       const result = computeMessageChangeScroll(messages, prevCount)
-      expect(result.force).toBe(false)
-    })
-
-    it('MutationObserver should not force for user messages', () => {
-      const messages = [
-        { role: 'user', content: 'Hello' },
-      ]
-      const result = computeMutationScroll(messages)
       expect(result.force).toBe(false)
     })
   })
@@ -163,14 +151,6 @@ describe('Auto-scroll during streaming (#441)', () => {
       const prevCount = 0
       const result = computeMessageChangeScroll(messages, prevCount)
       expect(result.force).toBe(true) // new assistant message, should force
-    })
-
-    it('MutationObserver treats undefined _streaming as not streaming', () => {
-      const messages = [
-        { role: 'assistant', content: 'History message' }, // no _streaming flag
-      ]
-      const result = computeMutationScroll(messages)
-      expect(result.force).toBe(true)
     })
   })
 
@@ -213,9 +193,8 @@ describe('Auto-scroll during streaming (#441)', () => {
       expect(scroll.force).toBe(false) // still streaming
       expect(scroll.isStreamingUpdate).toBe(true)
 
-      // Step 5: MutationObserver fires during streaming (e.g., code block highlighted)
-      let mutation = computeMutationScroll(messages)
-      expect(mutation.force).toBe(false) // during streaming, no force
+      // Step 5: MutationObserver fires during streaming — never forces
+      expect(shouldActuallyScroll(false, true)).toBe(false) // user scrolled up, no force
 
       // Step 6: Streaming ends
       messages = [
@@ -226,9 +205,8 @@ describe('Auto-scroll during streaming (#441)', () => {
       expect(scroll.force).toBe(false) // same count, not a new message
       expect(scroll.isStreamingUpdate).toBe(false) // not streaming anymore
 
-      // Step 7: Post-streaming DOM mutation (e.g., lazy-loaded image)
-      mutation = computeMutationScroll(messages)
-      expect(mutation.force).toBe(true) // streaming done, force for content expansion
+      // Step 7: Post-streaming DOM mutation — still no force, user stays where they are
+      expect(shouldActuallyScroll(false, true)).toBe(false) // user still scrolled up
     })
   })
 })
