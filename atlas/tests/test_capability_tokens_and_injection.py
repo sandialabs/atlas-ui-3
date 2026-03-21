@@ -48,6 +48,13 @@ def restore_litellm_module_after_tests():
 from atlas.core.capabilities import generate_file_token, verify_file_token  # noqa: E402  # type: ignore
 
 
+@pytest.fixture(autouse=True)
+def set_capability_token_secret(monkeypatch):
+    """Ensure capability token secret is set for all tests in this module."""
+    from atlas.modules.config import config_manager
+    monkeypatch.setattr(config_manager.app_settings, "capability_token_secret", "test-secret-for-tests")
+
+
 class FakeS3:
     def __init__(self):
         self._store = {}

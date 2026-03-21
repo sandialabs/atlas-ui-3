@@ -1,9 +1,17 @@
 import base64
 
+import pytest
 from main import app
 from starlette.testclient import TestClient
 
 from atlas.core.capabilities import generate_file_token
+
+
+@pytest.fixture(autouse=True)
+def set_capability_token_secret(monkeypatch):
+    """Ensure capability token secret is set for tests."""
+    from atlas.modules.config import config_manager
+    monkeypatch.setattr(config_manager.app_settings, "capability_token_secret", "test-secret-for-tests")
 
 
 def test_files_download_with_token(monkeypatch):

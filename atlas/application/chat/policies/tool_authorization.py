@@ -74,11 +74,11 @@ class ToolAuthorizationService:
             return filtered_tools
 
         except Exception:
-            logger.debug(
-                "Tool ACL filtering failed; proceeding with original selection",
+            logger.error(
+                "Tool ACL filtering failed; denying all tools (fail closed)",
                 exc_info=True
             )
-            return selected_tools
+            return []
 
     async def _get_authorized_servers(self, user: str) -> List[str]:
         """
