@@ -334,6 +334,75 @@ const copyMessageContent = (content, button) => {
   }
 }
 
+// Extract RAG references JSON marker from response content
+const RAG_REFS_PATTERN = /<!-- RAG_REFERENCES_JSON:([\s\S]+?)-->/
+const extractRagReferences = (content) => {
+  if (typeof content !== 'string') return { clean: content, refs: null }
+  const match = content.match(RAG_REFS_PATTERN)
+  if (!match) return { clean: content, refs: null }
+  try {
+    const refs = JSON.parse(match[1])
+    const clean = content.slice(0, match.index).trimEnd()
+    return { clean, refs }
+  } catch {
+    return { clean: content, refs: null }
+  }
+}
+
+// Collapsible RAG References section
+const RagReferences = ({ refs }) => {
+  const [expanded, setExpanded] = useState(false)
+  if (!refs || !refs.sources || refs.sources.length === 0) return null
+
+  return (
+    <div className="mt-4 border border-gray-600 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center justify-between px-4 py-2 bg-gray-700/50 hover:bg-gray-700 transition-colors text-sm text-gray-300 cursor-pointer"
+        type="button"
+      >
+        <span className="font-medium">
+          References ({refs.sources.length} source{refs.sources.length !== 1 ? 's' : ''})
+        </span>
+        <svg
+          className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="px-4 py-3 bg-gray-800/50 space-y-2">
+          {refs.sources.map((s, i) => (
+            <div key={i} className="flex items-start gap-2 text-sm">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 text-xs font-bold flex-shrink-0 mt-0.5">
+                {s.index}
+              </span>
+              <div className="min-w-0">
+                <span className="text-gray-200 font-medium break-all">{s.source}</span>
+                <div className="flex flex-wrap gap-2 mt-0.5">
+                  {s.content_type && (
+                    <span className="text-xs text-gray-500 uppercase">{s.content_type}</span>
+                  )}
+                  {s.confidence != null && (
+                    <span className="text-xs text-gray-500">{Math.round(s.confidence * 100)}% relevance</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+          {refs.retrieval_method && (
+            <div className="text-xs text-gray-500 pt-1 border-t border-gray-700">
+              Retrieved via {refs.retrieval_method} from {refs.data_source}
+              {refs.processing_time_ms > 0 && ` in ${refs.processing_time_ms}ms`}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Helper function to process message content (strings and structured objects)
 const processMessageContent = (content) => {
   let processedContent = ''
@@ -1156,24 +1225,31 @@ const renderContent = () => {
     // Process content to handle both strings and structured objects
     const content = processMessageContent(message.content)
 
+    // Extract RAG references before markdown processing
+    const { clean: cleanContent, refs: ragRefs } = extractRagReferences(content)
+
     try {
-      const { result: latexProcessed, placeholders } = preProcessLatex(content)
+      const { result: latexProcessed, placeholders } = preProcessLatex(cleanContent)
       const markdownHtml = marked.parse(latexProcessed)
       const latexRestoredHtml = restoreLatexPlaceholders(markdownHtml, placeholders)
       const sanitizedHtml = DOMPurify.sanitize(latexRestoredHtml, DOMPURIFY_CONFIG)
 
       return (
-        <div
-          className="prose prose-invert max-w-none selectable-markdown"
-          dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
-        />
+        <>
+          <div
+            className="prose prose-invert max-w-none selectable-markdown"
+            dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+          />
+          <RagReferences refs={ragRefs} />
+        </>
       )
     } catch (error) {
       console.error('Error parsing markdown content:', error)
       // Fallback to plain text if markdown parsing fails
       return (
         <div className="text-gray-200">
-          <pre className="whitespace-pre-wrap">{content}</pre>
+          <pre className="whitespace-pre-wrap">{cleanContent}</pre>
+          <RagReferences refs={ragRefs} />
         </div>
       )
     }
