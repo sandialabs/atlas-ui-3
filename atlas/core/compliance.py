@@ -56,7 +56,7 @@ class ComplianceLevelManager:
         if config_path and config_path.exists():
             self._load_config(config_path)
         else:
-            logger.warning("No compliance-levels.json found, using permissive validation")
+            logger.warning("No compliance-levels.json found; access will be denied for any configured compliance level (fail closed)")
 
     def _load_config(self, config_path: Path):
         """Load compliance level configuration from JSON file."""
@@ -87,7 +87,7 @@ class ComplianceLevelManager:
 
         except Exception as e:
             logger.error(f"Error loading compliance-levels.json: {e}")
-            # Continue with empty config for permissive validation
+            # Continue with empty config; access will be denied for configured levels (fail closed)
 
     def get_canonical_name(self, name: Optional[str]) -> Optional[str]:
         """Get the canonical name for a compliance level (resolves aliases).
@@ -159,15 +159,15 @@ class ComplianceLevelManager:
         user_canonical = self.get_canonical_name(user_level)
         resource_canonical = self.get_canonical_name(resource_level)
 
-        # If we don't have level info, be permissive
+        # If we can't resolve level info, deny access (fail closed)
         if not user_canonical or not resource_canonical:
-            return True
+            return False
 
         # Get level object for user
         user_level_obj = self.levels.get(user_canonical)
 
         if not user_level_obj:
-            return True
+            return False
 
         # Check if resource_level is in the user's allowed_with list
         return resource_canonical in user_level_obj.allowed_with

@@ -99,4 +99,8 @@ def summarize_tool_approval_response_for_logging(data: Any) -> str:
 
 async def get_current_user(request: Request) -> str:
     """Get current user from request state (set by middleware)."""
-    return getattr(request.state, 'user_email', 'test@test.com')
+    user_email = getattr(request.state, 'user_email', None)
+    if not user_email:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user_email

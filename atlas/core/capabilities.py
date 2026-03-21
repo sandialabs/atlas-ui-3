@@ -36,14 +36,15 @@ def _get_secret() -> bytes:
     """
     try:
         settings = config_manager.app_settings
-        if getattr(settings, "capability_token_secret", None):
-            return settings.capability_token_secret.encode("utf-8")
+        secret = getattr(settings, "capability_token_secret", None)
+        if secret:
+            return secret.encode("utf-8")
     except Exception:
-        # Config not ready; continue to fallback with a dev secret.
-        logger.debug("Capability token secret not available; using fallback dev secret.")
+        logger.error("Capability token secret not available; cannot generate secure tokens (fail closed)")
+        raise RuntimeError("CAPABILITY_TOKEN_SECRET not configured. Set it in app settings.")
 
-    logger.warning("Using fallback dev capability token secret. Set CAPABILITY_TOKEN_SECRET for security.")
-    return b"dev-capability-secret"
+    logger.error("CAPABILITY_TOKEN_SECRET is empty or not set (fail closed)")
+    raise RuntimeError("CAPABILITY_TOKEN_SECRET not configured. Set it in app settings.")
 
 
 def _get_default_ttl_seconds() -> int:

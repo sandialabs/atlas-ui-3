@@ -50,7 +50,7 @@ class TestDomainWhitelistManager:
         assert len(manager.get_domains()) == 3
 
     def test_missing_config_file(self):
-        """Test that missing config file allows all domains (fail open)."""
+        """Test that missing config file denies all domains (fail closed)."""
         non_existent_path = Path("/tmp/nonexistent_whitelist_config_12345.json")
         manager = DomainWhitelistManager(config_path=non_existent_path)
 
@@ -58,13 +58,13 @@ class TestDomainWhitelistManager:
         assert manager.config_loaded is False
         assert len(manager.get_domains()) == 0
 
-        # But should allow all domains (fail open)
-        assert manager.is_domain_allowed("user@gmail.com") is True
-        assert manager.is_domain_allowed("user@any-domain.com") is True
-        assert manager.is_domain_allowed("test@example.org") is True
+        # Should deny all domains (fail closed)
+        assert manager.is_domain_allowed("user@gmail.com") is False
+        assert manager.is_domain_allowed("user@any-domain.com") is False
+        assert manager.is_domain_allowed("test@example.org") is False
 
     def test_invalid_json_config(self):
-        """Test that invalid JSON config allows all domains (fail open)."""
+        """Test that invalid JSON config denies all domains (fail closed)."""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             f.write("{ invalid json content ]}")
             temp_path = Path(f.name)
@@ -76,9 +76,9 @@ class TestDomainWhitelistManager:
             assert manager.config_loaded is False
             assert len(manager.get_domains()) == 0
 
-            # Should allow all domains (fail open)
-            assert manager.is_domain_allowed("user@gmail.com") is True
-            assert manager.is_domain_allowed("test@example.org") is True
+            # Should deny all domains (fail closed)
+            assert manager.is_domain_allowed("user@gmail.com") is False
+            assert manager.is_domain_allowed("test@example.org") is False
         finally:
             if temp_path.exists():
                 temp_path.unlink()
@@ -248,7 +248,7 @@ class TestDomainWhitelistMiddleware:
         asyncio.run(test_request())
 
     def test_middleware_with_missing_config(self, create_middleware):
-        """Test that middleware with missing config allows all domains."""
+        """Test that middleware with missing config denies all domains (fail closed)."""
         from starlette.requests import Request
         from starlette.responses import Response
 
@@ -270,15 +270,15 @@ class TestDomainWhitelistMiddleware:
             request = Request(scope)
             request.state.user_email = "test@gmail.com"
 
-            # Should pass even though config is missing (fail open)
+            # Should block because config is missing (fail closed)
             response = await middleware.dispatch(request, call_next)
-            assert response.status_code == 200
+            assert response.status_code == 403
 
         import asyncio
         asyncio.run(test_request())
 
     def test_middleware_with_invalid_config(self, create_middleware):
-        """Test that middleware with invalid config allows all domains."""
+        """Test that middleware with invalid config denies all domains (fail closed)."""
         from starlette.requests import Request
         from starlette.responses import Response
 
@@ -304,9 +304,9 @@ class TestDomainWhitelistMiddleware:
                 request = Request(scope)
                 request.state.user_email = "test@anydomain.com"
 
-                # Should pass even though config is invalid (fail open)
+                # Should block because config is invalid (fail closed)
                 response = await middleware.dispatch(request, call_next)
-                assert response.status_code == 200
+                assert response.status_code == 403
 
             import asyncio
             asyncio.run(test_request())

@@ -113,9 +113,9 @@ class DomainWhitelistManager:
         Returns:
             True if domain is allowed, False otherwise
         """
-        # If config wasn't successfully loaded, allow all (fail open)
+        # If config wasn't successfully loaded, deny all (fail closed)
         if not self.config_loaded:
-            return True
+            return False
 
         if not email or "@" not in email:
             return False
