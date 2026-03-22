@@ -700,6 +700,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
 
             message = response.choices[0].message
+            reasoning = getattr(message, 'reasoning_content', None)
 
             if tool_choice == "required" and not getattr(message, 'tool_calls', None):
                 logger.error(f"LLM failed to return tool calls when tool_choice was 'required'. Full response: {response}")
@@ -712,7 +713,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             return LLMResponse(
                 content=getattr(message, 'content', None) or "",
                 tool_calls=tool_calls,
-                model_used=model_name
+                model_used=model_name,
+                reasoning_content=reasoning,
             )
 
         except Exception as exc:
@@ -732,7 +734,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     return LLMResponse(
                         content=getattr(message, 'content', None) or "",
                         tool_calls=getattr(message, 'tool_calls', None),
-                        model_used=model_name
+                        model_used=model_name,
+                        reasoning_content=getattr(message, 'reasoning_content', None),
                     )
                 except Exception as retry_exc:
                     logger.error("Retry with tool_choice='auto' also failed: %s", retry_exc, exc_info=True)
