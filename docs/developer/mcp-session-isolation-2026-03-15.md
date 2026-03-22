@@ -59,6 +59,16 @@ Holds live MCP sessions keyed by `(conversation_id, server_name)`:
 3. WebSocket disconnect → `release_sessions(conversation_id, user_email)` closes all sessions and evicts per-user HTTP clients
 4. Server shutdown → `cleanup()` closes all sessions and clears client caches
 
+### Dead Session Recovery (PR #461, 2026-03-21)
+
+When a STDIO server process crashes between tool calls, the persistent session becomes stale. Without detection, the next tool call would hit FastMCP's `ClosedResourceError` with no recovery path.
+
+**Detection**: `ManagedSession.is_open` checks `client.is_connected()` in addition to Python-side `_opened`/`_closed` flags. This detects server-side disconnects that the flags alone miss.
+
+**Eviction**: `MCPSessionManager.acquire()` detects dead sessions on the re-check path, removes them from the session map, and calls `close()` outside the global lock. The `close()` call invokes `client.__aexit__()` which resets FastMCP's internal nesting counter — required before `__aenter__` can start a fresh connection.
+
+**Reconnection**: After eviction, a new `ManagedSession` is created and opened normally. The caller sees a transparent reconnect with no error.
+
 ## Configuration
 
 | Variable | Default | Description |
