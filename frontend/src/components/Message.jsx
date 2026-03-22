@@ -1162,6 +1162,8 @@ const renderContent = () => {
     }
 
     // Render reasoning section for assistant messages with reasoning_content
+    const isReasoningStreaming = message._reasoningStreaming
+    const showExpanded = isReasoningStreaming || !reasoningCollapsed
     const reasoningBlock = message.reasoning_content ? (
       <div className="mb-3">
         <div className="border-l-4 border-purple-500 pl-4">
@@ -1169,15 +1171,19 @@ const renderContent = () => {
             onClick={() => setReasoningCollapsed(!reasoningCollapsed)}
             className="w-full text-left text-sm font-semibold text-purple-400 mb-2 flex items-center gap-2 hover:text-purple-300 transition-colors"
           >
-            <span className={`transform transition-transform duration-200 ${reasoningCollapsed ? 'rotate-0' : 'rotate-90'}`}>
+            <span className={`transform transition-transform duration-200 ${showExpanded ? 'rotate-90' : 'rotate-0'}`}>
               ▶
             </span>
-            Reasoning
+            {isReasoningStreaming ? 'Reasoning...' : 'Reasoning'}
           </button>
-          {!reasoningCollapsed && (
-            <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-96 overflow-y-auto">
+          {showExpanded && (
+            <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-96 overflow-y-auto" ref={el => {
+              // Auto-scroll to bottom during streaming
+              if (el && isReasoningStreaming) el.scrollTop = el.scrollHeight
+            }}>
               <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono">
                 {message.reasoning_content}
+                {isReasoningStreaming && <span className="animate-pulse">▌</span>}
               </pre>
             </div>
           )}

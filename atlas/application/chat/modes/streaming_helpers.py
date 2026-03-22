@@ -10,7 +10,7 @@ import logging
 from typing import AsyncGenerator
 
 from atlas.interfaces.events import EventPublisher
-from atlas.modules.llm.models import ReasoningBlock
+from atlas.modules.llm.models import ReasoningBlock, ReasoningToken
 
 from ..utilities.error_handler import classify_llm_error
 
@@ -42,7 +42,15 @@ async def stream_and_accumulate(
     try:
         token_count = 0
         async for token in token_generator:
-            # Handle ReasoningBlock marker
+            # Stream reasoning tokens in real-time
+            if isinstance(token, ReasoningToken):
+                await event_publisher.send_json({
+                    "type": "reasoning_token",
+                    "token": token.token,
+                })
+                continue
+
+            # Handle final ReasoningBlock marker
             if isinstance(token, ReasoningBlock):
                 reasoning_content = token.content
                 await event_publisher.send_json({
@@ -83,7 +91,7 @@ async def stream_and_accumulate(
         )
         raise
     except Exception as exc:
-        logger.error("%s streaming error, sending partial content: %s", context_label, exc)
+        logger.error("%s streaming error, sending partial content: %s", context_label, exc, exc_info=True)
         await event_publisher.publish_token_stream(
             token="", is_first=False, is_last=True,
         )
@@ -91,14 +99,17 @@ async def stream_and_accumulate(
             if fallback_fn:
                 try:
                     accumulated = await fallback_fn()
-                except Exception:
+                except Exception as fallback_exc:
+                    logger.error("%s fallback also failed: %s", context_label, fallback_exc, exc_info=True)
                     _err_class, user_msg, _log_msg = classify_llm_error(exc)
                     accumulated = user_msg
             else:
                 _err_class, user_msg, _log_msg = classify_llm_error(exc)
                 accumulated = user_msg
-            await event_publisher.publish_chat_response(
-                message=accumulated, has_pending_tools=False,
-            )
+            # Send error to frontend so user sees what happened
+            await event_publisher.send_json({
+                "type": "error",
+                "message": accumulated,
+            })
 
     return accumulated, reasoning_content

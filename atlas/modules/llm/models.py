@@ -7,6 +7,12 @@ from typing import Dict, List, Optional
 
 
 @dataclass
+class ReasoningToken:
+    """Emitted during streaming for each reasoning token chunk (for real-time display)."""
+    token: str
+
+
+@dataclass
 class ReasoningBlock:
     """Emitted during streaming when model reasoning is complete, before content begins."""
     content: str

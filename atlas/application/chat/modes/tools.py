@@ -8,6 +8,7 @@ from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
+from atlas.modules.llm.models import ReasoningBlock, ReasoningToken
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..preprocessors.message_builder import build_session_context
@@ -194,6 +195,7 @@ class ToolsModeRunner:
 
         # Stream initial LLM call with tools
         accumulated_content = ""
+        accumulated_reasoning: Optional[str] = None
         final_llm_response: Optional[LLMResponse] = None
         is_first = True
         streaming_error: Optional[Exception] = None
@@ -211,7 +213,18 @@ class ToolsModeRunner:
                 )
 
             async for item in stream:
-                if isinstance(item, str):
+                if isinstance(item, ReasoningToken):
+                    await self.event_publisher.send_json({
+                        "type": "reasoning_token",
+                        "token": item.token,
+                    })
+                elif isinstance(item, ReasoningBlock):
+                    accumulated_reasoning = item.content
+                    await self.event_publisher.send_json({
+                        "type": "reasoning_content",
+                        "content": item.content,
+                    })
+                elif isinstance(item, str):
                     await self.event_publisher.publish_token_stream(
                         token=item, is_first=is_first, is_last=False,
                     )
@@ -243,6 +256,7 @@ class ToolsModeRunner:
         # No tool calls -> treat as plain streamed content
         if not final_llm_response or not final_llm_response.has_tool_calls():
             content = accumulated_content or (final_llm_response.content if final_llm_response else "")
+            reasoning = accumulated_reasoning or (getattr(final_llm_response, 'reasoning_content', None) if final_llm_response else None)
             if accumulated_content:
                 await self.event_publisher.publish_token_stream(
                     token="", is_first=False, is_last=True,
@@ -250,9 +264,13 @@ class ToolsModeRunner:
             else:
                 await self.event_publisher.publish_chat_response(
                     message=content, has_pending_tools=False,
+                    reasoning_content=reasoning,
                 )
 
-            assistant_message = Message(role=MessageRole.ASSISTANT, content=content)
+            metadata = {}
+            if reasoning:
+                metadata["reasoning_content"] = reasoning
+            assistant_message = Message(role=MessageRole.ASSISTANT, content=content, metadata=metadata)
             session.history.add_message(assistant_message)
             await self.event_publisher.publish_response_complete()
             return event_notifier.create_chat_response(content)
@@ -309,17 +327,20 @@ class ToolsModeRunner:
             await self.artifact_processor(session, tool_results, effective_callback)
 
         # Stream synthesis
-        synthesis_content = await self._stream_synthesis(
+        synthesis_content, synthesis_reasoning = await self._stream_synthesis(
             final_llm_response, messages, model, session_context, user_email, effective_callback,
         )
 
+        metadata = {
+            "tools": selected_tools,
+            **({"data_sources": selected_data_sources} if selected_data_sources else {}),
+        }
+        if synthesis_reasoning:
+            metadata["reasoning_content"] = synthesis_reasoning
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
             content=synthesis_content,
-            metadata={
-                "tools": selected_tools,
-                **({"data_sources": selected_data_sources} if selected_data_sources else {}),
-            },
+            metadata=metadata,
         )
         session.history.add_message(assistant_message)
         await self.event_publisher.publish_response_complete()
@@ -333,12 +354,12 @@ class ToolsModeRunner:
         session_context: Dict[str, Any],
         user_email: Optional[str],
         update_callback: Optional[UpdateCallback],
-    ) -> str:
-        """Stream the tool synthesis LLM call."""
+    ) -> tuple:
+        """Stream the tool synthesis LLM call. Returns (content, reasoning_content)."""
         # Check canvas-only shortcut
         canvas_calls = [tc for tc in llm_response.tool_calls if tc.function.name == "canvas_canvas"]
         if len(canvas_calls) == len(llm_response.tool_calls):
-            return llm_response.content or "Content displayed in canvas."
+            return llm_response.content or "Content displayed in canvas.", None
 
         # Add files manifest
         files_manifest = tool_executor.build_files_manifest(session_context)
@@ -372,7 +393,7 @@ class ToolsModeRunner:
             if prompt_text:
                 synthesis_messages.append({"role": "system", "content": prompt_text})
 
-        accumulated, _reasoning = await stream_and_accumulate(
+        accumulated, reasoning = await stream_and_accumulate(
             token_generator=self.llm.stream_plain(
                 model, synthesis_messages, user_email=user_email,
             ),
@@ -382,7 +403,7 @@ class ToolsModeRunner:
             ),
             context_label="synthesis",
         )
-        return accumulated
+        return accumulated, reasoning
 
     def _get_send_json(self) -> Optional[UpdateCallback]:
         """Get send_json callback from event publisher if available."""

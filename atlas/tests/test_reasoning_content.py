@@ -74,7 +74,7 @@ async def test_call_with_tools_reasoning_none_when_absent():
 @pytest.mark.asyncio
 async def test_stream_plain_yields_reasoning_block():
     from atlas.modules.llm.litellm_streaming import LiteLLMStreamingMixin
-    from atlas.modules.llm.models import ReasoningBlock
+    from atlas.modules.llm.models import ReasoningBlock, ReasoningToken
 
     chunks = []
     for text in ["Let me ", "think..."]:
@@ -102,16 +102,23 @@ async def test_stream_plain_yields_reasoning_block():
         async for item in mixin.stream_plain("test", [{"role": "user", "content": "q"}]):
             items.append(item)
 
-    assert isinstance(items[0], ReasoningBlock)
-    assert items[0].content == "Let me think..."
-    assert items[1] == "The "
-    assert items[2] == "answer"
+    # First two items are ReasoningToken (one per chunk)
+    assert isinstance(items[0], ReasoningToken)
+    assert items[0].token == "Let me "
+    assert isinstance(items[1], ReasoningToken)
+    assert items[1].token == "think..."
+    # Then the full ReasoningBlock
+    assert isinstance(items[2], ReasoningBlock)
+    assert items[2].content == "Let me think..."
+    # Then content tokens
+    assert items[3] == "The "
+    assert items[4] == "answer"
 
 
 @pytest.mark.asyncio
 async def test_stream_with_tools_yields_reasoning_block():
     from atlas.modules.llm.litellm_streaming import LiteLLMStreamingMixin
-    from atlas.modules.llm.models import ReasoningBlock, LLMResponse
+    from atlas.modules.llm.models import ReasoningBlock, ReasoningToken, LLMResponse
 
     chunks = []
     for text in ["Think..."]:
@@ -142,11 +149,17 @@ async def test_stream_with_tools_yields_reasoning_block():
         ):
             items.append(item)
 
-    assert isinstance(items[0], ReasoningBlock)
-    assert items[0].content == "Think..."
-    assert items[1] == "ans"
-    assert isinstance(items[2], LLMResponse)
-    assert items[2].reasoning_content == "Think..."
+    # First: ReasoningToken
+    assert isinstance(items[0], ReasoningToken)
+    assert items[0].token == "Think..."
+    # Then: ReasoningBlock with full text
+    assert isinstance(items[1], ReasoningBlock)
+    assert items[1].content == "Think..."
+    # Then: content
+    assert items[2] == "ans"
+    # Then: final LLMResponse
+    assert isinstance(items[3], LLMResponse)
+    assert items[3].reasoning_content == "Think..."
 
 
 @pytest.mark.asyncio

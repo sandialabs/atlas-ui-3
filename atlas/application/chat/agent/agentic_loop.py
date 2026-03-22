@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
-from atlas.modules.llm.models import ReasoningBlock
+from atlas.modules.llm.models import ReasoningBlock, ReasoningToken
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
@@ -237,8 +237,14 @@ class AgenticLoop(AgentLoopProtocol):
 
         try:
             async for item in stream:
-                if isinstance(item, ReasoningBlock):
-                    # Emit reasoning to frontend BEFORE content tokens
+                if isinstance(item, ReasoningToken):
+                    # Stream reasoning tokens to frontend in real-time
+                    await event_publisher.send_json({
+                        "type": "reasoning_token",
+                        "token": item.token,
+                    })
+                elif isinstance(item, ReasoningBlock):
+                    # Final complete reasoning block
                     await event_publisher.send_json({
                         "type": "reasoning_content",
                         "content": item.content,

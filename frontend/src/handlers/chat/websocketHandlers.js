@@ -11,6 +11,8 @@ let _tokenBuffer = ''
 let _tokenFlushTimer = null
 let _streamActive = false
 let _pendingReasoning = null
+let _reasoningBuffer = ''
+let _reasoningFlushTimer = null
 const FLUSH_INTERVAL_MS = 30
 
 /**
@@ -21,9 +23,14 @@ export function cleanupStreamState() {
   _streamActive = false
   _tokenBuffer = ''
   _pendingReasoning = null
+  _reasoningBuffer = ''
   if (_tokenFlushTimer) {
     clearTimeout(_tokenFlushTimer)
     _tokenFlushTimer = null
+  }
+  if (_reasoningFlushTimer) {
+    clearTimeout(_reasoningFlushTimer)
+    _reasoningFlushTimer = null
   }
 }
 
@@ -76,7 +83,17 @@ export function createWebSocketHandler(deps) {
     setActiveConversationId,
     streamToken,
     streamEnd,
+    streamReasoningToken,
+    streamReasoningEnd,
   } = deps
+
+  function flushReasoningBuffer() {
+    if (_reasoningBuffer && typeof streamReasoningToken === 'function') {
+      streamReasoningToken(_reasoningBuffer)
+      _reasoningBuffer = ''
+    }
+    _reasoningFlushTimer = null
+  }
 
   function flushTokenBuffer() {
     if (_tokenBuffer && typeof streamToken === 'function') {
@@ -422,17 +439,29 @@ export function createWebSocketHandler(deps) {
           }
           break
         }
+        case 'reasoning_token':
+          // Stream reasoning tokens incrementally (arrives before content)
+          // Clear synthesizing indicator so reasoning message appears below tool result
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+          setIsThinking(false)
+          _reasoningBuffer += data.token
+          if (!_reasoningFlushTimer) {
+            _reasoningFlushTimer = setTimeout(() => {
+              flushReasoningBuffer()
+            }, FLUSH_INTERVAL_MS)
+          }
+          break
         case 'reasoning_content':
-          // Reasoning arrives before content tokens during streaming.
-          // Pre-create the streaming message with reasoning so it appears before content.
+          // Final complete reasoning - flush any remaining buffer and mark end
+          if (_reasoningFlushTimer) {
+            clearTimeout(_reasoningFlushTimer)
+            _reasoningFlushTimer = null
+          }
+          if (_reasoningBuffer) {
+            flushReasoningBuffer()
+          }
           _pendingReasoning = data.content
-          addMessage({
-            role: 'assistant',
-            content: '',
-            timestamp: new Date().toISOString(),
-            reasoning_content: data.content,
-            _streaming: true,
-          })
+          if (typeof streamReasoningEnd === 'function') streamReasoningEnd()
           break
         case 'response_complete': {
           setIsThinking(false)
