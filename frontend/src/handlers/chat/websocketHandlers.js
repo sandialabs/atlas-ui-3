@@ -10,6 +10,7 @@ const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
 let _tokenBuffer = ''
 let _tokenFlushTimer = null
 let _streamActive = false
+let _pendingReasoning = null
 const FLUSH_INTERVAL_MS = 30
 
 /**
@@ -19,6 +20,7 @@ const FLUSH_INTERVAL_MS = 30
 export function cleanupStreamState() {
   _streamActive = false
   _tokenBuffer = ''
+  _pendingReasoning = null
   if (_tokenFlushTimer) {
     clearTimeout(_tokenFlushTimer)
     _tokenFlushTimer = null
@@ -420,10 +422,23 @@ export function createWebSocketHandler(deps) {
           }
           break
         }
+        case 'reasoning_content':
+          // Reasoning arrives before content tokens during streaming.
+          // Pre-create the streaming message with reasoning so it appears before content.
+          _pendingReasoning = data.content
+          addMessage({
+            role: 'assistant',
+            content: '',
+            timestamp: new Date().toISOString(),
+            reasoning_content: data.content,
+            _streaming: true,
+          })
+          break
         case 'response_complete': {
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           endTokenStream()
+          _pendingReasoning = null
           break
         }
         case 'conversation_saved': {
@@ -445,6 +460,7 @@ export function createWebSocketHandler(deps) {
           }
           if (data.is_last) {
             endTokenStream()
+            _pendingReasoning = null
             if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           } else if (data.token) {
             _tokenBuffer += data.token
@@ -464,7 +480,12 @@ export function createWebSocketHandler(deps) {
         case 'chat_response':
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
-          addMessage({ role: 'assistant', content: data.message, timestamp: new Date().toISOString() })
+          addMessage({
+            role: 'assistant',
+            content: data.message,
+            timestamp: new Date().toISOString(),
+            ...(data.reasoning_content ? { reasoning_content: data.reasoning_content } : {}),
+          })
           break
         case 'error':
           setIsThinking(false)
