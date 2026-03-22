@@ -367,7 +367,7 @@ class ToolsModeRunner:
             if prompt_text:
                 synthesis_messages.append({"role": "system", "content": prompt_text})
 
-        return await stream_and_accumulate(
+        accumulated, _reasoning = await stream_and_accumulate(
             token_generator=self.llm.stream_plain(
                 model, synthesis_messages, user_email=user_email,
             ),
@@ -377,6 +377,7 @@ class ToolsModeRunner:
             ),
             context_label="synthesis",
         )
+        return accumulated
 
     def _get_send_json(self) -> Optional[UpdateCallback]:
         """Get send_json callback from event publisher if available."""

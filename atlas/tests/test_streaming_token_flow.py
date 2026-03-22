@@ -58,13 +58,14 @@ async def test_stream_and_accumulate_happy_path():
     """Tokens are accumulated and is_last is sent at the end."""
     pub = _make_publisher()
 
-    result = await stream_and_accumulate(
+    result, reasoning = await stream_and_accumulate(
         token_generator=_async_gen("Hello", " ", "World"),
         event_publisher=pub,
         context_label="test",
     )
 
     assert result == "Hello World"
+    assert reasoning is None
     # 3 token calls + 1 is_last
     assert pub.publish_token_stream.await_count == 4
     # First call has is_first=True
@@ -83,7 +84,7 @@ async def test_stream_and_accumulate_empty_with_fallback():
     pub = _make_publisher()
     fallback = AsyncMock(return_value="fallback text")
 
-    result = await stream_and_accumulate(
+    result, reasoning = await stream_and_accumulate(
         token_generator=_async_gen(),  # yields nothing
         event_publisher=pub,
         fallback_fn=fallback,
@@ -91,6 +92,7 @@ async def test_stream_and_accumulate_empty_with_fallback():
     )
 
     assert result == "fallback text"
+    assert reasoning is None
     fallback.assert_awaited_once()
     pub.publish_chat_response.assert_awaited_once()
 
@@ -100,13 +102,14 @@ async def test_stream_and_accumulate_empty_no_fallback():
     """Empty stream without fallback returns empty string."""
     pub = _make_publisher()
 
-    result = await stream_and_accumulate(
+    result, reasoning = await stream_and_accumulate(
         token_generator=_async_gen(),
         event_publisher=pub,
         context_label="test",
     )
 
     assert result == ""
+    assert reasoning is None
 
 
 @pytest.mark.asyncio
@@ -114,13 +117,14 @@ async def test_stream_and_accumulate_error_sends_is_last():
     """Mid-stream error always sends is_last to prevent stuck UI cursor."""
     pub = _make_publisher()
 
-    result = await stream_and_accumulate(
+    result, reasoning = await stream_and_accumulate(
         token_generator=_async_gen_error("partial"),
         event_publisher=pub,
         context_label="test",
     )
 
     assert result == "partial"
+    assert reasoning is None
     # Should have: 1 token + 1 is_last (error path)
     last_call = pub.publish_token_stream.await_args_list[-1]
     assert last_call.kwargs["is_last"] is True
@@ -137,7 +141,7 @@ async def test_stream_and_accumulate_error_no_tokens_with_fallback():
 
     fallback = AsyncMock(return_value="error fallback")
 
-    result = await stream_and_accumulate(
+    result, reasoning = await stream_and_accumulate(
         token_generator=_immediate_error(),
         event_publisher=pub,
         fallback_fn=fallback,
@@ -145,6 +149,7 @@ async def test_stream_and_accumulate_error_no_tokens_with_fallback():
     )
 
     assert result == "error fallback"
+    assert reasoning is None
     fallback.assert_awaited_once()
 
 
@@ -217,7 +222,7 @@ async def test_stream_and_accumulate_error_no_tokens_no_fallback_sends_user_mess
         raise RuntimeError("AuthenticationError: invalid api key")
         yield  # makes this an async generator
 
-    result = await stream_and_accumulate(
+    result, reasoning = await stream_and_accumulate(
         token_generator=_auth_error(),
         event_publisher=pub,
         context_label="test",
@@ -227,6 +232,7 @@ async def test_stream_and_accumulate_error_no_tokens_no_fallback_sends_user_mess
     assert "authentication" in result.lower() or "error" in result.lower()
     # Must NOT contain raw exception traceback details
     assert "RuntimeError" not in result
+    assert reasoning is None
     # The message should be sent to the frontend
     pub.publish_chat_response.assert_awaited_once()
 
@@ -242,7 +248,7 @@ async def test_stream_and_accumulate_error_fallback_also_fails():
 
     fallback = AsyncMock(side_effect=RuntimeError("also fails"))
 
-    result = await stream_and_accumulate(
+    result, reasoning = await stream_and_accumulate(
         token_generator=_immediate_error(),
         event_publisher=pub,
         fallback_fn=fallback,
@@ -251,6 +257,7 @@ async def test_stream_and_accumulate_error_fallback_also_fails():
 
     # Should return user-friendly message, not raw exception
     assert "RuntimeError" not in result
+    assert reasoning is None
     assert len(result) > 0
     pub.publish_chat_response.assert_awaited_once()
 

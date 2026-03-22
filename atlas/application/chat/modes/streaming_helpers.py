@@ -10,6 +10,7 @@ import logging
 from typing import AsyncGenerator
 
 from atlas.interfaces.events import EventPublisher
+from atlas.modules.llm.models import ReasoningBlock
 
 from ..utilities.error_handler import classify_llm_error
 
@@ -17,11 +18,11 @@ logger = logging.getLogger(__name__)
 
 
 async def stream_and_accumulate(
-    token_generator: AsyncGenerator[str, None],
+    token_generator,
     event_publisher: EventPublisher,
     fallback_fn=None,
     context_label: str = "LLM",
-) -> str:
+) -> tuple:
     """Consume a token async generator, publishing each chunk and accumulating the result.
 
     Args:
@@ -31,14 +32,25 @@ async def stream_and_accumulate(
         context_label: Label for log messages (e.g. "plain", "RAG").
 
     Returns:
-        The accumulated response text.
+        Tuple of (accumulated_text, reasoning_content).
+        reasoning_content is None if the model didn't produce reasoning.
     """
     accumulated = ""
+    reasoning_content = None
     is_first = True
 
     try:
         token_count = 0
         async for token in token_generator:
+            # Handle ReasoningBlock marker
+            if isinstance(token, ReasoningBlock):
+                reasoning_content = token.content
+                await event_publisher.send_json({
+                    "type": "reasoning_content",
+                    "content": reasoning_content,
+                })
+                continue
+
             token_count += 1
             if token_count <= 2:
                 logger.debug(
@@ -89,4 +101,4 @@ async def stream_and_accumulate(
                 message=accumulated, has_pending_tools=False,
             )
 
-    return accumulated
+    return accumulated, reasoning_content
