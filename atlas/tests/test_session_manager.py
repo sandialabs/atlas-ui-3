@@ -106,6 +106,33 @@ class TestMCPSessionManager:
         mock_client.__aenter__.assert_called_once()
 
 
+    @pytest.mark.asyncio
+    async def test_acquire_evicts_dead_session_and_reconnects(self, session_manager, mock_client):
+        """When the server process dies, acquire() should close the dead session and open a fresh one."""
+        s1 = await session_manager.acquire("conv-1", "server-a", mock_client)
+        assert s1.is_open
+
+        # Simulate server death: is_connected returns False
+        mock_client.is_connected = MagicMock(return_value=False)
+        assert not s1.is_open
+
+        mock_client.__aenter__.reset_mock()
+        # After __aenter__ reconnects, is_connected should return True again.
+        # Use side_effect on __aenter__ to flip it back.
+        async def reconnect_side_effect():
+            mock_client.is_connected = MagicMock(return_value=True)
+            return mock_client
+        mock_client.__aenter__ = AsyncMock(side_effect=reconnect_side_effect)
+
+        s2 = await session_manager.acquire("conv-1", "server-a", mock_client)
+        assert s2 is not s1
+        assert s2.is_open
+        # Dead session should have been closed
+        mock_client.__aexit__.assert_called_once()
+        # New session should have been opened
+        mock_client.__aenter__.assert_called_once()
+
+
 class TestManagedSession:
     @pytest.mark.asyncio
     async def test_client_property(self, mock_client):
@@ -127,3 +154,14 @@ class TestManagedSession:
         await session.close()
         await session.close()
         assert mock_client.__aexit__.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_is_open_reflects_transport_state(self, mock_client):
+        """is_open should return False when the underlying client disconnects."""
+        session = ManagedSession(mock_client)
+        await session.open()
+        assert session.is_open
+
+        # Simulate server-side disconnect
+        mock_client.is_connected = MagicMock(return_value=False)
+        assert not session.is_open
