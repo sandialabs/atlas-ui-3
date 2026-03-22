@@ -150,6 +150,52 @@ async def test_stream_with_tools_yields_reasoning_block():
 
 
 @pytest.mark.asyncio
+async def test_stream_and_accumulate_captures_reasoning():
+    from atlas.application.chat.modes.streaming_helpers import stream_and_accumulate
+    from atlas.modules.llm.models import ReasoningBlock
+
+    async def gen():
+        yield ReasoningBlock(content="thinking hard")
+        yield "Hello "
+        yield "world"
+
+    pub = AsyncMock()
+    pub.publish_token_stream = AsyncMock()
+    pub.send_json = AsyncMock()
+
+    text, reasoning = await stream_and_accumulate(
+        token_generator=gen(), event_publisher=pub,
+    )
+
+    assert text == "Hello world"
+    assert reasoning == "thinking hard"
+    pub.send_json.assert_awaited_once_with({
+        "type": "reasoning_content",
+        "content": "thinking hard",
+    })
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_no_reasoning():
+    from atlas.application.chat.modes.streaming_helpers import stream_and_accumulate
+
+    async def gen():
+        yield "Hello"
+
+    pub = AsyncMock()
+    pub.publish_token_stream = AsyncMock()
+    pub.send_json = AsyncMock()
+
+    text, reasoning = await stream_and_accumulate(
+        token_generator=gen(), event_publisher=pub,
+    )
+
+    assert text == "Hello"
+    assert reasoning is None
+    pub.send_json.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_notify_chat_response_includes_reasoning():
     from atlas.application.chat.utilities.event_notifier import notify_chat_response
 
@@ -169,3 +215,64 @@ async def test_notify_chat_response_omits_reasoning_when_none():
 
     await notify_chat_response(message="ans", update_callback=cb)
     assert "reasoning_content" not in sent[0]
+
+
+@pytest.mark.asyncio
+async def test_agentic_loop_handles_reasoning_block():
+    """AgenticLoop._call_llm_streaming should emit reasoning event for ReasoningBlock."""
+    from atlas.application.chat.agent.agentic_loop import AgenticLoop
+    from atlas.modules.llm.models import ReasoningBlock
+
+    async def mock_stream(*args, **kwargs):
+        yield ReasoningBlock(content="Deep thoughts")
+        yield "The "
+        yield "answer"
+        yield LLMResponse(content="The answer", reasoning_content="Deep thoughts")
+
+    llm = MagicMock()
+    llm.stream_with_tools = mock_stream
+
+    loop = AgenticLoop.__new__(AgenticLoop)
+    loop.llm = llm
+
+    pub = AsyncMock()
+    pub.publish_token_stream = AsyncMock()
+    pub.send_json = AsyncMock()
+
+    context = MagicMock()
+    context.user_email = "test@test.com"
+
+    result = await loop._call_llm_streaming(
+        model="test", messages=[], tools_schema=[], data_sources=None,
+        context=context, temperature=0.7, event_publisher=pub,
+    )
+
+    assert result.reasoning_content == "Deep thoughts"
+    # Verify reasoning event was sent
+    pub.send_json.assert_awaited_once_with({
+        "type": "reasoning_content",
+        "content": "Deep thoughts",
+    })
+
+
+@pytest.mark.asyncio
+async def test_agentic_loop_run_captures_reasoning():
+    """AgenticLoop.run() should include reasoning_content in AgentResult."""
+    from atlas.application.chat.agent.protocols import AgentResult
+
+    result = AgentResult(
+        final_answer="answer",
+        steps=1,
+        metadata={"agent_mode": True},
+        reasoning_content="thinking hard",
+    )
+    assert result.reasoning_content == "thinking hard"
+
+
+@pytest.mark.asyncio
+async def test_agent_result_reasoning_default_none():
+    """AgentResult.reasoning_content defaults to None."""
+    from atlas.application.chat.agent.protocols import AgentResult
+
+    result = AgentResult(final_answer="answer", steps=1, metadata={})
+    assert result.reasoning_content is None
