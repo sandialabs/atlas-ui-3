@@ -275,8 +275,11 @@ class ToolsModeRunner:
             await self.event_publisher.publish_response_complete()
             return event_notifier.create_chat_response(content)
 
-        # Has tool calls: signal end of initial stream if we sent tokens
-        if accumulated_content:
+        # Has tool calls: signal end of initial stream if we sent any tokens
+        # or reasoning (so the frontend clears the _streaming flag before
+        # tool call messages are added, preventing synthesis content from
+        # being appended to the pre-tool-call message).
+        if accumulated_content or accumulated_reasoning:
             await self.event_publisher.publish_token_stream(
                 token="", is_first=False, is_last=True,
             )
