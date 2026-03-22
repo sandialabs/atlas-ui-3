@@ -215,7 +215,7 @@ async def test_stream_final_answer_error_sends_stream_end():
 @pytest.mark.asyncio
 async def test_stream_and_accumulate_error_no_tokens_no_fallback_sends_user_message():
     """When stream errors with no tokens and no fallback, a user-friendly
-    error message (from classify_llm_error) is sent via publish_chat_response."""
+    error message (from classify_llm_error) is sent via send_json error event."""
     pub = _make_publisher()
 
     async def _auth_error():
@@ -233,8 +233,11 @@ async def test_stream_and_accumulate_error_no_tokens_no_fallback_sends_user_mess
     # Must NOT contain raw exception traceback details
     assert "RuntimeError" not in result
     assert reasoning is None
-    # The message should be sent to the frontend
-    pub.publish_chat_response.assert_awaited_once()
+    # The error should be sent to the frontend via send_json
+    pub.send_json.assert_awaited_once()
+    error_payload = pub.send_json.call_args[0][0]
+    assert error_payload["type"] == "error"
+    assert len(error_payload["message"]) > 0
 
 
 @pytest.mark.asyncio
@@ -259,7 +262,10 @@ async def test_stream_and_accumulate_error_fallback_also_fails():
     assert "RuntimeError" not in result
     assert reasoning is None
     assert len(result) > 0
-    pub.publish_chat_response.assert_awaited_once()
+    # The error should be sent to the frontend via send_json
+    pub.send_json.assert_awaited_once()
+    error_payload = pub.send_json.call_args[0][0]
+    assert error_payload["type"] == "error"
 
 
 @pytest.mark.asyncio

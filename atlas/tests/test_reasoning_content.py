@@ -1,8 +1,9 @@
 """Tests for reasoning_content support."""
 
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from atlas.modules.llm.models import LLMResponse, ReasoningBlock
 
@@ -118,7 +119,7 @@ async def test_stream_plain_yields_reasoning_block():
 @pytest.mark.asyncio
 async def test_stream_with_tools_yields_reasoning_block():
     from atlas.modules.llm.litellm_streaming import LiteLLMStreamingMixin
-    from atlas.modules.llm.models import ReasoningBlock, ReasoningToken, LLMResponse
+    from atlas.modules.llm.models import LLMResponse, ReasoningBlock, ReasoningToken
 
     chunks = []
     for text in ["Think..."]:

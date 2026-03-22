@@ -7,7 +7,6 @@ LLM responses token-by-token.
 
 import asyncio
 import logging
-from typing import AsyncGenerator
 
 from atlas.interfaces.events import EventPublisher
 from atlas.modules.llm.models import ReasoningBlock, ReasoningToken

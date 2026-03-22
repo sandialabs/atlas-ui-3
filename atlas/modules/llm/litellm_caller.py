@@ -110,9 +110,8 @@ try:
             # Already has reasoning_content? Skip.
             if getattr(delta, 'reasoning_content', None):
                 continue
-            # Inject: set content to the reasoning text so LiteLLM treats
-            # the chunk as non-empty, and also set reasoning_content on
-            # the delta for proper downstream handling.
+            # Inject reasoning_content on the delta so LiteLLM's
+            # downstream chunk processing picks it up.
             try:
                 delta.reasoning_content = reasoning_val
             except Exception:
