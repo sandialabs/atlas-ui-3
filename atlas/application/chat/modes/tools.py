@@ -196,6 +196,7 @@ class ToolsModeRunner:
         # Stream initial LLM call with tools
         accumulated_content = ""
         accumulated_reasoning: Optional[str] = None
+        sent_reasoning_tokens = False
         final_llm_response: Optional[LLMResponse] = None
         is_first = True
         streaming_error: Optional[Exception] = None
@@ -214,6 +215,7 @@ class ToolsModeRunner:
 
             async for item in stream:
                 if isinstance(item, ReasoningToken):
+                    sent_reasoning_tokens = True
                     await self.event_publisher.send_json({
                         "type": "reasoning_token",
                         "token": item.token,
@@ -279,7 +281,7 @@ class ToolsModeRunner:
         # or reasoning (so the frontend clears the _streaming flag before
         # tool call messages are added, preventing synthesis content from
         # being appended to the pre-tool-call message).
-        if accumulated_content or accumulated_reasoning:
+        if accumulated_content or accumulated_reasoning or sent_reasoning_tokens:
             await self.event_publisher.publish_token_stream(
                 token="", is_first=False, is_last=True,
             )

@@ -195,6 +195,11 @@ class LiteLLMStreamingMixin:
                             if hasattr(tc_delta.function, "arguments") and tc_delta.function.arguments:
                                 entry["function"]["arguments"] += tc_delta.function.arguments
 
+            # If stream ended with reasoning but no content, still emit the block
+            # (e.g. model went from reasoning straight to tool calls)
+            if accumulated_reasoning and not reasoning_emitted:
+                yield ReasoningBlock(content=accumulated_reasoning)
+
             # Build final tool_calls list as namespace objects (matching
             # litellm's non-streaming response format with attribute access)
             tool_calls_list = None
