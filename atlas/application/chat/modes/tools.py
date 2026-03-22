@@ -109,12 +109,17 @@ class ToolsModeRunner:
         # No tool calls -> treat as plain content
         if not llm_response or not llm_response.has_tool_calls():
             content = llm_response.content if llm_response else ""
-            assistant_message = Message(role=MessageRole.ASSISTANT, content=content)
+            reasoning = getattr(llm_response, 'reasoning_content', None) if llm_response else None
+            metadata = {}
+            if reasoning:
+                metadata["reasoning_content"] = reasoning
+            assistant_message = Message(role=MessageRole.ASSISTANT, content=content, metadata=metadata)
             session.history.add_message(assistant_message)
 
             await self.event_publisher.publish_chat_response(
                 message=content,
                 has_pending_tools=False,
+                reasoning_content=reasoning,
             )
             await self.event_publisher.publish_response_complete()
 
