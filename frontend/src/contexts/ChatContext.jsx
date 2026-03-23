@@ -37,7 +37,7 @@ export const ChatProvider = ({ children }) => {
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
-	const { messages, addMessage, bulkAdd, mapMessages, resetMessages, streamToken, streamEnd } = useMessages()
+	const { messages, addMessage, bulkAdd, mapMessages, resetMessages, streamToken, streamEnd, streamReasoningToken, streamReasoningEnd } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
 	const isStreaming = messages.some(m => m._streaming === true)
@@ -124,10 +124,12 @@ export const ChatProvider = ({ children }) => {
 			setActiveConversationId,
 			streamToken,
 			streamEnd,
+			streamReasoningToken,
+			streamReasoningEnd,
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd, streamReasoningToken, streamReasoningEnd])
 
 	// Safety timeout: if isThinking stays true for too long without any response
 	// from the backend, reset it and show an error so the user is not stuck forever.
@@ -569,12 +571,24 @@ export const ChatProvider = ({ children }) => {
 				title: firstUserMsg.substring(0, 200) || 'Untitled',
 				model: currentModel,
 				created_at: messages[0]?.timestamp || new Date().toISOString(),
-				messages: messages.map(m => ({
-					role: m.role,
-					content: m.content || '',
-					timestamp: m.timestamp,
-					message_type: m.type || 'chat',
-				})),
+				messages: messages.map(m => {
+					const msg = {
+						role: m.role,
+						content: m.content || '',
+						timestamp: m.timestamp,
+						message_type: m.type || 'chat',
+					}
+					// Preserve all metadata fields that were spread onto the
+					// message during load (tools, data_sources, agent_mode, etc.)
+					const meta = {}
+					if (m.tools) meta.tools = m.tools
+					if (m.data_sources) meta.data_sources = m.data_sources
+					if (m.agent_mode) meta.agent_mode = m.agent_mode
+					if (m.steps) meta.steps = m.steps
+					if (m.reasoning_content) meta.reasoning_content = m.reasoning_content
+					if (Object.keys(meta).length > 0) msg.metadata = meta
+					return msg
+				}),
 				tags: [],
 			}).catch(e => console.error('Failed to save conversation locally:', e))
 		}, 1000)
@@ -583,7 +597,7 @@ export const ChatProvider = ({ children }) => {
 			if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current)
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [messages?.length, saveMode, activeConversationId, currentModel])
+	}, [messages, saveMode, activeConversationId, currentModel])
 
 	// addSystemEvent: adds a system event message to the chat timeline
 	const addSystemEvent = useCallback((subtype, text, meta = {}) => {

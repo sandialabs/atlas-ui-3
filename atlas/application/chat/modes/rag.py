@@ -91,7 +91,7 @@ class RagModeRunner:
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
         """Execute RAG mode with token streaming."""
-        accumulated = await stream_and_accumulate(
+        accumulated, reasoning = await stream_and_accumulate(
             token_generator=self.llm.stream_with_rag(
                 model, messages, data_sources, user_email, temperature=temperature,
             ),
@@ -102,10 +102,13 @@ class RagModeRunner:
             context_label="RAG",
         )
 
+        metadata = {"data_sources": data_sources}
+        if reasoning:
+            metadata["reasoning_content"] = reasoning
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
             content=accumulated,
-            metadata={"data_sources": data_sources},
+            metadata=metadata,
         )
         session.history.add_message(assistant_message)
         await self.event_publisher.publish_response_complete()

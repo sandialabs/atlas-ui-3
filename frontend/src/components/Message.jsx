@@ -762,7 +762,10 @@ const Message = ({ message }) => {
   useEffect(() => {
     localStorage.setItem('toolOutputCollapsed', JSON.stringify(toolOutputCollapsed))
   }, [toolOutputCollapsed])
-  
+
+  // Per-message collapse state — defaults to collapsed, no global persistence
+  const [reasoningCollapsed, setReasoningCollapsed] = useState(true)
+
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
@@ -1152,6 +1155,36 @@ const renderContent = () => {
       return <div className="text-gray-200 whitespace-pre-wrap">{message.content}</div>
     }
 
+    // Render reasoning section for assistant messages with reasoning_content
+    const isReasoningStreaming = message._reasoningStreaming
+    const showExpanded = isReasoningStreaming || !reasoningCollapsed
+    const reasoningBlock = message.reasoning_content ? (
+      <div className="mb-3">
+        <div className="border-l-4 border-purple-500 pl-4">
+          <button
+            onClick={() => setReasoningCollapsed(!reasoningCollapsed)}
+            className="w-full text-left text-sm font-semibold text-purple-400 mb-2 flex items-center gap-2 hover:text-purple-300 transition-colors"
+          >
+            <span className={`transform transition-transform duration-200 ${showExpanded ? 'rotate-90' : 'rotate-0'}`}>
+              ▶
+            </span>
+            {isReasoningStreaming ? 'Reasoning...' : 'Reasoning'}
+          </button>
+          {showExpanded && (
+            <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-96 overflow-y-auto" ref={el => {
+              // Auto-scroll to bottom during streaming
+              if (el && isReasoningStreaming) el.scrollTop = el.scrollHeight
+            }}>
+              <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono">
+                {message.reasoning_content}
+                {isReasoningStreaming && <span className="animate-pulse">▌</span>}
+              </pre>
+            </div>
+          )}
+        </div>
+      </div>
+    ) : null
+
     // Render markdown for assistant messages
     // Process content to handle both strings and structured objects
     const content = processMessageContent(message.content)
@@ -1163,18 +1196,24 @@ const renderContent = () => {
       const sanitizedHtml = DOMPurify.sanitize(latexRestoredHtml, DOMPURIFY_CONFIG)
 
       return (
-        <div
-          className="prose prose-invert max-w-none selectable-markdown"
-          dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
-        />
+        <>
+          {reasoningBlock}
+          <div
+            className="prose prose-invert max-w-none selectable-markdown"
+            dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+          />
+        </>
       )
     } catch (error) {
       console.error('Error parsing markdown content:', error)
       // Fallback to plain text if markdown parsing fails
       return (
-        <div className="text-gray-200">
-          <pre className="whitespace-pre-wrap">{content}</pre>
-        </div>
+        <>
+          {reasoningBlock}
+          <div className="text-gray-200">
+            <pre className="whitespace-pre-wrap">{content}</pre>
+          </div>
+        </>
       )
     }
   }

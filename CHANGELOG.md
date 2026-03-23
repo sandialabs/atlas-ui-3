@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #463 - 2026-03-22
+- **Feature**: Real-time reasoning content streaming for reasoning-capable LLMs (o3, Qwen3, GPT-OSS via vLLM). Chain-of-thought reasoning tokens stream to the frontend live, displayed in a collapsible section that auto-expands during streaming. Reasoning content persists in message metadata across page reloads.
+- **Fix**: Includes monkey-patch for LiteLLM issue [#20246](https://github.com/BerriAI/litellm/issues/20246) — vLLM `delta.reasoning` field not mapped to `reasoning_content` in streaming mode. See `docs/developer/reasoning-content-streaming-2026-03-22.md` for removal instructions.
+- **Fix**: Synthesis content after tool calls now correctly appears below tool results instead of above them.
+
 ### PR #461 - 2026-03-21
 - **Fix**: MCP sessions now auto-reconnect when the underlying server process dies between tool calls. `ManagedSession.is_open` checks transport liveness via `client.is_connected()`, and `MCPSessionManager.acquire()` evicts dead sessions before opening a fresh connection.
 

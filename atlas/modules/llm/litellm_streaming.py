@@ -13,7 +13,7 @@ from litellm import acompletion
 
 from atlas.core.metrics_logger import log_metric
 
-from .models import LLMResponse
+from .models import LLMResponse, ReasoningBlock, ReasoningToken
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,11 @@ class LiteLLMStreamingMixin:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         user_email: Optional[str] = None,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Union[str, ReasoningBlock, ReasoningToken], None]:
         """Stream plain LLM response token-by-token.
 
-        Yields string chunks as they arrive from the LLM provider.
+        Yields ReasoningToken for each reasoning chunk, then a ReasoningBlock with
+        the full accumulated reasoning, then string chunks for content.
         """
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
@@ -60,6 +61,8 @@ class LiteLLMStreamingMixin:
             )
 
             chunk_count = 0
+            accumulated_reasoning = ""
+            reasoning_emitted = False
             total_chunks_seen = 0
             async for chunk in response:
                 total_chunks_seen += 1
@@ -71,12 +74,27 @@ class LiteLLMStreamingMixin:
                         bool(chunk.choices), type(delta).__name__ if delta else None,
                         len(delta.content) if delta and delta.content else 0,
                     )
+
+                # Stream reasoning tokens as they arrive
+                if delta and hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    accumulated_reasoning += delta.reasoning_content
+                    yield ReasoningToken(token=delta.reasoning_content)
+
+                # When first content token arrives, emit final ReasoningBlock
+                if delta and delta.content and accumulated_reasoning and not reasoning_emitted:
+                    yield ReasoningBlock(content=accumulated_reasoning)
+                    reasoning_emitted = True
+
                 if delta and delta.content:
                     yield delta.content
                     chunk_count += 1
                     # Yield control periodically to prevent backpressure buildup
                     if chunk_count % 50 == 0:
                         await asyncio.sleep(0)
+
+            # If stream ended with reasoning but no content, still emit the block
+            if accumulated_reasoning and not reasoning_emitted:
+                yield ReasoningBlock(content=accumulated_reasoning)
 
             if chunk_count == 0 and total_chunks_seen > 0:
                 logger.warning(
@@ -97,12 +115,12 @@ class LiteLLMStreamingMixin:
         tool_choice: str = "auto",
         temperature: float = 0.7,
         user_email: Optional[str] = None,
-    ) -> AsyncGenerator[Union[str, LLMResponse], None]:
+    ) -> AsyncGenerator[Union[str, ReasoningBlock, ReasoningToken, LLMResponse], None]:
         """Stream LLM response with tool support.
 
-        Yields str chunks for text content as they arrive.
-        Accumulates tool_calls fragments across chunks.
-        Yields a final LLMResponse with accumulated tool_calls at the end.
+        Yields ReasoningToken for each reasoning chunk, then a ReasoningBlock with
+        the full accumulated reasoning, then str chunks for content, and finally
+        a LLMResponse with accumulated tool_calls at the end.
         """
         if not tools_schema:
             async for chunk in self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email):
@@ -130,12 +148,24 @@ class LiteLLMStreamingMixin:
 
             accumulated_content = ""
             accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
+            accumulated_reasoning = ""
+            reasoning_emitted = False
             chunk_count = 0
 
             async for chunk in response:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if not delta:
                     continue
+
+                # Stream reasoning tokens as they arrive
+                if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    accumulated_reasoning += delta.reasoning_content
+                    yield ReasoningToken(token=delta.reasoning_content)
+
+                # When first content token arrives, emit final ReasoningBlock
+                if delta.content and accumulated_reasoning and not reasoning_emitted:
+                    yield ReasoningBlock(content=accumulated_reasoning)
+                    reasoning_emitted = True
 
                 # Yield text content as it arrives
                 if delta.content:
@@ -165,6 +195,11 @@ class LiteLLMStreamingMixin:
                             if hasattr(tc_delta.function, "arguments") and tc_delta.function.arguments:
                                 entry["function"]["arguments"] += tc_delta.function.arguments
 
+            # If stream ended with reasoning but no content, still emit the block
+            # (e.g. model went from reasoning straight to tool calls)
+            if accumulated_reasoning and not reasoning_emitted:
+                yield ReasoningBlock(content=accumulated_reasoning)
+
             # Build final tool_calls list as namespace objects (matching
             # litellm's non-streaming response format with attribute access)
             tool_calls_list = None
@@ -191,6 +226,7 @@ class LiteLLMStreamingMixin:
                 content=accumulated_content,
                 tool_calls=tool_calls_list,
                 model_used=model_name,
+                reasoning_content=accumulated_reasoning or None,
             )
 
         except Exception as exc:
@@ -205,7 +241,7 @@ class LiteLLMStreamingMixin:
         user_email: str,
         rag_service=None,
         temperature: float = 0.7,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Union[str, ReasoningBlock], None]:
         """Stream LLM response with RAG integration.
 
         Runs RAG query (non-streaming), then streams the LLM call.
@@ -261,7 +297,7 @@ class LiteLLMStreamingMixin:
         tool_choice: str = "auto",
         rag_service=None,
         temperature: float = 0.7,
-    ) -> AsyncGenerator[Union[str, LLMResponse], None]:
+    ) -> AsyncGenerator[Union[str, ReasoningBlock, LLMResponse], None]:
         """Stream LLM response with both RAG and tool support.
 
         Runs RAG query (non-streaming), then streams the LLM call with tools.

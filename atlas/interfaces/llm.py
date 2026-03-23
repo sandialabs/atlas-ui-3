@@ -3,6 +3,7 @@
 from typing import AsyncGenerator, Dict, List, Optional, Protocol, Union, runtime_checkable
 
 from atlas.modules.llm.models import LLMResponse as LLMResponse
+from atlas.modules.llm.models import ReasoningBlock, ReasoningToken
 
 
 @runtime_checkable
@@ -61,7 +62,7 @@ class LLMProtocol(Protocol):
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
         user_email: Optional[str] = None,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Union[str, ReasoningBlock, ReasoningToken], None]:
         """Stream plain LLM response token-by-token."""
         ...
 
@@ -73,7 +74,7 @@ class LLMProtocol(Protocol):
         tool_choice: str = "auto",
         temperature: float = 0.7,
         user_email: Optional[str] = None,
-    ) -> AsyncGenerator[Union[str, LLMResponse], None]:
+    ) -> AsyncGenerator[Union[str, ReasoningBlock, ReasoningToken, LLMResponse], None]:
         """Stream LLM with tools. Yields str chunks then final LLMResponse."""
         ...
 
@@ -84,7 +85,7 @@ class LLMProtocol(Protocol):
         data_sources: List[str],
         user_email: str,
         temperature: float = 0.7,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Union[str, ReasoningBlock, ReasoningToken], None]:
         """Stream LLM response with RAG integration."""
         ...
 
@@ -97,6 +98,6 @@ class LLMProtocol(Protocol):
         user_email: str,
         tool_choice: str = "auto",
         temperature: float = 0.7,
-    ) -> AsyncGenerator[Union[str, LLMResponse], None]:
+    ) -> AsyncGenerator[Union[str, ReasoningBlock, ReasoningToken, LLMResponse], None]:
         """Stream LLM with both RAG and tools."""
         ...

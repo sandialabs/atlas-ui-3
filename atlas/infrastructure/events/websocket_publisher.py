@@ -30,6 +30,7 @@ class WebSocketEventPublisher:
         self,
         message: str,
         has_pending_tools: bool = False,
+        reasoning_content: Optional[str] = None,
     ) -> None:
         """Publish a chat response message."""
         if self.connection:
@@ -37,6 +38,7 @@ class WebSocketEventPublisher:
                 message=message,
                 has_pending_tools=has_pending_tools,
                 update_callback=self.connection.send_json,
+                reasoning_content=reasoning_content,
             )
 
     async def publish_response_complete(self) -> None:
