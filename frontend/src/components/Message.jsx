@@ -763,14 +763,8 @@ const Message = ({ message }) => {
     localStorage.setItem('toolOutputCollapsed', JSON.stringify(toolOutputCollapsed))
   }, [toolOutputCollapsed])
 
-  const [reasoningCollapsed, setReasoningCollapsed] = useState(() => {
-    const saved = localStorage.getItem('reasoningCollapsed')
-    return saved !== null ? JSON.parse(saved) : true
-  })
-
-  useEffect(() => {
-    localStorage.setItem('reasoningCollapsed', JSON.stringify(reasoningCollapsed))
-  }, [reasoningCollapsed])
+  // Per-message collapse state — defaults to collapsed, no global persistence
+  const [reasoningCollapsed, setReasoningCollapsed] = useState(true)
 
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
