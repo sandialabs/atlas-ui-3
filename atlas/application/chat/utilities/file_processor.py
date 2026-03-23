@@ -13,6 +13,9 @@ from atlas.modules.file_storage.content_extractor import get_content_extractor
 
 logger = logging.getLogger(__name__)
 
+# MIME type prefixes that identify image files eligible for vision model input
+_IMAGE_MIME_PREFIX = "image/"
+
 # Type hint for update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
@@ -22,7 +25,8 @@ async def handle_session_files(
     user_email: Optional[str],
     files_map: Optional[Dict[str, Any]],
     file_manager,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    model_supports_vision: bool = False,
 ) -> Dict[str, Any]:
     """
     Handle user file ingestion and return updated session context.
@@ -37,6 +41,8 @@ async def handle_session_files(
             - dict: {"content": base64, "extract": bool} (new format with extraction flag)
         file_manager: File manager instance
         update_callback: Optional callback for emitting updates
+        model_supports_vision: When True, image files have their base64 data stored
+            in the session context for direct inclusion in LLM vision messages.
 
     Returns:
         Updated session context with file references
@@ -89,6 +95,19 @@ async def handle_session_files(
 
                 # Store the extraction mode for build_files_manifest
                 file_ref["extract_mode"] = extract_mode
+
+                # For vision-capable models, store raw image data so the message
+                # builder can embed it as an inline image content block.
+                mime_type = meta.get("content_type", "")
+                if model_supports_vision and mime_type.startswith(_IMAGE_MIME_PREFIX):
+                    file_ref["image_b64"] = b64
+                    file_ref["image_mime_type"] = mime_type
+                    logger.debug(
+                        "Stored vision image data for %s (%s, %d bytes base64)",
+                        filename,
+                        mime_type,
+                        len(b64),
+                    )
 
                 # Attempt content extraction if enabled and mode requests it
                 if extract_mode in ("full", "preview") and extractor.is_enabled():
@@ -544,12 +563,21 @@ async def notify_canvas_files_v2(
         logger.warning(f"Non-fatal: failed to emit v2 canvas_files update: {emit_err}")
 
 
-def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, str]]:
+def build_files_manifest(
+    session_context: Dict[str, Any],
+    exclude_vision_images: bool = False,
+) -> Optional[Dict[str, str]]:
     """
     Build ephemeral files manifest for LLM context.
 
     Pure function that creates manifest from session context.
     Includes extracted content previews when available.
+
+    Args:
+        session_context: Session context containing files dict
+        exclude_vision_images: When True, skip image files that already have
+            ``image_b64`` stored (they will be sent as inline vision blocks
+            by the message builder instead).
     """
     files_ctx = session_context.get("files", {})
     if not files_ctx:
@@ -562,6 +590,11 @@ def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, 
     has_none = False
     for name in sorted(files_ctx.keys()):
         file_info = files_ctx[name]
+
+        # Skip image files handled as vision content blocks
+        if exclude_vision_images and file_info.get("image_b64"):
+            continue
+
         entry = f"- {name}"
         mode = file_info.get("extract_mode", "preview")
 
@@ -592,6 +625,9 @@ def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, 
             has_none = True
 
         file_entries.append(entry)
+
+    if not file_entries:
+        return None
 
     file_list = "\n".join(file_entries)
 

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
@@ -35,6 +35,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     isSynthesizing,
     sendChatMessage,
     currentModel,
+    models,
     tools,
     selectedTools,
     toggleTool,
@@ -59,6 +60,11 @@ const ChatArea = ({ onOpenRagPanel }) => {
     setFollowUpSuggestions,
   } = useChat()
   const { isConnected } = useWS()
+
+  // Whether the currently selected model supports vision (image) input
+  const currentModelSupportsVision = models?.some(
+    m => m.name === currentModel && m.supports_vision === true
+  ) ?? false
 
   // Auto-resize textarea
   const autoResizeTextarea = () => {
@@ -559,6 +565,19 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
   const sanitizeFilename = (name) => name.replace(/\s+/g, '_')
 
+  const IMAGE_MIME_TYPES = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml'
+  }
+
+  const isImageFile = (filename) =>
+    /\.(jpe?g|png|gif|webp|bmp|svg)$/i.test(filename)
+
+  const getImageMimeType = (filename) => {
+    const ext = filename.split('.').pop()?.toLowerCase()
+    return IMAGE_MIME_TYPES[ext] || 'image/png'
+  }
+
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files)
     files.forEach(file => {
@@ -886,6 +905,40 @@ const ChatArea = ({ onOpenRagPanel }) => {
               </div>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(uploadedFiles).map(([filename, fileData]) => {
+                  const isImage = isImageFile(filename)
+                  const showAsVisionImage = isImage && currentModelSupportsVision
+
+                  // Vision image: show thumbnail card
+                  if (showAsVisionImage) {
+                    const mimeType = getImageMimeType(filename)
+                    const dataUrl = `data:${mimeType};base64,${fileData.content}`
+                    return (
+                      <div
+                        key={filename}
+                        className="relative flex flex-col items-center bg-gray-800 border border-indigo-500/50 rounded-lg p-1 gap-1"
+                        style={{ maxWidth: '80px' }}
+                      >
+                        <img
+                          src={dataUrl}
+                          alt={filename}
+                          className="w-16 h-16 object-cover rounded"
+                          title={filename}
+                        />
+                        <div className="flex items-center gap-1 w-full justify-between px-1">
+                          <Image className="w-3 h-3 text-indigo-400 flex-shrink-0" title="Sent as image to vision model" />
+                          <span className="text-gray-300 text-xs truncate" title={filename} style={{ maxWidth: '44px' }}>{filename}</span>
+                          <button
+                            onClick={() => removeFile(filename)}
+                            className="text-gray-400 hover:text-red-400 transition-colors flex-shrink-0"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  // Non-image file (or image with non-vision model): show pill chip
                   const supportsExtraction = canExtractFile(filename)
                   const mode = fileData.extractMode || 'none'
                   const borderColors = {
