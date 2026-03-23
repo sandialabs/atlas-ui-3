@@ -114,8 +114,8 @@ try:
             # downstream chunk processing picks it up.
             try:
                 delta.reasoning_content = reasoning_val
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Could not set reasoning_content on delta: %s", exc)
 
     CustomStreamWrapper.__init__ = _patched_csw_init
     logger.debug("Applied reasoning→reasoning_content streaming patch for LiteLLM")

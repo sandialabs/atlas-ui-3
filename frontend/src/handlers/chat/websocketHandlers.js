@@ -10,7 +10,6 @@ const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
 let _tokenBuffer = ''
 let _tokenFlushTimer = null
 let _streamActive = false
-let _pendingReasoning = null
 let _reasoningBuffer = ''
 let _reasoningFlushTimer = null
 const FLUSH_INTERVAL_MS = 30
@@ -22,7 +21,6 @@ const FLUSH_INTERVAL_MS = 30
 export function cleanupStreamState() {
   _streamActive = false
   _tokenBuffer = ''
-  _pendingReasoning = null
   _reasoningBuffer = ''
   if (_tokenFlushTimer) {
     clearTimeout(_tokenFlushTimer)
@@ -460,14 +458,12 @@ export function createWebSocketHandler(deps) {
           if (_reasoningBuffer) {
             flushReasoningBuffer()
           }
-          _pendingReasoning = data.content
           if (typeof streamReasoningEnd === 'function') streamReasoningEnd()
           break
         case 'response_complete': {
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           endTokenStream()
-          _pendingReasoning = null
           break
         }
         case 'conversation_saved': {
@@ -489,7 +485,6 @@ export function createWebSocketHandler(deps) {
           }
           if (data.is_last) {
             endTokenStream()
-            _pendingReasoning = null
             if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           } else if (data.token) {
             _tokenBuffer += data.token
