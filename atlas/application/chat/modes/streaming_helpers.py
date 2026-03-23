@@ -70,7 +70,7 @@ async def stream_and_accumulate(
             accumulated += token
             is_first = False
 
-        if not accumulated and fallback_fn:
+        if not accumulated and not reasoning_content and fallback_fn:
             logger.info(
                 "%s stream yielded %d tokens but no content, using fallback",
                 context_label, token_count,

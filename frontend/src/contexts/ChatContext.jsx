@@ -578,9 +578,15 @@ export const ChatProvider = ({ children }) => {
 						timestamp: m.timestamp,
 						message_type: m.type || 'chat',
 					}
-					if (m.reasoning_content) {
-						msg.metadata = { reasoning_content: m.reasoning_content }
-					}
+					// Preserve all metadata fields that were spread onto the
+					// message during load (tools, data_sources, agent_mode, etc.)
+					const meta = {}
+					if (m.tools) meta.tools = m.tools
+					if (m.data_sources) meta.data_sources = m.data_sources
+					if (m.agent_mode) meta.agent_mode = m.agent_mode
+					if (m.steps) meta.steps = m.steps
+					if (m.reasoning_content) meta.reasoning_content = m.reasoning_content
+					if (Object.keys(meta).length > 0) msg.metadata = meta
 					return msg
 				}),
 				tags: [],
@@ -591,7 +597,7 @@ export const ChatProvider = ({ children }) => {
 			if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current)
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [messages?.length, saveMode, activeConversationId, currentModel])
+	}, [messages, saveMode, activeConversationId, currentModel])
 
 	// addSystemEvent: adds a system event message to the chat timeline
 	const addSystemEvent = useCallback((subtype, text, meta = {}) => {
