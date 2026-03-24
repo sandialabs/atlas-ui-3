@@ -13,8 +13,21 @@ from atlas.modules.file_storage.content_extractor import get_content_extractor
 
 logger = logging.getLogger(__name__)
 
-# MIME type prefixes that identify image files eligible for vision model input
-_IMAGE_MIME_PREFIX = "image/"
+# Raster MIME types eligible for vision model input.
+# SVG is excluded — it's vector XML, not useful for LLM vision, and could
+# contain embedded scripts (though <img> tags neutralize them).
+_VISION_IMAGE_MIME_TYPES = frozenset({
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+})
+
+# Hard limits to prevent unbounded memory growth from vision images stored
+# in session context.  base64 ≈ 4/3 × raw, so 20 MB b64 ≈ 15 MB raw.
+_MAX_VISION_IMAGE_B64_BYTES = 20 * 1024 * 1024  # 20 MB base64
+_MAX_VISION_IMAGES_PER_REQUEST = 10
 
 # Type hint for update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
@@ -47,12 +60,17 @@ async def handle_session_files(
     Returns:
         Updated session context with file references
     """
-    if not files_map or not file_manager or not user_email:
-        return session_context
-
-    # Work with a copy to avoid mutations
+    # Always clear stale vision image data from prior turns, even when no
+    # new files are being uploaded.  Without this, old images silently
+    # reattach on every subsequent message in the session.
     updated_context = dict(session_context)
     session_files_ctx = updated_context.setdefault("files", {})
+    for existing_ref in session_files_ctx.values():
+        existing_ref.pop("image_b64", None)
+        existing_ref.pop("image_mime_type", None)
+
+    if not files_map or not file_manager or not user_email:
+        return updated_context
 
     # Get content extractor
     extractor = get_content_extractor()
@@ -99,15 +117,23 @@ async def handle_session_files(
                 # For vision-capable models, store raw image data so the message
                 # builder can embed it as an inline image content block.
                 mime_type = meta.get("content_type", "")
-                if model_supports_vision and mime_type.startswith(_IMAGE_MIME_PREFIX):
-                    file_ref["image_b64"] = b64
-                    file_ref["image_mime_type"] = mime_type
-                    logger.debug(
-                        "Stored vision image data for %s (%s, %d bytes base64)",
-                        filename,
-                        mime_type,
-                        len(b64),
-                    )
+                if model_supports_vision and mime_type in _VISION_IMAGE_MIME_TYPES:
+                    b64_len = len(b64)
+                    if b64_len > _MAX_VISION_IMAGE_B64_BYTES:
+                        logger.warning(
+                            "Vision image %s too large (%d bytes b64, limit %d) — "
+                            "sending as text manifest entry instead",
+                            filename, b64_len, _MAX_VISION_IMAGE_B64_BYTES,
+                        )
+                    else:
+                        file_ref["image_b64"] = b64
+                        file_ref["image_mime_type"] = mime_type
+                        logger.debug(
+                            "Stored vision image data for %s (%s, %d bytes base64)",
+                            filename,
+                            mime_type,
+                            b64_len,
+                        )
 
                 # Attempt content extraction if enabled and mode requests it
                 if extract_mode in ("full", "preview") and extractor.is_enabled():
@@ -129,6 +155,22 @@ async def handle_session_files(
                 uploaded_refs[filename] = meta
             except Exception as e:
                 logger.error(f"Failed uploading user file {filename}: {e}")
+
+        # Enforce per-request vision image count limit.  Keep the first N
+        # (by insertion order) and demote the rest to text-manifest entries.
+        if model_supports_vision:
+            vision_count = 0
+            for name, ref in session_files_ctx.items():
+                if ref.get("image_b64"):
+                    vision_count += 1
+                    if vision_count > _MAX_VISION_IMAGES_PER_REQUEST:
+                        logger.warning(
+                            "Vision image count limit (%d) reached — "
+                            "demoting %s to text manifest entry",
+                            _MAX_VISION_IMAGES_PER_REQUEST, name,
+                        )
+                        ref.pop("image_b64", None)
+                        ref.pop("image_mime_type", None)
 
         # Emit files update if successful uploads
         if uploaded_refs and update_callback:

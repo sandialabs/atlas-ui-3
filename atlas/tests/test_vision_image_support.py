@@ -17,6 +17,9 @@ from atlas.application.chat.preprocessors.message_builder import (
     _build_vision_user_message,
 )
 from atlas.application.chat.utilities.file_processor import (
+    _MAX_VISION_IMAGE_B64_BYTES,
+    _MAX_VISION_IMAGES_PER_REQUEST,
+    _VISION_IMAGE_MIME_TYPES,
     build_files_manifest,
     handle_session_files,
 )
@@ -25,7 +28,6 @@ from atlas.domain.sessions.models import Session
 from atlas.modules.config.config_manager import LLMConfig, ModelConfig
 from atlas.modules.file_storage.manager import FileManager
 from atlas.modules.file_storage.mock_s3_client import MockS3StorageClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -298,3 +300,157 @@ class TestMessageBuilderVision:
         for sm in system_msgs:
             assert "photo.png" not in sm.get("content", ""), \
                 "Vision image should not appear in text manifest"
+
+
+# ---------------------------------------------------------------------------
+# SVG exclusion tests
+# ---------------------------------------------------------------------------
+
+class TestSVGExcludedFromVision:
+    def test_svg_not_in_vision_mime_allowlist(self):
+        assert "image/svg+xml" not in _VISION_IMAGE_MIME_TYPES
+
+    @pytest.mark.asyncio
+    async def test_svg_file_not_stored_as_vision_image(self):
+        fm = _make_file_manager()
+        svg_b64 = base64.b64encode(b"<svg></svg>").decode()
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"icon.svg": {"content": svg_b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+        file_ref = context["files"]["icon.svg"]
+        assert "image_b64" not in file_ref
+        assert "image_mime_type" not in file_ref
+
+
+# ---------------------------------------------------------------------------
+# Size limit tests
+# ---------------------------------------------------------------------------
+
+class TestVisionImageSizeLimit:
+    @pytest.mark.asyncio
+    async def test_oversized_image_not_stored_as_vision(self):
+        fm = _make_file_manager()
+        # Create a base64 string just over the limit
+        oversized_b64 = base64.b64encode(b"x" * (_MAX_VISION_IMAGE_B64_BYTES + 1)).decode()
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"huge.png": {"content": oversized_b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+        file_ref = context["files"]["huge.png"]
+        assert "image_b64" not in file_ref, "Oversized image should not be stored for vision"
+
+    @pytest.mark.asyncio
+    async def test_image_within_size_limit_stored(self):
+        fm = _make_file_manager()
+        b64 = _png_b64()
+        assert len(b64) < _MAX_VISION_IMAGE_B64_BYTES
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"small.png": {"content": b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+        file_ref = context["files"]["small.png"]
+        assert file_ref.get("image_b64") == b64
+
+
+# ---------------------------------------------------------------------------
+# Count limit tests
+# ---------------------------------------------------------------------------
+
+class TestVisionImageCountLimit:
+    @pytest.mark.asyncio
+    async def test_excess_images_demoted(self):
+        fm = _make_file_manager()
+        b64 = _png_b64()
+        files_map = {
+            f"img_{i:02d}.png": {"content": b64, "extractMode": "none"}
+            for i in range(_MAX_VISION_IMAGES_PER_REQUEST + 3)
+        }
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map=files_map,
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+        vision_count = sum(
+            1 for ref in context["files"].values() if ref.get("image_b64")
+        )
+        assert vision_count == _MAX_VISION_IMAGES_PER_REQUEST
+
+
+# ---------------------------------------------------------------------------
+# Stale image cleanup tests
+# ---------------------------------------------------------------------------
+
+class TestStaleVisionImageCleanup:
+    @pytest.mark.asyncio
+    async def test_prior_turn_vision_images_cleared(self):
+        fm = _make_file_manager()
+        b64 = _png_b64()
+        # Simulate context from a prior turn with a vision image
+        prior_context = {
+            "files": {
+                "old_photo.png": {
+                    "key": "some-key",
+                    "content_type": "image/png",
+                    "size": 100,
+                    "source": "user",
+                    "extract_mode": "none",
+                    "image_b64": "OLD_DATA",
+                    "image_mime_type": "image/png",
+                }
+            }
+        }
+        # Process new files — the old vision data should be cleared
+        context = await handle_session_files(
+            session_context=prior_context,
+            user_email="u@example.com",
+            files_map={"new.png": {"content": b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+        old_ref = context["files"]["old_photo.png"]
+        assert "image_b64" not in old_ref, "Stale vision image data should be cleared"
+        assert "image_mime_type" not in old_ref
+        # New image should have vision data
+        new_ref = context["files"]["new.png"]
+        assert new_ref.get("image_b64") == b64
+
+    @pytest.mark.asyncio
+    async def test_stale_images_cleared_even_without_new_files(self):
+        """Critical: when no new files are uploaded (files_map=None), stale
+        vision data must still be cleaned up so old images don't reattach."""
+        prior_context = {
+            "files": {
+                "old_photo.png": {
+                    "key": "some-key",
+                    "content_type": "image/png",
+                    "size": 100,
+                    "source": "user",
+                    "extract_mode": "none",
+                    "image_b64": "OLD_DATA",
+                    "image_mime_type": "image/png",
+                }
+            }
+        }
+        context = await handle_session_files(
+            session_context=prior_context,
+            user_email="u@example.com",
+            files_map=None,
+            file_manager=_make_file_manager(),
+            model_supports_vision=True,
+        )
+        old_ref = context["files"]["old_photo.png"]
+        assert "image_b64" not in old_ref, \
+            "Stale vision data must be cleared even when files_map is None"
+        assert "image_mime_type" not in old_ref

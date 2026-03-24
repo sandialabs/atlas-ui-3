@@ -111,10 +111,12 @@ class MessageBuilder:
         history_messages = session.history.get_messages_for_llm()
         messages.extend(history_messages)
 
+        # Build session context once for both vision and manifest handling.
+        session_context = build_session_context(session)
+
         # When the model supports vision, find image files in the session context
         # and attach them as inline content blocks on the last user message.
         if model_supports_vision:
-            session_context = build_session_context(session)
             files_ctx = session_context.get("files", {})
             image_files = [
                 info for info in files_ctx.values()
@@ -135,14 +137,13 @@ class MessageBuilder:
                         messages[last_user_idx] = _build_vision_user_message(
                             text_content, image_files
                         )
-                        logger.debug(
-                            "Attached %d image(s) to last user message for vision model",
+                        logger.info(
+                            "Attached %d vision image(s) to user message for model",
                             len(image_files),
                         )
 
         # Optionally add files manifest (non-image files, or all files when not vision)
         if include_files_manifest:
-            session_context = build_session_context(session)
             files_in_context = session_context.get("files", {})
             logger.debug(f"Session has {len(files_in_context)} files: {list(files_in_context.keys())}")
             files_manifest = file_processor.build_files_manifest(

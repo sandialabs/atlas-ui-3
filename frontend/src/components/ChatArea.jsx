@@ -565,13 +565,14 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
   const sanitizeFilename = (name) => name.replace(/\s+/g, '_')
 
+  // Raster formats only — SVG is vector XML, not useful for LLM vision.
   const IMAGE_MIME_TYPES = {
     jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml'
+    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp'
   }
 
   const isImageFile = (filename) =>
-    /\.(jpe?g|png|gif|webp|bmp|svg)$/i.test(filename)
+    /\.(jpe?g|png|gif|webp|bmp)$/i.test(filename)
 
   const getImageMimeType = (filename) => {
     const ext = filename.split('.').pop()?.toLowerCase()
