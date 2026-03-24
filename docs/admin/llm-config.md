@@ -200,6 +200,12 @@ models:
 
 Images exceeding these limits fall back to the standard text files manifest.
 
+### Demo
+
+Below is a screenshot of a vision-capable model (`groq-llama-vision`) describing an uploaded image. The image thumbnail appears in the "Uploaded Files" area with a vision indicator icon, and the model responds with a detailed description.
+
+![Vision image demo](vision-image-demo.png)
+
 ### Which Models Support Vision?
 
 Common vision-capable models include GPT-4o, GPT-4.1, Claude Sonnet/Haiku, and Gemini. Check your provider's documentation to confirm vision support before enabling this flag.
