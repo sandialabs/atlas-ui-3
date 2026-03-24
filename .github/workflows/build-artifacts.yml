@@ -43,8 +43,7 @@ jobs:
     - name: Build frontend
       run: |
         cd frontend
-        export VITE_APP_NAME="Chat UI"
-        npm run build
+        VITE_APP_NAME="ATLAS" VITE_FEATURE_ANIMATED_LOGO="true" VITE_FEATURE_POWERED_BY_ATLAS="false" npm run build
 
     - name: Create build directory structure
       run: |
