@@ -1,4 +1,4 @@
-fastapi>=0.100.0
-uvicorn>=0.20.0
-python-multipart>=0.0.6
-pypdf>=3.0.0
+fastapi==0.129.0
+uvicorn==0.41.0
+python-multipart==0.0.22
+pypdf==6.8.0

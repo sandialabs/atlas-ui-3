@@ -1,11 +1,11 @@
 # Mock File Extractor Service Dependencies
 
 # Web framework
-fastapi>=0.115.0
-uvicorn>=0.32.0
+fastapi==0.129.0
+uvicorn==0.41.0
 
 # PDF text extraction (real extraction)
-pypdf>=5.0.0
+pypdf==6.8.0
 
 # Optional: Image dimension detection
-# Pillow>=10.0.0
+# Pillow==12.1.1

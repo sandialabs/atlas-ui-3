@@ -68,6 +68,121 @@ updates:
       - "dependencies"
       - "docker"
 
+  # Python dependencies (pptx_generator MCP server)
+  - package-ecosystem: "pip"
+    directory: "/atlas/mcp/pptx_generator"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    groups:
+      pptx-generator-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Python dependencies (image_demo MCP server)
+  - package-ecosystem: "pip"
+    directory: "/atlas/mcp/image_demo"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    groups:
+      image-demo-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Python dependencies (file-extractor-mock)
+  - package-ecosystem: "pip"
+    directory: "/mocks/file-extractor-mock"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    groups:
+      file-extractor-mock-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Python dependencies (multipart-extractor-mock)
+  - package-ecosystem: "pip"
+    directory: "/mocks/multipart-extractor-mock"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    groups:
+      multipart-extractor-mock-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Python dependencies (banyan-extractor-mock)
+  - package-ecosystem: "pip"
+    directory: "/mocks/banyan-extractor-mock"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    groups:
+      banyan-extractor-mock-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
   # GitHub Actions dependencies
   - package-ecosystem: "github-actions"
     directory: "/"

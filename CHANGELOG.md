@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #468 - 2026-03-24
+- **Chore**: Pin all subdirectory `requirements.txt` files (MCP servers and mocks) to exact versions verified in `uv.lock`. Add Dependabot entries for each subdirectory to automate future version updates.
+
 ### PR #466 - 2026-03-23
 - **Feature**: Models that declare `supports_vision: true` in `llmconfig.yml` now receive attached image files as inline multimodal content blocks (OpenAI `image_url` format, translated by LiteLLM). The frontend shows image thumbnails with a vision indicator when a vision-capable model is selected.
 
