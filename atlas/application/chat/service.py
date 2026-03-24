@@ -177,6 +177,7 @@ class ChatService:
                 rag_mode=self.rag_mode,
                 tools_mode=self.tools_mode,
                 agent_mode=self.agent_mode,
+                config_manager=self.config_manager,
             )
         return self.orchestrator
 
