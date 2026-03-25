@@ -493,6 +493,52 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             sanitized.append(msg)
         return sanitized
 
+    @staticmethod
+    def _enforce_strict_role_ordering(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Rewrite messages so that system/user messages never directly follow tool messages.
+
+        Mistral models (especially via vLLM) enforce strict role ordering:
+        after a tool message, only an assistant message is allowed.  This
+        pass converts post-tool system messages to user role and inserts a
+        bridging assistant message between tool results and the next
+        non-assistant message.
+
+        Note: ``seen_tool`` is a one-way latch — once any tool message has
+        appeared in the conversation, all subsequent system messages are
+        converted to user role for the remainder of the message list.
+        """
+        result = []
+        seen_tool = False
+        last_role = None
+        for msg in messages:
+            role = msg.get("role")
+            if role == "tool":
+                seen_tool = True
+            # Convert system → user after any tool message has appeared
+            if role == "system" and seen_tool:
+                msg = {**msg, "role": "user"}
+                role = "user"
+                logger.debug("strict_role_ordering: converted post-tool system message to user")
+            # Insert bridging assistant message when a non-assistant role
+            # follows a tool role (Mistral requires assistant after tool)
+            if last_role == "tool" and role not in ("tool", "assistant"):
+                result.append({"role": "assistant", "content": "(continuing)"})
+                logger.debug("strict_role_ordering: inserted bridging assistant message")
+            result.append(msg)
+            last_role = role
+        return result
+
+    def _prepare_messages(
+        self, model_name: str, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Sanitize messages and apply model-specific transformations."""
+        messages = self._sanitize_messages(messages)
+        if model_name in self.llm_config.models:
+            model_config = self.llm_config.models[model_name]
+            if model_config.strict_role_ordering:
+                messages = self._enforce_strict_role_ordering(messages)
+        return messages
+
     async def call_plain(
         self,
         model_name: str,
@@ -523,7 +569,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             response = await self._acompletion_with_retry(
                 model=litellm_model,
-                messages=self._sanitize_messages(messages),
+                messages=self._prepare_messages(model_name, messages),
                 **model_kwargs
             )
 
@@ -693,7 +739,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             response = await self._acompletion_with_retry(
                 model=litellm_model,
-                messages=self._sanitize_messages(messages),
+                messages=self._prepare_messages(model_name, messages),
                 tools=tools_schema,
                 tool_choice=final_tool_choice,
                 **model_kwargs
@@ -722,7 +768,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 try:
                     response = await self._acompletion_with_retry(
                         model=litellm_model,
-                        messages=self._sanitize_messages(messages),
+                        messages=self._prepare_messages(model_name, messages),
                         tools=tools_schema,
                         tool_choice="auto",
                         **model_kwargs
