@@ -495,23 +495,33 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
     @staticmethod
     def _enforce_strict_role_ordering(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Convert system messages to user role when they follow tool messages.
+        """Rewrite messages so that system/user messages never directly follow tool messages.
 
-        Models like Mistral/Devstral (especially via vLLM) reject system
-        messages that appear after tool-role messages.  This pass rewrites
-        those system messages to user role while preserving the first
-        system message (the system prompt at the top of the conversation).
+        Mistral models (especially via vLLM) enforce strict role ordering:
+        after a tool message, only an assistant message is allowed.  This
+        pass converts post-tool system messages to user role and inserts a
+        bridging assistant message between tool results and the next
+        non-assistant message.
         """
         result = []
         seen_tool = False
+        last_role = None
         for msg in messages:
             role = msg.get("role")
             if role == "tool":
                 seen_tool = True
+            # Convert system → user after any tool message has appeared
             if role == "system" and seen_tool:
                 msg = {**msg, "role": "user"}
+                role = "user"
                 logger.debug("strict_role_ordering: converted post-tool system message to user")
+            # Insert bridging assistant message when a non-assistant role
+            # follows a tool role (Mistral requires assistant after tool)
+            if last_role == "tool" and role not in ("tool", "assistant"):
+                result.append({"role": "assistant", "content": "Understood. Continuing."})
+                logger.debug("strict_role_ordering: inserted bridging assistant message")
             result.append(msg)
+            last_role = role
         return result
 
     def _prepare_messages(
