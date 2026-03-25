@@ -91,6 +91,10 @@ class ModelConfig(BaseModel):
     # This is the resource_server UUID from the Globus token response other_tokens
     # Example for ALCF: "681c10cc-f684-4540-bcd7-0b4df3bc26ef"
     globus_scope: Optional[str] = None
+    # Whether this model supports vision (multimodal image input).
+    # When true, attached image files are sent as inline image content blocks
+    # instead of being listed in the files manifest.
+    supports_vision: bool = False
 
 
 class LLMConfig(BaseModel):

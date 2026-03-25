@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #467 - 2026-03-24
+- **Fix**: CI workflows (quay-publish, ci, build-artifacts) now inject the correct Vite build args: `VITE_APP_NAME=ATLAS`, `VITE_FEATURE_ANIMATED_LOGO=true`, `VITE_FEATURE_POWERED_BY_ATLAS=false`, and pass `GIT_HASH`/`APP_VERSION` to Docker builds.
+
+### PR #466 - 2026-03-23
+- **Feature**: Models that declare `supports_vision: true` in `llmconfig.yml` now receive attached image files as inline multimodal content blocks (OpenAI `image_url` format, translated by LiteLLM). The frontend shows image thumbnails with a vision indicator when a vision-capable model is selected.
+
+### PR #461 - 2026-03-21
+- **Fix**: MCP sessions now auto-reconnect when the underlying server process dies between tool calls. `ManagedSession.is_open` checks transport liveness via `client.is_connected()`, and `MCPSessionManager.acquire()` evicts dead sessions before opening a fresh connection.
+
 ### PR #449 - 2026-03-18
 - **Fix**: Chat input search-glass button now clears all selected data sources and disables RAG when clicked while active (green), and opens the Data Sources sidebar when clicked while inactive (gray). Header Sources button only toggles sidebar visibility.
 

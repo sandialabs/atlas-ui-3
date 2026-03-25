@@ -40,7 +40,13 @@ class ManagedSession:
 
     @property
     def is_open(self) -> bool:
-        return self._opened and not self._closed
+        """Check if session is open and the underlying transport is still alive."""
+        if not self._opened or self._closed:
+            return False
+        # Detect server-side disconnects that our flags don't know about
+        if not self._client.is_connected():
+            return False
+        return True
 
     async def open(self) -> None:
         if self._opened:
@@ -82,6 +88,10 @@ class MCPSessionManager:
         If a session already exists and is open, returns it.
         Otherwise opens a new one.  Uses per-key locks so that opening
         a session for one server doesn't block other servers.
+
+        Dead sessions (server process crashed) are detected via
+        ``client.is_connected()`` and automatically cleaned up before
+        opening a fresh session.
         """
         key = (conversation_id, server_name)
 
@@ -98,10 +108,27 @@ class MCPSessionManager:
         # Slow path: open session under per-key lock (network I/O)
         async with key_lock:
             # Re-check after acquiring per-key lock
+            dead_session: Optional[ManagedSession] = None
             async with self._lock:
                 existing = self._sessions.get(key)
                 if existing is not None and existing.is_open:
                     return existing
+                # If the session exists but is no longer open (server died),
+                # remove it so we can clean up and reconnect.
+                if existing is not None:
+                    dead_session = self._sessions.pop(key, None)
+
+            # Clean up the dead session outside the lock.  This calls
+            # client.__aexit__ which resets FastMCP's internal nesting
+            # counter and session task — required before __aenter__ can
+            # start a fresh connection.
+            if dead_session is not None:
+                logger.info(
+                    "Evicting dead MCP session for conversation=%s server=%s",
+                    conversation_id,
+                    server_name,
+                )
+                await dead_session.close()
 
             session = ManagedSession(client)
             await session.open()
