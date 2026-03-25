@@ -563,7 +563,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     return 'No Extract'
   }
 
-  const sanitizeFilename = (name) => name.replace(/\s+/g, '_')
+  const sanitizeFilename = (name) => name.replace(/[^\w.-]+/g, '_')
 
   // Raster formats only — SVG is vector XML, not useful for LLM vision.
   const IMAGE_MIME_TYPES = {
