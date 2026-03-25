@@ -242,12 +242,12 @@ class TestComplianceLevelManager:
         assert "HIPAA" in all_levels
         assert "FedRAMP" in all_levels
 
-    def test_permissive_mode_no_config(self):
-        """Test permissive mode when no config is loaded."""
+    def test_fail_closed_no_config(self):
+        """Test fail-closed behavior when no config is loaded."""
         manager = ComplianceLevelManager(Path("/nonexistent"))
 
-        # Should validate anything in permissive mode
+        # Should validate anything when no levels defined (pass-through for validation)
         assert manager.validate_compliance_level("AnyLevel") == "AnyLevel"
 
-        # Should allow all access
-        assert manager.is_accessible("Level1", "Level2") is True
+        # Should deny access when levels cannot be resolved (fail closed)
+        assert manager.is_accessible("Level1", "Level2") is False
