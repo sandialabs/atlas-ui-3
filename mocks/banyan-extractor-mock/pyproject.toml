@@ -1,0 +1,16 @@
+[project]
+name = "banyan-extractor-mock"
+version = "0.1.0"
+description = "Banyan Extractor Mock Service for ATLAS testing"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "banyan-ingest[nemotronparse] @ git+https://github.com/sandialabs/banyan-ingest.git",
+    "pdf2image>=1.16.0",
+    "pypdf>=5.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

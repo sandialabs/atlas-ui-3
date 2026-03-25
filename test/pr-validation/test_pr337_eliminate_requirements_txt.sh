@@ -1,6 +1,6 @@
 #!/bin/bash
 # PR #337 Validation Script: Remove requirements.txt, consolidate deps into pyproject.toml
-# Tests that requirements.txt is removed, editable install works, imports work,
+# Tests that requirements.txt files are removed, mocks use pyproject.toml,
 # no stale references remain, and all tests pass.
 
 set -e
@@ -22,19 +22,25 @@ else
 fi
 
 echo ""
-echo "1. Verify requirements.txt is removed"
-echo "--------------------------------------"
-if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
-    echo "FAILED: requirements.txt still exists in project root"
-    exit 1
-else
-    echo "PASSED: requirements.txt removed from project root"
-fi
+echo "1. Verify requirements.txt is removed from project root and atlas/ subpackages"
+echo "-------------------------------------------------------------------------------"
+for path in \
+    "$PROJECT_ROOT/requirements.txt" \
+    "$PROJECT_ROOT/atlas/mcp/pptx_generator/requirements.txt" \
+    "$PROJECT_ROOT/atlas/mcp/image_demo/requirements.txt"; do
+    if [ -f "$path" ]; then
+        echo "FAILED: requirements.txt still exists: $path"
+        exit 1
+    else
+        echo "  PASSED: $path is removed"
+    fi
+done
+echo "PASSED: requirements.txt removed from root and atlas/ subpackages"
 
 echo ""
-echo "2. Verify pyproject.toml has all dependencies"
-echo "----------------------------------------------"
-# Check key dependencies that were in requirements.txt
+echo "2. Verify pyproject.toml has all core dependencies"
+echo "----------------------------------------------------"
+# Check key dependencies that should be in the root pyproject.toml
 for dep in fastapi litellm fastmcp httpx boto3 pydantic uvicorn websockets; do
     if grep -q "\"$dep" "$PROJECT_ROOT/pyproject.toml"; then
         echo "  PASSED: $dep found in pyproject.toml"
@@ -46,17 +52,39 @@ done
 echo "PASSED: All key dependencies present in pyproject.toml"
 
 echo ""
-echo "3. Verify fastmcp has upper bound constraint"
-echo "---------------------------------------------"
-if grep -q 'fastmcp>=2.10.0,<3.0.0' "$PROJECT_ROOT/pyproject.toml"; then
-    echo "PASSED: fastmcp has <3.0.0 upper bound"
+echo "3. Verify fastmcp has version constraints"
+echo "------------------------------------------"
+if grep -q 'fastmcp\[tasks\]>=3.0.0,<4.0.0' "$PROJECT_ROOT/pyproject.toml"; then
+    echo "PASSED: fastmcp has >=3.0.0,<4.0.0 version constraint"
 else
-    echo "FAILED: fastmcp missing <3.0.0 upper bound"
+    echo "FAILED: fastmcp missing expected version constraint (>=3.0.0,<4.0.0)"
     exit 1
 fi
 
 echo ""
-echo "4. Verify editable install works"
+echo "4. Verify mock services have pyproject.toml (not requirements.txt)"
+echo "--------------------------------------------------------------------"
+for mock_dir in \
+    "mocks/file-extractor-mock" \
+    "mocks/multipart-extractor-mock" \
+    "mocks/mcp-http-mock"; do
+    if [ -f "$PROJECT_ROOT/$mock_dir/pyproject.toml" ]; then
+        echo "  PASSED: $mock_dir/pyproject.toml exists"
+    else
+        echo "  FAILED: $mock_dir/pyproject.toml missing"
+        exit 1
+    fi
+    if [ -f "$PROJECT_ROOT/$mock_dir/requirements.txt" ]; then
+        echo "  FAILED: $mock_dir/requirements.txt still exists (should be removed)"
+        exit 1
+    else
+        echo "  PASSED: $mock_dir/requirements.txt removed"
+    fi
+done
+echo "PASSED: All mock services use pyproject.toml"
+
+echo ""
+echo "5. Verify editable install works"
 echo "---------------------------------"
 pip show atlas-chat > /dev/null 2>&1 && echo "PASSED: atlas-chat package is installed" || {
     echo "INFO: Package not installed, attempting editable install..."
@@ -67,7 +95,7 @@ pip show atlas-chat > /dev/null 2>&1 && echo "PASSED: atlas-chat package is inst
 }
 
 echo ""
-echo "5. Verify imports work without PYTHONPATH"
+echo "6. Verify imports work without PYTHONPATH"
 echo "------------------------------------------"
 (unset PYTHONPATH && python -c "from atlas import AtlasClient, ChatResult; print('OK')") && echo "PASSED: Imports work without PYTHONPATH" || {
     echo "FAILED: Imports require PYTHONPATH (editable install broken)"
@@ -75,7 +103,7 @@ echo "------------------------------------------"
 }
 
 echo ""
-echo "6. Verify CLI entry points work"
+echo "7. Verify CLI entry points work"
 echo "--------------------------------"
 cd "$PROJECT_ROOT/atlas"
 python atlas_chat_cli.py --help > /dev/null 2>&1 && echo "PASSED: atlas_chat_cli.py --help works" || {
@@ -89,7 +117,7 @@ python server_cli.py --help > /dev/null 2>&1 && echo "PASSED: server_cli.py --he
 cd "$PROJECT_ROOT"
 
 echo ""
-echo "7. Verify no stale requirements.txt references in scripts"
+echo "8. Verify no stale requirements.txt references in scripts"
 echo "----------------------------------------------------------"
 # Check main scripts (exclude mocks/, docs/, CHANGELOG, AI instruction files)
 STALE_REFS=$(grep -rn "requirements\.txt" \
@@ -111,7 +139,7 @@ else
 fi
 
 echo ""
-echo "8. Verify no unnecessary PYTHONPATH exports in test scripts"
+echo "9. Verify no unnecessary PYTHONPATH exports in test scripts"
 echo "------------------------------------------------------------"
 PYTHONPATH_REFS=$(grep -n "export PYTHONPATH" \
     test/atlas_tests.sh \
@@ -128,7 +156,7 @@ else
 fi
 
 echo ""
-echo "9. Verify Dockerfile layer caching structure"
+echo "10. Verify Dockerfile layer caching structure"
 echo "----------------------------------------------"
 # Check that Dockerfile installs deps before copying source
 if grep -q "uv pip install \." "$PROJECT_ROOT/Dockerfile" && \
@@ -140,7 +168,7 @@ else
 fi
 
 echo ""
-echo "10. Verify no duplicate COPY pyproject.toml in Dockerfile-test"
+echo "11. Verify no duplicate COPY pyproject.toml in Dockerfile-test"
 echo "---------------------------------------------------------------"
 PYPROJECT_COPIES=$(grep -c "COPY pyproject.toml" "$PROJECT_ROOT/Dockerfile-test")
 if [ "$PYPROJECT_COPIES" -le 1 ]; then
@@ -151,7 +179,7 @@ else
 fi
 
 echo ""
-echo "11. Verify S3 client eager instantiation is removed"
+echo "12. Verify S3 client eager instantiation is removed"
 echo "----------------------------------------------------"
 if python -c "
 import ast, sys
@@ -173,7 +201,20 @@ else
 fi
 
 echo ""
-echo "12. Run backend unit tests"
+echo "13. Verify dependabot.yml covers mock subdirectories"
+echo "-----------------------------------------------------"
+for mock_dir in "/mocks/file-extractor-mock" "/mocks/multipart-extractor-mock" "/mocks/mcp-http-mock"; do
+    if grep -q "directory: \"$mock_dir\"" "$PROJECT_ROOT/.github/dependabot.yml"; then
+        echo "  PASSED: dependabot.yml covers $mock_dir"
+    else
+        echo "  FAILED: dependabot.yml missing entry for $mock_dir"
+        exit 1
+    fi
+done
+echo "PASSED: dependabot.yml covers all mock subdirectories"
+
+echo ""
+echo "14. Run backend unit tests"
 echo "---------------------------"
 cd "$PROJECT_ROOT"
 ./test/run_tests.sh backend && echo "PASSED: Backend tests pass" || {

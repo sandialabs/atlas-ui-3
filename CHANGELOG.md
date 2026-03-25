@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #337 - 2026-03-25
+- **Chore**: Replace all `requirements.txt` files with `pyproject.toml` in mock services and remove redundant ones from atlas MCP subpackages. Update Dependabot to track mock subdirectories. Dependabot now monitors `mocks/file-extractor-mock`, `mocks/multipart-extractor-mock`, and `mocks/mcp-http-mock` for weekly dependency updates.
+
 ### PR #467 - 2026-03-24
 - **Fix**: CI workflows (quay-publish, ci, build-artifacts) now inject the correct Vite build args: `VITE_APP_NAME=ATLAS`, `VITE_FEATURE_ANIMATED_LOGO=true`, `VITE_FEATURE_POWERED_BY_ATLAS=false`, and pass `GIT_HASH`/`APP_VERSION` to Docker builds.
 
