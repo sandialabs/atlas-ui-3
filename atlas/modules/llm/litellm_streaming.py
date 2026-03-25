@@ -24,6 +24,7 @@ class LiteLLMStreamingMixin:
     Expects the host class to provide:
       - _get_litellm_model_name(model_name) -> str
       - _get_model_kwargs(model_name, temperature, user_email) -> dict
+      - _prepare_messages(model_name, messages) -> list
       - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> list
       - _build_rag_completion_response(rag_response, display_source) -> str
       - _combine_rag_contexts(source_responses) -> tuple

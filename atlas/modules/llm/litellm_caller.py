@@ -502,6 +502,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         pass converts post-tool system messages to user role and inserts a
         bridging assistant message between tool results and the next
         non-assistant message.
+
+        Note: ``seen_tool`` is a one-way latch — once any tool message has
+        appeared in the conversation, all subsequent system messages are
+        converted to user role for the remainder of the message list.
         """
         result = []
         seen_tool = False
@@ -518,7 +522,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             # Insert bridging assistant message when a non-assistant role
             # follows a tool role (Mistral requires assistant after tool)
             if last_role == "tool" and role not in ("tool", "assistant"):
-                result.append({"role": "assistant", "content": "Understood. Continuing."})
+                result.append({"role": "assistant", "content": "(continuing)"})
                 logger.debug("strict_role_ordering: inserted bridging assistant message")
             result.append(msg)
             last_role = role
@@ -531,7 +535,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         messages = self._sanitize_messages(messages)
         if model_name in self.llm_config.models:
             model_config = self.llm_config.models[model_name]
-            if getattr(model_config, "strict_role_ordering", False):
+            if model_config.strict_role_ordering:
                 messages = self._enforce_strict_role_ordering(messages)
         return messages
 

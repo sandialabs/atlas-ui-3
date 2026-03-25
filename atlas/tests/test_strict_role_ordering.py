@@ -6,8 +6,6 @@ a bridging assistant message is inserted so the role sequence is valid
 for Mistral-family models.
 """
 
-import pytest
-
 from atlas.modules.config.config_manager import LLMConfig, ModelConfig
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
