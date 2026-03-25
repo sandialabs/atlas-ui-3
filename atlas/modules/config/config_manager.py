@@ -95,6 +95,10 @@ class ModelConfig(BaseModel):
     # When true, attached image files are sent as inline image content blocks
     # instead of being listed in the files manifest.
     supports_vision: bool = False
+    # When true, system messages that appear after tool messages are converted
+    # to user role.  Required for models (e.g. Mistral/Devstral via vLLM)
+    # that reject system messages mid-conversation after tool results.
+    strict_role_ordering: bool = False
 
 
 class LLMConfig(BaseModel):

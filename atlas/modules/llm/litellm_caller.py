@@ -493,6 +493,38 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             sanitized.append(msg)
         return sanitized
 
+    @staticmethod
+    def _enforce_strict_role_ordering(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert system messages to user role when they follow tool messages.
+
+        Models like Mistral/Devstral (especially via vLLM) reject system
+        messages that appear after tool-role messages.  This pass rewrites
+        those system messages to user role while preserving the first
+        system message (the system prompt at the top of the conversation).
+        """
+        result = []
+        seen_tool = False
+        for msg in messages:
+            role = msg.get("role")
+            if role == "tool":
+                seen_tool = True
+            if role == "system" and seen_tool:
+                msg = {**msg, "role": "user"}
+                logger.debug("strict_role_ordering: converted post-tool system message to user")
+            result.append(msg)
+        return result
+
+    def _prepare_messages(
+        self, model_name: str, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Sanitize messages and apply model-specific transformations."""
+        messages = self._sanitize_messages(messages)
+        if model_name in self.llm_config.models:
+            model_config = self.llm_config.models[model_name]
+            if getattr(model_config, "strict_role_ordering", False):
+                messages = self._enforce_strict_role_ordering(messages)
+        return messages
+
     async def call_plain(
         self,
         model_name: str,
@@ -523,7 +555,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             response = await self._acompletion_with_retry(
                 model=litellm_model,
-                messages=self._sanitize_messages(messages),
+                messages=self._prepare_messages(model_name, messages),
                 **model_kwargs
             )
 
@@ -693,7 +725,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             response = await self._acompletion_with_retry(
                 model=litellm_model,
-                messages=self._sanitize_messages(messages),
+                messages=self._prepare_messages(model_name, messages),
                 tools=tools_schema,
                 tool_choice=final_tool_choice,
                 **model_kwargs
@@ -722,7 +754,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 try:
                     response = await self._acompletion_with_retry(
                         model=litellm_model,
-                        messages=self._sanitize_messages(messages),
+                        messages=self._prepare_messages(model_name, messages),
                         tools=tools_schema,
                         tool_choice="auto",
                         **model_kwargs
