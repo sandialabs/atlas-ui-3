@@ -399,3 +399,108 @@ class TestQueryRAGWithoutQualification:
                 qualified_data_source="corpus1",  # No server prefix
                 messages=[],
             )
+
+
+class TestQueryRAGBatch:
+    """Tests for query_rag_batch method."""
+
+    @pytest.mark.asyncio
+    async def test_batch_same_server_http(self, unified_rag_service):
+        """Test batching multiple sources on the same HTTP server."""
+        mock_client = AsyncMock()
+        mock_client.query_rag.return_value = RAGResponse(
+            content="Batched response",
+            metadata=None,
+        )
+
+        with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
+            result = await unified_rag_service.query_rag_batch(
+                username="test@test.com",
+                qualified_data_sources=["test_http:corpus1", "test_http:corpus2"],
+                messages=[{"role": "user", "content": "test"}],
+            )
+
+        assert result.content == "Batched response"
+        # Verify data_sources kwarg was passed with both source IDs
+        call_kwargs = mock_client.query_rag.call_args
+        assert call_kwargs[1]["data_sources"] == ["corpus1", "corpus2"]
+
+    @pytest.mark.asyncio
+    async def test_batch_mixed_servers_raises(self, unified_rag_service):
+        """Test that mixing servers in a batch raises ValueError."""
+        with pytest.raises(ValueError, match="same server"):
+            await unified_rag_service.query_rag_batch(
+                username="test@test.com",
+                qualified_data_sources=["test_http:corpus1", "other_server:corpus2"],
+                messages=[],
+            )
+
+    @pytest.mark.asyncio
+    async def test_batch_empty_sources_raises(self, unified_rag_service):
+        """Test that empty sources list raises ValueError."""
+        with pytest.raises(ValueError, match="No data sources"):
+            await unified_rag_service.query_rag_batch(
+                username="test@test.com",
+                qualified_data_sources=[],
+                messages=[],
+            )
+
+    @pytest.mark.asyncio
+    async def test_batch_unqualified_source_raises(self, unified_rag_service):
+        """Test that unqualified sources raise ValueError."""
+        with pytest.raises(ValueError, match="Unqualified source"):
+            await unified_rag_service.query_rag_batch(
+                username="test@test.com",
+                qualified_data_sources=["corpus_without_server"],
+                messages=[],
+            )
+
+    @pytest.mark.asyncio
+    async def test_batch_unknown_server_raises(self, unified_rag_service):
+        """Test that unknown server raises ValueError."""
+        with pytest.raises(ValueError, match="RAG source not found"):
+            await unified_rag_service.query_rag_batch(
+                username="test@test.com",
+                qualified_data_sources=["nonexistent:corpus1"],
+                messages=[],
+            )
+
+    @pytest.mark.asyncio
+    async def test_batch_mcp_source(self, mock_config_manager, mock_auth_check):
+        """Test batching MCP sources delegates to rag_mcp_service.synthesize."""
+        mock_rag_mcp = MagicMock()
+        mock_rag_mcp.synthesize = AsyncMock(return_value={
+            "results": {"answer": "MCP batch answer"},
+            "meta_data": {"providers": {}},
+        })
+
+        service = UnifiedRAGService(
+            config_manager=mock_config_manager,
+            rag_mcp_service=mock_rag_mcp,
+        )
+
+        result = await service.query_rag_batch(
+            username="test@test.com",
+            qualified_data_sources=["test_mcp:src1", "test_mcp:src2"],
+            messages=[{"role": "user", "content": "query"}],
+        )
+
+        assert result.content == "MCP batch answer"
+        mock_rag_mcp.synthesize.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_batch_passes_first_source_as_fallback(self, unified_rag_service):
+        """Test that batch passes first source_id (not empty string) to query_rag."""
+        mock_client = AsyncMock()
+        mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+
+        with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
+            await unified_rag_service.query_rag_batch(
+                username="test@test.com",
+                qualified_data_sources=["test_http:alpha", "test_http:beta"],
+                messages=[{"role": "user", "content": "q"}],
+            )
+
+        # The positional data_source arg should be "alpha", not ""
+        call_args = mock_client.query_rag.call_args
+        assert call_args[0][1] == "alpha"
