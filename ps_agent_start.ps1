@@ -24,6 +24,10 @@ param(
     [Alias("m")][switch]$StartMcpMock
 )
 
+# Force UTF-8 output encoding for the console and all output streams on Windows
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # Store the project root directory
 $PROJECT_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $PROJECT_ROOT
@@ -85,7 +89,7 @@ function Stop-Processes {
 function Clear-Logs {
     Write-Host "Clearing log for fresh start"
     New-Item -ItemType Directory -Path "$PROJECT_ROOT/logs" -Force | Out-Null
-    "NEW LOG" | Out-File -FilePath "$PROJECT_ROOT/logs/app.jsonl"
+    [System.IO.File]::WriteAllText("$PROJECT_ROOT/logs/app.jsonl", "NEW LOG`n", [System.Text.Encoding]::UTF8)
 }
 
 # =============================================================================

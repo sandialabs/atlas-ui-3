@@ -24,6 +24,7 @@ class LiteLLMStreamingMixin:
     Expects the host class to provide:
       - _get_litellm_model_name(model_name) -> str
       - _get_model_kwargs(model_name, temperature, user_email) -> dict
+      - _prepare_messages(model_name, messages) -> list
       - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> list
       - _build_rag_completion_response(rag_response, display_source) -> str
       - _combine_rag_contexts(source_responses) -> tuple
@@ -54,7 +55,7 @@ class LiteLLMStreamingMixin:
 
             response = await acompletion(
                 model=litellm_model,
-                messages=self._sanitize_messages(messages),
+                messages=self._prepare_messages(model_name, messages),
                 stream=True,
                 **model_kwargs,
             )
@@ -121,7 +122,7 @@ class LiteLLMStreamingMixin:
 
             response = await acompletion(
                 model=litellm_model,
-                messages=self._sanitize_messages(messages),
+                messages=self._prepare_messages(model_name, messages),
                 tools=tools_schema,
                 tool_choice=tool_choice,
                 stream=True,

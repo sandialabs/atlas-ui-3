@@ -58,6 +58,7 @@ class UnifiedRAGService:
                 default_model=config.default_model or "openai/gpt-oss-120b",
                 top_k=config.top_k,
                 timeout=config.timeout,
+                strip_domain=config.strip_domain,
             )
             logger.info("Created HTTP RAG client for source: %s", source_name)
 
@@ -306,6 +307,124 @@ class UnifiedRAGService:
             metadata = None
             if meta_data.get("providers"):
                 # Create basic metadata from MCP response
+                from atlas.modules.rag.client import DocumentMetadata, RAGMetadata
+                providers_info = meta_data.get("providers", {})
+                docs_found = []
+                for provider_name, provider_info in providers_info.items():
+                    if provider_info.get("used_synth"):
+                        docs_found.append(DocumentMetadata(
+                            source=provider_name,
+                            content_type="mcp_synthesis",
+                            confidence_score=1.0,
+                        ))
+                metadata = RAGMetadata(
+                    query_processing_time_ms=0,
+                    total_documents_searched=len(providers_info),
+                    documents_found=docs_found,
+                    data_source_name=server_name,
+                    retrieval_method="mcp_synthesis",
+                )
+
+            return RAGResponse(content=answer, metadata=metadata)
+
+        else:
+            raise ValueError(f"Unknown RAG source type: {source_config.type}")
+
+    async def query_rag_batch(
+        self,
+        username: str,
+        qualified_data_sources: List[str],
+        messages: List[Dict],
+    ) -> RAGResponse:
+        """Query multiple RAG sources on the same server in a single request.
+
+        Sends a single batched request for multiple sources that share the same
+        server, avoiding N separate HTTP calls when multiple corpora are selected.
+        The caller (e.g. LiteLLMCaller._query_all_rag_sources) is responsible for
+        grouping sources by server before calling this method.
+
+        Args:
+            username: The user making the query.
+            qualified_data_sources: Data sources in format "server:source_id".
+                All sources MUST belong to the same server.
+            messages: List of message dictionaries.
+
+        Returns:
+            RAGResponse with content and metadata from the batched query.
+
+        Raises:
+            ValueError: If sources list is empty or sources span multiple servers.
+        """
+        if not qualified_data_sources:
+            raise ValueError("No data sources provided for batch query")
+
+        # Parse all qualified sources - they must all be from the same server
+        source_ids: List[str] = []
+        server_name = None
+        for qs in qualified_data_sources:
+            if ":" in qs:
+                srv, src_id = qs.split(":", 1)
+            else:
+                raise ValueError(
+                    f"Unqualified source '{qs}' passed to query_rag_batch. "
+                    f"All sources must be qualified as 'server:source_id'."
+                )
+
+            if server_name is None:
+                server_name = srv
+            elif srv != server_name:
+                raise ValueError(
+                    f"All sources in a batch must be from the same server. "
+                    f"Got {server_name} and {srv}"
+                )
+            source_ids.append(src_id)
+
+        logger.info(
+            "[RAG] Batch query: server=%s, sources=%s, user=%s",
+            server_name, source_ids, sanitize_for_logging(username),
+        )
+
+        rag_config = self.config_manager.rag_sources_config
+        source_config = rag_config.sources.get(server_name)
+
+        if not source_config:
+            raise ValueError(f"RAG source not found: {server_name}")
+
+        if source_config.type == "http":
+            client = self._get_http_client(server_name, source_config)
+            response = await client.query_rag(
+                username, source_ids[0], messages, data_sources=source_ids,
+            )
+            logger.debug(
+                "[RAG] Batch HTTP response: content_length=%d, has_metadata=%s",
+                len(response.content) if response.content else 0,
+                response.metadata is not None,
+            )
+            return response
+
+        elif source_config.type == "mcp":
+            # MCP sources: delegate to synthesize with all sources
+            if not self.rag_mcp_service:
+                raise ValueError("RAGMCPService not configured for MCP RAG queries")
+
+            query = ""
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    query = msg.get("content", "")
+                    break
+
+            mcp_response = await self.rag_mcp_service.synthesize(
+                username=username,
+                query=query,
+                sources=qualified_data_sources,
+            )
+
+            results = mcp_response.get("results", {})
+            answer = results.get("answer", "No response from MCP RAG.")
+            meta_data = mcp_response.get("meta_data", {})
+
+            metadata = None
+            if meta_data.get("providers"):
                 from atlas.modules.rag.client import DocumentMetadata, RAGMetadata
                 providers_info = meta_data.get("providers", {})
                 docs_found = []

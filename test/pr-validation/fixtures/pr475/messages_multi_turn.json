@@ -1,0 +1,10 @@
+[
+  {"role": "system", "content": "You are a helpful assistant."},
+  {"role": "user", "content": "Run tool A then tool B"},
+  {"role": "assistant", "content": null, "tool_calls": [{"id": "call_1"}]},
+  {"role": "tool", "content": "result_a", "tool_call_id": "call_1"},
+  {"role": "system", "content": "Manifest after round 1"},
+  {"role": "assistant", "content": null, "tool_calls": [{"id": "call_2"}]},
+  {"role": "tool", "content": "result_b", "tool_call_id": "call_2"},
+  {"role": "system", "content": "Manifest after round 2"}
+]
