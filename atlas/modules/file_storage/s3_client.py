@@ -7,6 +7,7 @@ This module provides a client interface to interact with S3-compatible storage
 
 import base64
 import logging
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -94,7 +95,7 @@ class S3StorageClient:
         """Generate an S3-style key with user isolation."""
         timestamp = int(time.time())
         unique_id = str(uuid.uuid4())[:8]
-        safe_filename = filename.replace(" ", "_").replace("/", "_")
+        safe_filename = re.sub(r"[^\w.\-]+", "_", filename)
 
         if source_type == "tool":
             # Tool-generated files go in a special directory
