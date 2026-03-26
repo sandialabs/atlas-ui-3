@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Fix**: All LLM call paths (plain, tool-calling, streaming) now use a unified `_prepare_messages()` pipeline that chains existing sanitization with the new role enforcement.
 
 ### PR #473 - 2026-03-25
-- **Fix**: `ps_agent_start.ps1` now forces UTF-8 encoding for the log file (`logs/app.jsonl`) and sets console output encoding to UTF-8 on Windows.
+- **Fix**: `ps_agent_start.ps1` now forces UTF-8 encoding for the log file (`logs/app.jsonl`) and sets console output encoding to UTF-8 on Windows. This resolves the issue where Windows users saw Chinese/CJK characters in the Log Viewer — caused by PowerShell 5.1 writing UTF-16 LE by default, which Python's UTF-8 reader misinterpreted as CJK code points.
 
 ### PR #467 - 2026-03-24
 - **Fix**: CI workflows (quay-publish, ci, build-artifacts) now inject the correct Vite build args: `VITE_APP_NAME=ATLAS`, `VITE_FEATURE_ANIMATED_LOGO=true`, `VITE_FEATURE_POWERED_BY_ATLAS=false`, and pass `GIT_HASH`/`APP_VERSION` to Docker builds.
