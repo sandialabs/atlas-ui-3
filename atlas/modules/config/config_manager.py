@@ -189,6 +189,7 @@ class RAGSourceConfig(BaseModel):
     default_model: Optional[str] = None  # Model for RAG queries
     top_k: int = 4  # Number of documents to retrieve
     timeout: float = 60.0  # Request timeout in seconds
+    strip_domain: bool = False  # Strip @domain from username (e.g. user@corp.com -> user)
 
     # API endpoint customization (HTTP type)
     discovery_endpoint: str = "/discover/datasources"
