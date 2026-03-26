@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 import httpx
 from fastapi import HTTPException
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.modules.rag.client import DataSource, DocumentMetadata, RAGMetadata, RAGResponse
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ class AtlasRAGClient:
         """
         if self.strip_domain and "@" in user_name:
             stripped = user_name.split("@", 1)[0]
-            logger.debug("Stripped domain from username: %s -> %s", user_name, stripped)
+            logger.debug("Stripped domain from username: %s -> %s", sanitize_for_logging(user_name), sanitize_for_logging(stripped))
             return stripped
         return user_name
 

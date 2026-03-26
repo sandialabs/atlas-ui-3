@@ -338,8 +338,10 @@ class UnifiedRAGService:
     ) -> RAGResponse:
         """Query multiple RAG sources on the same server in a single request.
 
-        Groups all qualified_data_sources by server and sends one batched request
-        per server, avoiding N separate HTTP calls when multiple corpora are selected.
+        Sends a single batched request for multiple sources that share the same
+        server, avoiding N separate HTTP calls when multiple corpora are selected.
+        The caller (e.g. LiteLLMCaller._query_all_rag_sources) is responsible for
+        grouping sources by server before calling this method.
 
         Args:
             username: The user making the query.
@@ -349,6 +351,9 @@ class UnifiedRAGService:
 
         Returns:
             RAGResponse with content and metadata from the batched query.
+
+        Raises:
+            ValueError: If sources list is empty or sources span multiple servers.
         """
         if not qualified_data_sources:
             raise ValueError("No data sources provided for batch query")
@@ -360,10 +365,10 @@ class UnifiedRAGService:
             if ":" in qs:
                 srv, src_id = qs.split(":", 1)
             else:
-                src_id = qs
-                srv = self._find_server_for_source(src_id)
-                if not srv:
-                    raise ValueError(f"Could not find server for source: {src_id}")
+                raise ValueError(
+                    f"Unqualified source '{qs}' passed to query_rag_batch. "
+                    f"All sources must be qualified as 'server:source_id'."
+                )
 
             if server_name is None:
                 server_name = srv
@@ -388,7 +393,7 @@ class UnifiedRAGService:
         if source_config.type == "http":
             client = self._get_http_client(server_name, source_config)
             response = await client.query_rag(
-                username, "", messages, data_sources=source_ids,
+                username, source_ids[0], messages, data_sources=source_ids,
             )
             logger.debug(
                 "[RAG] Batch HTTP response: content_length=%d, has_metadata=%s",
