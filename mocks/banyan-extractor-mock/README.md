@@ -20,7 +20,7 @@ Falls back to `pypdf` for PDF extraction when banyan-ingest is not installed.
 cd mocks/banyan-extractor-mock
 
 # Install dependencies (requires git access to sandialabs/banyan-ingest)
-pip install -r requirements.txt
+pip install -e .
 
 # Configure Nemotron endpoint
 cp endpoint_config.json.example endpoint_config.json
@@ -34,7 +34,7 @@ Server starts at `http://127.0.0.1:8011`
 
 ## Prerequisites
 
-- **banyan-ingest**: Installed from GitHub (`pip install -r requirements.txt`)
+- **banyan-ingest**: Installed from GitHub (`pip install -e .`)
 - **Nemotron Parse endpoint**: A running Nemotron Parse service (configure in `endpoint_config.json`)
 - **poppler**: System dependency for `pdf2image` (`apt install poppler-utils` or `dnf install poppler-utils`)
 - **pypdf**: Included as fallback for PDF extraction without banyan-ingest

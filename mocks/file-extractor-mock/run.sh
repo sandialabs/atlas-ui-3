@@ -8,7 +8,7 @@ cd "$SCRIPT_DIR"
 # Install dependencies if needed
 if ! python -c "import fastapi, uvicorn, pypdf" 2>/dev/null; then
     echo "Installing dependencies..."
-    pip install -r requirements.txt
+    pip install -e .
 fi
 
 echo "Starting Mock File Extractor Service on http://127.0.0.1:8010"

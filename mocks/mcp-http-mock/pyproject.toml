@@ -1,0 +1,15 @@
+[project]
+name = "mcp-http-mock"
+version = "0.1.0"
+description = "MCP HTTP Mock Server for ATLAS testing"
+requires-python = ">=3.11"
+# This service runs in an isolated Docker container and intentionally uses fastmcp 2.x,
+# which exposes the StaticTokenVerifier API used by main.py for JWT auth.
+dependencies = [
+    "fastmcp>=2.10.6,<3.0.0",
+    "requests>=2.31.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

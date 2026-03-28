@@ -1,0 +1,15 @@
+[project]
+name = "multipart-extractor-mock"
+version = "0.1.0"
+description = "Mock Multipart File Extractor Service for ATLAS testing"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn>=0.32.0,<1.0.0",
+    "python-multipart>=0.0.6,<1.0.0",
+    "pypdf>=5.0.0,<6.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

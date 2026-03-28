@@ -246,7 +246,7 @@ The `banyan-extractor-mock` service (`mocks/banyan-extractor-mock/`) provides PD
 
 ```bash
 cd mocks/banyan-extractor-mock
-pip install -r requirements.txt
+pip install -e .
 cp endpoint_config.json.example endpoint_config.json
 # Edit endpoint_config.json with your Nemotron Parse URL
 python main.py
