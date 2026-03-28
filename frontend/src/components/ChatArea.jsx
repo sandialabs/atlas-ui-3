@@ -786,7 +786,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
       <main
         ref={messagesRef}
-        className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0"
+        className={`overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
         {messages.map((message, index) => (
           <Message

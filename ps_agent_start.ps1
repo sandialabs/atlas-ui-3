@@ -270,6 +270,13 @@ function Build-Frontend {
 
     npm run build
     Set-Location $PROJECT_ROOT
+
+    # Copy build output to atlas/static/ so the backend always serves from one
+    # location, matching the PyPI package layout.
+    if (Test-Path "$PROJECT_ROOT/atlas/static") {
+        Remove-Item -Recurse -Force "$PROJECT_ROOT/atlas/static"
+    }
+    Copy-Item -Recurse "$PROJECT_ROOT/frontend/dist" "$PROJECT_ROOT/atlas/static"
 }
 
 # =============================================================================
