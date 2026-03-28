@@ -67,6 +67,7 @@ echo "--------------------------------------------------------------------"
 for mock_dir in \
     "mocks/file-extractor-mock" \
     "mocks/multipart-extractor-mock" \
+    "mocks/banyan-extractor-mock" \
     "mocks/mcp-http-mock"; do
     if [ -f "$PROJECT_ROOT/$mock_dir/pyproject.toml" ]; then
         echo "  PASSED: $mock_dir/pyproject.toml exists"
@@ -203,7 +204,7 @@ fi
 echo ""
 echo "13. Verify dependabot.yml covers mock subdirectories"
 echo "-----------------------------------------------------"
-for mock_dir in "/mocks/file-extractor-mock" "/mocks/multipart-extractor-mock" "/mocks/mcp-http-mock"; do
+for mock_dir in "/mocks/file-extractor-mock" "/mocks/multipart-extractor-mock" "/mocks/banyan-extractor-mock" "/mocks/mcp-http-mock"; do
     if grep -q "directory: \"$mock_dir\"" "$PROJECT_ROOT/.github/dependabot.yml"; then
         echo "  PASSED: dependabot.yml covers $mock_dir"
     else

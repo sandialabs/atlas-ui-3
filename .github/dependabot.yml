@@ -32,6 +32,7 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
+    open-pull-requests-limit: 10
     commit-message:
       prefix: "security(deps)"
       include: "scope"
@@ -39,6 +40,13 @@ updates:
       - "security"
       - "dependencies"
       - "python"
+    groups:
+      mock-file-extractor-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Python dependencies (multipart-extractor-mock)
   - package-ecosystem: "pip"
@@ -47,6 +55,7 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
+    open-pull-requests-limit: 10
     commit-message:
       prefix: "security(deps)"
       include: "scope"
@@ -54,6 +63,36 @@ updates:
       - "security"
       - "dependencies"
       - "python"
+    groups:
+      mock-multipart-extractor-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Python dependencies (banyan-extractor-mock)
+  - package-ecosystem: "pip"
+    directory: "/mocks/banyan-extractor-mock"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    groups:
+      mock-banyan-extractor-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Python dependencies (mcp-http-mock)
   - package-ecosystem: "pip"
@@ -62,6 +101,7 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
+    open-pull-requests-limit: 10
     commit-message:
       prefix: "security(deps)"
       include: "scope"
@@ -69,6 +109,13 @@ updates:
       - "security"
       - "dependencies"
       - "python"
+    groups:
+      mock-mcp-http-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Node.js dependencies (frontend)
   - package-ecosystem: "npm"
