@@ -226,7 +226,7 @@ start_mcp_mock() {
 
 build_frontend() {
     local use_new_frontend="${USE_NEW_FRONTEND:-true}"
-    
+
     echo "Building frontend..."
     cd "$PROJECT_ROOT/frontend"
     npm install
@@ -237,6 +237,11 @@ build_frontend() {
     fi
     npm run build
     cd "$PROJECT_ROOT"
+
+    # Copy build output to atlas/static/ so the backend always serves from one
+    # location, matching the PyPI package layout.
+    rm -rf "$PROJECT_ROOT/atlas/static"
+    cp -r "$PROJECT_ROOT/frontend/dist" "$PROJECT_ROOT/atlas/static"
 }
 
 # =============================================================================
