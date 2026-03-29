@@ -49,7 +49,14 @@ from atlas.core.rate_limit_middleware import RateLimitMiddleware
 from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
 
 # Import domain errors
-from atlas.domain.errors import DomainError, LLMAuthenticationError, LLMTimeoutError, RateLimitError, ValidationError
+from atlas.domain.errors import (
+    ContextWindowExceededError,
+    DomainError,
+    LLMAuthenticationError,
+    LLMTimeoutError,
+    RateLimitError,
+    ValidationError,
+)
 
 # Import from atlas.infrastructure
 from atlas.infrastructure.app_factory import app_factory
@@ -60,12 +67,14 @@ from atlas.routes.admin_routes import admin_router
 from atlas.routes.config_routes import router as config_router
 from atlas.routes.conversation_routes import router as conversation_router
 from atlas.routes.feedback_routes import feedback_router
+from atlas.routes.files_routes import mcp_files_router
 from atlas.routes.files_routes import router as files_router
 from atlas.routes.globus_auth_routes import api_router as globus_api_router
 from atlas.routes.globus_auth_routes import browser_router as globus_browser_router
 from atlas.routes.health_routes import router as health_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
+from atlas.routes.suggestion_routes import suggestion_router
 from atlas.version import VERSION
 
 # Load environment variables from the parent directory
@@ -137,6 +146,15 @@ async def lifespan(app: FastAPI):
                 "Authentication will fail for all requests."
             )
 
+    # SECURITY WARNING: Check for weak Globus session secret
+    if config.app_settings.feature_globus_auth_enabled:
+        if config.app_settings.globus_session_secret == "atlas-globus-session-change-me":
+            logger.warning(
+                "SECURITY WARNING: Globus auth is enabled but GLOBUS_SESSION_SECRET "
+                "is still the default value. Set a strong random secret in .env to "
+                "protect OAuth CSRF state."
+            )
+
     logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
     logger.info(f"MCP servers configured: {len(config.mcp_config.servers)}")
 
@@ -203,7 +221,7 @@ if config.app_settings.feature_globus_auth_enabled:
     app.add_middleware(
         SessionMiddleware,
         secret_key=config.app_settings.globus_session_secret,
-        https_only=not config.app_settings.debug_mode,
+        https_only=False,
         same_site="lax",
     )
 # Domain whitelist check (if enabled) - add before Auth so it runs after
@@ -229,11 +247,13 @@ app.add_middleware(
 app.include_router(config_router)
 app.include_router(admin_router)
 app.include_router(files_router)
+app.include_router(mcp_files_router)
 app.include_router(health_router)
 app.include_router(feedback_router)
 app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
+app.include_router(suggestion_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
@@ -391,6 +411,7 @@ async def websocket_endpoint(websocket: WebSocket):
     )
 
     session_id = uuid4()
+    active_chat_task = {"task": None}
 
     # Create connection adapter with authenticated user and chat service
     connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
@@ -457,6 +478,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "authentication"
                         })
+                    except ContextWindowExceededError as e:
+                        logger.warning(f"Context window exceeded in chat handler: {e}")
+                        log_metric("error", user_email, error_type="context_window_exceeded")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "context_window_exceeded"
+                        })
                     except ValidationError as e:
                         logger.warning(f"Validation error in chat handler: {e}")
                         log_metric("error", user_email, error_type="validation")
@@ -465,6 +494,21 @@ async def websocket_endpoint(websocket: WebSocket):
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "validation"
                         })
+                    except asyncio.CancelledError:
+                        logger.info("Chat task cancelled by user (stop_streaming)")
+                        try:
+                            await websocket.send_json({
+                                "type": "token_stream",
+                                "token": "",
+                                "is_first": False,
+                                "is_last": True,
+                            })
+                            await websocket.send_json({
+                                "type": "response_complete",
+                            })
+                        except Exception:
+                            pass  # WebSocket may already be closed
+                        return
                     except DomainError as e:
                         logger.error(f"Domain error in chat handler: {e}", exc_info=True)
                         log_metric("error", user_email, error_type="domain")
@@ -483,7 +527,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
 
                 # Start chat handling in background
-                asyncio.create_task(handle_chat())
+                active_chat_task["task"] = asyncio.create_task(handle_chat())
 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection)
@@ -495,6 +539,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "restore_conversation":
+                # Release MCP sessions for the current conversation before restoring
+                session = chat_service.sessions.get(session_id)
+                if session:
+                    old_conv_id = session.context.get("conversation_id")
+                    if old_conv_id:
+                        try:
+                            from atlas.modules.mcp_tools import mcp_tool_manager
+                            await mcp_tool_manager.release_sessions(old_conv_id, user_email=user_email)
+                        except Exception as e:
+                            logger.debug("Error releasing MCP sessions on restore: %s", e)
+
                 # Restore a saved conversation into the current session
                 response = await chat_service.handle_restore_conversation(
                     session_id=session_id,
@@ -551,6 +606,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
 
+            elif message_type == "stop_streaming":
+                task = active_chat_task.get("task")
+                if task and not task.done():
+                    logger.info("Cancelling active chat task (stop_streaming)")
+                    task.cancel()
+
             elif message_type == "elicitation_response":
                 # Handle elicitation response
                 from atlas.application.chat.elicitation_manager import get_elicitation_manager
@@ -582,6 +643,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
 
     except WebSocketDisconnect:
+        # Release MCP sessions for this conversation
+        session = chat_service.sessions.get(session_id)
+        if session:
+            conv_id = session.context.get("conversation_id", str(session_id))
+            try:
+                from atlas.modules.mcp_tools import mcp_tool_manager
+                await mcp_tool_manager.release_sessions(conv_id, user_email=user_email)
+            except Exception as e:
+                logger.debug("Error releasing MCP sessions on disconnect: %s", e)
         chat_service.end_session(session_id)
         logger.info(f"WebSocket connection closed for session {session_id}")
 

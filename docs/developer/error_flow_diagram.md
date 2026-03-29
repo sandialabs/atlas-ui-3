@@ -74,7 +74,7 @@ Last updated: 2026-01-19
 		      │              │                               │
 		      │              │  Returns:                     │
 		      │              │  - error_class: RateLimitError│
-		      │              │  - user_msg: "The AI service  │
+		      │              │  - user_msg: "The LLM service  │
 		      │              │    is experiencing high       │
 		      │              │    traffic..."                │
 		      │              │  - log_msg: Full details      │
@@ -114,7 +114,7 @@ Last updated: 2026-01-19
 │                       WebSocket Message Sent                         │
 │  {                                                                   │
 │    "type": "error",                                                  │
-│    "message": "The AI service is experiencing high traffic...",      │
+│    "message": "The LLM service is experiencing high traffic...",      │
 │    "error_type": "rate_limit"                                        │
 │  }                                                                   │
 └─────────────────────────────────────────────────────────────────────┘
@@ -137,7 +137,7 @@ Last updated: 2026-01-19
 │                      UI DISPLAYS ERROR                               │
 │                                                                      │
 │  System Message:                                                     │
-│  "Error: The AI service is experiencing high traffic.                │
+│  "Error: The LLM service is experiencing high traffic.                │
 │   Please try again in a moment."                                     │
 │                                                                      │
 │  [User can see the error and knows what to do]                       │

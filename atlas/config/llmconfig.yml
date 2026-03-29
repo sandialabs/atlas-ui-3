@@ -1,5 +1,5 @@
 models:
-  openrouter-gpt-4o:
+  openrouter-gpt-oss-120b:
     model_url: "https://openrouter.ai/api/v1/chat/completions"
     model_name: "openai/gpt-oss-120b"
     api_key: "${OPENROUTER_API_KEY}"
@@ -12,13 +12,74 @@ models:
     model_name: "gpt-4.1"
     api_key: "${OPENAI_API_KEY}"
     compliance_level: "External"
+    supports_vision: true
   gpt-4.1-nano:
     model_url: "https://api.openai.com/v1/chat/completions"
     model_name: "gpt-4.1-nano"
     api_key: "${OPENAI_API_KEY}"
     compliance_level: "External"
+    supports_vision: true
   groq-gpt-oss-120b:
     model_url: "https://api.groq.com/openai/v1"
     model_name: "openai/gpt-oss-120b"
     api_key: "${GROQ_API_KEY}"
     compliance_level: "External"
+  gpt-4o-mini:
+    model_url: "https://api.openai.com/v1/chat/completions"
+    model_name: "gpt-4o-mini"
+    api_key: "${OPENAI_API_KEY}"
+    compliance_level: "External"
+    supports_vision: true
+  gpt-4o:
+    model_url: "https://api.openai.com/v1/chat/completions"
+    model_name: "gpt-4o"
+    api_key: "${OPENAI_API_KEY}"
+    compliance_level: "External"
+    supports_vision: true
+  claude-sonnet-4:
+    model_url: "https://api.anthropic.com/v1/messages"
+    model_name: "claude-sonnet-4-20250514"
+    api_key: "${ANTHROPIC_API_KEY}"
+    compliance_level: "External"
+    supports_vision: true
+  claude-haiku-4:
+    model_url: "https://api.anthropic.com/v1/messages"
+    model_name: "claude-haiku-4-5-20251001"
+    api_key: "${ANTHROPIC_API_KEY}"
+    compliance_level: "External"
+    supports_vision: true
+  gemini-2.5-flash:
+    model_url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    model_name: "gemini-2.5-flash-preview-05-20"
+    api_key: "${GOOGLE_API_KEY}"
+    compliance_level: "External"
+    supports_vision: true
+  openrouter-claude-sonnet:
+    model_url: "https://openrouter.ai/api/v1/chat/completions"
+    model_name: "anthropic/claude-sonnet-4"
+    api_key: "${OPENROUTER_API_KEY}"
+    compliance_level: "External"
+    supports_vision: true
+    extra_headers:
+      X-Title: "chat-11"
+  openrouter-gemini-2.5-pro:
+    model_url: "https://openrouter.ai/api/v1/chat/completions"
+    model_name: "google/gemini-2.5-pro-preview"
+    api_key: "${OPENROUTER_API_KEY}"
+    compliance_level: "External"
+    supports_vision: true
+    extra_headers:
+      X-Title: "chat-11"
+  groq-llama-vision:
+    model_url: "https://api.groq.com/openai/v1"
+    model_name: "meta-llama/llama-4-scout-17b-16e-instruct"
+    api_key: "${GROQ_API_KEY}"
+    max_tokens: 8192
+    compliance_level: "External"
+    supports_vision: true
+  mock-model:
+    model_url: "http://127.0.0.1:8002/v1"
+    model_name: "openai/mock-model"
+    api_key: "mock"
+    description: "Local mock LLM for testing"
+    compliance_level: "Internal"

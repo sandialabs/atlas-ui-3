@@ -79,7 +79,7 @@ A minimal endpoint that returns `{"status": "ok"}`. Use this for high-frequency 
 
 ### Health Check (`GET /api/health`)
 
-Returns a richer JSON response containing the service status, name, version, and current timestamp in ISO-8601 format. Use this for readiness probes or dashboards that need version and timestamp information.
+Returns a richer JSON response containing the service status, name, version, git commit hash, and current timestamp in ISO-8601 format. Use this for readiness probes or dashboards that need version and deployment information. The `git_commit` field is resolved from the `GIT_COMMIT` environment variable (set during Docker builds) or by running `git rev-parse --short HEAD` at startup.
 
 You can integrate either endpoint into your monitoring infrastructure (Kubernetes liveness/readiness probes, AWS ELB health checks, Prometheus monitoring). Neither endpoint checks database connectivity or external dependencies.
 

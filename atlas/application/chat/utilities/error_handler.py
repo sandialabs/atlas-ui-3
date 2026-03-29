@@ -9,6 +9,8 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from atlas.domain.errors import (
+    CONTEXT_WINDOW_KEYWORDS,
+    ContextWindowExceededError,
     LLMAuthenticationError,
     LLMServiceError,
     LLMTimeoutError,
@@ -80,24 +82,32 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
 
     # Check for rate limiting errors
     if "RateLimitError" in error_type_name or "rate limit" in error_str.lower() or "high traffic" in error_str.lower():
-        user_msg = "The AI service is experiencing high traffic. Please try again in a moment."
+        user_msg = "The LLM service is experiencing high traffic. Please try again in a moment."
         log_msg = f"Rate limit error: {error_str}"
         return (RateLimitError, user_msg, log_msg)
 
     # Check for timeout errors
     if "timeout" in error_str.lower() or "timed out" in error_str.lower():
-        user_msg = "The AI service request timed out. Please try again."
+        user_msg = "The LLM service request timed out. Please try again."
         log_msg = f"Timeout error: {error_str}"
         return (LLMTimeoutError, user_msg, log_msg)
 
     # Check for authentication/authorization errors
     if any(keyword in error_str.lower() for keyword in ["unauthorized", "authentication", "invalid api key", "invalid_api_key", "api key"]):
-        user_msg = "There was an authentication issue with the AI service. Please contact your administrator."
+        user_msg = "There was an authentication issue with the LLM service. Please contact your administrator."
         log_msg = f"Authentication error: {error_str}"
         return (LLMAuthenticationError, user_msg, log_msg)
 
+    # Check for context window exceeded errors
+    if isinstance(error, ContextWindowExceededError) or "ContextWindowExceeded" in error_type_name or any(
+        kw in error_str.lower() for kw in CONTEXT_WINDOW_KEYWORDS
+    ):
+        user_msg = "Your conversation is too long for this model's context window. Please start a new conversation or switch to a model with a larger context window."
+        log_msg = f"Context window exceeded: {error_str}"
+        return (ContextWindowExceededError, user_msg, log_msg)
+
     # Generic LLM service error (non-validation)
-    user_msg = "The AI service encountered an error. Please try again or contact support if the issue persists."
+    user_msg = "The LLM service encountered an error. Please try again or contact support if the issue persists."
     log_msg = f"LLM error: {error_str}"
     return (LLMServiceError, user_msg, log_msg)
 
@@ -317,8 +327,8 @@ def should_retry_operation(
     if retry_count >= max_retries:
         return False
 
-    # Don't retry validation errors
-    if isinstance(error, ValidationError):
+    # Don't retry validation or context window errors
+    if isinstance(error, (ValidationError, ContextWindowExceededError)):
         return False
 
     # Retry for other types of errors

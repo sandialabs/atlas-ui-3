@@ -129,7 +129,25 @@ If you cloned the repo and want to run tests, experiment locally, or test MCP se
 uv sync --dev
 ```
 
-This installs pytest, ruff, and other development tools into your virtual environment.
+This installs pytest, ruff, MCP demo server dependencies (matplotlib, pandas, etc.), and other development tools into your virtual environment.
+
+### Extract Pre-Built Frontend from PyPI Package
+
+On a machine without Node.js, you can extract the pre-built frontend assets from the published PyPI wheel instead of running `npm run build`.
+
+```bash
+# Create a throwaway venv and install the package into it
+uv venv ./tmp/atlas-extract --python 3.11
+uv pip install atlas-chat --target ./tmp/atlas-extract/site
+
+# Copy the static files into your cloned repo
+cp -r ./tmp/atlas-extract/site/atlas/static/ atlas/static/
+
+# Clean up
+rm -rf ./tmp/atlas-extract
+```
+
+The server checks `atlas/static/` first, then falls back to `frontend/dist/`. Once the files are in place, `bash agent_start.sh` will serve the frontend without needing Node.js.
 
 ### Running the Application
 
@@ -184,11 +202,26 @@ Pre-built container images are available at `quay.io/agarlan-snl/atlas-ui-3:late
 
 ## For AI Agent Contributors
 
-If you are an AI agent working on this repository, please refer to the following documents for the most current and concise guidance:
+If you are an AI agent working on this repository, please refer to **[AGENTS.md](./AGENTS.md)** for all project conventions, architecture, and development guidance.
 
-*   **[CLAUDE.md](./CLAUDE.md)**: Detailed architecture, workflows, and conventions.
-*   **[GEMINI.md](./GEMINI.md)**: Gemini-specific instructions.
-*   **[.github/copilot-instructions.md](./.github/copilot-instructions.md)**: A compact guide for getting productive quickly.
+## Citing Atlas-UI-3
+
+If you use Atlas-UI-3 in a publication, please cite:
+
+> Melander, Darryl, Garland, Anthony, Lancaster, Caitlin, & Bernauer, Michael. *Atlas-UI-3*. Sandia National Laboratories (SNL-NM), Albuquerque, NM, 2025. https://doi.org/10.11578/dc.20260211.11
+
+BibTeX:
+
+```bibtex
+@misc{atlas_ui_3,
+  author = {Melander, Darryl and Garland, Anthony and Lancaster, Caitlin and Bernauer, Michael},
+  title = {Atlas-UI-3},
+  year = {2025},
+  month = {10},
+  doi = {10.11578/dc.20260211.11},
+  url = {https://www.osti.gov/biblio/code-175384}
+}
+```
 
 ## License
 

@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional
 
 import requests
-from fastmcp import FastMCP
 from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -32,15 +31,14 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
-# Configuration
-VERBOSE = True
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 current_dir = Path(__file__).parent
 atlas_dir = current_dir.parent.parent
 project_root = atlas_dir.parent
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("pptx_generator")
+mcp = create_stdio_server("pptx_generator")
 
 # Sandia National Laboratories color scheme
 SANDIA_BLUE = RGBColor(0, 51, 102)  # Dark blue - primary brand color
@@ -281,8 +279,10 @@ def _sanitize_filename(filename: str, max_length: int = 50) -> str:
     return cleaned_filename[:max_length] if cleaned_filename else "presentation"
 
 def _is_backend_download_path(s: str) -> bool:
-    """Detect backend-relative download paths like /api/files/download/...."""
-    return isinstance(s, str) and s.startswith("/api/files/download/")
+    """Detect backend-relative download paths like /mcp/files/download/ or /api/files/download/."""
+    return isinstance(s, str) and (
+        s.startswith("/mcp/files/download/") or s.startswith("/api/files/download/")
+    )
 
 
 def _backend_base_url() -> str:
@@ -292,44 +292,49 @@ def _backend_base_url() -> str:
 
 def _load_image_bytes(filename: str, file_data_base64: str = "") -> Optional[bytes]:
     """Load image data from filename or base64 data."""
+    logger.info("Loading image: download_path=%s, base64=%s",
+                _is_backend_download_path(filename),
+                "yes" if file_data_base64 else "no")
+
     if file_data_base64:
         try:
-            return base64.b64decode(file_data_base64)
+            data = base64.b64decode(file_data_base64)
+            logger.info("Decoded base64 image: %d bytes", len(data))
+            return data
         except Exception as e:
-            if VERBOSE:
-                logger.info(f"Error decoding base64 image data: {e}")
+            logger.error("Error decoding base64 image data: %s", e)
             return None
 
     if _is_backend_download_path(filename):
-        # Backend provided a download path
         full_url = _backend_base_url() + filename
         try:
-            if VERBOSE:
-                logger.info(f"Fetching image from {full_url}")
+            logger.info("Fetching image from backend: %s", full_url)
             response = requests.get(full_url, timeout=30)
+            logger.info("Download response: status=%d, type=%s, size=%d bytes",
+                        response.status_code,
+                        response.headers.get("content-type", "unknown"),
+                        len(response.content))
             response.raise_for_status()
             return response.content
         except Exception as e:
-            if VERBOSE:
-                logger.info(f"Error fetching image from {full_url}: {e}")
+            logger.error("Failed to fetch image from %s: %s", full_url, e)
             return None
 
     # Try as local file path - with path traversal protection
     if _is_safe_local_path(filename) and os.path.isfile(filename):
         try:
             with open(filename, "rb") as f:
-                return f.read()
+                data = f.read()
+            logger.info("Read local image file: %d bytes", len(data))
+            return data
         except Exception as e:
-            if VERBOSE:
-                logger.info(f"Error reading local image file {filename}: {e}")
+            logger.error("Error reading local file %s: %s", filename, e)
             return None
     elif not _is_safe_local_path(filename):
-        if VERBOSE:
-            logger.warning(f"Blocked access to unsafe path: {filename}")
+        logger.warning("Blocked unsafe image path: %s", filename)
         return None
 
-    if VERBOSE:
-        logger.info(f"Image file not found: {filename}")
+    logger.warning("Could not load image from any source: %r", filename)
     return None
 
 
@@ -388,7 +393,7 @@ def _add_image_to_slide(slide_obj, image_bytes: bytes,
 def markdown_to_pptx(
     markdown_content: Annotated[str, "Markdown content with headers (# or ##) as slide titles and content below each header"],
     file_name: Annotated[Optional[str], "Output file name (base name for generated files without extension)"] = None,
-    image_filename: Annotated[Optional[str], "Optional image filename to integrate into the presentation"] = "",
+    filename: Annotated[Optional[str], "Optional image filename to integrate into the presentation"] = "",
     image_data_base64: Annotated[Optional[str], "Framework may supply Base64 image content as fallback"] = ""
 ) -> Dict[str, Any]:
     """
@@ -400,7 +405,7 @@ def markdown_to_pptx(
     Args:
         markdown_content: Markdown content where headers (# or ##) become slide titles and content below becomes slide content
         file_name: Output file name (base name for generated files without extension)
-        image_filename: Optional image filename to integrate into the presentation
+        filename: Optional image filename to integrate into the presentation
         image_data_base64: Framework may supply Base64 image content as fallback
 
     Returns:
@@ -408,19 +413,17 @@ def markdown_to_pptx(
         - 'results': Success message or error message
         - 'artifacts': List of artifact dictionaries with 'name', 'b64', and 'mime' keys
     """
-    if VERBOSE:
-        logger.info("Starting markdown_to_pptx execution...")
+    logger.info("Starting markdown_to_pptx execution...")
     try:
         # Handle None values and sanitize the output filename
-        image_filename = image_filename or ""
+        filename = filename or ""
         image_data_base64 = image_data_base64 or ""
         # Use file_name if provided, otherwise use default "presentation"
         output_filename = _sanitize_filename(file_name or "presentation")
 
         # Parse markdown into slides
         slides = _parse_markdown_slides(markdown_content)
-        if VERBOSE:
-            logger.info(f"Parsed {len(slides)} slides from markdown")
+        logger.info(f"Parsed {len(slides)} slides from markdown")
 
         if not slides:
             return {"results": {"error": "No slides could be parsed from markdown content"}}
@@ -429,14 +432,12 @@ def markdown_to_pptx(
 
         # Load image if provided
         image_bytes = None
-        if image_filename:
-            image_bytes = _load_image_bytes(image_filename, image_data_base64)
+        if filename:
+            image_bytes = _load_image_bytes(filename, image_data_base64)
             if image_bytes:
-                if VERBOSE:
-                    logger.info(f"Loaded image: {image_filename}")
+                logger.info("Image loaded: %d bytes", len(image_bytes))
             else:
-                if VERBOSE:
-                    logger.info(f"Failed to load image: {image_filename}")
+                logger.warning("Failed to load image from: %s", filename)
 
         # Create presentation: try template file first, then built-in layouts
         template_path = _find_template_path()
@@ -469,8 +470,7 @@ def markdown_to_pptx(
                 layout = prs.slide_layouts[6]  # Blank layout fallback
                 logger.info("Falling back to blank layout with manual textboxes")
 
-        if VERBOSE:
-            logger.info(
+        logger.info(
                 f"Created presentation (template={template_path is not None}, "
                 f"placeholders={use_placeholders})"
             )
@@ -541,27 +541,28 @@ def markdown_to_pptx(
 
                 _add_footer_bar(slide_obj, i + 1, total_slides)
 
-            if VERBOSE:
-                logger.info(f"Added slide {i+1}: {title}")
+            logger.info(f"Added slide {i+1}: {title}")
 
             # Add image to first slide if provided
             if i == 0 and image_bytes:
-                _add_image_to_slide(slide_obj, image_bytes,
+                pic = _add_image_to_slide(slide_obj, image_bytes,
                                    left=Inches(8), top=Inches(2),
                                    width=Inches(4.5), height=Inches(4))
+                if pic:
+                    logger.info("Image added to slide 1")
+                else:
+                    logger.warning("Failed to add image to slide 1")
 
         # Write outputs to a temporary directory and clean up after encoding
         with tempfile.TemporaryDirectory() as tmpdir:
             # Save presentation
             pptx_output_path = os.path.join(tmpdir, f"output_{output_filename}.pptx")
             prs.save(pptx_output_path)
-            if VERBOSE:
-                logger.info(f"Saved PowerPoint presentation to {pptx_output_path}")
+            logger.info(f"Saved PowerPoint presentation to {pptx_output_path}")
 
             # Create HTML file instead of PDF
             html_output_path = os.path.join(tmpdir, f"output_{output_filename}.html")
-            if VERBOSE:
-                logger.info(f"Starting HTML creation to {html_output_path}")
+            logger.info(f"Starting HTML creation to {html_output_path}")
 
             # Create HTML representation of the presentation with Sandia styling
             html_content = """<!DOCTYPE html>
@@ -665,8 +666,7 @@ def markdown_to_pptx(
                             img_b64 = base64.b64encode(image_bytes).decode('utf-8')
                             html_content += f'<img src="data:{mime_type};base64,{img_b64}" class="slide-image" />'
                     except Exception as e:
-                        if VERBOSE:
-                            logger.warning(f"Could not process image for HTML conversion: {e}")
+                        logger.warning(f"Could not process image for HTML conversion: {e}")
 
                 if content.strip():
                     lines = content.split('\n')
@@ -746,21 +746,17 @@ def markdown_to_pptx(
 
             # Save HTML file
             try:
-                if VERBOSE:
-                    logger.info("Saving HTML file...")
+                logger.info("Saving HTML file...")
                 with open(html_output_path, "w", encoding="utf-8") as f:
                     f.write(html_content)
-                if VERBOSE:
-                    logger.info(f"HTML successfully created at {html_output_path}")
+                logger.info(f"HTML successfully created at {html_output_path}")
             except Exception as e:
                 # If HTML save fails, continue with just PPTX
-                if VERBOSE:
-                    logger.warning(f"HTML creation failed: {str(e)}")
+                logger.warning(f"HTML creation failed: {str(e)}")
                 # Remove the HTML file if it exists
                 if os.path.exists(html_output_path):
                     os.remove(html_output_path)
-                if VERBOSE:
-                    logger.info("HTML file removed due to creation error")
+                logger.info("HTML file removed due to creation error")
 
             # Read PPTX file as bytes
             with open(pptx_output_path, "rb") as f:
@@ -768,8 +764,7 @@ def markdown_to_pptx(
 
             # Encode PPTX as base64
             pptx_b64 = base64.b64encode(pptx_bytes).decode('utf-8')
-            if VERBOSE:
-                logger.info("PPTX file successfully encoded to base64")
+            logger.info("PPTX file successfully encoded to base64")
 
             # Read HTML file as bytes if it exists
             html_b64 = None
@@ -777,8 +772,7 @@ def markdown_to_pptx(
                 with open(html_output_path, "r", encoding="utf-8") as f:
                     html_content_file = f.read()
                 html_b64 = base64.b64encode(html_content_file.encode('utf-8')).decode('utf-8')
-                if VERBOSE:
-                    logger.info("HTML file successfully encoded to base64")
+                logger.info("HTML file successfully encoded to base64")
 
             # Prepare artifacts
             artifacts = [
@@ -796,11 +790,9 @@ def markdown_to_pptx(
                     "b64": html_b64,
                     "mime": "text/html",
                 })
-                if VERBOSE:
-                    logger.info(f"Added {len(artifacts)} artifacts to response")
+                logger.info(f"Added {len(artifacts)} artifacts to response")
             else:
-                if VERBOSE:
-                    logger.info("No HTML artifact added due to creation failure")
+                logger.info("No HTML artifact added due to creation failure")
 
             return {
                 "results": {
@@ -828,4 +820,17 @@ def markdown_to_pptx(
 
 
 if __name__ == "__main__":
-    mcp.run(show_banner=False)
+    import argparse
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    parser = argparse.ArgumentParser(description="pptx_generator MCP server")
+    parser.add_argument("--transport", default="stdio", choices=["stdio", "sse", "streamable-http"])
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default="0.0.0.0")
+    args = parser.parse_args()
+    kwargs = {}
+    if args.transport != "stdio":
+        kwargs["host"] = args.host
+        kwargs["port"] = args.port
+    mcp.run(transport=args.transport, show_banner=False, **kwargs)

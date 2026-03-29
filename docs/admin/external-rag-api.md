@@ -1,6 +1,6 @@
 # RAG Configuration
 
-Last updated: 2026-02-23
+Last updated: 2026-03-18
 
 This guide explains how to configure RAG (Retrieval-Augmented Generation) in Atlas UI.
 
@@ -256,6 +256,15 @@ When a RAG source returns a completion, Atlas:
 The `is_completion` flag on `RAGResponse` tracks whether the response is already LLM-interpreted. This is set automatically by `AtlasRAGClient` when it detects `"object": "chat.completion"` in the API response.
 
 This behavior applies to both `call_with_rag` (RAG-only mode) and `call_with_rag_and_tools` (RAG + tools mode) in the LLM caller.
+
+## UI Behavior (2026-03-18)
+
+The frontend provides two controls for RAG:
+
+- **Header Sources button** (Database icon): Toggles the Data Sources sidebar open/closed. It turns blue when data sources are selected but does not change selection state on click.
+- **Chat input search-glass button**: Controls RAG activation. When green (RAG active or data sources selected), clicking clears all selected data sources and disables RAG. When gray (RAG inactive), clicking opens the Data Sources sidebar so the user can select sources.
+
+Users must explicitly select data sources from the sidebar to enable RAG; there is no "search all sources" toggle from the chat input.
 
 ## Troubleshooting
 

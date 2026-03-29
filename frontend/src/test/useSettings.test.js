@@ -40,8 +40,9 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'think-act',
-        autoApproveTools: false
+        agentLoopStrategy: 'agentic',
+        autoApproveTools: false,
+        debugMode: false
       })
       expect(result.current.isLoaded).toBe(true)
       expect(localStorageMock.getItem).toHaveBeenCalledWith('chatui-settings')
@@ -52,7 +53,8 @@ describe('useSettings', () => {
         llmTemperature: 0.5,
         maxIterations: 15,
         agentLoopStrategy: 'act-only',
-        autoApproveTools: true
+        autoApproveTools: true,
+        debugMode: false
       }
       localStorageMock.getItem.mockReturnValue(JSON.stringify(savedSettings))
 
@@ -74,8 +76,9 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.9,
         maxIterations: 20,
-        agentLoopStrategy: 'think-act', // default value
-        autoApproveTools: false // default value
+        agentLoopStrategy: 'agentic', // default value
+        autoApproveTools: false, // default value
+        debugMode: false // default value
       })
     })
 
@@ -87,8 +90,9 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'think-act',
-        autoApproveTools: false
+        agentLoopStrategy: 'agentic',
+        autoApproveTools: false,
+        debugMode: false
       })
       expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to parse saved settings:', expect.any(Error))
     })
@@ -114,16 +118,18 @@ describe('useSettings', () => {
         expect(updatedSettings).toEqual({
           llmTemperature: 0.8,
           maxIterations: 12,
-          agentLoopStrategy: 'think-act',
-          autoApproveTools: false
+          agentLoopStrategy: 'agentic',
+          autoApproveTools: false,
+          debugMode: false
         })
       })
 
       expect(result.current.settings).toEqual({
         llmTemperature: 0.8,
         maxIterations: 12,
-        agentLoopStrategy: 'think-act',
-        autoApproveTools: false
+        agentLoopStrategy: 'agentic',
+        autoApproveTools: false,
+        debugMode: false
       })
 
       expect(localStorageMock.setItem).toHaveBeenCalledWith(
@@ -131,8 +137,9 @@ describe('useSettings', () => {
         JSON.stringify({
           llmTemperature: 0.8,
           maxIterations: 12,
-          agentLoopStrategy: 'think-act',
-          autoApproveTools: false
+          agentLoopStrategy: 'agentic',
+          autoApproveTools: false,
+          debugMode: false
         })
       )
     })
@@ -153,8 +160,9 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.8,
         maxIterations: 15,
-        agentLoopStrategy: 'think-act',
-        autoApproveTools: false
+        agentLoopStrategy: 'agentic',
+        autoApproveTools: false,
+        debugMode: false
       })
     })
 
@@ -168,8 +176,9 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'think-act',
-        autoApproveTools: false
+        agentLoopStrategy: 'agentic',
+        autoApproveTools: false,
+        debugMode: false
       })
     })
 
@@ -205,16 +214,18 @@ describe('useSettings', () => {
         expect(resetSettings).toEqual({
           llmTemperature: 0.7,
           maxIterations: 10,
-          agentLoopStrategy: 'think-act',
-          autoApproveTools: false
+          agentLoopStrategy: 'agentic',
+          autoApproveTools: false,
+          debugMode: false
         })
       })
 
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'think-act',
-        autoApproveTools: false
+        agentLoopStrategy: 'agentic',
+        autoApproveTools: false,
+        debugMode: false
       })
 
       expect(localStorageMock.setItem).toHaveBeenLastCalledWith(
@@ -222,8 +233,9 @@ describe('useSettings', () => {
         JSON.stringify({
           llmTemperature: 0.7,
           maxIterations: 10,
-          agentLoopStrategy: 'think-act',
-          autoApproveTools: false
+          agentLoopStrategy: 'agentic',
+          autoApproveTools: false,
+          debugMode: false
         })
       )
     })
@@ -235,7 +247,7 @@ describe('useSettings', () => {
 
       expect(result.current.getSetting('llmTemperature')).toBe(0.7)
       expect(result.current.getSetting('maxIterations')).toBe(10)
-      expect(result.current.getSetting('agentLoopStrategy')).toBe('think-act')
+      expect(result.current.getSetting('agentLoopStrategy')).toBe('agentic')
       expect(result.current.getSetting('autoApproveTools')).toBe(false)
     })
 
@@ -278,8 +290,9 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'think-act',
-        autoApproveTools: false
+        agentLoopStrategy: 'agentic',
+        autoApproveTools: false,
+        debugMode: false
       })
     })
 
@@ -302,8 +315,9 @@ describe('useSettings', () => {
       const complexSettings = {
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'think-act',
+        agentLoopStrategy: 'agentic',
         autoApproveTools: false,
+        debugMode: false,
         customConfig: {
           nested: {
             value: 'test'
@@ -341,8 +355,9 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.8,
         maxIterations: 15,
-        agentLoopStrategy: 'think-act',
-        autoApproveTools: true
+        agentLoopStrategy: 'agentic',
+        autoApproveTools: true,
+        debugMode: false
       })
 
       // Reset
@@ -353,8 +368,9 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'think-act',
-        autoApproveTools: false
+        agentLoopStrategy: 'agentic',
+        autoApproveTools: false,
+        debugMode: false
       })
     })
 

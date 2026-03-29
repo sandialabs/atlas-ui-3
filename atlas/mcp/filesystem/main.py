@@ -7,10 +7,10 @@ Provides file system read/write operations through MCP protocol.
 from pathlib import Path
 from typing import Any, Dict
 
-from fastmcp import FastMCP
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("Filesystem")
+mcp = create_stdio_server("Filesystem")
 
 # Base path for file operations (security constraint)
 BASE_PATH = Path(".").resolve()

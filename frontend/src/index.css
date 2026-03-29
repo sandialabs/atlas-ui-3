@@ -86,6 +86,15 @@
     scrollbar-color: #4b5563 #1f2937;
   }
 
+  /* Hidden scrollbar - still scrollable but no visible scrollbar */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
   /* Table borders override - must be in components layer */
   .prose table,
   .prose-invert table,
@@ -353,5 +362,99 @@
 
   .hljs-subst {
     @apply text-gray-200;
+  }
+}
+
+/* Print styles for chat export (#150) */
+@media print {
+  /* Hide non-content UI elements */
+  header,
+  footer,
+  nav,
+  .sidebar,
+  #mobile-menu,
+  [class*="ToolsPanel"],
+  [class*="SettingsPanel"],
+  [class*="Sidebar"],
+  [class*="sidebar"],
+  [class*="EnabledToolsIndicator"],
+  [class*="PromptSelector"],
+  [class*="WelcomeScreen"],
+  [class*="BannerPanel"],
+  [class*="SplashScreen"],
+  [class*="from-yellow-500"],
+  button:not(.no-print-hide),
+  input,
+  textarea,
+  .fixed,
+  .modal-backdrop {
+    display: none !important;
+  }
+
+  /* Reset dark theme for print */
+  body {
+    background: white !important;
+    color: black !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Make chat area fill the page */
+  .print-chat-area,
+  [class*="ChatArea"],
+  main {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  /* Style messages for print */
+  [class*="rounded-lg"][class*="bg-gray-800"],
+  [class*="rounded-lg"][class*="bg-blue-600"] {
+    background: white !important;
+    border: 1px solid #ccc !important;
+    color: black !important;
+    page-break-inside: avoid;
+    margin-bottom: 0.5rem;
+  }
+
+  /* Make all text black for print */
+  * {
+    color: black !important;
+    text-shadow: none !important;
+  }
+
+  /* Code blocks should have light background */
+  pre, code {
+    background: #f5f5f5 !important;
+    border: 1px solid #ddd !important;
+    color: black !important;
+  }
+
+  /* Scrollable areas should show all content */
+  [class*="overflow-y-auto"],
+  [class*="overflow-hidden"],
+  [class*="custom-scrollbar"] {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  /* Show print-only elements */
+  .print\:block {
+    display: block !important;
+  }
+
+  /* Page setup */
+  @page {
+    margin: 1.5cm;
+    size: A4;
   }
 }

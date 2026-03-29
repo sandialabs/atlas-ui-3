@@ -8,11 +8,11 @@ import { useMessages } from '../hooks/chat/useMessages'
 import { useFiles } from '../hooks/chat/useFiles'
 import { useSettings } from '../hooks/useSettings'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
-import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
+import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 
-// Save mode constants: 'none' (incognito), 'local' (browser), 'server' (backend DB)
-const SAVE_MODES = ['none', 'local', 'server']
+// Safety timeout for stuck thinking state (no backend response)
+const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
 // Generate cryptographically secure random string
 const generateSecureRandomString = (length = 9) => {
@@ -40,6 +40,8 @@ export const ChatProvider = ({ children }) => {
 	const { messages, addMessage, bulkAdd, mapMessages, resetMessages, streamToken, streamEnd } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
+	const isStreaming = messages.some(m => m._streaming === true)
+
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
 	const [isThinking, setIsThinking] = useState(false)
 	const [isSynthesizing, setIsSynthesizing] = useState(false)
@@ -47,6 +49,7 @@ export const ChatProvider = ({ children }) => {
 	const [attachments, setAttachments] = useState(new Set())
 	const [, setPendingFileEvents] = useState(new Map())
 	const [pendingElicitation, setPendingElicitation] = useState(null)
+	const [followUpSuggestions, setFollowUpSuggestions] = useState([])
 
 	// Chat history: 3-state save mode persists across refreshes via localStorage
 	// 'none' = incognito (nothing saved), 'local' = browser IndexedDB, 'server' = backend DB
@@ -125,6 +128,79 @@ export const ChatProvider = ({ children }) => {
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd])
+
+	// Safety timeout: if isThinking stays true for too long without any response
+	// from the backend, reset it and show an error so the user is not stuck forever.
+	const thinkingTimeoutRef = useRef(null)
+
+	useEffect(() => {
+		if (isThinking) {
+			thinkingTimeoutRef.current = setTimeout(() => {
+				setIsThinking(false)
+				setIsSynthesizing(false)
+				agent.setCurrentAgentStep(0)
+				addMessage({
+					role: 'system',
+					content: 'Error: The request timed out without a response from the server. Please try again or select a different model.',
+					timestamp: new Date().toISOString()
+				})
+			}, THINKING_TIMEOUT_MS)
+		} else {
+			if (thinkingTimeoutRef.current) {
+				clearTimeout(thinkingTimeoutRef.current)
+				thinkingTimeoutRef.current = null
+			}
+		}
+		return () => {
+			if (thinkingTimeoutRef.current) {
+				clearTimeout(thinkingTimeoutRef.current)
+				thinkingTimeoutRef.current = null
+			}
+		}
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isThinking])
+
+	// Fetch follow-up suggestions after a response completes
+	const prevIsThinkingRef = useRef(false)
+	const prevIsStreamingRef = useRef(false)
+
+	useEffect(() => {
+		const wasThinking = prevIsThinkingRef.current
+		const wasStreaming = prevIsStreamingRef.current
+
+		// Detect when the response has fully completed:
+		// - streaming mode: streaming transitions from true to false
+		// - non-streaming mode: thinking transitions from true to false (with no streaming)
+		const responseCompleted =
+			(wasStreaming && !isStreaming && !isThinking) ||
+			(wasThinking && !isThinking && !isStreaming && !wasStreaming)
+
+		if (responseCompleted && config.features?.followup_suggestions) {
+			const convMessages = messages
+				.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content)
+				.map(m => ({ role: m.role, content: m.content }))
+
+			const lastAssistant = convMessages.findLast(m => m.role === 'assistant')
+			if (lastAssistant && config.currentModel) {
+				fetch('/api/suggest_followups', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ messages: convMessages, model: config.currentModel }),
+				})
+					.then(r => (r.ok ? r.json() : null))
+					.then(data => {
+						if (data?.questions?.length > 0) {
+							setFollowUpSuggestions(data.questions)
+						}
+					})
+					.catch(e => console.debug('Follow-up suggestions unavailable:', e))
+			}
+		}
+
+		prevIsThinkingRef.current = isThinking
+		prevIsStreamingRef.current = isStreaming
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isThinking, isStreaming])
 
 	// Validate persisted data sources against current config and remove stale ones
 	useEffect(() => {
@@ -233,17 +309,19 @@ export const ChatProvider = ({ children }) => {
 	const sendChatMessage = useCallback((content, extraFiles = {}, forceRag = false) => {
 		if (!content.trim() || !currentModel) return
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
+		setFollowUpSuggestions([])
 		addMessage({ role: 'user', content, timestamp: new Date().toISOString() })
 		setIsThinking(true)
 		setIsSynthesizing(false)
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
-		// RAG is only invoked when explicitly activated via the search button (ragEnabled)
-		// or the /search command (forceRag). Data source selection alone just marks
-		// availability -- it does not trigger RAG.
-		const ragActivated = forceRag || ragEnabled
+		// RAG is activated when any of these are true:
+		//   1. The RAG toggle is on (ragEnabled)
+		//   2. The /search command was used (forceRag)
+		//   3. One or more data sources are selected (hasSelectedSources)
 		const hasSelectedSources = selectedDataSources.size > 0
+		const ragActivated = forceRag || ragEnabled || hasSelectedSources
 		const dataSourcesToSend = ragActivated
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []
@@ -261,7 +339,7 @@ export const ChatProvider = ({ children }) => {
 			agent_mode: agent.agentModeEnabled,
 			agent_max_steps: settings.maxIterations || agent.agentMaxSteps,
 			temperature: settings.llmTemperature || 0.7,
-			agent_loop_strategy: undefined,
+			agent_loop_strategy: settings.agentLoopStrategy || undefined,
 			compliance_level_filter: selections.complianceLevelFilter,
 			save_mode: saveMode,
 			// Backward compat: backend still checks incognito for older clients
@@ -274,6 +352,7 @@ export const ChatProvider = ({ children }) => {
 		resetMessages()
 		setIsWelcomeVisible(true)
 		setActiveConversationId(null)
+		setFollowUpSuggestions([])
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
@@ -333,6 +412,14 @@ export const ChatProvider = ({ children }) => {
 		const stopAgent = useCallback(() => {
 			if (sendMessage) sendMessage({ type: 'agent_control', action: 'stop' })
 		}, [sendMessage])
+
+		// Stop non-agent streaming
+		const stopStreaming = useCallback(() => {
+			cleanupStreamState()
+			streamEnd()
+			setIsThinking(false)
+			if (sendMessage) sendMessage({ type: 'stop_streaming' })
+		}, [sendMessage, streamEnd])
 
 			const answerAgentQuestion = useCallback((content) => {
 			if (!content || !content.trim()) return
@@ -570,6 +657,8 @@ export const ChatProvider = ({ children }) => {
 		sendChatMessage,
 		clearChat,
 		stopAgent,
+		stopStreaming,
+		isStreaming,
 		answerAgentQuestion,
 		downloadChat,
 		downloadChatAsText,
@@ -601,10 +690,13 @@ export const ChatProvider = ({ children }) => {
 		pendingElicitation,
 		setPendingElicitation,
 		refreshConfig: config.refreshConfig,
+		configReady: config.configReady,
 		saveMode,
 		setSaveMode,
 		activeConversationId,
 		loadSavedConversation,
+		followUpSuggestions,
+		setFollowUpSuggestions,
 	}
 
 	return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

@@ -27,9 +27,10 @@ import numpy as np
 import pandas as pd
 import requests
 import seaborn as sns
-from fastmcp import FastMCP
 
-mcp = FastMCP("CSV_Reporter")
+from atlas.mcp_shared.server_factory import create_stdio_server
+
+mcp = create_stdio_server("CSV_Reporter")
 
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -43,8 +44,10 @@ def _is_http_url(s: str) -> bool:
 
 
 def _is_backend_download_path(s: str) -> bool:
-    """Detect backend-relative download paths like /api/files/download/...."""
-    return isinstance(s, str) and s.startswith("/api/files/download/")
+    """Detect backend-relative download paths like /mcp/files/download/ or /api/files/download/."""
+    return isinstance(s, str) and (
+        s.startswith("/mcp/files/download/") or s.startswith("/api/files/download/")
+    )
 
 
 def _backend_base_url() -> str:

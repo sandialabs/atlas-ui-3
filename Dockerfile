@@ -47,6 +47,14 @@ ENV VITE_APP_NAME=${VITE_APP_NAME}
 # Set default whether to display powered by atlas logo on welcome screen (can be overridden via build arg)
 ARG VITE_FEATURE_POWERED_BY_ATLAS="false"
 ENV VITE_FEATURE_POWERED_BY_ATLAS=${VITE_FEATURE_POWERED_BY_ATLAS}
+# Enable animated logo on welcome screen (can be overridden via build arg)
+ARG VITE_FEATURE_ANIMATED_LOGO="true"
+ENV VITE_FEATURE_ANIMATED_LOGO=${VITE_FEATURE_ANIMATED_LOGO}
+# Git hash and version injected at build time for console/health display
+ARG GIT_HASH="unknown"
+ARG APP_VERSION="unknown"
+ENV GIT_HASH=${GIT_HASH}
+ENV APP_VERSION=${APP_VERSION}
 # build and delete the node_modules
 RUN  npm run build && rm -rf node_modules
 
@@ -89,7 +97,8 @@ ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Install dependencies from pyproject.toml (cached unless pyproject.toml changes)
-RUN /home/appuser/.local/bin/uv pip install .
+# Include mcp-demos extra so bundled MCP demo servers work out of the box
+RUN /home/appuser/.local/bin/uv pip install ".[mcp-demos]"
 
 # Copy actual source code (invalidates cache only from here down)
 COPY --chown=appuser:appuser atlas/ ./atlas/
@@ -110,7 +119,8 @@ EXPOSE 8000
 ENV NODE_ENV=production \
     APP_CONFIG_DIR=/app/config \
     RUNTIME_LOG_DIR=/app/runtime/logs \
-    RUNTIME_FEEDBACK_DIR=/app/runtime/feedback
+    RUNTIME_FEEDBACK_DIR=/app/runtime/feedback \
+    GIT_COMMIT=${GIT_HASH}
 
 # Start the application using the atlas-server CLI or direct Python
 WORKDIR /app/atlas

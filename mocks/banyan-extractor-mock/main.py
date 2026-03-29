@@ -146,16 +146,7 @@ def extract_pdf_with_pypdf(pdf_bytes: bytes) -> tuple[str, dict]:
     Returns:
         Tuple of (extracted_text, metadata_dict)
     """
-    try:
-        from pypdf import PdfReader
-    except ImportError:
-        try:
-            from PyPDF2 import PdfReader
-        except ImportError:
-            raise ImportError(
-                "PDF extraction requires 'banyan-ingest' or 'pypdf'. "
-                "Install with: pip install pypdf"
-            )
+    from pypdf import PdfReader
 
     pdf_file = io.BytesIO(pdf_bytes)
     reader = PdfReader(pdf_file)

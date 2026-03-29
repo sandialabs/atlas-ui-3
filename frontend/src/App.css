@@ -1495,3 +1495,26 @@ table th, table td,
         transform: translateY(100%);
     }
 }
+
+/* Animated Logo */
+.animated-logo-container {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    max-height: 100%;
+    user-select: none;
+    cursor: default;
+}
+
+.animated-logo-glow {
+    position: absolute;
+    inset: 0;
+    border-radius: 1rem;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 15% 50%, rgba(0, 188, 212, 0.4) 0%, transparent 60%);
+    filter: blur(25px);
+    transform: scale(1.3);
+    transition: opacity 0.5s ease;
+}
+
+

@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
 
-const ChatArea = () => {
+const ChatArea = ({ onOpenRagPanel }) => {
   const [inputValue, setInputValue] = useState('')
   const [isMobile, setIsMobile] = useState(false)
   // uploadedFiles: { filename: { content: base64, extractMode: "full"|"preview"|"none" } }
@@ -35,6 +35,7 @@ const ChatArea = () => {
     isSynthesizing,
     sendChatMessage,
     currentModel,
+    models,
     tools,
     selectedTools,
     toggleTool,
@@ -44,14 +45,26 @@ const ChatArea = () => {
     agentPendingQuestion,
     setAgentPendingQuestion,
     stopAgent,
+    stopStreaming,
+    isStreaming,
     answerAgentQuestion,
     fileExtraction,
     ragEnabled,
     toggleRagEnabled,
+    selectedDataSources,
+    clearDataSources,
     features,
-    appName
+    appName,
+    user,
+    followUpSuggestions,
+    setFollowUpSuggestions,
   } = useChat()
   const { isConnected } = useWS()
+
+  // Whether the currently selected model supports vision (image) input
+  const currentModelSupportsVision = models?.some(
+    m => m.name === currentModel && m.supports_vision === true
+  ) ?? false
 
   // Auto-resize textarea
   const autoResizeTextarea = () => {
@@ -98,25 +111,36 @@ const ChatArea = () => {
     return () => el.removeEventListener('scroll', handleScroll)
   }, [])
 
-  // Function to perform smooth scroll to bottom respecting user scroll state
-  const scrollToBottom = useCallback((force = false) => {
+  // Function to perform scroll to bottom respecting user scroll state.
+  // Use smooth=false during streaming to avoid animation fighting user scroll.
+  const scrollToBottom = useCallback((force = false, smooth = true) => {
     const el = messagesRef.current
     if (!el) return
     if (userScrolledRef.current && !force) return
     if (endRef.current && typeof endRef.current.scrollIntoView === 'function') {
-      endRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      endRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', block: 'end' })
     } else {
       el.scrollTop = el.scrollHeight
     }
   }, [])
 
   // Scroll when messages list changes (initial render or new message)
+  // Only force-scroll when a genuinely new message appears (count increases).
+  // During streaming token updates (same message, content growing), respect
+  // the user's scroll position so they can read earlier output (#441).
   useEffect(() => {
     const newCount = messages.length
     const lastMsg = messages[messages.length - 1]
     const isNewMessage = newCount !== prevMessageCountRef.current
+    const isStreamingUpdate = lastMsg && lastMsg._streaming && !isNewMessage
     const force = isNewMessage && lastMsg && (lastMsg.role !== 'user')
     prevMessageCountRef.current = newCount
+    // During streaming token updates, only scroll if user hasn't scrolled away.
+    // Use instant scroll (no smooth animation) so users can break out easily.
+    if (isStreamingUpdate) {
+      requestAnimationFrame(() => scrollToBottom(false, false))
+      return
+    }
     requestAnimationFrame(() => {
       scrollToBottom(force)
       setTimeout(() => scrollToBottom(force), 80)
@@ -124,18 +148,18 @@ const ChatArea = () => {
     })
   }, [messages, isThinking, isSynthesizing, scrollToBottom])
 
-  // Observe DOM mutations inside messages container (handles content expansion post-render)
+  // Observe DOM mutations inside messages container (handles content expansion post-render).
+  // Never force-scroll from mutations — if the user scrolled away to read, respect that.
+  // Only the message-change effect above should force-scroll (on genuinely new messages).
   useEffect(() => {
     const el = messagesRef.current
     if (!el) return
     const observer = new MutationObserver(() => {
-      const lastMsg = messages[messages.length - 1]
-      const force = lastMsg && lastMsg.role !== 'user'
-      scrollToBottom(force)
+      scrollToBottom(false)
     })
     observer.observe(el, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [scrollToBottom, messages])
+  }, [scrollToBottom])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -280,7 +304,9 @@ const ChatArea = () => {
     const value = e.target.value
     setInputValue(value)
     autoResizeTextarea()
-    
+    if (value && followUpSuggestions.length > 0) {
+      setFollowUpSuggestions([])
+    }
     // Handle autocomplete for different command types
     handleAutoComplete(value)
   }
@@ -537,7 +563,21 @@ const ChatArea = () => {
     return 'No Extract'
   }
 
-  const sanitizeFilename = (name) => name.replace(/\s+/g, '_')
+  const sanitizeFilename = (name) => name.replace(/[^\w.-]+/g, '_')
+
+  // Raster formats only — SVG is vector XML, not useful for LLM vision.
+  const IMAGE_MIME_TYPES = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp'
+  }
+
+  const isImageFile = (filename) =>
+    /\.(jpe?g|png|gif|webp|bmp)$/i.test(filename)
+
+  const getImageMimeType = (filename) => {
+    const ext = filename.split('.').pop()?.toLowerCase()
+    return IMAGE_MIME_TYPES[ext] || 'image/png'
+  }
 
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files)
@@ -588,6 +628,47 @@ const ChatArea = () => {
 
   const triggerFileUpload = () => {
     fileInputRef.current?.click()
+  }
+
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const pastedFiles = Array.from(items).filter(item => item.kind === 'file')
+    if (pastedFiles.length === 0) return
+    e.preventDefault()
+    pastedFiles.forEach((item, idx) => {
+      const file = item.getAsFile()
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const base64Data = event.target.result.split(',')[1]
+        // Browsers often assign generic names (e.g. "image.png") to pasted screenshots;
+        // detect those and replace with a unique timestamped name.
+        const isGenericName = !file.name || /^image\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name)
+        const ext = file.type.includes('/') ? file.type.split('/')[1].split('+')[0] : 'bin'
+        const rawName = isGenericName
+          ? `pasted_image_${Date.now()}_${idx}.${ext}`
+          : file.name
+        const safeName = sanitizeFilename(rawName)
+        const extractMode = canExtractFile(safeName) ? globalExtractMode : 'none'
+        setUploadedFiles(prev => ({
+          ...prev,
+          [safeName]: {
+            content: base64Data,
+            extractMode
+          }
+        }))
+      }
+      reader.onerror = () => {
+        console.error('Failed to read pasted file', {
+          name: file.name,
+          type: file.type,
+          index: idx,
+          error: reader.error
+        })
+      }
+      reader.readAsDataURL(file)
+    })
   }
 
   const handleDragEnter = (e) => {
@@ -689,9 +770,23 @@ const ChatArea = () => {
       )}
 
       {/* Messages */}
+      {/* Print-only metadata header */}
+      <div className="hidden print:block p-4 mb-4 border-b-2 border-gray-300">
+        <h1 className="text-xl font-bold mb-2">Chat Export - {appName}</h1>
+        <div className="text-sm space-y-1">
+          <div>Date: {new Date().toLocaleString()}</div>
+          <div>User: {user}</div>
+          <div>Model: {currentModel}</div>
+          <div>Selected Tools: {[...selectedTools].join(', ') || 'None'}</div>
+          {ragEnabled && <div>RAG Sources: {[...selectedDataSources].join(', ') || 'None selected'}</div>}
+          {agentModeEnabled && <div>Agent Mode: Enabled</div>}
+          <div>Messages: {messages.length}</div>
+        </div>
+      </div>
+
       <main
         ref={messagesRef}
-        className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0"
+        className={`overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
         {messages.map((message, index) => (
           <Message
@@ -757,6 +852,26 @@ const ChatArea = () => {
         <div ref={endRef} />
       </main>
 
+      {/* Follow-up suggestion buttons */}
+      {followUpSuggestions.length > 0 && !isThinking && !isStreaming && (
+        <div className="px-4 py-1 flex-shrink-0">
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide ml-11">
+            {followUpSuggestions.map((question, idx) => (
+              <button
+                key={`${idx}-${question.substring(0, 20)}`}
+                onClick={() => {
+                  setFollowUpSuggestions([])
+                  sendChatMessage(question)
+                }}
+                className="text-sm px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-600 hover:border-gray-500 rounded-full transition-colors whitespace-nowrap flex-shrink-0"
+              >
+                {question}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Input Area */}
   <footer 
         className="p-4 border-t border-gray-700 flex-shrink-0"
@@ -791,6 +906,40 @@ const ChatArea = () => {
               </div>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(uploadedFiles).map(([filename, fileData]) => {
+                  const isImage = isImageFile(filename)
+                  const showAsVisionImage = isImage && currentModelSupportsVision
+
+                  // Vision image: show thumbnail card
+                  if (showAsVisionImage) {
+                    const mimeType = getImageMimeType(filename)
+                    const dataUrl = `data:${mimeType};base64,${fileData.content}`
+                    return (
+                      <div
+                        key={filename}
+                        className="relative flex flex-col items-center bg-gray-800 border border-indigo-500/50 rounded-lg p-1 gap-1"
+                        style={{ maxWidth: '80px' }}
+                      >
+                        <img
+                          src={dataUrl}
+                          alt={filename}
+                          className="w-16 h-16 object-cover rounded"
+                          title={filename}
+                        />
+                        <div className="flex items-center gap-1 w-full justify-between px-1">
+                          <Image className="w-3 h-3 text-indigo-400 flex-shrink-0" title="Sent as image to vision model" />
+                          <span className="text-gray-300 text-xs truncate" title={filename} style={{ maxWidth: '44px' }}>{filename}</span>
+                          <button
+                            onClick={() => removeFile(filename)}
+                            className="text-gray-400 hover:text-red-400 transition-colors flex-shrink-0"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  // Non-image file (or image with non-vision model): show pill chip
                   const supportsExtraction = canExtractFile(filename)
                   const mode = fileData.extractMode || 'none'
                   const borderColors = {
@@ -849,13 +998,22 @@ const ChatArea = () => {
               {features?.rag && (
                 <button
                   type="button"
-                  onClick={toggleRagEnabled}
+                  onClick={() => {
+                    if (ragEnabled || selectedDataSources?.size > 0) {
+                      // Turn off RAG: clear data sources and disable
+                      clearDataSources()
+                      if (ragEnabled) toggleRagEnabled()
+                    } else {
+                      // Turn on RAG: open the panel so user can select data sources
+                      onOpenRagPanel?.()
+                    }
+                  }}
                   className={`px-3 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
-                    ragEnabled || hasSearchCommand
+                    ragEnabled || hasSearchCommand || selectedDataSources?.size > 0
                       ? 'bg-green-600 hover:bg-green-700 text-white'
                       : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                   }`}
-                  title={ragEnabled ? 'RAG enabled - click to disable' : hasSearchCommand ? 'RAG active for this search' : 'RAG disabled - click to enable'}
+                  title={ragEnabled || selectedDataSources?.size > 0 ? 'Click to disable RAG and clear data sources' : 'Click to select data sources'}
                 >
                   <Search className="w-5 h-5" />
                 </button>
@@ -876,6 +1034,7 @@ const ChatArea = () => {
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 placeholder={isMobile ? "Type a message..." : "Type a message... (/ or @ for help)"}
                 rows={1}
                 className={`w-full px-4 py-3 bg-gray-800 rounded-lg text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:border-transparent ${
@@ -946,17 +1105,28 @@ const ChatArea = () => {
                 </div>
               )}
             </div>
-            <button
-              type="submit"
-              disabled={!canSend}
-              className={`px-4 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
-                canSend 
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white' 
-                  : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              <Send className="w-5 h-5" />
-            </button>
+            {(isThinking || isStreaming) && !agentModeEnabled ? (
+              <button
+                type="button"
+                onClick={stopStreaming}
+                className="px-4 py-3 bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                title="Stop streaming"
+              >
+                <Square className="w-5 h-5" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!canSend}
+                className={`px-4 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
+                  canSend
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            )}
           </div>
           </form>
           

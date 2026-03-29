@@ -7,6 +7,7 @@ This module provides a client interface to interact with S3-compatible storage
 
 import base64
 import logging
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -70,12 +71,31 @@ class S3StorageClient:
         )
 
         logger.info(f"S3Client initialized with endpoint: {self.endpoint_url}, bucket: {self.bucket_name}")
+        self._ensure_bucket()
+
+    def _ensure_bucket(self):
+        """Create the S3 bucket if it does not already exist."""
+        try:
+            self.s3_client.head_bucket(Bucket=self.bucket_name)
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code in ('404', 'NoSuchBucket'):
+                logger.info(f"Bucket '{self.bucket_name}' not found, creating it")
+                try:
+                    self.s3_client.create_bucket(Bucket=self.bucket_name)
+                    logger.info(f"Bucket '{self.bucket_name}' created successfully")
+                except ClientError as create_err:
+                    logger.warning(f"Failed to create bucket '{self.bucket_name}': {create_err}")
+            else:
+                logger.warning(f"Could not check bucket '{self.bucket_name}': {e}")
+        except Exception as e:
+            logger.warning(f"Could not reach S3 endpoint to check bucket '{self.bucket_name}': {e}")
 
     def _generate_s3_key(self, user_email: str, filename: str, source_type: str = "user") -> str:
         """Generate an S3-style key with user isolation."""
         timestamp = int(time.time())
         unique_id = str(uuid.uuid4())[:8]
-        safe_filename = filename.replace(" ", "_").replace("/", "_")
+        safe_filename = re.sub(r"[^\w.\-]+", "_", filename)
 
         if source_type == "tool":
             # Tool-generated files go in a special directory

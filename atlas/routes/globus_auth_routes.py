@@ -99,10 +99,16 @@ async def globus_callback(
     tokens from 'other_tokens', stores them in MCPTokenStorage, and
     redirects back to the app.
     """
-    # Handle OAuth errors
+    # Handle OAuth errors - use allowlisted codes to prevent log injection / open redirect
     if error:
-        logger.warning("Globus OAuth error: %s - %s", error, error_description)
-        return RedirectResponse(f"/?globus_error={error}", status_code=302)
+        known_errors = {
+            "access_denied", "invalid_request", "unauthorized_client",
+            "unsupported_response_type", "invalid_scope", "server_error",
+            "temporarily_unavailable", "consent_required", "login_required",
+        }
+        error_code = error if error in known_errors else "unknown_error"
+        logger.warning("Globus OAuth error: %s", error_code)
+        return RedirectResponse(f"/?globus_error={error_code}", status_code=302)
 
     if not code or not state:
         logger.warning("Globus callback missing code or state")

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Download, Save, X, Check, ThumbsUp, ThumbsDown, Minus } from 'lucide-react'
+import { Download, Save, Check, ThumbsUp, ThumbsDown, Minus } from 'lucide-react'
+import 'highlight.js/styles/github-dark.css'
+import MCPDetailsView from './admin/MCPDetailsView'
 
 const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
   const [content, setContent] = useState(data.content?.value || '')
@@ -393,6 +395,9 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
         )
       }
 
+      case 'mcp-details':
+        return <MCPDetailsView content={data.content} />
+
       default:
         return <p>Unknown content type</p>
     }
@@ -403,9 +408,11 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
       data.content?.type === 'logs' ? 'p-0' : 'p-4'
     }`}>
       <div className={`bg-gray-800 rounded-lg w-full overflow-y-auto my-8 ${
-        data.content?.type === 'logs' 
-          ? 'max-w-none max-h-none h-full m-0 rounded-none' 
-          : 'max-w-4xl max-h-[90vh]'
+        data.content?.type === 'logs'
+          ? 'max-w-none max-h-none h-full m-0 rounded-none'
+          : data.contentCategory === 'mcp-config'
+            ? 'max-w-[95vw] max-h-[95vh]'
+            : 'max-w-4xl max-h-[90vh]'
       }`}>
         <div className="p-6">
           <h2 className="text-xl font-bold mb-4">{data.title}</h2>

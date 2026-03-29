@@ -15,7 +15,6 @@ from typing import Annotated, Any, Dict, Optional
 import requests
 from execution_engine import execute_code_safely
 from execution_environment import CodeExecutionError, create_execution_environment, save_file_to_execution_dir
-from fastmcp import FastMCP
 from result_processing import (
     create_visualization_html,
     detect_matplotlib_plots,
@@ -27,6 +26,8 @@ from script_generation import create_safe_execution_script
 
 # Import from modular components
 from security_checker import check_code_security
+
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Debug logging control
 VERBOSE = False
@@ -57,8 +58,10 @@ def _is_http_url(s: str) -> bool:
     return s.startswith("http://") or s.startswith("https://")
 
 def _is_backend_download_path(s: str) -> bool:
-    """Detect backend-relative download paths like /api/files/download/...."""
-    return isinstance(s, str) and s.startswith("/api/files/download/")
+    """Detect backend-relative download paths like /mcp/files/download/ or /api/files/download/."""
+    return isinstance(s, str) and (
+        s.startswith("/mcp/files/download/") or s.startswith("/api/files/download/")
+    )
 
 def _backend_base_url() -> str:
     """Resolve backend base URL from environment variable.
@@ -78,7 +81,7 @@ def _extract_clean_filename(filename: str) -> str:
     # First, remove query parameters (everything after ?)
     clean_path = filename.split('?')[0]
 
-    if clean_path.startswith('/api/files/download/'):
+    if clean_path.startswith('/mcp/files/download/') or clean_path.startswith('/api/files/download/'):
         url_basename = os.path.basename(clean_path)
         # Try to extract original filename from pattern: timestamp_hash_originalname.ext
         match = re.match(r'^\d+_[a-f0-9]+_(.+)$', url_basename)
@@ -124,7 +127,7 @@ def _load_file_bytes(filename: str, file_data_base64: str = "") -> bytes:
     raise FileNotFoundError("No filename or file data provided")
 
 # Initialize the MCP server
-mcp = FastMCP("SecureCodeExecutor")
+mcp = create_stdio_server("SecureCodeExecutor")
 
 
 # Security checking functionality moved to security_checker.py

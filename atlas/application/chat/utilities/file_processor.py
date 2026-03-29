@@ -8,9 +8,26 @@ chat sessions, including user uploads and tool-generated artifacts.
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.core.capabilities import create_download_url
 from atlas.modules.file_storage.content_extractor import get_content_extractor
 
 logger = logging.getLogger(__name__)
+
+# Raster MIME types eligible for vision model input.
+# SVG is excluded — it's vector XML, not useful for LLM vision, and could
+# contain embedded scripts (though <img> tags neutralize them).
+_VISION_IMAGE_MIME_TYPES = frozenset({
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+})
+
+# Hard limits to prevent unbounded memory growth from vision images stored
+# in session context.  base64 ≈ 4/3 × raw, so 20 MB b64 ≈ 15 MB raw.
+_MAX_VISION_IMAGE_B64_BYTES = 20 * 1024 * 1024  # 20 MB base64
+_MAX_VISION_IMAGES_PER_REQUEST = 10
 
 # Type hint for update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
@@ -21,7 +38,8 @@ async def handle_session_files(
     user_email: Optional[str],
     files_map: Optional[Dict[str, Any]],
     file_manager,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    model_supports_vision: bool = False,
 ) -> Dict[str, Any]:
     """
     Handle user file ingestion and return updated session context.
@@ -36,16 +54,23 @@ async def handle_session_files(
             - dict: {"content": base64, "extract": bool} (new format with extraction flag)
         file_manager: File manager instance
         update_callback: Optional callback for emitting updates
+        model_supports_vision: When True, image files have their base64 data stored
+            in the session context for direct inclusion in LLM vision messages.
 
     Returns:
         Updated session context with file references
     """
-    if not files_map or not file_manager or not user_email:
-        return session_context
-
-    # Work with a copy to avoid mutations
+    # Always clear stale vision image data from prior turns, even when no
+    # new files are being uploaded.  Without this, old images silently
+    # reattach on every subsequent message in the session.
     updated_context = dict(session_context)
     session_files_ctx = updated_context.setdefault("files", {})
+    for existing_ref in session_files_ctx.values():
+        existing_ref.pop("image_b64", None)
+        existing_ref.pop("image_mime_type", None)
+
+    if not files_map or not file_manager or not user_email:
+        return updated_context
 
     # Get content extractor
     extractor = get_content_extractor()
@@ -89,6 +114,27 @@ async def handle_session_files(
                 # Store the extraction mode for build_files_manifest
                 file_ref["extract_mode"] = extract_mode
 
+                # For vision-capable models, store raw image data so the message
+                # builder can embed it as an inline image content block.
+                mime_type = meta.get("content_type", "")
+                if model_supports_vision and mime_type in _VISION_IMAGE_MIME_TYPES:
+                    b64_len = len(b64)
+                    if b64_len > _MAX_VISION_IMAGE_B64_BYTES:
+                        logger.warning(
+                            "Vision image %s too large (%d bytes b64, limit %d) — "
+                            "sending as text manifest entry instead",
+                            filename, b64_len, _MAX_VISION_IMAGE_B64_BYTES,
+                        )
+                    else:
+                        file_ref["image_b64"] = b64
+                        file_ref["image_mime_type"] = mime_type
+                        logger.debug(
+                            "Stored vision image data for %s (%s, %d bytes base64)",
+                            filename,
+                            mime_type,
+                            b64_len,
+                        )
+
                 # Attempt content extraction if enabled and mode requests it
                 if extract_mode in ("full", "preview") and extractor.is_enabled():
                     extraction_result = await extractor.extract_content(
@@ -110,9 +156,25 @@ async def handle_session_files(
             except Exception as e:
                 logger.error(f"Failed uploading user file {filename}: {e}")
 
+        # Enforce per-request vision image count limit.  Keep the first N
+        # (by insertion order) and demote the rest to text-manifest entries.
+        if model_supports_vision:
+            vision_count = 0
+            for name, ref in session_files_ctx.items():
+                if ref.get("image_b64"):
+                    vision_count += 1
+                    if vision_count > _MAX_VISION_IMAGES_PER_REQUEST:
+                        logger.warning(
+                            "Vision image count limit (%d) reached — "
+                            "demoting %s to text manifest entry",
+                            _MAX_VISION_IMAGES_PER_REQUEST, name,
+                        )
+                        ref.pop("image_b64", None)
+                        ref.pop("image_mime_type", None)
+
         # Emit files update if successful uploads
         if uploaded_refs and update_callback:
-            organized = file_manager.organize_files_metadata(uploaded_refs)
+            organized = file_manager.organize_files_metadata(uploaded_refs, user_email=session_context.get("user_email"))
             logger.info(
                 "Emitting files_update for user uploads: total=%d",
                 len(organized.get('files', [])),
@@ -245,7 +307,7 @@ async def ingest_tool_files(
     # Emit files update if successful uploads
     if uploaded_refs and update_callback:
         try:
-            organized = file_manager.organize_files_metadata(uploaded_refs)
+            organized = file_manager.organize_files_metadata(uploaded_refs, user_email=session_context.get("user_email"))
             logger.info(
                 "Emitting files_update for tool uploads: total=%d",
                 len(organized.get('files', [])),
@@ -292,16 +354,21 @@ async def notify_canvas_files(
                 }
 
         if uploaded_refs:
+            user_email = session_context.get("user_email")
             canvas_files = []
             for fname, meta in uploaded_refs.items():
                 if file_manager.should_display_in_canvas(fname):
                     file_ext = file_manager.get_file_extension(fname).lower()
-                    canvas_files.append({
+                    file_key = meta.get("key")
+                    entry = {
                         "filename": fname,
                         "type": file_manager.get_canvas_file_type(file_ext),
-                        "s3_key": meta.get("key"),
+                        "s3_key": file_key,
                         "size": meta.get("size", 0),
-                    })
+                    }
+                    if file_key and user_email:
+                        entry["download_url"] = create_download_url(file_key, user_email)
+                    canvas_files.append(entry)
 
             if canvas_files:
                 await update_callback({
@@ -339,7 +406,7 @@ async def emit_files_update_from_context(
                 "tags": {"source": ref.get("source", "user")}
             }
 
-        organized = file_manager.organize_files_metadata(file_refs)
+        organized = file_manager.organize_files_metadata(file_refs, user_email=session_context.get("user_email"))
         logger.info(
             "Emitting files_update from context: total=%d",
             len(organized.get('files', [])),
@@ -407,7 +474,7 @@ async def ingest_v2_artifacts(
 
         # Emit files update if successful uploads
         if uploaded_refs and update_callback:
-            organized = file_manager.organize_files_metadata(uploaded_refs)
+            organized = file_manager.organize_files_metadata(uploaded_refs, user_email=session_context.get("user_email"))
             logger.info(
                 "Emitting files_update for v2 artifacts: total=%d",
                 len(organized.get('files', [])),
@@ -479,6 +546,7 @@ async def notify_canvas_files_v2(
             return
 
         if uploaded_refs and artifact_names:
+            user_email = session_context.get("user_email")
             canvas_files = []
             for fname in artifact_names:
                 meta = uploaded_refs.get(fname)
@@ -488,13 +556,17 @@ async def notify_canvas_files_v2(
                     mime_type = artifact.get("mime")
 
                     file_ext = file_manager.get_file_extension(fname).lower()
-                    canvas_files.append({
+                    file_key = meta.get("key")
+                    entry = {
                         "filename": fname,
                         "type": file_manager.get_canvas_file_type(file_ext),
-                        "s3_key": meta.get("key"),
+                        "s3_key": file_key,
                         "size": meta.get("size", 0),
                         "mime_type": mime_type
-                    })
+                    }
+                    if file_key and user_email:
+                        entry["download_url"] = create_download_url(file_key, user_email)
+                    canvas_files.append(entry)
 
             if canvas_files:
                 # Reorder files to put primary_file first if provided
@@ -533,12 +605,21 @@ async def notify_canvas_files_v2(
         logger.warning(f"Non-fatal: failed to emit v2 canvas_files update: {emit_err}")
 
 
-def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, str]]:
+def build_files_manifest(
+    session_context: Dict[str, Any],
+    exclude_vision_images: bool = False,
+) -> Optional[Dict[str, str]]:
     """
     Build ephemeral files manifest for LLM context.
 
     Pure function that creates manifest from session context.
     Includes extracted content previews when available.
+
+    Args:
+        session_context: Session context containing files dict
+        exclude_vision_images: When True, skip image files that already have
+            ``image_b64`` stored (they will be sent as inline vision blocks
+            by the message builder instead).
     """
     files_ctx = session_context.get("files", {})
     if not files_ctx:
@@ -551,6 +632,11 @@ def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, 
     has_none = False
     for name in sorted(files_ctx.keys()):
         file_info = files_ctx[name]
+
+        # Skip image files handled as vision content blocks
+        if exclude_vision_images and file_info.get("image_b64"):
+            continue
+
         entry = f"- {name}"
         mode = file_info.get("extract_mode", "preview")
 
@@ -581,6 +667,9 @@ def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, 
             has_none = True
 
         file_entries.append(entry)
+
+    if not file_entries:
+        return None
 
     file_list = "\n".join(file_entries)
 

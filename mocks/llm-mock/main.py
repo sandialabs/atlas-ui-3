@@ -19,6 +19,7 @@ import time
 import uuid
 from typing import Dict, List, Any, Optional
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -34,6 +35,11 @@ API_KEY_TO_USER: Dict[str, str] = {
 }
 
 app = FastAPI(title="Mock LLM Server", description="Mock LLM service for testing")
+
+# Forced error mode: set via /test/force-error endpoint
+# Values: None (normal), "rate_limit", "timeout", "auth", "server_error"
+_forced_error_mode: Optional[str] = None
+_forced_error_count: int = 0  # How many requests should fail (0 = indefinite)
 
 
 def _extract_bearer_token(request: Request) -> Optional[str]:
@@ -141,9 +147,70 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
     }
 
+@app.post("/test/force-error")
+async def force_error(request: Request):
+    """Force the next N chat completions to return a specific error.
+
+    Body: {"error_type": "rate_limit"|"timeout"|"auth"|"server_error", "count": 1}
+    Set error_type to null or "none" to clear.
+    count=0 means indefinite until cleared.
+    """
+    global _forced_error_mode, _forced_error_count
+    body = await request.json()
+    error_type = body.get("error_type")
+    if error_type in (None, "none", ""):
+        _forced_error_mode = None
+        _forced_error_count = 0
+        return {"status": "cleared", "error_mode": None}
+    _forced_error_mode = error_type
+    _forced_error_count = body.get("count", 1)
+    return {"status": "set", "error_mode": _forced_error_mode, "count": _forced_error_count}
+
+
+@app.get("/test/force-error")
+async def get_force_error():
+    """Check current forced error state."""
+    return {"error_mode": _forced_error_mode, "remaining_count": _forced_error_count}
+
+
+def _check_forced_error():
+    """Check if a forced error should be raised, decrementing counter."""
+    global _forced_error_mode, _forced_error_count
+    if _forced_error_mode is None:
+        return
+    mode = _forced_error_mode
+    if _forced_error_count > 0:
+        _forced_error_count -= 1
+        if _forced_error_count == 0:
+            _forced_error_mode = None
+    if mode == "rate_limit":
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later.")
+    elif mode == "timeout":
+        time.sleep(35)  # Exceed typical timeout
+        raise HTTPException(status_code=504, detail="Gateway timeout")
+    elif mode == "auth":
+        raise HTTPException(status_code=401, detail="Invalid API key provided")
+    elif mode == "server_error":
+        raise HTTPException(status_code=500, detail="Internal server error")
+    elif mode == "context_window_exceeded":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "litellm.ContextWindowExceededError: litellm.BadRequestError: "
+                "ContextWindowExceededError: OpenAIException - This model's maximum context length "
+                "is 128000 tokens. However, you requested 478376 tokens (468376 in the messages, "
+                "10000 in the completion). Please reduce the length of the messages or completion."
+            ),
+        )
+
+
+@app.post("/chat/completions")
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     """Mock OpenAI chat completions endpoint."""
+
+    # Check forced error mode first
+    _check_forced_error()
 
     # Validate auth if enabled
     api_key = _validate_auth(request)
@@ -156,20 +223,48 @@ async def chat_completions(request: Request):
     body = await request.json()
     completion_request = ChatCompletionRequest(**body)
 
-    # Simulate processing time
-    time.sleep(0.1)
-
     # Generate mock response
     response_content = generate_mock_response(completion_request.messages, api_key=api_key)
+    chat_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+    created = int(time.time())
 
-    # Create mock usage statistics
+    # Handle streaming
+    if completion_request.stream:
+        def stream_chunks():
+            # Send tokens word by word
+            words = response_content.split(" ")
+            for i, word in enumerate(words):
+                token = word if i == 0 else " " + word
+                chunk = {
+                    "id": chat_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": completion_request.model,
+                    "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}]
+                }
+                yield f"data: {json.dumps(chunk)}\n\n"
+                time.sleep(0.02)
+            # Send final chunk with finish_reason
+            final = {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": completion_request.model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+            }
+            yield f"data: {json.dumps(final)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(stream_chunks(), media_type="text/event-stream")
+
+    # Non-streaming response
     prompt_tokens = sum(len(msg.content.split()) for msg in completion_request.messages)
     completion_tokens = len(response_content.split())
 
     response = ChatCompletionResponse(
-        id=f"chatcmpl-{uuid.uuid4().hex[:29]}",
+        id=chat_id,
         object="chat.completion",
-        created=int(time.time()),
+        created=created,
         model=completion_request.model,
         choices=[
             ChatCompletionChoice(

@@ -24,13 +24,12 @@ Updated: 2026-02-24
 """
 
 import argparse
-import json
 import secrets
 import time
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import urlencode, urlparse
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 app = FastAPI(title="Mock Globus Auth Server")
 
@@ -51,17 +50,27 @@ async def authorize(
     In a real flow, the user would log in and consent.
     Here we auto-approve and redirect back immediately.
     """
+    # Validate and reconstruct redirect_uri from parsed components (mock server only)
+    parsed = urlparse(redirect_uri)
+    if parsed.hostname not in ("localhost", "127.0.0.1"):
+        return JSONResponse(
+            {"error": "invalid_redirect_uri", "error_description": "Only localhost allowed"},
+            status_code=400,
+        )
+    # Reconstruct from validated components to break taint chain
+    safe_uri = f"{parsed.scheme}://{parsed.hostname}:{parsed.port}{parsed.path}"
+
     code = secrets.token_urlsafe(32)
     PENDING_CODES[code] = {
         "client_id": client_id,
-        "redirect_uri": redirect_uri,
+        "redirect_uri": safe_uri,
         "scope": scope,
         "created_at": time.time(),
     }
 
     # Auto-redirect back to Atlas with the auth code
     params = urlencode({"code": code, "state": state})
-    return RedirectResponse(f"{redirect_uri}?{params}", status_code=302)
+    return RedirectResponse(f"{safe_uri}?{params}", status_code=302)
 
 
 @app.post("/v2/oauth2/token")
@@ -73,7 +82,6 @@ async def token_exchange(request: Request):
     """
     form = await request.form()
     code = form.get("code", "")
-    redirect_uri = form.get("redirect_uri", "")
 
     # Validate the auth code
     code_info = PENDING_CODES.pop(code, None)
@@ -83,7 +91,6 @@ async def token_exchange(request: Request):
             status_code=400,
         )
 
-    now = time.time()
     scopes = code_info.get("scope", "")
 
     # Build the main identity token
@@ -156,7 +163,7 @@ if __name__ == "__main__":
 
     print(f"Starting Mock Globus Auth Server on http://{args.host}:{args.port}")
     print("Configure Atlas with:")
-    print(f"  GLOBUS_CLIENT_ID=mock-client-id")
-    print(f"  GLOBUS_CLIENT_SECRET=mock-client-secret")
-    print(f"  GLOBUS_REDIRECT_URI=http://localhost:8000/auth/globus/callback")
+    print("  GLOBUS_CLIENT_ID=mock-client-id")
+    print("  GLOBUS_CLIENT_SECRET=mock-client-secret")
+    print("  GLOBUS_REDIRECT_URI=http://localhost:8000/auth/globus/callback")
     uvicorn.run(app, host=args.host, port=args.port)

@@ -1,4 +1,4 @@
-"""Claude-native agentic loop -- mirrors Claude Code / Claude Desktop patterns.
+"""Native agentic loop -- no scaffolding, no control tools.
 
 No control tools, no forced tool choice, no separate reasoning phases.
 The model naturally decides when to use tools and when to respond with text.
@@ -8,9 +8,10 @@ Loop:
   2. If response has tool_calls -> execute them -> add results -> loop
   3. If response is text only -> done (that's the final answer)
 
-This strategy works best with Anthropic models (Claude) but is compatible
-with any provider via LiteLLM. It is the simplest and most token-efficient
-strategy because it trusts the model to manage its own control flow.
+This strategy works best with models that have strong native tool-use
+training but is compatible with any provider via LiteLLM. It is the
+simplest and most token-efficient strategy because it trusts the model
+to manage its own control flow.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgenticLoop(AgentLoopProtocol):
-    """Claude-native agentic loop with no scaffolding overhead.
+    """Native agentic loop with no scaffolding overhead.
 
     Unlike the ReAct, Think-Act, and Act strategies, this loop uses zero
     control tools (no ``finished``, ``agent_decide_next``, etc.) and never
@@ -40,8 +41,8 @@ class AgenticLoop(AgentLoopProtocol):
     * Call one or more tools, then see results and decide again.
     * Respond with text only, which signals completion.
 
-    This matches how Claude Code and Claude Desktop drive tool-use loops
-    and produces the best results with Anthropic models.
+    This produces the best results with models that have strong native
+    tool-use training but works with all providers via LiteLLM.
     """
 
     def __init__(
@@ -91,6 +92,13 @@ class AgenticLoop(AgentLoopProtocol):
 
         while steps < max_steps:
             steps += 1
+
+            # Sanitize messages: OpenAI rejects empty tool_calls arrays
+            for i, msg in enumerate(messages):
+                if isinstance(msg, dict) and "tool_calls" in msg and not msg["tool_calls"]:
+                    logger.warning("Stripping empty tool_calls from messages[%d]", i)
+                    del msg["tool_calls"]
+
             await event_handler(AgentEvent(
                 type="agent_turn_start", payload={"step": steps},
             ))

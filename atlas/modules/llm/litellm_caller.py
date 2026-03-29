@@ -14,8 +14,10 @@ fallbacks, cost tracking, and provider-specific optimizations.
 import asyncio
 import logging
 import os
+import random
 import warnings
-from typing import Any, Dict, List, Optional, Tuple
+from collections import defaultdict
+from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
 # Suppress Pydantic deprecation warnings from litellm's response processing.
 # litellm accesses Pydantic v2.11+ deprecated instance attributes
@@ -32,6 +34,14 @@ import litellm
 from litellm import acompletion
 
 from atlas.core.metrics_logger import log_metric
+from atlas.domain.errors import (
+    CONTEXT_WINDOW_KEYWORDS,
+    ContextWindowExceededError,
+    LLMAuthenticationError,
+    LLMServiceError,
+    LLMTimeoutError,
+    RateLimitError,
+)
 from atlas.modules.config.config_manager import resolve_env_var
 
 from .litellm_streaming import LiteLLMStreamingMixin
@@ -41,6 +51,10 @@ logger = logging.getLogger(__name__)
 
 # Configure LiteLLM settings
 litellm.drop_params = True  # Drop unsupported params instead of erroring
+
+# Retry configuration for transient LLM errors
+MAX_LLM_RETRIES = 3
+RETRY_BASE_DELAY_SECONDS = 1.0
 
 
 class LiteLLMCaller(LiteLLMStreamingMixin):
@@ -78,6 +92,115 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             litellm.set_verbose = False
         else:
             litellm.set_verbose = debug_mode
+
+    @staticmethod
+    def _raise_llm_domain_error(exc: Exception) -> NoReturn:
+        """Classify a litellm exception and raise the corresponding domain error.
+
+        This ensures the WebSocket handler receives specific error types
+        (RateLimitError, LLMTimeoutError, etc.) instead of a generic Exception,
+        which allows it to send meaningful error messages to the frontend.
+        """
+        error_str = str(exc)
+        error_type = type(exc).__name__
+
+        # Map litellm exception types to domain errors
+        if isinstance(exc, litellm.RateLimitError) or "rate limit" in error_str.lower():
+            raise RateLimitError(
+                "The LLM service is experiencing high traffic. Please try again in a moment."
+            ) from exc
+        if isinstance(exc, litellm.Timeout) or "timeout" in error_str.lower():
+            raise LLMTimeoutError(
+                "The LLM service request timed out. Please try again."
+            ) from exc
+        if isinstance(exc, litellm.AuthenticationError) or any(
+            kw in error_str.lower()
+            for kw in ("unauthorized", "authentication", "invalid api key", "invalid_api_key")
+        ):
+            raise LLMAuthenticationError(
+                "There was an authentication issue with the LLM service. "
+                "Please check your API key or contact your administrator."
+            ) from exc
+        if isinstance(exc, litellm.ContextWindowExceededError) or any(
+            kw in error_str.lower() for kw in CONTEXT_WINDOW_KEYWORDS
+        ):
+            raise ContextWindowExceededError(
+                "Your conversation is too long for this model's context window. "
+                "Please start a new conversation or switch to a model with a larger context window."
+            ) from exc
+
+        # All other LLM errors get a generic but user-friendly message
+        # Include the original error type in the log-level message for debugging
+        logger.error("LLM call failed (%s): %s", error_type, error_str)
+        raise LLMServiceError(
+            "The LLM service encountered an error. Please try again or select a different model."
+        ) from exc
+
+    @staticmethod
+    def _is_retryable_error(exc: Exception) -> bool:
+        """Check if an LLM error is transient and worth retrying.
+
+        Auth errors are never retryable. Rate limits, timeouts, and
+        generic service errors (5xx) are retried with backoff.
+        """
+        error_str = str(exc).lower()
+
+        # Auth errors will never succeed on retry
+        if isinstance(exc, litellm.AuthenticationError) or any(
+            kw in error_str
+            for kw in ("unauthorized", "authentication", "invalid api key", "invalid_api_key")
+        ):
+            return False
+
+        # Context window errors will never succeed on retry
+        if isinstance(exc, litellm.ContextWindowExceededError) or any(
+            kw in error_str for kw in CONTEXT_WINDOW_KEYWORDS
+        ):
+            return False
+
+        # Rate limit, timeout, and server errors are transient
+        if isinstance(exc, (litellm.RateLimitError, litellm.Timeout)):
+            return True
+        if any(
+            kw in error_str
+            for kw in ("rate limit", "timeout", "timed out", "server error", "503", "502", "429")
+        ):
+            return True
+
+        # ServiceUnavailableError if litellm exposes it
+        if hasattr(litellm, "ServiceUnavailableError") and isinstance(
+            exc, litellm.ServiceUnavailableError
+        ):
+            return True
+
+        return False
+
+    async def _acompletion_with_retry(self, **kwargs):
+        """Call litellm.acompletion with automatic retry for transient errors.
+
+        Retries up to MAX_LLM_RETRIES times with exponential backoff and jitter.
+        Auth errors are raised immediately without retry.
+        """
+        last_exc = None
+        for attempt in range(MAX_LLM_RETRIES + 1):
+            try:
+                return await acompletion(**kwargs)
+            except Exception as exc:
+                last_exc = exc
+                remaining = MAX_LLM_RETRIES - attempt
+                if remaining > 0 and self._is_retryable_error(exc):
+                    delay = RETRY_BASE_DELAY_SECONDS * (2 ** attempt) + random.uniform(0, 0.5)
+                    logger.warning(
+                        "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1,
+                        MAX_LLM_RETRIES + 1,
+                        delay,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+        raise last_exc  # pragma: no cover – loop always raises or returns
 
     @staticmethod
     def _parse_qualified_data_source(qualified_data_source: str) -> str:
@@ -132,7 +255,11 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         user_email: str,
         messages: List[Dict[str, str]],
     ) -> List[Tuple[str, Any]]:
-        """Query all RAG data sources in parallel.
+        """Query all RAG data sources in parallel, batching by server.
+
+        Sources sharing the same server are sent as a single batched request
+        (one HTTP call with multiple corpora) instead of N separate calls.
+        Different servers are queried in parallel.
 
         Args:
             data_sources: Qualified data source identifiers (server:source_id).
@@ -141,23 +268,48 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             messages: Conversation messages for RAG context.
 
         Returns:
-            List of (display_source, rag_response) tuples, one per source.
+            List of (display_source, rag_response) tuples, one per server batch.
         """
+        # Group data sources by server
+        server_groups: Dict[str, List[str]] = defaultdict(list)
+        for qualified_source in data_sources:
+            if ":" in qualified_source:
+                server_name = qualified_source.split(":", 1)[0]
+            else:
+                server_name = "__default__"
+            server_groups[server_name].append(qualified_source)
 
-        async def _query_single(qualified_source: str):
-            display = self._parse_qualified_data_source(qualified_source)
-            response = await rag_service.query_rag(user_email, qualified_source, messages)
+        logger.info(
+            "[RAG] Batching %d sources across %d server(s): %s",
+            len(data_sources),
+            len(server_groups),
+            {k: len(v) for k, v in server_groups.items()},
+        )
+
+        async def _query_server_batch(server_name: str, sources: List[str]):
+            # Build a display label from all source names in this batch
+            display_parts = [self._parse_qualified_data_source(s) for s in sources]
+            display = ", ".join(display_parts)
+
+            if len(sources) == 1:
+                # Single source: use the existing single-source path
+                response = await rag_service.query_rag(user_email, sources[0], messages)
+            else:
+                # Multiple sources on same server: batch into one request
+                response = await rag_service.query_rag_batch(
+                    user_email, sources, messages,
+                )
             return (display, response)
 
         results = await asyncio.gather(
-            *[_query_single(src) for src in data_sources],
+            *[_query_server_batch(srv, srcs) for srv, srcs in server_groups.items()],
             return_exceptions=True,
         )
 
         successful: List[Tuple[str, Any]] = []
-        for src, result in zip(data_sources, results):
+        for (server_name, _sources), result in zip(server_groups.items(), results):
             if isinstance(result, Exception):
-                logger.error("[RAG] Failed to query source %s: %s", src, result)
+                logger.error("[RAG] Failed to query server %s: %s", server_name, result)
             else:
                 successful.append(result)
 
@@ -357,6 +509,66 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         return kwargs
 
+    @staticmethod
+    def _sanitize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Strip empty tool_calls arrays from messages.
+
+        OpenAI rejects messages where tool_calls is present but empty ([]).
+        The field must either be omitted or contain at least one item.
+        """
+        sanitized = []
+        for msg in messages:
+            if "tool_calls" in msg and not msg["tool_calls"]:
+                msg = {k: v for k, v in msg.items() if k != "tool_calls"}
+            sanitized.append(msg)
+        return sanitized
+
+    @staticmethod
+    def _enforce_strict_role_ordering(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Rewrite messages so that system/user messages never directly follow tool messages.
+
+        Mistral models (especially via vLLM) enforce strict role ordering:
+        after a tool message, only an assistant message is allowed.  This
+        pass converts post-tool system messages to user role and inserts a
+        bridging assistant message between tool results and the next
+        non-assistant message.
+
+        Note: ``seen_tool`` is a one-way latch — once any tool message has
+        appeared in the conversation, all subsequent system messages are
+        converted to user role for the remainder of the message list.
+        """
+        result = []
+        seen_tool = False
+        last_role = None
+        for msg in messages:
+            role = msg.get("role")
+            if role == "tool":
+                seen_tool = True
+            # Convert system → user after any tool message has appeared
+            if role == "system" and seen_tool:
+                msg = {**msg, "role": "user"}
+                role = "user"
+                logger.debug("strict_role_ordering: converted post-tool system message to user")
+            # Insert bridging assistant message when a non-assistant role
+            # follows a tool role (Mistral requires assistant after tool)
+            if last_role == "tool" and role not in ("tool", "assistant"):
+                result.append({"role": "assistant", "content": "(continuing)"})
+                logger.debug("strict_role_ordering: inserted bridging assistant message")
+            result.append(msg)
+            last_role = role
+        return result
+
+    def _prepare_messages(
+        self, model_name: str, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Sanitize messages and apply model-specific transformations."""
+        messages = self._sanitize_messages(messages)
+        if model_name in self.llm_config.models:
+            model_config = self.llm_config.models[model_name]
+            if model_config.strict_role_ordering:
+                messages = self._enforce_strict_role_ordering(messages)
+        return messages
+
     async def call_plain(
         self,
         model_name: str,
@@ -385,9 +597,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
             logger.info(f"Plain LLM call: {len(messages)} messages, {total_chars} chars")
 
-            response = await acompletion(
+            response = await self._acompletion_with_retry(
                 model=litellm_model,
-                messages=messages,
+                messages=self._prepare_messages(model_name, messages),
                 **model_kwargs
             )
 
@@ -404,7 +616,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         except Exception as exc:
             logger.error("Error calling LLM: %s", exc, exc_info=True)
-            raise Exception(f"Failed to call LLM: {exc}") from exc
+            self._raise_llm_domain_error(exc)
 
     async def call_with_rag(
         self,
@@ -524,6 +736,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
+        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, ContextWindowExceededError):
+            raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG] Falling back to plain LLM call due to RAG error")
@@ -553,9 +767,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
             logger.info(f"LLM call with tools: {len(messages)} messages, {total_chars} chars, {len(tools_schema)} tools")
 
-            response = await acompletion(
+            response = await self._acompletion_with_retry(
                 model=litellm_model,
-                messages=messages,
+                messages=self._prepare_messages(model_name, messages),
                 tools=tools_schema,
                 tool_choice=final_tool_choice,
                 **model_kwargs
@@ -582,9 +796,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             if tool_choice == "required" and final_tool_choice == "required":
                 logger.warning(f"Tool choice 'required' failed, retrying with 'auto': {exc}")
                 try:
-                    response = await acompletion(
+                    response = await self._acompletion_with_retry(
                         model=litellm_model,
-                        messages=messages,
+                        messages=self._prepare_messages(model_name, messages),
                         tools=tools_schema,
                         tool_choice="auto",
                         **model_kwargs
@@ -598,10 +812,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     )
                 except Exception as retry_exc:
                     logger.error("Retry with tool_choice='auto' also failed: %s", retry_exc, exc_info=True)
-                    raise Exception(f"Failed to call LLM with tools: {retry_exc}") from retry_exc
+                    self._raise_llm_domain_error(retry_exc)
 
             logger.error("Error calling LLM with tools: %s", exc, exc_info=True)
-            raise Exception(f"Failed to call LLM with tools: {exc}") from exc
+            self._raise_llm_domain_error(exc)
 
     async def call_with_rag_and_tools(
         self,
@@ -672,18 +886,14 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
                 if rag_response.is_completion:
                     logger.info(
-                        "[LLM+RAG+Tools] RAG returned chat completion - returning directly without LLM processing"
+                        "[LLM+RAG+Tools] RAG returned completion - injecting as context (tools still available)"
                     )
-                    final_response = self._build_rag_completion_response(rag_response, display_source)
-                    logger.info(
-                        "[LLM+RAG+Tools] Returning RAG completion directly: response_length=%d",
-                        len(final_response),
-                    )
-                    return LLMResponse(content=final_response)
-
-                rag_content = rag_response.content
+                    rag_content = self._build_rag_completion_response(rag_response, display_source)
+                    context_label = f"Pre-synthesized answer from {display_source}"
+                else:
+                    rag_content = rag_response.content
+                    context_label = f"Retrieved context from {display_source}"
                 rag_metadata = rag_response.metadata
-                context_label = f"Retrieved context from {display_source}"
             else:
                 # Multiple sources: combine all as raw context
                 rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
@@ -724,6 +934,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
+        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, ContextWindowExceededError):
+            raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG+Tools] Falling back to tools-only call due to RAG error")

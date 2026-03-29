@@ -6,17 +6,97 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-<<<<<<< HEAD
+### PR #475 - 2026-03-25
+- **Feature**: Add `strict_role_ordering` config flag to `ModelConfig` for Mistral/Devstral models served via vLLM. When enabled, post-tool `system` messages are converted to `user` role and a bridging `assistant` message is inserted so the role sequence satisfies Mistral's strict ordering constraint.
+- **Fix**: All LLM call paths (plain, tool-calling, streaming) now use a unified `_prepare_messages()` pipeline that chains existing sanitization with the new role enforcement.
+
+### PR #473 - 2026-03-25
+- **Fix**: `ps_agent_start.ps1` now forces UTF-8 encoding for the log file (`logs/app.jsonl`) and sets console output encoding to UTF-8 on Windows. This resolves the issue where Windows users saw Chinese/CJK characters in the Log Viewer — caused by PowerShell 5.1 writing UTF-16 LE by default, which Python's UTF-8 reader misinterpreted as CJK code points.
+
+### PR #468 - 2026-03-25
+- **Fix**: Filenames with special characters (`(`, `)`, `!`, `#`, `?`, `&`, etc.) are now properly sanitized to underscores in both the frontend and backend. Previously only whitespace was replaced, causing filenames like `my_cool_idea(!).pdf` to bypass document extraction and tool processing.
+
+### PR #467 - 2026-03-24
+- **Fix**: CI workflows (quay-publish, ci, build-artifacts) now inject the correct Vite build args: `VITE_APP_NAME=ATLAS`, `VITE_FEATURE_ANIMATED_LOGO=true`, `VITE_FEATURE_POWERED_BY_ATLAS=false`, and pass `GIT_HASH`/`APP_VERSION` to Docker builds.
+
+### PR #466 - 2026-03-23
+- **Feature**: Models that declare `supports_vision: true` in `llmconfig.yml` now receive attached image files as inline multimodal content blocks (OpenAI `image_url` format, translated by LiteLLM). The frontend shows image thumbnails with a vision indicator when a vision-capable model is selected.
+
+### PR #461 - 2026-03-21
+- **Fix**: MCP sessions now auto-reconnect when the underlying server process dies between tool calls. `ManagedSession.is_open` checks transport liveness via `client.is_connected()`, and `MCPSessionManager.acquire()` evicts dead sessions before opening a fresh connection.
+
+### PR #449 - 2026-03-18
+- **Fix**: Chat input search-glass button now clears all selected data sources and disables RAG when clicked while active (green), and opens the Data Sources sidebar when clicked while inactive (gray). Header Sources button only toggles sidebar visibility.
+
+### PR #426 - 2026-03-18
+- **Feature**: Add AI-generated follow-up question suggestion buttons after each chat response. Enabled via `FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED=true`. Suggestions appear as clickable pill buttons below the messages and are cleared when a new message is sent.
+
+### PR #420 - 2026-03-16
+- **Enhancement**: Users can now paste images or documents directly into the chat input textarea to attach them, using the same flow as drag-and-drop file attachment.
+
+### PR #431 - 2026-03-15
+- **Feature**: Per-user MCP session isolation -- STDIO servers use `BlockedStateStore` to prevent cross-user state leakage; HTTP servers get per-user client routing for session isolation.
+- **Fix**: Concurrent elicitation/sampling routing (#295) -- O(1) composite key lookup replaces broken server-name-only iteration.
+- **Feature**: Session persistence per conversation with `MCPSessionManager`, adaptive background task polling, multi-prompt support with meta forwarding, and pluggable state backend (memory/redis).
+
+### PR #420 - 2026-03-16
+- **Enhancement**: Banner Messages admin card now displays the exact config file save path (e.g. `Config: /path/to/messages.txt`), consistent with how MCP Configuration shows its config path.
+
+### PR #418 - 2026-03-13
+- **Fix**: Canvas file downloads no longer return 401 errors behind a reverse proxy. Canvas files now use HMAC-tokenized `/mcp/files/download/` URLs (bypassing nginx `auth_request`) instead of hardcoded `/api/files/download/` paths.
+
+### PR #412 - 2026-03-12
+- **Fix**: Eliminate UI flash on startup by caching the last `/api/config` response in localStorage for instant hydration on page load, then reconciling with fresh data.
+- **Enhancement**: Add `/api/config/shell` fast endpoint that returns feature flags, models, and app metadata without waiting for slow MCP tool/prompt and RAG source discovery.
+
+### PR #409 - 2026-03-12
+- **Release**: Bump version from 0.1.4 to 0.1.5.
+
+### PR #407 - 2026-03-12
+- **Enhancement**: Split Python dependencies into core vs. `mcp-demos` optional extra. Core install is now lighter; `uv sync --dev` or `pip install atlas-chat[mcp-demos]` pulls in matplotlib, pandas, numpy, and other demo-only packages.
+- **Docs**: Added README section for extracting pre-built frontend from PyPI wheel on machines without Node.js.
+
+### PR #403 - 2026-03-11
+- **Feature**: Separate MCP and browser file download paths. MCP servers now use `/mcp/files/download/` (HMAC token auth, bypasses nginx `auth_request`) while browsers use `/api/files/download/` (nginx-injected `X-User-Email`). Fixes 401 errors when browser downloads went through the unauthenticated MCP path.
+
+### PR #394 - 2026-03-10
+- **Fix**: LLM errors (rate limit, timeout, auth, bad request) now propagate as domain-specific errors through the WebSocket to the frontend instead of causing the chat to hang indefinitely.
+- **Fix**: Frontend error handler now resets agent UI state (step counter, pending question) and includes a 5-minute safety timeout that clears the stuck "thinking" indicator.
+- **Enhancement**: Transient LLM errors (rate limit, timeout, 5xx) are now auto-retried up to 3 times with exponential backoff; auth errors raise immediately without retry.
+
+### PR #366 - 2026-03-10
+- **Upgrade**: Bump minimum FastMCP dependency from `>=2.10.0` to `>=3.0.0`. The codebase already used FastMCP 3.x-compatible APIs (`list_tools()`, `list_prompts()`, `Client` constructor), so no application code changes were needed.
+
+### PR #390 - 2026-03-07
+- **Fix**: Admin panel MCP server status now correctly excludes failed servers from connected list, shows per-server tool/prompt counts, and displays the active `mcp.json` file path so admins know which config file is being read and written.
+- **Fix**: Add/remove server endpoints now properly reload MCP config instead of calling non-existent `reload_servers()` method; removed servers are cleaned up from clients, tools, and prompts caches.
+
+### PR #389 - 2026-03-06
+- **Fix**: RAG `is_completion` responses no longer bypass tools when both RAG and tools are active. The pre-synthesized RAG answer is injected as context so the LLM can still use available tools.
+
+### PR #388 - 2026-03-06
+- **Fix**: Remove `auth_request` from `/api/files/download/` nginx location block; the endpoint uses application-layer HMAC capability tokens for auth, and the nginx `auth_request` was causing 302 redirects for MCP servers and other non-browser clients.
+
+### PR #384 - 2026-03-04
+- **Fix**: Package install no longer silently ignores user config files. `atlas-server` now auto-detects a `config/` directory next to the loaded `.env` file when neither `--config-folder` nor `APP_CONFIG_DIR` is set. `atlas-init --minimal` now sets `APP_CONFIG_DIR=./config` in the generated `.env` by default.
+
+### PR #373 - 2026-03-06
+- **Fix**: Agentic loop strategy now appears in the Settings panel dropdown and the selected strategy is correctly sent to the backend via WebSocket (was previously undefined).
+- **Fix**: Strip empty `tool_calls` arrays from messages before sending to LLM providers; OpenAI rejects messages where `tool_calls` is present but empty, which caused the agentic loop to fail when tools were enabled.
+
+### PR #371 - 2026-02-26
+- **Feature**: App version and git commit hash logged to browser console on startup (e.g. `Atlas v0.1.3 (a3f8b2c) | Built 2026-02-26T15:30:00Z`). Version injected at build time via Vite `define`, with Docker build-arg support. `/api/health` now includes `git_commit` field.
+- **Fix**: Sync `atlas/version.py` to `0.1.3` to match `pyproject.toml`.
+
+### PR #372 - 2026-02-27
+- **Feature**: Animated logo on the welcome screen with 3D mouse-tracking tilt, floating bob, ambient glow, and paired energy pulse rings radiating from the thunderbird icon. Controlled by the `VITE_FEATURE_ANIMATED_LOGO` build-time flag (enabled by default).
+
 ### PR #367 - 2026-02-25
 - **Feature**: 3-state chat save mode (issue #367). Users cycle between Incognito (nothing saved), Saved Locally (IndexedDB in browser), and Saved to Server (backend database). The selected mode persists across page refreshes via `usePersistentState`. New `localConversationDB.js` IndexedDB wrapper and `useLocalConversationHistory` hook provide browser-local conversation storage with the same API shape as the server-backed hook.
 
 ### PR #365 - 2026-02-24
 - **Feature**: Globus OAuth integration for ALCF inference endpoints (issue #361). Users log in via Globus Auth to automatically obtain access tokens for ALCF and other Globus-scoped services, eliminating manual token copy-paste.
 - **Feature**: New `api_key_source: "globus"` option for LLM models with `globus_scope` field to identify which Globus resource server token to use.
-
-### K3s Job Runner with Prefect - 2026-02-24
-- **Feature**: Add K3s Job Runner MCP server (`k3s_job_runner`) that executes Python code as isolated Kubernetes Jobs orchestrated by Prefect. Includes full Prefect stack deployment (PostgreSQL, server, worker) in the atlas K3s namespace.
-- **Deployment**: Add Prefect K3s manifests (30-33), flow runner Dockerfile and deployment scripts in `deploy/prefect/`, and `run.sh` integration for building/deploying Prefect components.
 
 ### PR #348 - 2026-02-24
 - **Feature**: LaTeX rendering in assistant messages using KaTeX. Display math (`\[...\]`, `$$...$$`) and inline math (`\(...\)`, `$...$`) are rendered as formatted equations. LaTeX inside fenced code blocks and inline code spans is left as-is.
@@ -50,11 +130,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #347 - 2026-02-20
 - **Config**: Enable chat history with DuckDB by default in `.env.example` so new setups get conversation persistence out of the box.
 
-### Deployment - 2026-02-18
-- **Docs**: Add `docs/deployment/` with K3s and Docker Compose deployment guides, including architecture diagrams, CLI reference, auto-update cron setup, and troubleshooting.
-- **Feature**: Add `deploy/` directory with K3s manifests, Docker Compose production config, Nginx reverse proxy config, auth service, and deployment CLI (`run.sh`).
-- **Feature**: Add `prod_setup.sh` auto-update script for cron-based git pull, rebuild, and redeploy.
-
 ### PR #344 - 2026-02-16
 - **Feature**: Chat history persistence with DuckDB (local) and PostgreSQL (production) support. Conversations, messages, and tags are saved to a database and can be browsed, searched, loaded, and deleted from the sidebar.
 - **Feature**: Incognito mode prevents conversation saving, with a clear visual indicator in the header.
@@ -70,9 +145,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #335 - 2026-02-14
 - **Fix**: RAG no longer triggers automatically when data sources are selected. Selecting data sources now only marks availability; RAG is invoked only when explicitly activated via the search button toggle or the `/search` command.
-
-### PR #338 - 2026-02-13
-- **Feature**: Add four new tools to the tool_planner MCP server: `plan_cli_steps` (AI generates ordered (prompt, tool) tuples), `execute_cli_plan` (runs tuple list sequentially via atlas-chat), `generate_tool_functions` (maps MCP tools to Python function stubs), and `plan_python_workflow` (AI generates a .py workflow with if/elif/for control flow).
 
 ### PR #334 - 2026-02-13
 - **Fix**: Add exponential backoff with jitter to all frontend polling endpoints to prevent accidental backend DOS. Affects WebSocket health checks, log viewer, MCP status polling, and banner panel.

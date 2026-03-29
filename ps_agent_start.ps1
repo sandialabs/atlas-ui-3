@@ -19,10 +19,14 @@
 #>
 
 param(
-    [switch]$FrontendOnly,
-    [switch]$BackendOnly,
-    [switch]$StartMcpMock
+    [Alias("f")][switch]$FrontendOnly,
+    [Alias("b")][switch]$BackendOnly,
+    [Alias("m")][switch]$StartMcpMock
 )
+
+# Force UTF-8 output encoding for the console and all output streams on Windows
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 # Store the project root directory
 $PROJECT_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Definition
@@ -85,7 +89,7 @@ function Stop-Processes {
 function Clear-Logs {
     Write-Host "Clearing log for fresh start"
     New-Item -ItemType Directory -Path "$PROJECT_ROOT/logs" -Force | Out-Null
-    "NEW LOG" | Out-File -FilePath "$PROJECT_ROOT/logs/app.jsonl"
+    [System.IO.File]::WriteAllText("$PROJECT_ROOT/logs/app.jsonl", "NEW LOG`n", [System.Text.Encoding]::UTF8)
 }
 
 # =============================================================================
@@ -266,6 +270,13 @@ function Build-Frontend {
 
     npm run build
     Set-Location $PROJECT_ROOT
+
+    # Copy build output to atlas/static/ so the backend always serves from one
+    # location, matching the PyPI package layout.
+    if (Test-Path "$PROJECT_ROOT/atlas/static") {
+        Remove-Item -Recurse -Force "$PROJECT_ROOT/atlas/static"
+    }
+    Copy-Item -Recurse "$PROJECT_ROOT/frontend/dist" "$PROJECT_ROOT/atlas/static"
 }
 
 # =============================================================================
@@ -281,6 +292,11 @@ function Start-Backend {
     Set-Location "$PROJECT_ROOT/atlas"
     # The atlas package is installed in editable mode (pip install -e .), so
     # PYTHONPATH is no longer needed for atlas imports to work.
+    # Set APP_CONFIG_DIR so user overrides in <project_root>/config/ take
+    # precedence over package defaults in atlas/config/ (CWD is atlas/).
+    if (-not $env:APP_CONFIG_DIR) {
+        $env:APP_CONFIG_DIR = "$PROJECT_ROOT/config"
+    }
     $uvicornExe = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
     $arguments = "main:app --host $HostName --port $Port"
 
@@ -312,7 +328,9 @@ function Main {
         Stop-Processes
         Clear-Logs
         Start-McpMock
-        Start-Backend -Port 8000 -HostName "0.0.0.0"
+        $backendPort = if ($env:PORT) { [int]$env:PORT } else { 8000 }
+        $backendHost = if ($env:ATLAS_HOST) { $env:ATLAS_HOST } else { "127.0.0.1" }
+        Start-Backend -Port $backendPort -HostName $backendHost
         Write-Host "Backend server started."
         Write-Host "Press Ctrl+C to stop all services."
 
@@ -334,7 +352,9 @@ function Main {
     Clear-Logs
     Build-Frontend
     Start-McpMock
-    Start-Backend -Port 8000 -HostName "127.0.0.1"
+    $backendPort = if ($env:PORT) { [int]$env:PORT } else { 8000 }
+    $backendHost = if ($env:ATLAS_HOST) { $env:ATLAS_HOST } else { "127.0.0.1" }
+    Start-Backend -Port $backendPort -HostName $backendHost
 
     # Display MCP info if started
     if ($START_MCP_MOCK) {

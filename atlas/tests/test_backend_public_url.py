@@ -5,6 +5,7 @@ This module tests that the file download URL generation correctly handles:
 1. Relative URLs when BACKEND_PUBLIC_URL is not configured (backward compatibility)
 2. Absolute URLs when BACKEND_PUBLIC_URL is configured (remote MCP server support)
 3. Proper token generation and validation
+4. MCP download path (/mcp/files/download/) is used for generated URLs
 """
 
 from unittest.mock import MagicMock, patch
@@ -35,8 +36,8 @@ class TestBackendPublicUrlConfiguration:
 
             url = create_download_url("test-key-123", "user@example.com")
 
-            # Should start with / (relative URL)
-            assert url.startswith("/api/files/download/")
+            # Should use /mcp/ prefix for MCP server access
+            assert url.startswith("/mcp/files/download/")
             assert "test-key-123" in url
             assert "token=" in url
             assert not url.startswith("http")
@@ -50,8 +51,8 @@ class TestBackendPublicUrlConfiguration:
 
             url = create_download_url("test-key-456", "admin@example.com")
 
-            # Should be absolute URL
-            assert url.startswith("https://atlas.example.com/api/files/download/")
+            # Should be absolute URL with /mcp/ prefix
+            assert url.startswith("https://atlas.example.com/mcp/files/download/")
             assert "test-key-456" in url
             assert "token=" in url
 
@@ -65,8 +66,8 @@ class TestBackendPublicUrlConfiguration:
             url = create_download_url("test-key-789", "user@example.com")
 
             # Should not have double slash
-            assert "https://atlas.example.com/api/files/download/" in url
-            assert "https://atlas.example.com//api" not in url
+            assert "https://atlas.example.com/mcp/files/download/" in url
+            assert "https://atlas.example.com//mcp" not in url
 
     def test_url_with_non_standard_port(self):
         """Test absolute URL generation with non-standard port."""
@@ -78,7 +79,7 @@ class TestBackendPublicUrlConfiguration:
             url = create_download_url("test-key-abc", "user@example.com")
 
             # Should include port in URL
-            assert url.startswith("https://atlas.example.com:8443/api/files/download/")
+            assert url.startswith("https://atlas.example.com:8443/mcp/files/download/")
 
     def test_url_with_localhost(self):
         """Test absolute URL generation with localhost (development mode)."""
@@ -90,7 +91,7 @@ class TestBackendPublicUrlConfiguration:
             url = create_download_url("test-key-dev", "dev@example.com")
 
             # Should use localhost URL
-            assert url.startswith("http://localhost:8000/api/files/download/")
+            assert url.startswith("http://localhost:8000/mcp/files/download/")
 
     def test_fallback_without_user_email(self):
         """Test URL generation without user email (no token)."""
@@ -102,7 +103,7 @@ class TestBackendPublicUrlConfiguration:
             url = create_download_url("test-key-nouser", None)
 
             # Should be absolute but without token
-            assert url.startswith("https://atlas.example.com/api/files/download/")
+            assert url.startswith("https://atlas.example.com/mcp/files/download/")
             assert "test-key-nouser" in url
             assert "token=" not in url
 
@@ -118,8 +119,8 @@ class TestBackendPublicUrlConfiguration:
             with patch('atlas.core.capabilities._get_secret', return_value=b'test-secret'):
                 url = create_download_url("test-key-error", "user@example.com")
 
-                # Should fall back to relative URL
-                assert url.startswith("/api/files/download/")
+                # Should fall back to relative URL with /mcp/ prefix
+                assert url.startswith("/mcp/files/download/")
                 assert not url.startswith("http")
 
 
@@ -161,8 +162,8 @@ class TestBackwardCompatibility:
 
             url = create_download_url("local-file", "local@example.com")
 
-            # Local servers can resolve relative URLs
-            assert url.startswith("/api/files/download/")
+            # Local servers can resolve relative URLs (now using /mcp/ prefix)
+            assert url.startswith("/mcp/files/download/")
 
     def test_existing_mcp_servers_unaffected(self):
         """Test that existing MCP server configurations continue to work."""
@@ -177,9 +178,8 @@ class TestBackwardCompatibility:
             # Should handle missing attribute gracefully and return relative URL
             url = create_download_url("legacy-key", "legacy@example.com")
 
-            assert url.startswith("/api/files/download/")
+            assert url.startswith("/mcp/files/download/")
 
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

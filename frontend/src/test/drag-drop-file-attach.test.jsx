@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ChatArea from '../components/ChatArea'
 import { useChat } from '../contexts/ChatContext'
@@ -31,7 +31,9 @@ describe('ChatArea - Drag and Drop File Attachment', () => {
     agentPendingQuestion: null,
     setAgentPendingQuestion: vi.fn(),
     stopAgent: vi.fn(),
-    answerAgentQuestion: vi.fn()
+    answerAgentQuestion: vi.fn(),
+    followUpSuggestions: [],
+    setFollowUpSuggestions: vi.fn()
   }
 
   const defaultWSContext = {
@@ -164,7 +166,9 @@ describe('ChatArea - Drag and Drop File Attachment', () => {
     const dropEvent = createDragEvent('drop', [mockFile])
     fireEvent.drop(chatArea, dropEvent)
 
-    mockFileReader.onload({ target: { result: 'data:text/plain;base64,dGVzdCBjb250ZW50' } })
+    act(() => {
+      mockFileReader.onload({ target: { result: 'data:text/plain;base64,dGVzdCBjb250ZW50' } })
+    })
 
     await vi.waitFor(() => {
       expect(screen.getByText('test-file.txt')).toBeInTheDocument()

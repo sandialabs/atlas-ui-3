@@ -59,6 +59,64 @@ async def get_banners(current_user: str = Depends(get_current_user)):
         return {"messages": []}
 
 
+@router.get("/config/shell")
+async def get_config_shell(
+    current_user: str = Depends(get_current_user),
+):
+    """Fast config endpoint returning UI shell data (feature flags, models, app metadata).
+
+    Skips slow operations (MCP tool/prompt discovery, RAG source discovery) so the
+    frontend can render the UI shell immediately while the full /api/config loads
+    tools and prompts in the background.
+    """
+    config_manager = app_factory.get_config_manager()
+    llm_config = config_manager.llm_config
+    app_settings = config_manager.app_settings
+
+    # Build models list without per-user token validity checks (fast path)
+    models_list = []
+    for model_name, model_config in llm_config.models.items():
+        model_info = {
+            "name": model_name,
+            "description": model_config.description,
+        }
+        if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
+            model_info["compliance_level"] = model_config.compliance_level
+        api_key_source = getattr(model_config, "api_key_source", "system")
+        if api_key_source == "user":
+            model_info["api_key_source"] = "user"
+        elif api_key_source == "globus":
+            model_info["api_key_source"] = "globus"
+            model_info["globus_scope"] = getattr(model_config, "globus_scope", None)
+        model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
+        models_list.append(model_info)
+
+    return {
+        "app_name": app_settings.app_name,
+        "models": models_list,
+        "user": current_user,
+        "is_in_admin_group": await is_user_in_group(current_user, app_settings.admin_group),
+        "agent_mode_available": app_settings.agent_mode_available,
+        "banner_enabled": app_settings.banner_enabled,
+        "features": {
+            "workspaces": app_settings.feature_workspaces_enabled,
+            "rag": app_settings.feature_rag_enabled,
+            "tools": app_settings.feature_tools_enabled,
+            "marketplace": app_settings.feature_marketplace_enabled,
+            "files_panel": app_settings.feature_files_panel_enabled,
+            "chat_history": app_settings.feature_chat_history_enabled,
+            "chat_history_storage": _get_chat_history_storage_label(app_settings) if app_settings.feature_chat_history_enabled else None,
+            "chat_history_save_modes": ["none", "local", "server"] if app_settings.feature_chat_history_enabled else [],
+            "compliance_levels": app_settings.feature_compliance_levels_enabled,
+            "splash_screen": app_settings.feature_splash_screen_enabled,
+            "file_content_extraction": app_settings.feature_file_content_extraction_enabled,
+            "globus_auth": app_settings.feature_globus_auth_enabled,
+            "followup_suggestions": app_settings.feature_followup_suggestions_enabled,
+        },
+        "file_extraction": _get_file_extraction_config(config_manager),
+    }
+
+
 @router.get("/config")
 async def get_config(
     current_user: str = Depends(get_current_user),
@@ -282,6 +340,7 @@ async def get_config(
                 model_info["user_has_key"] = stored is not None
             else:
                 model_info["user_has_key"] = False
+        model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
         models_list.append(model_info)
 
     # Build tool approval settings - only include tools from authorized servers
@@ -336,7 +395,8 @@ async def get_config(
             "compliance_levels": app_settings.feature_compliance_levels_enabled,
             "splash_screen": app_settings.feature_splash_screen_enabled,
             "file_content_extraction": app_settings.feature_file_content_extraction_enabled,
-            "globus_auth": app_settings.feature_globus_auth_enabled
+            "globus_auth": app_settings.feature_globus_auth_enabled,
+            "followup_suggestions": app_settings.feature_followup_suggestions_enabled,
         },
         "file_extraction": _get_file_extraction_config(config_manager)
     }

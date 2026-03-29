@@ -18,9 +18,11 @@ import re
 import sys
 from typing import Any, Dict, Optional
 
-from fastmcp import Context, FastMCP
+from fastmcp import Context
 
-mcp = FastMCP("Tool Planner")
+from atlas.mcp_shared.server_factory import create_stdio_server
+
+mcp = create_stdio_server("Tool Planner")
 
 # ---------------------------------------------------------------------------
 # System prompts

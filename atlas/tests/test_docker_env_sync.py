@@ -113,6 +113,7 @@ def test_docker_compose_has_required_env_vars():
         'USE_MOCK_S3',  # Docker uses real MinIO, not mock S3
         'VITE_APP_NAME',  # Build-time arg, not runtime env var in docker-compose
         'VITE_FEATURE_POWERED_BY_ATLAS',  # Build-time arg, not runtime env var in docker-compose
+        'VITE_FEATURE_ANIMATED_LOGO',  # Build-time arg, not runtime env var in docker-compose
         # Note: The following are in .env.example as commented out, not as active vars,
         # so they won't appear in env_example_vars and don't need to be listed here:
         # - ATLAS_HOST (Docker-specific, set to 0.0.0.0 for container networking)

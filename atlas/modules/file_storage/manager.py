@@ -26,8 +26,14 @@ class FileManager:
 
     @staticmethod
     def sanitize_filename(filename: str) -> str:
-        """Replace whitespace in a filename with underscores."""
-        return re.sub(r"\s+", "_", filename)
+        """Replace unsafe characters in a filename with underscores.
+
+        Keeps alphanumeric characters, underscores, hyphens, and dots.
+        Replaces whitespace and other special characters (parentheses,
+        exclamation marks, hash, ampersand, etc.) with underscores so that
+        filenames are safe for use in URLs, HTTP headers, and filesystem paths.
+        """
+        return re.sub(r"[^\w.\-]+", "_", filename)
 
     def get_content_type(self, filename: str) -> str:
         """Determine content type based on filename."""
@@ -155,8 +161,10 @@ class FileManager:
 
         return uploaded_files
 
-    def organize_files_metadata(self, file_references: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def organize_files_metadata(self, file_references: Dict[str, Dict[str, Any]], user_email: Optional[str] = None) -> Dict[str, Any]:
         """Organize files metadata by category for UI display."""
+        from atlas.core.capabilities import create_download_url
+
         files_metadata = []
 
         for filename, file_metadata in file_references.items():
@@ -165,9 +173,10 @@ class FileManager:
             source_type = tags.get("source", "uploaded")
             source_tool = tags.get("source_tool", None)
 
+            file_key = file_metadata.get("key", "")
             file_info = {
                 'filename': filename,
-                's3_key': file_metadata.get("key", ""),
+                's3_key': file_key,
                 'size': file_metadata.get("size", 0),
                 'type': self.categorize_file_type(filename),
                 'source': source_type,
@@ -177,6 +186,8 @@ class FileManager:
                 'content_type': file_metadata.get("content_type", "application/octet-stream"),
                 'can_display_in_canvas': self.should_display_in_canvas(filename)
             }
+            if file_key and user_email:
+                file_info['download_url'] = create_download_url(file_key, user_email)
             files_metadata.append(file_info)
 
         # Group by category

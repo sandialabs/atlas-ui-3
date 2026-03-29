@@ -25,8 +25,19 @@ def get_config_dir() -> Path:
 
 
 def get_env_example_path() -> Path:
-    """Get the path to .env.example in the package."""
-    return get_package_root() / ".env.example"
+    """Get the path to .env.example.
+
+    Checks the package directory first (installed package or post-build),
+    then falls back to the repo root (development from source).
+    """
+    package_path = get_package_root() / ".env.example"
+    if package_path.exists():
+        return package_path
+    # Fallback: repo root (atlas/ is one level below)
+    repo_root_path = get_package_root().parent / ".env.example"
+    if repo_root_path.exists():
+        return repo_root_path
+    return package_path
 
 
 def prompt_yes_no(message: str, default: bool = False) -> bool:
@@ -90,10 +101,9 @@ PORT=8000
 DEBUG_MODE=true
 
 # =============================================================================
-# Optional: Custom config location
-# Uncomment and set if you have custom config files
+# Custom config location (auto-detected by atlas-server if config/ exists)
 # =============================================================================
-# APP_CONFIG_DIR=./config
+APP_CONFIG_DIR=./config
 
 # =============================================================================
 # Optional: RAG Configuration

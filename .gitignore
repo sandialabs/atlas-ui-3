@@ -3,6 +3,8 @@
 .ruff_cache
 # Environment variables
 .env
+# Auto-copied during build from root .env.example
+atlas/.env.example
 .claude
 
 .pytest_cache
@@ -112,4 +114,4 @@ backend/bandit_output.txt
 # Scratch folder (local experimentation)
 scratch/
 backend/report.md
-.playwright-mcp
+.playwright-mcpdocs/planning/improvements1.md

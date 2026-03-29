@@ -13,18 +13,19 @@ from collections import Counter
 from typing import Annotated, Any, Dict, Optional
 
 import requests
-from fastmcp import FastMCP
 
-# This tool requires the PyPDF2 and reportlab libraries.
-# Install them using: pip install PyPDF2 reportlab
-from PyPDF2 import PdfReader
+# This tool requires the pypdf and reportlab libraries.
+# Install them using: pip install pypdf reportlab
+from pypdf import PdfReader
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 
+from atlas.mcp_shared.server_factory import create_stdio_server
+
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("PDF_Analyzer")
+mcp = create_stdio_server("PDF_Analyzer")
 
 
 def _analyze_pdf_content(instructions: str, filename: str, original_filename: Optional[str] = None) -> Dict[str, Any]:

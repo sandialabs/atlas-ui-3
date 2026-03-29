@@ -91,6 +91,14 @@ class ModelConfig(BaseModel):
     # This is the resource_server UUID from the Globus token response other_tokens
     # Example for ALCF: "681c10cc-f684-4540-bcd7-0b4df3bc26ef"
     globus_scope: Optional[str] = None
+    # Whether this model supports vision (multimodal image input).
+    # When true, attached image files are sent as inline image content blocks
+    # instead of being listed in the files manifest.
+    supports_vision: bool = False
+    # When true, system messages that appear after tool messages are converted
+    # to user role.  Required for models (e.g. Mistral/Devstral via vLLM)
+    # that reject system messages mid-conversation after tool results.
+    strict_role_ordering: bool = False
 
 
 class LLMConfig(BaseModel):
@@ -185,6 +193,7 @@ class RAGSourceConfig(BaseModel):
     default_model: Optional[str] = None  # Model for RAG queries
     top_k: int = 4  # Number of documents to retrieve
     timeout: float = 60.0  # Request timeout in seconds
+    strip_domain: bool = False  # Strip @domain from username (e.g. user@corp.com -> user)
 
     # API endpoint customization (HTTP type)
     discovery_endpoint: str = "/discover/datasources"
@@ -382,6 +391,11 @@ class AppSettings(BaseSettings):
         description="Timeout in seconds for MCP tool calls (call_tool)",
         validation_alias="MCP_CALL_TIMEOUT"
     )
+    mcp_task_timeout: float = Field(
+        default=10.0,
+        description="Seconds to wait synchronously before switching to background task polling",
+        validation_alias="MCP_TASK_TIMEOUT"
+    )
 
     # MCP Token Storage settings
     mcp_token_storage_dir: Optional[str] = Field(
@@ -525,6 +539,12 @@ class AppSettings(BaseSettings):
         False,
         description="Enable automatic content extraction from uploaded files (PDFs, images)",
         validation_alias=AliasChoices("FEATURE_FILE_CONTENT_EXTRACTION_ENABLED"),
+    )
+    # Follow-up question suggestions feature gate
+    feature_followup_suggestions_enabled: bool = Field(
+        False,
+        description="Enable AI-generated follow-up question suggestions after each chat response",
+        validation_alias=AliasChoices("FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED"),
     )
 
     # Capability tokens (for headless access to downloads/iframes)

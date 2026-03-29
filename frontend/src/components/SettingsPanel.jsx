@@ -202,7 +202,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             <div className="flex items-center justify-between">
               <label className="text-white font-medium">Agent Loop Strategy</label>
               <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
-                {settings.agentLoopStrategy === 'react' ? 'ReAct' : settings.agentLoopStrategy === 'act' ? 'Act' : 'Think-Act'}
+                {settings.agentLoopStrategy === 'agentic' ? 'Agentic' : settings.agentLoopStrategy === 'react' ? 'ReAct' : settings.agentLoopStrategy === 'act' ? 'Act' : 'Think-Act'}
               </span>
             </div>
             <div className="space-y-2">
@@ -211,10 +211,15 @@ const SettingsPanel = ({ isOpen, onClose }) => {
                 onChange={(e) => handleSettingChange('agentLoopStrategy', e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
               >
-                <option value="think-act">Think-Act (Recommended)</option>
+                <option value="agentic">Agentic (Recommended)</option>
+                <option value="think-act">Think-Act</option>
                 <option value="react">ReAct</option>
                 <option value="act">Act</option>
               </select>
+              <p className="text-sm text-gray-400">
+                <strong className="text-gray-300">Agentic:</strong> Native agentic loop with no control tools and tool_choice=auto.
+                The model decides when to call tools and when to respond. Best for models with strong native tool-use training.
+              </p>
               <p className="text-sm text-gray-400">
                 <strong className="text-gray-300">Think-Act:</strong> Concise, unified reasoning approach.
                 Faster iterations with fewer LLM calls. Better for most workflows and quick tasks.
@@ -256,6 +261,33 @@ const SettingsPanel = ({ isOpen, onClose }) => {
                 <strong>⚠ Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
               </p>
             )}
+          </div>
+
+          {/* Debug Mode Setting */}
+          <div className="bg-gray-700 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-white font-medium">Debug Mode</label>
+              <button
+                onClick={() => {
+                  const newVal = !settings.debugMode
+                  handleSettingChange('debugMode', newVal)
+                  saveSettings({ ...settings, debugMode: newVal })
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  settings.debugMode ? 'bg-green-600' : 'bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    settings.debugMode ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="text-sm text-gray-400">
+              When enabled, tool call messages will show raw input arguments and output results expanded by default,
+              making it easier to debug tool interactions.
+            </p>
           </div>
 
           {/* Globus Authentication Section (only shown when feature is enabled) */}

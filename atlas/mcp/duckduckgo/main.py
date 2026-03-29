@@ -10,10 +10,11 @@ from typing import Any, Dict, Union
 import requests
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
-from fastmcp import FastMCP
+
+from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
-mcp = FastMCP("WebSearcher")
+mcp = create_stdio_server("WebSearcher")
 
 
 def get_page_content(url: str) -> str:

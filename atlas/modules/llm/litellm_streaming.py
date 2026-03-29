@@ -24,6 +24,7 @@ class LiteLLMStreamingMixin:
     Expects the host class to provide:
       - _get_litellm_model_name(model_name) -> str
       - _get_model_kwargs(model_name, temperature, user_email) -> dict
+      - _prepare_messages(model_name, messages) -> list
       - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> list
       - _build_rag_completion_response(rag_response, display_source) -> str
       - _combine_rag_contexts(source_responses) -> tuple
@@ -54,7 +55,7 @@ class LiteLLMStreamingMixin:
 
             response = await acompletion(
                 model=litellm_model,
-                messages=messages,
+                messages=self._prepare_messages(model_name, messages),
                 stream=True,
                 **model_kwargs,
             )
@@ -87,7 +88,7 @@ class LiteLLMStreamingMixin:
 
         except Exception as exc:
             logger.error("Error in streaming LLM call: %s", exc, exc_info=True)
-            raise Exception(f"Failed to stream LLM: {exc}") from exc
+            self._raise_llm_domain_error(exc)
 
     async def stream_with_tools(
         self,
@@ -121,7 +122,7 @@ class LiteLLMStreamingMixin:
 
             response = await acompletion(
                 model=litellm_model,
-                messages=messages,
+                messages=self._prepare_messages(model_name, messages),
                 tools=tools_schema,
                 tool_choice=tool_choice,
                 stream=True,
@@ -195,7 +196,7 @@ class LiteLLMStreamingMixin:
 
         except Exception as exc:
             logger.error("Error in streaming LLM call with tools: %s", exc, exc_info=True)
-            raise Exception(f"Failed to stream LLM with tools: {exc}") from exc
+            self._raise_llm_domain_error(exc)
 
     async def stream_with_rag(
         self,
@@ -292,12 +293,11 @@ class LiteLLMStreamingMixin:
         if len(data_sources) == 1:
             display_source, rag_response = source_responses[0]
             if rag_response.is_completion:
-                yield LLMResponse(
-                    content=self._build_rag_completion_response(rag_response, display_source),
-                )
-                return
-            rag_content = rag_response.content
-            context_label = f"Retrieved context from {display_source}"
+                rag_content = self._build_rag_completion_response(rag_response, display_source)
+                context_label = f"Pre-synthesized answer from {display_source}"
+            else:
+                rag_content = rag_response.content
+                context_label = f"Retrieved context from {display_source}"
         else:
             rag_content, _ = self._combine_rag_contexts(source_responses)
             context_label = f"Retrieved context from {len(source_responses)} RAG sources"

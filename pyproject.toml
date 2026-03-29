@@ -1,6 +1,6 @@
 [project]
 name = "atlas-chat"
-version = "0.1.3"
+version = "0.1.5"
 description = "Full-stack LLM chat interface with Model Context Protocol (MCP) integration"
 readme = "README.md"
 license = { text = "MIT" }
@@ -20,46 +20,50 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "beautifulsoup4",
     "boto3>=1.34.0",
     "cryptography",
     "duckdb-engine",
-    "duckduckgo-search",
     "fastapi",
-    "fastmcp>=2.10.0,<4.0.0",
+    "fastmcp[tasks]>=3.0.0,<4.0.0",
     "httpx",
     "itsdangerous",
     "litellm>=1.81.14",
-    "matplotlib",
-    "numpy",
-    "openpyxl",
     "opentelemetry-api",
     "opentelemetry-exporter-otlp",
     "opentelemetry-instrumentation-fastapi",
     "opentelemetry-instrumentation-httpx",
     "opentelemetry-instrumentation-logging",
     "opentelemetry-sdk",
-    "pandas",
     "psycopg2-binary",
     "pydantic",
     "PyJWT",
-    "PyPDF2",
     "pytz",
     "python-dotenv",
     "python-multipart",
-    "python-pptx",
     "pyyaml",
-    "reportlab",
     "requests",
-    "scikit-learn",
-    "scipy",
-    "seaborn",
     "sqlalchemy>=2.0",
     "uvicorn[standard]",
     "websockets",
 ]
 
 [project.optional-dependencies]
+# Keep in sync with [dependency-groups] mcp-demos below
+mcp-demos = [
+    "beautifulsoup4",
+    "duckduckgo-search",
+    "matplotlib",
+    "numpy",
+    "openpyxl",
+    "pandas",
+    "Pillow",
+    "pypdf",
+    "python-pptx",
+    "reportlab",
+    "scikit-learn",
+    "scipy",
+    "seaborn",
+]
 dev = [
     "alembic",
     "podman-compose",
@@ -81,7 +85,24 @@ Repository = "https://github.com/sandialabs/atlas"
 Issues = "https://github.com/sandialabs/atlas/issues"
 
 [dependency-groups]
+# Keep in sync with [project.optional-dependencies] mcp-demos above
+mcp-demos = [
+    "beautifulsoup4",
+    "duckduckgo-search",
+    "matplotlib",
+    "numpy",
+    "openpyxl",
+    "pandas",
+    "Pillow",
+    "pypdf",
+    "python-pptx",
+    "reportlab",
+    "scikit-learn",
+    "scipy",
+    "seaborn",
+]
 dev = [
+    {include-group = "mcp-demos"},
     "alembic",
     "podman-compose",
     "pytest",

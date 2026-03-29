@@ -1,7 +1,13 @@
 """Tests for error classification and user-friendly error messages."""
 
 from atlas.application.chat.utilities.error_handler import classify_llm_error
-from atlas.domain.errors import LLMAuthenticationError, LLMServiceError, LLMTimeoutError, RateLimitError
+from atlas.domain.errors import (
+    ContextWindowExceededError,
+    LLMAuthenticationError,
+    LLMServiceError,
+    LLMTimeoutError,
+    RateLimitError,
+)
 
 
 class TestErrorClassification:
@@ -111,3 +117,30 @@ class TestErrorClassification:
         # Log message should contain the actual error for debugging
         assert "high traffic" in log_msg.lower()
         assert len(log_msg) > 10
+
+    def test_classify_context_window_exceeded_by_keyword(self):
+        """Test classification of context window exceeded errors by keyword."""
+        error = Exception("This model's maximum context length is 128000 tokens")
+
+        error_class, user_msg, log_msg = classify_llm_error(error)
+
+        assert error_class == ContextWindowExceededError
+        assert "too long" in user_msg.lower()
+        assert "new conversation" in user_msg.lower()
+
+    def test_classify_context_window_exceeded_by_type(self):
+        """Test classification of context window exceeded errors by isinstance."""
+        error = ContextWindowExceededError("Your conversation is too long")
+
+        error_class, user_msg, log_msg = classify_llm_error(error)
+
+        assert error_class == ContextWindowExceededError
+        assert "context window" in log_msg.lower()
+
+    def test_classify_context_window_exceeded_by_litellm_keyword(self):
+        """Test classification with litellm-style context_length_exceeded."""
+        error = Exception("context_length_exceeded: too many tokens")
+
+        error_class, user_msg, log_msg = classify_llm_error(error)
+
+        assert error_class == ContextWindowExceededError
