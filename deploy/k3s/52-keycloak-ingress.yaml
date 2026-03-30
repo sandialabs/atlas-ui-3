@@ -1,0 +1,16 @@
+---
+# Traefik IngressRoute for Keycloak (no auth required for login pages)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: keycloak
+  namespace: atlas
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: PathPrefix(`/auth`)
+      kind: Rule
+      services:
+        - name: keycloak
+          port: 8080

@@ -1,6 +1,7 @@
 """FastAPI middleware for authentication and logging."""
 
 import logging
+import os
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -12,6 +13,8 @@ from atlas.core.capabilities import verify_file_token
 from atlas.infrastructure.app_factory import app_factory
 
 logger = logging.getLogger(__name__)
+
+FEATURE_KEYCLOAK_ENABLED = os.getenv("FEATURE_KEYCLOAK_ENABLED", "false").lower() in ("true", "1")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -117,45 +120,69 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # Check authentication via configured header (default: X-User-Email)
         user_email = None
-        if self.debug_mode:
-            # In debug mode, honor auth header if provided, otherwise use config test user
-            x_auth_header = request.headers.get(self.auth_header_name)
-            if x_auth_header:
-                # Apply same authentication logic as production for testing
-                if self.auth_header_type == "aws-alb-jwt":
+        keycloak_claims = None
+
+        # Priority 1: Keycloak OIDC Bearer token (when enabled)
+        if FEATURE_KEYCLOAK_ENABLED:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+                try:
+                    from atlas.core.keycloak_client import get_keycloak_client
+                    kc = get_keycloak_client()
+                    claims = kc.validate_token(token)
+                    if claims:
+                        info = kc.extract_user_info(claims)
+                        user_email = info["email"]
+                        keycloak_claims = info
+                        logger.debug("Keycloak auth: user=%s roles=%s", user_email, info["roles"])
+                except Exception as exc:
+                    logger.warning("Keycloak token validation error: %s", exc)
+
+        # Priority 2: Existing header-based or debug auth (fallback)
+        if not user_email:
+            if self.debug_mode:
+                # In debug mode, honor auth header if provided, otherwise use config test user
+                x_auth_header = request.headers.get(self.auth_header_name)
+                if x_auth_header:
+                    # Apply same authentication logic as production for testing
+                    if self.auth_header_type == "aws-alb-jwt":
+                        user_email = get_user_from_aws_alb_jwt(x_auth_header, self.auth_aws_expected_alb_arn, self.auth_aws_region)
+                    else:
+                        user_email = get_user_from_header(x_auth_header)
+                else:
+                    # Get test user from config
+                    config_manager = app_factory.get_config_manager()
+                    user_email = config_manager.app_settings.test_user
+                # logger.info(f"Debug mode: using user {user_email}")
+            else:
+                x_auth_header = request.headers.get(self.auth_header_name)
+
+                # Extract the user's email, depending on the datatype of auth header
+                if self.auth_header_type == "aws-alb-jwt": # Amazon Application Load Balancer
                     user_email = get_user_from_aws_alb_jwt(x_auth_header, self.auth_aws_expected_alb_arn, self.auth_aws_region)
                 else:
                     user_email = get_user_from_header(x_auth_header)
-            else:
-                # Get test user from config
-                config_manager = app_factory.get_config_manager()
-                user_email = config_manager.app_settings.test_user
-            # logger.info(f"Debug mode: using user {user_email}")
-        else:
-            x_auth_header = request.headers.get(self.auth_header_name)
 
-            # Extract the user's email, depending on the datatype of auth header
-            if self.auth_header_type == "aws-alb-jwt": # Amazon Application Load Balancer
-                user_email = get_user_from_aws_alb_jwt(x_auth_header, self.auth_aws_expected_alb_arn, self.auth_aws_region)
-            else:
-                user_email = get_user_from_header(x_auth_header)
-
-            if not user_email:
-                # Distinguish between API endpoints (return 401) and browser endpoints (redirect)
-                # /mcp/ paths are handled above (token-only auth), but included here
-                # defensively for any future /mcp/ endpoints that reach this point.
-                if request.url.path.startswith('/api/') or request.url.path.startswith('/mcp/'):
-                    logger.warning(f"Missing authentication for API endpoint: {request.url.path}")
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "Unauthorized"}
-                    )
-                else:
-                    logger.warning(f"Missing {self.auth_header_name}, redirecting to {self.auth_redirect_url}")
-                    return RedirectResponse(url=self.auth_redirect_url, status_code=302)
+                if not user_email:
+                    # Distinguish between API endpoints (return 401) and browser endpoints (redirect)
+                    # /mcp/ paths are handled above (token-only auth), but included here
+                    # defensively for any future /mcp/ endpoints that reach this point.
+                    if request.url.path.startswith('/api/') or request.url.path.startswith('/mcp/'):
+                        logger.warning(f"Missing authentication for API endpoint: {request.url.path}")
+                        return JSONResponse(
+                            status_code=401,
+                            content={"detail": "Unauthorized"}
+                        )
+                    else:
+                        logger.warning(f"Missing {self.auth_header_name}, redirecting to {self.auth_redirect_url}")
+                        return RedirectResponse(url=self.auth_redirect_url, status_code=302)
 
         # Add user to request state
         request.state.user_email = user_email
+        # Store Keycloak claims if available (roles, groups for downstream authz)
+        if keycloak_claims:
+            request.state.keycloak_claims = keycloak_claims
 
         response = await call_next(request)
         return response

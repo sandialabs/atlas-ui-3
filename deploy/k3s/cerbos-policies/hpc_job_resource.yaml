@@ -1,0 +1,51 @@
+---
+# Cerbos policy for HPC job submission and management.
+# Controls access to compute resources on HPC clusters.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: "hpc_job"
+  rules:
+    # Admins can manage all HPC jobs
+    - actions: ["submit", "cancel", "monitor", "list", "view_output"]
+      effect: EFFECT_ALLOW
+      roles: ["admin"]
+
+    # Operators can submit and manage jobs
+    - actions: ["submit", "cancel", "monitor", "list", "view_output"]
+      effect: EFFECT_ALLOW
+      roles: ["operator"]
+
+    # Users can submit jobs to approved queues and manage their own
+    - actions: ["submit"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.resource.attr.queue in
+            request.principal.attr.allowed_queues
+
+    - actions: ["cancel", "monitor", "view_output"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.owner == request.principal.id
+
+    - actions: ["list"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+
+    # Agents can submit jobs only to sandboxed queues
+    - actions: ["submit", "monitor", "view_output"]
+      effect: EFFECT_ALLOW
+      roles: ["agent"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: >-
+                  request.resource.attr.queue in
+                  request.principal.attr.allowed_queues
+              - expr: request.resource.attr.sandboxed == true

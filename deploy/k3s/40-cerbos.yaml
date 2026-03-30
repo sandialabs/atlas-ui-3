@@ -1,0 +1,238 @@
+---
+# ConfigMap: Cerbos server configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cerbos-config
+  namespace: atlas
+data:
+  config.yaml: |
+    server:
+      httpListenAddr: ":3592"
+      grpcListenAddr: ":3593"
+    storage:
+      driver: disk
+      disk:
+        directory: /policies
+    audit:
+      enabled: true
+      backend: local
+      local:
+        storagePath: /audit
+        retentionPeriod: 168h
+---
+# ConfigMap: Cerbos policies (mounted from individual policy files)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cerbos-policies
+  namespace: atlas
+data:
+  agent_resource.yaml: |
+    ---
+    apiVersion: api.cerbos.dev/v1
+    resourcePolicy:
+      version: default
+      resource: "agent"
+      rules:
+        - actions: ["launch", "stop", "monitor", "configure", "delete", "list", "view_logs"]
+          effect: EFFECT_ALLOW
+          roles: ["admin"]
+        - actions: ["launch", "stop", "monitor", "list", "view_logs"]
+          effect: EFFECT_ALLOW
+          roles: ["operator"]
+        - actions: ["launch", "monitor", "list"]
+          effect: EFFECT_ALLOW
+          roles: ["user"]
+          condition:
+            match:
+              expr: request.resource.attr.owner == request.principal.id || request.resource.attr.template_approved == true
+        - actions: ["list", "monitor"]
+          effect: EFFECT_ALLOW
+          roles: ["viewer"]
+  mcp_tool_resource.yaml: |
+    ---
+    apiVersion: api.cerbos.dev/v1
+    resourcePolicy:
+      version: default
+      resource: "mcp_tool"
+      rules:
+        - actions: ["invoke", "configure", "approve"]
+          effect: EFFECT_ALLOW
+          roles: ["admin"]
+        - actions: ["invoke", "approve"]
+          effect: EFFECT_ALLOW
+          roles: ["operator"]
+        - actions: ["invoke"]
+          effect: EFFECT_ALLOW
+          roles: ["user"]
+          condition:
+            match:
+              all:
+                of:
+                  - expr: >-
+                      request.resource.attr.compliance_level in
+                      request.principal.attr.allowed_compliance_levels
+                  - expr: >-
+                      request.resource.attr.server_name in
+                      request.principal.attr.authorized_servers
+        - actions: ["invoke"]
+          effect: EFFECT_ALLOW
+          roles: ["agent"]
+          condition:
+            match:
+              all:
+                of:
+                  - expr: >-
+                      request.resource.attr.compliance_level in
+                      request.principal.attr.allowed_compliance_levels
+                  - expr: >-
+                      request.resource.attr.server_name in
+                      request.principal.attr.authorized_servers
+                  - expr: >-
+                      request.resource.attr.sandbox_allowed == true
+  hpc_job_resource.yaml: |
+    ---
+    apiVersion: api.cerbos.dev/v1
+    resourcePolicy:
+      version: default
+      resource: "hpc_job"
+      rules:
+        - actions: ["submit", "cancel", "monitor", "list", "view_output"]
+          effect: EFFECT_ALLOW
+          roles: ["admin"]
+        - actions: ["submit", "cancel", "monitor", "list", "view_output"]
+          effect: EFFECT_ALLOW
+          roles: ["operator"]
+        - actions: ["submit"]
+          effect: EFFECT_ALLOW
+          roles: ["user"]
+          condition:
+            match:
+              expr: >-
+                request.resource.attr.queue in
+                request.principal.attr.allowed_queues
+        - actions: ["cancel", "monitor", "view_output"]
+          effect: EFFECT_ALLOW
+          roles: ["user"]
+          condition:
+            match:
+              expr: request.resource.attr.owner == request.principal.id
+        - actions: ["list"]
+          effect: EFFECT_ALLOW
+          roles: ["user"]
+  data_source_resource.yaml: |
+    ---
+    apiVersion: api.cerbos.dev/v1
+    resourcePolicy:
+      version: default
+      resource: "data_source"
+      rules:
+        - actions: ["read", "write", "list", "search"]
+          effect: EFFECT_ALLOW
+          roles: ["admin"]
+        - actions: ["read", "search", "list"]
+          effect: EFFECT_ALLOW
+          roles: ["user", "operator"]
+          condition:
+            match:
+              expr: >-
+                request.resource.attr.classification_level in
+                request.principal.attr.clearance_levels
+        - actions: ["read", "search"]
+          effect: EFFECT_ALLOW
+          roles: ["agent"]
+          condition:
+            match:
+              all:
+                of:
+                  - expr: >-
+                      request.resource.attr.classification_level in
+                      request.principal.attr.clearance_levels
+                  - expr: >-
+                      request.resource.attr.id in
+                      request.principal.attr.whitelisted_sources
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cerbos
+  namespace: atlas
+  labels:
+    app: cerbos
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cerbos
+  template:
+    metadata:
+      labels:
+        app: cerbos
+    spec:
+      containers:
+        - name: cerbos
+          image: ghcr.io/cerbos/cerbos:0.42.0
+          args: ["server", "--config=/config/config.yaml"]
+          ports:
+            - containerPort: 3592
+              name: http
+            - containerPort: 3593
+              name: grpc
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: policies
+              mountPath: /policies
+              readOnly: true
+            - name: audit
+              mountPath: /audit
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /_cerbos/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_cerbos/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: cerbos-config
+        - name: policies
+          configMap:
+            name: cerbos-policies
+        - name: audit
+          emptyDir: {}
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: cerbos
+  namespace: atlas
+  labels:
+    app: cerbos
+spec:
+  selector:
+    app: cerbos
+  ports:
+    - name: http
+      port: 3592
+      targetPort: http
+    - name: grpc
+      port: 3593
+      targetPort: grpc

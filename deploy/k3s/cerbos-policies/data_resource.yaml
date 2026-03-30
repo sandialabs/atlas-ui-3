@@ -1,0 +1,37 @@
+---
+# Cerbos policy for data access (RAG stores, files, classified data).
+# Enforces data classification boundaries for agents and users.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: "data_source"
+  rules:
+    # Admins can access all data sources
+    - actions: ["read", "write", "list", "search"]
+      effect: EFFECT_ALLOW
+      roles: ["admin"]
+
+    # Users and operators can access data within their clearance level
+    - actions: ["read", "search", "list"]
+      effect: EFFECT_ALLOW
+      roles: ["user", "operator"]
+      condition:
+        match:
+          expr: >-
+            request.resource.attr.classification_level in
+            request.principal.attr.clearance_levels
+
+    # Agents can only access data explicitly whitelisted for their sandbox
+    - actions: ["read", "search"]
+      effect: EFFECT_ALLOW
+      roles: ["agent"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: >-
+                  request.resource.attr.classification_level in
+                  request.principal.attr.clearance_levels
+              - expr: >-
+                  request.resource.attr.id in
+                  request.principal.attr.whitelisted_sources

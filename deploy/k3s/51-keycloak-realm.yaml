@@ -1,0 +1,258 @@
+---
+# Keycloak realm configuration for ATLAS agent portal.
+# Imported automatically on first startup via --import-realm.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  namespace: atlas
+data:
+  atlas-realm.json: |
+    {
+      "realm": "atlas",
+      "enabled": true,
+      "displayName": "ATLAS Agent Portal",
+      "sslRequired": "none",
+      "registrationAllowed": false,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "editUsernameAllowed": false,
+      "bruteForceProtected": true,
+      "permanentLockout": false,
+      "maxFailureWaitSeconds": 900,
+      "minimumQuickLoginWaitSeconds": 60,
+      "waitIncrementSeconds": 60,
+      "quickLoginCheckMilliSeconds": 1000,
+      "maxDeltaTimeSeconds": 43200,
+      "failureFactor": 5,
+      "accessTokenLifespan": 300,
+      "ssoSessionIdleTimeout": 1800,
+      "ssoSessionMaxLifespan": 36000,
+      "offlineSessionIdleTimeout": 2592000,
+      "accessCodeLifespan": 60,
+      "roles": {
+        "realm": [
+          {
+            "name": "atlas-admin",
+            "description": "Full administrative access to ATLAS and agent portal",
+            "composite": false
+          },
+          {
+            "name": "atlas-operator",
+            "description": "Can launch, stop, and monitor agents; manage MCP tools",
+            "composite": false
+          },
+          {
+            "name": "atlas-user",
+            "description": "Standard ATLAS user; can launch approved agent templates",
+            "composite": false
+          },
+          {
+            "name": "atlas-viewer",
+            "description": "Read-only access to agent status and dashboards",
+            "composite": false
+          },
+          {
+            "name": "hpc-user",
+            "description": "Can submit jobs to HPC queues",
+            "composite": false
+          },
+          {
+            "name": "classified-access",
+            "description": "Access to CUI/classified data sources",
+            "composite": false
+          }
+        ]
+      },
+      "groups": [
+        {
+          "name": "admin",
+          "realmRoles": ["atlas-admin", "atlas-operator", "atlas-user", "hpc-user"]
+        },
+        {
+          "name": "operators",
+          "realmRoles": ["atlas-operator", "atlas-user", "hpc-user"]
+        },
+        {
+          "name": "users",
+          "realmRoles": ["atlas-user"]
+        },
+        {
+          "name": "mcp_basic",
+          "realmRoles": ["atlas-user"]
+        },
+        {
+          "name": "mcp_advanced",
+          "realmRoles": ["atlas-operator"]
+        },
+        {
+          "name": "hpc_users",
+          "realmRoles": ["hpc-user"]
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "atlas-ui",
+          "name": "ATLAS Chat Interface",
+          "enabled": true,
+          "publicClient": true,
+          "directAccessGrantsEnabled": true,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "rootUrl": "http://localhost:8080",
+          "baseUrl": "/",
+          "redirectUris": [
+            "http://localhost:8080/*",
+            "http://localhost:8000/*",
+            "http://atlas-ui:8000/*"
+          ],
+          "webOrigins": ["*"],
+          "protocol": "openid-connect",
+          "defaultClientScopes": ["openid", "profile", "email", "roles"],
+          "protocolMappers": [
+            {
+              "name": "atlas-roles",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-realm-role-mapper",
+              "config": {
+                "multivalued": "true",
+                "claim.name": "realm_roles",
+                "jsonType.label": "String",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            },
+            {
+              "name": "atlas-groups",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-group-membership-mapper",
+              "config": {
+                "full.path": "false",
+                "claim.name": "groups",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            },
+            {
+              "name": "atlas-audience",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "config": {
+                "included.client.audience": "atlas-ui",
+                "id.token.claim": "false",
+                "access.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "atlas-agent-service",
+          "name": "ATLAS Agent Service (Backend)",
+          "enabled": true,
+          "publicClient": false,
+          "secret": "atlas-agent-service-secret",
+          "serviceAccountsEnabled": true,
+          "directAccessGrantsEnabled": true,
+          "standardFlowEnabled": false,
+          "protocol": "openid-connect",
+          "defaultClientScopes": ["openid", "profile", "email"],
+          "protocolMappers": [
+            {
+              "name": "agent-roles",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-realm-role-mapper",
+              "config": {
+                "multivalued": "true",
+                "claim.name": "realm_roles",
+                "jsonType.label": "String",
+                "access.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "atlas-prefect",
+          "name": "ATLAS Prefect Integration",
+          "enabled": true,
+          "publicClient": false,
+          "secret": "atlas-prefect-secret",
+          "serviceAccountsEnabled": true,
+          "directAccessGrantsEnabled": false,
+          "standardFlowEnabled": false,
+          "protocol": "openid-connect"
+        }
+      ],
+      "users": [
+        {
+          "username": "admin",
+          "email": "admin@atlas.local",
+          "emailVerified": true,
+          "enabled": true,
+          "firstName": "Atlas",
+          "lastName": "Admin",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "admin",
+              "temporary": false
+            }
+          ],
+          "realmRoles": ["atlas-admin", "atlas-operator", "atlas-user", "hpc-user", "classified-access"],
+          "groups": ["admin"]
+        },
+        {
+          "username": "operator",
+          "email": "operator@atlas.local",
+          "emailVerified": true,
+          "enabled": true,
+          "firstName": "Atlas",
+          "lastName": "Operator",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "operator",
+              "temporary": false
+            }
+          ],
+          "realmRoles": ["atlas-operator", "atlas-user", "hpc-user"],
+          "groups": ["operators"]
+        },
+        {
+          "username": "user1",
+          "email": "user1@atlas.local",
+          "emailVerified": true,
+          "enabled": true,
+          "firstName": "Test",
+          "lastName": "User",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "user1",
+              "temporary": false
+            }
+          ],
+          "realmRoles": ["atlas-user"],
+          "groups": ["users", "mcp_basic"]
+        },
+        {
+          "username": "viewer",
+          "email": "viewer@atlas.local",
+          "emailVerified": true,
+          "enabled": true,
+          "firstName": "View",
+          "lastName": "Only",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "viewer",
+              "temporary": false
+            }
+          ],
+          "realmRoles": ["atlas-viewer"],
+          "groups": ["users"]
+        }
+      ]
+    }

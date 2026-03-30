@@ -1,0 +1,49 @@
+---
+# Cerbos policy for MCP tool access control.
+# Fine-grained control over which tools users and agents can invoke.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: "mcp_tool"
+  rules:
+    # Admins can use any tool
+    - actions: ["invoke", "configure", "approve"]
+      effect: EFFECT_ALLOW
+      roles: ["admin"]
+
+    # Operators can invoke and approve tools
+    - actions: ["invoke", "approve"]
+      effect: EFFECT_ALLOW
+      roles: ["operator"]
+
+    # Standard users can invoke tools within their compliance level
+    - actions: ["invoke"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: >-
+                  request.resource.attr.compliance_level in
+                  request.principal.attr.allowed_compliance_levels
+              - expr: >-
+                  request.resource.attr.server_name in
+                  request.principal.attr.authorized_servers
+
+    # Agents inherit the launching user's permissions but with additional sandbox constraints
+    - actions: ["invoke"]
+      effect: EFFECT_ALLOW
+      roles: ["agent"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: >-
+                  request.resource.attr.compliance_level in
+                  request.principal.attr.allowed_compliance_levels
+              - expr: >-
+                  request.resource.attr.server_name in
+                  request.principal.attr.authorized_servers
+              - expr: >-
+                  request.resource.attr.sandbox_allowed == true

@@ -15,7 +15,8 @@ import MarketplacePanel from './components/MarketplacePanel'
 import BannerPanel from './components/BannerPanel'
 import HelpPage from './components/HelpPage'
 import AdminDashboard from './components/AdminDashboard'
-import LogViewer from './components/LogViewer' // Import LogViewer
+import LogViewer from './components/LogViewer'
+import AgentManagement from './components/AgentManagement'
 import FeedbackButton from './components/FeedbackButton'
 import FileManagerPanel from './components/FileManagerPanel'
 import FilesPage from './components/FilesPage'
@@ -191,7 +192,8 @@ function AppRoutes() {
       <Route path="/help" element={<HelpPage />} />
       <Route path="/admin" element={<AdminDashboard />} />
       <Route path="/files" element={<FilesPage />} />
-      <Route path="/admin/logview" element={<LogViewer />} /> {/* New route for LogViewer */}
+      <Route path="/admin/logview" element={<LogViewer />} />
+      <Route path="/admin/agents" element={<AgentManagement />} />
     </Routes>
   )
 }

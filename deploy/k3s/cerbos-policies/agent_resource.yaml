@@ -1,0 +1,30 @@
+---
+# Cerbos policy for agent lifecycle operations.
+# Controls who can launch, monitor, stop, and configure persistent AI agents.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: "agent"
+  rules:
+    # Admins can do everything with agents
+    - actions: ["launch", "stop", "monitor", "configure", "delete", "list", "view_logs"]
+      effect: EFFECT_ALLOW
+      roles: ["admin"]
+
+    # Operators can launch, monitor, and stop agents but not delete or reconfigure
+    - actions: ["launch", "stop", "monitor", "list", "view_logs"]
+      effect: EFFECT_ALLOW
+      roles: ["operator"]
+
+    # Standard users can only launch pre-approved agent templates and monitor their own
+    - actions: ["launch", "monitor", "list"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: request.resource.attr.owner == request.principal.id || request.resource.attr.template_approved == true
+
+    # Viewers can only see agent status
+    - actions: ["list", "monitor"]
+      effect: EFFECT_ALLOW
+      roles: ["viewer"]
