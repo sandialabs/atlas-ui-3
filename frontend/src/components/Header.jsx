@@ -6,7 +6,7 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
 import ModelInfoPopover from './ModelInfoPopover'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Eye, Brain, Info } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Info } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 
 // Save mode display config: label, icon component, button classes, title text
@@ -200,7 +200,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
           </button>
           
           {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1 w-56 sm:w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+            <div className="absolute right-0 top-full mt-1 w-72 sm:w-80 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
               {models.length === 0 ? (
                 <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
               ) : (
@@ -238,12 +238,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                             title={isDisabled ? 'Configure your API key to use this model' : modelName}
                           >
                             <span className="flex items-center justify-between gap-2 w-full">
-                              <span className="flex items-center gap-1.5 truncate">
-                                <span className="truncate">{modelName}</span>
-                                {model.supports_vision && <Eye className="w-3 h-3 text-blue-400 flex-shrink-0" title="Supports vision" />}
-                                {model.supports_tools && <Wrench className="w-3 h-3 text-green-400 flex-shrink-0" title="Supports tools" />}
-                                {model.supports_reasoning && <Brain className="w-3 h-3 text-purple-400 flex-shrink-0" title="Supports reasoning" />}
-                              </span>
+                              <span className="truncate">{modelName}</span>
                               <span className="flex items-center gap-1 flex-shrink-0">
                                 {complianceEnabled && model.compliance_level && (
                                   <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1">
@@ -263,10 +258,10 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                                 e.stopPropagation()
                                 setModelInfoPopover(modelInfoPopover === modelName ? null : modelName)
                               }}
-                              className="px-2 py-2 hover:bg-gray-700 transition-colors flex-shrink-0"
+                              className={`px-2 py-2 hover:bg-gray-700 transition-colors flex-shrink-0 ${modelInfoPopover === modelName ? 'bg-gray-700' : ''}`}
                               title="Model info"
                             >
-                              <Info className="w-4 h-4 text-gray-400" />
+                              <Info className={`w-4 h-4 ${modelInfoPopover === modelName ? 'text-blue-400' : 'text-gray-400'}`} />
                             </button>
                           )}
                           {needsUserKey && (
