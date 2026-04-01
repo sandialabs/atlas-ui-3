@@ -200,7 +200,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
           </button>
           
           {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1 w-72 sm:w-80 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+            <div className="absolute right-0 top-full mt-1 w-72 sm:w-80 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto overflow-x-hidden">
               {models.length === 0 ? (
                 <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
               ) : (
@@ -226,10 +226,10 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                         key={modelName}
                         className="first:rounded-t-lg last:rounded-b-lg"
                       >
-                        <div className="flex items-center">
+                        <div className="flex items-center min-w-0">
                           <button
                             onClick={() => !isDisabled && handleModelSelect(modelName)}
-                            className={`flex-1 text-left px-4 py-2 text-sm flex flex-col gap-0.5 ${
+                            className={`flex-1 min-w-0 text-left px-4 py-2 text-sm flex flex-col gap-0.5 ${
                               isDisabled
                                 ? 'text-gray-500 cursor-not-allowed'
                                 : 'text-gray-200 hover:bg-gray-700'
