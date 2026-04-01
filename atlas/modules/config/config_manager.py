@@ -105,6 +105,13 @@ class ModelConfig(BaseModel):
     context_window: Optional[int] = None
     model_card_url: Optional[str] = None
 
+    @field_validator('model_card_url', mode='before')
+    @classmethod
+    def validate_model_card_url(cls, v):
+        if v is not None and not v.startswith(('https://', 'http://')):
+            raise ValueError('model_card_url must be an HTTP(S) URL')
+        return v
+
 
 class LLMConfig(BaseModel):
     """Configuration for all LLM models."""

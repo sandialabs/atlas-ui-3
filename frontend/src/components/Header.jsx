@@ -257,7 +257,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                               <span className="text-xs text-gray-400 truncate w-full">{model.description}</span>
                             )}
                           </button>
-                          {(model.model_card_url || model.context_window) && (
+                          {(model.model_card_url || model.context_window != null) && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()

@@ -6,14 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-
-// Mirror of formatContextWindow from ModelInfoPopover.jsx
-function formatContextWindow(tokens) {
-  if (tokens == null) return null
-  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M tokens`
-  if (tokens >= 1000) return `${Math.round(tokens / 1000)}K tokens`
-  return `${tokens} tokens`
-}
+import { formatContextWindow } from '../components/ModelInfoPopover'
 
 // Mirror of which capability badges should render
 function getVisibleBadges(model) {

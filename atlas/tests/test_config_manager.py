@@ -405,6 +405,29 @@ class TestModelConfigCapabilityFields:
         assert config.supports_tools is False
         assert config.context_window == 64000
 
+    def test_model_card_url_rejects_javascript_uri(self):
+        """model_card_url should reject non-HTTP(S) URLs."""
+        from atlas.modules.config.config_manager import ModelConfig
+        import pytest
+
+        with pytest.raises(Exception):
+            ModelConfig(
+                model_name="test-model",
+                model_url="https://api.example.com/v1",
+                model_card_url="javascript:alert(1)",
+            )
+
+    def test_model_card_url_accepts_https(self):
+        """model_card_url should accept HTTPS URLs."""
+        from atlas.modules.config.config_manager import ModelConfig
+
+        config = ModelConfig(
+            model_name="test-model",
+            model_url="https://api.example.com/v1",
+            model_card_url="https://example.com/model-card",
+        )
+        assert config.model_card_url == "https://example.com/model-card"
+
 
 class TestLLMConfigEnvExpansion:
     """Test LLM configuration with environment variable expansion."""
