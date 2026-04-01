@@ -407,8 +407,9 @@ class TestModelConfigCapabilityFields:
 
     def test_model_card_url_rejects_javascript_uri(self):
         """model_card_url should reject non-HTTP(S) URLs."""
-        from atlas.modules.config.config_manager import ModelConfig
         import pytest
+
+        from atlas.modules.config.config_manager import ModelConfig
 
         with pytest.raises(Exception):
             ModelConfig(

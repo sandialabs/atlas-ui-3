@@ -1,0 +1,18 @@
+models:
+  model-with-capabilities:
+    model_url: "http://127.0.0.1:8002/v1"
+    model_name: "openai/test-model"
+    api_key: "test-key"
+    description: "Test model with all capabilities"
+    compliance_level: "External"
+    supports_vision: true
+    supports_tools: true
+    supports_reasoning: true
+    context_window: 128000
+    model_card_url: "https://example.com/model-card"
+  model-without-capabilities:
+    model_url: "http://127.0.0.1:8002/v1"
+    model_name: "openai/basic-model"
+    api_key: "test-key"
+    description: "Basic model without capability metadata"
+    compliance_level: "Internal"

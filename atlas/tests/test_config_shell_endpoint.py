@@ -129,7 +129,7 @@ def test_config_shell_feature_flags_match_full_config():
 
 def test_config_shell_includes_capability_fields_when_set():
     """Shell endpoint should include capability metadata fields when configured on a model."""
-    from atlas.modules.config.config_manager import ModelConfig, LLMConfig
+    from atlas.modules.config.config_manager import LLMConfig, ModelConfig
 
     test_model = ModelConfig(
         model_name="test-model",
@@ -162,7 +162,7 @@ def test_config_shell_includes_capability_fields_when_set():
 
 def test_config_shell_omits_capability_fields_when_none():
     """Shell endpoint should NOT include capability fields when they are None."""
-    from atlas.modules.config.config_manager import ModelConfig, LLMConfig
+    from atlas.modules.config.config_manager import LLMConfig, ModelConfig
 
     test_model = ModelConfig(
         model_name="basic-model",
