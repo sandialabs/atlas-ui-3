@@ -1,0 +1,12 @@
+# Agent runner image: atlas-ui base (has all ATLAS code + deps) + prefect
+# Used by K8s Jobs spawned by the Prefect worker for agent execution.
+FROM localhost/atlas-ui:latest
+
+USER root
+RUN pip3 install --no-cache-dir prefect
+USER appuser
+
+COPY --chown=appuser:appuser agent_flow.py /app/agent_flow.py
+
+WORKDIR /app
+ENTRYPOINT ["python3", "/app/agent_flow.py"]

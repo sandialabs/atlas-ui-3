@@ -45,6 +45,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "uvicorn[standard]",
     "websockets",
+    "asyncpg>=0.29.0",
 ]
 
 [project.optional-dependencies]

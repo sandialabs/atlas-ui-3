@@ -45,6 +45,9 @@ resolve_deployment() {
         prefect|prefect-server)   echo "prefect-server" ;;
         prefect-worker)           echo "prefect-worker" ;;
         prefect-postgres)         echo "prefect-postgres" ;;
+        cerbos)                   echo "cerbos" ;;
+        keycloak)                 echo "keycloak" ;;
+        keycloak-postgres)        echo "keycloak-postgres" ;;
         *)                        echo "$svc" ;;
     esac
 }
@@ -75,10 +78,17 @@ cmd_build() {
         -f "$PROJECT_ROOT/deploy/prefect/Dockerfile" \
         "$PROJECT_ROOT/deploy/prefect"
 
+    echo "  Building atlas-agent-runner (atlas-ui + prefect)..."
+    podman build \
+        -t localhost/atlas-agent-runner:latest \
+        -f "$PROJECT_ROOT/deploy/prefect/Dockerfile.agent" \
+        "$PROJECT_ROOT/deploy/prefect"
+
     echo "Importing images into k3s containerd..."
     podman save localhost/atlas-ui:latest | sudo k3s ctr images import -
     podman save localhost/atlas-auth:latest | sudo k3s ctr images import -
     podman save localhost/atlas-prefect-runner:latest | sudo k3s ctr images import -
+    podman save localhost/atlas-agent-runner:latest | sudo k3s ctr images import -
 
     echo "Build complete. Images imported into k3s."
 }
@@ -112,6 +122,15 @@ cmd_up() {
     # Delete previous prefect-init job if it exists, then recreate
     kubectl_cmd delete job prefect-init -n "$NAMESPACE" --ignore-not-found
     kubectl_cmd apply -f "$K3S_MANIFESTS/33-prefect-init-job.yaml"
+
+    # Apply Cerbos and Keycloak (if manifests exist)
+    [ -f "$K3S_MANIFESTS/40-cerbos.yaml" ] && kubectl_cmd apply -f "$K3S_MANIFESTS/40-cerbos.yaml"
+    [ -f "$K3S_MANIFESTS/50-keycloak.yaml" ] && kubectl_cmd apply -f "$K3S_MANIFESTS/50-keycloak.yaml"
+    [ -f "$K3S_MANIFESTS/51-keycloak-realm.yaml" ] && kubectl_cmd apply -f "$K3S_MANIFESTS/51-keycloak-realm.yaml"
+    [ -f "$K3S_MANIFESTS/52-keycloak-ingress.yaml" ] && kubectl_cmd apply -f "$K3S_MANIFESTS/52-keycloak-ingress.yaml"
+
+    # Apply agent network policy
+    [ -f "$K3S_MANIFESTS/60-agent-networkpolicy.yaml" ] && kubectl_cmd apply -f "$K3S_MANIFESTS/60-agent-networkpolicy.yaml"
 
     # Apply Traefik middleware and ingress routes
     kubectl_cmd apply -f "$K3S_MANIFESTS/20-middleware.yaml"

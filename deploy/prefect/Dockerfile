@@ -8,6 +8,7 @@ RUN groupadd -g 1000 runner && \
 RUN mkdir -p /tmp/workdir && chown runner:runner /tmp/workdir
 
 COPY python_runner_flow.py /app/python_runner_flow.py
+COPY agent_flow.py /app/agent_flow.py
 
 WORKDIR /tmp/workdir
 USER runner

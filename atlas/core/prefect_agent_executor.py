@@ -44,8 +44,8 @@ K8S_JOB_TEMPLATE = {
                         "containers": [
                             {
                                 "name": "agent",
-                                "image": "localhost/atlas-prefect-runner:latest",
-                                "command": ["python", "-m", "atlas.main"],
+                                "image": "localhost/atlas-agent-runner:latest",
+                                "command": ["python3", "/app/agent_flow.py"],
                                 "env": [
                                     {"name": "PREFECT_API_URL", "value": PREFECT_API_URL},
                                 ],
@@ -160,7 +160,7 @@ class PrefectAgentExecutor:
                         "work_pool_name": PREFECT_WORK_POOL,
                         "job_variables": {
                             "namespace": "atlas",
-                            "image": "localhost/atlas-prefect-runner:latest",
+                            "image": "localhost/atlas-agent-runner:latest",
                             "service_account_name": "prefect-worker",
                         },
                     },

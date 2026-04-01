@@ -1,0 +1,58 @@
+# NetworkPolicy: restrict agent job pods to only necessary services
+# Agent pods (label: app=atlas-agent) can reach:
+#   - prefect-server (4200) for flow run status
+#   - cerbos (3592/3593) for authz checks
+#   - atlas-ui (8000) for MCP tool proxying
+#   - DNS (53) for service discovery
+# Everything else is denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-job-egress
+  namespace: atlas
+spec:
+  podSelector:
+    matchLabels:
+      app: atlas-agent
+  policyTypes:
+    - Egress
+    - Ingress
+  ingress: []  # No inbound traffic to agent pods
+  egress:
+    # DNS resolution (kube-dns in kube-system)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Prefect server -- flow run reporting
+    - to:
+        - podSelector:
+            matchLabels:
+              app: prefect-server
+      ports:
+        - protocol: TCP
+          port: 4200
+
+    # Cerbos -- authorization checks for tool invocations
+    - to:
+        - podSelector:
+            matchLabels:
+              app: cerbos
+      ports:
+        - protocol: TCP
+          port: 3592
+        - protocol: TCP
+          port: 3593
+
+    # ATLAS UI -- MCP tool proxy (agents call tools via ATLAS API)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: atlas-ui
+      ports:
+        - protocol: TCP
+          port: 8000
