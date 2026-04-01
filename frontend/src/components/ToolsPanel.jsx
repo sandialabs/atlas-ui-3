@@ -31,6 +31,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     toolChoiceRequired: savedToolChoiceRequired,
     setToolChoiceRequired: saveSetToolChoiceRequired,
     clearToolsAndPrompts,
+    currentModelSupportsTools,
     complianceLevelFilter,
     tools: allTools,
     prompts: allPrompts,
@@ -574,8 +575,15 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                 </h3>
               </div>
               
+              {/* Model doesn't support tools warning */}
+              {!currentModelSupportsTools && (
+                <div className="px-4 py-3 mx-4 mt-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-yellow-400 text-sm">
+                  The current model does not support tool calling. Switch to a tool-capable model to use tools.
+                </div>
+              )}
+
               {/* Search Bar */}
-              <div className="px-4 py-2">
+              <div className={`px-4 py-2${!currentModelSupportsTools ? ' opacity-50 pointer-events-none' : ''}`}>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                   <input
@@ -594,7 +602,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                   <p className="text-gray-500">Try adjusting your search terms</p>
                 </div>
               ) : (
-                <div className="px-4 pb-4 space-y-3">
+                <div className={`px-4 pb-4 space-y-3${!currentModelSupportsTools ? ' opacity-50 pointer-events-none' : ''}`}>
                   {filteredServers.map(server => {
                     const isCollapsed = collapsedServers.has(server.server)
                     const toolCount = server.tools.length

@@ -600,6 +600,18 @@ export const ChatProvider = ({ children }) => {
 		return eventId
 	}, [addMessage])
 
+	// Whether the currently selected model supports tool calling
+	const currentModelSupportsTools = config.models?.some(
+		m => m.name === config.currentModel && m.supports_tools !== false
+	) ?? true
+
+	// Clear tool selections when switching to a model that doesn't support tools
+	useEffect(() => {
+		if (!currentModelSupportsTools) {
+			selections.clearToolsAndPrompts()
+		}
+	}, [config.currentModel]) // eslint-disable-line react-hooks/exhaustive-deps
+
 	const value = {
 		appName: config.appName,
 		user: config.user,
@@ -638,6 +650,7 @@ export const ChatProvider = ({ children }) => {
 		toolChoiceRequired: selections.toolChoiceRequired,
 		setToolChoiceRequired: selections.setToolChoiceRequired,
 		clearToolsAndPrompts: selections.clearToolsAndPrompts,
+		currentModelSupportsTools,
 		complianceLevelFilter: selections.complianceLevelFilter,
 		setComplianceLevelFilter: setComplianceLevelFilterWithCleanup,
 		agentModeEnabled: agent.agentModeEnabled,

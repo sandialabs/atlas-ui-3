@@ -42,6 +42,7 @@ describe('ToolsPanel - Tool Selection', () => {
     removeTools: vi.fn(),
     removePrompts: vi.fn(),
     clearToolsAndPrompts: vi.fn(),
+    currentModelSupportsTools: true,
     toolChoiceRequired: false,
     setToolChoiceRequired: vi.fn(),
     complianceLevelFilter: 'all',
@@ -564,6 +565,70 @@ describe('ToolsPanel - Tool Selection', () => {
     // Verify onClose was called
     expect(mockOnClose).toHaveBeenCalled()
   })
+
+  it('shows disabled message when currentModelSupportsTools is false', () => {
+    const testServer = {
+      server: 'test_server',
+      description: 'Test server',
+      tools: ['tool1'],
+      tools_detailed: [],
+      prompts: [],
+      prompts_detailed: [],
+      tool_count: 1,
+      prompt_count: 0,
+    }
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      currentModelSupportsTools: false,
+      tools: [testServer],
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => [testServer]),
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.getByText(/does not support tool calling/i)).toBeInTheDocument()
+  })
+
+  it('does not show disabled message when currentModelSupportsTools is true', () => {
+    const testServer = {
+      server: 'test_server',
+      description: 'Test server',
+      tools: ['tool1'],
+      tools_detailed: [],
+      prompts: [],
+      prompts_detailed: [],
+      tool_count: 1,
+      prompt_count: 0,
+    }
+
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      currentModelSupportsTools: true,
+      tools: [testServer],
+    })
+
+    useMarketplace.mockReturnValue({
+      ...defaultMarketplaceContext,
+      getFilteredTools: vi.fn(() => [testServer]),
+    })
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.queryByText(/does not support tool calling/i)).not.toBeInTheDocument()
+  })
 })
 
 describe('ToolsPanel - Custom Information Display', () => {
@@ -577,6 +642,7 @@ describe('ToolsPanel - Custom Information Display', () => {
     removeTools: vi.fn(),
     removePrompts: vi.fn(),
     clearToolsAndPrompts: vi.fn(),
+    currentModelSupportsTools: true,
     toolChoiceRequired: false,
     setToolChoiceRequired: vi.fn(),
     complianceLevelFilter: 'all',

@@ -3,7 +3,9 @@ import { X, ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
 
 const EnabledToolsIndicator = () => {
-  const { selectedTools, toggleTool } = useChat()
+  const { selectedTools, toggleTool, currentModelSupportsTools } = useChat()
+
+  if (!currentModelSupportsTools) return null
   const [isExpanded, setIsExpanded] = useState(false)
 
   const allTools = Array.from(selectedTools).map(key => {

@@ -105,6 +105,18 @@ class ChatOrchestrator:
         except Exception:
             return False
 
+    def _model_supports_tools(self, model: str) -> bool:
+        """Return True unless the model is explicitly configured with supports_tools=False."""
+        if not self.config_manager:
+            return True
+        try:
+            model_config = self.config_manager.llm_config.models.get(model)
+            if model_config and getattr(model_config, "supports_tools", None) is False:
+                return False
+            return True
+        except Exception:
+            return True
+
     async def execute(
         self,
         session_id: UUID,
@@ -183,6 +195,11 @@ class ChatOrchestrator:
             user_email=user_email,
             conversation_id=session.context.get("conversation_id", str(session_id)),
         )
+
+        # Strip tools if model doesn't support them
+        if selected_tools and not self._model_supports_tools(model):
+            logger.warning("Model %s does not support tools; ignoring selected_tools", model)
+            selected_tools = None
 
         # Route to appropriate mode (always streaming)
         if agent_mode and self.agent_mode:

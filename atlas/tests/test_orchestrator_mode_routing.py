@@ -136,3 +136,115 @@ async def test_tools_with_no_data_sources_routes_to_tools():
     mocks["tools"].assert_awaited_once()
     mocks["rag"].assert_not_awaited()
     mocks["plain"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tools_stripped_when_model_does_not_support_tools():
+    """selected_tools are ignored when model has supports_tools=False."""
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    # Patch tool authorization (would normally be called for tools mode)
+    orch.tool_authorization = MagicMock()
+    orch.tool_authorization.filter_authorized_tools = AsyncMock(
+        return_value=["server_tool1"]
+    )
+
+    # Set up config_manager with supports_tools=False
+    mock_model_config = MagicMock()
+    mock_model_config.supports_tools = False
+    mock_config_manager = MagicMock()
+    mock_config_manager.llm_config.models.get.return_value = mock_model_config
+    orch.config_manager = mock_config_manager
+
+    await orch.execute(
+        session_id=sid,
+        content="use a tool",
+        model="no-tools-model",
+        selected_tools=["server_tool1"],
+    )
+
+    mocks["plain"].assert_awaited_once()
+    mocks["tools"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tools_allowed_when_supports_tools_is_none():
+    """selected_tools work normally when supports_tools is None (not set)."""
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    orch.tool_authorization = MagicMock()
+    orch.tool_authorization.filter_authorized_tools = AsyncMock(
+        return_value=["server_tool1"]
+    )
+
+    # supports_tools=None (the default)
+    mock_model_config = MagicMock()
+    mock_model_config.supports_tools = None
+    mock_config_manager = MagicMock()
+    mock_config_manager.llm_config.models.get.return_value = mock_model_config
+    orch.config_manager = mock_config_manager
+
+    await orch.execute(
+        session_id=sid,
+        content="use a tool",
+        model="default-model",
+        selected_tools=["server_tool1"],
+    )
+
+    mocks["tools"].assert_awaited_once()
+    mocks["plain"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tools_allowed_when_supports_tools_is_true():
+    """selected_tools work normally when supports_tools is True."""
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    orch.tool_authorization = MagicMock()
+    orch.tool_authorization.filter_authorized_tools = AsyncMock(
+        return_value=["server_tool1"]
+    )
+
+    mock_model_config = MagicMock()
+    mock_model_config.supports_tools = True
+    mock_config_manager = MagicMock()
+    mock_config_manager.llm_config.models.get.return_value = mock_model_config
+    orch.config_manager = mock_config_manager
+
+    await orch.execute(
+        session_id=sid,
+        content="use a tool",
+        model="tools-model",
+        selected_tools=["server_tool1"],
+    )
+
+    mocks["tools"].assert_awaited_once()
+    mocks["plain"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tools_allowed_when_no_config_manager():
+    """selected_tools work normally when config_manager is not set."""
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    orch.tool_authorization = MagicMock()
+    orch.tool_authorization.filter_authorized_tools = AsyncMock(
+        return_value=["server_tool1"]
+    )
+
+    # No config_manager (default None)
+    orch.config_manager = None
+
+    await orch.execute(
+        session_id=sid,
+        content="use a tool",
+        model="any-model",
+        selected_tools=["server_tool1"],
+    )
+
+    mocks["tools"].assert_awaited_once()
+    mocks["plain"].assert_not_awaited()
