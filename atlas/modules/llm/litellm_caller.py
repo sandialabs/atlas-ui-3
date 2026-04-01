@@ -16,6 +16,7 @@ import logging
 import os
 import random
 import warnings
+from collections import defaultdict
 from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
 # Suppress Pydantic deprecation warnings from litellm's response processing.
@@ -254,7 +255,11 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         user_email: str,
         messages: List[Dict[str, str]],
     ) -> List[Tuple[str, Any]]:
-        """Query all RAG data sources in parallel.
+        """Query all RAG data sources in parallel, batching by server.
+
+        Sources sharing the same server are sent as a single batched request
+        (one HTTP call with multiple corpora) instead of N separate calls.
+        Different servers are queried in parallel.
 
         Args:
             data_sources: Qualified data source identifiers (server:source_id).
@@ -263,23 +268,48 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             messages: Conversation messages for RAG context.
 
         Returns:
-            List of (display_source, rag_response) tuples, one per source.
+            List of (display_source, rag_response) tuples, one per server batch.
         """
+        # Group data sources by server
+        server_groups: Dict[str, List[str]] = defaultdict(list)
+        for qualified_source in data_sources:
+            if ":" in qualified_source:
+                server_name = qualified_source.split(":", 1)[0]
+            else:
+                server_name = "__default__"
+            server_groups[server_name].append(qualified_source)
 
-        async def _query_single(qualified_source: str):
-            display = self._parse_qualified_data_source(qualified_source)
-            response = await rag_service.query_rag(user_email, qualified_source, messages)
+        logger.info(
+            "[RAG] Batching %d sources across %d server(s): %s",
+            len(data_sources),
+            len(server_groups),
+            {k: len(v) for k, v in server_groups.items()},
+        )
+
+        async def _query_server_batch(server_name: str, sources: List[str]):
+            # Build a display label from all source names in this batch
+            display_parts = [self._parse_qualified_data_source(s) for s in sources]
+            display = ", ".join(display_parts)
+
+            if len(sources) == 1:
+                # Single source: use the existing single-source path
+                response = await rag_service.query_rag(user_email, sources[0], messages)
+            else:
+                # Multiple sources on same server: batch into one request
+                response = await rag_service.query_rag_batch(
+                    user_email, sources, messages,
+                )
             return (display, response)
 
         results = await asyncio.gather(
-            *[_query_single(src) for src in data_sources],
+            *[_query_server_batch(srv, srcs) for srv, srcs in server_groups.items()],
             return_exceptions=True,
         )
 
         successful: List[Tuple[str, Any]] = []
-        for src, result in zip(data_sources, results):
+        for (server_name, _sources), result in zip(server_groups.items(), results):
             if isinstance(result, Exception):
-                logger.error("[RAG] Failed to query source %s: %s", src, result)
+                logger.error("[RAG] Failed to query server %s: %s", server_name, result)
             else:
                 successful.append(result)
 
@@ -493,6 +523,52 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             sanitized.append(msg)
         return sanitized
 
+    @staticmethod
+    def _enforce_strict_role_ordering(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Rewrite messages so that system/user messages never directly follow tool messages.
+
+        Mistral models (especially via vLLM) enforce strict role ordering:
+        after a tool message, only an assistant message is allowed.  This
+        pass converts post-tool system messages to user role and inserts a
+        bridging assistant message between tool results and the next
+        non-assistant message.
+
+        Note: ``seen_tool`` is a one-way latch — once any tool message has
+        appeared in the conversation, all subsequent system messages are
+        converted to user role for the remainder of the message list.
+        """
+        result = []
+        seen_tool = False
+        last_role = None
+        for msg in messages:
+            role = msg.get("role")
+            if role == "tool":
+                seen_tool = True
+            # Convert system → user after any tool message has appeared
+            if role == "system" and seen_tool:
+                msg = {**msg, "role": "user"}
+                role = "user"
+                logger.debug("strict_role_ordering: converted post-tool system message to user")
+            # Insert bridging assistant message when a non-assistant role
+            # follows a tool role (Mistral requires assistant after tool)
+            if last_role == "tool" and role not in ("tool", "assistant"):
+                result.append({"role": "assistant", "content": "(continuing)"})
+                logger.debug("strict_role_ordering: inserted bridging assistant message")
+            result.append(msg)
+            last_role = role
+        return result
+
+    def _prepare_messages(
+        self, model_name: str, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Sanitize messages and apply model-specific transformations."""
+        messages = self._sanitize_messages(messages)
+        if model_name in self.llm_config.models:
+            model_config = self.llm_config.models[model_name]
+            if model_config.strict_role_ordering:
+                messages = self._enforce_strict_role_ordering(messages)
+        return messages
+
     async def call_plain(
         self,
         model_name: str,
@@ -523,7 +599,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             response = await self._acompletion_with_retry(
                 model=litellm_model,
-                messages=self._sanitize_messages(messages),
+                messages=self._prepare_messages(model_name, messages),
                 **model_kwargs
             )
 
@@ -693,7 +769,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             response = await self._acompletion_with_retry(
                 model=litellm_model,
-                messages=self._sanitize_messages(messages),
+                messages=self._prepare_messages(model_name, messages),
                 tools=tools_schema,
                 tool_choice=final_tool_choice,
                 **model_kwargs
@@ -722,7 +798,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 try:
                     response = await self._acompletion_with_retry(
                         model=litellm_model,
-                        messages=self._sanitize_messages(messages),
+                        messages=self._prepare_messages(model_name, messages),
                         tools=tools_schema,
                         tool_choice="auto",
                         **model_kwargs

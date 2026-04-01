@@ -26,8 +26,14 @@ class FileManager:
 
     @staticmethod
     def sanitize_filename(filename: str) -> str:
-        """Replace whitespace in a filename with underscores."""
-        return re.sub(r"\s+", "_", filename)
+        """Replace unsafe characters in a filename with underscores.
+
+        Keeps alphanumeric characters, underscores, hyphens, and dots.
+        Replaces whitespace and other special characters (parentheses,
+        exclamation marks, hash, ampersand, etc.) with underscores so that
+        filenames are safe for use in URLs, HTTP headers, and filesystem paths.
+        """
+        return re.sub(r"[^\w.\-]+", "_", filename)
 
     def get_content_type(self, filename: str) -> str:
         """Determine content type based on filename."""

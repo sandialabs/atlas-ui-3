@@ -309,7 +309,7 @@ class TestModelConfigCapabilityFields:
             model_name="test-model",
             model_url="https://api.example.com/v1",
         )
-        assert config.supports_vision is None
+        assert config.supports_vision is False  # bool field, defaults to False
         assert config.supports_tools is None
         assert config.supports_reasoning is None
         assert config.context_window is None

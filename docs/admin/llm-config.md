@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-02-08
+Last updated: 2026-03-23
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -22,6 +22,7 @@ models:
     extra_headers:
       "x-my-custom-header": "value"
     compliance_level: "External"
+    supports_vision: true
 
   OpenRouterLlama:
     model_name: meta-llama/llama-3-70b-instruct
@@ -161,4 +162,50 @@ models:
 *   **`temperature`**: (float) A value between 0.0 and 1.0 that controls the creativity of the model's responses. Higher values are more creative.
 *   **`extra_headers`**: (dictionary) A set of custom HTTP headers to include in the request, which is useful for some proxy services or custom providers. **Environment Variable Support**: Header values can also use the `${VAR_NAME}` syntax for environment variable expansion. This is particularly useful for services like OpenRouter that require headers like `HTTP-Referer` and `X-Title`. If an environment variable is missing, the application will raise a clear error message.
 *   **`api_key_source`**: (string) Controls where the API key comes from. `"system"` (default) resolves from environment variables. `"user"` requires each user to provide their own key via the UI. See [Per-User API Keys](#per-user-api-keys-2026-02-08) above.
+*   **`supports_vision`**: (boolean, default `false`) When `true`, the model accepts image inputs. Users can upload images in the chat UI, and those images are sent as inline base64 content blocks in the user message rather than being described in the text files manifest. Only raster image formats are supported (PNG, JPEG, GIF, WebP); SVG files are excluded. See [Vision Image Support](#vision-image-support-2026-03-23) below.
 *   **`compliance_level`**: (string) The security compliance level of this model (e.g., "Public", "Internal"). This is used to filter which models can be used in certain compliance contexts.
+
+## Vision Image Support (2026-03-23)
+
+Models that support image/vision input can be configured with `supports_vision: true`. When enabled:
+
+1. The chat UI shows image upload controls when the model is selected
+2. Uploaded images (PNG, JPEG, GIF, WebP) are sent as inline base64 content blocks in the user message
+3. Non-image files continue to appear in the text files manifest as before
+4. SVG files are always excluded from vision embedding (treated as text)
+
+### Example
+
+```yaml
+models:
+  gpt-4o:
+    model_name: gpt-4o
+    model_url: https://api.openai.com/v1/chat/completions
+    api_key: "${OPENAI_API_KEY}"
+    compliance_level: "External"
+    supports_vision: true
+
+  # Text-only model — no supports_vision needed (defaults to false)
+  gpt-3.5-turbo:
+    model_name: gpt-3.5-turbo
+    model_url: https://api.openai.com/v1/chat/completions
+    api_key: "${OPENAI_API_KEY}"
+    compliance_level: "External"
+```
+
+### Limits
+
+- **Max image size**: 20 MB per image
+- **Max images per message**: 10
+
+Images exceeding these limits fall back to the standard text files manifest.
+
+### Demo
+
+Below is a screenshot of a vision-capable model (`groq-llama-vision`) describing an uploaded image. The image thumbnail appears in the "Uploaded Files" area with a vision indicator icon, and the model responds with a detailed description.
+
+![Vision image demo](vision-image-demo.png)
+
+### Which Models Support Vision?
+
+Common vision-capable models include GPT-4o, GPT-4.1, Claude Sonnet/Haiku, and Gemini. Check your provider's documentation to confirm vision support before enabling this flag.

@@ -181,7 +181,7 @@ def test_config_shell_omits_capability_fields_when_none():
 
         model = data["models"][0]
         assert model["name"] == "basic-model"
-        assert "supports_vision" not in model
+        assert model["supports_vision"] is False  # bool field, always present
         assert "supports_tools" not in model
         assert "supports_reasoning" not in model
         assert "context_window" not in model

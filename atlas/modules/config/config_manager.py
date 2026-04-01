@@ -91,8 +91,15 @@ class ModelConfig(BaseModel):
     # This is the resource_server UUID from the Globus token response other_tokens
     # Example for ALCF: "681c10cc-f684-4540-bcd7-0b4df3bc26ef"
     globus_scope: Optional[str] = None
+    # Whether this model supports vision (multimodal image input).
+    # When true, attached image files are sent as inline image content blocks
+    # instead of being listed in the files manifest.
+    supports_vision: bool = False
+    # When true, system messages that appear after tool messages are converted
+    # to user role.  Required for models (e.g. Mistral/Devstral via vLLM)
+    # that reject system messages mid-conversation after tool results.
+    strict_role_ordering: bool = False
     # Model capability and metadata fields (used by UI model cards)
-    supports_vision: Optional[bool] = None
     supports_tools: Optional[bool] = None
     supports_reasoning: Optional[bool] = None
     context_window: Optional[int] = None
@@ -191,6 +198,7 @@ class RAGSourceConfig(BaseModel):
     default_model: Optional[str] = None  # Model for RAG queries
     top_k: int = 4  # Number of documents to retrieve
     timeout: float = 60.0  # Request timeout in seconds
+    strip_domain: bool = False  # Strip @domain from username (e.g. user@corp.com -> user)
 
     # API endpoint customization (HTTP type)
     discovery_endpoint: str = "/discover/datasources"
