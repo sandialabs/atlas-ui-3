@@ -25,6 +25,98 @@ updates:
           - "minor"
           - "patch"
 
+  # Python dependencies (file-extractor-mock)
+  - package-ecosystem: "pip"
+    directory: "/mocks/file-extractor-mock"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    groups:
+      mock-file-extractor-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Python dependencies (multipart-extractor-mock)
+  - package-ecosystem: "pip"
+    directory: "/mocks/multipart-extractor-mock"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    groups:
+      mock-multipart-extractor-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Python dependencies (banyan-extractor-mock)
+  - package-ecosystem: "pip"
+    directory: "/mocks/banyan-extractor-mock"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    groups:
+      mock-banyan-extractor-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Python dependencies (mcp-http-mock)
+  - package-ecosystem: "pip"
+    directory: "/mocks/mcp-http-mock"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+      - "python"
+    groups:
+      mock-mcp-http-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
   # Node.js dependencies (frontend)
   - package-ecosystem: "npm"
     directory: "/frontend"
@@ -57,6 +149,20 @@ updates:
   # Docker dependencies
   - package-ecosystem: "docker"
     directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+    commit-message:
+      prefix: "security(docker)"
+    labels:
+      - "security"
+      - "dependencies"
+      - "docker"
+
+  # Docker dependencies (mcp-http-mock)
+  - package-ecosystem: "docker"
+    directory: "/mocks/mcp-http-mock"
     schedule:
       interval: "weekly"
       day: "tuesday"

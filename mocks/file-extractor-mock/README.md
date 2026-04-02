@@ -22,7 +22,7 @@ All endpoints are hosted on the same server (default port 8010) at different pat
 cd mocks/file-extractor-mock
 
 # Install dependencies
-pip install -r requirements.txt
+pip install -e .
 
 # Run the server
 python main.py

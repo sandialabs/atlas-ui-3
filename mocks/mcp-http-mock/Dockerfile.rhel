@@ -18,19 +18,19 @@ RUN dnf update -y && \
         hostname \
     && dnf clean all
 
+# Copy pyproject.toml first for layer caching
+COPY pyproject.toml .
+
+# Create virtual environment and install dependencies as root first
+RUN python3.11 -m venv /app/venv && \
+    /app/venv/bin/pip install --no-cache-dir --upgrade pip && \
+    /app/venv/bin/pip install --no-cache-dir .
+
 # Copy application files
 COPY main.py .
 COPY run.sh .
 COPY mcp-config.json .
 COPY README.md .
-
-# Create requirements.txt for this specific service
-RUN echo "fastmcp>=2.10.6" > requirements.txt
-
-# Create virtual environment and install dependencies as root first
-RUN python3.11 -m venv /app/venv && \
-    /app/venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /app/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Change ownership to non-root user
 RUN chown -R mcpuser:mcpuser /app
