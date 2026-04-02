@@ -8,7 +8,7 @@ dependencies = [
     "uvicorn>=0.32.0,<1.0.0",
     "banyan-extract[nemotronparse] @ git+https://github.com/sandialabs/banyan-ingest.git@160e956a2fce342fbad990a2e667bafebef23260",
     "pdf2image>=1.16.0,<2.0.0",
-    "pypdf>=5.0.0,<6.0.0",
+    "pypdf>=5.0.0,<7.0.0",
 ]
 
 [build-system]
