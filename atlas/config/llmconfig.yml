@@ -5,16 +5,16 @@ models:
     api_key: "${OPENROUTER_API_KEY}"
     description: "OpenRouter openai oss-120b"
     compliance_level: "External"
-    supports_tools: false
+    supports_tools: true
     model_card: >
       GPT OSS 120B is OpenAI's first fully open-source large language model,
       released under the Apache 2.0 license. It is a 120 billion parameter
       mixture-of-experts (MoE) model with approximately 30B active parameters
       per forward pass, making it efficient despite its large total size.
       Trained on 31.3 trillion tokens of public data, it achieves performance
-      competitive with GPT-4o on many benchmarks. It does NOT support tool/function
-      calling or vision input. Context window: 1M tokens. Best for: general
-      text generation, coding assistance, and open-weight deployment scenarios.
+      competitive with GPT-4o on many benchmarks. Supports tool/function calling
+      but does not support vision input. Context window: 1M tokens. Best for:
+      general text generation, coding assistance, and open-weight deployment.
     extra_headers:
       X-Title: "chat-11"
   gpt-4.1:
@@ -50,13 +50,13 @@ models:
     api_key: "${GROQ_API_KEY}"
     description: "GPT OSS 120B via Groq"
     compliance_level: "External"
-    supports_tools: false
+    supports_tools: true
     model_card: >
       GPT OSS 120B served via Groq's LPU (Language Processing Unit) inference
       hardware for extremely fast token generation. This is the same open-source
       120B mixture-of-experts model from OpenAI (~30B active parameters), but
-      running on Groq's specialized chips for low-latency inference. It does NOT
-      support tool/function calling or vision input. Apache 2.0 licensed, trained
+      running on Groq's specialized chips for low-latency inference. Supports
+      tool/function calling but not vision input. Apache 2.0 licensed, trained
       on 31.3T tokens. Context window: 1M tokens. Best for: fast general text
       generation when speed is the priority.
   gpt-4o-mini:
