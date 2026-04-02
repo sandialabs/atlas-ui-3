@@ -308,6 +308,7 @@ See `test/pr-validation/README.md` for the full template.
 - **NEVER use `npm run dev`** - WebSocket connection problems
 - **ALWAYS use `npm run build`** for frontend
 - **ALWAYS use `bash agent_start.sh`** to start the application for development and testing
+- **ALWAYS run `bash agent_start.sh` AFTER any frontend/UI change** before testing or taking screenshots - it rebuilds the frontend and restarts the backend so changes are visible at http://localhost:8001. Using `npm run dev` or a standalone vite dev server will NOT work correctly (missing backend, wrong port, WebSocket failures). If you skip this step, you will be testing stale code and wasting time.
 - **NEVER use pip** - this project requires `uv`
 - **NEVER CANCEL builds or tests** - they must complete
 - **NEVER modify files in `atlas/config/`** unless explicitly asked by the user - these are package defaults
