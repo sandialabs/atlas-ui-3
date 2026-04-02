@@ -1104,7 +1104,7 @@ const renderContent = () => {
             textColor = 'text-blue-300'
             break
           case 'debug':
-            badgeColor = 'bg-gray-500 text-white'
+            badgeColor = 'bg-gray-500 text-gray-50'
             textColor = 'text-gray-400'
             break
           default:
@@ -1187,7 +1187,7 @@ const renderContent = () => {
       </div>
       
       {/* Message Content */}
-      <div className={`${isUser ? 'max-w-[70%] bg-blue-600' : 'w-full bg-gray-800'} rounded-lg p-4`}>
+      <div className={`${isUser ? 'max-w-[70%] user-message-bubble' : 'w-full bg-gray-800'} rounded-lg p-4`}>
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium text-gray-300">

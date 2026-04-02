@@ -151,7 +151,7 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
         >
           <div className="flex items-center gap-3">
             {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
-            <h3 className="text-lg font-semibold text-white">{title.replace('_', ' ').toUpperCase()}</h3>
+            <h3 className="text-lg font-semibold text-gray-50">{title.replace('_', ' ').toUpperCase()}</h3>
             {isValid !== undefined && (
               <div className="flex items-center gap-1">
                 {isValid ? (
