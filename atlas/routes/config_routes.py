@@ -90,6 +90,9 @@ async def get_config_shell(
             model_info["globus_scope"] = getattr(model_config, "globus_scope", None)
         model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
         model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
+        model_card = getattr(model_config, "model_card", None)
+        if model_card:
+            model_info["model_card"] = model_card
         models_list.append(model_info)
 
     return {
@@ -343,6 +346,9 @@ async def get_config(
                 model_info["user_has_key"] = False
         model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
         model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
+        model_card = getattr(model_config, "model_card", None)
+        if model_card:
+            model_info["model_card"] = model_card
         models_list.append(model_info)
 
     # Build tool approval settings - only include tools from authorized servers

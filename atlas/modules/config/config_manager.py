@@ -98,6 +98,9 @@ class ModelConfig(BaseModel):
     # Whether this model supports tool/function calling.
     # When false, tools are stripped from requests and the user is warned.
     supports_tools: bool = True
+    # Rich model card text shown in the UI info panel (markdown allowed).
+    # Provides details like context window, training info, strengths, etc.
+    model_card: Optional[str] = None
     # When true, system messages that appear after tool messages are converted
     # to user role.  Required for models (e.g. Mistral/Devstral via vLLM)
     # that reject system messages mid-conversation after tool results.
