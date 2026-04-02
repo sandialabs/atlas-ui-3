@@ -272,6 +272,17 @@ class FileExtractorsConfig(BaseModel):
     extractors: Dict[str, FileExtractorConfig] = Field(default_factory=dict)
     extension_mapping: Dict[str, str] = Field(default_factory=dict)
     mime_mapping: Dict[str, str] = Field(default_factory=dict)
+    # Extensions whose files are plain text and can be read directly (no extractor service needed).
+    # All values are normalised to lowercase on load.
+    plain_text_types: List[str] = Field(default_factory=list)
+
+    @field_validator('plain_text_types', mode='before')
+    @classmethod
+    def normalize_plain_text_types(cls, v):
+        """Normalise all extensions to lowercase."""
+        if isinstance(v, list):
+            return [ext.lower() for ext in v]
+        return v
 
     @field_validator('default_behavior', mode='before')
     @classmethod

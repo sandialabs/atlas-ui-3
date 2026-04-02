@@ -1132,3 +1132,247 @@ class TestConfigManagerFileExtractors:
             config = cm.file_extractors_config
 
             assert config.enabled is False
+
+
+class TestPlainTextTypes:
+    """Test plain-text file type direct-read functionality."""
+
+    def _make_extractor(self, plain_text_types=None):
+        """Helper to build a FileContentExtractor with plain_text_types configured."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            plain_text_types=plain_text_types or [".txt", ".py", ".c", ".md"],
+        )
+        return FileContentExtractor(config=config)
+
+    def _enabled_settings(self):
+        """Return a mock app settings with extraction enabled."""
+        mock_settings = Mock()
+        mock_settings.feature_file_content_extraction_enabled = True
+        return mock_settings
+
+    # --- Model tests ---
+
+    def test_plain_text_types_stored_on_model(self):
+        """FileExtractorsConfig should store plain_text_types."""
+        config = FileExtractorsConfig(plain_text_types=[".txt", ".py"])
+        assert ".txt" in config.plain_text_types
+        assert ".py" in config.plain_text_types
+
+    def test_plain_text_types_normalized_to_lowercase(self):
+        """Extensions in plain_text_types are normalised to lowercase."""
+        config = FileExtractorsConfig(plain_text_types=[".TXT", ".PY", ".C"])
+        assert config.plain_text_types == [".txt", ".py", ".c"]
+
+    def test_plain_text_types_default_empty(self):
+        """plain_text_types should default to an empty list."""
+        config = FileExtractorsConfig()
+        assert config.plain_text_types == []
+
+    # --- is_plain_text_type ---
+
+    def test_is_plain_text_type_returns_true_for_listed_extension(self):
+        """is_plain_text_type should return True for extensions in plain_text_types."""
+        extractor = self._make_extractor([".txt", ".py"])
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            assert extractor.is_plain_text_type("script.py") is True
+            assert extractor.is_plain_text_type("README.txt") is True
+
+    def test_is_plain_text_type_case_insensitive(self):
+        """is_plain_text_type should match regardless of case in the filename."""
+        extractor = self._make_extractor([".py"])
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            assert extractor.is_plain_text_type("script.PY") is True
+            assert extractor.is_plain_text_type("script.Py") is True
+
+    def test_is_plain_text_type_returns_false_for_unlisted_extension(self):
+        """is_plain_text_type should return False for extensions not in plain_text_types."""
+        extractor = self._make_extractor([".txt"])
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            assert extractor.is_plain_text_type("document.pdf") is False
+
+    def test_is_plain_text_type_returns_false_when_disabled(self):
+        """is_plain_text_type should return False when extraction is globally disabled."""
+        config = FileExtractorsConfig(enabled=False, plain_text_types=[".txt"])
+        extractor = FileContentExtractor(config=config)
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            assert extractor.is_plain_text_type("file.txt") is False
+
+    # --- can_extract with plain_text_types ---
+
+    def test_can_extract_true_for_plain_text_type(self):
+        """can_extract should return True for plain-text extensions."""
+        extractor = self._make_extractor([".py"])
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            assert extractor.can_extract("script.py") is True
+
+    def test_can_extract_false_when_no_extractor_and_not_plain_text(self):
+        """can_extract should return False when neither condition is satisfied."""
+        extractor = self._make_extractor([".txt"])
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            assert extractor.can_extract("archive.zip") is False
+
+    # --- get_supported_extensions with plain_text_types ---
+
+    def test_get_supported_extensions_includes_plain_text_types(self):
+        """get_supported_extensions should include plain_text_types entries."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            plain_text_types=[".txt", ".py"],
+            extractors={
+                "pdf-text": FileExtractorConfig(url="http://localhost/pdf", enabled=True)
+            },
+            extension_mapping={".pdf": "pdf-text"},
+        )
+        extractor = FileContentExtractor(config=config)
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            exts = extractor.get_supported_extensions()
+            assert ".txt" in exts
+            assert ".py" in exts
+            assert ".pdf" in exts
+
+    def test_get_supported_extensions_no_duplicates(self):
+        """get_supported_extensions should not duplicate entries."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            plain_text_types=[".txt"],
+            extractors={
+                "txt-extractor": FileExtractorConfig(url="http://localhost/txt", enabled=True)
+            },
+            extension_mapping={".txt": "txt-extractor"},
+        )
+        extractor = FileContentExtractor(config=config)
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            exts = extractor.get_supported_extensions()
+            assert exts.count(".txt") == 1
+
+    # --- extract_content plain-text fast path ---
+
+    @pytest.mark.asyncio
+    async def test_extract_content_plain_text_returns_decoded_content(self):
+        """extract_content should decode base64 and return text for plain-text types."""
+        extractor = self._make_extractor([".py"])
+
+        source = "print('hello world')\n"
+        import base64 as b64mod
+        encoded = b64mod.b64encode(source.encode()).decode()
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            result = await extractor.extract_content("script.py", encoded)
+
+        assert result.success is True
+        assert result.content == source
+        assert result.preview == source  # short text: preview == content
+        assert result.metadata == {"method": "plain_text_read"}
+
+    @pytest.mark.asyncio
+    async def test_extract_content_plain_text_preview_truncated(self):
+        """extract_content should truncate preview to 2000 chars for long plain-text files."""
+        extractor = self._make_extractor([".txt"])
+
+        long_text = "x" * 5000
+        import base64 as b64mod
+        encoded = b64mod.b64encode(long_text.encode()).decode()
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            result = await extractor.extract_content("file.txt", encoded)
+
+        assert result.success is True
+        assert result.content == long_text
+        assert result.preview == "x" * 2000 + "..."
+
+    @pytest.mark.asyncio
+    async def test_extract_content_plain_text_invalid_base64(self):
+        """extract_content should fail gracefully for invalid base64 in plain-text path."""
+        extractor = self._make_extractor([".txt"])
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            result = await extractor.extract_content("file.txt", "!!!not-valid-base64!!!")
+
+        assert result.success is False
+        assert "base64" in result.error.lower() or "decode" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_extract_content_plain_text_does_not_call_http(self):
+        """extract_content plain-text path must never call any HTTP extractor service."""
+        extractor = self._make_extractor([".c"])
+
+        import base64 as b64mod
+        encoded = b64mod.b64encode(b"int main() { return 0; }").decode()
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            with patch('httpx.AsyncClient') as mock_http:
+                result = await extractor.extract_content("main.c", encoded)
+
+        assert result.success is True
+        mock_http.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_extract_content_plain_text_uppercase_extension(self):
+        """Plain-text extension matching should be case-insensitive on the filename."""
+        extractor = self._make_extractor([".py"])
+
+        import base64 as b64mod
+        encoded = b64mod.b64encode(b"# python script").decode()
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            result = await extractor.extract_content("SCRIPT.PY", encoded)
+
+        assert result.success is True
+        assert result.content == "# python script"
+
+    @pytest.mark.asyncio
+    async def test_extract_content_non_plain_text_falls_through_to_extractor(self):
+        """Files not in plain_text_types should still use the HTTP extractor."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            plain_text_types=[".txt"],
+            extractors={
+                "pdf-text": FileExtractorConfig(
+                    url="http://localhost:8010/extract",
+                    enabled=True,
+                    response_field="text"
+                )
+            },
+            extension_mapping={".pdf": "pdf-text"},
+        )
+        extractor = FileContentExtractor(config=config)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True, "text": "PDF content"}
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            with patch('httpx.AsyncClient') as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.request = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client_class.return_value = mock_client
+
+                result = await extractor.extract_content("doc.pdf", "dGVzdA==")
+
+        assert result.success is True
+        assert result.content == "PDF content"
