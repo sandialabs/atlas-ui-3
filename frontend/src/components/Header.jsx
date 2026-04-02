@@ -374,13 +374,24 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
             <button
               onClick={() => setAgentModeEnabled(!agentModeEnabled)}
               className={`p-2 rounded-lg transition-colors ${
-                agentModeEnabled 
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                agentModeEnabled
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
                   : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
               }`}
               title={agentModeEnabled ? "Agent Mode: ON (click to disable)" : "Agent Mode: OFF (click to enable)"}
             >
               <Bot className="w-5 h-5" />
+            </button>
+          )}
+
+          {/* Agent Portal Button */}
+          {agentModeAvailable && (
+            <button
+              onClick={() => navigate('/admin/agents')}
+              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+              title="Agent Portal"
+            >
+              <Monitor className="w-5 h-5" />
             </button>
           )}
 
@@ -592,13 +603,27 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                     setMobileMenuOpen(false)
                   }}
                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                    agentModeEnabled 
-                      ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                    agentModeEnabled
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white'
                       : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
                   }`}
                 >
                   <Bot className="w-5 h-5" />
                   <span>Agent Mode: {agentModeEnabled ? 'ON' : 'OFF'}</span>
+                </button>
+              )}
+
+              {/* Agent Portal */}
+              {agentModeAvailable && (
+                <button
+                  onClick={() => {
+                    navigate('/admin/agents')
+                    setMobileMenuOpen(false)
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
+                >
+                  <Monitor className="w-5 h-5" />
+                  <span>Agent Portal</span>
                 </button>
               )}
 
