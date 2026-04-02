@@ -635,6 +635,14 @@ const ChatArea = ({ onOpenRagPanel }) => {
     if (!items) return
     const pastedFiles = Array.from(items).filter(item => item.kind === 'file')
     if (pastedFiles.length === 0) return
+    // When clipboard has both text and images (e.g. copy from Office docs),
+    // default to text paste so the user gets the text they copied, not a screenshot.
+    // Excludes text/uri-list which accompanies file copies from file managers.
+    const allFilesAreImages = pastedFiles.every(item => item.type && item.type.startsWith('image/'))
+    const hasText = Array.from(items).some(
+      item => item.kind === 'string' && item.type?.startsWith('text/') && item.type !== 'text/uri-list'
+    )
+    if (hasText && allFilesAreImages) return
     e.preventDefault()
     pastedFiles.forEach((item, idx) => {
       const file = item.getAsFile()
