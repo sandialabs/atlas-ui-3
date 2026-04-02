@@ -105,6 +105,18 @@ class ChatOrchestrator:
         except Exception:
             return False
 
+    def _model_supports_tools(self, model: str) -> bool:
+        """Return True if the named model is configured with supports_tools=True."""
+        if not self.config_manager:
+            return True  # Default to True for backward compat
+        try:
+            model_config = self.config_manager.llm_config.models.get(model)
+            if not model_config:
+                return True  # Unknown models default to tool-capable
+            return bool(getattr(model_config, "supports_tools", True))
+        except Exception:
+            return True
+
     async def execute(
         self,
         session_id: UUID,
@@ -183,6 +195,39 @@ class ChatOrchestrator:
             user_email=user_email,
             conversation_id=session.context.get("conversation_id", str(session_id)),
         )
+
+        # Strip tools and warn if the model does not support tool/function calling
+        if selected_tools and not self._model_supports_tools(model):
+            logger.warning(
+                "Model %s does not support tool calling; stripping %d selected tools",
+                model,
+                len(selected_tools),
+            )
+            await self.event_publisher.publish_chat_response(
+                message=(
+                    f"**Note:** The model `{model}` does not support tool/function calling. "
+                    "Your selected tools have been disabled for this request. "
+                    "Please switch to a tool-capable model to use tools."
+                ),
+                has_pending_tools=False,
+            )
+            selected_tools = None
+
+        # Block agent mode for non-tool models (agent mode requires tool calling)
+        if agent_mode and not self._model_supports_tools(model):
+            logger.warning(
+                "Model %s does not support tool calling; disabling agent mode",
+                model,
+            )
+            await self.event_publisher.publish_chat_response(
+                message=(
+                    f"**Note:** The model `{model}` does not support tool/function calling. "
+                    "Agent mode has been disabled for this request. "
+                    "Please switch to a tool-capable model to use agent mode."
+                ),
+                has_pending_tools=False,
+            )
+            agent_mode = False
 
         # Route to appropriate mode (always streaming)
         if agent_mode and self.agent_mode:

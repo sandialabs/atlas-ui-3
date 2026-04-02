@@ -116,7 +116,27 @@ async def handle_session_files(
 
                 # For vision-capable models, store raw image data so the message
                 # builder can embed it as an inline image content block.
+                # Warn the user if they uploaded an image but the model can't process it.
                 mime_type = meta.get("content_type", "")
+                if not model_supports_vision and mime_type in _VISION_IMAGE_MIME_TYPES:
+                    logger.info(
+                        "Image %s uploaded but model does not support vision; "
+                        "image will be listed in text manifest only",
+                        filename,
+                    )
+                    if update_callback:
+                        try:
+                            await update_callback({
+                                "type": "warning",
+                                "message": (
+                                    f"The current model does not support image/vision input. "
+                                    f"The image '{filename}' will be listed as a file reference "
+                                    f"but cannot be visually analyzed. Switch to a vision-capable "
+                                    f"model to use image analysis."
+                                ),
+                            })
+                        except Exception:
+                            pass  # best-effort warning
                 if model_supports_vision and mime_type in _VISION_IMAGE_MIME_TYPES:
                     b64_len = len(b64)
                     if b64_len > _MAX_VISION_IMAGE_B64_BYTES:

@@ -5,7 +5,7 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, EyeOff } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 import { useTheme } from '../contexts/ThemeContext'
 
@@ -232,10 +232,25 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                               : 'text-gray-200 hover:bg-gray-700'
                           }`}
                           disabled={isDisabled}
-                          title={isDisabled ? 'Configure your API key to use this model' : modelName}
+                          title={isDisabled ? 'Configure your API key to use this model' : `${modelName}${model.supports_vision ? ' | Vision' : ''}${model.supports_tools !== false ? ' | Tools' : ''}`}
                         >
                           <span className="truncate">{modelName}</span>
                           <span className="flex items-center gap-1 flex-shrink-0">
+                            {model.supports_vision && (
+                              <span className="text-green-400" title="Supports vision/image input">
+                                <Eye className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                            {model.supports_tools !== false && (
+                              <span className="text-blue-400" title="Supports tool/function calling">
+                                <Wrench className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                            {model.supports_tools === false && (
+                              <span className="text-gray-500" title="Does not support tool calling">
+                                <Wrench className="w-3.5 h-3.5" />
+                              </span>
+                            )}
                             {complianceEnabled && model.compliance_level && (
                               <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1">
                                 <Shield className="w-3 h-3" />

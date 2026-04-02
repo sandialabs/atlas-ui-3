@@ -89,6 +89,7 @@ async def get_config_shell(
             model_info["api_key_source"] = "globus"
             model_info["globus_scope"] = getattr(model_config, "globus_scope", None)
         model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
+        model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
         models_list.append(model_info)
 
     return {
@@ -341,6 +342,7 @@ async def get_config(
             else:
                 model_info["user_has_key"] = False
         model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
+        model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
         models_list.append(model_info)
 
     # Build tool approval settings - only include tools from authorized servers
