@@ -100,7 +100,8 @@ const AgentManagement = () => {
     setSelectedTemplate(template)
     setLaunchName('')
     setLaunchTask('')
-    setSelectedTools(template?.mcp_servers || [])
+    const templateTools = template?.mcp_servers || []
+    setSelectedTools(templateTools.filter(t => availableTools.some(at => at.server === t)))
     setLaunchModalOpen(true)
   }
 
@@ -123,7 +124,9 @@ const AgentManagement = () => {
           template_id: selectedTemplate.id,
           name: launchName || undefined,
           task: launchTask || undefined,
-          mcp_servers: selectedTools.length > 0 ? selectedTools : undefined,
+          mcp_servers: selectedTools.length > 0
+            ? selectedTools.filter(t => availableTools.some(at => at.server === t))
+            : undefined,
         }),
       })
       if (!resp.ok) {
