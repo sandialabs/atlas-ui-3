@@ -1,4 +1,0 @@
-# Optional dependencies for image_demo MCP server
-# The server has fallbacks if Pillow is not installed
-
-Pillow>=10.0.0

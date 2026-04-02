@@ -302,7 +302,7 @@ export default function LogViewer() {
         {/* Right side: Back button */}
         <button
           onClick={() => navigate('/admin')}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors text-sm font-semibold"
+          className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-gray-50 rounded-lg transition-colors text-sm font-semibold"
         >
           <ArrowLeft className="w-4 h-4" />
           Back to Admin Dashboard

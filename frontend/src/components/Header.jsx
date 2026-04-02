@@ -5,8 +5,9 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
+import { useTheme } from '../contexts/ThemeContext'
 
 // Save mode display config: label, icon component, button classes, title text
 const SAVE_MODE_CONFIG = {
@@ -57,6 +58,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   } = useChat()
   const { isComplianceAccessible, complianceLevels } = useMarketplace()
   const { connectionStatus, isConnected } = useWS()
+  const { theme, toggleTheme } = useTheme()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -294,7 +296,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         })()}
 
         {/* Desktop-only buttons (hidden on mobile, shown in hamburger menu) */}
-        <div className="hidden min-[1200px]:flex items-center gap-2">
+        <div className="hidden min-[1280px]:flex items-center gap-2">
           {/* User Info */}
           <div className="text-sm text-gray-300">
             {user}
@@ -393,6 +395,15 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
             </button>
           )}
 
+          {/* Theme Toggle */}
+          <button
+            onClick={toggleTheme}
+            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+
           {/* Settings Button */}
           <button
             onClick={onToggleSettings}
@@ -452,7 +463,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         {/* Hamburger Menu Button - Only visible on mobile/tablet */}
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="min-[1200px]:hidden p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+          className="min-[1280px]:hidden p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
           title="Menu"
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-menu"
@@ -467,12 +478,12 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         <>
           {/* Backdrop */}
           <div 
-            className="fixed inset-0 bg-black bg-opacity-50 z-40 min-[1200px]:hidden" 
+            className="fixed inset-0 bg-black bg-opacity-50 z-40 min-[1280px]:hidden" 
             onClick={() => setMobileMenuOpen(false)}
           />
           
           {/* Menu Panel */}
-          <div id="mobile-menu" className="fixed top-[57px] sm:top-[65px] right-0 w-64 bg-gray-800 border-l border-gray-700 shadow-lg z-50 min-[1200px]:hidden max-h-[calc(100vh-57px)] sm:max-h-[calc(100vh-65px)] overflow-y-auto">
+          <div id="mobile-menu" className="fixed top-[57px] sm:top-[65px] right-0 w-64 bg-gray-800 border-l border-gray-700 shadow-lg z-50 min-[1280px]:hidden max-h-[calc(100vh-57px)] sm:max-h-[calc(100vh-65px)] overflow-y-auto">
             <div className="p-4 space-y-2">
               {/* User Info */}
               <div className="px-3 py-2 text-sm text-gray-300 bg-gray-700 rounded-lg">
@@ -604,6 +615,18 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                   <span>Admin Dashboard</span>
                 </button>
               )}
+
+              {/* Theme Toggle */}
+              <button
+                onClick={() => {
+                  toggleTheme()
+                  setMobileMenuOpen(false)
+                }}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
+              >
+                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+              </button>
 
               {/* Settings Button */}
               <button

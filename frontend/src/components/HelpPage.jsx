@@ -57,7 +57,7 @@ const HelpPage = () => {
         <div className="grid md:grid-cols-2 gap-4">
           {section.cards.map((card, index) => (
             <div key={index} className="bg-gray-700 p-4 rounded-lg">
-              <h3 className="font-semibold text-white mb-2">{card.title}</h3>
+              <h3 className="font-semibold text-gray-50 mb-2">{card.title}</h3>
               <p className="text-sm">
                 {card.content}
                 {card.hasKeyboard && (
@@ -110,7 +110,7 @@ const HelpPage = () => {
       <div className="space-y-4">
         {section.tips.map((tip, index) => (
           <div key={index} className="bg-gray-700 p-4 rounded-lg">
-            <h3 className="font-semibold text-white mb-2">{tip.title}</h3>
+            <h3 className="font-semibold text-gray-50 mb-2">{tip.title}</h3>
             <p className="text-gray-300 text-sm">{tip.content}</p>
             {tip.shortcuts && (
               <div className="text-gray-300 text-sm space-y-1 mt-2">
@@ -146,7 +146,7 @@ const HelpPage = () => {
                   <div key={contentIndex} className="space-y-3">
                     {content.type === 'subsection' && (
                       <div>
-                        <h4 className="font-medium text-white">{content.title}</h4>
+                        <h4 className="font-medium text-gray-50">{content.title}</h4>
                         <ul className="text-sm text-gray-400 space-y-1 ml-4">
                           {content.bullets.map((bullet, bulletIndex) => (
                             <li key={bulletIndex}>
@@ -159,7 +159,7 @@ const HelpPage = () => {
                     
                     {content.type === 'code-example' && (
                       <div>
-                        <h4 className="font-medium text-white">{content.title}</h4>
+                        <h4 className="font-medium text-gray-50">{content.title}</h4>
                         <pre className="bg-gray-900 p-3 rounded text-xs text-gray-300 overflow-x-auto">
                           <code>{content.code}</code>
                         </pre>
@@ -178,7 +178,7 @@ const HelpPage = () => {
               </div>
             ) : subsection.type === 'resource-card' ? (
               <div className="bg-gray-700 p-4 rounded-lg">
-                <h3 className="font-semibold text-white mb-2">{subsection.title}</h3>
+                <h3 className="font-semibold text-gray-50 mb-2">{subsection.title}</h3>
                 <div className="text-sm text-gray-300 space-y-1">
                   {subsection.resources.map((resource, resourceIndex) => (
                     <p key={resourceIndex}>
@@ -211,7 +211,7 @@ const HelpPage = () => {
         <p>{section.description}</p>
         
         <div className="bg-gray-700 p-4 rounded-lg">
-          <h3 className="font-semibold text-white mb-2">Features</h3>
+          <h3 className="font-semibold text-gray-50 mb-2">Features</h3>
           <ul className="text-sm space-y-1">
             {section.features.map((feature, index) => (
               <li key={index}>• {feature}</li>
@@ -241,7 +241,7 @@ const HelpPage = () => {
         <div className="grid md:grid-cols-2 gap-4">
           {section.cards.map((card, index) => (
             <div key={index} className="bg-gray-700 p-4 rounded-lg">
-              <h3 className="font-semibold text-white mb-2">{card.title}</h3>
+              <h3 className="font-semibold text-gray-50 mb-2">{card.title}</h3>
               <p className="text-sm">
                 {card.content}
                 {card.code && <code className="bg-gray-600 px-1 rounded ml-1">{card.code}</code>}

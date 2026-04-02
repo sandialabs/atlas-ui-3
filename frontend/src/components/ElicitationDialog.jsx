@@ -111,7 +111,7 @@ const ElicitationDialog = ({ elicitation }) => {
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-700">
           <div>
-            <h2 className="text-xl font-semibold text-white">User Input Required</h2>
+            <h2 className="text-xl font-semibold text-gray-50">User Input Required</h2>
             <p className="text-sm text-gray-400 mt-1">Tool: {tool_name}</p>
           </div>
           <button
@@ -167,7 +167,7 @@ const ElicitationDialog = ({ elicitation }) => {
           </button>
           <button
             onClick={handleCancel}
-            className="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-white transition-colors flex items-center gap-2"
+            className="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-50 transition-colors flex items-center gap-2"
           >
             <X size={16} />
             Cancel
@@ -194,7 +194,7 @@ const FormField = ({ field, value, onChange }) => {
             <select
               value={value || ''}
               onChange={(e) => onChange(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
               required={required}
             >
               <option value="">Select an option...</option>
@@ -210,7 +210,7 @@ const FormField = ({ field, value, onChange }) => {
             type="text"
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder={description || `Enter ${name}`}
             required={required}
           />
@@ -223,7 +223,7 @@ const FormField = ({ field, value, onChange }) => {
             type="number"
             value={value === '' ? '' : (value ?? '')}
             onChange={(e) => onChange(e.target.value === '' ? '' : parseFloat(e.target.value))}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder={description || `Enter ${name}`}
             required={required}
             step={type === 'integer' ? '1' : 'any'}
@@ -250,7 +250,7 @@ const FormField = ({ field, value, onChange }) => {
           <select
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
             required={required}
           >
             <option value="">Select an option...</option>
@@ -266,7 +266,7 @@ const FormField = ({ field, value, onChange }) => {
             type="text"
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder={description || `Enter ${name}`}
             required={required}
           />
