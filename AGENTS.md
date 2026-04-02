@@ -307,8 +307,11 @@ See `test/pr-validation/README.md` for the full template.
 - **NEVER use `uvicorn --reload`** - causes development issues
 - **NEVER use `npm run dev`** - WebSocket connection problems
 - **ALWAYS use `npm run build`** for frontend
+- **ALWAYS use `bash agent_start.sh`** to start the application for development and testing
 - **NEVER use pip** - this project requires `uv`
 - **NEVER CANCEL builds or tests** - they must complete
+- **NEVER modify files in `atlas/config/`** unless explicitly asked by the user - these are package defaults
+- **ALWAYS use `config/` (project root)** for test configurations and local overrides - create/modify files there instead of `atlas/config/`
 
 ## Docker
 
