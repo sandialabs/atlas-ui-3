@@ -125,8 +125,10 @@ async def _get_user_roles(user_email: str, request: Optional[Request] = None) ->
         roles.append("operator")
     if await is_user_in_group(user_email, "users"):
         roles.append("user")
+    # Authenticated users without explicit group membership get "user" baseline
+    # (they passed login — they're not anonymous viewers)
     if not roles:
-        roles.append("viewer")
+        roles.append("user")
     return roles
 
 
