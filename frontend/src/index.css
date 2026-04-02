@@ -35,6 +35,36 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme CSS variables — RGB triplets so Tailwind opacity modifiers work */
+:root,
+[data-theme="dark"] {
+  --gray-50: 249 250 251;
+  --gray-100: 243 244 246;
+  --gray-200: 229 231 235;
+  --gray-300: 209 213 219;
+  --gray-400: 156 163 175;
+  --gray-500: 107 114 128;
+  --gray-600: 75 85 99;
+  --gray-700: 55 65 81;
+  --gray-800: 31 41 55;
+  --gray-900: 17 24 39;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --gray-50: 17 24 39;
+  --gray-100: 31 41 55;
+  --gray-200: 55 65 81;
+  --gray-300: 75 85 99;
+  --gray-400: 107 114 128;
+  --gray-500: 156 163 175;
+  --gray-600: 209 213 219;
+  --gray-700: 229 231 235;
+  --gray-800: 243 244 246;
+  --gray-900: 255 255 255;
+  color-scheme: light;
+}
+
 @layer base {
   * {
     margin: 0;
@@ -48,8 +78,8 @@
 
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-    background-color: #111827;
-    color: #e5e7eb;
+    background-color: rgb(var(--gray-900));
+    color: rgb(var(--gray-200));
     line-height: 1.6;
     height: 100%;
     overflow: hidden;
@@ -83,7 +113,7 @@
 
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: #4b5563 #1f2937;
+    scrollbar-color: rgb(var(--gray-600)) rgb(var(--gray-800));
   }
 
   /* Hidden scrollbar - still scrollable but no visible scrollbar */
@@ -103,7 +133,7 @@
     border-collapse: collapse !important;
     border-width: 1px !important;
     border-style: solid !important;
-    border-color: #6b7280 !important;
+    border-color: rgb(var(--gray-500)) !important;
   }
 
   .prose th,
@@ -115,7 +145,7 @@
   th, td {
     border-width: 1px !important;
     border-style: solid !important;
-    border-color: #6b7280 !important;
+    border-color: rgb(var(--gray-500)) !important;
     padding: 0.5rem !important;
   }
 
@@ -363,6 +393,67 @@
   .hljs-subst {
     @apply text-gray-200;
   }
+}
+
+/* Light mode: fix prose-invert typography colors for light backgrounds */
+[data-theme="light"] .prose-invert {
+  --tw-prose-invert-body: rgb(var(--gray-300));
+  --tw-prose-invert-headings: rgb(var(--gray-100));
+  --tw-prose-invert-links: #2563eb;
+  --tw-prose-invert-bold: rgb(var(--gray-100));
+  --tw-prose-invert-counters: rgb(var(--gray-400));
+  --tw-prose-invert-bullets: rgb(var(--gray-500));
+  --tw-prose-invert-hr: rgb(var(--gray-600));
+  --tw-prose-invert-quotes: rgb(var(--gray-200));
+  --tw-prose-invert-quote-borders: rgb(var(--gray-600));
+  --tw-prose-invert-captions: rgb(var(--gray-400));
+  --tw-prose-invert-code: rgb(var(--gray-100));
+  --tw-prose-invert-pre-code: rgb(var(--gray-200));
+  --tw-prose-invert-pre-bg: rgb(var(--gray-800));
+  --tw-prose-invert-th-borders: rgb(var(--gray-500));
+  --tw-prose-invert-td-borders: rgb(var(--gray-600));
+}
+
+/* Light mode: boost accent colors for better contrast on white backgrounds */
+[data-theme="light"] .hljs-keyword,
+[data-theme="light"] .hljs-selector-tag,
+[data-theme="light"] .hljs-literal,
+[data-theme="light"] .hljs-title,
+[data-theme="light"] .hljs-section,
+[data-theme="light"] .hljs-doctag,
+[data-theme="light"] .hljs-type,
+[data-theme="light"] .hljs-name,
+[data-theme="light"] .hljs-strong {
+  color: #2563eb; /* blue-600 */
+}
+
+[data-theme="light"] .hljs-string,
+[data-theme="light"] .hljs-title.class_,
+[data-theme="light"] .hljs-title.class_.inherited__,
+[data-theme="light"] .hljs-title.function_,
+[data-theme="light"] .hljs-attr,
+[data-theme="light"] .hljs-symbol,
+[data-theme="light"] .hljs-bullet,
+[data-theme="light"] .hljs-link,
+[data-theme="light"] .hljs-emphasis,
+[data-theme="light"] .hljs-quote {
+  color: #16a34a; /* green-600 */
+}
+
+[data-theme="light"] .hljs-number,
+[data-theme="light"] .hljs-regexp,
+[data-theme="light"] .hljs-variable,
+[data-theme="light"] .hljs-template-variable {
+  color: #ca8a04; /* yellow-600 */
+}
+
+/* Light mode: adjust link colors for better contrast */
+[data-theme="light"] .message-content a {
+  color: #2563eb; /* blue-600 */
+}
+
+[data-theme="light"] .message-content a:hover {
+  color: #1d4ed8; /* blue-700 */
 }
 
 /* Print styles for chat export (#150) */
