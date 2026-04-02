@@ -10,6 +10,19 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+def _to_dt(val) -> Optional[datetime]:
+    """Coerce a value to a datetime for asyncpg TIMESTAMPTZ columns."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val)
+        except (ValueError, TypeError):
+            return None
+    return None
+
 logger = logging.getLogger(__name__)
 
 # Reuse the Prefect Postgres connection
@@ -117,11 +130,11 @@ class AgentStore:
                     agent.get("max_steps", 10),
                     agent.get("loop_strategy", "think-act"),
                     agent.get("sandbox_policy", "restrictive"),
-                    agent.get("created_at", datetime.now(timezone.utc).isoformat()),
-                    agent.get("started_at"),
-                    agent.get("stopped_at"),
+                    _to_dt(agent.get("created_at")) or datetime.now(timezone.utc),
+                    _to_dt(agent.get("started_at")),
+                    _to_dt(agent.get("stopped_at")),
                     agent.get("stopped_by"),
-                    agent.get("last_activity", datetime.now(timezone.utc).isoformat()),
+                    _to_dt(agent.get("last_activity")) or datetime.now(timezone.utc),
                     agent.get("steps_completed", 0),
                     json.dumps(agent.get("prefect")) if agent.get("prefect") else None,
                     agent.get("has_token", False),

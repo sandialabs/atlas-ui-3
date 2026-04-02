@@ -67,6 +67,33 @@ AGENT_TEMPLATES = {
         "sandbox_policy": "hpc",
         "template_approved": True,
     },
+    "design-agent": {
+        "name": "Design Agent",
+        "description": "Assists with CAD review, design rule checks, tolerance analysis, and design optimization using engineering tools",
+        "mcp_servers": ["filesystem", "code-executor"],
+        "max_steps": 20,
+        "loop_strategy": "react",
+        "sandbox_policy": "standard",
+        "template_approved": True,
+    },
+    "manufacturing-analysis": {
+        "name": "Manufacturing Analysis Agent",
+        "description": "Analyzes manufacturing process data, identifies bottlenecks, evaluates yield metrics, and recommends process improvements",
+        "mcp_servers": ["csv_reporter", "basictable"],
+        "max_steps": 25,
+        "loop_strategy": "react",
+        "sandbox_policy": "standard",
+        "template_approved": True,
+    },
+    "quality-report": {
+        "name": "Manufacturing Quality Report Generation Agent",
+        "description": "Generates quality inspection reports from sensor data, defect logs, and SPC charts with compliance summaries",
+        "mcp_servers": ["pdfbasic", "csv_reporter"],
+        "max_steps": 30,
+        "loop_strategy": "agentic",
+        "sandbox_policy": "standard",
+        "template_approved": True,
+    },
     "custom": {
         "name": "Custom Agent",
         "description": "User-defined agent with custom tool selection and configuration",
@@ -87,6 +114,7 @@ class AgentLaunchRequest(BaseModel):
     """Request to launch a new persistent agent."""
     template_id: str = Field(..., description="Agent template to use")
     name: Optional[str] = Field(None, description="Custom name for this agent instance")
+    task: Optional[str] = Field(None, description="Task instructions for the agent")
     mcp_servers: Optional[List[str]] = Field(None, description="Override MCP servers (custom template only)")
     max_steps: Optional[int] = Field(None, ge=1, le=100, description="Max agent loop iterations")
     loop_strategy: Optional[str] = Field(None, description="Agent loop strategy override")
@@ -218,17 +246,22 @@ async def launch_agent(
             detail="You do not have permission to launch this agent type",
         )
 
-    # Validate MCP servers if custom
+    # Resolve MCP servers: use explicitly requested ones, or template defaults
     mcp_servers = launch_request.mcp_servers or template["mcp_servers"]
     if mcp_servers:
         mcp_manager = app_factory.get_mcp_manager()
         authorized = await mcp_manager.get_authorized_servers(current_user, is_user_in_group)
-        unauthorized = [s for s in mcp_servers if s not in authorized]
-        if unauthorized:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Not authorized for MCP servers: {unauthorized}",
-            )
+        if authorized:
+            # Block only if user explicitly requests servers they lack access to
+            if launch_request.mcp_servers:
+                unauthorized = [s for s in mcp_servers if s not in authorized]
+                if unauthorized:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Not authorized for MCP servers: {unauthorized}",
+                    )
+            # Filter to only actually-available servers
+            mcp_servers = [s for s in mcp_servers if s in authorized]
 
     # Create agent instance
     agent_id = str(uuid.uuid4())[:12]
@@ -239,7 +272,7 @@ async def launch_agent(
         "name": launch_request.name or f"{template['name']} ({agent_id})",
         "description": template["description"],
         "owner": current_user,
-        "status": "running",
+        "status": "queued",
         "mcp_servers": mcp_servers,
         "max_steps": launch_request.max_steps or template["max_steps"],
         "loop_strategy": launch_request.loop_strategy or template["loop_strategy"],
@@ -248,8 +281,12 @@ async def launch_agent(
         "started_at": now,
         "last_activity": now,
         "steps_completed": 0,
+        "task": launch_request.task or "",
         "actions_log": [],
-        "environment": launch_request.environment or {},
+        "environment": {
+            **(launch_request.environment or {}),
+            "task": launch_request.task or "Await instructions.",
+        },
     }
 
     # Launch as a Prefect flow run
@@ -290,6 +327,25 @@ async def launch_agent(
         "message": f"Agent '{agent_record['name']}' launched",
         "agent": agent_record,
     }
+
+
+@agent_router.get("/tools")
+async def list_available_tools(
+    request: Request,
+    current_user: str = Depends(get_current_user),
+):
+    """List MCP tools the current user is authorized to assign to agents."""
+    mcp_manager = app_factory.get_mcp_manager()
+    authorized = await mcp_manager.get_authorized_servers(current_user, is_user_in_group)
+
+    tools = []
+    for server_name in authorized:
+        tools.append({
+            "server": server_name,
+            "authorized": True,
+        })
+
+    return {"tools": tools}
 
 
 @agent_router.get("/")
