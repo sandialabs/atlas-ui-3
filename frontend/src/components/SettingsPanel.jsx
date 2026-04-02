@@ -140,7 +140,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
           {/* LLM Temperature Setting */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-white font-medium">LLM Temperature</label>
+              <label className="text-gray-50 font-medium">LLM Temperature</label>
               <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
                 {settings.llmTemperature}
               </span>
@@ -170,7 +170,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
           {/* Max Iterations Setting */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-white font-medium">Max Agent Iterations</label>
+              <label className="text-gray-50 font-medium">Max Agent Iterations</label>
               <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
                 {settings.maxIterations}
               </span>
@@ -200,7 +200,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
           {/* Agent Loop Strategy Setting */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-white font-medium">Agent Loop Strategy</label>
+              <label className="text-gray-50 font-medium">Agent Loop Strategy</label>
               <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
                 {settings.agentLoopStrategy === 'agentic' ? 'Agentic' : settings.agentLoopStrategy === 'react' ? 'ReAct' : settings.agentLoopStrategy === 'act' ? 'Act' : 'Think-Act'}
               </span>
@@ -209,7 +209,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
               <select
                 value={settings.agentLoopStrategy}
                 onChange={(e) => handleSettingChange('agentLoopStrategy', e.target.value)}
-                className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                className="w-full px-3 py-2 bg-gray-700 text-gray-50 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
               >
                 <option value="agentic">Agentic (Recommended)</option>
                 <option value="think-act">Think-Act</option>
@@ -238,7 +238,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
           {/* Auto-Approve Tools Setting (always in sync via context) */}
           <div className="bg-gray-700 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-white font-medium">Auto-Approve Tool Calls</label>
+              <label className="text-gray-50 font-medium">Auto-Approve Tool Calls</label>
               <button
                 onClick={() => updateCtxSettings({ autoApproveTools: !ctxSettings?.autoApproveTools })}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
@@ -266,7 +266,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
           {/* Debug Mode Setting */}
           <div className="bg-gray-700 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-white font-medium">Debug Mode</label>
+              <label className="text-gray-50 font-medium">Debug Mode</label>
               <button
                 onClick={() => {
                   const newVal = !settings.debugMode
@@ -294,7 +294,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
           {features?.globus_auth && (
             <div className="bg-gray-700 rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
-                <label className="text-white font-medium">Globus Authentication</label>
+                <label className="text-gray-50 font-medium">Globus Authentication</label>
                 <div className="flex items-center gap-2">
                   {globusAuthenticated ? (
                     <span className="flex items-center gap-1 text-sm text-green-400">

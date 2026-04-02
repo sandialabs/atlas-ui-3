@@ -534,7 +534,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
           {/* Required Tool Usage Toggle */}
           <div className="flex items-center justify-between px-4 py-2 bg-gray-700 rounded-lg">
             <div>
-              <h3 className="text-white text-sm font-medium">Required Tool Usage</h3>
+              <h3 className="text-gray-50 text-sm font-medium">Required Tool Usage</h3>
               <p className="text-xs text-gray-400">Model must use selected tools to respond</p>
             </div>
             <button
@@ -569,7 +569,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
             <>
               {/* Section Header */}
               <div className="px-4 py-2 border-b border-gray-700">
-                <h3 className="text-sm font-semibold text-white">
+                <h3 className="text-sm font-semibold text-gray-50">
                   Your Installed Tools, Integrations, and Prompts ({serverList.reduce((total, server) => total + server.tool_count + server.prompt_count, 0)})
                 </h3>
               </div>
@@ -626,7 +626,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                           {/* Server Content */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <h3 className="text-white font-medium text-base capitalize truncate">
+                              <h3 className="text-gray-50 font-medium text-base capitalize truncate">
                                 {server.server}
                               </h3>
                               <span className="text-xs text-gray-400 flex-shrink-0">
@@ -745,8 +745,8 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                 {server.tools.length > 0 && (
                                   <div className="mb-4">
                                     <div className="flex items-center gap-1 mb-1">
-                                      <Wrench className="w-3 h-3 text-white" />
-                                      <span className="text-sm font-bold text-white">Tools</span>
+                                      <Wrench className="w-3 h-3 text-gray-50" />
+                                      <span className="text-sm font-bold text-gray-50">Tools</span>
                                     </div>
                                     <div className="flex flex-wrap gap-1">
                 {server.tools.map(tool => {
@@ -764,7 +764,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
             // Toggle ONLY this specific tool
             toggleTool(toolKey)
                                             }}
-                                            className={`px-2 py-0.5 text-xs rounded text-white transition-colors hover:opacity-80 ${
+                                            className={`px-2 py-0.5 text-xs rounded text-gray-50 transition-colors hover:opacity-80 ${
                                               isSelected ? 'bg-green-600' : 'bg-gray-600 hover:bg-green-600'
                                             }`}
                                             title={`Click to ${isSelected ? 'disable' : 'enable'} ${tool}`}
@@ -811,8 +811,8 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                             {server.prompts.length > 0 && (
                               <div className="mb-2">
                                 <div className="flex items-center gap-1 mb-1">
-                                  <Sparkles className="w-3 h-3 text-white" />
-                                  <span className="text-sm font-bold text-white">Prompts</span>
+                                  <Sparkles className="w-3 h-3 text-gray-50" />
+                                  <span className="text-sm font-bold text-gray-50">Prompts</span>
                                 </div>
                                 <div className="flex flex-wrap gap-1">
                                   {server.prompts.map(prompt => {
@@ -825,7 +825,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
                                         <div className="flex items-center gap-1">
                                           <button
                                             onClick={() => togglePrompt(promptKey)}
-                                            className={`px-2 py-0.5 text-xs rounded text-white transition-colors hover:opacity-80 ${
+                                            className={`px-2 py-0.5 text-xs rounded text-gray-50 transition-colors hover:opacity-80 ${
                                               isSelected ? 'bg-green-600' : 'bg-gray-600 hover:bg-green-600'
                                             }`}
                                             title={`Click to ${isSelected ? 'disable' : 'enable'} ${prompt.name}`}

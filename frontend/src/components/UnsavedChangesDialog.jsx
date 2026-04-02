@@ -20,7 +20,7 @@ const UnsavedChangesDialog = ({ isOpen, onSave, onDiscard, onCancel }) => {
           <div className="p-2 bg-orange-600 rounded-full">
             <AlertTriangle className="w-5 h-5 text-white" />
           </div>
-          <h3 className="text-lg font-semibold text-white">Unsaved Changes</h3>
+          <h3 className="text-lg font-semibold text-gray-50">Unsaved Changes</h3>
         </div>
 
         {/* Content */}
