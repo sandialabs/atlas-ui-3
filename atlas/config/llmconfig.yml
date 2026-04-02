@@ -166,15 +166,15 @@ models:
     max_tokens: 8192
     compliance_level: "External"
     supports_vision: true
-    supports_tools: true
+    supports_tools: false
     model_card: >
       Llama 4 Scout 17B is Meta's efficient multimodal model with 17B active
       parameters and 16 expert modules (mixture-of-experts). It supports vision
-      (image input) and tool/function calling. Running on Groq's LPU hardware
-      for extremely fast inference. It handles text and image understanding with
-      a 512K token context window. Open-weight model under Meta's community
-      license. Best for: fast multimodal chat, image understanding, and
-      lightweight tool use.
+      (image input) but does NOT support tool/function calling. Running on
+      Groq's LPU hardware for extremely fast inference. It handles text and
+      image understanding with a 512K token context window. Open-weight model
+      under Meta's community license. Best for: fast multimodal chat, image
+      understanding, and visual question answering.
   mock-model:
     model_url: "http://127.0.0.1:8002/v1"
     model_name: "openai/mock-model"
