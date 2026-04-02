@@ -635,6 +635,10 @@ const ChatArea = ({ onOpenRagPanel }) => {
     if (!items) return
     const pastedFiles = Array.from(items).filter(item => item.kind === 'file')
     if (pastedFiles.length === 0) return
+    // When clipboard has both text and image (e.g. copy from Office docs),
+    // default to text paste. Hold Shift (Ctrl+Shift+V) to paste as image.
+    const hasText = Array.from(items).some(item => item.kind === 'string' && item.type.startsWith('text/'))
+    if (hasText && !e.shiftKey) return
     e.preventDefault()
     pastedFiles.forEach((item, idx) => {
       const file = item.getAsFile()
