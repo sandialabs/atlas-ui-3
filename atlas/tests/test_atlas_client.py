@@ -124,6 +124,34 @@ class TestCLIEventPublisher:
         # quiet mode: no stderr output for tool status
         assert "some_tool" not in captured.err
 
+    @pytest.mark.asyncio
+    async def test_publish_warning_records_event(self, publisher):
+        """publish_warning must record warning in raw_events."""
+        await publisher.publish_warning("Model X does not support tools")
+        events = publisher.get_result().raw_events
+        assert len(events) == 1
+        assert events[0]["type"] == "warning"
+        assert "Model X" in events[0]["message"]
+
+    @pytest.mark.asyncio
+    async def test_publish_warning_streams_to_stderr(self, capsys):
+        """publish_warning in streaming mode prints to stderr."""
+        pub = CLIEventPublisher(streaming=True)
+        await pub.publish_warning("tools disabled")
+        captured = capsys.readouterr()
+        assert "[warning]" in captured.err
+        assert "tools disabled" in captured.err
+
+    @pytest.mark.asyncio
+    async def test_publish_warning_quiet_suppresses(self, capsys):
+        """publish_warning in quiet+streaming mode should not print to stderr."""
+        pub = CLIEventPublisher(streaming=True, quiet=True)
+        await pub.publish_warning("tools disabled")
+        captured = capsys.readouterr()
+        assert "tools disabled" not in captured.err
+        # But still recorded in raw_events
+        assert len(pub.get_result().raw_events) == 1
+
 
 # ---------------------------------------------------------------------------
 # CLI arg parsing tests

@@ -14,6 +14,18 @@ class EventPublisher(Protocol):
     and keep the application layer decoupled from atlas.infrastructure concerns.
     """
 
+    async def publish_warning(
+        self,
+        message: str,
+    ) -> None:
+        """
+        Publish a warning message to the client.
+
+        Args:
+            message: Warning text to display
+        """
+        ...
+
     async def publish_chat_response(
         self,
         message: str,
