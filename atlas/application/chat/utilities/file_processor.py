@@ -6,10 +6,13 @@ chat sessions, including user uploads and tool-generated artifacts.
 """
 
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.core.capabilities import create_download_url
 from atlas.modules.file_storage.content_extractor import get_content_extractor
+
+if TYPE_CHECKING:
+    from atlas.interfaces.events import EventPublisher
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ async def handle_session_files(
     file_manager,
     update_callback: Optional[UpdateCallback] = None,
     model_supports_vision: bool = False,
+    event_publisher: Optional["EventPublisher"] = None,
 ) -> Dict[str, Any]:
     """
     Handle user file ingestion and return updated session context.
@@ -124,19 +128,22 @@ async def handle_session_files(
                         "image will be listed in text manifest only",
                         filename,
                     )
-                    if update_callback:
+                    warning_msg = (
+                        f"The current model does not support image/vision input. "
+                        f"The image '{filename}' will be listed as a file reference "
+                        f"but cannot be visually analyzed. Switch to a vision-capable "
+                        f"model to use image analysis."
+                    )
+                    if event_publisher:
                         try:
-                            await update_callback({
-                                "type": "warning",
-                                "message": (
-                                    f"The current model does not support image/vision input. "
-                                    f"The image '{filename}' will be listed as a file reference "
-                                    f"but cannot be visually analyzed. Switch to a vision-capable "
-                                    f"model to use image analysis."
-                                ),
-                            })
+                            await event_publisher.publish_warning(message=warning_msg)
                         except Exception:
-                            pass  # best-effort warning
+                            logger.exception("Failed to send vision capability warning")
+                    elif update_callback:
+                        try:
+                            await update_callback({"type": "warning", "message": warning_msg})
+                        except Exception:
+                            logger.exception("Failed to send vision capability warning")
                 if model_supports_vision and mime_type in _VISION_IMAGE_MIME_TYPES:
                     b64_len = len(b64)
                     if b64_len > _MAX_VISION_IMAGE_B64_BYTES:

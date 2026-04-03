@@ -179,6 +179,7 @@ class ChatOrchestrator:
             file_manager=self.file_manager,
             update_callback=update_callback,
             model_supports_vision=model_supports_vision,
+            event_publisher=self.event_publisher,
         )
 
         # Build messages with history and files manifest
@@ -196,36 +197,32 @@ class ChatOrchestrator:
             conversation_id=session.context.get("conversation_id", str(session_id)),
         )
 
-        # Strip tools and warn if the model does not support tool/function calling
-        if selected_tools and not self._model_supports_tools(model):
-            logger.warning(
-                "Model %s does not support tool calling; stripping %d selected tools",
-                model,
-                len(selected_tools),
-            )
-            await self.event_publisher.publish_warning(
-                message=(
-                    f"**Note:** The model `{model}` does not support tool/function calling. "
-                    "Your selected tools have been disabled for this request. "
-                    "Please switch to a tool-capable model to use tools."
-                ),
-            )
-            selected_tools = None
-
-        # Block agent mode for non-tool models (agent mode requires tool calling)
-        if agent_mode and not self._model_supports_tools(model):
-            logger.warning(
-                "Model %s does not support tool calling; disabling agent mode",
-                model,
-            )
-            await self.event_publisher.publish_warning(
-                message=(
-                    f"**Note:** The model `{model}` does not support tool/function calling. "
-                    "Agent mode has been disabled for this request. "
-                    "Please switch to a tool-capable model to use agent mode."
-                ),
-            )
-            agent_mode = False
+        # Strip tools / agent mode and warn if the model does not support tool/function calling
+        if not self._model_supports_tools(model):
+            warnings = []
+            if selected_tools:
+                logger.warning(
+                    "Model %s does not support tool calling; stripping %d selected tools",
+                    model,
+                    len(selected_tools),
+                )
+                warnings.append("Your selected tools have been disabled for this request.")
+                selected_tools = None
+            if agent_mode:
+                logger.warning(
+                    "Model %s does not support tool calling; disabling agent mode",
+                    model,
+                )
+                warnings.append("Agent mode has been disabled for this request.")
+                agent_mode = False
+            if warnings:
+                await self.event_publisher.publish_warning(
+                    message=(
+                        f"**Note:** The model `{model}` does not support tool/function calling. "
+                        + " ".join(warnings)
+                        + " Please switch to a tool-capable model."
+                    ),
+                )
 
         # Route to appropriate mode (always streaming)
         if agent_mode and self.agent_mode:

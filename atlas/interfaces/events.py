@@ -24,7 +24,7 @@ class EventPublisher(Protocol):
         Args:
             message: Warning text to display
         """
-        pass
+        ...
 
     async def publish_chat_response(
         self,
