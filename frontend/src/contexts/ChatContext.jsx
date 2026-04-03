@@ -308,7 +308,14 @@ export const ChatProvider = ({ children }) => {
 
 	const sendChatMessage = useCallback((content, extraFiles = {}, forceRag = false) => {
 		if (!content.trim() || !currentModel) return
-		if (!isConnected) return
+		if (!isConnected) {
+			addMessage({
+				role: 'system',
+				content: 'Unable to send message: not connected to the server. Please wait for the connection to be restored and try again.',
+				timestamp: new Date().toISOString(),
+			})
+			return
+		}
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		setFollowUpSuggestions([])
 		addMessage({ role: 'user', content, timestamp: new Date().toISOString() })
