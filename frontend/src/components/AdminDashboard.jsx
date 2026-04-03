@@ -237,6 +237,7 @@ const AdminDashboard = () => {
         const messages = content.split('\n').map(line => line.trim()).filter(line => line)
         payload = { messages }
       } else if (currentEndpoint === 'help-config') {
+        // help-config uses PUT to replace the full markdown document
         payload = { content }
         method = 'PUT'
       } else {

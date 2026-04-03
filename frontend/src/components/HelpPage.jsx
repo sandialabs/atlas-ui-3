@@ -33,7 +33,8 @@ const HelpPage = () => {
     try {
       const html = marked.parse(content)
       return DOMPurify.sanitize(html)
-    } catch {
+    } catch (err) {
+      console.error('Error rendering help content:', err)
       return ''
     }
   }
