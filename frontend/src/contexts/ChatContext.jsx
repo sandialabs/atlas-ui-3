@@ -86,7 +86,7 @@ export const ChatProvider = ({ children }) => {
 		})
 	}, [mapMessages])
 
-		const { sendMessage, addMessageHandler } = useWS()
+		const { sendMessage, addMessageHandler, isConnected } = useWS()
 	const { currentModel } = config
 	const { selectedTools, selectedPrompts, activePrompts, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
 
@@ -308,6 +308,7 @@ export const ChatProvider = ({ children }) => {
 
 	const sendChatMessage = useCallback((content, extraFiles = {}, forceRag = false) => {
 		if (!content.trim() || !currentModel) return
+		if (!isConnected) return
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		setFollowUpSuggestions([])
 		addMessage({ role: 'user', content, timestamp: new Date().toISOString() })
@@ -326,7 +327,7 @@ export const ChatProvider = ({ children }) => {
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []
 
-		sendMessage({
+		const sent = sendMessage({
 			type: 'chat',
 			content,
 			model: currentModel,
@@ -346,7 +347,18 @@ export const ChatProvider = ({ children }) => {
 			incognito: saveMode !== 'server',
 			conversation_id: activeConversationId || undefined,
 		})
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId])
+
+		if (!sent) {
+			// Roll back the optimistic UI update: remove the user message and reset thinking state
+			mapMessages(msgs => msgs.slice(0, -1))
+			setIsThinking(false)
+			addMessage({
+				role: 'system',
+				content: 'Unable to send message: not connected to the server. Please wait for the connection to be restored and try again.',
+				timestamp: new Date().toISOString(),
+			})
+		}
+	}, [addMessage, mapMessages, currentModel, isConnected, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId])
 
 	const clearChat = useCallback(() => {
 		resetMessages()

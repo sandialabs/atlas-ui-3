@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #494 - 2026-04-03
+- **Fix**: Chat send is now blocked when the WebSocket is disconnected. `sendChatMessage` in `ChatContext` guards against disconnected state before adding the user message optimistically, and rolls back the UI if `sendMessage` fails due to a race condition (e.g., disconnect during async file processing).
+
 ### PR #475 - 2026-03-25
 - **Feature**: Add `strict_role_ordering` config flag to `ModelConfig` for Mistral/Devstral models served via vLLM. When enabled, post-tool `system` messages are converted to `user` role and a bridging `assistant` message is inserted so the role sequence satisfies Mistral's strict ordering constraint.
 - **Fix**: All LLM call paths (plain, tool-calling, streaming) now use a unified `_prepare_messages()` pipeline that chains existing sanitization with the new role enforcement.
