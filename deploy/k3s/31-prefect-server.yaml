@@ -33,6 +33,8 @@ spec:
               value: "/prefect"
             - name: PREFECT_API_URL
               value: "http://prefect-server:4200/api"
+            - name: PREFECT_UI_API_URL
+              value: "/prefect/api"
           readinessProbe:
             httpGet:
               path: /api/health

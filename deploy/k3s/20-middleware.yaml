@@ -24,6 +24,17 @@ spec:
     authResponseHeaders:
       - X-User-Email
 ---
+# Strip /prefect prefix before forwarding to Prefect server
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-prefect-prefix
+  namespace: atlas
+spec:
+  stripPrefix:
+    prefixes:
+      - /prefect
+---
 # Chain: strip header first, then forward-auth.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
