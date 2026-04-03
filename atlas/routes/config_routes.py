@@ -262,9 +262,8 @@ async def get_config(
                         'compliance_level': server_config.get('compliance_level')
                     })
 
-    # Read help page configuration (supports new config directory layout + legacy paths)
-    help_config = {}
-    import json
+    # Read help page content from a markdown file
+    help_content = ""
     help_config_filename = config_manager.app_settings.help_config_file
     help_paths = []
     try:
@@ -292,17 +291,15 @@ async def get_config(
                 break
         if found_path:
             with open(found_path, "r", encoding="utf-8") as f:
-                help_config = json.load(f)
-            logger.info(f"Loaded help config from {found_path}")
+                help_content = f.read()
+            logger.info(f"Loaded help content from {found_path}")
         else:
             logger.warning(
-                "Help config not found in any of these locations: %s",
+                "Help content file not found in any of these locations: %s",
                 [str(p) for p in help_paths]
             )
-            help_config = {"title": "Help & Documentation", "sections": []}
     except Exception as e:
-        logger.warning(f"Error loading help config: {e}")
-        help_config = {"title": "Help & Documentation", "sections": []}
+        logger.warning(f"Error loading help content: {e}")
 
     # Keep INFO logging concise; server lists can be very long.
     logger.info(
@@ -386,7 +383,7 @@ async def get_config(
         "authorized_servers": authorized_servers,  # Optional: expose for debugging
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
-        "help_config": help_config,  # Help page configuration from help-config.json
+        "help_content": help_content,  # Help page content from help.md
         "tool_approvals": {
             "require_approval_by_default": tool_approvals_config.require_approval_by_default,
             "tools": filtered_tool_approvals

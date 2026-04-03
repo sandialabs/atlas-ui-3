@@ -118,13 +118,13 @@ const AdminDashboard = () => {
       
       setCurrentEndpoint('help-config')
       
-      openModal('Edit Help Configuration', {
+      openModal('Edit Help Content', {
         type: 'textarea',
         value: data.content,
-        description: 'Configure help documentation structure and content.'
+        description: 'Edit help documentation in Markdown format.'
       }, 'help-config')
     } catch (err) {
-      addNotification('Error loading help configuration: ' + err.message, 'error')
+      addNotification('Error loading help content: ' + err.message, 'error')
     }
   }
 
@@ -232,9 +232,13 @@ const AdminDashboard = () => {
     
     try {
       let payload
+      let method = 'POST'
       if (currentEndpoint === 'banners') {
         const messages = content.split('\n').map(line => line.trim()).filter(line => line)
         payload = { messages }
+      } else if (currentEndpoint === 'help-config') {
+        payload = { content }
+        method = 'PUT'
       } else {
         const fileType = currentEndpoint.includes('json') ? 'json' : 
                        currentEndpoint.includes('yml') || currentEndpoint.includes('yaml') ? 'yaml' : 'text'
@@ -242,7 +246,7 @@ const AdminDashboard = () => {
       }
       
       const response = await fetch(`/admin/${currentEndpoint}`, {
-        method: 'POST',
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
