@@ -244,3 +244,101 @@ class TestAgentModeBlocking:
         event_pub.publish_warning.assert_not_awaited()
         # Should route to agent mode
         orch.agent_mode.run.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_tools_and_agent_mode_combined_single_warning(self):
+        """When both tools and agent mode are used with a non-tool model,
+        only one publish_warning call should be made containing both messages."""
+        cm = _make_config_manager({
+            "no-tools": ModelConfig(model_name="no-tools", model_url="http://x", supports_tools=False),
+        })
+        orch, repo, event_pub = _make_orchestrator(config_manager=cm)
+        orch.tool_authorization = MagicMock()
+        orch.tool_authorization.filter_authorized_tools = AsyncMock(return_value=[])
+        sid = await _seed_session(repo)
+
+        await orch.execute(
+            session_id=sid,
+            content="do it all",
+            model="no-tools",
+            selected_tools=["some_tool"],
+            agent_mode=True,
+        )
+
+        # Exactly one warning covering both tools and agent mode
+        event_pub.publish_warning.assert_awaited_once()
+        msg = event_pub.publish_warning.call_args.kwargs["message"]
+        assert "tools have been disabled" in msg
+        assert "Agent mode has been disabled" in msg
+
+        # Should fall back to plain mode
+        orch.plain_mode.run_streaming.assert_awaited_once()
+        orch.agent_mode.run.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# File processor vision warning via event_publisher tests
+# ---------------------------------------------------------------------------
+
+class TestFileProcessorVisionWarning:
+    @pytest.mark.asyncio
+    async def test_vision_warning_uses_publish_warning(self):
+        """file_processor should route vision warnings through event_publisher.publish_warning."""
+        from atlas.application.chat.utilities.file_processor import handle_session_files
+
+        event_pub = MagicMock()
+        event_pub.publish_warning = AsyncMock()
+
+        file_manager = MagicMock()
+        file_manager.upload_file = AsyncMock(return_value={
+            "key": "uploads/photo.png",
+            "content_type": "image/png",
+            "size": 1234,
+            "last_modified": "2026-04-03",
+        })
+
+        await handle_session_files(
+            session_context={},
+            user_email="test@example.com",
+            files_map={"photo.png": {"content": "iVBORw0KGgo="}},
+            file_manager=file_manager,
+            model_supports_vision=False,
+            event_publisher=event_pub,
+        )
+
+        event_pub.publish_warning.assert_awaited_once()
+        msg = event_pub.publish_warning.call_args.kwargs["message"]
+        assert "does not support image/vision" in msg
+        assert "photo.png" in msg
+
+    @pytest.mark.asyncio
+    async def test_vision_warning_falls_back_to_callback(self):
+        """Without event_publisher, file_processor should fall back to update_callback."""
+        from atlas.application.chat.utilities.file_processor import handle_session_files
+
+        callback = AsyncMock()
+        file_manager = MagicMock()
+        file_manager.upload_file = AsyncMock(return_value={
+            "key": "uploads/photo.png",
+            "content_type": "image/png",
+            "size": 1234,
+            "last_modified": "2026-04-03",
+        })
+
+        await handle_session_files(
+            session_context={},
+            user_email="test@example.com",
+            files_map={"photo.png": {"content": "iVBORw0KGgo="}},
+            file_manager=file_manager,
+            model_supports_vision=False,
+            update_callback=callback,
+            event_publisher=None,
+        )
+
+        # callback may be called for status updates too; find the warning call
+        warning_calls = [
+            c for c in callback.call_args_list
+            if c[0][0].get("type") == "warning"
+        ]
+        assert len(warning_calls) == 1
+        assert "photo.png" in warning_calls[0][0][0]["message"]
