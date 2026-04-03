@@ -17,6 +17,13 @@ function getInitialTheme() {
   return getSystemTheme()
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
+export function useTheme() {
+  const ctx = useContext(ThemeContext)
+  if (!ctx) throw new Error('useTheme must be used within ThemeProvider')
+  return ctx
+}
+
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(getInitialTheme)
 
@@ -48,10 +55,4 @@ export function ThemeProvider({ children }) {
       {children}
     </ThemeContext.Provider>
   )
-}
-
-export function useTheme() {
-  const ctx = useContext(ThemeContext)
-  if (!ctx) throw new Error('useTheme must be used within ThemeProvider')
-  return ctx
 }

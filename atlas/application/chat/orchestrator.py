@@ -203,13 +203,12 @@ class ChatOrchestrator:
                 model,
                 len(selected_tools),
             )
-            await self.event_publisher.publish_chat_response(
+            await self.event_publisher.publish_warning(
                 message=(
                     f"**Note:** The model `{model}` does not support tool/function calling. "
                     "Your selected tools have been disabled for this request. "
                     "Please switch to a tool-capable model to use tools."
                 ),
-                has_pending_tools=False,
             )
             selected_tools = None
 
@@ -219,13 +218,12 @@ class ChatOrchestrator:
                 "Model %s does not support tool calling; disabling agent mode",
                 model,
             )
-            await self.event_publisher.publish_chat_response(
+            await self.event_publisher.publish_warning(
                 message=(
                     f"**Note:** The model `{model}` does not support tool/function calling. "
                     "Agent mode has been disabled for this request. "
                     "Please switch to a tool-capable model to use agent mode."
                 ),
-                has_pending_tools=False,
             )
             agent_mode = False
 

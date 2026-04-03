@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #491 - 2026-04-02
+- **Feature**: Models that declare `supports_tools: false` in `llmconfig.yml` now have tools and agent mode automatically stripped by the orchestrator, with user-visible warnings sent via a new `warning` WebSocket message type. Frontend shows capability icons (eye/wrench) in the model dropdown and yellow warning banners when incompatible features are selected.
+
 ### PR #475 - 2026-03-25
 - **Feature**: Add `strict_role_ordering` config flag to `ModelConfig` for Mistral/Devstral models served via vLLM. When enabled, post-tool `system` messages are converted to `user` role and a bridging `assistant` message is inserted so the role sequence satisfies Mistral's strict ordering constraint.
 - **Fix**: All LLM call paths (plain, tool-calling, streaming) now use a unified `_prepare_messages()` pipeline that chains existing sanitization with the new role enforcement.
