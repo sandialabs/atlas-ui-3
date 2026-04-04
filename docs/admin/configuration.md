@@ -17,7 +17,7 @@ To customize your instance, place your own versions of the configuration files i
 *   **`mcp.json`**: Registers and configures the MCP (tool) servers that provide capabilities to the LLM.
 *   **`llmconfig.yml`**: Defines the list of available Large Language Models and their connection details.
 *   **`compliance-levels.json`**: Defines the security compliance levels (e.g., Public, Internal, HIPAA) and the rules for how they can interact.
-*   **`help-config.json`**: Populates the content of the "Help" modal in the user interface.
+*   **`help.md`**: Populates the content of the "Help" page in the user interface (Markdown).
 *   **`splash-config.json`**: Configures the startup splash screen for displaying policies and information to users.
 *   **`messages.txt`**: Defines the text for system-wide banner messages that can be displayed to all users.
 

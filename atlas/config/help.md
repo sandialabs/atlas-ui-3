@@ -2,7 +2,7 @@
 
 ## Quick Start
 
-Welcome to the Chat UI! This application provides an advanced chat interface with AI models, enhanced by powerful tools and data sources.
+Welcome to ATLAS! This application provides an advanced chat interface with AI models, enhanced by powerful tools and data sources.
 
 - Click **New Chat** or press `Ctrl+Alt+N` to start a new conversation
 - Click the **Settings** icon in the header to open the tools panel
