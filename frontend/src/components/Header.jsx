@@ -5,7 +5,7 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, Info } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 import { useTheme } from '../contexts/ThemeContext'
 
@@ -63,6 +63,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [llmAuthModalModel, setLlmAuthModalModel] = useState(null)
+  const [expandedModelInfo, setExpandedModelInfo] = useState(null)
   const llmAuth = useLLMAuthStatus()
 
   // Fetch LLM auth status on mount
@@ -77,6 +78,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   const handleModelSelect = (model) => {
     setCurrentModel(model)
     setDropdownOpen(false)
+    setExpandedModelInfo(null)
   }
 
   // Close dropdowns when mobile menu opens
@@ -198,7 +200,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
           </button>
           
           {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1 w-56 sm:w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+            <div className="absolute right-0 top-full mt-1 w-72 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
               {models.length === 0 ? (
                 <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
               ) : (
@@ -208,54 +210,98 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                   const filteredModels = complianceEnabled && complianceLevelFilter
                     ? models.filter(m => {
                         const model = typeof m === 'string' ? { name: m } : m
-                        // STRICT MODE: When compliance filter is active, only show models with matching compliance levels
                         return isComplianceAccessible(complianceLevelFilter, model.compliance_level)
                       })
                     : models
-                  
+
                   return filteredModels.map(m => {
                     const model = typeof m === 'string' ? { name: m } : m
                     const modelName = model.name || m
                     const needsUserKey = model.api_key_source === 'user'
                     const hasUserKey = model.user_has_key === true || llmAuth.getModelAuth(modelName)?.authenticated === true
                     const isDisabled = needsUserKey && !hasUserKey
+                    const isExpanded = expandedModelInfo === modelName
                     return (
                       <div
                         key={modelName}
-                        className="flex items-center first:rounded-t-lg last:rounded-b-lg"
+                        className="border-b border-gray-700 last:border-b-0 first:rounded-t-lg last:rounded-b-lg"
                       >
-                        <button
-                          onClick={() => !isDisabled && handleModelSelect(modelName)}
-                          className={`flex-1 text-left px-4 py-2 text-sm flex items-center justify-between gap-2 ${
-                            isDisabled
-                              ? 'text-gray-500 cursor-not-allowed'
-                              : 'text-gray-200 hover:bg-gray-700'
-                          }`}
-                          disabled={isDisabled}
-                          title={isDisabled ? 'Configure your API key to use this model' : modelName}
-                        >
-                          <span className="truncate">{modelName}</span>
-                          <span className="flex items-center gap-1 flex-shrink-0">
-                            {complianceEnabled && model.compliance_level && (
-                              <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1">
-                                <Shield className="w-3 h-3" />
-                                {model.compliance_level}
-                              </span>
-                            )}
-                          </span>
-                        </button>
-                        {needsUserKey && (
+                        {/* Model row: name, capability icons, (i) button */}
+                        <div className="flex items-center">
+                          <button
+                            onClick={() => !isDisabled && handleModelSelect(modelName)}
+                            className={`flex-1 min-w-0 text-left px-3 py-2 text-sm flex items-center gap-2 ${
+                              isDisabled
+                                ? 'text-gray-500 cursor-not-allowed'
+                                : 'text-gray-200 hover:bg-gray-700'
+                            }`}
+                            disabled={isDisabled}
+                            title={isDisabled ? 'Configure your API key to use this model' : modelName}
+                          >
+                            <span className="truncate">{modelName}</span>
+                            <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                              {model.supports_vision ? (
+                                <Eye className="w-3.5 h-3.5 text-green-400" title="Vision" />
+                              ) : (
+                                <Eye className="w-3.5 h-3.5 text-gray-600" title="No vision" />
+                              )}
+                              {model.supports_tools !== false ? (
+                                <Wrench className="w-3.5 h-3.5 text-blue-400" title="Tools" />
+                              ) : (
+                                <Wrench className="w-3.5 h-3.5 text-gray-600" title="No tools" />
+                              )}
+                            </span>
+                          </button>
+                          {needsUserKey && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setLlmAuthModalModel(modelName)
+                                setDropdownOpen(false)
+                              }}
+                              className="px-1.5 py-2 hover:bg-gray-700 transition-colors"
+                              title={hasUserKey ? 'API key configured (click to change)' : 'Click to add your API key'}
+                            >
+                              <Key className={`w-3.5 h-3.5 ${hasUserKey ? 'text-green-400' : 'text-orange-400'}`} />
+                            </button>
+                          )}
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
-                              setLlmAuthModalModel(modelName)
-                              setDropdownOpen(false)
+                              setExpandedModelInfo(isExpanded ? null : modelName)
                             }}
-                            className="px-2 py-2 hover:bg-gray-700 transition-colors"
-                            title={hasUserKey ? 'API key configured (click to change)' : 'Click to add your API key'}
+                            className={`px-2 py-2 hover:bg-gray-700 transition-colors ${isExpanded ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}
+                            title="Model info"
                           >
-                            <Key className={`w-4 h-4 ${hasUserKey ? 'text-green-400' : 'text-orange-400'}`} />
+                            <Info className="w-3.5 h-3.5" />
                           </button>
+                        </div>
+                        {/* Expanded model card */}
+                        {isExpanded && (
+                          <div className="px-3 pb-3 pt-2 text-xs bg-gray-900/50 border-t border-gray-700 space-y-2">
+                            {model.model_card && (
+                              <p className="text-gray-300 leading-relaxed whitespace-pre-line">{model.model_card}</p>
+                            )}
+                            {!model.model_card && model.description && (
+                              <p className="text-gray-400">{model.description}</p>
+                            )}
+                            <div className="flex flex-wrap gap-1.5">
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${model.supports_vision ? 'bg-green-900/50 text-green-400 border border-green-800' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
+                                <Eye className="w-3 h-3" />
+                                Vision {model.supports_vision ? '' : '(no)'}
+                              </span>
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${model.supports_tools !== false ? 'bg-blue-900/50 text-blue-400 border border-blue-800' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
+                                <Wrench className="w-3 h-3" />
+                                Tools {model.supports_tools !== false ? '' : '(no)'}
+                              </span>
+                              {complianceEnabled && model.compliance_level && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-600 text-white">
+                                  <Shield className="w-3 h-3" />
+                                  {model.compliance_level}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         )}
                       </div>
                     )
@@ -700,7 +746,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
       {dropdownOpen && (
         <div 
           className="fixed inset-0 z-40" 
-          onClick={() => setDropdownOpen(false)}
+          onClick={() => { setDropdownOpen(false); setExpandedModelInfo(null) }}
         />
       )}
       
