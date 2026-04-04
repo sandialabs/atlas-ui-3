@@ -10,6 +10,16 @@ The Help page content is authored in Markdown. You can customize it by creating 
 
 The file is rendered with `marked` + `DOMPurify` on the frontend, the same pipeline used for chat messages, so standard GitHub-flavored Markdown (headings, lists, tables, code blocks, blockquotes) is supported.
 
+## Embedding images
+
+Drop image files into `config/help-images/` (user override) or `atlas/config/help-images/` (shipped default) and reference them in `help.md` as:
+
+```markdown
+![alt text](/help-images/filename.png)
+```
+
+The backend mounts `/help-images/*` and searches the user-override directory first, then falls back to the shipped one. Path traversal is blocked.
+
 ## Example `help.md`
 
 ```markdown
