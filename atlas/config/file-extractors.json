@@ -70,5 +70,19 @@
     "image/tiff": "ocr",
     "image/bmp": "ocr",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx-text"
-  }
+  },
+
+  "plain_text_types": [
+    ".txt", ".md", ".rst", ".csv", ".tsv",
+    ".py", ".js", ".ts", ".jsx", ".tsx",
+    ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp",
+    ".cs", ".java", ".go", ".rs", ".rb", ".php",
+    ".swift", ".kt", ".scala", ".r", ".m",
+    ".sh", ".bash", ".zsh", ".fish",
+    ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+    ".json", ".xml", ".html", ".css", ".scss", ".less",
+    ".sql", ".graphql", ".proto",
+    ".log", ".gitignore", ".dockerfile",
+    ".tex", ".bib"
+  ]
 }

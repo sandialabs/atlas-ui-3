@@ -441,11 +441,11 @@ def _get_file_extraction_config(config_manager) -> dict:
     try:
         extractors_config = config_manager.file_extractors_config
 
-        # Get list of extensions with enabled extractors
-        supported_extensions = []
+        # Get list of all extractable extensions (plain-text + enabled HTTP extractors)
+        supported_extensions = list(extractors_config.plain_text_types)
         for ext, extractor_name in extractors_config.extension_mapping.items():
             extractor = extractors_config.extractors.get(extractor_name)
-            if extractor and extractor.enabled:
+            if extractor and extractor.enabled and ext not in supported_extensions:
                 supported_extensions.append(ext)
 
         return {
