@@ -250,8 +250,11 @@ async def get_help_config(admin_user: str = Depends(require_admin)):  # noqa: AR
         setup_config_dir()
         help_file = get_admin_config_path("help.md")
         if not help_file.exists():
-            # Check fallback for legacy help-config.json
-            legacy_file = get_admin_config_path("help-config.json")
+            # Fall back to legacy help-config.json in the same config directory.
+            # Note: get_admin_config_path() maps both "help.md" and "help-config.json"
+            # to app_settings.help_config_file, so we must construct the legacy path
+            # directly to actually hit a different file.
+            legacy_file = help_file.parent / "help-config.json"
             if legacy_file.exists():
                 help_file = legacy_file
             else:
@@ -277,6 +280,11 @@ async def update_help_config(request: Request, admin_user: str = Depends(require
         setup_config_dir()
         body = await request.json()
         content = body.get("content", "")
+        if not isinstance(content, str):
+            raise HTTPException(
+                status_code=400,
+                detail="Field 'content' must be a string",
+            )
         if len(content.encode("utf-8")) > MAX_HELP_CONTENT_BYTES:
             raise HTTPException(
                 status_code=413,

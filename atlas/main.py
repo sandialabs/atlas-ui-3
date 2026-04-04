@@ -33,7 +33,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, WebSocketException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, WebSocketException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -326,8 +326,6 @@ async def help_image(path: str):
     and drop files into ``config/help-images/`` (user override) or
     ``atlas/config/help-images/`` (shipped default).
     """
-    from fastapi import HTTPException
-
     for root in _help_image_roots:
         if not root.exists():
             continue
