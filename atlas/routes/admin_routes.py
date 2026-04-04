@@ -292,9 +292,15 @@ async def update_help_config(request: Request, admin_user: str = Depends(require
             )
         help_file = get_admin_config_path("help.md")
         write_file_content(help_file, content)
+        # Sanitize admin_user inline so CodeQL's py/log-injection query can
+        # trace the newline/CR removal as a sanitizer. help_file is derived
+        # from app_settings (server-controlled), not user input, so it is
+        # safe to interpolate without additional scrubbing.
+        safe_admin_user = str(admin_user).replace("\r", "").replace("\n", "")
         logger.info(
-            f"Help content updated at {sanitize_for_logging(str(help_file))} "
-            f"by {sanitize_for_logging(admin_user)}"
+            "Help content updated at %s by %s",
+            sanitize_for_logging(str(help_file)),
+            safe_admin_user,
         )
         return {"message": "Help content updated successfully", "file_path": str(help_file)}
     except HTTPException:

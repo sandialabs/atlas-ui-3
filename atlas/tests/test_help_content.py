@@ -205,7 +205,10 @@ def test_admin_get_help_config_returns_empty_when_nothing_exists(isolated_config
 def test_help_image_serves_shipped_default():
     """The shipped chat-interface.png under atlas/config/help-images/ should be servable."""
     client = TestClient(app)
-    resp = client.get("/help-images/chat-interface.png")
+    resp = client.get(
+        "/help-images/chat-interface.png",
+        headers={"X-User-Email": "test@test.com"},
+    )
     assert resp.status_code == 200
     assert resp.headers.get("content-type", "").startswith("image/")
 
@@ -213,7 +216,10 @@ def test_help_image_serves_shipped_default():
 def test_help_image_missing_returns_404():
     """Requests for a non-existent image return 404."""
     client = TestClient(app)
-    resp = client.get("/help-images/definitely-not-here-xyz.png")
+    resp = client.get(
+        "/help-images/definitely-not-here-xyz.png",
+        headers={"X-User-Email": "test@test.com"},
+    )
     assert resp.status_code == 404
 
 
@@ -228,7 +234,10 @@ def test_help_image_missing_returns_404():
 def test_help_image_rejects_path_traversal(traversal_path):
     """Path traversal attempts must not escape the help-images directories."""
     client = TestClient(app)
-    resp = client.get(f"/help-images/{traversal_path}")
+    resp = client.get(
+        f"/help-images/{traversal_path}",
+        headers={"X-User-Email": "test@test.com"},
+    )
     # Either 404 (traversal blocked by resolve()+relative_to()) or 400 from FastAPI —
     # must NOT be 200, which would mean we served a file outside the roots.
     assert resp.status_code != 200
