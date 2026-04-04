@@ -82,7 +82,7 @@
     ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
     ".json", ".xml", ".html", ".css", ".scss", ".less",
     ".sql", ".graphql", ".proto",
-    ".log", ".env", ".gitignore", ".dockerfile",
+    ".log", ".gitignore", ".dockerfile",
     ".tex", ".bib"
   ]
 }

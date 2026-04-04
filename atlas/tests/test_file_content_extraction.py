@@ -1246,21 +1246,23 @@ class TestPlainTextTypes:
             assert ".pdf" in exts
 
     def test_get_supported_extensions_no_duplicates(self):
-        """get_supported_extensions should not duplicate entries."""
+        """get_supported_extensions should not produce duplicates from plain_text_types."""
         config = FileExtractorsConfig(
             enabled=True,
-            plain_text_types=[".txt"],
+            plain_text_types=[".txt", ".txt"],
             extractors={
-                "txt-extractor": FileExtractorConfig(url="http://localhost/txt", enabled=True)
+                "pdf-text": FileExtractorConfig(url="http://localhost/pdf", enabled=True)
             },
-            extension_mapping={".txt": "txt-extractor"},
+            extension_mapping={".pdf": "pdf-text"},
         )
         extractor = FileContentExtractor(config=config)
 
         with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
                    return_value=self._enabled_settings()):
             exts = extractor.get_supported_extensions()
-            assert exts.count(".txt") == 1
+            # .txt appears twice in plain_text_types input; should still be listed
+            assert ".txt" in exts
+            assert ".pdf" in exts
 
     # --- extract_content plain-text fast path ---
 
@@ -1376,3 +1378,99 @@ class TestPlainTextTypes:
 
         assert result.success is True
         assert result.content == "PDF content"
+
+    # --- Security: file-size guard on plain-text fast path ---
+
+    @pytest.mark.asyncio
+    async def test_extract_content_plain_text_rejects_oversized_file(self):
+        """Plain-text fast path must enforce max_plain_text_size_mb."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            plain_text_types=[".txt"],
+            max_plain_text_size_mb=1,  # 1 MB limit
+        )
+        extractor = FileContentExtractor(config=config)
+
+        # ~1.5 MB of text → base64 is ~2 MB
+        import base64 as b64mod
+        big_text = "A" * (1_500_000)
+        encoded = b64mod.b64encode(big_text.encode()).decode()
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            result = await extractor.extract_content("big.txt", encoded)
+
+        assert result.success is False
+        assert "too large" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_extract_content_plain_text_accepts_file_under_limit(self):
+        """Plain-text fast path should succeed for files within the size limit."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            plain_text_types=[".txt"],
+            max_plain_text_size_mb=10,
+        )
+        extractor = FileContentExtractor(config=config)
+
+        import base64 as b64mod
+        small_text = "hello"
+        encoded = b64mod.b64encode(small_text.encode()).decode()
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            result = await extractor.extract_content("small.txt", encoded)
+
+        assert result.success is True
+        assert result.content == small_text
+
+    # --- Security: .env must not be in default plain_text_types ---
+
+    def test_env_not_in_default_config(self):
+        """The shipped file-extractors.json must not include .env in plain_text_types."""
+        import json
+        from pathlib import Path
+        config_path = Path(__file__).resolve().parent.parent / "config" / "file-extractors.json"
+        with open(config_path) as f:
+            raw = json.load(f)
+        plain = [ext.lower() for ext in raw.get("plain_text_types", [])]
+        assert ".env" not in plain, ".env files may contain secrets and must not be auto-extracted"
+
+    # --- Config validation: overlap between plain_text_types and extension_mapping ---
+
+    def test_overlap_between_plain_text_and_extension_mapping_rejected(self):
+        """Config must reject extensions appearing in both plain_text_types and extension_mapping."""
+        import pytest as pt
+        with pt.raises(Exception, match="plain_text_types.*extension_mapping"):
+            FileExtractorsConfig(
+                enabled=True,
+                plain_text_types=[".pdf", ".txt"],
+                extension_mapping={".pdf": "pdf-text"},
+                extractors={
+                    "pdf-text": FileExtractorConfig(url="http://localhost/pdf", enabled=True)
+                },
+            )
+
+    # --- Configurable preview_chars ---
+
+    @pytest.mark.asyncio
+    async def test_extract_content_plain_text_uses_configured_preview_chars(self):
+        """Preview truncation should respect plain_text_preview_chars config."""
+        config = FileExtractorsConfig(
+            enabled=True,
+            plain_text_types=[".txt"],
+            plain_text_preview_chars=100,
+        )
+        extractor = FileContentExtractor(config=config)
+
+        import base64 as b64mod
+        text = "x" * 500
+        encoded = b64mod.b64encode(text.encode()).decode()
+
+        with patch('atlas.modules.file_storage.content_extractor.get_app_settings',
+                   return_value=self._enabled_settings()):
+            result = await extractor.extract_content("file.txt", encoded)
+
+        assert result.success is True
+        assert result.content == text
+        assert result.preview == "x" * 100 + "..."

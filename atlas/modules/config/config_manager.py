@@ -275,6 +275,11 @@ class FileExtractorsConfig(BaseModel):
     # Extensions whose files are plain text and can be read directly (no extractor service needed).
     # All values are normalised to lowercase on load.
     plain_text_types: List[str] = Field(default_factory=list)
+    # Max file size (MB) for plain-text direct reads.  Mirrors the per-extractor
+    # max_file_size_mb used by HTTP-backed extractors so the fast path stays bounded.
+    max_plain_text_size_mb: int = 50
+    # Preview truncation length (chars) for plain-text reads.
+    plain_text_preview_chars: int = 2000
 
     @field_validator('plain_text_types', mode='before')
     @classmethod
@@ -283,6 +288,17 @@ class FileExtractorsConfig(BaseModel):
         if isinstance(v, list):
             return [ext.lower() for ext in v]
         return v
+
+    @model_validator(mode='after')
+    def reject_plain_text_extractor_overlap(self):
+        """Reject extensions that appear in both plain_text_types and extension_mapping."""
+        overlap = set(self.plain_text_types) & set(self.extension_mapping)
+        if overlap:
+            raise ValueError(
+                f"Extensions must not appear in both plain_text_types and "
+                f"extension_mapping: {sorted(overlap)}"
+            )
+        return self
 
     @field_validator('default_behavior', mode='before')
     @classmethod
