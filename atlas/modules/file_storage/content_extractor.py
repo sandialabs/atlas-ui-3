@@ -178,6 +178,15 @@ class FileContentExtractor:
         """
         # --- Plain-text fast path: decode and return directly ---
         if self.is_plain_text_type(filename):
+            # Enforce size limit (mirrors the per-extractor max_file_size_mb check)
+            max_size_mb = self.config.max_plain_text_size_mb
+            content_size_mb = len(content_base64) * 3 / 4 / (1024 * 1024)
+            if content_size_mb > max_size_mb:
+                return ExtractionResult(
+                    success=False,
+                    error=f"File too large: {content_size_mb:.1f}MB exceeds limit of {max_size_mb}MB"
+                )
+
             try:
                 raw_bytes = base64.b64decode(content_base64)
             except Exception as e:
@@ -196,7 +205,7 @@ class FileContentExtractor:
                         error=f"Failed to decode file as text: {str(e)}"
                     )
 
-            preview_chars = 2000
+            preview_chars = self.config.plain_text_preview_chars
             if len(text) > preview_chars:
                 preview = text[:preview_chars] + "..."
             else:

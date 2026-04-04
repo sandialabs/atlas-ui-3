@@ -142,8 +142,8 @@ def test_file_extraction_extensions_sorted():
             extension_mapping={
                 ".pdf": "pdf-text",
                 ".doc": "pdf-text",
-                ".txt": "pdf-text"
-            }
+            },
+            plain_text_types=[".txt"],
         )
 
         client = TestClient(app)
@@ -153,6 +153,39 @@ def test_file_extraction_extensions_sorted():
         data = resp.json()
         extensions = data["file_extraction"]["supported_extensions"]
         assert extensions == sorted(extensions)
+    finally:
+        config_manager.app_settings.feature_file_content_extraction_enabled = original_feature
+        config_manager._file_extractors_config = original_extractors
+
+
+def test_file_extraction_includes_plain_text_types():
+    """API config must expose plain_text_types alongside extractor-backed extensions."""
+    config_manager = app_factory.get_config_manager()
+    original_feature = config_manager.app_settings.feature_file_content_extraction_enabled
+    original_extractors = config_manager._file_extractors_config
+
+    try:
+        config_manager.app_settings.feature_file_content_extraction_enabled = True
+        config_manager._file_extractors_config = FileExtractorsConfig(
+            enabled=True,
+            extractors={
+                "pdf-text": FileExtractorConfig(url="http://localhost/pdf", enabled=True),
+            },
+            extension_mapping={".pdf": "pdf-text"},
+            plain_text_types=[".py", ".txt", ".md"],
+        )
+
+        client = TestClient(app)
+        resp = client.get("/api/config", headers={"X-User-Email": "test@test.com"})
+
+        assert resp.status_code == 200
+        extensions = resp.json()["file_extraction"]["supported_extensions"]
+        # All plain_text_types must appear
+        assert ".py" in extensions
+        assert ".txt" in extensions
+        assert ".md" in extensions
+        # Extractor-backed extensions must still appear
+        assert ".pdf" in extensions
     finally:
         config_manager.app_settings.feature_file_content_extraction_enabled = original_feature
         config_manager._file_extractors_config = original_extractors
