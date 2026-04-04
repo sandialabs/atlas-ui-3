@@ -185,7 +185,7 @@ frontend/src/
 - **LLM**: `atlas/config/llmconfig.yml` (user overrides in `config/llmconfig.yml`)
 - **MCP Servers**: `atlas/config/mcp.json` (user overrides in `config/mcp.json`)
 - **RAG Sources**: `atlas/config/rag-sources.json` (user overrides in `config/rag-sources.json`)
-- **Help**: `atlas/config/help-config.json`
+- **Help**: `atlas/config/help.md` (Markdown; user override in `config/help.md`)
 - **Compliance Levels**: `atlas/config/compliance-levels.json`
 - **MCP Examples**: `atlas/config/mcp-example-configs/`
 - **Environment**: `.env` (copy from `.env.example`)

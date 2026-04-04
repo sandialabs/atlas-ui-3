@@ -605,7 +605,7 @@ class AppSettings(BaseSettings):
     mcp_config_file: str = Field(default="mcp.json", validation_alias="MCP_CONFIG_FILE")
     rag_sources_config_file: str = Field(default="rag-sources.json", validation_alias="RAG_SOURCES_CONFIG_FILE")
     llm_config_file: str = Field(default="llmconfig.yml", validation_alias="LLM_CONFIG_FILE")
-    help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
+    help_config_file: str = Field(default="help.md", validation_alias="HELP_CONFIG_FILE")
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
     tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
     splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")

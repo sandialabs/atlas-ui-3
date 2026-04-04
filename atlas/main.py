@@ -33,7 +33,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, WebSocketException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, WebSocketException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -304,6 +304,40 @@ if static_dir.exists():
     async def logo2_png():
         path = static_dir / "sandia-powered-by-atlas.png"
         return FileResponse(str(path))
+
+
+# Serve images referenced from help.md
+# Search order: project_root/config/help-images/ (user override)
+# then atlas/config/help-images/ (shipped defaults)
+_atlas_root = Path(__file__).resolve().parent
+_project_root = _atlas_root.parent
+_help_image_roots = [
+    (_project_root / "config" / "help-images").resolve(),
+    (_atlas_root / "config" / "help-images").resolve(),
+]
+
+
+@app.get("/help-images/{path:path}")
+async def help_image(path: str):
+    """Serve images referenced from help.md.
+
+    Resolves ``path`` against the configured help-image roots and rejects
+    traversal attempts. Use ``![alt](/help-images/filename.png)`` in help.md
+    and drop files into ``config/help-images/`` (user override) or
+    ``atlas/config/help-images/`` (shipped default).
+    """
+    for root in _help_image_roots:
+        if not root.exists():
+            continue
+        candidate = (root / path).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            # Path traversal attempt — skip this root
+            continue
+        if candidate.is_file():
+            return FileResponse(str(candidate))
+    raise HTTPException(status_code=404, detail="Help image not found")
 
 
 # WebSocket endpoint for chat

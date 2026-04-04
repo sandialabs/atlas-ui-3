@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -85,7 +85,7 @@ def get_admin_config_path(filename: str) -> Path:
     # Map standard filenames to potentially overridden ones
     if filename == "messages.txt":
         custom_filename = app_settings.messages_config_file
-    elif filename == "help-config.json":
+    elif filename in ("help-config.json", "help.md"):
         custom_filename = app_settings.help_config_file
     elif filename == "mcp.json":
         custom_filename = app_settings.mcp_config_file
@@ -241,6 +241,72 @@ async def update_banner_config(
         logger.error(
             f"Failed to save banner messages to disk at {file_path_str}: {e}"
         )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.get("/help-config")
+async def get_help_config(admin_user: str = Depends(require_admin)):  # noqa: ARG001 (enforces auth)
+    try:
+        setup_config_dir()
+        help_file = get_admin_config_path("help.md")
+        if not help_file.exists():
+            # Fall back to legacy help-config.json in the same config directory.
+            # Note: get_admin_config_path() maps both "help.md" and "help-config.json"
+            # to app_settings.help_config_file, so we must construct the legacy path
+            # directly to actually hit a different file.
+            legacy_file = help_file.parent / "help-config.json"
+            if legacy_file.exists():
+                help_file = legacy_file
+            else:
+                return {"content": "", "file_path": str(help_file)}
+        content = get_file_content(help_file)
+        return {
+            "content": content,
+            "file_path": str(help_file),
+            "last_modified": help_file.stat().st_mtime,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error getting help config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.put("/help-config")
+async def update_help_config(request: Request, admin_user: str = Depends(require_admin)):
+    # Reject payloads larger than 1 MB to prevent abuse
+    MAX_HELP_CONTENT_BYTES = 1_048_576
+    try:
+        setup_config_dir()
+        body = await request.json()
+        content = body.get("content", "")
+        if not isinstance(content, str):
+            raise HTTPException(
+                status_code=400,
+                detail="Field 'content' must be a string",
+            )
+        if len(content.encode("utf-8")) > MAX_HELP_CONTENT_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Help content exceeds maximum size of {MAX_HELP_CONTENT_BYTES} bytes",
+            )
+        help_file = get_admin_config_path("help.md")
+        write_file_content(help_file, content)
+        # Sanitize admin_user inline so CodeQL's py/log-injection query can
+        # trace the newline/CR removal as a sanitizer. help_file is derived
+        # from app_settings (server-controlled), not user input, so it is
+        # safe to interpolate without additional scrubbing.
+        safe_admin_user = str(admin_user).replace("\r", "").replace("\n", "")
+        logger.info(
+            "Help content updated at %s by %s",
+            sanitize_for_logging(str(help_file)),
+            safe_admin_user,
+        )
+        return {"message": "Help content updated successfully", "file_path": str(help_file)}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error updating help config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

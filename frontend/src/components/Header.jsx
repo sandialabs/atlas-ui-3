@@ -462,10 +462,11 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
           {/* Help Button */}
           <button
             onClick={() => navigate('/help')}
-            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-            title="Help & Documentation"
+            className="flex items-center gap-1 px-2 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            title="Help"
           >
             <HelpCircle className="w-5 h-5" />
+            <span className="text-sm">Help</span>
           </button>
 
           {/* Tools Panel Toggle */}
@@ -695,7 +696,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
               >
                 <HelpCircle className="w-5 h-5" />
-                <span>Help & Documentation</span>
+                <span>Help</span>
               </button>
 
               {/* Tools Panel Toggle */}
