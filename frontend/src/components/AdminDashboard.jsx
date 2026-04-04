@@ -14,6 +14,7 @@ import MCPConfigurationCard from './admin/MCPConfigurationCard'
 import ConfigViewerCard from './admin/ConfigViewerCard'
 import MCPServerManager from './admin/MCPServerManager'
 import FeedbackViewerCard from './admin/FeedbackViewerCard'
+import HelpConfigCard from './admin/HelpConfigCard'
 import { useWS } from '../contexts/WSContext'
 
 const AdminDashboard = () => {
@@ -378,9 +379,15 @@ const AdminDashboard = () => {
           />
 
           {/* User Feedback */}
-          <FeedbackViewerCard 
-            openModal={openModal} 
-            addNotification={addNotification} 
+          <FeedbackViewerCard
+            openModal={openModal}
+            addNotification={addNotification}
+          />
+
+          {/* Help Content */}
+          <HelpConfigCard
+            openModal={openModal}
+            addNotification={addNotification}
           />
 
           {/* LLM Configuration */}
