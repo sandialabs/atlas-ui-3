@@ -262,7 +262,7 @@ async def get_config(
                         'compliance_level': server_config.get('compliance_level')
                     })
 
-    # Read help page content from a markdown file
+    # Read help page content from a markdown file (with legacy JSON fallback)
     help_content = ""
     help_config_filename = config_manager.app_settings.help_config_file
     help_paths = []
@@ -289,6 +289,30 @@ async def get_config(
             if p.exists():
                 found_path = p
                 break
+
+        # Legacy fallback: if help.md was not found, try help-config.json
+        if not found_path and help_config_filename.endswith(".md"):
+            legacy_filename = help_config_filename.rsplit(".", 1)[0] + "-config.json"
+            try:
+                legacy_paths = config_manager._search_paths(legacy_filename)  # type: ignore[attr-defined]
+            except AttributeError:
+                from pathlib import Path
+                atlas_root = Path(__file__).parent.parent
+                project_root = atlas_root.parent
+                legacy_paths = [
+                    project_root / "config" / "overrides" / legacy_filename,
+                    project_root / "config" / "defaults" / legacy_filename,
+                    atlas_root / "configfilesadmin" / legacy_filename,
+                    atlas_root / "configfiles" / legacy_filename,
+                    atlas_root / legacy_filename,
+                    project_root / legacy_filename,
+                ]
+            for p in legacy_paths:
+                if p.exists():
+                    found_path = p
+                    logger.info("Using legacy help config %s (migrate to help.md)", found_path)
+                    break
+
         if found_path:
             with open(found_path, "r", encoding="utf-8") as f:
                 help_content = f.read()

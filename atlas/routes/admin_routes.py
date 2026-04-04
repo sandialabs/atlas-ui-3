@@ -271,10 +271,17 @@ async def get_help_config(admin_user: str = Depends(require_admin)):  # noqa: AR
 
 @admin_router.put("/help-config")
 async def update_help_config(request: Request, admin_user: str = Depends(require_admin)):
+    # Reject payloads larger than 1 MB to prevent abuse
+    MAX_HELP_CONTENT_BYTES = 1_048_576
     try:
         setup_config_dir()
         body = await request.json()
         content = body.get("content", "")
+        if len(content.encode("utf-8")) > MAX_HELP_CONTENT_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Help content exceeds maximum size of {MAX_HELP_CONTENT_BYTES} bytes",
+            )
         help_file = get_admin_config_path("help.md")
         write_file_content(help_file, content)
         logger.info(
