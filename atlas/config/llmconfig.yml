@@ -5,6 +5,16 @@ models:
     api_key: "${OPENROUTER_API_KEY}"
     description: "OpenRouter openai oss-120b"
     compliance_level: "External"
+    supports_tools: true
+    model_card: >
+      GPT OSS 120B is OpenAI's first fully open-source large language model,
+      released under the Apache 2.0 license. It is a 120 billion parameter
+      mixture-of-experts (MoE) model with approximately 30B active parameters
+      per forward pass, making it efficient despite its large total size.
+      Trained on 31.3 trillion tokens of public data, it achieves performance
+      competitive with GPT-4o on many benchmarks. Supports tool/function calling
+      but does not support vision input. Context window: 1M tokens. Best for:
+      general text generation, coding assistance, and open-weight deployment.
     extra_headers:
       X-Title: "chat-11"
   gpt-4.1:
@@ -13,53 +23,125 @@ models:
     api_key: "${OPENAI_API_KEY}"
     compliance_level: "External"
     supports_vision: true
+    supports_tools: true
+    model_card: >
+      GPT-4.1 is OpenAI's flagship model optimized for advanced coding tasks,
+      instruction following, and long-context understanding. It supports up to
+      1M tokens of context and has a 32K token output limit. GPT-4.1 excels at
+      complex multi-step reasoning, code generation across many languages, and
+      agentic workflows with tool use. It supports vision (image input) and
+      tool/function calling. Best for: coding, complex analysis, agentic tasks.
   gpt-4.1-nano:
     model_url: "https://api.openai.com/v1/chat/completions"
     model_name: "gpt-4.1-nano"
     api_key: "${OPENAI_API_KEY}"
     compliance_level: "External"
     supports_vision: true
+    supports_tools: true
+    model_card: >
+      GPT-4.1 Nano is the fastest and most cost-effective model in the GPT-4.1
+      family. Despite its small size, it supports vision input, tool/function
+      calling, and up to 1M tokens of context. It is ideal for classification,
+      autocompletion, and fast lightweight tasks where latency matters more than
+      peak reasoning quality. Context window: 1M tokens. Output limit: 32K tokens.
   groq-gpt-oss-120b:
     model_url: "https://api.groq.com/openai/v1"
     model_name: "openai/gpt-oss-120b"
     api_key: "${GROQ_API_KEY}"
+    description: "GPT OSS 120B via Groq"
     compliance_level: "External"
+    supports_tools: true
+    model_card: >
+      GPT OSS 120B served via Groq's LPU (Language Processing Unit) inference
+      hardware for extremely fast token generation. This is the same open-source
+      120B mixture-of-experts model from OpenAI (~30B active parameters), but
+      running on Groq's specialized chips for low-latency inference. Supports
+      tool/function calling but not vision input. Apache 2.0 licensed, trained
+      on 31.3T tokens. Context window: 1M tokens. Best for: fast general text
+      generation when speed is the priority.
   gpt-4o-mini:
     model_url: "https://api.openai.com/v1/chat/completions"
     model_name: "gpt-4o-mini"
     api_key: "${OPENAI_API_KEY}"
     compliance_level: "External"
     supports_vision: true
+    supports_tools: true
+    model_card: >
+      GPT-4o Mini is OpenAI's small, fast, and affordable multimodal model.
+      It supports text, vision (image input), and tool/function calling. It
+      scores 82% on MMLU and outperforms GPT-3.5 Turbo on most benchmarks
+      while being significantly cheaper. Context window: 128K tokens. Output
+      limit: 16K tokens. Best for: quick tasks, chat, lightweight coding,
+      and cost-sensitive applications.
   gpt-4o:
     model_url: "https://api.openai.com/v1/chat/completions"
     model_name: "gpt-4o"
     api_key: "${OPENAI_API_KEY}"
     compliance_level: "External"
     supports_vision: true
+    supports_tools: true
+    model_card: >
+      GPT-4o ("omni") is OpenAI's high-intelligence multimodal flagship model.
+      It accepts text, image, and audio inputs and generates text output. It
+      matches GPT-4 Turbo on English text and code while being faster and
+      cheaper. It supports vision and tool/function calling natively. Context
+      window: 128K tokens. Output limit: 16K tokens. Best for: complex
+      reasoning, multimodal tasks, and production applications.
   claude-sonnet-4:
     model_url: "https://api.anthropic.com/v1/messages"
     model_name: "claude-sonnet-4-20250514"
     api_key: "${ANTHROPIC_API_KEY}"
     compliance_level: "External"
     supports_vision: true
+    supports_tools: true
+    model_card: >
+      Claude Sonnet 4 is Anthropic's best model for balanced intelligence and
+      speed. It excels at coding (setting new SWE-bench records), complex
+      reasoning, and agentic tool use. It supports vision (image analysis) and
+      tool/function calling with parallel and nested tool use. Features extended
+      thinking for step-by-step reasoning. Context window: 200K tokens. Best
+      for: coding, analysis, agentic workflows, and tasks requiring both speed
+      and intelligence.
   claude-haiku-4:
     model_url: "https://api.anthropic.com/v1/messages"
     model_name: "claude-haiku-4-5-20251001"
     api_key: "${ANTHROPIC_API_KEY}"
     compliance_level: "External"
     supports_vision: true
+    supports_tools: true
+    model_card: >
+      Claude Haiku 4.5 is Anthropic's fastest and most affordable model. It
+      offers strong performance for its speed tier, with vision and tool/function
+      calling support. It is well-suited for quick interactions, lightweight
+      agentic tasks, and real-time applications. Context window: 200K tokens.
+      Best for: fast responses, classification, summarization, and
+      cost-sensitive use cases.
   gemini-2.5-flash:
     model_url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
     model_name: "gemini-2.5-flash-preview-05-20"
     api_key: "${GOOGLE_API_KEY}"
     compliance_level: "External"
     supports_vision: true
+    supports_tools: true
+    model_card: >
+      Gemini 2.5 Flash is Google's fast, cost-efficient "thinking" model with
+      built-in reasoning capabilities. It provides strong performance across
+      coding, math, and multimodal tasks. It supports vision (image/video input)
+      and tool/function calling. Features a configurable thinking budget to
+      balance quality vs. speed. Context window: 1M tokens. Best for: fast
+      reasoning, multimodal tasks, and high-throughput applications.
   openrouter-claude-sonnet:
     model_url: "https://openrouter.ai/api/v1/chat/completions"
     model_name: "anthropic/claude-sonnet-4"
     api_key: "${OPENROUTER_API_KEY}"
     compliance_level: "External"
     supports_vision: true
+    supports_tools: true
+    model_card: >
+      Claude Sonnet 4 served via OpenRouter. Same model as the direct Anthropic
+      endpoint — excellent at coding, reasoning, and agentic tool use with
+      vision support. OpenRouter provides fallback routing and unified billing
+      across providers. Context window: 200K tokens.
     extra_headers:
       X-Title: "chat-11"
   openrouter-gemini-2.5-pro:
@@ -68,6 +150,13 @@ models:
     api_key: "${OPENROUTER_API_KEY}"
     compliance_level: "External"
     supports_vision: true
+    supports_tools: true
+    model_card: >
+      Gemini 2.5 Pro is Google's most capable thinking model, designed for
+      complex reasoning, coding, mathematics, and scientific tasks. It features
+      an extended thinking mode and supports vision and tool/function calling.
+      Context window: 1M tokens. Best for: hard reasoning problems, research,
+      and tasks requiring deep analysis. Served via OpenRouter.
     extra_headers:
       X-Title: "chat-11"
   groq-llama-vision:
@@ -77,9 +166,23 @@ models:
     max_tokens: 8192
     compliance_level: "External"
     supports_vision: true
+    supports_tools: false
+    model_card: >
+      Llama 4 Scout 17B is Meta's efficient multimodal model with 17B active
+      parameters and 16 expert modules (mixture-of-experts). It supports vision
+      (image input) but does NOT support tool/function calling. Running on
+      Groq's LPU hardware for extremely fast inference. It handles text and
+      image understanding with a 512K token context window. Open-weight model
+      under Meta's community license. Best for: fast multimodal chat, image
+      understanding, and visual question answering.
   mock-model:
     model_url: "http://127.0.0.1:8002/v1"
     model_name: "openai/mock-model"
     api_key: "mock"
     description: "Local mock LLM for testing"
     compliance_level: "Internal"
+    supports_tools: false
+    model_card: >
+      Mock model for local development and testing. Returns canned responses
+      and does not call any real LLM API. Does not support tool calling or
+      vision input.

@@ -37,6 +37,14 @@ class CLIEventPublisher:
         """Return the collected result (useful in collecting mode)."""
         return self._collected
 
+    async def publish_warning(
+        self,
+        message: str,
+    ) -> None:
+        self._collected.raw_events.append({"type": "warning", "message": message})
+        if self.streaming and not self.quiet:
+            _print_status(f"[warning] {message}")
+
     async def publish_chat_response(
         self,
         message: str,

@@ -466,6 +466,9 @@ export function createWebSocketHandler(deps) {
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           addMessage({ role: 'assistant', content: data.message, timestamp: new Date().toISOString() })
           break
+        case 'warning':
+          addMessage({ role: 'system', content: `Warning: ${data.message}`, type: 'warning', timestamp: new Date().toISOString() })
+          break
         case 'error':
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)

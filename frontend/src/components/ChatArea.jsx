@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image, Wrench } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
@@ -65,6 +65,11 @@ const ChatArea = ({ onOpenRagPanel }) => {
   const currentModelSupportsVision = models?.some(
     m => m.name === currentModel && m.supports_vision === true
   ) ?? false
+
+  // Whether the currently selected model supports tool/function calling
+  const currentModelSupportsTools = models?.some(
+    m => m.name === currentModel && m.supports_tools !== false
+  ) ?? true
 
   // Auto-resize textarea
   const autoResizeTextarea = () => {
@@ -887,6 +892,27 @@ const ChatArea = ({ onOpenRagPanel }) => {
         <div className="max-w-4xl mx-auto">
           {/* Enabled Tools Indicator */}
           <EnabledToolsIndicator />
+
+          {/* Warning: tools selected but model doesn't support tools */}
+          {selectedTools.size > 0 && !currentModelSupportsTools && (
+            <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
+              <Wrench className="w-4 h-4 flex-shrink-0" />
+              <span>
+                <strong>{currentModel}</strong> does not support tool/function calling. Selected tools will be ignored. Switch to a tool-capable model to use tools.
+              </span>
+            </div>
+          )}
+
+          {/* Warning: images uploaded but model doesn't support vision */}
+          {Object.keys(uploadedFiles).some(f => isImageFile(f)) && !currentModelSupportsVision && (
+            <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
+              <Image className="w-4 h-4 flex-shrink-0" />
+              <span>
+                <strong>{currentModel}</strong> does not support vision/image input. Uploaded images will be listed as file references but cannot be visually analyzed. Switch to a vision-capable model for image analysis.
+              </span>
+            </div>
+          )}
+
           {/* Uploaded Files Display */}
           {Object.keys(uploadedFiles).length > 0 && (
             <div className="mb-3 p-3 bg-gray-800 rounded-lg border border-gray-600">
