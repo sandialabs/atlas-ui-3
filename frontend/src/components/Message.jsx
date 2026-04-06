@@ -52,7 +52,7 @@ hljs.registerLanguage('sh', bash)
 // uses <svg>, <path>, and a handful of MathML elements for some symbols.
 const DOMPURIFY_CONFIG = {
   ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext'],
-  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref'],
+  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'role', 'tabindex'],
 }
 
 // Helper function to highlight @file references in message content
@@ -71,15 +71,27 @@ const processFileReferences = (content) => {
  * Only processes text outside HTML tags to avoid mangling attributes.
  */
 const processCitationBadges = (html) => {
-  // Split on HTML tags so we only transform text segments, leaving
-  // tag attributes (href="...[1]..." etc.) untouched.
+  // Track whether we are inside a <code> or <pre> block so we don't
+  // convert array indices like arr[1] into citation badges.
+  let insideCode = 0
   return html.replace(
-    /(<[^>]*>)|(?<!\]\()(\[(\d{1,2})\])(?!\()/g,
-    (match, tag, bracket, num) => {
-      // If we matched an HTML tag, return it unchanged
-      if (tag) return tag
-      // Otherwise convert the [N] citation
-      return `<sup class="rag-citation-badge" data-ref="${num}"><a href="#rag-ref-${num}" class="rag-citation-link">${num}</a></sup>`
+    /(<\/?(?:code|pre)[^>]*>)|(<[^>]*>)|(?<!\]\()(\[(\d{1,2})\])(?!\()/gi,
+    (match, codeTag, otherTag, bracket, num) => {
+      // Track entering/leaving code and pre blocks
+      if (codeTag) {
+        if (codeTag[1] === '/') {
+          insideCode = Math.max(0, insideCode - 1)
+        } else {
+          insideCode++
+        }
+        return codeTag
+      }
+      // Return other HTML tags unchanged
+      if (otherTag) return otherTag
+      // Inside code/pre: leave [N] as plain text
+      if (insideCode > 0) return match
+      // Normal text: convert to citation badge with scrollIntoView pattern
+      return `<sup class="rag-citation-badge" data-ref="${num}"><span role="button" tabindex="0" class="rag-citation-link" data-citation-target="rag-ref-${num}">${num}</span></sup>`
     }
   )
 }
@@ -111,8 +123,25 @@ const convertBulletListsToMarkdown = (content) => {
   return content.replace(/^(\s*)[•◦▪▫‣]\s+(.+)$/gm, '$1- $2')
 }
 
-// Configure marked with custom renderer for code blocks
+// Configure marked with custom renderer for code blocks and safe links
 const renderer = new marked.Renderer()
+
+// Safe link renderer: external links get target=_blank and rel=noopener noreferrer
+renderer.link = function(href, title, text) {
+  // Handle marked v5+ structured args ({href, title, text} object)
+  if (typeof href === 'object' && href !== null) {
+    title = href.title
+    text = href.text || href.tokens?.map(t => t.raw).join('') || ''
+    href = href.href
+  }
+  const titleAttr = title ? ` title="${title}"` : ''
+  // Internal fragment links (citation anchors) stay in-page
+  if (href && href.startsWith('#')) {
+    return `<a href="${href}"${titleAttr}>${text}</a>`
+  }
+  return `<a href="${href}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`
+}
+
 renderer.code = function(code, language) {
   // Handle different code input types
   let codeString = ''
@@ -1211,6 +1240,21 @@ const renderContent = () => {
         <div
           className="prose prose-invert max-w-none selectable-markdown"
           dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+          onClick={(e) => {
+            // Handle citation badge clicks — scroll the target reference
+            // into view within the chat container instead of relying on
+            // browser fragment navigation.
+            const badge = e.target.closest('[data-citation-target]')
+            if (!badge) return
+            e.preventDefault()
+            const targetId = badge.getAttribute('data-citation-target')
+            const target = document.getElementById(targetId)
+            if (target) {
+              target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              target.classList.add('rag-ref-highlight')
+              setTimeout(() => target.classList.remove('rag-ref-highlight'), 2000)
+            }
+          }}
         />
       )
     } catch (error) {

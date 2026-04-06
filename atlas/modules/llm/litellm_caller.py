@@ -962,6 +962,14 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email)
 
     @staticmethod
+    def _sanitize_label(text: str) -> str:
+        """Strip markdown/prompt-injection characters from a metadata label."""
+        import re
+        # Remove characters that could break markdown structure or inject prompts
+        cleaned = re.sub(r"[*\[\](){}<>`#\n\r\\]", "", text)
+        return cleaned.strip()[:200]
+
+    @staticmethod
     def _build_citation_instructions(metadata) -> str:
         """Build inline-citation instructions for the LLM system prompt.
 
@@ -988,12 +996,17 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         ]
 
         for i, doc in enumerate(metadata.documents_found, start=1):
-            label = doc.title or doc.source or f"Document {i}"
+            raw_label = doc.title or doc.source or f"Document {i}"
+            label = LiteLLMCaller._sanitize_label(raw_label)
+            if not label:
+                label = f"Document {i}"
             parts = [f"[{i}] **{label}**"]
             if doc.url:
                 parts.append(f"  URL: {doc.url}")
-            if doc.source and doc.source != label:
-                parts.append(f"  Source: {doc.source}")
+            if doc.source:
+                safe_source = LiteLLMCaller._sanitize_label(doc.source)
+                if safe_source and safe_source != label:
+                    parts.append(f"  Source: {safe_source}")
             confidence_pct = int(doc.confidence_score * 100)
             parts.append(f"  Relevance: {confidence_pct}%")
             if doc.last_modified:
@@ -1018,17 +1031,25 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         lines = ["**References**", ""]
         for i, doc in enumerate(metadata.documents_found, start=1):
-            label = doc.title or doc.source or f"Document {i}"
+            raw_label = doc.title or doc.source or f"Document {i}"
+            label = LiteLLMCaller._sanitize_label(raw_label)
+            if not label:
+                label = f"Document {i}"
             confidence_pct = int(doc.confidence_score * 100)
 
             if doc.url:
-                entry = f"{i}. [{label}]({doc.url})"
+                # URL is already validated to http(s) by DocumentMetadata
+                # Escape parens in URL to prevent markdown injection
+                safe_url = doc.url.replace("(", "%28").replace(")", "%29")
+                entry = f"{i}. [{label}]({safe_url})"
             else:
                 entry = f"{i}. {label}"
 
             detail_parts = []
-            if doc.source and doc.source != label:
-                detail_parts.append(doc.source)
+            if doc.source:
+                safe_source = LiteLLMCaller._sanitize_label(doc.source)
+                if safe_source and safe_source != label:
+                    detail_parts.append(safe_source)
             detail_parts.append(f"{confidence_pct}% relevance")
             if doc.last_modified:
                 detail_parts.append(f"updated {doc.last_modified}")
