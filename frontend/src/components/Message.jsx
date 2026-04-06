@@ -52,7 +52,7 @@ hljs.registerLanguage('sh', bash)
 // uses <svg>, <path>, and a handful of MathML elements for some symbols.
 const DOMPURIFY_CONFIG = {
   ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext'],
-  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace'],
+  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref'],
 }
 
 // Helper function to highlight @file references in message content
@@ -61,6 +61,48 @@ const processFileReferences = (content) => {
     /@file\s+([^\s]+)/g,
     '<span class="inline-flex items-center px-2 py-1 rounded-md bg-green-900/30 border border-green-500/30 text-green-400 text-sm font-medium">@file $1</span>'
   )
+}
+
+/**
+ * Convert inline citation markers like [1], [2] in rendered HTML into
+ * Perplexity-style superscript citation badges that link to the
+ * references section at the bottom of the message.
+ *
+ * Only processes text outside HTML tags to avoid mangling attributes.
+ */
+const processCitationBadges = (html) => {
+  // Split on HTML tags so we only transform text segments, leaving
+  // tag attributes (href="...[1]..." etc.) untouched.
+  return html.replace(
+    /(<[^>]*>)|(?<!\]\()(\[(\d{1,2})\])(?!\()/g,
+    (match, tag, bracket, num) => {
+      // If we matched an HTML tag, return it unchanged
+      if (tag) return tag
+      // Otherwise convert the [N] citation
+      return `<sup class="rag-citation-badge" data-ref="${num}"><a href="#rag-ref-${num}" class="rag-citation-link">${num}</a></sup>`
+    }
+  )
+}
+
+/**
+ * Add anchor IDs to the numbered items in the References section so
+ * inline citation badges can link to them.
+ */
+const processReferencesSection = (html) => {
+  // Find the References heading, then process all subsequent <p>N. entries
+  const refIdx = html.indexOf('<strong>References</strong>')
+  if (refIdx === -1) return html
+
+  const before = html.slice(0, refIdx)
+  const after = html.slice(refIdx)
+
+  const anchored = after
+    // List items
+    .replace(/<li>(\d{1,2})\.\s/g, (_, num) => `<li id="rag-ref-${num}">${num}. `)
+    // Paragraph items
+    .replace(/<p>(\d{1,2})\.\s/g, (_, num) => `<p><span id="rag-ref-${num}"></span>${num}. `)
+
+  return before + anchored
 }
 
 // Helper function to convert bullet characters to proper markdown list syntax
@@ -1160,7 +1202,10 @@ const renderContent = () => {
       const { result: latexProcessed, placeholders } = preProcessLatex(content)
       const markdownHtml = marked.parse(latexProcessed)
       const latexRestoredHtml = restoreLatexPlaceholders(markdownHtml, placeholders)
-      const sanitizedHtml = DOMPurify.sanitize(latexRestoredHtml, DOMPURIFY_CONFIG)
+      // Apply citation badge rendering for RAG inline references
+      const citationHtml = processCitationBadges(latexRestoredHtml)
+      const referencesHtml = processReferencesSection(citationHtml)
+      const sanitizedHtml = DOMPurify.sanitize(referencesHtml, DOMPURIFY_CONFIG)
 
       return (
         <div

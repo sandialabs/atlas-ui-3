@@ -322,6 +322,8 @@ class AtlasRAGClient:
                     confidence_score=doc.get("confidence_score", 0.0),
                     chunk_id=str(doc.get("id")) if doc.get("id") else None,
                     last_modified=doc.get("last_modified"),
+                    title=doc.get("title"),
+                    url=doc.get("url"),
                 )
                 documents_found.append(doc_metadata)
 

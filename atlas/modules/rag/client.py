@@ -26,6 +26,8 @@ class DocumentMetadata(BaseModel):
     confidence_score: float
     chunk_id: Optional[str] = None
     last_modified: Optional[str] = None
+    title: Optional[str] = None
+    url: Optional[str] = None
 
 
 class RAGMetadata(BaseModel):
