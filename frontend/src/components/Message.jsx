@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify'
 import 'katex/dist/katex.min.css'
 import { preProcessLatex, restoreLatexPlaceholders } from '../utils/latexPreprocessor'
 import { useChat } from '../contexts/ChatContext'
-import { useState, memo, useEffect, useRef } from 'react'
+import { useState, memo, useEffect, useRef, useId } from 'react'
 import { Copy } from 'lucide-react'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
@@ -70,9 +70,11 @@ const processFileReferences = (content) => {
  *
  * Only processes text outside HTML tags to avoid mangling attributes.
  */
-const processCitationBadges = (html) => {
+const processCitationBadges = (html, scope = '') => {
   // Track whether we are inside a <code> or <pre> block so we don't
   // convert array indices like arr[1] into citation badges.
+  // The scope parameter ensures IDs are unique per message, preventing
+  // cross-message collisions when multiple RAG responses are in the chat.
   let insideCode = 0
   return html.replace(
     /(<\/?(?:code|pre)[^>]*>)|(<[^>]*>)|(?<!\]\()(\[(\d{1,2})\])(?!\()/gi,
@@ -91,7 +93,8 @@ const processCitationBadges = (html) => {
       // Inside code/pre: leave [N] as plain text
       if (insideCode > 0) return match
       // Normal text: convert to citation badge with scrollIntoView pattern
-      return `<sup class="rag-citation-badge" data-ref="${num}"><span role="button" tabindex="0" class="rag-citation-link" data-citation-target="rag-ref-${num}">${num}</span></sup>`
+      const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
+      return `<sup class="rag-citation-badge" data-ref="${num}"><span role="button" tabindex="0" class="rag-citation-link" data-citation-target="${refId}">${num}</span></sup>`
     }
   )
 }
@@ -100,19 +103,21 @@ const processCitationBadges = (html) => {
  * Add anchor IDs to the numbered items in the References section so
  * inline citation badges can link to them.
  */
-const processReferencesSection = (html) => {
-  // Find the References heading, then process all subsequent <p>N. entries
+const processReferencesSection = (html, scope = '') => {
+  // Find the References heading, then process all subsequent <p>N. entries.
+  // The scope parameter ensures anchor IDs are unique per message.
   const refIdx = html.indexOf('<strong>References</strong>')
   if (refIdx === -1) return html
 
   const before = html.slice(0, refIdx)
   const after = html.slice(refIdx)
+  const prefix = scope ? `rag-ref-${scope}` : 'rag-ref'
 
   const anchored = after
-    // List items
-    .replace(/<li>(\d{1,2})\.\s/g, (_, num) => `<li id="rag-ref-${num}">${num}. `)
-    // Paragraph items
-    .replace(/<p>(\d{1,2})\.\s/g, (_, num) => `<p><span id="rag-ref-${num}"></span>${num}. `)
+    // List items — put id on the <li> itself (visible block element for highlighting)
+    .replace(/<li>(\d{1,2})\.\s/g, (_, num) => `<li id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
+    // Paragraph items — put id on the <p> so the highlight covers the whole line
+    .replace(/<p>(\d{1,2})\.\s/g, (_, num) => `<p id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
 
   return before + anchored
 }
@@ -810,6 +815,10 @@ const ToolElapsedTime = ({ timestamp }) => {
 const Message = ({ message }) => {
   const { appName, downloadFile, isSynthesizing, settings } = useChat()
   const debugMode = settings?.debugMode || false
+  // Stable per-message scope for citation anchor IDs — prevents collisions
+  // when multiple RAG responses exist in the same conversation.
+  const rawId = useId()
+  const messageScope = rawId.replace(/:/g, '')
 
   // State for collapsible sections with localStorage persistence
   // In debug mode, default to expanded
@@ -1232,8 +1241,9 @@ const renderContent = () => {
       const markdownHtml = marked.parse(latexProcessed)
       const latexRestoredHtml = restoreLatexPlaceholders(markdownHtml, placeholders)
       // Apply citation badge rendering for RAG inline references
-      const citationHtml = processCitationBadges(latexRestoredHtml)
-      const referencesHtml = processReferencesSection(citationHtml)
+      // Pass messageScope so IDs are unique per message in the conversation
+      const citationHtml = processCitationBadges(latexRestoredHtml, messageScope)
+      const referencesHtml = processReferencesSection(citationHtml, messageScope)
       const sanitizedHtml = DOMPurify.sanitize(referencesHtml, DOMPURIFY_CONFIG)
 
       return (

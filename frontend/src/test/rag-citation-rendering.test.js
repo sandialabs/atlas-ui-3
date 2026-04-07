@@ -7,7 +7,8 @@
  *  3. [N] inside <code> and <pre> blocks are NOT converted
  *  4. References section gets anchor IDs
  *  5. Citation badges use scrollIntoView pattern (not fragment links)
- *  6. Security: no XSS vectors in badge rendering
+ *  6. IDs are scoped per message to avoid cross-message collisions
+ *  7. Security: no XSS vectors in badge rendering
  */
 
 import { describe, it, expect } from 'vitest'
@@ -17,7 +18,7 @@ import { describe, it, expect } from 'vitest'
 // them without mounting React components.
 // --------------------------------------------------------------------------
 
-const processCitationBadges = (html) => {
+const processCitationBadges = (html, scope = '') => {
   let insideCode = 0
   return html.replace(
     /(<\/?(?:code|pre)[^>]*>)|(<[^>]*>)|(?<!\]\()(\[(\d{1,2})\])(?!\()/gi,
@@ -32,27 +33,29 @@ const processCitationBadges = (html) => {
       }
       if (otherTag) return otherTag
       if (insideCode > 0) return match
-      return `<sup class="rag-citation-badge" data-ref="${num}"><span role="button" tabindex="0" class="rag-citation-link" data-citation-target="rag-ref-${num}">${num}</span></sup>`
+      const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
+      return `<sup class="rag-citation-badge" data-ref="${num}"><span role="button" tabindex="0" class="rag-citation-link" data-citation-target="${refId}">${num}</span></sup>`
     }
   )
 }
 
-const processReferencesSection = (html) => {
+const processReferencesSection = (html, scope = '') => {
   const refIdx = html.indexOf('<strong>References</strong>')
   if (refIdx === -1) return html
 
   const before = html.slice(0, refIdx)
   const after = html.slice(refIdx)
+  const prefix = scope ? `rag-ref-${scope}` : 'rag-ref'
 
   const anchored = after
-    .replace(/<li>(\d{1,2})\.\s/g, (_, num) => `<li id="rag-ref-${num}">${num}. `)
-    .replace(/<p>(\d{1,2})\.\s/g, (_, num) => `<p><span id="rag-ref-${num}"></span>${num}. `)
+    .replace(/<li>(\d{1,2})\.\s/g, (_, num) => `<li id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
+    .replace(/<p>(\d{1,2})\.\s/g, (_, num) => `<p id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
 
   return before + anchored
 }
 
 // --------------------------------------------------------------------------
-// Tests
+// Tests: citation badge rendering
 // --------------------------------------------------------------------------
 
 describe('RAG citation badge rendering', () => {
@@ -64,7 +67,6 @@ describe('RAG citation badge rendering', () => {
     expect(result).toContain('data-citation-target="rag-ref-1"')
     expect(result).toContain('class="rag-citation-link"')
     expect(result).toContain('role="button"')
-    // Should NOT use <a href="#..."> fragment navigation
     expect(result).not.toContain('href="#rag-ref-')
   })
 
@@ -114,13 +116,15 @@ describe('RAG citation badge rendering', () => {
   })
 })
 
+// --------------------------------------------------------------------------
+// Tests: code/pre block exclusion
+// --------------------------------------------------------------------------
+
 describe('RAG citation badges inside code/pre blocks', () => {
   it('does NOT convert [1] inside inline <code> tags', () => {
     const input = '<p>Use <code>arr[1]</code> to access the element [1].</p>'
     const result = processCitationBadges(input)
-    // The [1] inside <code> should stay as plain text
     expect(result).toContain('<code>arr[1]</code>')
-    // The [1] outside <code> SHOULD become a badge
     expect(result).toContain('data-ref="1"')
   })
 
@@ -135,19 +139,15 @@ describe('RAG citation badges inside code/pre blocks', () => {
   it('resumes converting badges after closing </code> tag', () => {
     const input = '<p>In <code>arr[1]</code> the index is fixed [2].</p>'
     const result = processCitationBadges(input)
-    // [1] inside code: NOT converted
     expect(result).toContain('<code>arr[1]</code>')
-    // [2] outside code: converted
     expect(result).toContain('data-ref="2"')
   })
 
   it('handles nested <pre><code> correctly', () => {
     const input = '<pre><code>dict[1] = "a"\ndict[2] = "b"</code></pre><p>See [1] for details.</p>'
     const result = processCitationBadges(input)
-    // Inside pre/code: NOT converted
     expect(result).toContain('dict[1]')
     expect(result).toContain('dict[2]')
-    // After pre/code: converted
     expect(result).toContain('data-ref="1"')
   })
 
@@ -164,11 +164,70 @@ describe('RAG citation badges inside code/pre blocks', () => {
     expect(result).toContain('<code>a[1]</code>')
     expect(result).toContain('<code>b[2]</code>')
     expect(result).toContain('data-ref="3"')
-    // Only the [3] outside code should be a badge
     const badgeCount = (result.match(/rag-citation-badge/g) || []).length
     expect(badgeCount).toBe(1)
   })
 })
+
+// --------------------------------------------------------------------------
+// Tests: per-message scoping of citation IDs
+// --------------------------------------------------------------------------
+
+describe('RAG citation ID scoping per message', () => {
+  it('uses unscoped IDs when no scope is provided', () => {
+    const input = '<p>Claim [1].</p>'
+    const result = processCitationBadges(input)
+    expect(result).toContain('data-citation-target="rag-ref-1"')
+  })
+
+  it('uses scoped IDs when scope is provided', () => {
+    const input = '<p>Claim [1].</p>'
+    const result = processCitationBadges(input, 'msg42')
+    expect(result).toContain('data-citation-target="rag-ref-msg42-1"')
+    expect(result).not.toContain('data-citation-target="rag-ref-1"')
+  })
+
+  it('two different scopes produce different target IDs for same citation number', () => {
+    const input = '<p>Fact [1] is cited.</p>'
+    const resultA = processCitationBadges(input, 'msgA')
+    const resultB = processCitationBadges(input, 'msgB')
+    expect(resultA).toContain('data-citation-target="rag-ref-msgA-1"')
+    expect(resultB).toContain('data-citation-target="rag-ref-msgB-1"')
+    // Confirm they don't collide
+    expect(resultA).not.toContain('msgB')
+    expect(resultB).not.toContain('msgA')
+  })
+
+  it('scoped references section produces matching anchor IDs', () => {
+    const badges = processCitationBadges('<p>Point [1].</p>', 'r5')
+    const refs = processReferencesSection(
+      '<p><strong>References</strong></p>\n<p>1. Source A - 90%</p>',
+      'r5'
+    )
+    // Badge target and reference anchor should match
+    expect(badges).toContain('data-citation-target="rag-ref-r5-1"')
+    expect(refs).toContain('id="rag-ref-r5-1"')
+  })
+
+  it('scoped references do NOT collide across two messages', () => {
+    const refsMsg1 = processReferencesSection(
+      '<p><strong>References</strong></p>\n<p>1. Alpha</p>',
+      'first'
+    )
+    const refsMsg2 = processReferencesSection(
+      '<p><strong>References</strong></p>\n<p>1. Beta</p>',
+      'second'
+    )
+    expect(refsMsg1).toContain('id="rag-ref-first-1"')
+    expect(refsMsg2).toContain('id="rag-ref-second-1"')
+    expect(refsMsg1).not.toContain('second')
+    expect(refsMsg2).not.toContain('first')
+  })
+})
+
+// --------------------------------------------------------------------------
+// Tests: references section anchoring and highlight targets
+// --------------------------------------------------------------------------
 
 describe('RAG references section anchoring', () => {
   it('adds id anchors to paragraph-style reference entries', () => {
@@ -196,5 +255,18 @@ describe('RAG references section anchoring', () => {
     const result = processReferencesSection(input)
     expect(result).toContain('id="rag-ref-1"')
     expect(result).toContain('id="rag-ref-2"')
+  })
+
+  it('adds rag-ref-entry class to paragraph reference targets for visible highlighting', () => {
+    const input = '<p><strong>References</strong></p>\n<p>1. Source A</p>'
+    const result = processReferencesSection(input)
+    // The id should be on the <p> element itself (not a child span)
+    expect(result).toContain('<p id="rag-ref-1" class="rag-ref-entry">')
+  })
+
+  it('adds rag-ref-entry class to list-item reference targets for visible highlighting', () => {
+    const input = '<strong>References</strong><ul><li>1. Source A</li></ul>'
+    const result = processReferencesSection(input)
+    expect(result).toContain('<li id="rag-ref-1" class="rag-ref-entry">')
   })
 })

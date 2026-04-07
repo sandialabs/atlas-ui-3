@@ -449,14 +449,19 @@
 }
 
 /* Highlight animation when a citation badge scrolls a reference into view */
-.rag-ref-highlight {
-  background-color: rgba(99, 102, 241, 0.15);
-  border-radius: 0.25rem;
+.rag-ref-entry {
   transition: background-color 0.3s ease;
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.25rem;
+  margin: -0.125rem -0.25rem;
+}
+
+.rag-ref-highlight {
+  background-color: rgba(99, 102, 241, 0.2) !important;
 }
 
 [data-theme="light"] .rag-ref-highlight {
-  background-color: rgba(79, 70, 229, 0.1);
+  background-color: rgba(79, 70, 229, 0.15) !important;
 }
 
 /* User message bubble: blue in dark mode, lighter blue in light mode */
