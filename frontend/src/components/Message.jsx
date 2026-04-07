@@ -51,7 +51,7 @@ hljs.registerLanguage('sh', bash)
 // KaTeX renders almost exclusively with <span> (allowed by default) but also
 // uses <svg>, <path>, and a handful of MathML elements for some symbols.
 const DOMPURIFY_CONFIG = {
-  ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext'],
+  ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext', 'details', 'summary'],
   ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'role', 'tabindex'],
 }
 
@@ -70,7 +70,45 @@ const processFileReferences = (content) => {
  *
  * Only processes text outside HTML tags to avoid mangling attributes.
  */
-const processCitationBadges = (html, scope = '') => {
+/**
+ * Extract source labels from the References section so inline citation
+ * chips can show source names (e.g. "eater") instead of bare numbers.
+ * Returns a Map<string, {label: string, url: string|null}>.
+ */
+const extractSourceLabels = (html) => {
+  const labels = new Map()
+  const refIdx = html.indexOf('<strong>References</strong>')
+  if (refIdx === -1) return labels
+
+  const refsHtml = html.slice(refIdx)
+  // Match "N. <a href="url">label</a>" or "N. label"
+  const linkPattern = /(\d{1,2})\.\s+<a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/g
+  const plainPattern = /(\d{1,2})\.\s+([^<—\n]+)/g
+
+  let m
+  while ((m = linkPattern.exec(refsHtml)) !== null) {
+    labels.set(m[1], { label: m[3].trim(), url: m[2] })
+  }
+  // Fill in any that weren't links
+  while ((m = plainPattern.exec(refsHtml)) !== null) {
+    if (!labels.has(m[1])) {
+      labels.set(m[1], { label: m[2].trim(), url: null })
+    }
+  }
+  return labels
+}
+
+/**
+ * Shorten a source label to a compact domain-style chip label.
+ * "API Authentication Guide" → "api-auth..." (max ~20 chars)
+ * Already short names pass through unchanged.
+ */
+const chipLabel = (label) => {
+  if (label.length <= 20) return label
+  return label.slice(0, 18) + '…'
+}
+
+const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
   // Track whether we are inside a <code> or <pre> block so we don't
   // convert array indices like arr[1] into citation badges.
   // The scope parameter ensures IDs are unique per message, preventing
@@ -92,34 +130,40 @@ const processCitationBadges = (html, scope = '') => {
       if (otherTag) return otherTag
       // Inside code/pre: leave [N] as plain text
       if (insideCode > 0) return match
-      // Normal text: convert to citation badge with scrollIntoView pattern
+      // Render as Perplexity-style inline source chip with source name
       const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
-      return `<sup class="rag-citation-badge" data-ref="${num}"><span role="button" tabindex="0" class="rag-citation-link" data-citation-target="${refId}">${num}</span></sup>`
+      const src = sourceLabels.get(num)
+      const displayLabel = src ? chipLabel(src.label) : num
+      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" class="rag-source-chip-inner" data-citation-target="${refId}">${displayLabel}<span class="rag-source-chip-num">${num}</span></span></span>`
     }
   )
 }
 
 /**
- * Add anchor IDs to the numbered items in the References section so
- * inline citation badges can link to them.
+ * Add anchor IDs to the numbered items in the References section and
+ * wrap the whole section in a collapsible details element so inline
+ * source chips are the primary attribution UX.
  */
 const processReferencesSection = (html, scope = '') => {
-  // Find the References heading, then process all subsequent <p>N. entries.
-  // The scope parameter ensures anchor IDs are unique per message.
   const refIdx = html.indexOf('<strong>References</strong>')
   if (refIdx === -1) return html
 
   const before = html.slice(0, refIdx)
-  const after = html.slice(refIdx)
+  let after = html.slice(refIdx)
   const prefix = scope ? `rag-ref-${scope}` : 'rag-ref'
 
   const anchored = after
-    // List items — put id on the <li> itself (visible block element for highlighting)
     .replace(/<li>(\d{1,2})\.\s/g, (_, num) => `<li id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
-    // Paragraph items — put id on the <p> so the highlight covers the whole line
     .replace(/<p>(\d{1,2})\.\s/g, (_, num) => `<p id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
 
-  return before + anchored
+  // Wrap the references in a collapsible <details> so inline chips are primary
+  const wrapped = anchored
+    .replace(
+      /(<p>)?<strong>References<\/strong>(<\/p>)?/,
+      '<details class="rag-references-collapse"><summary class="rag-references-summary">Sources</summary>'
+    ) + '</details>'
+
+  return before + wrapped
 }
 
 // Helper function to convert bullet characters to proper markdown list syntax
@@ -1240,9 +1284,10 @@ const renderContent = () => {
       const { result: latexProcessed, placeholders } = preProcessLatex(content)
       const markdownHtml = marked.parse(latexProcessed)
       const latexRestoredHtml = restoreLatexPlaceholders(markdownHtml, placeholders)
-      // Apply citation badge rendering for RAG inline references
-      // Pass messageScope so IDs are unique per message in the conversation
-      const citationHtml = processCitationBadges(latexRestoredHtml, messageScope)
+      // Extract source labels from references before badge processing,
+      // so inline chips can show source names instead of bare numbers
+      const sourceLabels = extractSourceLabels(latexRestoredHtml)
+      const citationHtml = processCitationBadges(latexRestoredHtml, messageScope, sourceLabels)
       const referencesHtml = processReferencesSection(citationHtml, messageScope)
       const sanitizedHtml = DOMPurify.sanitize(referencesHtml, DOMPURIFY_CONFIG)
 

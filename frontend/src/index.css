@@ -395,60 +395,105 @@
   }
 }
 
-/* ── RAG inline citation badges (Perplexity-style) ── */
-.rag-citation-badge {
+/* ── RAG inline source chips (Perplexity-style) ── */
+.rag-source-chip {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: baseline;
+  margin: 0 2px;
+}
+
+.rag-source-chip-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.2;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.75rem;
+  background-color: rgba(99, 102, 241, 0.12);
+  color: rgb(165, 180, 252); /* indigo-300 */
+  cursor: pointer;
+  transition: background-color 0.15s;
+  text-decoration: none !important;
+  white-space: nowrap;
+}
+
+.rag-source-chip-inner:hover {
+  background-color: rgba(99, 102, 241, 0.25);
+}
+
+.rag-source-chip-num {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.65rem;
-  font-weight: 600;
+  font-size: 0.6rem;
+  font-weight: 700;
+  min-width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background-color: rgba(99, 102, 241, 0.25);
+  color: rgb(199, 210, 254); /* indigo-200 */
   line-height: 1;
-  min-width: 1.1rem;
-  height: 1.1rem;
-  padding: 0 0.25rem;
-  margin: 0 1px;
-  border-radius: 0.25rem;
-  background-color: rgba(99, 102, 241, 0.2);
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  vertical-align: super;
+}
+
+[data-theme="light"] .rag-source-chip-inner {
+  background-color: rgba(79, 70, 229, 0.08);
+  color: rgb(79, 70, 229); /* indigo-600 */
+}
+
+[data-theme="light"] .rag-source-chip-inner:hover {
+  background-color: rgba(79, 70, 229, 0.16);
+}
+
+[data-theme="light"] .rag-source-chip-num {
+  background-color: rgba(79, 70, 229, 0.15);
+  color: rgb(67, 56, 202); /* indigo-700 */
+}
+
+/* ── Collapsible references section ── */
+.rag-references-collapse {
+  margin-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 0.5rem;
+}
+
+.rag-references-summary {
   cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgb(156, 163, 175); /* gray-400 */
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
-.rag-citation-badge:hover {
-  background-color: rgba(99, 102, 241, 0.4);
-  border-color: rgba(99, 102, 241, 0.7);
+.rag-references-summary::before {
+  content: '▶';
+  font-size: 0.55rem;
+  transition: transform 0.15s;
 }
 
-.rag-citation-link {
-  color: rgb(165, 180, 252) !important; /* indigo-300 */
-  text-decoration: none !important;
-  font-variant-numeric: tabular-nums;
+.rag-references-collapse[open] > .rag-references-summary::before {
+  transform: rotate(90deg);
 }
 
-.rag-citation-link:hover {
-  color: rgb(199, 210, 254) !important; /* indigo-200 */
+.rag-references-summary::-webkit-details-marker {
+  display: none;
 }
 
-[data-theme="light"] .rag-citation-badge {
-  background-color: rgba(79, 70, 229, 0.1);
-  border-color: rgba(79, 70, 229, 0.3);
+[data-theme="light"] .rag-references-collapse {
+  border-top-color: rgba(0, 0, 0, 0.1);
 }
 
-[data-theme="light"] .rag-citation-badge:hover {
-  background-color: rgba(79, 70, 229, 0.2);
-  border-color: rgba(79, 70, 229, 0.5);
+[data-theme="light"] .rag-references-summary {
+  color: rgb(107, 114, 128); /* gray-500 */
 }
 
-[data-theme="light"] .rag-citation-link {
-  color: rgb(79, 70, 229) !important; /* indigo-600 */
-}
-
-[data-theme="light"] .rag-citation-link:hover {
-  color: rgb(67, 56, 202) !important; /* indigo-700 */
-}
-
-/* Highlight animation when a citation badge scrolls a reference into view */
+/* ── Reference entry highlight on citation click ── */
 .rag-ref-entry {
   transition: background-color 0.3s ease;
   border-radius: 0.25rem;
