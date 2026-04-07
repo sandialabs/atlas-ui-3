@@ -99,13 +99,22 @@ const extractSourceLabels = (html) => {
 }
 
 /**
- * Shorten a source label to a compact domain-style chip label.
- * "API Authentication Guide" → "api-auth..." (max ~20 chars)
- * Already short names pass through unchanged.
+ * Shorten a source label to a compact domain-style name.
+ * "New Mexico Magazine" → "newmexicomagazine"
+ * "https://eater.com/food" → "eater.com"
+ * Already short names pass through lowercased.
  */
-const chipLabel = (label) => {
-  if (label.length <= 20) return label
-  return label.slice(0, 18) + '…'
+const chipLabel = (label, url) => {
+  // If we have a URL, extract the domain as the label (like Perplexity does)
+  if (url) {
+    try {
+      const domain = new URL(url).hostname.replace(/^www\./, '')
+      if (domain.length <= 25) return domain
+    } catch { /* fall through to label-based logic */ }
+  }
+  // Collapse to a compact lowercase slug
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20)
+  return slug || label.slice(0, 20)
 }
 
 const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
@@ -130,10 +139,10 @@ const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
       if (otherTag) return otherTag
       // Inside code/pre: leave [N] as plain text
       if (insideCode > 0) return match
-      // Render as Perplexity-style inline source chip with source name
+      // Render as Perplexity-style inline source label
       const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
       const src = sourceLabels.get(num)
-      const displayLabel = src ? chipLabel(src.label) : num
+      const displayLabel = src ? chipLabel(src.label, src.url) : num
       return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" class="rag-source-chip-inner" data-citation-target="${refId}">${displayLabel}<span class="rag-source-chip-num">${num}</span></span></span>`
     }
   )

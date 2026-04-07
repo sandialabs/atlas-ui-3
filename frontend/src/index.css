@@ -395,61 +395,44 @@
   }
 }
 
-/* ── RAG inline source chips (Perplexity-style) ── */
+/* ── RAG inline source labels (Perplexity-style) ── */
 .rag-source-chip {
-  display: inline-flex;
-  align-items: center;
-  vertical-align: baseline;
-  margin: 0 2px;
+  display: inline;
+  margin: 0 1px;
 }
 
 .rag-source-chip-inner {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
   font-size: 0.7rem;
-  font-weight: 500;
-  line-height: 1.2;
-  padding: 0.1rem 0.4rem;
-  border-radius: 0.75rem;
-  background-color: rgba(99, 102, 241, 0.12);
-  color: rgb(165, 180, 252); /* indigo-300 */
+  font-weight: 400;
+  color: rgb(115, 115, 130); /* muted gray */
   cursor: pointer;
-  transition: background-color 0.15s;
   text-decoration: none !important;
   white-space: nowrap;
+  transition: color 0.15s;
 }
 
 .rag-source-chip-inner:hover {
-  background-color: rgba(99, 102, 241, 0.25);
+  color: rgb(165, 165, 180);
 }
 
 .rag-source-chip-num {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   font-size: 0.6rem;
-  font-weight: 700;
-  min-width: 0.85rem;
-  height: 0.85rem;
-  border-radius: 50%;
-  background-color: rgba(99, 102, 241, 0.25);
-  color: rgb(199, 210, 254); /* indigo-200 */
-  line-height: 1;
+  font-weight: 500;
+  vertical-align: super;
+  margin-left: 1px;
+  color: rgb(115, 115, 130);
 }
 
 [data-theme="light"] .rag-source-chip-inner {
-  background-color: rgba(79, 70, 229, 0.08);
-  color: rgb(79, 70, 229); /* indigo-600 */
+  color: rgb(120, 120, 135);
 }
 
 [data-theme="light"] .rag-source-chip-inner:hover {
-  background-color: rgba(79, 70, 229, 0.16);
+  color: rgb(80, 80, 100);
 }
 
 [data-theme="light"] .rag-source-chip-num {
-  background-color: rgba(79, 70, 229, 0.15);
-  color: rgb(67, 56, 202); /* indigo-700 */
+  color: rgb(120, 120, 135);
 }
 
 /* ── Collapsible references section ── */

@@ -34,9 +34,15 @@ const extractSourceLabels = (html) => {
   return labels
 }
 
-const chipLabel = (label) => {
-  if (label.length <= 20) return label
-  return label.slice(0, 18) + '…'
+const chipLabel = (label, url) => {
+  if (url) {
+    try {
+      const domain = new URL(url).hostname.replace(/^www\./, '')
+      if (domain.length <= 25) return domain
+    } catch { /* fall through */ }
+  }
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20)
+  return slug || label.slice(0, 20)
 }
 
 const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
@@ -56,7 +62,7 @@ const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
       if (insideCode > 0) return match
       const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
       const src = sourceLabels.get(num)
-      const displayLabel = src ? chipLabel(src.label) : num
+      const displayLabel = src ? chipLabel(src.label, src.url) : num
       return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" class="rag-source-chip-inner" data-citation-target="${refId}">${displayLabel}<span class="rag-source-chip-num">${num}</span></span></span>`
     }
   )
@@ -116,14 +122,25 @@ describe('extractSourceLabels', () => {
 // --------------------------------------------------------------------------
 
 describe('chipLabel', () => {
-  it('returns short labels unchanged', () => {
-    expect(chipLabel('eater')).toBe('eater')
+  it('extracts domain from URL when available', () => {
+    expect(chipLabel('Eater NM', 'https://www.eater.com/food')).toBe('eater.com')
   })
 
-  it('truncates long labels with ellipsis', () => {
-    const result = chipLabel('Very Long Source Name That Exceeds Limit')
-    expect(result.length).toBe(19) // 18 + '…'
-    expect(result).toContain('…')
+  it('strips www. prefix from domain', () => {
+    expect(chipLabel('Anything', 'https://www.example.org/page')).toBe('example.org')
+  })
+
+  it('produces lowercase slug from label when no URL', () => {
+    expect(chipLabel('New Mexico Magazine')).toBe('newmexicomagazine')
+  })
+
+  it('truncates long slugs at 20 chars', () => {
+    const result = chipLabel('A Very Long Source Name That Exceeds The Limit')
+    expect(result.length).toBeLessThanOrEqual(20)
+  })
+
+  it('falls back to label text when URL is invalid', () => {
+    expect(chipLabel('eater', 'not-a-url')).toBe('eater')
   })
 })
 
@@ -132,13 +149,13 @@ describe('chipLabel', () => {
 // --------------------------------------------------------------------------
 
 describe('RAG source chip rendering', () => {
-  it('converts [1] into a source chip with source name', () => {
-    const labels = new Map([['1', { label: 'eater', url: 'https://eater.com' }]])
+  it('converts [1] into a source chip with domain name', () => {
+    const labels = new Map([['1', { label: 'Eater NM', url: 'https://eater.com/nm' }]])
     const input = '<p>Green chile is iconic [1].</p>'
     const result = processCitationBadges(input, '', labels)
     expect(result).toContain('class="rag-source-chip"')
     expect(result).toContain('class="rag-source-chip-inner"')
-    expect(result).toContain('eater')
+    expect(result).toContain('eater.com') // domain extracted from URL
     expect(result).toContain('class="rag-source-chip-num"')
     expect(result).toContain('>1<')
   })
@@ -150,14 +167,14 @@ describe('RAG source chip rendering', () => {
     expect(result).toContain('data-ref="1"')
   })
 
-  it('converts multiple adjacent citations [1][2]', () => {
+  it('converts multiple adjacent citations [1][2] with slug labels', () => {
     const labels = new Map([
-      ['1', { label: 'eater', url: null }],
-      ['2', { label: 'foodnetwork', url: null }],
+      ['1', { label: 'Eater NM', url: null }],
+      ['2', { label: 'Food Network', url: null }],
     ])
     const input = '<p>Both sources agree [1][2].</p>'
     const result = processCitationBadges(input, '', labels)
-    expect(result).toContain('eater')
+    expect(result).toContain('eaternm') // slug from label
     expect(result).toContain('foodnetwork')
   })
 
