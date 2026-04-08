@@ -231,26 +231,39 @@ class LiteLLMStreamingMixin:
                 yield chunk
             return
 
+        from atlas.modules.rag.citation_formatter import build_citation_context, build_references_marker
+
         # Single source with direct completion
+        rag_metadata = None
+        refs_display_source = None
         if len(data_sources) == 1:
             display_source, rag_response = source_responses[0]
             if rag_response.is_completion:
                 yield self._build_rag_completion_response(rag_response, display_source)
                 return
             rag_content = rag_response.content
+            rag_metadata = rag_response.metadata
             context_label = f"Retrieved context from {display_source}"
+            refs_display_source = display_source
         else:
-            rag_content, _ = self._combine_rag_contexts(source_responses)
+            rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
             context_label = f"Retrieved context from {len(source_responses)} RAG sources"
+            refs_display_source = f"{len(source_responses)} sources"
 
         messages_with_rag = messages.copy()
         messages_with_rag.insert(-1, {
             "role": "system",
-            "content": f"{context_label}:\n\n{rag_content}\n\nUse this context to inform your response.",
+            "content": build_citation_context(rag_content, rag_metadata, context_label),
         })
 
         async for chunk in self.stream_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email):
             yield chunk
+
+        # After streaming completes, yield the references marker
+        if rag_metadata:
+            marker = build_references_marker(rag_metadata, refs_display_source)
+            if marker:
+                yield f"\n\n{marker}"
 
     async def stream_with_rag_and_tools(
         self,
@@ -290,6 +303,10 @@ class LiteLLMStreamingMixin:
                 yield item
             return
 
+        from atlas.modules.rag.citation_formatter import build_citation_context, build_references_marker
+
+        rag_metadata = None
+        refs_display_source = None
         if len(data_sources) == 1:
             display_source, rag_response = source_responses[0]
             if rag_response.is_completion:
@@ -298,17 +315,26 @@ class LiteLLMStreamingMixin:
             else:
                 rag_content = rag_response.content
                 context_label = f"Retrieved context from {display_source}"
+            rag_metadata = rag_response.metadata
+            refs_display_source = display_source
         else:
-            rag_content, _ = self._combine_rag_contexts(source_responses)
+            rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
             context_label = f"Retrieved context from {len(source_responses)} RAG sources"
+            refs_display_source = f"{len(source_responses)} sources"
 
         messages_with_rag = messages.copy()
         messages_with_rag.insert(-1, {
             "role": "system",
-            "content": f"{context_label}:\n\n{rag_content}\n\nUse this context to inform your response.",
+            "content": build_citation_context(rag_content, rag_metadata, context_label),
         })
 
         async for item in self.stream_with_tools(
             model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature, user_email=user_email
         ):
             yield item
+
+        # Yield references marker after streaming if metadata available
+        if rag_metadata:
+            marker = build_references_marker(rag_metadata, refs_display_source)
+            if marker:
+                yield f"\n\n{marker}"

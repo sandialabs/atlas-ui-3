@@ -236,15 +236,17 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         Returns:
             Formatted response string with RAG completion note and metadata
         """
+        from atlas.modules.rag.citation_formatter import build_references_marker
+
         response_parts = []
         response_parts.append(f"*Response from {display_source} (RAG completions endpoint):*\n")
         response_parts.append(rag_response.content)
 
-        # Append metadata if available
+        # Append structured references marker for frontend rendering
         if rag_response.metadata:
-            metadata_summary = self._format_rag_metadata(rag_response.metadata)
-            if metadata_summary and metadata_summary != "Metadata unavailable":
-                response_parts.append(f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}")
+            marker = build_references_marker(rag_response.metadata, display_source)
+            if marker:
+                response_parts.append(f"\n\n{marker}")
 
         return "\n".join(response_parts)
 
@@ -697,23 +699,27 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 rag_content = rag_response.content
                 rag_metadata = rag_response.metadata
                 context_label = f"Retrieved context from {display_source}"
+                refs_display_source = display_source
             else:
                 # Multiple sources: combine all as raw context
                 rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
                 context_label = f"Retrieved context from {len(source_responses)} RAG sources"
+                refs_display_source = f"{len(source_responses)} sources"
 
-            # Integrate RAG context into messages
+            # Integrate RAG context into messages with citation instructions
+            from atlas.modules.rag.citation_formatter import build_citation_context, build_references_marker
+
             messages_with_rag = messages.copy()
             rag_context_message = {
                 "role": "system",
-                "content": f"{context_label}:\n\n{rag_content}\n\nUse this context to inform your response."
+                "content": build_citation_context(rag_content, rag_metadata, context_label),
             }
             messages_with_rag.insert(-1, rag_context_message)
 
             logger.debug("[LLM+RAG] Calling LLM with RAG-enriched context...")
             llm_response = await self.call_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email)
 
-            # Only append metadata if RAG actually provided useful content
+            # Only append references marker if RAG actually provided useful content
             rag_content_useful = bool(
                 rag_content
                 and rag_content.strip()
@@ -725,9 +731,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
 
             if rag_content_useful and rag_metadata:
-                metadata_summary = self._format_rag_metadata(rag_metadata)
-                if metadata_summary and metadata_summary != "Metadata unavailable":
-                    llm_response += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
+                marker = build_references_marker(rag_metadata, refs_display_source)
+                if marker:
+                    llm_response += f"\n\n{marker}"
 
             logger.info(
                 "[LLM+RAG] RAG-integrated query complete: response_length=%d, rag_content_useful=%s",
@@ -894,23 +900,27 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     rag_content = rag_response.content
                     context_label = f"Retrieved context from {display_source}"
                 rag_metadata = rag_response.metadata
+                refs_display_source = display_source
             else:
                 # Multiple sources: combine all as raw context
                 rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
                 context_label = f"Retrieved context from {len(source_responses)} RAG sources"
+                refs_display_source = f"{len(source_responses)} sources"
 
-            # Integrate RAG context into messages
+            # Integrate RAG context into messages with citation instructions
+            from atlas.modules.rag.citation_formatter import build_citation_context, build_references_marker
+
             messages_with_rag = messages.copy()
             rag_context_message = {
                 "role": "system",
-                "content": f"{context_label}:\n\n{rag_content}\n\nUse this context to inform your response."
+                "content": build_citation_context(rag_content, rag_metadata, context_label),
             }
             messages_with_rag.insert(-1, rag_context_message)
 
             logger.debug("[LLM+RAG+Tools] Calling LLM with RAG-enriched context and tools...")
             llm_response = await self.call_with_tools(model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature, user_email=user_email)
 
-            # Only append metadata if RAG actually provided useful content
+            # Only append references marker if RAG actually provided useful content
             rag_content_useful = bool(
                 rag_content
                 and rag_content.strip()
@@ -922,9 +932,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
 
             if rag_content_useful and rag_metadata and not llm_response.has_tool_calls():
-                metadata_summary = self._format_rag_metadata(rag_metadata)
-                if metadata_summary and metadata_summary != "Metadata unavailable":
-                    llm_response.content += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
+                marker = build_references_marker(rag_metadata, refs_display_source)
+                if marker:
+                    llm_response.content += f"\n\n{marker}"
 
             logger.info(
                 "[LLM+RAG+Tools] RAG+tools query complete: response_length=%d, has_tool_calls=%s, rag_content_useful=%s",
@@ -945,7 +955,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         """Format RAG metadata into a user-friendly summary."""
         # Import here to avoid circular imports
         try:
-            from atlas.modules.rag.models import RAGMetadata
+            from atlas.modules.rag.client import RAGMetadata
             if not isinstance(metadata, RAGMetadata):
                 return "Metadata unavailable"
         except ImportError:
