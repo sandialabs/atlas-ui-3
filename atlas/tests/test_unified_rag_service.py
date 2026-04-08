@@ -153,11 +153,11 @@ class TestUserAuthorization:
 
     @pytest.mark.asyncio
     async def test_is_user_authorized_no_auth_func(self, mock_config_manager):
-        """Test authorization when no auth check function is provided."""
+        """Test authorization when no auth check function is provided (fail closed)."""
         service = UnifiedRAGService(config_manager=mock_config_manager)
         result = await service._is_user_authorized("anyone@test.com", ["admin"])
-        # Should return True when no auth function (permissive by default)
-        assert result is True
+        # Should return False when no auth function (fail closed)
+        assert result is False
 
 
 class TestDiscoverDataSources:

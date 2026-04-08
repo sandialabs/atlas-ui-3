@@ -69,7 +69,7 @@ class UnifiedRAGService:
         if not groups:
             return True  # No groups restriction
         if not self.auth_check_func:
-            return True  # No auth check function provided
+            return False  # No auth check function provided; deny access (fail closed)
 
         for group in groups:
             if await self.auth_check_func(username, group):
