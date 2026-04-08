@@ -81,20 +81,42 @@ const extractSourceLabels = (html) => {
   if (refIdx === -1) return labels
 
   const refsHtml = html.slice(refIdx)
-  // Match "N. <a href="url">label</a>" or "N. label"
-  const linkPattern = /(\d{1,2})\.\s+<a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/g
-  const plainPattern = /(\d{1,2})\.\s+([^<—\n]+)/g
 
-  let m
-  while ((m = linkPattern.exec(refsHtml)) !== null) {
+  // Pattern 1: "N. <a href="url">label</a>" (paragraph-style numbered refs)
+  const numberedLinkPattern = /(\d{1,2})\.\s+<a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/g
+  // Pattern 2: "<li><a href="url">label</a>" (ol/li-style refs — auto-numbered)
+  const liLinkPattern = /<li><a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/g
+  // Pattern 3: "N. label" (plain text numbered refs)
+  const numberedPlainPattern = /(\d{1,2})\.\s+([^<—\n]+)/g
+  // Pattern 4: "<li>label" (plain li refs)
+  const liPlainPattern = /<li>([^<—\n]+)/g
+
+  let m, idx
+
+  // Try numbered patterns first
+  while ((m = numberedLinkPattern.exec(refsHtml)) !== null) {
     labels.set(m[1], { label: m[3].trim(), url: m[2] })
   }
-  // Fill in any that weren't links
-  while ((m = plainPattern.exec(refsHtml)) !== null) {
+  while ((m = numberedPlainPattern.exec(refsHtml)) !== null) {
     if (!labels.has(m[1])) {
       labels.set(m[1], { label: m[2].trim(), url: null })
     }
   }
+
+  // If no numbered refs found, fall back to li-based (auto-numbered by ol)
+  if (labels.size === 0) {
+    idx = 1
+    while ((m = liLinkPattern.exec(refsHtml)) !== null) {
+      labels.set(String(idx++), { label: m[2].trim(), url: m[1] })
+    }
+    if (labels.size === 0) {
+      idx = 1
+      while ((m = liPlainPattern.exec(refsHtml)) !== null) {
+        labels.set(String(idx++), { label: m[1].trim(), url: null })
+      }
+    }
+  }
+
   return labels
 }
 
@@ -139,21 +161,21 @@ const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
       if (otherTag) return otherTag
       // Inside code/pre: leave [N] as plain text
       if (insideCode > 0) return match
-      // Render as Perplexity-style inline source label
+      // Render as compact inline citation number — source names live in the
+      // Sources footer, not inline. Just show a small superscript number.
       const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
-      const src = sourceLabels.get(num)
-      const displayLabel = src ? chipLabel(src.label, src.url) : num
-      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" class="rag-source-chip-inner" data-citation-target="${refId}">${displayLabel}<span class="rag-source-chip-num">${num}</span></span></span>`
+      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" class="rag-source-chip-inner rag-source-chip-numonly" data-citation-target="${refId}">${num}</span></span>`
     }
   )
 }
 
 /**
  * Add anchor IDs to the numbered items in the References section and
- * wrap the whole section in a collapsible details element so inline
- * source chips are the primary attribution UX.
+ * wrap it in a collapsible element. The collapsed state shows a compact
+ * inline summary like "[1] Auth Guide, [2] Deploy Guide"; expanding
+ * reveals the full detailed list with relevance scores and links.
  */
-const processReferencesSection = (html, scope = '') => {
+const processReferencesSection = (html, scope = '', sourceLabels = new Map()) => {
   const refIdx = html.indexOf('<strong>References</strong>')
   if (refIdx === -1) return html
 
@@ -161,15 +183,30 @@ const processReferencesSection = (html, scope = '') => {
   let after = html.slice(refIdx)
   const prefix = scope ? `rag-ref-${scope}` : 'rag-ref'
 
+  // Add anchor IDs to reference entries — handles both "N. text" and plain <li> formats
+  let liCounter = 0
   const anchored = after
     .replace(/<li>(\d{1,2})\.\s/g, (_, num) => `<li id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
     .replace(/<p>(\d{1,2})\.\s/g, (_, num) => `<p id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
+    .replace(/<li>(?!\d{1,2}\.\s)/g, () => {
+      liCounter++
+      return `<li id="${prefix}-${liCounter}" class="rag-ref-entry">`
+    })
 
-  // Wrap the references in a collapsible <details> so inline chips are primary
+  // Build compact inline summary: [1] Name, [2] Name, ...
+  const summaryParts = []
+  const sorted = [...sourceLabels.entries()].sort((a, b) => Number(a[0]) - Number(b[0]))
+  for (const [num, src] of sorted) {
+    summaryParts.push(`<span class="rag-summary-ref">[${num}]</span> ${src.label}`)
+  }
+  const summaryText = summaryParts.length > 0
+    ? summaryParts.join('<span class="rag-summary-sep">,</span> ')
+    : 'Sources'
+
   const wrapped = anchored
     .replace(
       /(<p>)?<strong>References<\/strong>(<\/p>)?/,
-      '<details class="rag-references-collapse"><summary class="rag-references-summary">Sources</summary>'
+      `<details class="rag-references-collapse"><summary class="rag-references-summary">${summaryText}</summary>`
     ) + '</details>'
 
   return before + wrapped
@@ -1297,7 +1334,7 @@ const renderContent = () => {
       // so inline chips can show source names instead of bare numbers
       const sourceLabels = extractSourceLabels(latexRestoredHtml)
       const citationHtml = processCitationBadges(latexRestoredHtml, messageScope, sourceLabels)
-      const referencesHtml = processReferencesSection(citationHtml, messageScope)
+      const referencesHtml = processReferencesSection(citationHtml, messageScope, sourceLabels)
       const sanitizedHtml = DOMPurify.sanitize(referencesHtml, DOMPURIFY_CONFIG)
 
       return (

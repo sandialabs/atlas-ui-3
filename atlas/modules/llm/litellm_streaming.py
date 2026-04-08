@@ -346,8 +346,8 @@ class LiteLLMStreamingMixin:
                 has_tool_calls = True
             yield item
 
-        # Yield the references section as a final chunk (skip if tool calls were made)
-        if rag_metadata and not has_tool_calls:
+        # Yield the references section as a final chunk
+        if rag_metadata:
             references_section = self._format_rag_references(rag_metadata)
             if references_section:
                 yield f"\n\n---\n{references_section}"

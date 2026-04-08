@@ -20,15 +20,29 @@ const extractSourceLabels = (html) => {
   const refIdx = html.indexOf('<strong>References</strong>')
   if (refIdx === -1) return labels
   const refsHtml = html.slice(refIdx)
-  const linkPattern = /(\d{1,2})\.\s+<a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/g
-  const plainPattern = /(\d{1,2})\.\s+([^<—\n]+)/g
-  let m
-  while ((m = linkPattern.exec(refsHtml)) !== null) {
+  const numberedLinkPattern = /(\d{1,2})\.\s+<a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/g
+  const liLinkPattern = /<li><a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/g
+  const numberedPlainPattern = /(\d{1,2})\.\s+([^<—\n]+)/g
+  const liPlainPattern = /<li>([^<—\n]+)/g
+  let m, idx
+  while ((m = numberedLinkPattern.exec(refsHtml)) !== null) {
     labels.set(m[1], { label: m[3].trim(), url: m[2] })
   }
-  while ((m = plainPattern.exec(refsHtml)) !== null) {
+  while ((m = numberedPlainPattern.exec(refsHtml)) !== null) {
     if (!labels.has(m[1])) {
       labels.set(m[1], { label: m[2].trim(), url: null })
+    }
+  }
+  if (labels.size === 0) {
+    idx = 1
+    while ((m = liLinkPattern.exec(refsHtml)) !== null) {
+      labels.set(String(idx++), { label: m[2].trim(), url: m[1] })
+    }
+    if (labels.size === 0) {
+      idx = 1
+      while ((m = liPlainPattern.exec(refsHtml)) !== null) {
+        labels.set(String(idx++), { label: m[1].trim(), url: null })
+      }
     }
   }
   return labels
@@ -61,26 +75,37 @@ const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
       if (otherTag) return otherTag
       if (insideCode > 0) return match
       const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
-      const src = sourceLabels.get(num)
-      const displayLabel = src ? chipLabel(src.label, src.url) : num
-      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" class="rag-source-chip-inner" data-citation-target="${refId}">${displayLabel}<span class="rag-source-chip-num">${num}</span></span></span>`
+      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" class="rag-source-chip-inner rag-source-chip-numonly" data-citation-target="${refId}">${num}</span></span>`
     }
   )
 }
 
-const processReferencesSection = (html, scope = '') => {
+const processReferencesSection = (html, scope = '', sourceLabels = new Map()) => {
   const refIdx = html.indexOf('<strong>References</strong>')
   if (refIdx === -1) return html
   const before = html.slice(0, refIdx)
   let after = html.slice(refIdx)
   const prefix = scope ? `rag-ref-${scope}` : 'rag-ref'
+  let liCounter = 0
   const anchored = after
     .replace(/<li>(\d{1,2})\.\s/g, (_, num) => `<li id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
     .replace(/<p>(\d{1,2})\.\s/g, (_, num) => `<p id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
+    .replace(/<li>(?!\d{1,2}\.\s)/g, () => {
+      liCounter++
+      return `<li id="${prefix}-${liCounter}" class="rag-ref-entry">`
+    })
+  const summaryParts = []
+  const sorted = [...sourceLabels.entries()].sort((a, b) => Number(a[0]) - Number(b[0]))
+  for (const [num, src] of sorted) {
+    summaryParts.push(`<span class="rag-summary-ref">[${num}]</span> ${src.label}`)
+  }
+  const summaryText = summaryParts.length > 0
+    ? summaryParts.join('<span class="rag-summary-sep">,</span> ')
+    : 'Sources'
   const wrapped = anchored
     .replace(
       /(<p>)?<strong>References<\/strong>(<\/p>)?/,
-      '<details class="rag-references-collapse"><summary class="rag-references-summary">Sources</summary>'
+      `<details class="rag-references-collapse"><summary class="rag-references-summary">${summaryText}</summary>`
     ) + '</details>'
   return before + wrapped
 }
@@ -108,7 +133,15 @@ describe('extractSourceLabels', () => {
     expect(labels.size).toBe(0)
   })
 
-  it('extracts multiple sources', () => {
+  it('extracts labels from ol/li linked references', () => {
+    const html = '<p><strong>References</strong></p><ol><li><a href="https://a.com">Alpha Source</a> — 95%</li><li><a href="https://b.com">Beta Source</a> — 80%</li></ol>'
+    const labels = extractSourceLabels(html)
+    expect(labels.size).toBe(2)
+    expect(labels.get('1')).toEqual({ label: 'Alpha Source', url: 'https://a.com' })
+    expect(labels.get('2')).toEqual({ label: 'Beta Source', url: 'https://b.com' })
+  })
+
+  it('extracts multiple sources from paragraph format', () => {
     const html = '<p><strong>References</strong></p><p>1. <a href="https://a.com">Alpha</a> — 95%</p><p>2. Beta — 80%</p>'
     const labels = extractSourceLabels(html)
     expect(labels.size).toBe(2)
@@ -149,15 +182,15 @@ describe('chipLabel', () => {
 // --------------------------------------------------------------------------
 
 describe('RAG source chip rendering', () => {
-  it('converts [1] into a source chip with domain name', () => {
+  it('converts [1] into a compact number-only citation chip', () => {
     const labels = new Map([['1', { label: 'Eater NM', url: 'https://eater.com/nm' }]])
     const input = '<p>Green chile is iconic [1].</p>'
     const result = processCitationBadges(input, '', labels)
     expect(result).toContain('class="rag-source-chip"')
-    expect(result).toContain('class="rag-source-chip-inner"')
-    expect(result).toContain('eater.com') // domain extracted from URL
-    expect(result).toContain('class="rag-source-chip-num"')
+    expect(result).toContain('rag-source-chip-numonly')
     expect(result).toContain('>1<')
+    // Source name should NOT appear inline — it belongs in the Sources footer
+    expect(result).not.toContain('eater.com')
   })
 
   it('falls back to number when no source label available', () => {
@@ -167,15 +200,18 @@ describe('RAG source chip rendering', () => {
     expect(result).toContain('data-ref="1"')
   })
 
-  it('converts multiple adjacent citations [1][2] with slug labels', () => {
+  it('converts multiple adjacent citations [1][2] as number-only chips', () => {
     const labels = new Map([
       ['1', { label: 'Eater NM', url: null }],
       ['2', { label: 'Food Network', url: null }],
     ])
     const input = '<p>Both sources agree [1][2].</p>'
     const result = processCitationBadges(input, '', labels)
-    expect(result).toContain('eaternm') // slug from label
-    expect(result).toContain('foodnetwork')
+    expect(result).toContain('data-ref="1"')
+    expect(result).toContain('data-ref="2"')
+    // No source labels inline
+    expect(result).not.toContain('eaternm')
+    expect(result).not.toContain('foodnetwork')
   })
 
   it('does NOT convert [N] inside HTML tag attributes', () => {
@@ -276,12 +312,25 @@ describe('RAG citation ID scoping per message', () => {
 // --------------------------------------------------------------------------
 
 describe('RAG references section', () => {
-  it('wraps references in a collapsible details element', () => {
+  it('shows compact [N] Name summary when source labels provided', () => {
+    const labels = new Map([
+      ['1', { label: 'Auth Guide', url: null }],
+      ['2', { label: 'Deploy Guide', url: null }],
+    ])
+    const input = '<p><strong>References</strong></p>\n<p>1. Auth Guide</p>\n<p>2. Deploy Guide</p>'
+    const result = processReferencesSection(input, '', labels)
+    expect(result).toContain('<details class="rag-references-collapse">')
+    expect(result).toContain('[1]')
+    expect(result).toContain('Auth Guide')
+    expect(result).toContain('[2]')
+    expect(result).toContain('Deploy Guide')
+    expect(result).toContain('rag-summary-ref')
+  })
+
+  it('falls back to "Sources" when no labels provided', () => {
     const input = '<p><strong>References</strong></p>\n<p>1. Source A</p>'
     const result = processReferencesSection(input)
-    expect(result).toContain('<details class="rag-references-collapse">')
-    expect(result).toContain('<summary class="rag-references-summary">Sources</summary>')
-    expect(result).toContain('</details>')
+    expect(result).toContain('>Sources</summary>')
   })
 
   it('adds anchor IDs and rag-ref-entry class to reference entries', () => {

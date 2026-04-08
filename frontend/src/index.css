@@ -435,6 +435,12 @@
   color: rgb(120, 120, 135);
 }
 
+.rag-source-chip-numonly {
+  font-weight: 600;
+  font-size: 0.65rem;
+  vertical-align: super;
+}
+
 /* ── Collapsible references section ── */
 .rag-references-collapse {
   margin-top: 1rem;
@@ -444,14 +450,33 @@
 
 .rag-references-summary {
   cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: rgb(156, 163, 175); /* gray-400 */
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: rgb(140, 140, 155);
   user-select: none;
   list-style: none;
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
+  align-items: baseline;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  line-height: 1.6;
+}
+
+.rag-summary-ref {
+  font-weight: 600;
+  color: rgb(130, 130, 150);
+}
+
+.rag-summary-sep {
+  margin-right: 0.2rem;
+}
+
+[data-theme="light"] .rag-references-summary {
+  color: rgb(100, 100, 120);
+}
+
+[data-theme="light"] .rag-summary-ref {
+  color: rgb(90, 90, 110);
 }
 
 .rag-references-summary::before {

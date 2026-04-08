@@ -941,7 +941,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 )
             )
 
-            if rag_content_useful and rag_metadata and not llm_response.has_tool_calls():
+            if rag_content_useful and rag_metadata:
                 references_section = self._format_rag_references(rag_metadata)
                 if references_section:
                     llm_response.content += f"\n\n---\n{references_section}"
