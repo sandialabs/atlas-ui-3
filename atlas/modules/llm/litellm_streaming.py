@@ -338,15 +338,14 @@ class LiteLLMStreamingMixin:
             ),
         })
 
-        has_tool_calls = False
         async for item in self.stream_with_tools(
             model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature, user_email=user_email
         ):
-            if not isinstance(item, str):
-                has_tool_calls = True
             yield item
 
-        # Yield the references section as a final chunk
+        # Always yield the references section after RAG+tools responses,
+        # even when tool calls were present — the references are relevant
+        # to the RAG context that informed the LLM's decisions.
         if rag_metadata:
             references_section = self._format_rag_references(rag_metadata)
             if references_section:

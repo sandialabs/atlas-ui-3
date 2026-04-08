@@ -52,7 +52,7 @@ hljs.registerLanguage('sh', bash)
 // uses <svg>, <path>, and a handful of MathML elements for some symbols.
 const DOMPURIFY_CONFIG = {
   ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext', 'details', 'summary'],
-  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'role', 'tabindex'],
+  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'role', 'tabindex', 'aria-label'],
 }
 
 // Helper function to highlight @file references in message content
@@ -63,13 +63,6 @@ const processFileReferences = (content) => {
   )
 }
 
-/**
- * Convert inline citation markers like [1], [2] in rendered HTML into
- * Perplexity-style superscript citation badges that link to the
- * references section at the bottom of the message.
- *
- * Only processes text outside HTML tags to avoid mangling attributes.
- */
 /**
  * Extract source labels from the References section so inline citation
  * chips can show source names (e.g. "eater") instead of bare numbers.
@@ -120,26 +113,7 @@ const extractSourceLabels = (html) => {
   return labels
 }
 
-/**
- * Shorten a source label to a compact domain-style name.
- * "New Mexico Magazine" → "newmexicomagazine"
- * "https://eater.com/food" → "eater.com"
- * Already short names pass through lowercased.
- */
-const chipLabel = (label, url) => {
-  // If we have a URL, extract the domain as the label (like Perplexity does)
-  if (url) {
-    try {
-      const domain = new URL(url).hostname.replace(/^www\./, '')
-      if (domain.length <= 25) return domain
-    } catch { /* fall through to label-based logic */ }
-  }
-  // Collapse to a compact lowercase slug
-  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20)
-  return slug || label.slice(0, 20)
-}
-
-const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
+const processCitationBadges = (html, scope = '') => {
   // Track whether we are inside a <code> or <pre> block so we don't
   // convert array indices like arr[1] into citation badges.
   // The scope parameter ensures IDs are unique per message, preventing
@@ -164,7 +138,7 @@ const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
       // Render as compact inline citation number — source names live in the
       // Sources footer, not inline. Just show a small superscript number.
       const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
-      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" class="rag-source-chip-inner rag-source-chip-numonly" data-citation-target="${refId}">${num}</span></span>`
+      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" aria-label="Citation ${num}" class="rag-source-chip-inner rag-source-chip-numonly" data-citation-target="${refId}">${num}</span></span>`
     }
   )
 }
@@ -206,7 +180,7 @@ const processReferencesSection = (html, scope = '', sourceLabels = new Map()) =>
   const wrapped = anchored
     .replace(
       /(<p>)?<strong>References<\/strong>(<\/p>)?/,
-      `<details class="rag-references-collapse"><summary class="rag-references-summary">${summaryText}</summary>`
+      `<details class="rag-references-collapse"><summary class="rag-references-summary" aria-label="References: ${summaryParts.length} sources">${summaryText}</summary>`
     ) + '</details>'
 
   return before + wrapped
@@ -229,7 +203,8 @@ renderer.link = function(href, title, text) {
     text = href.text || href.tokens?.map(t => t.raw).join('') || ''
     href = href.href
   }
-  const titleAttr = title ? ` title="${title}"` : ''
+  const escTitle = title ? title.replace(/&/g, '&amp;').replace(/"/g, '&quot;') : ''
+  const titleAttr = escTitle ? ` title="${escTitle}"` : ''
   // Internal fragment links (citation anchors) stay in-page
   if (href && href.startsWith('#')) {
     return `<a href="${href}"${titleAttr}>${text}</a>`
@@ -1330,10 +1305,10 @@ const renderContent = () => {
       const { result: latexProcessed, placeholders } = preProcessLatex(content)
       const markdownHtml = marked.parse(latexProcessed)
       const latexRestoredHtml = restoreLatexPlaceholders(markdownHtml, placeholders)
-      // Extract source labels from references before badge processing,
-      // so inline chips can show source names instead of bare numbers
-      const sourceLabels = extractSourceLabels(latexRestoredHtml)
-      const citationHtml = processCitationBadges(latexRestoredHtml, messageScope, sourceLabels)
+      // Skip citation pipeline for non-RAG messages (no References section)
+      const hasReferences = latexRestoredHtml.includes('References')
+      const sourceLabels = hasReferences ? extractSourceLabels(latexRestoredHtml) : new Map()
+      const citationHtml = hasReferences ? processCitationBadges(latexRestoredHtml, messageScope) : latexRestoredHtml
       const referencesHtml = processReferencesSection(citationHtml, messageScope, sourceLabels)
       const sanitizedHtml = DOMPurify.sanitize(referencesHtml, DOMPURIFY_CONFIG)
 

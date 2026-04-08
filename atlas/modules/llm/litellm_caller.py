@@ -15,6 +15,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import warnings
 from collections import defaultdict
 from typing import Any, Dict, List, NoReturn, Optional, Tuple
@@ -941,6 +942,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 )
             )
 
+            # Always append references when RAG provided useful content,
+            # even when tool calls were present — the references are relevant
+            # to the RAG context that informed the LLM's decisions.
             if rag_content_useful and rag_metadata:
                 references_section = self._format_rag_references(rag_metadata)
                 if references_section:
@@ -964,7 +968,6 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
     @staticmethod
     def _sanitize_label(text: str) -> str:
         """Strip markdown/prompt-injection characters from a metadata label."""
-        import re
         # Remove characters that could break markdown structure or inject prompts
         cleaned = re.sub(r"[*\[\](){}<>`#\n\r\\]", "", text)
         return cleaned.strip()[:200]

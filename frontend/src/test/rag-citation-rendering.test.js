@@ -48,18 +48,7 @@ const extractSourceLabels = (html) => {
   return labels
 }
 
-const chipLabel = (label, url) => {
-  if (url) {
-    try {
-      const domain = new URL(url).hostname.replace(/^www\./, '')
-      if (domain.length <= 25) return domain
-    } catch { /* fall through */ }
-  }
-  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20)
-  return slug || label.slice(0, 20)
-}
-
-const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
+const processCitationBadges = (html, scope = '') => {
   let insideCode = 0
   return html.replace(
     /(<\/?(?:code|pre)[^>]*>)|(<[^>]*>)|(?<!\]\()(\[(\d{1,2})\])(?!\()/gi,
@@ -75,7 +64,7 @@ const processCitationBadges = (html, scope = '', sourceLabels = new Map()) => {
       if (otherTag) return otherTag
       if (insideCode > 0) return match
       const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
-      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" class="rag-source-chip-inner rag-source-chip-numonly" data-citation-target="${refId}">${num}</span></span>`
+      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" aria-label="Citation ${num}" class="rag-source-chip-inner rag-source-chip-numonly" data-citation-target="${refId}">${num}</span></span>`
     }
   )
 }
@@ -105,7 +94,7 @@ const processReferencesSection = (html, scope = '', sourceLabels = new Map()) =>
   const wrapped = anchored
     .replace(
       /(<p>)?<strong>References<\/strong>(<\/p>)?/,
-      `<details class="rag-references-collapse"><summary class="rag-references-summary">${summaryText}</summary>`
+      `<details class="rag-references-collapse"><summary class="rag-references-summary" aria-label="References: ${summaryParts.length} sources">${summaryText}</summary>`
     ) + '</details>'
   return before + wrapped
 }
@@ -147,33 +136,6 @@ describe('extractSourceLabels', () => {
     expect(labels.size).toBe(2)
     expect(labels.get('1').label).toBe('Alpha')
     expect(labels.get('2').label).toBe('Beta')
-  })
-})
-
-// --------------------------------------------------------------------------
-// Tests: chipLabel
-// --------------------------------------------------------------------------
-
-describe('chipLabel', () => {
-  it('extracts domain from URL when available', () => {
-    expect(chipLabel('Eater NM', 'https://www.eater.com/food')).toBe('eater.com')
-  })
-
-  it('strips www. prefix from domain', () => {
-    expect(chipLabel('Anything', 'https://www.example.org/page')).toBe('example.org')
-  })
-
-  it('produces lowercase slug from label when no URL', () => {
-    expect(chipLabel('New Mexico Magazine')).toBe('newmexicomagazine')
-  })
-
-  it('truncates long slugs at 20 chars', () => {
-    const result = chipLabel('A Very Long Source Name That Exceeds The Limit')
-    expect(result.length).toBeLessThanOrEqual(20)
-  })
-
-  it('falls back to label text when URL is invalid', () => {
-    expect(chipLabel('eater', 'not-a-url')).toBe('eater')
   })
 })
 
