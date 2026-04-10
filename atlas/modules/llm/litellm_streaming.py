@@ -232,25 +232,43 @@ class LiteLLMStreamingMixin:
             return
 
         # Single source with direct completion
+        rag_metadata = None
         if len(data_sources) == 1:
             display_source, rag_response = source_responses[0]
             if rag_response.is_completion:
                 yield self._build_rag_completion_response(rag_response, display_source)
                 return
             rag_content = rag_response.content
+            rag_metadata = rag_response.metadata
             context_label = f"Retrieved context from {display_source}"
         else:
-            rag_content, _ = self._combine_rag_contexts(source_responses)
+            rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
             context_label = f"Retrieved context from {len(source_responses)} RAG sources"
+
+        # Build citation instructions from metadata
+        citation_block = ""
+        if rag_metadata:
+            citation_block = self._build_citation_instructions(rag_metadata)
 
         messages_with_rag = messages.copy()
         messages_with_rag.insert(-1, {
             "role": "system",
-            "content": f"{context_label}:\n\n{rag_content}\n\nUse this context to inform your response.",
+            "content": (
+                f"{context_label}:\n\n{rag_content}"
+                f"{citation_block}\n\n"
+                "Use this context to inform your response. "
+                "Cite sources inline using [1], [2], etc. where applicable."
+            ),
         })
 
         async for chunk in self.stream_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email):
             yield chunk
+
+        # Yield the references section as a final chunk
+        if rag_metadata:
+            references_section = self._format_rag_references(rag_metadata)
+            if references_section:
+                yield f"\n\n---\n{references_section}"
 
     async def stream_with_rag_and_tools(
         self,
@@ -290,6 +308,7 @@ class LiteLLMStreamingMixin:
                 yield item
             return
 
+        rag_metadata = None
         if len(data_sources) == 1:
             display_source, rag_response = source_responses[0]
             if rag_response.is_completion:
@@ -298,17 +317,36 @@ class LiteLLMStreamingMixin:
             else:
                 rag_content = rag_response.content
                 context_label = f"Retrieved context from {display_source}"
+            rag_metadata = rag_response.metadata
         else:
-            rag_content, _ = self._combine_rag_contexts(source_responses)
+            rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
             context_label = f"Retrieved context from {len(source_responses)} RAG sources"
+
+        # Build citation instructions from metadata
+        citation_block = ""
+        if rag_metadata:
+            citation_block = self._build_citation_instructions(rag_metadata)
 
         messages_with_rag = messages.copy()
         messages_with_rag.insert(-1, {
             "role": "system",
-            "content": f"{context_label}:\n\n{rag_content}\n\nUse this context to inform your response.",
+            "content": (
+                f"{context_label}:\n\n{rag_content}"
+                f"{citation_block}\n\n"
+                "Use this context to inform your response. "
+                "Cite sources inline using [1], [2], etc. where applicable."
+            ),
         })
 
         async for item in self.stream_with_tools(
             model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature, user_email=user_email
         ):
             yield item
+
+        # Always yield the references section after RAG+tools responses,
+        # even when tool calls were present — the references are relevant
+        # to the RAG context that informed the LLM's decisions.
+        if rag_metadata:
+            references_section = self._format_rag_references(rag_metadata)
+            if references_section:
+                yield f"\n\n---\n{references_section}"
