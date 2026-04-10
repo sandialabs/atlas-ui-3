@@ -316,13 +316,18 @@ class AtlasRAGClient:
             # Map documents_found to DocumentMetadata list
             documents_found = []
             for doc in rm.get("documents_found", []):
+                # data_source may be a nested dict {id, label, ...} or absent;
+                # corpus_id and title are the legacy flat-field equivalents.
+                ds = doc.get("data_source") if isinstance(doc.get("data_source"), dict) else {}
+                source = doc.get("corpus_id") or ds.get("id") or ""
+                title = doc.get("title") or ds.get("label") or None
                 doc_metadata = DocumentMetadata(
-                    source=doc.get("corpus_id", ""),
+                    source=source,
                     content_type=doc.get("content_type", "atlas-search"),
                     confidence_score=doc.get("confidence_score", 0.0),
                     chunk_id=str(doc.get("id")) if doc.get("id") else None,
                     last_modified=doc.get("last_modified"),
-                    title=doc.get("title"),
+                    title=title,
                     url=doc.get("url"),
                 )
                 documents_found.append(doc_metadata)

@@ -469,6 +469,83 @@ class TestParseRagMetadata:
         result = client._parse_rag_metadata(data, "corpus")
         assert result is None
 
+    def test_parse_documents_with_nested_data_source(self, client):
+        """Test documents with nested data_source dict populate source and title."""
+        data = {
+            "rag_metadata": {
+                "query_processing_time_ms": 2993,
+                "documents_found": [
+                    {
+                        "data_source": {
+                            "id": "atlas_team_data",
+                            "label": "Search Dataset | UUR: ATLAS Team Data",
+                            "compliance_level": "UUR",
+                            "description": "",
+                        },
+                        "text": "Some document text.",
+                        "id": 459716260075906100,
+                        "content_type": "atlas-search",
+                        "confidence_score": 0.48,
+                        "last_modified": "20250724_144206",
+                    },
+                    {
+                        "data_source": {
+                            "id": "atlas_team_data",
+                            "label": "Search Dataset | UUR: ATLAS Team Data",
+                            "compliance_level": "UUR",
+                            "description": "",
+                        },
+                        "text": "Another document text.",
+                        "id": 459716260075906101,
+                        "content_type": "atlas-search",
+                        "confidence_score": 0.47,
+                        "last_modified": "20250724_144206",
+                    },
+                ],
+                "data_sources": [
+                    {
+                        "id": "atlas_team_data",
+                        "label": "Search Dataset | UUR: ATLAS Team Data",
+                        "compliance_level": "UUR",
+                        "description": "",
+                    }
+                ],
+                "retrieval_method": "similarity",
+            }
+        }
+
+        result = client._parse_rag_metadata(data, "fallback-corpus")
+
+        assert result is not None
+        assert len(result.documents_found) == 2
+        assert result.documents_found[0].source == "atlas_team_data"
+        assert result.documents_found[0].title == "Search Dataset | UUR: ATLAS Team Data"
+        assert result.documents_found[1].source == "atlas_team_data"
+        assert result.documents_found[1].title == "Search Dataset | UUR: ATLAS Team Data"
+
+    def test_parse_documents_flat_corpus_id_takes_precedence(self, client):
+        """Flat corpus_id overrides nested data_source.id when both present."""
+        data = {
+            "rag_metadata": {
+                "query_processing_time_ms": 100,
+                "documents_found": [
+                    {
+                        "corpus_id": "legacy-corpus",
+                        "data_source": {"id": "nested-id", "label": "Nested Label"},
+                        "content_type": "atlas-search",
+                        "confidence_score": 0.9,
+                    },
+                ],
+                "data_sources": [],
+                "retrieval_method": "similarity",
+            }
+        }
+
+        result = client._parse_rag_metadata(data, "fallback-corpus")
+
+        assert result is not None
+        assert result.documents_found[0].source == "legacy-corpus"
+
 
 class TestFactoryFunction:
     """Tests for create_atlas_rag_client_from_config factory."""
