@@ -410,6 +410,53 @@ class TestParseRagMetadata:
 
         assert result.data_source_name == "fallback-corpus"
 
+    def test_parse_metadata_data_sources_as_objects(self, client):
+        """Test parsing when data_sources entries are dicts with id/label."""
+        data = {
+            "rag_metadata": {
+                "query_processing_time_ms": 50,
+                "documents_found": [],
+                "data_sources": [
+                    {
+                        "id": "atlas_team_data",
+                        "label": "Search Dataset | UUR: ATLAS Team Data",
+                        "compliance_level": "UUR",
+                        "description": "",
+                    },
+                    {
+                        "id": "atlas_team_data_2",
+                        "label": "Search Dataset | UUR: ATLAS Team Data 2",
+                        "compliance_level": "UUR",
+                        "description": "",
+                    },
+                ],
+                "retrieval_method": "similarity",
+            }
+        }
+
+        result = client._parse_rag_metadata(data, "fallback-corpus")
+
+        assert result is not None
+        assert result.data_source_name == "Search Dataset | UUR: ATLAS Team Data"
+
+    def test_parse_metadata_data_source_dict_missing_label(self, client):
+        """Test parsing when data_sources dict has no label but has id."""
+        data = {
+            "rag_metadata": {
+                "query_processing_time_ms": 50,
+                "documents_found": [],
+                "data_sources": [
+                    {"id": "atlas_team_data", "compliance_level": "UUR"},
+                ],
+                "retrieval_method": "similarity",
+            }
+        }
+
+        result = client._parse_rag_metadata(data, "fallback-corpus")
+
+        assert result is not None
+        assert result.data_source_name == "atlas_team_data"
+
     def test_parse_no_metadata(self, client):
         """Test parsing when no rag_metadata present."""
         data = {"choices": []}

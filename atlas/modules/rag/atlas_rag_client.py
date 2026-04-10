@@ -327,11 +327,17 @@ class AtlasRAGClient:
                 )
                 documents_found.append(doc_metadata)
 
-            # Determine data source name from response or fallback
+            # Determine data source name from response or fallback.
+            # data_sources entries may be plain strings or dicts with id/label.
             data_sources_list = rm.get("data_sources", [])
-            data_source_name = (
-                data_sources_list[0] if data_sources_list else data_source
-            )
+            if data_sources_list:
+                first = data_sources_list[0]
+                if isinstance(first, dict):
+                    data_source_name = first.get("label") or first.get("id") or data_source
+                else:
+                    data_source_name = first
+            else:
+                data_source_name = data_source
 
             return RAGMetadata(
                 query_processing_time_ms=rm.get("query_processing_time_ms", 0),
