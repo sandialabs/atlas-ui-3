@@ -47,6 +47,11 @@ hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('shell', bash)
 hljs.registerLanguage('sh', bash)
 
+// Feature flag: Perplexity-style inline citations & references for RAG.
+// Off by default; enable at Vite build time with VITE_FEATURE_RAG_CITATIONS=true.
+const ragCitationsEnabled =
+  import.meta.env.VITE_FEATURE_RAG_CITATIONS === 'true'
+
 // DOMPurify configuration that permits KaTeX-generated HTML.
 // KaTeX renders almost exclusively with <span> (allowed by default) but also
 // uses <svg>, <path>, and a handful of MathML elements for some symbols.
@@ -1306,10 +1311,11 @@ const renderContent = () => {
       const markdownHtml = marked.parse(latexProcessed)
       const latexRestoredHtml = restoreLatexPlaceholders(markdownHtml, placeholders)
       // Skip citation pipeline for non-RAG messages (no References section)
-      const hasReferences = latexRestoredHtml.includes('References')
+      // or when the RAG citations feature flag is disabled.
+      const hasReferences = ragCitationsEnabled && latexRestoredHtml.includes('References')
       const sourceLabels = hasReferences ? extractSourceLabels(latexRestoredHtml) : new Map()
       const citationHtml = hasReferences ? processCitationBadges(latexRestoredHtml, messageScope) : latexRestoredHtml
-      const referencesHtml = processReferencesSection(citationHtml, messageScope, sourceLabels)
+      const referencesHtml = hasReferences ? processReferencesSection(citationHtml, messageScope, sourceLabels) : citationHtml
       const sanitizedHtml = DOMPurify.sanitize(referencesHtml, DOMPURIFY_CONFIG)
 
       return (
