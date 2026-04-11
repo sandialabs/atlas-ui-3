@@ -59,6 +59,7 @@ jobs:
           VITE_APP_NAME=ATLAS
           VITE_FEATURE_ANIMATED_LOGO=true
           VITE_FEATURE_POWERED_BY_ATLAS=false
+          VITE_FEATURE_RAG_CITATIONS=false
           GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
           APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: ${{ steps.meta.outputs.tags }}
