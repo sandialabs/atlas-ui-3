@@ -138,12 +138,16 @@ async def lifespan(app: FastAPI):
         if not config.app_settings.feature_proxy_secret_enabled:
             logger.warning(
                 "SECURITY WARNING: Proxy secret validation is DISABLED in production. "
-                "Set FEATURE_PROXY_SECRET_ENABLED=true and PROXY_SECRET to enable."
+                "Without it, anyone with direct backend access can spoof the %s header. "
+                "Set FEATURE_PROXY_SECRET_ENABLED=true and PROXY_SECRET to enable, "
+                "or ensure the backend is only reachable through a trusted reverse proxy.",
+                config.app_settings.auth_user_header
             )
         elif not config.app_settings.proxy_secret:
-            logger.warning(
-                "SECURITY WARNING: Proxy secret is ENABLED but PROXY_SECRET is not set. "
-                "Authentication will fail for all requests."
+            logger.error(
+                "SECURITY ERROR: Proxy secret is ENABLED but PROXY_SECRET is not set. "
+                "All requests will be rejected (fail-closed). "
+                "Set PROXY_SECRET to a strong random value in .env."
             )
 
     # SECURITY WARNING: Check for weak Globus session secret
@@ -386,9 +390,13 @@ async def websocket_endpoint(websocket: WebSocket):
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
         config_manager.app_settings.feature_proxy_secret_enabled
-        and config_manager.app_settings.proxy_secret
         and not is_debug_mode
     ):
+        if not config_manager.app_settings.proxy_secret:
+            # Fail closed: proxy secret is required but not configured
+            logger.error("Proxy secret validation enabled but PROXY_SECRET is not set — rejecting WebSocket")
+            raise WebSocketException(code=1008, reason="Server misconfigured: proxy secret not set")
+
         proxy_secret_header = config_manager.app_settings.proxy_secret_header
         proxy_secret_value = websocket.headers.get(proxy_secret_header)
         if proxy_secret_value != config_manager.app_settings.proxy_secret:

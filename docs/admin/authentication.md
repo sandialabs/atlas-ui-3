@@ -83,14 +83,15 @@ AUTH_USER_HEADER=X-Custom-Auth-Header
 
 This setting allows the application to work with various authentication infrastructures without code changes.
 
-## Proxy Secret Authentication (Optional Security Layer)
+## Proxy Secret Authentication (Enabled by Default)
 
-For additional security, you can configure the application to require a secret value in a specific header to validate that requests are coming from your trusted reverse proxy. This prevents direct access to the backend application, even if it's accidentally exposed.
+The application requires a secret value in a specific header to validate that requests are coming from your trusted reverse proxy. This prevents direct access to the backend application from spoofing the authentication header (e.g., `X-User-Email`).
 
-**When to Use Proxy Secret Authentication:**
-- When you want an additional layer of security beyond network isolation
-- To prevent unauthorized access if the backend accidentally becomes publicly accessible
-- To ensure requests only come from your approved reverse proxy
+**Proxy secret validation is enabled by default.** In production mode (`DEBUG_MODE=false`), if `PROXY_SECRET` is not configured, all requests are rejected with HTTP 503 (fail-closed). This ensures the backend cannot accidentally be exposed without proxy secret protection.
+
+**When to Disable Proxy Secret Authentication:**
+- When the backend is guaranteed to be network-isolated (not reachable from untrusted networks)
+- Set `FEATURE_PROXY_SECRET_ENABLED=false` explicitly in `.env`
 
 **Configuration:**
 
@@ -149,9 +150,9 @@ location / {
 - Never commit the secret to version control
 
 **Startup Warnings:**
-In production mode (`DEBUG_MODE=false`), the application logs security warnings at startup if:
-- `FEATURE_PROXY_SECRET_ENABLED=false` - warns that proxy secret validation is disabled
-- `FEATURE_PROXY_SECRET_ENABLED=true` but `PROXY_SECRET` is empty - warns that authentication will fail
+In production mode (`DEBUG_MODE=false`), the application logs security messages at startup if:
+- `FEATURE_PROXY_SECRET_ENABLED=false` - warns that proxy secret validation is disabled and the auth header can be spoofed via direct access
+- `FEATURE_PROXY_SECRET_ENABLED=true` but `PROXY_SECRET` is empty - logs an error that all requests will be rejected (fail-closed)
 
 ## Customizing Authorization
 

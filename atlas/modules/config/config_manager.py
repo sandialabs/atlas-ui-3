@@ -451,8 +451,11 @@ class AppSettings(BaseSettings):
 
     # Proxy secret authentication configuration
     feature_proxy_secret_enabled: bool = Field(
-        default=False,
-        description="Enable proxy secret validation to ensure requests come from trusted reverse proxy",
+        default=True,
+        description="Enable proxy secret validation to ensure requests come from trusted reverse proxy. "
+                    "Enabled by default to prevent direct backend access from spoofing auth headers. "
+                    "Set PROXY_SECRET to a strong random value, or explicitly disable with "
+                    "FEATURE_PROXY_SECRET_ENABLED=false if the backend is network-isolated.",
         validation_alias="FEATURE_PROXY_SECRET_ENABLED"
     )
     proxy_secret_header: str = Field(
