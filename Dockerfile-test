@@ -90,7 +90,9 @@ RUN echo "# Development mode - skip authentication when true" > /app/.env && \
     echo "# CI/CD mode - skip static file serving checks" >> /app/.env && \
     echo "CICD_MODE=true" >> /app/.env && \
     echo "# Use correct frontend path in container" >> /app/.env && \
-    echo "USE_NEW_FRONTEND=true" >> /app/.env
+    echo "USE_NEW_FRONTEND=true" >> /app/.env && \
+    echo "# CI has no reverse proxy — disable proxy secret validation" >> /app/.env && \
+    echo "FEATURE_PROXY_SECRET_ENABLED=false" >> /app/.env
 
 # Set up uv for appuser
 RUN mkdir -p /home/appuser/.local/bin && \
