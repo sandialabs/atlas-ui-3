@@ -80,7 +80,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         # Validate proxy secret if enabled (skip in debug mode for local development)
-        if self.proxy_secret_enabled and self.proxy_secret and not self.debug_mode:
+        if self.proxy_secret_enabled and not self.debug_mode:
+            if not self.proxy_secret:
+                # Fail closed: proxy secret is required but not configured
+                logger.error("Proxy secret validation enabled but PROXY_SECRET is not set — rejecting request")
+                if request.url.path.startswith('/api/'):
+                    return JSONResponse(
+                        status_code=503,
+                        content={"detail": "Server misconfigured: proxy secret not set"}
+                    )
+                else:
+                    return JSONResponse(
+                        status_code=503,
+                        content={"detail": "Server misconfigured"}
+                    )
+
             proxy_secret_value = request.headers.get(self.proxy_secret_header)
 
             if not proxy_secret_value or proxy_secret_value != self.proxy_secret:

@@ -9,10 +9,7 @@ Covers:
 - Security edge cases: prompt injection, URL validation, confidence bounds
 """
 
-import pytest
-
 from atlas.modules.rag.client import DocumentMetadata, RAGMetadata
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -42,12 +39,7 @@ def _make_doc(**kwargs):
     return DocumentMetadata(**defaults)
 
 
-# We need a minimal caller instance to invoke the static/instance methods.
-# Since the methods under test are static or only use `self` for backward
-# compat, we can import and call them directly on the class.
-
-from atlas.modules.llm.litellm_caller import LiteLLMCaller
-
+from atlas.modules.llm.litellm_caller import LiteLLMCaller  # noqa: E402 — after fixtures that only use rag.client
 
 # ---------------------------------------------------------------------------
 # DocumentMetadata title/url
@@ -173,7 +165,7 @@ class TestFormatRagReferences:
         result = LiteLLMCaller._format_rag_references(meta)
         # Source should only appear once (as the label), not repeated
         lines = result.split("\n")
-        ref_line = [l for l in lines if l.startswith("1.")][0]
+        ref_line = [line for line in lines if line.startswith("1.")][0]
         assert ref_line.count("same-label") == 1
 
 

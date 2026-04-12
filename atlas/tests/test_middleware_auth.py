@@ -88,6 +88,72 @@ def test_auth_middleware_custom_header_debug_mode():
     assert resp.json()["user"] == "debug@example.com"
 
 
+def test_proxy_secret_enabled_but_not_configured_rejects_requests():
+    """Test that when proxy secret is enabled but PROXY_SECRET is not set, requests are rejected (fail-closed)."""
+    app = FastAPI()
+
+    @app.get("/ping")
+    def ping():
+        return {"ok": True}
+
+    @app.get("/api/data")
+    def api_data():
+        return {"data": "value"}
+
+    @app.get("/auth")
+    def auth():
+        return {"login": True}
+
+    # proxy_secret_enabled=True but proxy_secret=None (not configured)
+    app.add_middleware(
+        AuthMiddleware,
+        debug_mode=False,
+        proxy_secret_enabled=True,
+        proxy_secret=None
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+
+    # Browser endpoint should get 503
+    resp = client.get("/ping", headers={"X-User-Email": "user@example.com"}, follow_redirects=False)
+    assert resp.status_code == 503
+
+    # API endpoint should get 503
+    resp = client.get("/api/data", headers={"X-User-Email": "user@example.com"}, follow_redirects=False)
+    assert resp.status_code == 503
+
+    # Health endpoint should still bypass
+    @app.get("/api/health")
+    def health():
+        return {"status": "ok"}
+    client2 = TestClient(app, raise_server_exceptions=False)
+    resp = client2.get("/api/health")
+    assert resp.status_code == 200
+
+
+def test_proxy_secret_enabled_not_configured_debug_mode_bypasses():
+    """Test that debug mode bypasses proxy secret validation even when not configured."""
+    from fastapi import Request
+
+    app = FastAPI()
+
+    @app.get("/ping")
+    def ping(request: Request):
+        return {"user": request.state.user_email}
+
+    app.add_middleware(
+        AuthMiddleware,
+        debug_mode=True,
+        proxy_secret_enabled=True,
+        proxy_secret=None
+    )
+    client = TestClient(app)
+
+    headers = {"X-User-Email": "debug@example.com"}
+    resp = client.get("/ping", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["user"] == "debug@example.com"
+
+
 def test_proxy_secret_disabled_default_behavior():
     """Test that with proxy secret disabled, normal auth behavior works."""
     from fastapi import Request
