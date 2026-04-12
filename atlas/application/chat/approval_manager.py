@@ -129,13 +129,23 @@ class ToolApprovalManager:
 
         # Security: verify the responding user owns this approval request.
         # Prevents cross-user approval bypass where one user approves
-        # another user's pending tool call.
-        if request.user_email and user_email and request.user_email != user_email:
+        # another user's pending tool call. Fail-closed: if the request has
+        # a user_email binding, the response MUST supply a matching one.
+        # Backward compat: only legacy requests (no user_email set) skip the
+        # check so single-user deployments continue to work.
+        if request.user_email and request.user_email != user_email:
+            # Inline sanitize for CodeQL py/log-injection: the query traces
+            # explicit CR/LF removal as a log-injection sanitizer, but does
+            # not recognize sanitize_for_logging() as one.
+            safe_user_email = str(user_email).replace("\r", "").replace("\n", "")
+            safe_tool_call_id = str(tool_call_id).replace("\r", "").replace("\n", "")
             logger.warning(
                 "SECURITY: approval response rejected — user %s attempted to "
-                "approve tool call owned by a different user (call_id: %s)",
-                sanitize_for_logging(user_email),
-                sanitize_for_logging(tool_call_id),
+                "respond to tool call owned by a different user "
+                "(call_id: %s, approved=%s)",
+                safe_user_email,
+                safe_tool_call_id,
+                approved,
             )
             return False
 

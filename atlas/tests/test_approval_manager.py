@@ -571,6 +571,33 @@ class TestCrossUserApprovalPrevention:
         assert response["approved"] is True
 
     @pytest.mark.asyncio
+    async def test_empty_user_email_cannot_approve_owned_request(self):
+        """An empty responder user_email must not approve a request owned by a specific user.
+
+        Regression test for fail-closed behavior: if the request is bound to
+        a user, the response MUST supply a matching user_email. An empty
+        user_email on the response side is NOT a free pass.
+        """
+        manager = ToolApprovalManager()
+        manager.create_approval_request(
+            tool_call_id="call_alice",
+            tool_name="dangerous_tool",
+            arguments={"action": "delete_all"},
+            user_email="alice@example.com",
+        )
+
+        result = manager.handle_approval_response(
+            tool_call_id="call_alice",
+            approved=True,
+            user_email="",
+        )
+
+        assert result is False
+        # Request must still be pending (not resolved by an empty user identity)
+        request = manager.get_pending_requests()["call_alice"]
+        assert not request.future.done()
+
+    @pytest.mark.asyncio
     async def test_legacy_no_user_email_still_works(self):
         """Requests without user_email (backward compat) can be resolved by anyone."""
         manager = ToolApprovalManager()

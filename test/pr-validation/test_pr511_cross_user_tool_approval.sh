@@ -149,9 +149,28 @@ print(result)
 print_result $? "Request still resolvable by owner after cross-user attempt (got: $RESULT)"
 
 # ==========================================
-# 6. Legacy requests (no user_email) still resolve
+# 6a. Empty user_email cannot bypass ownership check
 # ==========================================
-print_header "6. Legacy backward compatibility"
+print_header "6a. Empty user_email response blocked on bound request"
+
+RESULT=$(python3 -c "
+import logging; logging.disable(logging.CRITICAL)
+from atlas.application.chat.approval_manager import ToolApprovalManager
+
+mgr = ToolApprovalManager()
+mgr.create_approval_request('tc-6a', 'dangerous_tool', {'arg': 'val'}, user_email='$USER_A')
+# Attacker sends empty user_email; fail-closed must reject.
+result = mgr.handle_approval_response('tc-6a', approved=True, user_email='')
+print(result)
+" 2>&1 | tail -1)
+
+[ "$RESULT" = "False" ]
+print_result $? "Empty user_email cannot bypass owned request (got: $RESULT)"
+
+# ==========================================
+# 6b. Legacy requests (no user_email) still resolve
+# ==========================================
+print_header "6b. Legacy backward compatibility"
 
 RESULT=$(python3 -c "
 import logging; logging.disable(logging.CRITICAL)
@@ -174,7 +193,7 @@ print_header "7. Targeted test suite"
 
 cd "$ATLAS_DIR"
 python3 -m pytest tests/test_approval_manager.py -x -q 2>&1
-print_result $? "test_approval_manager.py passes (all 25 tests)"
+print_result $? "test_approval_manager.py passes (all 26 tests)"
 
 # ==========================================
 # Summary
