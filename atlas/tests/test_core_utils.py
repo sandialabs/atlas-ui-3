@@ -1,16 +1,18 @@
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 
 
 @pytest.mark.asyncio
-async def test_get_current_user_default():
-    class Dummy:
-        pass
+async def test_get_current_user_raises_when_no_email():
+    """get_current_user must reject requests that bypassed auth middleware."""
     req = SimpleNamespace(state=SimpleNamespace())
-    assert await get_current_user(req) == "test@test.com"
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(req)
+    assert exc_info.value.status_code == 401
 
 
 @pytest.mark.asyncio
