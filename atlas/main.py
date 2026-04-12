@@ -655,7 +655,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     tool_call_id=tool_call_id,
                     approved=approved,
                     arguments=arguments,
-                    reason=reason
+                    reason=reason,
+                    user_email=user_email,
                 )
 
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")

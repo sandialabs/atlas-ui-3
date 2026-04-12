@@ -17,12 +17,14 @@ class TestToolApprovalRequest:
             tool_call_id="test_123",
             tool_name="test_tool",
             arguments={"arg1": "value1"},
-            allow_edit=True
+            allow_edit=True,
+            user_email="alice@example.com",
         )
         assert request.tool_call_id == "test_123"
         assert request.tool_name == "test_tool"
         assert request.arguments == {"arg1": "value1"}
         assert request.allow_edit is True
+        assert request.user_email == "alice@example.com"
 
     @pytest.mark.asyncio
     async def test_set_response(self):
@@ -85,10 +87,12 @@ class TestToolApprovalManager:
             tool_call_id="test_123",
             tool_name="test_tool",
             arguments={"arg1": "value1"},
-            allow_edit=True
+            allow_edit=True,
+            user_email="alice@example.com",
         )
 
         assert request.tool_call_id == "test_123"
+        assert request.user_email == "alice@example.com"
         assert "test_123" in manager.get_pending_requests()
 
     @pytest.mark.asyncio
@@ -98,14 +102,16 @@ class TestToolApprovalManager:
         manager.create_approval_request(
             tool_call_id="test_123",
             tool_name="test_tool",
-            arguments={"arg1": "value1"}
+            arguments={"arg1": "value1"},
+            user_email="alice@example.com",
         )
 
-        # Handle approval response
+        # Handle approval response from the same user
         result = manager.handle_approval_response(
             tool_call_id="test_123",
             approved=True,
-            arguments={"arg1": "edited_value"}
+            arguments={"arg1": "edited_value"},
+            user_email="alice@example.com",
         )
 
         assert result is True
@@ -156,7 +162,8 @@ class TestToolApprovalManager:
             tool_call_id="test_123",
             tool_name="test_tool",
             arguments={"code": "print('test')"},
-            allow_edit=True
+            allow_edit=True,
+            user_email="alice@example.com",
         )
 
         # Simulate async approval (in a separate task)
@@ -165,7 +172,8 @@ class TestToolApprovalManager:
             manager.handle_approval_response(
                 tool_call_id="test_123",
                 approved=True,
-                arguments={"code": "print('edited test')"}
+                arguments={"code": "print('edited test')"},
+                user_email="alice@example.com",
             )
 
         # Start approval task
@@ -190,17 +198,20 @@ class TestToolApprovalManager:
         request1 = manager.create_approval_request(
             tool_call_id="test_1",
             tool_name="tool_a",
-            arguments={"arg": "value1"}
+            arguments={"arg": "value1"},
+            user_email="alice@example.com",
         )
         request2 = manager.create_approval_request(
             tool_call_id="test_2",
             tool_name="tool_b",
-            arguments={"arg": "value2"}
+            arguments={"arg": "value2"},
+            user_email="alice@example.com",
         )
         request3 = manager.create_approval_request(
             tool_call_id="test_3",
             tool_name="tool_c",
-            arguments={"arg": "value3"}
+            arguments={"arg": "value3"},
+            user_email="alice@example.com",
         )
 
         assert len(manager.get_pending_requests()) == 3
@@ -208,11 +219,11 @@ class TestToolApprovalManager:
         # Approve them in different order
         async def approve_requests():
             await asyncio.sleep(0.05)
-            manager.handle_approval_response("test_2", approved=True)
+            manager.handle_approval_response("test_2", approved=True, user_email="alice@example.com")
             await asyncio.sleep(0.05)
-            manager.handle_approval_response("test_1", approved=False, reason="Rejected")
+            manager.handle_approval_response("test_1", approved=False, reason="Rejected", user_email="alice@example.com")
             await asyncio.sleep(0.05)
-            manager.handle_approval_response("test_3", approved=True)
+            manager.handle_approval_response("test_3", approved=True, user_email="alice@example.com")
 
         asyncio.create_task(approve_requests())
 
@@ -236,7 +247,8 @@ class TestToolApprovalManager:
             tool_call_id="test_123",
             tool_name="test_tool",
             arguments=original_args,
-            allow_edit=True
+            allow_edit=True,
+            user_email="alice@example.com",
         )
 
         # Approve with same arguments
@@ -245,7 +257,8 @@ class TestToolApprovalManager:
             manager.handle_approval_response(
                 tool_call_id="test_123",
                 approved=True,
-                arguments={"code": "print('hello')"}  # Same as original
+                arguments={"code": "print('hello')"},  # Same as original
+                user_email="alice@example.com",
             )
 
         asyncio.create_task(approve())
@@ -282,14 +295,16 @@ class TestToolApprovalManager:
         request = manager.create_approval_request(
             tool_call_id="test_123",
             tool_name="test_tool",
-            arguments={"arg1": "value1"}
+            arguments={"arg1": "value1"},
+            user_email="alice@example.com",
         )
 
         async def reject():
             await asyncio.sleep(0.05)
             manager.handle_approval_response(
                 tool_call_id="test_123",
-                approved=False
+                approved=False,
+                user_email="alice@example.com",
                 # No reason provided
             )
 
@@ -363,7 +378,8 @@ class TestToolApprovalManager:
             tool_call_id="test_complex",
             tool_name="complex_tool",
             arguments=complex_args,
-            allow_edit=True
+            allow_edit=True,
+            user_email="alice@example.com",
         )
 
         # Modify nested structure
@@ -385,7 +401,8 @@ class TestToolApprovalManager:
             manager.handle_approval_response(
                 tool_call_id="test_complex",
                 approved=True,
-                arguments=edited_args
+                arguments=edited_args,
+                user_email="alice@example.com",
             )
 
         asyncio.create_task(approve())
@@ -404,12 +421,13 @@ class TestToolApprovalManager:
         request1 = manager.create_approval_request(
             tool_call_id="seq_1",
             tool_name="tool_1",
-            arguments={"step": 1}
+            arguments={"step": 1},
+            user_email="alice@example.com",
         )
 
         async def approve1():
             await asyncio.sleep(0.05)
-            manager.handle_approval_response("seq_1", approved=True)
+            manager.handle_approval_response("seq_1", approved=True, user_email="alice@example.com")
 
         task1 = asyncio.create_task(approve1())
         response1 = await request1.wait_for_response(timeout=1.0)
@@ -423,12 +441,13 @@ class TestToolApprovalManager:
         request2 = manager.create_approval_request(
             tool_call_id="seq_2",
             tool_name="tool_2",
-            arguments={"step": 2}
+            arguments={"step": 2},
+            user_email="alice@example.com",
         )
 
         async def approve2():
             await asyncio.sleep(0.05)
-            manager.handle_approval_response("seq_2", approved=True)
+            manager.handle_approval_response("seq_2", approved=True, user_email="alice@example.com")
 
         task2 = asyncio.create_task(approve2())
         response2 = await request2.wait_for_response(timeout=1.0)
@@ -437,3 +456,162 @@ class TestToolApprovalManager:
 
         assert response2["approved"] is True
         assert "seq_2" not in manager.get_pending_requests()
+
+
+class TestCrossUserApprovalPrevention:
+    """Test that cross-user tool approval bypass is prevented (F-03)."""
+
+    @pytest.mark.asyncio
+    async def test_different_user_cannot_approve(self):
+        """A different user's approval response must be rejected."""
+        manager = ToolApprovalManager()
+        manager.create_approval_request(
+            tool_call_id="call_alice",
+            tool_name="dangerous_tool",
+            arguments={"action": "delete_all"},
+            user_email="alice@example.com",
+        )
+
+        result = manager.handle_approval_response(
+            tool_call_id="call_alice",
+            approved=True,
+            user_email="bob@example.com",
+        )
+
+        assert result is False
+        # Request must still be pending (not resolved by the wrong user)
+        request = manager.get_pending_requests()["call_alice"]
+        assert not request.future.done()
+
+    @pytest.mark.asyncio
+    async def test_same_user_can_approve(self):
+        """The owning user's approval response must be accepted."""
+        manager = ToolApprovalManager()
+        manager.create_approval_request(
+            tool_call_id="call_alice",
+            tool_name="dangerous_tool",
+            arguments={"action": "delete_all"},
+            user_email="alice@example.com",
+        )
+
+        result = manager.handle_approval_response(
+            tool_call_id="call_alice",
+            approved=True,
+            user_email="alice@example.com",
+        )
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_different_user_cannot_reject(self):
+        """A different user must not be able to reject another user's request."""
+        manager = ToolApprovalManager()
+        manager.create_approval_request(
+            tool_call_id="call_alice",
+            tool_name="dangerous_tool",
+            arguments={"action": "delete_all"},
+            user_email="alice@example.com",
+        )
+
+        result = manager.handle_approval_response(
+            tool_call_id="call_alice",
+            approved=False,
+            reason="I don't like this",
+            user_email="bob@example.com",
+        )
+
+        assert result is False
+        request = manager.get_pending_requests()["call_alice"]
+        assert not request.future.done()
+
+    @pytest.mark.asyncio
+    async def test_different_user_cannot_edit_arguments(self):
+        """A different user must not be able to inject edited arguments."""
+        manager = ToolApprovalManager()
+        manager.create_approval_request(
+            tool_call_id="call_alice",
+            tool_name="filesystem_write",
+            arguments={"path": "/safe/file.txt", "content": "hello"},
+            user_email="alice@example.com",
+        )
+
+        result = manager.handle_approval_response(
+            tool_call_id="call_alice",
+            approved=True,
+            arguments={"path": "/etc/passwd", "content": "pwned"},
+            user_email="bob@example.com",
+        )
+
+        assert result is False
+        request = manager.get_pending_requests()["call_alice"]
+        assert not request.future.done()
+
+    @pytest.mark.asyncio
+    async def test_cross_user_rejection_leaves_request_resolvable(self):
+        """After a cross-user attempt is rejected, the real owner can still approve."""
+        manager = ToolApprovalManager()
+        request = manager.create_approval_request(
+            tool_call_id="call_alice",
+            tool_name="dangerous_tool",
+            arguments={"action": "safe_action"},
+            user_email="alice@example.com",
+        )
+
+        # Bob tries and fails
+        assert manager.handle_approval_response(
+            "call_alice", approved=True, user_email="bob@example.com"
+        ) is False
+
+        # Alice approves successfully
+        assert manager.handle_approval_response(
+            "call_alice", approved=True, user_email="alice@example.com"
+        ) is True
+
+        response = await request.wait_for_response(timeout=1.0)
+        assert response["approved"] is True
+
+    @pytest.mark.asyncio
+    async def test_empty_user_email_cannot_approve_owned_request(self):
+        """An empty responder user_email must not approve a request owned by a specific user.
+
+        Regression test for fail-closed behavior: if the request is bound to
+        a user, the response MUST supply a matching user_email. An empty
+        user_email on the response side is NOT a free pass.
+        """
+        manager = ToolApprovalManager()
+        manager.create_approval_request(
+            tool_call_id="call_alice",
+            tool_name="dangerous_tool",
+            arguments={"action": "delete_all"},
+            user_email="alice@example.com",
+        )
+
+        result = manager.handle_approval_response(
+            tool_call_id="call_alice",
+            approved=True,
+            user_email="",
+        )
+
+        assert result is False
+        # Request must still be pending (not resolved by an empty user identity)
+        request = manager.get_pending_requests()["call_alice"]
+        assert not request.future.done()
+
+    @pytest.mark.asyncio
+    async def test_legacy_no_user_email_still_works(self):
+        """Requests without user_email (backward compat) can be resolved by anyone."""
+        manager = ToolApprovalManager()
+        manager.create_approval_request(
+            tool_call_id="legacy_call",
+            tool_name="some_tool",
+            arguments={"arg": "val"},
+            # No user_email
+        )
+
+        result = manager.handle_approval_response(
+            tool_call_id="legacy_call",
+            approved=True,
+            # No user_email
+        )
+
+        assert result is True
