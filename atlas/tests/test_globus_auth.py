@@ -25,7 +25,7 @@ from atlas.core.globus_auth import (
     store_globus_tokens,
 )
 from atlas.core.log_sanitizer import get_current_user
-from atlas.routes.globus_auth_routes import api_router
+from atlas.routes.globus_auth_routes import api_router, browser_router
 
 # -- Helper function tests --
 
@@ -320,6 +320,67 @@ class TestGlobusRemoveTokensRoute:
         data = response.json()
         assert data["removed_count"] == 3
         mock_remove.assert_called_once_with("test@example.com")
+
+
+class TestGlobusBrowserRoutesWithoutSession:
+    """Regression: browser routes must not 500 when SessionMiddleware is absent.
+
+    When GLOBUS_SESSION_SECRET is missing, main.py disables Globus auth and
+    skips mounting SessionMiddleware. The browser routes (/callback, /logout)
+    access request.session, which raises without SessionMiddleware. The early
+    feature-enabled guard must return a redirect before reaching session access.
+    """
+
+    @pytest.fixture
+    def client_no_session(self):
+        """App with browser routes but NO SessionMiddleware — mirrors disabled Globus."""
+        app = FastAPI()
+        app.include_router(browser_router)
+        return TestClient(app, raise_server_exceptions=False)
+
+    @patch("atlas.routes.globus_auth_routes.app_factory")
+    def test_callback_returns_redirect_not_500(self, mock_factory, client_no_session):
+        mock_settings = MagicMock()
+        mock_settings.feature_globus_auth_enabled = False
+        mock_cm = MagicMock()
+        mock_cm.app_settings = mock_settings
+        mock_factory.get_config_manager.return_value = mock_cm
+
+        response = client_no_session.get(
+            "/auth/globus/callback?code=abc&state=xyz",
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+        assert "globus_error=auth_disabled" in response.headers["location"]
+
+    @patch("atlas.routes.globus_auth_routes.app_factory")
+    def test_logout_returns_redirect_not_500(self, mock_factory, client_no_session):
+        mock_settings = MagicMock()
+        mock_settings.feature_globus_auth_enabled = False
+        mock_cm = MagicMock()
+        mock_cm.app_settings = mock_settings
+        mock_factory.get_config_manager.return_value = mock_cm
+
+        response = client_no_session.get(
+            "/auth/globus/logout",
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+        assert "globus_auth=logged_out" in response.headers["location"]
+
+    @patch("atlas.routes.globus_auth_routes.app_factory")
+    def test_login_returns_404_not_500(self, mock_factory, client_no_session):
+        mock_settings = MagicMock()
+        mock_settings.feature_globus_auth_enabled = False
+        mock_cm = MagicMock()
+        mock_cm.app_settings = mock_settings
+        mock_factory.get_config_manager.return_value = mock_cm
+
+        response = client_no_session.get(
+            "/auth/globus/login",
+            follow_redirects=False,
+        )
+        assert response.status_code == 404
 
 
 # -- LLM caller Globus key resolution tests --
