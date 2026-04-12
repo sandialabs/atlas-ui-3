@@ -392,7 +392,8 @@ async def execute_single_tool(
                 tool_call.id,
                 tool_call.function.name,
                 filtered_args,
-                allow_edit
+                allow_edit,
+                user_email=session_context.get("user_email", ""),
             )
 
             try:
