@@ -501,8 +501,10 @@ class AppSettings(BaseSettings):
         validation_alias="GLOBUS_SCOPES",
     )
     globus_session_secret: str = Field(
-        default="atlas-globus-session-change-me",
-        description="Secret key for Globus session middleware",
+        default="",
+        description="Secret key for Globus session middleware. Must be set to a strong random "
+                    "value when FEATURE_GLOBUS_AUTH_ENABLED=true. Globus auth will not start "
+                    "without this.",
         validation_alias="GLOBUS_SESSION_SECRET",
     )
 
