@@ -11,7 +11,6 @@ import base64
 from main import app
 from starlette.testclient import TestClient
 
-
 MULTI_SEGMENT_KEY = "users/alice@example.com/generated/subdir/report.txt"
 
 
