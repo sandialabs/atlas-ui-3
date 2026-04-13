@@ -1,6 +1,6 @@
 # Troubleshooting File Access for MCP Servers
 
-Last updated: 2026-03-11
+Last updated: 2026-04-12
 
 This guide helps resolve issues with MCP servers accessing attached files in Atlas UI.
 
@@ -60,7 +60,39 @@ Local servers can resolve relative URLs or use `localhost`, but remote servers n
    curl https://atlas-ui.example.com/api/health
    ```
 
-### Issue 3: Token Expiration Errors
+### Issue 3: `CAPABILITY_TOKEN_SECRET` Not Configured (Ephemeral Secret Warning)
+
+**Symptoms:**
+- Logs contain `CRITICAL` or `WARNING` entries mentioning
+  `CAPABILITY_TOKEN_SECRET is not configured; using an ephemeral per-process secret`
+- File download links stop working after a backend restart
+- Tokens minted by one worker cannot be verified by another in multi-worker
+  deployments
+
+**Cause:**
+`CAPABILITY_TOKEN_SECRET` is unset or empty. As of PR #512 the backend no
+longer falls back to a hardcoded development secret; instead it generates a
+cryptographically random 32-byte secret at first use. This secret is safe
+against forgery, but does not persist across process restarts or multiple
+worker processes.
+
+**Solution:**
+Set a strong, stable value in production:
+
+```bash
+# Generate a random secret once, then store it in your secrets manager / .env
+openssl rand -hex 32
+```
+
+Add to `.env`:
+```bash
+CAPABILITY_TOKEN_SECRET=<paste-the-64-char-hex-output-here>
+```
+
+Restart the backend. The warning should stop appearing and tokens will
+survive restarts and be verifiable across workers.
+
+### Issue 4: Token Expiration Errors
 
 **Symptoms:**
 - File download initially works but fails after some time
@@ -82,7 +114,7 @@ Increase the token TTL in your configuration:
 
 3. For very large files or slow operations, consider implementing chunked downloads or streaming in your MCP server
 
-### Issue 4: Files Work in Development But Not Production
+### Issue 5: Files Work in Development But Not Production
 
 **Symptoms:**
 - File access works when testing locally
@@ -106,7 +138,7 @@ Increase the token TTL in your configuration:
 
 3. Ensure load balancer or reverse proxy properly forwards requests to the backend
 
-### Issue 5: SSL/TLS Certificate Errors
+### Issue 6: SSL/TLS Certificate Errors
 
 **Symptoms:**
 - MCP server reports SSL certificate verification errors
@@ -134,7 +166,7 @@ The remote MCP server cannot verify the SSL certificate of the Atlas UI backend.
 
 2. Or install the self-signed certificate in the MCP server's trust store
 
-### Issue 6: Network Isolation / Firewall Blocks
+### Issue 7: Network Isolation / Firewall Blocks
 
 **Symptoms:**
 - Connection timeout errors
@@ -214,7 +246,7 @@ BACKEND_PUBLIC_URL=https://atlas.company.com
 
 Both local and remote servers work because the backend generates absolute URLs.
 
-### Issue 7: File Upload Fails for Filenames with Spaces
+### Issue 8: File Upload Fails for Filenames with Spaces
 
 **Symptoms:**
 - Uploading a file whose name contains spaces fails silently or produces an error

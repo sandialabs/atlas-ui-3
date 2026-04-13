@@ -138,21 +138,28 @@ async def lifespan(app: FastAPI):
         if not config.app_settings.feature_proxy_secret_enabled:
             logger.warning(
                 "SECURITY WARNING: Proxy secret validation is DISABLED in production. "
-                "Set FEATURE_PROXY_SECRET_ENABLED=true and PROXY_SECRET to enable."
+                "Without it, anyone with direct backend access can spoof the %s header. "
+                "Set FEATURE_PROXY_SECRET_ENABLED=true and PROXY_SECRET to enable, "
+                "or ensure the backend is only reachable through a trusted reverse proxy.",
+                config.app_settings.auth_user_header
             )
         elif not config.app_settings.proxy_secret:
-            logger.warning(
-                "SECURITY WARNING: Proxy secret is ENABLED but PROXY_SECRET is not set. "
-                "Authentication will fail for all requests."
+            logger.error(
+                "SECURITY ERROR: Proxy secret is ENABLED but PROXY_SECRET is not set. "
+                "All requests will be rejected (fail-closed). "
+                "Set PROXY_SECRET to a strong random value in .env."
             )
 
-    # SECURITY WARNING: Check for weak Globus session secret
+    # SECURITY: Validate Globus session secret (runtime check, complements module-level gate)
     if config.app_settings.feature_globus_auth_enabled:
-        if config.app_settings.globus_session_secret == "atlas-globus-session-change-me":
-            logger.warning(
-                "SECURITY WARNING: Globus auth is enabled but GLOBUS_SESSION_SECRET "
-                "is still the default value. Set a strong random secret in .env to "
-                "protect OAuth CSRF state."
+        _globus_secret = config.app_settings.globus_session_secret
+        _GLOBUS_PLACEHOLDER = "atlas-globus-session-change-me"
+        if not _globus_secret or _globus_secret == _GLOBUS_PLACEHOLDER:
+            logger.error(
+                "SECURITY ERROR: Globus auth is enabled but GLOBUS_SESSION_SECRET "
+                "is not set (or is still the old placeholder value). "
+                "Globus auth routes will reject requests. "
+                "Set GLOBUS_SESSION_SECRET to a strong random value in .env."
             )
 
     logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
@@ -216,14 +223,24 @@ RateLimit first to cheaply throttle abusive traffic before heavier logic.
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
 # Session middleware for Globus OAuth state (CSRF protection during login flow)
+# Security: refuse to enable Globus auth with a missing/placeholder session secret
+_GLOBUS_PLACEHOLDER_SECRET = "atlas-globus-session-change-me"
 if config.app_settings.feature_globus_auth_enabled:
-    from starlette.middleware.sessions import SessionMiddleware
-    app.add_middleware(
-        SessionMiddleware,
-        secret_key=config.app_settings.globus_session_secret,
-        https_only=False,
-        same_site="lax",
-    )
+    _globus_secret = config.app_settings.globus_session_secret
+    if not _globus_secret or _globus_secret == _GLOBUS_PLACEHOLDER_SECRET:
+        logger.error(
+            "SECURITY: Globus auth DISABLED — GLOBUS_SESSION_SECRET is not set "
+            "(or is the old placeholder). Set a strong random value in .env."
+        )
+        config.app_settings.feature_globus_auth_enabled = False
+    else:
+        from starlette.middleware.sessions import SessionMiddleware
+        app.add_middleware(
+            SessionMiddleware,
+            secret_key=_globus_secret,
+            https_only=False,
+            same_site="lax",
+        )
 # Domain whitelist check (if enabled) - add before Auth so it runs after
 if config.app_settings.feature_domain_whitelist_enabled:
     app.add_middleware(
@@ -386,9 +403,13 @@ async def websocket_endpoint(websocket: WebSocket):
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
         config_manager.app_settings.feature_proxy_secret_enabled
-        and config_manager.app_settings.proxy_secret
         and not is_debug_mode
     ):
+        if not config_manager.app_settings.proxy_secret:
+            # Fail closed: proxy secret is required but not configured
+            logger.error("Proxy secret validation enabled but PROXY_SECRET is not set — rejecting WebSocket")
+            raise WebSocketException(code=1008, reason="Server misconfigured: proxy secret not set")
+
         proxy_secret_header = config_manager.app_settings.proxy_secret_header
         proxy_secret_value = websocket.headers.get(proxy_secret_header)
         if proxy_secret_value != config_manager.app_settings.proxy_secret:
@@ -634,7 +655,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     tool_call_id=tool_call_id,
                     approved=approved,
                     arguments=arguments,
-                    reason=reason
+                    reason=reason,
+                    user_email=user_email,
                 )
 
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")

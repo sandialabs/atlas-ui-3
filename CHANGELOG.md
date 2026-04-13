@@ -6,8 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #500 - 2026-04-07
+### PR #504 - 2026-04-12
 - **Fix**: Light mode white-on-white bug in slash command and `@file` autocomplete dropdowns. Tool and file names now inherit their text color from the parent row instead of using a hardcoded `text-white` class, making them visible in both light and dark themes.
+
+### PR #512 - 2026-04-12
+- **Security**: Removed the hardcoded `b"dev-capability-secret"` fallback used by `atlas/core/capabilities.py` when `CAPABILITY_TOKEN_SECRET` was unset. Previously, any attacker who knew this constant could forge HMAC capability tokens for any `{user, file_key}` pair and download any user's files via `/mcp/files/download/` (which intentionally bypasses header-based auth). The fallback now generates a cryptographically random 32-byte per-process secret via `secrets.token_bytes(32)`; tokens signed with it cannot be predicted or forged. A `CRITICAL` log entry is emitted in production (or `WARNING` in debug mode) the first time the ephemeral secret is used, instructing operators to set `CAPABILITY_TOKEN_SECRET` for durable, restart-stable tokens. Fail-closed: no hardcoded value is ever returned from `_get_secret()`.
+
+### PR #511 - 2026-04-12
+- **Security**: Tool approval requests are now bound to the authenticated user who created them. Any WebSocket approval response from a different user (or from an empty/missing user identity) is rejected and a security warning is logged. This prevents cross-user approval bypass (F-03) where a user who learned another user's pending `tool_call_id` could approve, reject, or inject edited arguments into that user's tool execution. The ownership check fails closed: once a request is bound to a `user_email`, the response must supply a matching one. Backward compatible: verification is skipped only for legacy requests where the request itself has no `user_email` (single-user deployments).
+
+### PR #510 - 2026-04-12
+- **Security**: `get_current_user()` now raises HTTP 401 when `request.state.user_email` is unset, instead of silently falling back to `test@test.com`. Any request that bypasses auth middleware is now rejected rather than granted a default identity.
+- **Security**: `is_user_in_group()` mock group memberships (which grant admin access to the test user) are now gated behind `debug_mode=True`. In production mode with no external auth endpoint, users receive only the default `users` group — no admin privileges are granted via mock.
+- **Security**: `FEATURE_PROXY_SECRET_ENABLED` now defaults to `true`. In production without a configured `PROXY_SECRET`, the middleware rejects all requests with HTTP 503 (fail-closed) instead of silently passing through. This prevents direct backend access from spoofing the `X-User-Email` header. Deployments that rely on network isolation can explicitly set `FEATURE_PROXY_SECRET_ENABLED=false`.
+- **Security**: `GLOBUS_SESSION_SECRET` no longer has a default value. The old placeholder (`atlas-globus-session-change-me`) allowed session cookie forgery. When Globus auth is enabled but the secret is missing or still the placeholder, the feature is automatically disabled at startup and an error is logged.
+
+### PR #503 - 2026-04-10
+- **Fix**: `_parse_rag_metadata` in `AtlasRAGClient` now handles `data_sources` entries that are dicts (with `id`/`label` fields) in addition to plain strings, resolving a Pydantic validation error when the ATLAS RAG API returns object-shaped data sources.
+- **Fix**: Documents in `documents_found` with a nested `data_source` object (instead of a flat `corpus_id`/`title`) now correctly populate `source` and `title`, so citations show meaningful labels instead of "Document 1, Document 2, …".
+
+### PR #500 - 2026-04-10
+- **Chore**: Upgrade fastmcp to `>=3.2.0` in all `pyproject.toml` files (main package and `mocks/mcp-http-mock`).
 
 ### PR #495 - 2026-04-03
 - **Feature**: Help documentation is now authored in Markdown (`help.md`). The help page renders the `.md` file content directly. The header "Help" button now displays a text label alongside the icon. Admins can edit the help content via the admin panel.

@@ -1,10 +1,11 @@
 """RAG Client for integrating with RAG mock endpoint."""
 
 import logging
+import re
 from typing import Dict, List, Optional
 
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from atlas.core.http_client import create_rag_client
 
@@ -26,6 +27,32 @@ class DocumentMetadata(BaseModel):
     confidence_score: float
     chunk_id: Optional[str] = None
     last_modified: Optional[str] = None
+    title: Optional[str] = None
+    url: Optional[str] = None
+
+    @field_validator("confidence_score")
+    @classmethod
+    def clamp_confidence(cls, v: float) -> float:
+        return max(0.0, min(1.0, v))
+
+    @field_validator("title")
+    @classmethod
+    def sanitize_title(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        # Strip control characters, collapse whitespace, cap length
+        cleaned = re.sub(r"[\x00-\x1f\x7f-\x9f]+", "", v).strip()
+        return cleaned[:200] if cleaned else None
+
+    @field_validator("url")
+    @classmethod
+    def validate_url_scheme(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not re.match(r"^https?://", v, re.IGNORECASE):
+            return None
+        return v
 
 
 class RAGMetadata(BaseModel):

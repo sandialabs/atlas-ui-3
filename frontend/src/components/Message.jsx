@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify'
 import 'katex/dist/katex.min.css'
 import { preProcessLatex, restoreLatexPlaceholders } from '../utils/latexPreprocessor'
 import { useChat } from '../contexts/ChatContext'
-import { useState, memo, useEffect, useRef } from 'react'
+import { useState, memo, useEffect, useRef, useId } from 'react'
 import { Copy } from 'lucide-react'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
@@ -47,12 +47,17 @@ hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('shell', bash)
 hljs.registerLanguage('sh', bash)
 
+// Feature flag: Perplexity-style inline citations & references for RAG.
+// Off by default; enable at Vite build time with VITE_FEATURE_RAG_CITATIONS=true.
+const ragCitationsEnabled =
+  import.meta.env.VITE_FEATURE_RAG_CITATIONS === 'true'
+
 // DOMPurify configuration that permits KaTeX-generated HTML.
 // KaTeX renders almost exclusively with <span> (allowed by default) but also
 // uses <svg>, <path>, and a handful of MathML elements for some symbols.
 const DOMPURIFY_CONFIG = {
-  ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext'],
-  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace'],
+  ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext', 'details', 'summary'],
+  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'role', 'tabindex', 'aria-label'],
 }
 
 // Helper function to highlight @file references in message content
@@ -63,14 +68,155 @@ const processFileReferences = (content) => {
   )
 }
 
+/**
+ * Extract source labels from the References section so inline citation
+ * chips can show source names (e.g. "eater") instead of bare numbers.
+ * Returns a Map<string, {label: string, url: string|null}>.
+ */
+const extractSourceLabels = (html) => {
+  const labels = new Map()
+  const refIdx = html.indexOf('<strong>References</strong>')
+  if (refIdx === -1) return labels
+
+  const refsHtml = html.slice(refIdx)
+
+  // Pattern 1: "N. <a href="url">label</a>" (paragraph-style numbered refs)
+  const numberedLinkPattern = /(\d{1,2})\.\s+<a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/g
+  // Pattern 2: "<li><a href="url">label</a>" (ol/li-style refs — auto-numbered)
+  const liLinkPattern = /<li><a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/g
+  // Pattern 3: "N. label" (plain text numbered refs)
+  const numberedPlainPattern = /(\d{1,2})\.\s+([^<—\n]+)/g
+  // Pattern 4: "<li>label" (plain li refs)
+  const liPlainPattern = /<li>([^<—\n]+)/g
+
+  let m, idx
+
+  // Try numbered patterns first
+  while ((m = numberedLinkPattern.exec(refsHtml)) !== null) {
+    labels.set(m[1], { label: m[3].trim(), url: m[2] })
+  }
+  while ((m = numberedPlainPattern.exec(refsHtml)) !== null) {
+    if (!labels.has(m[1])) {
+      labels.set(m[1], { label: m[2].trim(), url: null })
+    }
+  }
+
+  // If no numbered refs found, fall back to li-based (auto-numbered by ol)
+  if (labels.size === 0) {
+    idx = 1
+    while ((m = liLinkPattern.exec(refsHtml)) !== null) {
+      labels.set(String(idx++), { label: m[2].trim(), url: m[1] })
+    }
+    if (labels.size === 0) {
+      idx = 1
+      while ((m = liPlainPattern.exec(refsHtml)) !== null) {
+        labels.set(String(idx++), { label: m[1].trim(), url: null })
+      }
+    }
+  }
+
+  return labels
+}
+
+const processCitationBadges = (html, scope = '') => {
+  // Track whether we are inside a <code> or <pre> block so we don't
+  // convert array indices like arr[1] into citation badges.
+  // The scope parameter ensures IDs are unique per message, preventing
+  // cross-message collisions when multiple RAG responses are in the chat.
+  let insideCode = 0
+  return html.replace(
+    /(<\/?(?:code|pre)[^>]*>)|(<[^>]*>)|(?<!\]\()(\[(\d{1,2})\])(?!\()/gi,
+    (match, codeTag, otherTag, bracket, num) => {
+      // Track entering/leaving code and pre blocks
+      if (codeTag) {
+        if (codeTag[1] === '/') {
+          insideCode = Math.max(0, insideCode - 1)
+        } else {
+          insideCode++
+        }
+        return codeTag
+      }
+      // Return other HTML tags unchanged
+      if (otherTag) return otherTag
+      // Inside code/pre: leave [N] as plain text
+      if (insideCode > 0) return match
+      // Render as compact inline citation number — source names live in the
+      // Sources footer, not inline. Just show a small superscript number.
+      const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
+      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" aria-label="Citation ${num}" class="rag-source-chip-inner rag-source-chip-numonly" data-citation-target="${refId}">${num}</span></span>`
+    }
+  )
+}
+
+/**
+ * Add anchor IDs to the numbered items in the References section and
+ * wrap it in a collapsible element. The collapsed state shows a compact
+ * inline summary like "[1] Auth Guide, [2] Deploy Guide"; expanding
+ * reveals the full detailed list with relevance scores and links.
+ */
+const processReferencesSection = (html, scope = '', sourceLabels = new Map()) => {
+  const refIdx = html.indexOf('<strong>References</strong>')
+  if (refIdx === -1) return html
+
+  const before = html.slice(0, refIdx)
+  let after = html.slice(refIdx)
+  const prefix = scope ? `rag-ref-${scope}` : 'rag-ref'
+
+  // Add anchor IDs to reference entries — handles both "N. text" and plain <li> formats
+  let liCounter = 0
+  const anchored = after
+    .replace(/<li>(\d{1,2})\.\s/g, (_, num) => `<li id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
+    .replace(/<p>(\d{1,2})\.\s/g, (_, num) => `<p id="${prefix}-${num}" class="rag-ref-entry">${num}. `)
+    .replace(/<li>(?!\d{1,2}\.\s)/g, () => {
+      liCounter++
+      return `<li id="${prefix}-${liCounter}" class="rag-ref-entry">`
+    })
+
+  // Build compact inline summary: [1] Name, [2] Name, ...
+  const summaryParts = []
+  const sorted = [...sourceLabels.entries()].sort((a, b) => Number(a[0]) - Number(b[0]))
+  for (const [num, src] of sorted) {
+    summaryParts.push(`<span class="rag-summary-ref">[${num}]</span> ${src.label}`)
+  }
+  const summaryText = summaryParts.length > 0
+    ? summaryParts.join('<span class="rag-summary-sep">,</span> ')
+    : 'Sources'
+
+  const wrapped = anchored
+    .replace(
+      /(<p>)?<strong>References<\/strong>(<\/p>)?/,
+      `<details class="rag-references-collapse"><summary class="rag-references-summary" aria-label="References: ${summaryParts.length} sources">${summaryText}</summary>`
+    ) + '</details>'
+
+  return before + wrapped
+}
+
 // Helper function to convert bullet characters to proper markdown list syntax
 const convertBulletListsToMarkdown = (content) => {
   // Convert lines starting with bullet characters (•, ◦, ▪, ▫, ‣) to markdown lists
   return content.replace(/^(\s*)[•◦▪▫‣]\s+(.+)$/gm, '$1- $2')
 }
 
-// Configure marked with custom renderer for code blocks
+// Configure marked with custom renderer for code blocks and safe links
 const renderer = new marked.Renderer()
+
+// Safe link renderer: external links get target=_blank and rel=noopener noreferrer
+renderer.link = function(href, title, text) {
+  // Handle marked v5+ structured args ({href, title, text} object)
+  if (typeof href === 'object' && href !== null) {
+    title = href.title
+    text = href.text || href.tokens?.map(t => t.raw).join('') || ''
+    href = href.href
+  }
+  const escTitle = title ? title.replace(/&/g, '&amp;').replace(/"/g, '&quot;') : ''
+  const titleAttr = escTitle ? ` title="${escTitle}"` : ''
+  // Internal fragment links (citation anchors) stay in-page
+  if (href && href.startsWith('#')) {
+    return `<a href="${href}"${titleAttr}>${text}</a>`
+  }
+  return `<a href="${href}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`
+}
+
 renderer.code = function(code, language) {
   // Handle different code input types
   let codeString = ''
@@ -739,6 +885,10 @@ const ToolElapsedTime = ({ timestamp }) => {
 const Message = ({ message }) => {
   const { appName, downloadFile, isSynthesizing, settings } = useChat()
   const debugMode = settings?.debugMode || false
+  // Stable per-message scope for citation anchor IDs — prevents collisions
+  // when multiple RAG responses exist in the same conversation.
+  const rawId = useId()
+  const messageScope = rawId.replace(/:/g, '')
 
   // State for collapsible sections with localStorage persistence
   // In debug mode, default to expanded
@@ -1160,12 +1310,33 @@ const renderContent = () => {
       const { result: latexProcessed, placeholders } = preProcessLatex(content)
       const markdownHtml = marked.parse(latexProcessed)
       const latexRestoredHtml = restoreLatexPlaceholders(markdownHtml, placeholders)
-      const sanitizedHtml = DOMPurify.sanitize(latexRestoredHtml, DOMPURIFY_CONFIG)
+      // Skip citation pipeline for non-RAG messages (no References section)
+      // or when the RAG citations feature flag is disabled.
+      const hasReferences = ragCitationsEnabled && latexRestoredHtml.includes('References')
+      const sourceLabels = hasReferences ? extractSourceLabels(latexRestoredHtml) : new Map()
+      const citationHtml = hasReferences ? processCitationBadges(latexRestoredHtml, messageScope) : latexRestoredHtml
+      const referencesHtml = hasReferences ? processReferencesSection(citationHtml, messageScope, sourceLabels) : citationHtml
+      const sanitizedHtml = DOMPurify.sanitize(referencesHtml, DOMPURIFY_CONFIG)
 
       return (
         <div
           className="prose prose-invert max-w-none selectable-markdown"
           dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+          onClick={(e) => {
+            // Handle citation badge clicks — scroll the target reference
+            // into view within the chat container instead of relying on
+            // browser fragment navigation.
+            const badge = e.target.closest('[data-citation-target]')
+            if (!badge) return
+            e.preventDefault()
+            const targetId = badge.getAttribute('data-citation-target')
+            const target = document.getElementById(targetId)
+            if (target) {
+              target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              target.classList.add('rag-ref-highlight')
+              setTimeout(() => target.classList.remove('rag-ref-highlight'), 2000)
+            }
+          }}
         />
       )
     } catch (error) {

@@ -235,6 +235,10 @@ build_frontend() {
     if [ -z "$VITE_APP_NAME" ]; then
         export VITE_APP_NAME="Chat UI 13"
     fi
+    # RAG citations UI is opt-in at build time; default to off if unset.
+    if [ -z "$VITE_FEATURE_RAG_CITATIONS" ]; then
+        export VITE_FEATURE_RAG_CITATIONS="false"
+    fi
     npm run build
     cd "$PROJECT_ROOT"
 

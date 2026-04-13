@@ -159,4 +159,4 @@ The server uses FastMCP framework and provides:
 - **SSE**: Server-Sent Events for streaming responses
 - **STDIO**: Standard input/output for direct integration
 
-Built with FastMCP 2.10.6 and MCP Protocol 1.12.2.
+Built with FastMCP >=3.2.0 and MCP Protocol 1.26.0.
