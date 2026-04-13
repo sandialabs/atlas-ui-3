@@ -5,7 +5,7 @@ description = "MCP HTTP Mock Server for ATLAS testing"
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=3.2.0,<4.0.0",
-    "requests>=2.31.0",
+    "requests>=2.33.1",
 ]
 
 [build-system]
