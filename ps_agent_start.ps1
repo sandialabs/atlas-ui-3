@@ -268,6 +268,11 @@ function Build-Frontend {
         $env:VITE_APP_NAME = "Chat UI 13"
     }
 
+    # RAG citations UI is opt-in at build time; default to off if unset.
+    if (-not $env:VITE_FEATURE_RAG_CITATIONS) {
+        $env:VITE_FEATURE_RAG_CITATIONS = "false"
+    }
+
     npm run build
     Set-Location $PROJECT_ROOT
 

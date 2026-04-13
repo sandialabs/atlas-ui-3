@@ -185,7 +185,7 @@ frontend/src/
 - **LLM**: `atlas/config/llmconfig.yml` (user overrides in `config/llmconfig.yml`)
 - **MCP Servers**: `atlas/config/mcp.json` (user overrides in `config/mcp.json`)
 - **RAG Sources**: `atlas/config/rag-sources.json` (user overrides in `config/rag-sources.json`)
-- **Help**: `atlas/config/help-config.json`
+- **Help**: `atlas/config/help.md` (Markdown; user override in `config/help.md`)
 - **Compliance Levels**: `atlas/config/compliance-levels.json`
 - **MCP Examples**: `atlas/config/mcp-example-configs/`
 - **Environment**: `.env` (copy from `.env.example`)
@@ -196,6 +196,7 @@ frontend/src/
 - `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Compliance level enforcement
 - `FEATURE_AGENT_MODE_AVAILABLE` - Agent mode UI toggle
 - `VITE_FEATURE_ANIMATED_LOGO` - Animated logo (build-time Vite flag; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
+- `VITE_FEATURE_RAG_CITATIONS` - Perplexity-style inline citations & collapsible Sources section for RAG responses (build-time Vite flag; defaults to `false`; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
 
 ## Per-User LLM API Keys
 
@@ -322,3 +323,38 @@ docker run -p 8000:8000 atlas-ui-3
 ```
 
 Container uses RHEL 9 UBI (GitHub Actions use Ubuntu runners).
+
+## RAG Mock for Local Testing
+
+The `mocks/atlas-rag-api-mock/` directory contains a FastAPI mock RAG server with 3 realistic corpora (Company Policies, Technical Documentation, Product Knowledge Base — 12 documents total, all with `title`, `url`, and `last_modified` fields). Use it to test RAG features without an external API.
+
+### Quick Start
+
+```bash
+# 1. Start the RAG mock (port 8002)
+cd mocks/atlas-rag-api-mock && python main.py &
+
+# 2. Add it to your local config (config/ overrides atlas/config/)
+cat > config/rag-sources.json << 'EOF'
+{
+  "atlas_rag": {
+    "type": "http",
+    "display_name": "Technical Docs",
+    "url": "http://localhost:8002",
+    "bearer_token": "test-atlas-rag-token",
+    "groups": ["users"],
+    "compliance_level": "Internal"
+  }
+}
+EOF
+
+# 3. Set FEATURE_RAG_ENABLED=true in .env, then restart the backend
+bash agent_start.sh
+```
+
+### Mock Details
+- **Port:** 8002
+- **Auth:** Bearer token `test-atlas-rag-token`
+- **Test users:** `test@test.com` (all corpora), `alice@example.com`, `bob@example.com`, `charlie@example.com`, `guest@example.com` (public only)
+- **Data:** `mocks/atlas-rag-api-mock/mock_data.json` — edit to add documents or corpora
+- **Endpoints:** `GET /discover/datasources?as_user=`, `POST /rag/completions`, `POST /rag/search`

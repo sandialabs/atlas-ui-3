@@ -99,6 +99,12 @@ async def globus_callback(
     tokens from 'other_tokens', stores them in MCPTokenStorage, and
     redirects back to the app.
     """
+    # Fail fast if Globus auth was disabled (e.g. missing session secret).
+    # Must check before any request.session access — SessionMiddleware may be absent.
+    config_manager = app_factory.get_config_manager()
+    if not config_manager.app_settings.feature_globus_auth_enabled:
+        return RedirectResponse("/?globus_error=auth_disabled", status_code=302)
+
     # Handle OAuth errors - use allowlisted codes to prevent log injection / open redirect
     if error:
         known_errors = {
@@ -185,6 +191,12 @@ async def globus_logout(request: Request):
     Also opens the Globus logout URL in a new window via the frontend
     to clear the Globus session cookies.
     """
+    # Fail fast if Globus auth was disabled (e.g. missing session secret).
+    # Must check before any request.session access — SessionMiddleware may be absent.
+    config_manager = app_factory.get_config_manager()
+    if not config_manager.app_settings.feature_globus_auth_enabled:
+        return RedirectResponse("/?globus_auth=logged_out", status_code=302)
+
     # Get user email from session or auth header
     user_email = request.session.get("globus_user_email")
     if not user_email:

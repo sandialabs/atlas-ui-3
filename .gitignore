@@ -105,4 +105,6 @@ backend/bandit_output.txt
 # Scratch folder (local experimentation)
 scratch/
 backend/report.md
-.playwright-mcpdocs/planning/improvements1.md
+.playwright-mcp/
+screenshots/
+docs/planning/improvements1.md
