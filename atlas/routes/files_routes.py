@@ -113,30 +113,6 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
-@router.get("/files/{file_key}", response_model=FileContentResponse)
-async def get_file(
-    file_key: str,
-    current_user: str = Depends(get_current_user)
-) -> FileContentResponse:
-    """Get a file from S3 storage."""
-    try:
-        s3_client = app_factory.get_file_storage()
-        result = await s3_client.get_file(current_user, file_key)
-
-        if not result:
-            raise HTTPException(status_code=404, detail="File not found")
-
-        return FileContentResponse(**result)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting file: {str(e)}")
-        if "Access denied" in str(e):
-            raise HTTPException(status_code=403, detail="Access denied")
-        raise HTTPException(status_code=500, detail=f"Failed to get file: {str(e)}")
-
-
 @router.get("/files", response_model=List[FileResponse])
 async def list_files(
     current_user: str = Depends(get_current_user),
@@ -170,30 +146,6 @@ async def list_files(
     except Exception as e:
         logger.error(f"Error listing files: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to list files: {str(e)}")
-
-
-@router.delete("/files/{file_key}")
-async def delete_file(
-    file_key: str,
-    current_user: str = Depends(get_current_user)
-) -> Dict[str, str]:
-    """Delete a file from S3 storage."""
-    try:
-        s3_client = app_factory.get_file_storage()
-        success = await s3_client.delete_file(current_user, file_key)
-
-        if not success:
-            raise HTTPException(status_code=404, detail="File not found")
-
-        return {"message": "File deleted successfully", "key": file_key}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting file: {str(e)}")
-        if "Access denied" in str(e):
-            raise HTTPException(status_code=403, detail="Access denied")
-        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
 
 
 @router.get("/users/{user_email}/files/stats")
@@ -283,6 +235,57 @@ async def download_file(
     Also accepts capability tokens for backward compatibility.
     """
     return await _handle_file_download(file_key, token, current_user)
+
+
+# NOTE: The path-capturing routes below MUST be declared after all specific
+# /files/... routes (healthz, download, list, stats) so that FastAPI matches
+# those fixed prefixes first before falling through to the greedy {file_key:path}.
+@router.get("/files/{file_key:path}", response_model=FileContentResponse)
+async def get_file(
+    file_key: str,
+    current_user: str = Depends(get_current_user)
+) -> FileContentResponse:
+    """Get a file from S3 storage."""
+    try:
+        s3_client = app_factory.get_file_storage()
+        result = await s3_client.get_file(current_user, file_key)
+
+        if not result:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        return FileContentResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting file: {str(e)}")
+        if "Access denied" in str(e):
+            raise HTTPException(status_code=403, detail="Access denied")
+        raise HTTPException(status_code=500, detail=f"Failed to get file: {str(e)}")
+
+
+@router.delete("/files/{file_key:path}")
+async def delete_file(
+    file_key: str,
+    current_user: str = Depends(get_current_user)
+) -> Dict[str, str]:
+    """Delete a file from S3 storage."""
+    try:
+        s3_client = app_factory.get_file_storage()
+        success = await s3_client.delete_file(current_user, file_key)
+
+        if not success:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        return {"message": "File deleted successfully", "key": file_key}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting file: {str(e)}")
+        if "Access denied" in str(e):
+            raise HTTPException(status_code=403, detail="Access denied")
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
 
 
 @mcp_files_router.get("/files/download/{file_key:path}")

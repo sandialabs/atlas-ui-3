@@ -28,6 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #500 - 2026-04-10
 - **Chore**: Upgrade fastmcp to `>=3.2.0` in all `pyproject.toml` files (main package and `mocks/mcp-http-mock`).
 
+### PR #498 - 2026-04-04
+- **Fix**: `GET /api/files/{file_key}` and `DELETE /api/files/{file_key}` now use the `{file_key:path}` converter, so S3 keys containing `/` (e.g. `users/alice@example.com/generated/foo.txt`) are captured in full instead of returning 404. Route declarations were reordered so the greedy catch-all comes after specific `/files/...` routes (healthz, list, download, stats) to prevent it from shadowing them.
+
 ### PR #495 - 2026-04-03
 - **Feature**: Help documentation is now authored in Markdown (`help.md`). The help page renders the `.md` file content directly. The header "Help" button now displays a text label alongside the icon. Admins can edit the help content via the admin panel.
 
