@@ -9,6 +9,7 @@ import base64
 import logging
 import re
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
@@ -170,6 +171,9 @@ async def get_user_file_stats(
 
 async def _handle_file_download(file_key: str, token: str | None, current_user: str) -> Response:
     """Shared download logic for both /api/ and /mcp/ file download endpoints."""
+    # Defensive: some reverse proxies re-encode characters (e.g. @ -> %40)
+    # leaving residual percent-encoding in the path parameter.
+    file_key = unquote(file_key)
     try:
         s3_client = app_factory.get_file_storage()
 
@@ -246,6 +250,7 @@ async def get_file(
     current_user: str = Depends(get_current_user)
 ) -> FileContentResponse:
     """Get a file from S3 storage."""
+    file_key = unquote(file_key)
     try:
         s3_client = app_factory.get_file_storage()
         result = await s3_client.get_file(current_user, file_key)
@@ -270,6 +275,7 @@ async def delete_file(
     current_user: str = Depends(get_current_user)
 ) -> Dict[str, str]:
     """Delete a file from S3 storage."""
+    file_key = unquote(file_key)
     try:
         s3_client = app_factory.get_file_storage()
         success = await s3_client.delete_file(current_user, file_key)

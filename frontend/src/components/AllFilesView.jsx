@@ -16,6 +16,15 @@ import {
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 
+/**
+ * Encode a multi-segment file key for use in URL paths.
+ * Encodes each path segment individually (e.g. @ -> %40) while
+ * preserving `/` as the path separator, unlike encodeURIComponent
+ * which also encodes `/` to `%2F` and can break proxy routing.
+ */
+const encodeFileKeyPath = (key) =>
+  key.split('/').map(encodeURIComponent).join('/')
+
 const AllFilesView = () => {
   const { token, user: userEmail, ensureSession, addSystemEvent, addPendingFileEvent, attachments } = useChat()
   const { sendMessage } = useWS()
@@ -163,7 +172,7 @@ const AllFilesView = () => {
 
   const handleDownloadFile = async (file) => {
     try {
-      const response = await fetch(`/api/files/download/${encodeURIComponent(file.key)}`, {
+      const response = await fetch(`/api/files/download/${encodeFileKeyPath(file.key)}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -193,7 +202,7 @@ const AllFilesView = () => {
     }
 
     try {
-      const response = await fetch(`/api/files/${encodeURIComponent(file.key)}`, {
+      const response = await fetch(`/api/files/${encodeFileKeyPath(file.key)}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`

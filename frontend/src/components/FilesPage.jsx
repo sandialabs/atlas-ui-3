@@ -53,9 +53,16 @@ const FilesPage = () => {
     }
   }
 
+  /**
+   * Encode a multi-segment file key for use in URL paths.
+   * Encodes each path segment individually while preserving `/` separators.
+   */
+  const encodeFileKeyPath = (key) =>
+    key.split('/').map(encodeURIComponent).join('/')
+
   const deleteFile = async (fileKey) => {
     try {
-      const response = await fetch(`/api/files/${fileKey}`, {
+      const response = await fetch(`/api/files/${encodeFileKeyPath(fileKey)}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('userEmail') || 'user@example.com'}`
@@ -63,7 +70,7 @@ const FilesPage = () => {
       })
       
       if (response.ok) {
-        setFiles(files.filter(f => f.s3_key !== fileKey))
+        setFiles(files.filter(f => f.key !== fileKey))
         await fetchStats() // Refresh stats
       } else {
         throw new Error('Failed to delete file')
@@ -75,7 +82,7 @@ const FilesPage = () => {
 
   const downloadFile = async (fileKey, filename) => {
     try {
-      const response = await fetch(`/api/files/${fileKey}`, {
+      const response = await fetch(`/api/files/${encodeFileKeyPath(fileKey)}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('userEmail') || 'user@example.com'}`
         }
@@ -292,7 +299,7 @@ const FilesPage = () => {
               </div>
             ) : (
               filteredFiles.map((file) => (
-                <div key={file.s3_key} className="px-6 py-4 hover:bg-gray-50">
+                <div key={file.key} className="px-6 py-4 hover:bg-gray-50">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3 flex-1 min-w-0">
                       <div className="flex-shrink-0">
@@ -320,7 +327,7 @@ const FilesPage = () => {
                         <Tag className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => downloadFile(file.s3_key, file.filename)}
+                        onClick={() => downloadFile(file.key, file.filename)}
                         className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors"
                         title="Download file"
                       >
@@ -329,7 +336,7 @@ const FilesPage = () => {
                       <button
                         onClick={() => {
                           if (confirm(`Are you sure you want to delete "${file.filename}"?`)) {
-                            deleteFile(file.s3_key)
+                            deleteFile(file.key)
                           }
                         }}
                         className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
