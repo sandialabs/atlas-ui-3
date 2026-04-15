@@ -395,6 +395,118 @@
   }
 }
 
+/* ── RAG inline source labels (Perplexity-style) ── */
+.rag-source-chip {
+  display: inline;
+  margin: 0 1px;
+}
+
+.rag-source-chip-inner {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: rgb(115, 115, 130); /* muted gray */
+  cursor: pointer;
+  text-decoration: none !important;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+
+.rag-source-chip-inner:hover {
+  color: rgb(165, 165, 180);
+}
+
+
+[data-theme="light"] .rag-source-chip-inner {
+  color: rgb(120, 120, 135);
+}
+
+[data-theme="light"] .rag-source-chip-inner:hover {
+  color: rgb(80, 80, 100);
+}
+
+
+.rag-source-chip-numonly {
+  font-weight: 600;
+  font-size: 0.65rem;
+  vertical-align: super;
+}
+
+/* ── Collapsible references section ── */
+.rag-references-collapse {
+  margin-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 0.5rem;
+}
+
+.rag-references-summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: rgb(140, 140, 155);
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  line-height: 1.6;
+}
+
+.rag-summary-ref {
+  font-weight: 600;
+  color: rgb(130, 130, 150);
+}
+
+.rag-summary-sep {
+  margin-right: 0.2rem;
+}
+
+[data-theme="light"] .rag-references-summary {
+  color: rgb(100, 100, 120);
+}
+
+[data-theme="light"] .rag-summary-ref {
+  color: rgb(90, 90, 110);
+}
+
+.rag-references-summary::before {
+  content: '▶';
+  font-size: 0.55rem;
+  transition: transform 0.15s;
+}
+
+.rag-references-collapse[open] > .rag-references-summary::before {
+  transform: rotate(90deg);
+}
+
+.rag-references-summary::-webkit-details-marker {
+  display: none;
+}
+
+[data-theme="light"] .rag-references-collapse {
+  border-top-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .rag-references-summary {
+  color: rgb(107, 114, 128); /* gray-500 */
+}
+
+/* ── Reference entry highlight on citation click ── */
+.rag-ref-entry {
+  transition: background-color 0.3s ease;
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.25rem;
+  margin: -0.125rem -0.25rem;
+}
+
+.rag-ref-highlight {
+  background-color: rgba(99, 102, 241, 0.2) !important;
+}
+
+[data-theme="light"] .rag-ref-highlight {
+  background-color: rgba(79, 70, 229, 0.15) !important;
+}
+
 /* User message bubble: blue in dark mode, lighter blue in light mode */
 .user-message-bubble {
   background-color: #2563eb;

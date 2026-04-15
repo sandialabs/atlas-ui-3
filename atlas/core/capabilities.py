@@ -9,6 +9,8 @@ import base64
 import hmac
 import json
 import logging
+import secrets
+import threading
 import time
 from hashlib import sha256
 from typing import Any, Dict, Optional
@@ -16,6 +18,15 @@ from typing import Any, Dict, Optional
 from atlas.modules.config import config_manager
 
 logger = logging.getLogger(__name__)
+
+# Ephemeral per-process secret used only when CAPABILITY_TOKEN_SECRET is not
+# configured. Generated on first use from a cryptographically secure RNG, so
+# it cannot be predicted or forged by an attacker. Tokens signed with an
+# ephemeral secret do not survive process restarts; operators must set
+# CAPABILITY_TOKEN_SECRET in production for durable tokens.
+_ephemeral_secret: Optional[bytes] = None
+_ephemeral_lock = threading.Lock()
+_ephemeral_warned: bool = False
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -27,23 +38,67 @@ def _b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode((data + padding).encode("ascii"))
 
 
+def _get_ephemeral_secret() -> bytes:
+    """Return (and lazily create) the per-process ephemeral secret.
+
+    The first caller in the process allocates 32 random bytes; subsequent
+    callers receive the same value so mint/verify are consistent within
+    one process lifetime.
+    """
+    global _ephemeral_secret, _ephemeral_warned
+    with _ephemeral_lock:
+        if _ephemeral_secret is None:
+            _ephemeral_secret = secrets.token_bytes(32)
+        if not _ephemeral_warned:
+            _ephemeral_warned = True
+            # Elevate severity in production so this cannot be missed in logs.
+            try:
+                production = not bool(
+                    getattr(config_manager.app_settings, "debug_mode", False)
+                )
+            except Exception:
+                production = True
+            message = (
+                "CAPABILITY_TOKEN_SECRET is not configured; using an ephemeral "
+                "per-process secret for HMAC-signed file download tokens. "
+                "Tokens will not survive process restarts. Set "
+                "CAPABILITY_TOKEN_SECRET in the environment for production."
+            )
+            if production:
+                logger.critical(message)
+            else:
+                logger.warning(message)
+        return _ephemeral_secret
+
+
 def _get_secret() -> bytes:
     """Get the capability token secret as bytes.
 
     Order of precedence:
-    - App settings (config manager)
-    - Fallback development secret (unsafe for production)
+    - Configured CAPABILITY_TOKEN_SECRET from app settings
+    - Cryptographically random per-process ephemeral secret (fail-closed:
+      never falls back to a hardcoded value that an attacker could predict)
     """
     try:
         settings = config_manager.app_settings
-        if getattr(settings, "capability_token_secret", None):
-            return settings.capability_token_secret.encode("utf-8")
+        configured = getattr(settings, "capability_token_secret", None)
+        if configured:
+            return configured.encode("utf-8")
     except Exception:
-        # Config not ready; continue to fallback with a dev secret.
-        logger.debug("Capability token secret not available; using fallback dev secret.")
+        logger.debug("Capability token secret config not ready; using ephemeral secret.")
 
-    logger.warning("Using fallback dev capability token secret. Set CAPABILITY_TOKEN_SECRET for security.")
-    return b"dev-capability-secret"
+    return _get_ephemeral_secret()
+
+
+def _reset_ephemeral_secret_for_tests() -> None:
+    """Test helper: clear the cached ephemeral secret and warning flag.
+
+    Do not call from production code paths.
+    """
+    global _ephemeral_secret, _ephemeral_warned
+    with _ephemeral_lock:
+        _ephemeral_secret = None
+        _ephemeral_warned = False
 
 
 def _get_default_ttl_seconds() -> int:

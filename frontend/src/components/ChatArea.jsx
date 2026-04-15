@@ -1100,7 +1100,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <span className="font-black text-white">/{tool.name}</span>
+                        <span className="font-black">/{tool.name}</span>
                         <span className="text-xs text-gray-400">from {tool.server}</span>
                       </div>
                     </div>
@@ -1126,7 +1126,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="font-medium text-white">@file {file.filename}</span>
+                          <span className="font-medium">@file {file.filename}</span>
                           <span className="text-xs px-2 py-1 rounded bg-gray-600 text-gray-300">{file.type}</span>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-gray-400">

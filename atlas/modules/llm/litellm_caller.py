@@ -15,6 +15,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import warnings
 from collections import defaultdict
 from typing import Any, Dict, List, NoReturn, Optional, Tuple
@@ -240,11 +241,11 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         response_parts.append(f"*Response from {display_source} (RAG completions endpoint):*\n")
         response_parts.append(rag_response.content)
 
-        # Append metadata if available
+        # Append references if available
         if rag_response.metadata:
-            metadata_summary = self._format_rag_metadata(rag_response.metadata)
-            if metadata_summary and metadata_summary != "Metadata unavailable":
-                response_parts.append(f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}")
+            references_section = self._format_rag_references(rag_response.metadata)
+            if references_section:
+                response_parts.append(f"\n\n---\n{references_section}")
 
         return "\n".join(response_parts)
 
@@ -702,18 +703,28 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
                 context_label = f"Retrieved context from {len(source_responses)} RAG sources"
 
+            # Build citation instructions from metadata (if available)
+            citation_block = ""
+            if rag_metadata:
+                citation_block = self._build_citation_instructions(rag_metadata)
+
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()
             rag_context_message = {
                 "role": "system",
-                "content": f"{context_label}:\n\n{rag_content}\n\nUse this context to inform your response."
+                "content": (
+                    f"{context_label}:\n\n{rag_content}"
+                    f"{citation_block}\n\n"
+                    "Use this context to inform your response. "
+                    "Cite sources inline using [1], [2], etc. where applicable."
+                ),
             }
             messages_with_rag.insert(-1, rag_context_message)
 
             logger.debug("[LLM+RAG] Calling LLM with RAG-enriched context...")
             llm_response = await self.call_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email)
 
-            # Only append metadata if RAG actually provided useful content
+            # Only append references if RAG actually provided useful content
             rag_content_useful = bool(
                 rag_content
                 and rag_content.strip()
@@ -725,9 +736,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
 
             if rag_content_useful and rag_metadata:
-                metadata_summary = self._format_rag_metadata(rag_metadata)
-                if metadata_summary and metadata_summary != "Metadata unavailable":
-                    llm_response += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
+                references_section = self._format_rag_references(rag_metadata)
+                if references_section:
+                    llm_response += f"\n\n---\n{references_section}"
 
             logger.info(
                 "[LLM+RAG] RAG-integrated query complete: response_length=%d, rag_content_useful=%s",
@@ -899,18 +910,28 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
                 context_label = f"Retrieved context from {len(source_responses)} RAG sources"
 
+            # Build citation instructions from metadata (if available)
+            citation_block = ""
+            if rag_metadata:
+                citation_block = self._build_citation_instructions(rag_metadata)
+
             # Integrate RAG context into messages
             messages_with_rag = messages.copy()
             rag_context_message = {
                 "role": "system",
-                "content": f"{context_label}:\n\n{rag_content}\n\nUse this context to inform your response."
+                "content": (
+                    f"{context_label}:\n\n{rag_content}"
+                    f"{citation_block}\n\n"
+                    "Use this context to inform your response. "
+                    "Cite sources inline using [1], [2], etc. where applicable."
+                ),
             }
             messages_with_rag.insert(-1, rag_context_message)
 
             logger.debug("[LLM+RAG+Tools] Calling LLM with RAG-enriched context and tools...")
             llm_response = await self.call_with_tools(model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature, user_email=user_email)
 
-            # Only append metadata if RAG actually provided useful content
+            # Only append references if RAG actually provided useful content
             rag_content_useful = bool(
                 rag_content
                 and rag_content.strip()
@@ -921,10 +942,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 )
             )
 
-            if rag_content_useful and rag_metadata and not llm_response.has_tool_calls():
-                metadata_summary = self._format_rag_metadata(rag_metadata)
-                if metadata_summary and metadata_summary != "Metadata unavailable":
-                    llm_response.content += f"\n\n---\n**RAG Sources & Processing Info:**\n{metadata_summary}"
+            # Always append references when RAG provided useful content,
+            # even when tool calls were present — the references are relevant
+            # to the RAG context that informed the LLM's decisions.
+            if rag_content_useful and rag_metadata:
+                references_section = self._format_rag_references(rag_metadata)
+                if references_section:
+                    llm_response.content += f"\n\n---\n{references_section}"
 
             logger.info(
                 "[LLM+RAG+Tools] RAG+tools query complete: response_length=%d, has_tool_calls=%s, rag_content_useful=%s",
@@ -941,30 +965,109 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             logger.warning("[LLM+RAG+Tools] Falling back to tools-only call due to RAG error")
             return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email)
 
+    @staticmethod
+    def _sanitize_label(text: str) -> str:
+        """Strip markdown/prompt-injection characters from a metadata label."""
+        # Remove characters that could break markdown structure or inject prompts
+        cleaned = re.sub(r"[*\[\](){}<>`#\n\r\\]", "", text)
+        return cleaned.strip()[:200]
+
+    @staticmethod
+    def _build_citation_instructions(metadata) -> str:
+        """Build inline-citation instructions for the LLM system prompt.
+
+        Produces a numbered source list and asks the model to cite sources
+        using bracketed numbers (e.g. [1], [2]) in its answer — similar to
+        the Perplexity AI citation style.
+
+        Returns an empty string when no usable documents are available.
+        """
+        from atlas.modules.rag.client import RAGMetadata
+
+        if not isinstance(metadata, RAGMetadata) or not metadata.documents_found:
+            return ""
+
+        lines = [
+            "",
+            "## Source documents (for inline citations)",
+            "When you use information from these sources, cite them inline using "
+            "bracketed numbers like [1], [2], etc. Place citations immediately after "
+            "the claim they support. You may cite multiple sources for the same "
+            "claim, e.g. [1][3]. Do not fabricate citations — only cite sources "
+            "listed below.",
+            "",
+        ]
+
+        for i, doc in enumerate(metadata.documents_found, start=1):
+            raw_label = doc.title or doc.source or f"Document {i}"
+            label = LiteLLMCaller._sanitize_label(raw_label)
+            if not label:
+                label = f"Document {i}"
+            parts = [f"[{i}] **{label}**"]
+            if doc.url:
+                parts.append(f"  URL: {doc.url}")
+            if doc.source:
+                safe_source = LiteLLMCaller._sanitize_label(doc.source)
+                if safe_source and safe_source != label:
+                    parts.append(f"  Source: {safe_source}")
+            confidence_pct = int(doc.confidence_score * 100)
+            parts.append(f"  Relevance: {confidence_pct}%")
+            if doc.last_modified:
+                parts.append(f"  Updated: {doc.last_modified}")
+            lines.append("\n".join(parts))
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_rag_references(metadata) -> str:
+        """Format RAG metadata into a numbered references section.
+
+        Produces a Perplexity-style references block that pairs with the
+        inline [1], [2] citations the LLM was instructed to emit.
+
+        Returns empty string when metadata is unusable.
+        """
+        from atlas.modules.rag.client import RAGMetadata
+
+        if not isinstance(metadata, RAGMetadata) or not metadata.documents_found:
+            return ""
+
+        lines = ["**References**", ""]
+        for i, doc in enumerate(metadata.documents_found, start=1):
+            raw_label = doc.title or doc.source or f"Document {i}"
+            label = LiteLLMCaller._sanitize_label(raw_label)
+            if not label:
+                label = f"Document {i}"
+            confidence_pct = int(doc.confidence_score * 100)
+
+            if doc.url:
+                # URL is already validated to http(s) by DocumentMetadata
+                # Escape parens in URL to prevent markdown injection
+                safe_url = doc.url.replace("(", "%28").replace(")", "%29")
+                entry = f"{i}. [{label}]({safe_url})"
+            else:
+                entry = f"{i}. {label}"
+
+            detail_parts = []
+            if doc.source:
+                safe_source = LiteLLMCaller._sanitize_label(doc.source)
+                if safe_source and safe_source != label:
+                    detail_parts.append(safe_source)
+            detail_parts.append(f"{confidence_pct}% relevance")
+            if doc.last_modified:
+                detail_parts.append(f"updated {doc.last_modified}")
+
+            entry += f" — {', '.join(detail_parts)}"
+            lines.append(entry)
+
+        lines.append(f"\n*{metadata.data_source_name} · {metadata.retrieval_method} · {metadata.query_processing_time_ms}ms*")
+        return "\n".join(lines)
+
     def _format_rag_metadata(self, metadata) -> str:
-        """Format RAG metadata into a user-friendly summary."""
-        # Import here to avoid circular imports
-        try:
-            from atlas.modules.rag.models import RAGMetadata
-            if not isinstance(metadata, RAGMetadata):
-                return "Metadata unavailable"
-        except ImportError:
-            return "Metadata unavailable"
+        """Format RAG metadata — delegates to _format_rag_references.
 
-        summary_parts = []
-        summary_parts.append(f" **Data Source:** {metadata.data_source_name}")
-        summary_parts.append(f" **Processing Time:** {metadata.query_processing_time_ms}ms")
-
-        if metadata.documents_found:
-            summary_parts.append(f" **Documents Found:** {len(metadata.documents_found)} (searched {metadata.total_documents_searched})")
-
-            for i, doc in enumerate(metadata.documents_found[:3]):
-                confidence_percent = int(doc.confidence_score * 100)
-                summary_parts.append(f"  • {doc.source} ({confidence_percent}% relevance, {doc.content_type})")
-
-            if len(metadata.documents_found) > 3:
-                remaining = len(metadata.documents_found) - 3
-                summary_parts.append(f"  • ... and {remaining} more document(s)")
-
-        summary_parts.append(f" **Retrieval Method:** {metadata.retrieval_method}")
-        return "\n".join(summary_parts)
+        Kept for backward compatibility with call sites that check the return
+        value against 'Metadata unavailable'.
+        """
+        result = self._format_rag_references(metadata)
+        return result if result else "Metadata unavailable"

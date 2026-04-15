@@ -4,11 +4,11 @@ version = "0.1.0"
 description = "Mock File Extractor Service for ATLAS testing"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115.0,<1.0.0",
+    "fastapi>=0.135.3,<1.0.0",
     "uvicorn>=0.32.0,<1.0.0",
-    "pypdf>=5.0.0,<7.0.0",
+    "pypdf>=6.10.0,<7.0.0",
 ]
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=82.0.1", "wheel"]
 build-backend = "setuptools.build_meta"

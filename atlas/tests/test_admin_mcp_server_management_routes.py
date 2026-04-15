@@ -1,11 +1,15 @@
 import json
+import os
 from pathlib import Path
 
+import pytest
 from main import app
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.config import config_manager
+
+_IS_PRODUCTION = os.environ.get("DEBUG_MODE", "true").lower() == "false"
 
 
 def _configure_test_overrides(tmp_path: Path, monkeypatch):
@@ -17,6 +21,7 @@ def _configure_test_overrides(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(app_factory, "get_mcp_manager", lambda: None)
 
 
+@pytest.mark.skipif(_IS_PRODUCTION, reason="Requires debug mode for mock admin access")
 def test_admin_mcp_available_servers_returns_inventory(monkeypatch, tmp_path):
     _configure_test_overrides(tmp_path, monkeypatch)
 
@@ -41,6 +46,7 @@ def test_admin_mcp_available_servers_returns_inventory(monkeypatch, tmp_path):
     assert "source_file" in first
 
 
+@pytest.mark.skipif(_IS_PRODUCTION, reason="Requires debug mode for mock admin access")
 def test_admin_mcp_active_servers_empty_when_no_override_file(monkeypatch, tmp_path):
     _configure_test_overrides(tmp_path, monkeypatch)
 
@@ -58,6 +64,7 @@ def test_admin_mcp_active_servers_empty_when_no_override_file(monkeypatch, tmp_p
     assert "config_path" in data
 
 
+@pytest.mark.skipif(_IS_PRODUCTION, reason="Requires debug mode for mock admin access")
 def test_admin_mcp_add_server_persists_to_overrides(monkeypatch, tmp_path):
     _configure_test_overrides(tmp_path, monkeypatch)
 
@@ -102,6 +109,7 @@ def test_admin_mcp_add_server_persists_to_overrides(monkeypatch, tmp_path):
     assert add_again.json().get("already_active") is True
 
 
+@pytest.mark.skipif(_IS_PRODUCTION, reason="Requires debug mode for mock admin access")
 def test_admin_mcp_remove_server_updates_overrides(monkeypatch, tmp_path):
     _configure_test_overrides(tmp_path, monkeypatch)
 
@@ -140,3 +148,15 @@ def test_admin_mcp_remove_server_updates_overrides(monkeypatch, tmp_path):
 
     persisted = json.loads((tmp_path / "mcp.json").read_text(encoding="utf-8"))
     assert server_name not in persisted
+
+
+@pytest.mark.skipif(not _IS_PRODUCTION, reason="Verifies production-mode admin denial")
+def test_admin_mcp_routes_reject_mock_users_in_production():
+    """In production mode, mock admin users must be denied access."""
+    client = TestClient(app)
+    for path in ["/admin/mcp/available-servers", "/admin/mcp/active-servers"]:
+        response = client.get(path, headers={"X-User-Email": "admin@example.com"})
+        # 403 = admin auth correctly denied; 503 = proxy secret also blocks (both are correct)
+        assert response.status_code in (403, 503), (
+            f"{path} should deny access in production mode, got {response.status_code}"
+        )

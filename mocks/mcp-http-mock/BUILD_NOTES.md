@@ -53,7 +53,7 @@ In a normal environment with proper internet access, the build should:
 2. Install system dependencies (Python, pip, curl, etc.)
 3. Copy application files
 4. Create a Python virtual environment
-5. Install fastmcp>=2.10.6 and its dependencies
+5. Install fastmcp>=3.2.0 and its dependencies
 6. Set up a non-root user
 7. Configure health checks
 8. Set the default command to start the MCP server

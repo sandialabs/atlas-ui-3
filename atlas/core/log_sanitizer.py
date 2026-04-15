@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Any
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
@@ -98,5 +98,15 @@ def summarize_tool_approval_response_for_logging(data: Any) -> str:
 
 
 async def get_current_user(request: Request) -> str:
-    """Get current user from request state (set by middleware)."""
-    return getattr(request.state, 'user_email', 'test@test.com')
+    """Get current user from request state (set by middleware).
+
+    Raises HTTPException 401 if user_email is not set on request state,
+    which indicates the request bypassed authentication middleware.
+    """
+    user_email = getattr(request.state, 'user_email', None)
+    if not user_email:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated: missing user identity"
+        )
+    return user_email

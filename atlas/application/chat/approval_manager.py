@@ -22,12 +22,14 @@ class ToolApprovalRequest:
         tool_call_id: str,
         tool_name: str,
         arguments: Dict[str, Any],
-        allow_edit: bool = True
+        allow_edit: bool = True,
+        user_email: str = "",
     ):
         self.tool_call_id = tool_call_id
         self.tool_name = tool_name
         self.arguments = arguments
         self.allow_edit = allow_edit
+        self.user_email = user_email
         self.future: asyncio.Future = asyncio.Future()
 
     async def wait_for_response(self, timeout: float = 300.0) -> Dict[str, Any]:
@@ -70,7 +72,8 @@ class ToolApprovalManager:
         tool_call_id: str,
         tool_name: str,
         arguments: Dict[str, Any],
-        allow_edit: bool = True
+        allow_edit: bool = True,
+        user_email: str = "",
     ) -> ToolApprovalRequest:
         """
         Create a new approval request.
@@ -80,11 +83,12 @@ class ToolApprovalManager:
             tool_name: Name of the tool being called
             arguments: Tool arguments
             allow_edit: Whether to allow editing of arguments
+            user_email: Authenticated email of the user who owns this request
 
         Returns:
             ToolApprovalRequest object
         """
-        request = ToolApprovalRequest(tool_call_id, tool_name, arguments, allow_edit)
+        request = ToolApprovalRequest(tool_call_id, tool_name, arguments, allow_edit, user_email=user_email)
         self._pending_requests[tool_call_id] = request
         logger.info(f"Created approval request for tool {sanitize_for_logging(tool_name)} (call_id: {sanitize_for_logging(tool_call_id)})")
         return request
@@ -94,7 +98,8 @@ class ToolApprovalManager:
         tool_call_id: str,
         approved: bool,
         arguments: Optional[Dict[str, Any]] = None,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
+        user_email: str = "",
     ) -> bool:
         """
         Handle a user's response to an approval request.
@@ -104,6 +109,7 @@ class ToolApprovalManager:
             approved: Whether the user approved the call
             arguments: Potentially edited arguments (if allowed)
             reason: Optional reason for rejection
+            user_email: Authenticated email of the responding user
 
         Returns:
             True if request was found and handled, False otherwise
@@ -119,6 +125,28 @@ class ToolApprovalManager:
         if request is None:
             logger.warning(f"Received approval response for unknown tool call: {sanitize_for_logging(tool_call_id)}")
             logger.debug("Available pending requests: %s", list(self._pending_requests.keys()))
+            return False
+
+        # Security: verify the responding user owns this approval request.
+        # Prevents cross-user approval bypass where one user approves
+        # another user's pending tool call. Fail-closed: if the request has
+        # a user_email binding, the response MUST supply a matching one.
+        # Backward compat: only legacy requests (no user_email set) skip the
+        # check so single-user deployments continue to work.
+        if request.user_email and request.user_email != user_email:
+            # Inline sanitize for CodeQL py/log-injection: the query traces
+            # explicit CR/LF removal as a log-injection sanitizer, but does
+            # not recognize sanitize_for_logging() as one.
+            safe_user_email = str(user_email).replace("\r", "").replace("\n", "")
+            safe_tool_call_id = str(tool_call_id).replace("\r", "").replace("\n", "")
+            logger.warning(
+                "SECURITY: approval response rejected — user %s attempted to "
+                "respond to tool call owned by a different user "
+                "(call_id: %s, approved=%s)",
+                safe_user_email,
+                safe_tool_call_id,
+                approved,
+            )
             return False
 
         logger.debug("Found pending request for %s; setting response", sanitize_for_logging(tool_call_id))

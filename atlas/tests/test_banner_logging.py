@@ -1,12 +1,23 @@
 """Tests for banner message save logging functionality."""
 import logging
+import os
 
+import pytest
 from main import app
 from starlette.testclient import TestClient
 
 from atlas.modules.config import config_manager
 
+_IS_PRODUCTION = os.environ.get("DEBUG_MODE", "true").lower() == "false"
 
+# Mark functional tests that need mock admin access as debug-only
+_requires_debug = pytest.mark.skipif(
+    _IS_PRODUCTION,
+    reason="Admin route tests require debug mode for mock admin access",
+)
+
+
+@_requires_debug
 def test_banner_save_success_logging(caplog, tmp_path, monkeypatch):
     """Test that successful banner save produces INFO log with file path."""
     client = TestClient(app)
@@ -56,6 +67,7 @@ def test_banner_save_success_logging(caplog, tmp_path, monkeypatch):
     assert "admin@example.com" in log_message
 
 
+@_requires_debug
 def test_banner_save_failure_logging(caplog, tmp_path, monkeypatch):
     """Test that failed banner save produces ERROR log with details."""
     client = TestClient(app)
@@ -113,6 +125,7 @@ def test_banner_save_failure_logging(caplog, tmp_path, monkeypatch):
     assert "Permission denied" in log_message or "PermissionError" in log_message
 
 
+@_requires_debug
 def test_banner_save_logs_sanitized_paths(caplog, tmp_path, monkeypatch):
     """Test that file paths in logs are sanitized to prevent log injection."""
     client = TestClient(app)
@@ -160,6 +173,7 @@ def test_banner_save_logs_sanitized_paths(caplog, tmp_path, monkeypatch):
     assert "\r" not in log_message
 
 
+@_requires_debug
 def test_banner_get_includes_enabled_status(tmp_path, monkeypatch):
     """Test that GET /admin/banners includes banner_enabled status."""
     client = TestClient(app)
@@ -199,6 +213,7 @@ def test_banner_get_includes_enabled_status(tmp_path, monkeypatch):
     assert data["banner_enabled"] == config_manager.app_settings.banner_enabled
 
 
+@_requires_debug
 def test_banner_get_with_feature_disabled(tmp_path, monkeypatch):
     """Test that GET /admin/banners returns banner_enabled: false when feature is disabled."""
     client = TestClient(app)
@@ -242,6 +257,7 @@ def test_banner_get_with_feature_disabled(tmp_path, monkeypatch):
     assert data["banner_enabled"] is False
 
 
+@_requires_debug
 def test_banner_get_with_feature_enabled(tmp_path, monkeypatch):
     """Test that GET /admin/banners returns banner_enabled: true when feature is enabled."""
     client = TestClient(app)
@@ -285,3 +301,18 @@ def test_banner_get_with_feature_enabled(tmp_path, monkeypatch):
     assert data["banner_enabled"] is True
 
 
+@pytest.mark.skipif(not _IS_PRODUCTION, reason="Verifies production-mode admin denial")
+def test_banner_admin_routes_reject_mock_users_in_production():
+    """In production mode, mock admin users must be denied access."""
+    client = TestClient(app)
+    for method, path in [("GET", "/admin/banners"), ("POST", "/admin/banners")]:
+        response = client.request(
+            method,
+            path,
+            headers={"X-User-Email": "admin@example.com"},
+            json={"messages": ["test"]} if method == "POST" else None,
+        )
+        # 403 = admin auth correctly denied; 503 = proxy secret also blocks (both are correct)
+        assert response.status_code in (403, 503), (
+            f"{method} {path} should deny access in production mode, got {response.status_code}"
+        )

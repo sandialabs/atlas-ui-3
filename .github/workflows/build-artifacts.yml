@@ -43,7 +43,7 @@ jobs:
     - name: Build frontend
       run: |
         cd frontend
-        VITE_APP_NAME="ATLAS" VITE_FEATURE_ANIMATED_LOGO="true" VITE_FEATURE_POWERED_BY_ATLAS="false" npm run build
+        VITE_APP_NAME="ATLAS" VITE_FEATURE_ANIMATED_LOGO="true" VITE_FEATURE_POWERED_BY_ATLAS="false" VITE_FEATURE_RAG_CITATIONS="false" npm run build
 
     - name: Create build directory structure
       run: |
