@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Download, Trash2, Upload, Tag, File, Image, Code, Database, FileText, Search, Filter } from 'lucide-react'
+import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 
 const FilesPage = () => {
   const [files, setFiles] = useState([])
@@ -52,13 +53,6 @@ const FilesPage = () => {
       console.error('Failed to fetch stats:', err)
     }
   }
-
-  /**
-   * Encode a multi-segment file key for use in URL paths.
-   * Encodes each path segment individually while preserving `/` separators.
-   */
-  const encodeFileKeyPath = (key) =>
-    key.split('/').map(encodeURIComponent).join('/')
 
   const deleteFile = async (fileKey) => {
     try {

@@ -15,15 +15,7 @@ import {
 } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-
-/**
- * Encode a multi-segment file key for use in URL paths.
- * Encodes each path segment individually (e.g. @ -> %40) while
- * preserving `/` as the path separator, unlike encodeURIComponent
- * which also encodes `/` to `%2F` and can break proxy routing.
- */
-const encodeFileKeyPath = (key) =>
-  key.split('/').map(encodeURIComponent).join('/')
+import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 
 const AllFilesView = () => {
   const { token, user: userEmail, ensureSession, addSystemEvent, addPendingFileEvent, attachments } = useChat()
