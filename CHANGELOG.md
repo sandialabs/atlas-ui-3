@@ -34,6 +34,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #495 - 2026-04-03
 - **Feature**: Help documentation is now authored in Markdown (`help.md`). The help page renders the `.md` file content directly. The header "Help" button now displays a text label alongside the icon. Admins can edit the help content via the admin panel.
 
+### PR #493 - 2026-04-02
+- **Feature**: Add `plain_text_types` list to `atlas/config/file-extractors.json`. Files with a matching extension (e.g. `.py`, `.c`, `.txt`, `.md`) are now decoded directly from their base64 content and injected into the LLM context without requiring an external extractor service. Extensions are matched case-insensitively.
+
 ### PR #491 - 2026-04-02
 - **Feature**: Models that declare `supports_tools: false` in `llmconfig.yml` now have tools and agent mode automatically stripped by the orchestrator, with user-visible warnings sent via a new `warning` WebSocket message type. Frontend shows capability icons (eye/wrench) in the model dropdown and yellow warning banners when incompatible features are selected.
 
