@@ -6,6 +6,14 @@ This project is developed for the U.S. Department of Energy (DOE). Operational s
 
 This file provides guidance to AI coding agents (Claude Code, GitHub Copilot, Google Gemini, etc.) when working with code in this repository.
 
+## Ground Rule: Investigate Before Answering
+
+**Always investigate the actual repository before answering any diagnostic, architectural, or debugging question.** Do not rely on memory, prior conversation context, or assumptions about how the code "probably" works. Read the relevant files, grep for the real symbols, run the tests, and check git history as needed. If you are asked *why* something behaves a certain way, *where* something lives, *how* a flow is wired, or *what* is broken — open the code and verify before responding. A confident-sounding answer built on stale assumptions is worse than a short delay to check. When an investigation would be expensive, say so and ask the user before guessing.
+
+## Product Direction: Agent Loop Is Not the Focus
+
+The in-app agent loop inside ATLAS is **not** the main focus of this product. The plan is for the ATLAS app to continue as-is with its core capabilities — **chat, RAG, and MCP tools** — and to add a separate **Agent Portal** that lets users launch and control agents from a UI-friendly surface with **governed controls suitable for enterprise and government use** (authorization, auditing, approval gates, resource limits, and role-scoped access). When working on agent-related features, prefer investment in the Agent Portal and its governance surface over deepening the in-chat agent loop. If a request would expand the in-chat agent loop in a significant way, flag it and ask whether it belongs in the Agent Portal instead.
+
 ## Project Overview
 
 Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) integration, supporting multiple LLM providers (OpenAI, Anthropic Claude, Google Gemini), RAG, and agentic capabilities.
@@ -246,8 +254,8 @@ When enabled: `/api/config` includes model/server `compliance_level`, `domain/ra
 
 ## S3 Storage
 
-- **Mock S3 (default)**: `USE_MOCK_S3=true` -- in-process, no Docker needed
-- **MinIO**: `USE_MOCK_S3=false` -- requires `docker-compose up -d minio minio-init`
+- **Mock S3 (default)**: `USE_MOCK_S3=true` -- in-process, no Podman needed
+- **MinIO**: `USE_MOCK_S3=false` -- requires `podman-compose up -d minio minio-init` (Podman reads the existing `docker-compose.yml`)
 
 ## Security
 
@@ -274,7 +282,7 @@ In production, reverse proxy injects `X-User-Email` (after stripping client head
 
 **Add a RAG provider:** Edit `config/rag-sources.json`. MCP: set `type: "mcp"` with `rag_*` tools. HTTP: set `type: "http"` with `url` and `bearer_token`.
 
-**Build-time constants**: `vite.config.js` injects `__APP_VERSION__`, `__GIT_HASH__`, `__BUILD_TIME__` via `define`; in Docker these come from build args since `.git/` and `atlas/version.py` are unavailable during frontend build.
+**Build-time constants**: `vite.config.js` injects `__APP_VERSION__`, `__GIT_HASH__`, `__BUILD_TIME__` via `define`; in Podman container builds these come from build args since `.git/` and `atlas/version.py` are unavailable during frontend build.
 
 ## Common Issues
 
@@ -315,14 +323,14 @@ See `test/pr-validation/README.md` for the full template.
 - **NEVER modify files in `atlas/config/`** unless explicitly asked by the user - these are package defaults
 - **ALWAYS use `config/` (project root)** for test configurations and local overrides - create/modify files there instead of `atlas/config/`
 
-## Docker
+## Podman
 
 ```bash
-docker build -t atlas-ui-3 .
-docker run -p 8000:8000 atlas-ui-3
+podman build -t atlas-ui-3 .
+podman run -p 8000:8000 atlas-ui-3
 ```
 
-Container uses RHEL 9 UBI (GitHub Actions use Ubuntu runners).
+Podman reads the existing `Dockerfile` natively. Container uses RHEL 9 UBI (GitHub Actions use Ubuntu runners).
 
 ## RAG Mock for Local Testing
 
