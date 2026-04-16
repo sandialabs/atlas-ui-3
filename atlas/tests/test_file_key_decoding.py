@@ -5,7 +5,6 @@ while the S3 client's prefix check blocks cross-user traversal attempts.
 """
 
 import base64
-from urllib.parse import quote
 
 from main import app
 from starlette.testclient import TestClient
@@ -19,9 +18,15 @@ def _fake_s3(monkeypatch):
     s3 = app_factory.get_file_storage()
     captured = {}
 
+    def _enforce_user_prefix(user, key):
+        expected_prefix = f"users/{user}/"
+        if not key.startswith(expected_prefix):
+            raise PermissionError("Access denied")
+
     async def fake_get_file(user, key):
         captured["user"] = user
         captured["key"] = key
+        _enforce_user_prefix(user, key)
         return {
             "key": key,
             "filename": "report.txt",
@@ -37,6 +42,7 @@ def _fake_s3(monkeypatch):
     async def fake_delete_file(user, key):
         captured["user"] = user
         captured["key"] = key
+        _enforce_user_prefix(user, key)
         return True
 
     monkeypatch.setattr(s3, "get_file", fake_get_file)
@@ -99,26 +105,27 @@ def test_get_file_clean_key_unchanged(monkeypatch):
     assert captured["key"] == KEY
 
 
-# --- Traversal attempts blocked by S3 prefix check ---
+# --- Traversal-shaped paths are handled safely by decode/normalization logic ---
 
-def test_traversal_via_double_encoded_slash_blocked(monkeypatch):
-    """Double-encoded ../ (%252F) must not escape the user's S3 prefix."""
+def test_traversal_via_double_encoded_slash_does_not_crash(monkeypatch):
+    """Double-encoded ../ (%252F) is handled without a 500 for same-user paths."""
     _fake_s3(monkeypatch)
     client = TestClient(app)
     # Attacker tries: users/alice@example.com/../../secret
     # Wire-encoded as: users/alice%40example.com/%252E%252E%252F%252E%252E%252Fsecret
     # After Starlette: users/alice@example.com/%2E%2E%2F%2E%2E%2Fsecret
     # After _normalize_file_key: users/alice@example.com/../../secret
-    # S3 treats this as an opaque key — no traversal. The key still starts with
-    # users/alice@example.com/ so the prefix check passes, but the file simply
-    # won't exist in S3. This test verifies no crash or unexpected behavior.
+    # S3 treats this as an opaque key rather than filesystem traversal syntax.
+    # With the current fake S3 setup, this regression test only checks that the
+    # handler responds without crashing; it does not assert prefix enforcement.
     traversal = f"users/{USER}/%252E%252E%252F%252E%252E%252Fsecret"
     resp = client.get(
         f"/api/files/{traversal}",
         headers={"X-User-Email": USER},
     )
-    # Either 404 (file not found) or 200 (fake s3 returns data) — not 403 or 500.
-    # The key that reaches S3 must still start with the user's prefix.
+    # Either 404 (file not found) or 200 (fake S3 returns data) is acceptable
+    # here; the important behavior under test is that decoding this path does
+    # not produce an unexpected server error.
     assert resp.status_code in (200, 404), f"Unexpected status: {resp.status_code}"
 
 
@@ -132,12 +139,9 @@ def test_cross_user_traversal_blocked(monkeypatch):
         f"/api/files/{victim_key}",
         headers={"X-User-Email": "bob@example.com"},
     )
-    # The real S3 client would raise "Access denied" because the key starts
-    # with users/alice@... but the authenticated user is bob.
-    # With fake S3 this just returns 200, but the prefix check is in the real
-    # S3 client (s3_client.py line 214). This test documents the expectation.
-    # In integration tests with real S3 client, this returns 403.
-    assert resp.status_code in (200, 403)
+    # The fake S3 now mirrors the real client's prefix check and denies
+    # requests where the key does not start with users/{authenticated_user}/.
+    assert resp.status_code == 403
 
 
 # --- _normalize_file_key unit tests ---
