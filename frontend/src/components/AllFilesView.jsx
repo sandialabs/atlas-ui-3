@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
+import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 
 const AllFilesView = () => {
   const { token, user: userEmail, ensureSession, addSystemEvent, addPendingFileEvent, attachments } = useChat()
@@ -163,7 +164,7 @@ const AllFilesView = () => {
 
   const handleDownloadFile = async (file) => {
     try {
-      const response = await fetch(`/api/files/download/${encodeURIComponent(file.key)}`, {
+      const response = await fetch(`/api/files/download/${encodeFileKeyPath(file.key)}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -193,7 +194,7 @@ const AllFilesView = () => {
     }
 
     try {
-      const response = await fetch(`/api/files/${encodeURIComponent(file.key)}`, {
+      const response = await fetch(`/api/files/${encodeFileKeyPath(file.key)}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`

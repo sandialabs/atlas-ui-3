@@ -9,6 +9,7 @@ import base64
 import logging
 import re
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
@@ -19,6 +20,21 @@ from atlas.core.metrics_logger import log_metric
 from atlas.infrastructure.app_factory import app_factory
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_file_key(raw_key: str) -> str:
+    """Single-pass percent-decode to undo proxy-introduced double-encoding.
+
+    Some reverse proxies (nginx with certain rewrite rules) re-encode characters
+    that the frontend already encoded — e.g. @ (%40) becomes %2540 on the wire.
+    Starlette decodes one layer, leaving residual %40 in the handler argument.
+    This applies one additional unquote pass to recover the true S3 key.
+
+    Safety: the S3 client enforces a users/{email}/ prefix on every key, and S3
+    keys are opaque (no ".." resolution), so double-decoding cannot escape the
+    user's prefix. See atlas/modules/file_storage/s3_client.py get_file/delete_file.
+    """
+    return unquote(raw_key)
 
 router = APIRouter(prefix="/api", tags=["files"])
 
@@ -170,6 +186,7 @@ async def get_user_file_stats(
 
 async def _handle_file_download(file_key: str, token: str | None, current_user: str) -> Response:
     """Shared download logic for both /api/ and /mcp/ file download endpoints."""
+    file_key = _normalize_file_key(file_key)
     try:
         s3_client = app_factory.get_file_storage()
 
@@ -246,6 +263,7 @@ async def get_file(
     current_user: str = Depends(get_current_user)
 ) -> FileContentResponse:
     """Get a file from S3 storage."""
+    file_key = _normalize_file_key(file_key)
     try:
         s3_client = app_factory.get_file_storage()
         result = await s3_client.get_file(current_user, file_key)
@@ -270,6 +288,7 @@ async def delete_file(
     current_user: str = Depends(get_current_user)
 ) -> Dict[str, str]:
     """Delete a file from S3 storage."""
+    file_key = _normalize_file_key(file_key)
     try:
         s3_client = app_factory.get_file_storage()
         success = await s3_client.delete_file(current_user, file_key)

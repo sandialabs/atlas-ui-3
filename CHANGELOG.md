@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #533 - 2026-04-15
+- **Fix**: File delete (and download) from the File Library returned 404 in production. `AllFilesView` used `encodeURIComponent` on the full S3 key which encoded `/` to `%2F`, breaking path-based routing through reverse proxies. Now encodes each path segment individually. Also fixed `FilesPage` referencing the non-existent `file.s3_key` property (should be `file.key`). Added backend `unquote()` safety net on all `{file_key:path}` route handlers to handle residual percent-encoding from proxies.
+
 ### PR #504 - 2026-04-12
 - **Fix**: Light mode white-on-white bug in slash command and `@file` autocomplete dropdowns. Tool and file names now inherit their text color from the parent row instead of using a hardcoded `text-white` class, making them visible in both light and dark themes.
 
