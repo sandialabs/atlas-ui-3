@@ -4,6 +4,7 @@ import { useWS } from '../contexts/WSContext'
 import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image, Wrench } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
+import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
 
@@ -223,7 +224,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
       if (file && file.s3_key) {
         try {
           // Fetch file content from S3 via API
-          const response = await fetch(`/api/files/${encodeURIComponent(file.s3_key)}`, {
+          const response = await fetch(`/api/files/${encodeFileKeyPath(file.s3_key)}`, {
             headers: {
               'Authorization': `Bearer ${localStorage.getItem('userEmail') || 'user@example.com'}`
             }
