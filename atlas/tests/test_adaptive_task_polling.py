@@ -261,7 +261,7 @@ class TestTaskForbiddenFallback:
         # Pre-seed the forbidden cache as if a prior call had discovered it
         manager._tool_task_forbidden.add(("srv", "evaluate"))
 
-        _result = await manager.call_tool(
+        await manager.call_tool(
             "srv", "evaluate", {},
             conversation_id="conv-1",
         )

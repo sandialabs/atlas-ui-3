@@ -52,6 +52,11 @@ logger = logging.getLogger(__name__)
 
 # Configure LiteLLM settings
 litellm.drop_params = True  # Drop unsupported params instead of erroring
+# Allow litellm to inject a dummy tool schema for Anthropic requests when the
+# message history contains tool_call blocks but the current call doesn't pass
+# tools= (e.g. title generation or plain replies on a conversation that earlier
+# used tools). Without this, Anthropic's transformer raises UnsupportedParamsError.
+litellm.modify_params = True
 
 # Retry configuration for transient LLM errors
 MAX_LLM_RETRIES = 3
