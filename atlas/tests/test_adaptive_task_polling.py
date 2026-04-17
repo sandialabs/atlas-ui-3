@@ -26,7 +26,7 @@ def _make_mock_client(*, task_support=True, immediate=True, wait_timeout=False):
     mock_result.content = [MagicMock(type="text", text="done")]
     mock_result.structured_content = None
     mock_result.data = None
-    mock_task.result = mock_result
+    mock_task.result = AsyncMock(return_value=mock_result)
     mock_task.cancel = AsyncMock()
     mock_task.on_status_change = MagicMock()
 
@@ -130,7 +130,7 @@ class TestAdaptiveTaskPolling:
         mock_result.content = [MagicMock(type="text", text="done")]
         mock_result.structured_content = None
         mock_result.data = None
-        mock_task.result = mock_result
+        mock_task.result = AsyncMock(return_value=mock_result)
         mock_task.cancel = AsyncMock()
         mock_task.on_status_change = MagicMock()
 
