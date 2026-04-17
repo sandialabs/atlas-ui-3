@@ -1828,14 +1828,14 @@ class MCPToolManager:
 
             if use_tasks:
                 if tool_task.returned_immediately:
-                    result = tool_task.result
+                    result = await tool_task.result()
                 else:
                     try:
                         await asyncio.wait_for(
                             tool_task.wait(),
                             timeout=task_timeout,
                         )
-                        result = tool_task.result
+                        result = await tool_task.result()
                     except asyncio.TimeoutError:
                         # Exceeded threshold -- notify UI and keep waiting
                         if update_cb:
@@ -1864,7 +1864,7 @@ class MCPToolManager:
                         try:
                             remaining = max(call_timeout - task_timeout, 1)
                             await tool_task.wait(timeout=remaining)
-                            result = tool_task.result
+                            result = await tool_task.result()
                         except asyncio.CancelledError:
                             await tool_task.cancel()
                             raise

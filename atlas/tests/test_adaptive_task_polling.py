@@ -26,7 +26,7 @@ def _make_mock_client(*, task_support=True, immediate=True, wait_timeout=False):
     mock_result.content = [MagicMock(type="text", text="done")]
     mock_result.structured_content = None
     mock_result.data = None
-    mock_task.result = mock_result
+    mock_task.result = AsyncMock(return_value=mock_result)
     mock_task.cancel = AsyncMock()
     mock_task.on_status_change = MagicMock()
 
@@ -75,6 +75,8 @@ class TestAdaptiveTaskPolling:
 
         for call in update_cb.call_args_list:
             assert call[0][0].get("type") != "tool_task_started"
+
+        mock_task.result.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_no_task_support_falls_back_to_blocking(self, manager):
@@ -130,7 +132,7 @@ class TestAdaptiveTaskPolling:
         mock_result.content = [MagicMock(type="text", text="done")]
         mock_result.structured_content = None
         mock_result.data = None
-        mock_task.result = mock_result
+        mock_task.result = AsyncMock(return_value=mock_result)
         mock_task.cancel = AsyncMock()
         mock_task.on_status_change = MagicMock()
 
@@ -176,6 +178,8 @@ class TestAdaptiveTaskPolling:
 
         # Verify on_status_change was registered for progress
         mock_task.on_status_change.assert_called_once()
+
+        mock_task.result.assert_awaited()
 
 
 class TestTaskForbiddenFallback:
