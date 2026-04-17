@@ -176,3 +176,124 @@ class TestAdaptiveTaskPolling:
 
         # Verify on_status_change was registered for progress
         mock_task.on_status_change.assert_called_once()
+
+
+class TestTaskForbiddenFallback:
+    """A server may advertise task support while individual tools refuse
+    task-augmented execution (fastmcp `tasks.mode="forbidden"`). The manager
+    must fall back to a synchronous call and cache the decision per tool."""
+
+    @pytest.mark.asyncio
+    async def test_task_forbidden_falls_back_to_sync_and_returns_result(self, manager):
+        """First call with task=True raises the forbidden McpError; manager
+        retries the same tool with a sync call and returns that result."""
+        mock_client = AsyncMock()
+
+        # Advertise task support at the server level
+        caps = MagicMock()
+        caps.tasks = MagicMock()
+        init_result = MagicMock()
+        init_result.capabilities = caps
+        mock_client.initialize_result = init_result
+
+        # Synchronous (non-task) result the fallback should return
+        sync_result = MagicMock()
+        sync_result.content = [MagicMock(type="text", text="42")]
+        sync_result.structured_content = None
+        sync_result.data = None
+
+        # First call (task=True) raises; second call (no task) returns sync_result
+        call_history = []
+
+        async def fake_call_tool(tool_name, arguments, **kwargs):
+            call_history.append(kwargs)
+            if kwargs.get("task") is True:
+                raise Exception(
+                    "FunctionTool 'tool:evaluate@' does not support task-augmented execution"
+                )
+            return sync_result
+
+        mock_client.call_tool = AsyncMock(side_effect=fake_call_tool)
+
+        mock_session = MagicMock(spec=ManagedSession)
+        mock_session.client = mock_client
+        manager._session_manager.acquire = AsyncMock(return_value=mock_session)
+
+        manager.clients["srv"] = mock_client
+        manager.servers_config["srv"] = {}
+
+        result = await manager.call_tool(
+            "srv", "evaluate", {"x": 1},
+            conversation_id="conv-1",
+            meta={"tool_call_id": "tc-1"},
+        )
+
+        assert result is sync_result
+        # First attempt used task=True, second attempt dropped it
+        assert call_history[0].get("task") is True
+        assert call_history[1].get("task") is not True
+        # Tool is now remembered as forbidden
+        assert ("srv", "evaluate") in manager._tool_task_forbidden
+
+    @pytest.mark.asyncio
+    async def test_forbidden_cache_skips_task_mode_on_subsequent_call(self, manager):
+        """After the cache is populated, the next call for that (server, tool)
+        must not attempt task mode at all."""
+        mock_client = AsyncMock()
+        caps = MagicMock()
+        caps.tasks = MagicMock()
+        init_result = MagicMock()
+        init_result.capabilities = caps
+        mock_client.initialize_result = init_result
+
+        sync_result = MagicMock()
+        sync_result.content = [MagicMock(type="text", text="ok")]
+        sync_result.structured_content = None
+        sync_result.data = None
+        mock_client.call_tool = AsyncMock(return_value=sync_result)
+
+        mock_session = MagicMock(spec=ManagedSession)
+        mock_session.client = mock_client
+        manager._session_manager.acquire = AsyncMock(return_value=mock_session)
+
+        manager.clients["srv"] = mock_client
+        manager.servers_config["srv"] = {}
+        # Pre-seed the forbidden cache as if a prior call had discovered it
+        manager._tool_task_forbidden.add(("srv", "evaluate"))
+
+        _result = await manager.call_tool(
+            "srv", "evaluate", {},
+            conversation_id="conv-1",
+        )
+
+        # Only one underlying call, and it was the sync (no task=True) path
+        assert mock_client.call_tool.call_count == 1
+        assert mock_client.call_tool.call_args.kwargs.get("task") is not True
+
+    @pytest.mark.asyncio
+    async def test_non_forbidden_error_is_not_swallowed(self, manager):
+        """Unrelated errors during task-mode call must still propagate."""
+        mock_client = AsyncMock()
+        caps = MagicMock()
+        caps.tasks = MagicMock()
+        init_result = MagicMock()
+        init_result.capabilities = caps
+        mock_client.initialize_result = init_result
+
+        mock_client.call_tool = AsyncMock(side_effect=RuntimeError("boom"))
+
+        mock_session = MagicMock(spec=ManagedSession)
+        mock_session.client = mock_client
+        manager._session_manager.acquire = AsyncMock(return_value=mock_session)
+
+        manager.clients["srv"] = mock_client
+        manager.servers_config["srv"] = {}
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await manager.call_tool(
+                "srv", "evaluate", {},
+                conversation_id="conv-1",
+            )
+
+        # Did not poison the cache
+        assert ("srv", "evaluate") not in manager._tool_task_forbidden

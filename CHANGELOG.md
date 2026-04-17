@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-04-16
+- **Fix**: Tool calls failed with `McpError: FunctionTool '...' does not support task-augmented execution` when the server advertised task capability but the individual tool declared `tasks.mode="forbidden"`. `MCPToolManager.call_tool` now catches that specific error, falls back to a synchronous (non-task) call, and caches the `(server, tool)` pair so subsequent invocations skip task mode directly. Unrelated errors still propagate unchanged.
+
 ### PR #533 - 2026-04-15
 - **Fix**: File delete (and download) from the File Library returned 404 in production. `AllFilesView` used `encodeURIComponent` on the full S3 key which encoded `/` to `%2F`, breaking path-based routing through reverse proxies. Now encodes each path segment individually. Also fixed `FilesPage` referencing the non-existent `file.s3_key` property (should be `file.key`). Added backend `unquote()` safety net on all `{file_key:path}` route handlers to handle residual percent-encoding from proxies.
 
