@@ -6,8 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2026-04-17
-- **Fix**: MCP tool calls that went through the background-task (`ToolTask`) path returned `null` to the UI. In `fastmcp>=3.2.0`, `ToolTask.result` is an `async` method rather than an attribute, so `result = tool_task.result` captured the bound coroutine method instead of the `CallToolResult`; normalization then found no `content`/`structured_content`/`data` and produced an empty payload. All three call sites in `MCPToolManager.call_tool` now use `result = await tool_task.result()`. Updated `test_adaptive_task_polling.py` to model `result` as an `AsyncMock` so the test suite exercises the real coroutine contract and would catch a regression.
+### PR #536 - 2026-04-17
+- **Fix**: MCP tool calls using the background-task (`ToolTask`) path now return results correctly instead of `null` (`fastmcp>=3.2.0` changed `ToolTask.result` to an async method).
 
 ### PR #534 - 2026-04-16
 - **Fix**: Anthropic calls failed with `litellm.UnsupportedParamsError: Anthropic doesn't support tool calling without tools= param specified` whenever the conversation history contained a prior assistant `tool_calls` block but the current call omitted `tools=` (e.g. title generation, plain replies, or follow-ups on a conversation that earlier used tools). Set `litellm.modify_params = True` at module load so litellm injects a benign `dummy_tool` schema for Anthropic in this case, matching litellm's documented workaround. Added a regression test asserting both `drop_params` and `modify_params` stay enabled.

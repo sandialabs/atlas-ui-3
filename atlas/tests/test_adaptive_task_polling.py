@@ -76,6 +76,8 @@ class TestAdaptiveTaskPolling:
         for call in update_cb.call_args_list:
             assert call[0][0].get("type") != "tool_task_started"
 
+        mock_task.result.assert_awaited()
+
     @pytest.mark.asyncio
     async def test_no_task_support_falls_back_to_blocking(self, manager):
         """Servers without task support use blocking call_tool."""
@@ -176,6 +178,8 @@ class TestAdaptiveTaskPolling:
 
         # Verify on_status_change was registered for progress
         mock_task.on_status_change.assert_called_once()
+
+        mock_task.result.assert_awaited()
 
 
 class TestTaskForbiddenFallback:
