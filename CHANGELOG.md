@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2026-04-16
+### PR #534 - 2026-04-16
 - **Fix**: Tool calls failed with `McpError: FunctionTool '...' does not support task-augmented execution` when the server advertised task capability but the individual tool declared `tasks.mode="forbidden"`. `MCPToolManager.call_tool` now catches that specific error, falls back to a synchronous (non-task) call, and caches the `(server, tool)` pair so subsequent invocations skip task mode directly. Unrelated errors still propagate unchanged.
 
 ### PR #533 - 2026-04-15
