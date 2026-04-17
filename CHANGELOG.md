@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-04-16
+- **Fix**: Anthropic calls failed with `litellm.UnsupportedParamsError: Anthropic doesn't support tool calling without tools= param specified` whenever the conversation history contained a prior assistant `tool_calls` block but the current call omitted `tools=` (e.g. title generation, plain replies, or follow-ups on a conversation that earlier used tools). Set `litellm.modify_params = True` at module load so litellm injects a benign `dummy_tool` schema for Anthropic in this case, matching litellm's documented workaround. Added a regression test asserting both `drop_params` and `modify_params` stay enabled.
+
 ### PR #533 - 2026-04-15
 - **Fix**: File delete (and download) from the File Library returned 404 in production. `AllFilesView` used `encodeURIComponent` on the full S3 key which encoded `/` to `%2F`, breaking path-based routing through reverse proxies. Now encodes each path segment individually. Also fixed `FilesPage` referencing the non-existent `file.s3_key` property (should be `file.key`). Added backend `unquote()` safety net on all `{file_key:path}` route handlers to handle residual percent-encoding from proxies.
 
