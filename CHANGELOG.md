@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Frontend maintainability - 2026-04-18
+- **Refactor**: Decomposed `frontend/src/components/Message.jsx` from 1,396 lines to 524 lines by extracting cohesive helpers into sibling modules. New modules: `utils/markdownRenderer.js` (marked + highlight.js + DOMPurify config), `utils/ragCitations.js` (source-label extraction, inline citation badges, collapsible References section), `utils/messageContent.js` (content shaping), `utils/clipboard.js` (code-block and message copy helpers), `utils/toolResultUtils.js` (argument filtering, tool-result sanitization, file download). The `ToolApprovalMessage` and `ToolElapsedTime` sub-components moved to their own files under `components/`. `rag-citation-rendering.test.js` now imports from `utils/ragCitations.js` instead of duplicating the helpers, eliminating drift risk. No behavior changes.
+
 ### PR #533 - 2026-04-15
 - **Fix**: File delete (and download) from the File Library returned 404 in production. `AllFilesView` used `encodeURIComponent` on the full S3 key which encoded `/` to `%2F`, breaking path-based routing through reverse proxies. Now encodes each path segment individually. Also fixed `FilesPage` referencing the non-existent `file.s3_key` property (should be `file.key`). Added backend `unquote()` safety net on all `{file_key:path}` route handlers to handle residual percent-encoding from proxies.
 
