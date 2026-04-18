@@ -595,7 +595,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif message_type == "restore_conversation":
                 # Release MCP sessions for the current conversation before restoring
-                session = chat_service.sessions.get(session_id)
+                session = await chat_service.session_repository.get(session_id)
                 if session:
                     old_conv_id = session.context.get("conversation_id")
                     if old_conv_id:
@@ -700,7 +700,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         # Release MCP sessions for this conversation
-        session = chat_service.sessions.get(session_id)
+        session = await chat_service.session_repository.get(session_id)
         if session:
             conv_id = session.context.get("conversation_id", str(session_id))
             try:
@@ -708,7 +708,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await mcp_tool_manager.release_sessions(conv_id, user_email=user_email)
             except Exception as e:
                 logger.debug("Error releasing MCP sessions on disconnect: %s", e)
-        chat_service.end_session(session_id)
+        await chat_service.end_session(session_id)
         logger.info(f"WebSocket connection closed for session {session_id}")
 
 

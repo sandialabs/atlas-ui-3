@@ -78,7 +78,7 @@ async def test_handle_attach_file_success_creates_session_and_emits_update(chat_
     ), "Expected a files_update intermediate update to be emitted"
 
     # Session context should include the file by filename
-    session = chat_service.sessions.get(session_id)
+    session = await chat_service.session_repository.get(session_id)
     assert session is not None
     assert filename in session.context.get("files", {})
     assert session.context["files"][filename]["key"] == s3_key
@@ -142,14 +142,14 @@ async def test_handle_reset_session_reinitializes(chat_service):
 
     # Create a session first
     await chat_service.create_session(session_id, user_email)
-    assert chat_service.sessions.get(session_id) is not None
+    assert await chat_service.session_repository.get(session_id) is not None
 
     # Reset the session
     resp = await chat_service.handle_reset_session(session_id=session_id, user_email=user_email)
 
     assert resp.get("type") == "session_reset"
     # After reset, a fresh active session should exist for the same id
-    new_session = chat_service.sessions.get(session_id)
+    new_session = await chat_service.session_repository.get(session_id)
     assert new_session is not None
     assert new_session.active is True
 
@@ -278,7 +278,7 @@ async def test_attach_file_with_spaces_end_to_end(chat_service, file_manager):
     assert " " not in s3_key
 
     # Verify the session stores the sanitized filename (no spaces)
-    session = chat_service.sessions.get(session_id)
+    session = await chat_service.session_repository.get(session_id)
     assert session is not None
     session_files = session.context.get("files", {})
     # The filename key in the session should have underscores, not spaces
