@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Frontend maintainability - 2026-04-18
+- **Refactor**: Decomposed `frontend/src/components/Message.jsx` from 1,396 lines to 524 lines by extracting cohesive helpers into sibling modules. New modules: `utils/markdownRenderer.js` (marked + highlight.js + DOMPurify config), `utils/ragCitations.js` (source-label extraction, inline citation badges, collapsible References section), `utils/messageContent.js` (content shaping), `utils/clipboard.js` (code-block and message copy helpers), `utils/toolResultUtils.js` (argument filtering, tool-result sanitization, file download). The `ToolApprovalMessage` and `ToolElapsedTime` sub-components moved to their own files under `components/`. `rag-citation-rendering.test.js` now imports from `utils/ragCitations.js` instead of duplicating the helpers, eliminating drift risk. Addressed review feedback: sanitize hljs language tag before HTML interpolation, null-guard artifact/base64 lengths in `processToolResult`, scope the code-block copy delegator to each message's container ref (was `document`, which multiplied listeners by message count), and render RAG citation chips as real `<button>` elements for native keyboard activation. No behavior changes.
+
 ### PR #536 - 2026-04-17
 - **Fix**: MCP tool calls using the background-task (`ToolTask`) path now return results correctly instead of `null` (`fastmcp>=3.2.0` changed `ToolTask.result` to an async method).
 
