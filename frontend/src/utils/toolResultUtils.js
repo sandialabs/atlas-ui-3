@@ -31,18 +31,24 @@ export const processToolResult = (result) => {
     const processed = { ...result }
 
     if (processed.artifacts && Array.isArray(processed.artifacts)) {
-      processed.artifacts = processed.artifacts.map(artifact => ({
-        name: artifact.name,
-        mime: artifact.mime,
-        b64: `[File data: ${artifact.b64.length} characters - hidden for display]`
-      }))
+      processed.artifacts = processed.artifacts.map(artifact => {
+        const b64Len = typeof artifact?.b64 === 'string' ? artifact.b64.length : 0
+        return {
+          name: artifact?.name,
+          mime: artifact?.mime,
+          b64: `[File data: ${b64Len} characters - hidden for display]`,
+        }
+      })
       processed._artifacts_download_available = true
     }
     else if (processed.returned_files && Array.isArray(processed.returned_files)) {
-      processed.returned_files = processed.returned_files.map(file => ({
-        filename: file.filename,
-        content_base64: `[File data: ${file.content_base64.length} characters - hidden for display]`
-      }))
+      processed.returned_files = processed.returned_files.map(file => {
+        const len = typeof file?.content_base64 === 'string' ? file.content_base64.length : 0
+        return {
+          filename: file?.filename,
+          content_base64: `[File data: ${len} characters - hidden for display]`,
+        }
+      })
       processed._multiple_files_download_available = true
     } else if (processed.returned_file_base64 && processed.returned_file_name) {
       const dataSize = processed.returned_file_base64.length

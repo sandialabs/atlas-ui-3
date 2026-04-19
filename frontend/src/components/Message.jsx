@@ -2,7 +2,7 @@ import DOMPurify from 'dompurify'
 import 'katex/dist/katex.min.css'
 import { preProcessLatex, restoreLatexPlaceholders } from '../utils/latexPreprocessor'
 import { useChat } from '../contexts/ChatContext'
-import { memo, useEffect, useId, useState } from 'react'
+import { memo, useEffect, useId, useRef, useState } from 'react'
 import { Copy } from 'lucide-react'
 import { marked, DOMPURIFY_CONFIG } from '../utils/markdownRenderer'
 import {
@@ -63,22 +63,23 @@ const Message = ({ message }) => {
     copyMessageContent(message.content, event.currentTarget)
   }
 
-  // Handle code block copy buttons using event delegation for this message
+  // Delegate code-block copy clicks on this message's own container rather
+  // than `document`. A document-level listener per Message multiplies the
+  // handler count by the number of messages in the chat, so one click fired
+  // `copyCodeBlock` N times — wasteful even when idempotent.
+  const containerRef = useRef(null)
   useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
     const handleCodeCopyClick = (event) => {
-      if (event.target.matches('[data-action="copy-code"]') ||
-          event.target.closest('[data-action="copy-code"]')) {
-        event.preventDefault()
-        const button = event.target.matches('[data-action="copy-code"]')
-          ? event.target
-          : event.target.closest('[data-action="copy-code"]')
-        copyCodeBlock(button)
-      }
+      const button = event.target.closest('[data-action="copy-code"]')
+      if (!button || !container.contains(button)) return
+      event.preventDefault()
+      copyCodeBlock(button)
     }
-
-    document.addEventListener('click', handleCodeCopyClick)
+    container.addEventListener('click', handleCodeCopyClick)
     return () => {
-      document.removeEventListener('click', handleCodeCopyClick)
+      container.removeEventListener('click', handleCodeCopyClick)
     }
   }, [])
 
@@ -488,7 +489,7 @@ const Message = ({ message }) => {
         {avatarText}
       </div>
 
-      <div className={`${isUser ? 'max-w-[70%] user-message-bubble' : 'w-full bg-gray-800'} rounded-lg p-4`}>
+      <div ref={containerRef} className={`${isUser ? 'max-w-[70%] user-message-bubble' : 'w-full bg-gray-800'} rounded-lg p-4`}>
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium text-gray-300">

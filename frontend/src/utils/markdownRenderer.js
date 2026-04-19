@@ -72,6 +72,15 @@ renderer.link = function(href, title, text) {
   return `<a href="${href}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`
 }
 
+// Restrict language identifiers to a safe charset before interpolating into
+// HTML. The output is later sanitized by DOMPurify, but keeping the markup
+// well-formed avoids surprises and defends the class-attribute / label spot
+// where a fence info string like ``` lang"></span><... could otherwise land.
+const sanitizeLanguageTag = (lang) => {
+  if (!lang || typeof lang !== 'string') return ''
+  return lang.toLowerCase().replace(/[^a-z0-9_+#-]/g, '').slice(0, 32)
+}
+
 renderer.code = function(code, language) {
   let codeString = ''
   let actualLanguage = language
@@ -136,9 +145,11 @@ renderer.code = function(code, language) {
     }
   }
 
+  const safeLang = sanitizeLanguageTag(actualLanguage) || 'text'
+
   return `<div class="code-block-container relative bg-gray-900 rounded-lg my-4 border border-gray-700">
     <div class="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
-      <span class="text-xs text-gray-400 font-medium uppercase tracking-wider">${actualLanguage || 'text'}</span>
+      <span class="text-xs text-gray-400 font-medium uppercase tracking-wider">${safeLang}</span>
       <button
         class="copy-button bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 px-3 py-1 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
         data-action="copy-code"
@@ -146,7 +157,7 @@ renderer.code = function(code, language) {
         type="button"
       >Copy</button>
     </div>
-    <pre class="p-4 overflow-x-auto bg-gray-900 m-0"><code class="hljs language-${actualLanguage || 'text'} text-sm leading-relaxed">${highlightedCode}</code></pre>
+    <pre class="p-4 overflow-x-auto bg-gray-900 m-0"><code class="hljs language-${safeLang} text-sm leading-relaxed">${highlightedCode}</code></pre>
   </div>`
 }
 

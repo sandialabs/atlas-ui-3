@@ -65,7 +65,9 @@ export const processCitationBadges = (html, scope = '') => {
       if (otherTag) return otherTag
       if (insideCode > 0) return match
       const refId = scope ? `rag-ref-${scope}-${num}` : `rag-ref-${num}`
-      return `<span class="rag-source-chip" data-ref="${num}"><span role="button" tabindex="0" aria-label="Citation ${num}" class="rag-source-chip-inner rag-source-chip-numonly" data-citation-target="${refId}">${num}</span></span>`
+      // Real <button> so Enter/Space activate the chip (native button semantics);
+      // the parent Message onClick handler still picks it up via event delegation.
+      return `<span class="rag-source-chip" data-ref="${num}"><button type="button" aria-label="Citation ${num}" class="rag-source-chip-inner rag-source-chip-numonly" data-citation-target="${refId}">${num}</button></span>`
     }
   )
 }
