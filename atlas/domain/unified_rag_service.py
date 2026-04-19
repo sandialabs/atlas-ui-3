@@ -12,11 +12,60 @@ from typing import Any, Callable, Dict, List, Optional
 
 from atlas.core.compliance import get_compliance_manager
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.telemetry import hash_short, set_attrs, start_span
 from atlas.modules.config.config_manager import ConfigManager, RAGSourceConfig, resolve_env_var
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
 from atlas.modules.rag.client import RAGResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_query_text(messages: List[Dict]) -> str:
+    """Return the last user message content used as the RAG query."""
+    for msg in reversed(messages or []):
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            return content if isinstance(content, str) else str(content)
+    return ""
+
+
+def _rag_response_attrs(response: RAGResponse) -> Dict[str, Any]:
+    """Extract per-response RAG attributes for a span.
+
+    ``docs_used_in_context`` equals ``doc_ids`` in the current implementation
+    because every retrieved doc is injected into the LLM prompt; the separate
+    field is preserved so that future filtering/reranking can distinguish
+    retrieved-but-unused docs without a schema change.
+    """
+    attrs: Dict[str, Any] = {
+        "is_completion": bool(response.is_completion),
+        "content_size": len(response.content or ""),
+    }
+    metadata = response.metadata
+    if metadata is None:
+        attrs["num_results"] = 0
+        attrs["doc_ids"] = []
+        attrs["doc_scores"] = []
+        attrs["docs_used_in_context"] = []
+        return attrs
+
+    docs = metadata.documents_found or []
+    doc_ids: List[str] = []
+    doc_scores: List[float] = []
+    for doc in docs:
+        identifier = doc.chunk_id or doc.title or doc.source or ""
+        doc_ids.append(identifier)
+        doc_scores.append(float(doc.confidence_score))
+
+    attrs["num_results"] = len(docs)
+    attrs["total_documents_searched"] = metadata.total_documents_searched
+    attrs["retrieval_method"] = metadata.retrieval_method
+    attrs["query_processing_time_ms"] = metadata.query_processing_time_ms
+    attrs["doc_ids"] = doc_ids
+    attrs["doc_scores"] = doc_scores
+    attrs["docs_used_in_context"] = doc_ids
+    attrs["top_score"] = max(doc_scores) if doc_scores else None
+    return attrs
 
 
 class UnifiedRAGService:
@@ -208,6 +257,27 @@ class UnifiedRAGService:
         Returns:
             RAGResponse with content and metadata.
         """
+        query_text = _extract_query_text(messages)
+        span_attrs = {
+            "data_source": qualified_data_source,
+            "query_hash": hash_short(query_text),
+            "query_chars": len(query_text),
+            "user_hash": hash_short(username),
+            "message_count": len(messages),
+            "batch": False,
+        }
+        with start_span("rag.query", span_attrs) as span:
+            response = await self._query_rag_impl(username, qualified_data_source, messages)
+            set_attrs(span, _rag_response_attrs(response))
+            return response
+
+    async def _query_rag_impl(
+        self,
+        username: str,
+        qualified_data_source: str,
+        messages: List[Dict],
+    ) -> RAGResponse:
+        """Internal RAG query implementation (span-free)."""
         logger.debug(
             "[RAG] query_rag called: qualified_source=%s, user=%s, message_count=%d",
             sanitize_for_logging(qualified_data_source),
@@ -355,6 +425,28 @@ class UnifiedRAGService:
         Raises:
             ValueError: If sources list is empty or sources span multiple servers.
         """
+        query_text = _extract_query_text(messages)
+        span_attrs = {
+            "data_source": ",".join(qualified_data_sources or []),
+            "query_hash": hash_short(query_text),
+            "query_chars": len(query_text),
+            "user_hash": hash_short(username),
+            "message_count": len(messages),
+            "batch": True,
+            "batch_size": len(qualified_data_sources or []),
+        }
+        with start_span("rag.query", span_attrs) as span:
+            response = await self._query_rag_batch_impl(username, qualified_data_sources, messages)
+            set_attrs(span, _rag_response_attrs(response))
+            return response
+
+    async def _query_rag_batch_impl(
+        self,
+        username: str,
+        qualified_data_sources: List[str],
+        messages: List[Dict],
+    ) -> RAGResponse:
+        """Internal batched RAG query (span-free)."""
         if not qualified_data_sources:
             raise ValueError("No data sources provided for batch query")
 
