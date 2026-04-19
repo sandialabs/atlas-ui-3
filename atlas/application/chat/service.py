@@ -242,10 +242,23 @@ class ChatService:
         elif incognito is False:
             self._incognito_sessions.discard(session_id)
 
-        # Track conversation_id for continuing saved conversations
+        # Track conversation_id for continuing saved conversations.
+        #
+        # If the client didn't send one (typically the first message of a
+        # brand-new conversation), default to ``str(session_id)`` so that MCP
+        # tool calls within this turn share a persistent MCP session via
+        # ``MCPSessionManager`` instead of falling back to the per-call
+        # ``async with client:`` path, which tears the session down after
+        # every tool call and breaks stateful MCP servers that key per-tool
+        # data on ``Context.session_id`` (e.g. sub-renderers like canvas
+        # iframes). This matches the fallback already used by
+        # ``_save_conversation`` and the ``conversation_saved`` notification,
+        # so the stable id round-trips to the frontend and back.
         conversation_id = kwargs.pop("conversation_id", None)
         if conversation_id:
             session.context["conversation_id"] = conversation_id
+        elif "conversation_id" not in session.context:
+            session.context["conversation_id"] = str(session_id)
 
         try:
             # Delegate to orchestrator
