@@ -40,6 +40,19 @@ def _is_task_forbidden_error(exc: BaseException) -> bool:
     return "does not support task-augmented execution" in str(exc)
 
 
+def _is_session_terminated_error(exc: BaseException) -> bool:
+    """Return True when an MCP call failed because the server-side session
+    was terminated or invalidated.
+
+    This can happen when the backing process for a stateful MCP server
+    restarts and invalidates its session ID while the transport-level
+    connection still appears alive (e.g. HTTP socket open, 404 response).
+    We match on common error messages because the exception class varies.
+    """
+    msg = str(exc).lower()
+    return "session terminated" in msg or "session not found" in msg or "invalid session" in msg
+
+
 class _ElicitationRoutingContext:
     def __init__(
         self,
@@ -2428,6 +2441,25 @@ class MCPToolManager:
             )
         except Exception as e:
             logger.error(f"Error executing tool {tool_call.name}: {e}")
+
+            # If the server terminated its session, evict the cached session so
+            # the next call transparently opens a fresh one instead of reusing
+            # the dead session and failing again.
+            if _is_session_terminated_error(e) and conversation_id:
+                logger.warning(
+                    "Session terminated for server=%s conversation=%s — evicting dead session",
+                    server_name,
+                    conversation_id,
+                )
+                try:
+                    await self._session_manager.release(conversation_id, server_name)
+                except Exception as release_exc:
+                    logger.warning(
+                        "Failed to release dead session for server=%s conversation=%s: %s",
+                        server_name,
+                        conversation_id,
+                        release_exc,
+                    )
 
             log_metric("tool_error", user_email, tool_name=actual_tool_name)
 
