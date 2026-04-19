@@ -6,7 +6,7 @@ These tests verify that Atlas can parse tool results from both:
 """
 
 import json
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -294,3 +294,167 @@ class TestMCPToolResultParsing:
                 assert result.artifacts == []
                 assert result.display_config is None
                 assert result.meta_data is None
+
+
+class TestSessionTerminatedEviction:
+    """Tests for execute_tool's session eviction on 'session terminated' errors."""
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_evicts_session_on_session_terminated_error(self):
+        """execute_tool should call session_manager.release when call_tool raises
+        a 'Session terminated' exception with a known conversation_id."""
+        server_config = {
+            "url": "http://localhost:8001/mcp",
+            "transport": "http",
+        }
+
+        with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
+            mock_config_manager.mcp_config.servers = {"test-server": Mock()}
+            mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
+            mock_config_manager.app_settings.mcp_call_timeout = 120
+
+            manager = MCPToolManager()
+            manager.servers_config = {"test-server": server_config}
+
+            with patch('atlas.modules.mcp_tools.client.Client') as MockFastMCPClient:
+                mock_client_instance = MockFastMCPClient.return_value
+                mock_client_instance.__aenter__.return_value = mock_client_instance
+                mock_client_instance.is_connected = MagicMock(return_value=True)
+                mock_client_instance.call_tool = AsyncMock(
+                    side_effect=Exception("Session terminated")
+                )
+
+                await manager.initialize_clients()
+
+                tool_call = ToolCall(id="call_1", name="test-server_get_state", arguments={})
+                mock_tool = Mock()
+                mock_tool.name = "get_state"
+                manager._tool_index = {
+                    "test-server_get_state": {
+                        'server': 'test-server',
+                        'tool': mock_tool
+                    }
+                }
+
+                release_mock = AsyncMock()
+                manager._session_manager.release = release_mock
+
+                result = await manager.execute_tool(
+                    tool_call,
+                    context={
+                        "conversation_id": "conv-abc",
+                        "user_email": "test@example.com",
+                        "update_callback": None,
+                    }
+                )
+
+                assert result.success is False
+                assert "Session terminated" in result.error
+                release_mock.assert_awaited_once_with("conv-abc", "test-server")
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_evicts_session_on_wrapped_session_terminated_error(self):
+        """execute_tool should evict when the session-terminated error is wrapped
+        in an outer exception (FastMCP may wrap before re-raising)."""
+        server_config = {
+            "url": "http://localhost:8001/mcp",
+            "transport": "http",
+        }
+
+        with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
+            mock_config_manager.mcp_config.servers = {"test-server": Mock()}
+            mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
+            mock_config_manager.app_settings.mcp_call_timeout = 120
+
+            manager = MCPToolManager()
+            manager.servers_config = {"test-server": server_config}
+
+            with patch('atlas.modules.mcp_tools.client.Client') as MockFastMCPClient:
+                mock_client_instance = MockFastMCPClient.return_value
+                mock_client_instance.__aenter__.return_value = mock_client_instance
+                mock_client_instance.is_connected = MagicMock(return_value=True)
+
+                # Simulate FastMCP wrapping: outer message is generic, inner cause
+                # carries the real "session terminated" text.
+                inner = Exception("Session terminated by server")
+                outer = Exception("MCP call failed")
+                outer.__cause__ = inner
+                mock_client_instance.call_tool = AsyncMock(side_effect=outer)
+
+                await manager.initialize_clients()
+
+                tool_call = ToolCall(id="call_2", name="test-server_get_state", arguments={})
+                mock_tool = Mock()
+                mock_tool.name = "get_state"
+                manager._tool_index = {
+                    "test-server_get_state": {
+                        'server': 'test-server',
+                        'tool': mock_tool
+                    }
+                }
+
+                release_mock = AsyncMock()
+                manager._session_manager.release = release_mock
+
+                result = await manager.execute_tool(
+                    tool_call,
+                    context={
+                        "conversation_id": "conv-xyz",
+                        "user_email": "test@example.com",
+                        "update_callback": None,
+                    }
+                )
+
+                assert result.success is False
+                release_mock.assert_awaited_once_with("conv-xyz", "test-server")
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_does_not_evict_session_on_unrelated_error(self):
+        """execute_tool should NOT call release for errors unrelated to session termination."""
+        server_config = {
+            "url": "http://localhost:8001/mcp",
+            "transport": "http",
+        }
+
+        with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
+            mock_config_manager.mcp_config.servers = {"test-server": Mock()}
+            mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
+            mock_config_manager.app_settings.mcp_call_timeout = 120
+
+            manager = MCPToolManager()
+            manager.servers_config = {"test-server": server_config}
+
+            with patch('atlas.modules.mcp_tools.client.Client') as MockFastMCPClient:
+                mock_client_instance = MockFastMCPClient.return_value
+                mock_client_instance.__aenter__.return_value = mock_client_instance
+                mock_client_instance.is_connected = MagicMock(return_value=True)
+                mock_client_instance.call_tool = AsyncMock(
+                    side_effect=ValueError("Tool argument validation failed")
+                )
+
+                await manager.initialize_clients()
+
+                tool_call = ToolCall(id="call_3", name="test-server_get_state", arguments={})
+                mock_tool = Mock()
+                mock_tool.name = "get_state"
+                manager._tool_index = {
+                    "test-server_get_state": {
+                        'server': 'test-server',
+                        'tool': mock_tool
+                    }
+                }
+
+                release_mock = AsyncMock()
+                manager._session_manager.release = release_mock
+
+                result = await manager.execute_tool(
+                    tool_call,
+                    context={
+                        "conversation_id": "conv-def",
+                        "user_email": "test@example.com",
+                        "update_callback": None,
+                    }
+                )
+
+                assert result.success is False
+                release_mock.assert_not_awaited()

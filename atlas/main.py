@@ -707,7 +707,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 from atlas.modules.mcp_tools import mcp_tool_manager
                 await mcp_tool_manager.release_sessions(conv_id, user_email=user_email)
             except Exception as e:
-                logger.debug("Error releasing MCP sessions on disconnect: %s", e)
+                logger.warning("Error releasing MCP sessions on disconnect: %s", e)
         await chat_service.end_session(session_id)
         logger.info(f"WebSocket connection closed for session {session_id}")
 
