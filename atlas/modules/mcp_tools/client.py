@@ -40,7 +40,7 @@ def _is_task_forbidden_error(exc: BaseException) -> bool:
     return "does not support task-augmented execution" in str(exc)
 
 
-_SESSION_TERMINATED_MARKERS = ("session terminated", "session not found", "invalid session")
+_SESSION_TERMINATED_MARKERS = ("session terminated", "session not found", "invalid session id")
 
 
 def _is_session_terminated_error(exc: BaseException) -> bool:
