@@ -6,6 +6,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Frontend maintainability - 2026-04-18
+- **Refactor**: Decomposed `frontend/src/components/Message.jsx` from 1,396 lines to 524 lines by extracting cohesive helpers into sibling modules. New modules: `utils/markdownRenderer.js` (marked + highlight.js + DOMPurify config), `utils/ragCitations.js` (source-label extraction, inline citation badges, collapsible References section), `utils/messageContent.js` (content shaping), `utils/clipboard.js` (code-block and message copy helpers), `utils/toolResultUtils.js` (argument filtering, tool-result sanitization, file download). The `ToolApprovalMessage` and `ToolElapsedTime` sub-components moved to their own files under `components/`. `rag-citation-rendering.test.js` now imports from `utils/ragCitations.js` instead of duplicating the helpers, eliminating drift risk. Addressed review feedback: sanitize hljs language tag before HTML interpolation, null-guard artifact/base64 lengths in `processToolResult`, scope the code-block copy delegator to each message's container ref (was `document`, which multiplied listeners by message count), and render RAG citation chips as real `<button>` elements for native keyboard activation. No behavior changes.
+
+### PR #536 - 2026-04-17
+- **Fix**: MCP tool calls using the background-task (`ToolTask`) path now return results correctly instead of `null` (`fastmcp>=3.2.0` changed `ToolTask.result` to an async method).
+
+### PR #534 - 2026-04-16
+- **Fix**: Anthropic calls failed with `litellm.UnsupportedParamsError: Anthropic doesn't support tool calling without tools= param specified` whenever the conversation history contained a prior assistant `tool_calls` block but the current call omitted `tools=` (e.g. title generation, plain replies, or follow-ups on a conversation that earlier used tools). Set `litellm.modify_params = True` at module load so litellm injects a benign `dummy_tool` schema for Anthropic in this case, matching litellm's documented workaround. Added a regression test asserting both `drop_params` and `modify_params` stay enabled.
+
+### PR #TBD - 2026-04-17
+- **Fix**: Tool calls failed with `McpError: FunctionTool '...' does not support task-augmented execution` when the server advertised task capability but the individual tool declared `tasks.mode="forbidden"`. `MCPToolManager.call_tool` now catches that specific error, falls back to a synchronous (non-task) call, and caches the `(server, tool)` pair so subsequent invocations skip task mode directly. Unrelated errors still propagate unchanged.
+
+### PR #533 - 2026-04-15
+- **Fix**: File delete (and download) from the File Library returned 404 in production. `AllFilesView` used `encodeURIComponent` on the full S3 key which encoded `/` to `%2F`, breaking path-based routing through reverse proxies. Now encodes each path segment individually. Also fixed `FilesPage` referencing the non-existent `file.s3_key` property (should be `file.key`). Added backend `unquote()` safety net on all `{file_key:path}` route handlers to handle residual percent-encoding from proxies.
+
+### PR #504 - 2026-04-12
+- **Fix**: Light mode white-on-white bug in slash command and `@file` autocomplete dropdowns. Tool and file names now inherit their text color from the parent row instead of using a hardcoded `text-white` class, making them visible in both light and dark themes.
+
+### PR #512 - 2026-04-12
+- **Security**: Removed the hardcoded `b"dev-capability-secret"` fallback used by `atlas/core/capabilities.py` when `CAPABILITY_TOKEN_SECRET` was unset. Previously, any attacker who knew this constant could forge HMAC capability tokens for any `{user, file_key}` pair and download any user's files via `/mcp/files/download/` (which intentionally bypasses header-based auth). The fallback now generates a cryptographically random 32-byte per-process secret via `secrets.token_bytes(32)`; tokens signed with it cannot be predicted or forged. A `CRITICAL` log entry is emitted in production (or `WARNING` in debug mode) the first time the ephemeral secret is used, instructing operators to set `CAPABILITY_TOKEN_SECRET` for durable, restart-stable tokens. Fail-closed: no hardcoded value is ever returned from `_get_secret()`.
+
+### PR #511 - 2026-04-12
+- **Security**: Tool approval requests are now bound to the authenticated user who created them. Any WebSocket approval response from a different user (or from an empty/missing user identity) is rejected and a security warning is logged. This prevents cross-user approval bypass (F-03) where a user who learned another user's pending `tool_call_id` could approve, reject, or inject edited arguments into that user's tool execution. The ownership check fails closed: once a request is bound to a `user_email`, the response must supply a matching one. Backward compatible: verification is skipped only for legacy requests where the request itself has no `user_email` (single-user deployments).
+
+### PR #510 - 2026-04-12
+- **Security**: `get_current_user()` now raises HTTP 401 when `request.state.user_email` is unset, instead of silently falling back to `test@test.com`. Any request that bypasses auth middleware is now rejected rather than granted a default identity.
+- **Security**: `is_user_in_group()` mock group memberships (which grant admin access to the test user) are now gated behind `debug_mode=True`. In production mode with no external auth endpoint, users receive only the default `users` group — no admin privileges are granted via mock.
+- **Security**: `FEATURE_PROXY_SECRET_ENABLED` now defaults to `true`. In production without a configured `PROXY_SECRET`, the middleware rejects all requests with HTTP 503 (fail-closed) instead of silently passing through. This prevents direct backend access from spoofing the `X-User-Email` header. Deployments that rely on network isolation can explicitly set `FEATURE_PROXY_SECRET_ENABLED=false`.
+- **Security**: `GLOBUS_SESSION_SECRET` no longer has a default value. The old placeholder (`atlas-globus-session-change-me`) allowed session cookie forgery. When Globus auth is enabled but the secret is missing or still the placeholder, the feature is automatically disabled at startup and an error is logged.
+
+### PR #503 - 2026-04-10
+- **Fix**: `_parse_rag_metadata` in `AtlasRAGClient` now handles `data_sources` entries that are dicts (with `id`/`label` fields) in addition to plain strings, resolving a Pydantic validation error when the ATLAS RAG API returns object-shaped data sources.
+- **Fix**: Documents in `documents_found` with a nested `data_source` object (instead of a flat `corpus_id`/`title`) now correctly populate `source` and `title`, so citations show meaningful labels instead of "Document 1, Document 2, …".
+
+### PR #500 - 2026-04-10
+- **Chore**: Upgrade fastmcp to `>=3.2.0` in all `pyproject.toml` files (main package and `mocks/mcp-http-mock`).
+
+### PR #498 - 2026-04-04
+- **Fix**: `GET /api/files/{file_key}` and `DELETE /api/files/{file_key}` now use the `{file_key:path}` converter, so S3 keys containing `/` (e.g. `users/alice@example.com/generated/foo.txt`) are captured in full instead of returning 404. Route declarations were reordered so the greedy catch-all comes after specific `/files/...` routes (healthz, list, download, stats) to prevent it from shadowing them.
+
+### PR #495 - 2026-04-03
+- **Feature**: Help documentation is now authored in Markdown (`help.md`). The help page renders the `.md` file content directly. The header "Help" button now displays a text label alongside the icon. Admins can edit the help content via the admin panel.
+
+### PR #493 - 2026-04-02
+- **Feature**: Add `plain_text_types` list to `atlas/config/file-extractors.json`. Files with a matching extension (e.g. `.py`, `.c`, `.txt`, `.md`) are now decoded directly from their base64 content and injected into the LLM context without requiring an external extractor service. Extensions are matched case-insensitively.
+
+### PR #491 - 2026-04-02
+- **Feature**: Models that declare `supports_tools: false` in `llmconfig.yml` now have tools and agent mode automatically stripped by the orchestrator, with user-visible warnings sent via a new `warning` WebSocket message type. Frontend shows capability icons (eye/wrench) in the model dropdown and yellow warning banners when incompatible features are selected.
+
+### PR #475 - 2026-03-25
+- **Feature**: Add `strict_role_ordering` config flag to `ModelConfig` for Mistral/Devstral models served via vLLM. When enabled, post-tool `system` messages are converted to `user` role and a bridging `assistant` message is inserted so the role sequence satisfies Mistral's strict ordering constraint.
+- **Fix**: All LLM call paths (plain, tool-calling, streaming) now use a unified `_prepare_messages()` pipeline that chains existing sanitization with the new role enforcement.
+
+### PR #473 - 2026-03-25
+- **Fix**: `ps_agent_start.ps1` now forces UTF-8 encoding for the log file (`logs/app.jsonl`) and sets console output encoding to UTF-8 on Windows. This resolves the issue where Windows users saw Chinese/CJK characters in the Log Viewer — caused by PowerShell 5.1 writing UTF-16 LE by default, which Python's UTF-8 reader misinterpreted as CJK code points.
+
+### PR #468 - 2026-03-25
+- **Fix**: Filenames with special characters (`(`, `)`, `!`, `#`, `?`, `&`, etc.) are now properly sanitized to underscores in both the frontend and backend. Previously only whitespace was replaced, causing filenames like `my_cool_idea(!).pdf` to bypass document extraction and tool processing.
+
+### PR #472 - 2026-03-25
+- **Chore**: Replace all `requirements.txt` files with `pyproject.toml` in mock services and remove redundant ones from atlas MCP subpackages. Update Dependabot to track mock subdirectories. Dependabot now monitors `mocks/file-extractor-mock`, `mocks/multipart-extractor-mock`, `mocks/banyan-extractor-mock`, and `mocks/mcp-http-mock` for weekly dependency updates.
+
+### PR #467 - 2026-03-24
+- **Fix**: CI workflows (quay-publish, ci, build-artifacts) now inject the correct Vite build args: `VITE_APP_NAME=ATLAS`, `VITE_FEATURE_ANIMATED_LOGO=true`, `VITE_FEATURE_POWERED_BY_ATLAS=false`, and pass `GIT_HASH`/`APP_VERSION` to Docker builds.
+
+### PR #466 - 2026-03-23
+- **Feature**: Models that declare `supports_vision: true` in `llmconfig.yml` now receive attached image files as inline multimodal content blocks (OpenAI `image_url` format, translated by LiteLLM). The frontend shows image thumbnails with a vision indicator when a vision-capable model is selected.
+
 ### PR #463 - 2026-03-22
 - **Feature**: Real-time reasoning content streaming for reasoning-capable LLMs (o3, Qwen3, GPT-OSS via vLLM). Chain-of-thought reasoning tokens stream to the frontend live, displayed in a collapsible section that auto-expands during streaming. Reasoning content persists in message metadata across page reloads.
 - **Fix**: Includes monkey-patch for LiteLLM issue [#20246](https://github.com/BerriAI/litellm/issues/20246) — vLLM `delta.reasoning` field not mapped to `reasoning_content` in streaming mode. See `docs/developer/reasoning-content-streaming-2026-03-22.md` for removal instructions.

@@ -43,8 +43,9 @@ jobs:
         pip install -e ".[dev]"
 
     - name: Python Safety Check
+      continue-on-error: true
       run: |
-        safety check --json --output safety-report.json || true
+        timeout 120 safety check --json --output safety-report.json || true
         if [ -f safety-report.json ]; then
           echo "Safety vulnerabilities found. Check the report:"
           cat safety-report.json
@@ -343,7 +344,7 @@ jobs:
     # Comment on PR with security summary
     - name: Comment PR with Security Summary
       if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       with:
         script: |
           const fs = require('fs');

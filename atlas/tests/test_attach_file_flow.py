@@ -78,7 +78,7 @@ async def test_handle_attach_file_success_creates_session_and_emits_update(chat_
     ), "Expected a files_update intermediate update to be emitted"
 
     # Session context should include the file by filename
-    session = chat_service.sessions.get(session_id)
+    session = await chat_service.session_repository.get(session_id)
     assert session is not None
     assert filename in session.context.get("files", {})
     assert session.context["files"][filename]["key"] == s3_key
@@ -142,14 +142,14 @@ async def test_handle_reset_session_reinitializes(chat_service):
 
     # Create a session first
     await chat_service.create_session(session_id, user_email)
-    assert chat_service.sessions.get(session_id) is not None
+    assert await chat_service.session_repository.get(session_id) is not None
 
     # Reset the session
     resp = await chat_service.handle_reset_session(session_id=session_id, user_email=user_email)
 
     assert resp.get("type") == "session_reset"
     # After reset, a fresh active session should exist for the same id
-    new_session = chat_service.sessions.get(session_id)
+    new_session = await chat_service.session_repository.get(session_id)
     assert new_session is not None
     assert new_session.active is True
 
@@ -278,10 +278,71 @@ async def test_attach_file_with_spaces_end_to_end(chat_service, file_manager):
     assert " " not in s3_key
 
     # Verify the session stores the sanitized filename (no spaces)
-    session = chat_service.sessions.get(session_id)
+    session = await chat_service.session_repository.get(session_id)
     assert session is not None
     session_files = session.context.get("files", {})
     # The filename key in the session should have underscores, not spaces
     stored_names = list(session_files.keys())
     for name in stored_names:
         assert " " not in name, f"Session stored filename with spaces: {name}"
+
+
+@pytest.mark.asyncio
+async def test_sanitize_filename_removes_special_chars(file_manager):
+    """sanitize_filename should replace parentheses, exclamation marks, and other
+    special characters with underscores so filenames are safe for URLs and headers."""
+    fm = file_manager
+
+    assert fm.sanitize_filename("my_cool_idea(!).pdf") == "my_cool_idea_.pdf"
+    assert fm.sanitize_filename("my cool idea.docx") == "my_cool_idea.docx"
+    assert fm.sanitize_filename("report (final)!.pdf") == "report_final_.pdf"
+    assert fm.sanitize_filename("file#1.txt") == "file_1.txt"
+    assert fm.sanitize_filename("file?v=2.txt") == "file_v_2.txt"
+    assert fm.sanitize_filename("safe-file_name.txt") == "safe-file_name.txt"
+    assert fm.sanitize_filename("normal.pdf") == "normal.pdf"
+    # Consecutive special chars collapse to a single underscore
+    assert fm.sanitize_filename("a  b  c.pdf") == "a_b_c.pdf"
+
+
+@pytest.mark.asyncio
+async def test_upload_file_with_special_chars_in_filename(file_manager):
+    """Files with special chars (parentheses, exclamation marks) should upload
+    successfully after sanitization removes those characters."""
+    user_email = "user1@example.com"
+    content_b64 = base64.b64encode(b"pdf content").decode()
+
+    result = await file_manager.upload_file(
+        user_email=user_email,
+        filename="my_cool_idea(!).pdf",
+        content_base64=content_b64,
+        source_type="user",
+    )
+
+    assert result["filename"] == "my_cool_idea_.pdf"
+    assert "my_cool_idea_.pdf" in result["key"]
+    assert "(" not in result["key"]
+    assert "!" not in result["key"]
+    assert ")" not in result["key"]
+
+
+@pytest.mark.asyncio
+async def test_upload_multiple_files_with_special_chars(file_manager):
+    """upload_multiple_files should sanitize filenames with special characters."""
+    user_email = "user1@example.com"
+    files = {
+        "my_cool_idea(!).pdf": base64.b64encode(b"pdf bytes").decode(),
+        "report (v2)!.txt": base64.b64encode(b"text bytes").decode(),
+    }
+
+    uploaded = await file_manager.upload_multiple_files(
+        user_email=user_email,
+        files=files,
+        source_type="user",
+    )
+
+    assert "my_cool_idea_.pdf" in uploaded
+    assert "report_v2_.txt" in uploaded
+    for key in uploaded.values():
+        assert "(" not in key
+        assert ")" not in key
+        assert "!" not in key

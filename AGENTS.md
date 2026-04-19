@@ -6,6 +6,14 @@ This project is developed for the U.S. Department of Energy (DOE). Operational s
 
 This file provides guidance to AI coding agents (Claude Code, GitHub Copilot, Google Gemini, etc.) when working with code in this repository.
 
+## Ground Rule: Investigate Before Answering
+
+**Always investigate the actual repository before answering any diagnostic, architectural, or debugging question.** Do not rely on memory, prior conversation context, or assumptions about how the code "probably" works. Read the relevant files, grep for the real symbols, run the tests, and check git history as needed. If you are asked *why* something behaves a certain way, *where* something lives, *how* a flow is wired, or *what* is broken — open the code and verify before responding. A confident-sounding answer built on stale assumptions is worse than a short delay to check. When an investigation would be expensive, say so and ask the user before guessing.
+
+## Product Direction: Agent Loop Is Not the Focus
+
+The in-app agent loop inside ATLAS is **not** the main focus of this product. The plan is for the ATLAS app to continue as-is with its core capabilities — **chat, RAG, and MCP tools** — and to add a separate **Agent Portal** that lets users launch and control agents from a UI-friendly surface with **governed controls suitable for enterprise and government use** (authorization, auditing, approval gates, resource limits, and role-scoped access). When working on agent-related features, prefer investment in the Agent Portal and its governance surface over deepening the in-chat agent loop. If a request would expand the in-chat agent loop in a significant way, flag it and ask whether it belongs in the Agent Portal instead.
+
 ## Project Overview
 
 Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) integration, supporting multiple LLM providers (OpenAI, Anthropic Claude, Google Gemini), RAG, and agentic capabilities.
@@ -185,7 +193,7 @@ frontend/src/
 - **LLM**: `atlas/config/llmconfig.yml` (user overrides in `config/llmconfig.yml`)
 - **MCP Servers**: `atlas/config/mcp.json` (user overrides in `config/mcp.json`)
 - **RAG Sources**: `atlas/config/rag-sources.json` (user overrides in `config/rag-sources.json`)
-- **Help**: `atlas/config/help-config.json`
+- **Help**: `atlas/config/help.md` (Markdown; user override in `config/help.md`)
 - **Compliance Levels**: `atlas/config/compliance-levels.json`
 - **MCP Examples**: `atlas/config/mcp-example-configs/`
 - **Environment**: `.env` (copy from `.env.example`)
@@ -196,6 +204,7 @@ frontend/src/
 - `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Compliance level enforcement
 - `FEATURE_AGENT_MODE_AVAILABLE` - Agent mode UI toggle
 - `VITE_FEATURE_ANIMATED_LOGO` - Animated logo (build-time Vite flag; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
+- `VITE_FEATURE_RAG_CITATIONS` - Perplexity-style inline citations & collapsible Sources section for RAG responses (build-time Vite flag; defaults to `false`; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
 
 ## Per-User LLM API Keys
 
@@ -245,8 +254,8 @@ When enabled: `/api/config` includes model/server `compliance_level`, `domain/ra
 
 ## S3 Storage
 
-- **Mock S3 (default)**: `USE_MOCK_S3=true` -- in-process, no Docker needed
-- **MinIO**: `USE_MOCK_S3=false` -- requires `docker-compose up -d minio minio-init`
+- **Mock S3 (default)**: `USE_MOCK_S3=true` -- in-process, no Podman needed
+- **MinIO**: `USE_MOCK_S3=false` -- requires `podman-compose up -d minio minio-init` (Podman reads the existing `docker-compose.yml`)
 
 ## Security
 
@@ -273,7 +282,7 @@ In production, reverse proxy injects `X-User-Email` (after stripping client head
 
 **Add a RAG provider:** Edit `config/rag-sources.json`. MCP: set `type: "mcp"` with `rag_*` tools. HTTP: set `type: "http"` with `url` and `bearer_token`.
 
-**Build-time constants**: `vite.config.js` injects `__APP_VERSION__`, `__GIT_HASH__`, `__BUILD_TIME__` via `define`; in Docker these come from build args since `.git/` and `atlas/version.py` are unavailable during frontend build.
+**Build-time constants**: `vite.config.js` injects `__APP_VERSION__`, `__GIT_HASH__`, `__BUILD_TIME__` via `define`; in Podman container builds these come from build args since `.git/` and `atlas/version.py` are unavailable during frontend build.
 
 ## Common Issues
 
@@ -307,14 +316,53 @@ See `test/pr-validation/README.md` for the full template.
 - **NEVER use `uvicorn --reload`** - causes development issues
 - **NEVER use `npm run dev`** - WebSocket connection problems
 - **ALWAYS use `npm run build`** for frontend
+- **ALWAYS use `bash agent_start.sh`** to start the application for development and testing
+- **ALWAYS run `bash agent_start.sh` AFTER any frontend/UI change** before testing or taking screenshots - it rebuilds the frontend and restarts the backend. The port is configured in the `.env` file (e.g. 8001, 8020, etc.) — check `.env` for the actual port before navigating. Using `npm run dev` or a standalone vite dev server will NOT work correctly (missing backend, wrong port, WebSocket failures). If you skip this step, you will be testing stale code and wasting time.
 - **NEVER use pip** - this project requires `uv`
 - **NEVER CANCEL builds or tests** - they must complete
+- **NEVER modify files in `atlas/config/`** unless explicitly asked by the user - these are package defaults
+- **ALWAYS use `config/` (project root)** for test configurations and local overrides - create/modify files there instead of `atlas/config/`
 
-## Docker
+## Podman
 
 ```bash
-docker build -t atlas-ui-3 .
-docker run -p 8000:8000 atlas-ui-3
+podman build -t atlas-ui-3 .
+podman run -p 8000:8000 atlas-ui-3
 ```
 
-Container uses RHEL 9 UBI (GitHub Actions use Ubuntu runners).
+Podman reads the existing `Dockerfile` natively. Container uses RHEL 9 UBI (GitHub Actions use Ubuntu runners).
+
+## RAG Mock for Local Testing
+
+The `mocks/atlas-rag-api-mock/` directory contains a FastAPI mock RAG server with 3 realistic corpora (Company Policies, Technical Documentation, Product Knowledge Base — 12 documents total, all with `title`, `url`, and `last_modified` fields). Use it to test RAG features without an external API.
+
+### Quick Start
+
+```bash
+# 1. Start the RAG mock (port 8002)
+cd mocks/atlas-rag-api-mock && python main.py &
+
+# 2. Add it to your local config (config/ overrides atlas/config/)
+cat > config/rag-sources.json << 'EOF'
+{
+  "atlas_rag": {
+    "type": "http",
+    "display_name": "Technical Docs",
+    "url": "http://localhost:8002",
+    "bearer_token": "test-atlas-rag-token",
+    "groups": ["users"],
+    "compliance_level": "Internal"
+  }
+}
+EOF
+
+# 3. Set FEATURE_RAG_ENABLED=true in .env, then restart the backend
+bash agent_start.sh
+```
+
+### Mock Details
+- **Port:** 8002
+- **Auth:** Bearer token `test-atlas-rag-token`
+- **Test users:** `test@test.com` (all corpora), `alice@example.com`, `bob@example.com`, `charlie@example.com`, `guest@example.com` (public only)
+- **Data:** `mocks/atlas-rag-api-mock/mock_data.json` — edit to add documents or corpora
+- **Endpoints:** `GET /discover/datasources?as_user=`, `POST /rag/completions`, `POST /rag/search`

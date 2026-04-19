@@ -511,6 +511,9 @@ export function createWebSocketHandler(deps) {
             ...(data.reasoning_content ? { reasoning_content: data.reasoning_content } : {}),
           })
           break
+        case 'warning':
+          addMessage({ role: 'system', content: `Warning: ${data.message}`, type: 'warning', timestamp: new Date().toISOString() })
+          break
         case 'error':
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)

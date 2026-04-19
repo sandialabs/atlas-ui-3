@@ -56,7 +56,8 @@ def mock_components():
             'success': True,
             'filename': 'mypdf.pdf'
         })
-        mock_chat_service.end_session = MagicMock()
+        mock_chat_service.end_session = AsyncMock()
+        mock_chat_service.session_repository.get = AsyncMock(return_value=None)
         mock_factory.create_chat_service.return_value = mock_chat_service
 
         yield {
@@ -112,7 +113,8 @@ def test_issue_scenario_would_fail_without_header():
 
         # Mock chat service
         mock_chat_service = MagicMock()
-        mock_chat_service.end_session = MagicMock()
+        mock_chat_service.end_session = AsyncMock()
+        mock_chat_service.session_repository.get = AsyncMock(return_value=None)
         mock_factory.create_chat_service.return_value = mock_chat_service
 
         client = TestClient(app)

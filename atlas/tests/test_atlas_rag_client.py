@@ -410,6 +410,53 @@ class TestParseRagMetadata:
 
         assert result.data_source_name == "fallback-corpus"
 
+    def test_parse_metadata_data_sources_as_objects(self, client):
+        """Test parsing when data_sources entries are dicts with id/label."""
+        data = {
+            "rag_metadata": {
+                "query_processing_time_ms": 50,
+                "documents_found": [],
+                "data_sources": [
+                    {
+                        "id": "atlas_team_data",
+                        "label": "Search Dataset | UUR: ATLAS Team Data",
+                        "compliance_level": "UUR",
+                        "description": "",
+                    },
+                    {
+                        "id": "atlas_team_data_2",
+                        "label": "Search Dataset | UUR: ATLAS Team Data 2",
+                        "compliance_level": "UUR",
+                        "description": "",
+                    },
+                ],
+                "retrieval_method": "similarity",
+            }
+        }
+
+        result = client._parse_rag_metadata(data, "fallback-corpus")
+
+        assert result is not None
+        assert result.data_source_name == "Search Dataset | UUR: ATLAS Team Data"
+
+    def test_parse_metadata_data_source_dict_missing_label(self, client):
+        """Test parsing when data_sources dict has no label but has id."""
+        data = {
+            "rag_metadata": {
+                "query_processing_time_ms": 50,
+                "documents_found": [],
+                "data_sources": [
+                    {"id": "atlas_team_data", "compliance_level": "UUR"},
+                ],
+                "retrieval_method": "similarity",
+            }
+        }
+
+        result = client._parse_rag_metadata(data, "fallback-corpus")
+
+        assert result is not None
+        assert result.data_source_name == "atlas_team_data"
+
     def test_parse_no_metadata(self, client):
         """Test parsing when no rag_metadata present."""
         data = {"choices": []}
@@ -421,6 +468,83 @@ class TestParseRagMetadata:
         data = {"rag_metadata": None}
         result = client._parse_rag_metadata(data, "corpus")
         assert result is None
+
+    def test_parse_documents_with_nested_data_source(self, client):
+        """Test documents with nested data_source dict populate source and title."""
+        data = {
+            "rag_metadata": {
+                "query_processing_time_ms": 2993,
+                "documents_found": [
+                    {
+                        "data_source": {
+                            "id": "atlas_team_data",
+                            "label": "Search Dataset | UUR: ATLAS Team Data",
+                            "compliance_level": "UUR",
+                            "description": "",
+                        },
+                        "text": "Some document text.",
+                        "id": 459716260075906100,
+                        "content_type": "atlas-search",
+                        "confidence_score": 0.48,
+                        "last_modified": "20250724_144206",
+                    },
+                    {
+                        "data_source": {
+                            "id": "atlas_team_data",
+                            "label": "Search Dataset | UUR: ATLAS Team Data",
+                            "compliance_level": "UUR",
+                            "description": "",
+                        },
+                        "text": "Another document text.",
+                        "id": 459716260075906101,
+                        "content_type": "atlas-search",
+                        "confidence_score": 0.47,
+                        "last_modified": "20250724_144206",
+                    },
+                ],
+                "data_sources": [
+                    {
+                        "id": "atlas_team_data",
+                        "label": "Search Dataset | UUR: ATLAS Team Data",
+                        "compliance_level": "UUR",
+                        "description": "",
+                    }
+                ],
+                "retrieval_method": "similarity",
+            }
+        }
+
+        result = client._parse_rag_metadata(data, "fallback-corpus")
+
+        assert result is not None
+        assert len(result.documents_found) == 2
+        assert result.documents_found[0].source == "atlas_team_data"
+        assert result.documents_found[0].title == "Search Dataset | UUR: ATLAS Team Data"
+        assert result.documents_found[1].source == "atlas_team_data"
+        assert result.documents_found[1].title == "Search Dataset | UUR: ATLAS Team Data"
+
+    def test_parse_documents_flat_corpus_id_takes_precedence(self, client):
+        """Flat corpus_id overrides nested data_source.id when both present."""
+        data = {
+            "rag_metadata": {
+                "query_processing_time_ms": 100,
+                "documents_found": [
+                    {
+                        "corpus_id": "legacy-corpus",
+                        "data_source": {"id": "nested-id", "label": "Nested Label"},
+                        "content_type": "atlas-search",
+                        "confidence_score": 0.9,
+                    },
+                ],
+                "data_sources": [],
+                "retrieval_method": "similarity",
+            }
+        }
+
+        result = client._parse_rag_metadata(data, "fallback-corpus")
+
+        assert result is not None
+        assert result.documents_found[0].source == "legacy-corpus"
 
 
 class TestFactoryFunction:
@@ -446,3 +570,140 @@ class TestFactoryFunction:
         assert client.bearer_token == "factory-token"
         assert client.default_model == "factory-model"
         assert client.top_k == 8
+
+
+class TestResolveUsername:
+    """Tests for _resolve_username with strip_domain."""
+
+    def test_strip_domain_disabled_by_default(self, client):
+        """Test that strip_domain defaults to False."""
+        assert client.strip_domain is False
+        assert client._resolve_username("user@corp.com") == "user@corp.com"
+
+    def test_strip_domain_enabled(self):
+        """Test strip_domain strips the @domain portion."""
+        c = AtlasRAGClient(
+            base_url="https://rag-api.example.com",
+            strip_domain=True,
+        )
+        assert c._resolve_username("user@corp.com") == "user"
+
+    def test_strip_domain_no_at_sign(self):
+        """Test strip_domain is a no-op when no @ in username."""
+        c = AtlasRAGClient(
+            base_url="https://rag-api.example.com",
+            strip_domain=True,
+        )
+        assert c._resolve_username("plainuser") == "plainuser"
+
+    def test_strip_domain_multiple_at_signs(self):
+        """Test strip_domain only strips at the first @."""
+        c = AtlasRAGClient(
+            base_url="https://rag-api.example.com",
+            strip_domain=True,
+        )
+        assert c._resolve_username("user@sub@corp.com") == "user"
+
+    def test_strip_domain_disabled_preserves_email(self):
+        """Test strip_domain=False preserves email username."""
+        c = AtlasRAGClient(
+            base_url="https://rag-api.example.com",
+            strip_domain=False,
+        )
+        assert c._resolve_username("user@corp.com") == "user@corp.com"
+
+
+class TestQueryRagBatchCorpora:
+    """Tests for query_rag with data_sources parameter (batch corpora)."""
+
+    @pytest.mark.asyncio
+    async def test_query_with_multiple_corpora(self, client):
+        """Test query_rag sends multiple corpora in a single request."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "object": "chat.completion",
+            "choices": [
+                {"message": {"role": "assistant", "content": "Batched answer."}}
+            ],
+            "rag_metadata": {
+                "query_processing_time_ms": 200,
+                "documents_found": [],
+                "data_sources": ["corpus1", "corpus2"],
+                "retrieval_method": "similarity",
+            },
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.post.return_value = mock_response
+            mock_instance.__aenter__.return_value = mock_instance
+            mock_instance.__aexit__.return_value = None
+            mock_client.return_value = mock_instance
+
+            messages = [{"role": "user", "content": "Question"}]
+            result = await client.query_rag(
+                "test-user", "corpus1", messages,
+                data_sources=["corpus1", "corpus2"],
+            )
+
+        assert isinstance(result, RAGResponse)
+        assert result.content == "Batched answer."
+
+        # Verify the corpora list in the payload uses data_sources, not single source
+        payload = mock_instance.post.call_args[1]["json"]
+        assert payload["corpora"] == ["corpus1", "corpus2"]
+
+    @pytest.mark.asyncio
+    async def test_query_data_sources_overrides_single_source(self, client):
+        """Test that data_sources parameter takes precedence over data_source."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [
+                {"message": {"role": "assistant", "content": "Answer."}}
+            ],
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.post.return_value = mock_response
+            mock_instance.__aenter__.return_value = mock_instance
+            mock_instance.__aexit__.return_value = None
+            mock_client.return_value = mock_instance
+
+            messages = [{"role": "user", "content": "Q"}]
+            await client.query_rag(
+                "test-user", "ignored-source", messages,
+                data_sources=["real-a", "real-b"],
+            )
+
+        payload = mock_instance.post.call_args[1]["json"]
+        assert payload["corpora"] == ["real-a", "real-b"]
+
+    @pytest.mark.asyncio
+    async def test_query_single_source_fallback(self, client):
+        """Test that without data_sources, single data_source is used."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [
+                {"message": {"role": "assistant", "content": "Answer."}}
+            ],
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.post.return_value = mock_response
+            mock_instance.__aenter__.return_value = mock_instance
+            mock_instance.__aexit__.return_value = None
+            mock_client.return_value = mock_instance
+
+            messages = [{"role": "user", "content": "Q"}]
+            await client.query_rag("test-user", "single-corpus", messages)
+
+        payload = mock_instance.post.call_args[1]["json"]
+        assert payload["corpora"] == ["single-corpus"]

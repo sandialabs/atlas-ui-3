@@ -226,7 +226,7 @@ start_mcp_mock() {
 
 build_frontend() {
     local use_new_frontend="${USE_NEW_FRONTEND:-true}"
-    
+
     echo "Building frontend..."
     cd "$PROJECT_ROOT/frontend"
     npm install
@@ -235,8 +235,17 @@ build_frontend() {
     if [ -z "$VITE_APP_NAME" ]; then
         export VITE_APP_NAME="Chat UI 13"
     fi
+    # RAG citations UI is opt-in at build time; default to off if unset.
+    if [ -z "$VITE_FEATURE_RAG_CITATIONS" ]; then
+        export VITE_FEATURE_RAG_CITATIONS="false"
+    fi
     npm run build
     cd "$PROJECT_ROOT"
+
+    # Copy build output to atlas/static/ so the backend always serves from one
+    # location, matching the PyPI package layout.
+    rm -rf "$PROJECT_ROOT/atlas/static"
+    cp -r "$PROJECT_ROOT/frontend/dist" "$PROJECT_ROOT/atlas/static"
 }
 
 # =============================================================================

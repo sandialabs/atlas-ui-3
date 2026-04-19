@@ -91,6 +91,20 @@ class ModelConfig(BaseModel):
     # This is the resource_server UUID from the Globus token response other_tokens
     # Example for ALCF: "681c10cc-f684-4540-bcd7-0b4df3bc26ef"
     globus_scope: Optional[str] = None
+    # Whether this model supports vision (multimodal image input).
+    # When true, attached image files are sent as inline image content blocks
+    # instead of being listed in the files manifest.
+    supports_vision: bool = False
+    # Whether this model supports tool/function calling.
+    # When false, tools are stripped from requests and the user is warned.
+    supports_tools: bool = True
+    # Rich model card text shown in the UI info panel (markdown allowed).
+    # Provides details like context window, training info, strengths, etc.
+    model_card: Optional[str] = None
+    # When true, system messages that appear after tool messages are converted
+    # to user role.  Required for models (e.g. Mistral/Devstral via vLLM)
+    # that reject system messages mid-conversation after tool results.
+    strict_role_ordering: bool = False
 
 
 class LLMConfig(BaseModel):
@@ -185,6 +199,7 @@ class RAGSourceConfig(BaseModel):
     default_model: Optional[str] = None  # Model for RAG queries
     top_k: int = 4  # Number of documents to retrieve
     timeout: float = 60.0  # Request timeout in seconds
+    strip_domain: bool = False  # Strip @domain from username (e.g. user@corp.com -> user)
 
     # API endpoint customization (HTTP type)
     discovery_endpoint: str = "/discover/datasources"
@@ -263,6 +278,33 @@ class FileExtractorsConfig(BaseModel):
     extractors: Dict[str, FileExtractorConfig] = Field(default_factory=dict)
     extension_mapping: Dict[str, str] = Field(default_factory=dict)
     mime_mapping: Dict[str, str] = Field(default_factory=dict)
+    # Extensions whose files are plain text and can be read directly (no extractor service needed).
+    # All values are normalised to lowercase on load.
+    plain_text_types: List[str] = Field(default_factory=list)
+    # Max file size (MB) for plain-text direct reads.  Mirrors the per-extractor
+    # max_file_size_mb used by HTTP-backed extractors so the fast path stays bounded.
+    max_plain_text_size_mb: int = 50
+    # Preview truncation length (chars) for plain-text reads.
+    plain_text_preview_chars: int = 2000
+
+    @field_validator('plain_text_types', mode='before')
+    @classmethod
+    def normalize_plain_text_types(cls, v):
+        """Normalise all extensions to lowercase."""
+        if isinstance(v, list):
+            return [ext.lower() for ext in v]
+        return v
+
+    @model_validator(mode='after')
+    def reject_plain_text_extractor_overlap(self):
+        """Reject extensions that appear in both plain_text_types and extension_mapping."""
+        overlap = set(self.plain_text_types) & set(self.extension_mapping)
+        if overlap:
+            raise ValueError(
+                f"Extensions must not appear in both plain_text_types and "
+                f"extension_mapping: {sorted(overlap)}"
+            )
+        return self
 
     @field_validator('default_behavior', mode='before')
     @classmethod
@@ -436,8 +478,11 @@ class AppSettings(BaseSettings):
 
     # Proxy secret authentication configuration
     feature_proxy_secret_enabled: bool = Field(
-        default=False,
-        description="Enable proxy secret validation to ensure requests come from trusted reverse proxy",
+        default=True,
+        description="Enable proxy secret validation to ensure requests come from trusted reverse proxy. "
+                    "Enabled by default to prevent direct backend access from spoofing auth headers. "
+                    "Set PROXY_SECRET to a strong random value, or explicitly disable with "
+                    "FEATURE_PROXY_SECRET_ENABLED=false if the backend is network-isolated.",
         validation_alias="FEATURE_PROXY_SECRET_ENABLED"
     )
     proxy_secret_header: str = Field(
@@ -483,8 +528,10 @@ class AppSettings(BaseSettings):
         validation_alias="GLOBUS_SCOPES",
     )
     globus_session_secret: str = Field(
-        default="atlas-globus-session-change-me",
-        description="Secret key for Globus session middleware",
+        default="",
+        description="Secret key for Globus session middleware. Must be set to a strong random "
+                    "value when FEATURE_GLOBUS_AUTH_ENABLED=true. Globus auth will not start "
+                    "without this.",
         validation_alias="GLOBUS_SESSION_SECRET",
     )
 
@@ -590,7 +637,7 @@ class AppSettings(BaseSettings):
     mcp_config_file: str = Field(default="mcp.json", validation_alias="MCP_CONFIG_FILE")
     rag_sources_config_file: str = Field(default="rag-sources.json", validation_alias="RAG_SOURCES_CONFIG_FILE")
     llm_config_file: str = Field(default="llmconfig.yml", validation_alias="LLM_CONFIG_FILE")
-    help_config_file: str = Field(default="help-config.json", validation_alias="HELP_CONFIG_FILE")
+    help_config_file: str = Field(default="help.md", validation_alias="HELP_CONFIG_FILE")
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
     tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
     splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")

@@ -23,7 +23,7 @@ const RagPanel = ({ isOpen, onClose }) => {
       case 'SOC2': return 'bg-red-600 text-white'
       case 'Internal': return 'bg-yellow-600 text-gray-900'
       case 'Public': return 'bg-green-600 text-white'
-      default: return 'bg-gray-500 text-white'
+      default: return 'bg-gray-500 text-gray-50'
     }
   }
 
@@ -125,7 +125,7 @@ const RagPanel = ({ isOpen, onClose }) => {
             <button
               onClick={clearAll}
               disabled={selectedDataSources.size === 0}
-              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-gray-50 text-sm font-medium rounded-lg transition-colors"
             >
               <Square className="w-4 h-4" />
               Clear All

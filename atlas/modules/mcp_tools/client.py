@@ -27,6 +27,19 @@ logger = logging.getLogger(__name__)
 LogCallback = Callable[[str, str, str, Dict[str, Any]], Awaitable[None]]
 
 
+def _is_task_forbidden_error(exc: BaseException) -> bool:
+    """Return True when an MCP call failed because the specific tool refuses
+    task-augmented execution (fastmcp `tasks.mode="forbidden"`).
+
+    A server may advertise task capability overall while individual tools
+    opt out. fastmcp surfaces that as an `McpError` whose message contains
+    "does not support task-augmented execution"
+    (see fastmcp/server/tasks/routing.py). We match on the message text
+    because the concrete exception class varies across fastmcp versions.
+    """
+    return "does not support task-augmented execution" in str(exc)
+
+
 class _ElicitationRoutingContext:
     def __init__(
         self,
@@ -171,6 +184,11 @@ class MCPToolManager:
 
         # Cache of which servers support background tasks
         self._server_task_support: Dict[str, bool] = {}
+        # Per-tool cache for tools that the server refused task-mode on (e.g.
+        # fastmcp tools declared with tasks.mode="forbidden"). A server may
+        # advertise task capability overall while individual tools opt out;
+        # we learn this on first failure and skip task mode thereafter.
+        self._tool_task_forbidden: set[tuple[str, str]] = set()
 
         # Task timeout: seconds before switching to background task polling
         app_settings = config_manager.app_settings
@@ -1783,21 +1801,41 @@ class MCPToolManager:
                     logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
                     return result
 
-            # With persistent session, try adaptive task mode
-            use_tasks = self._supports_tasks(server_name, active_client)
+            # With persistent session, try adaptive task mode — unless this
+            # specific tool was already observed to refuse task mode
+            # (fastmcp tasks.mode="forbidden").
+            use_tasks = (
+                self._supports_tasks(server_name, active_client)
+                and (server_name, tool_name) not in self._tool_task_forbidden
+            )
+
+            tool_task = None
+            if use_tasks:
+                try:
+                    tool_task = await active_client.call_tool(tool_name, arguments, task=True, **kwargs)
+                except Exception as task_exc:
+                    if _is_task_forbidden_error(task_exc):
+                        logger.info(
+                            "Tool %s on %s does not support task-augmented execution; "
+                            "falling back to synchronous call and caching the decision.",
+                            sanitize_for_logging(tool_name),
+                            sanitize_for_logging(server_name),
+                        )
+                        self._tool_task_forbidden.add((server_name, tool_name))
+                        use_tasks = False
+                    else:
+                        raise
 
             if use_tasks:
-                tool_task = await active_client.call_tool(tool_name, arguments, task=True, **kwargs)
-
                 if tool_task.returned_immediately:
-                    result = tool_task.result
+                    result = await tool_task.result()
                 else:
                     try:
                         await asyncio.wait_for(
                             tool_task.wait(),
                             timeout=task_timeout,
                         )
-                        result = tool_task.result
+                        result = await tool_task.result()
                     except asyncio.TimeoutError:
                         # Exceeded threshold -- notify UI and keep waiting
                         if update_cb:
@@ -1826,7 +1864,7 @@ class MCPToolManager:
                         try:
                             remaining = max(call_timeout - task_timeout, 1)
                             await tool_task.wait(timeout=remaining)
-                            result = tool_task.result
+                            result = await tool_task.result()
                         except asyncio.CancelledError:
                             await tool_task.cancel()
                             raise
@@ -1842,7 +1880,8 @@ class MCPToolManager:
                     except asyncio.CancelledError:
                         await tool_task.cancel()
                         raise
-            else:
+
+            if not use_tasks:
                 result = await asyncio.wait_for(
                     active_client.call_tool(tool_name, arguments, **kwargs),
                     timeout=call_timeout,

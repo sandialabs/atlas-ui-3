@@ -102,6 +102,7 @@ For external HTTP REST API RAG backends:
 | `default_model` | No | `"openai/gpt-oss-120b"` | Model for RAG queries |
 | `top_k` | No | `4` | Number of documents to retrieve |
 | `timeout` | No | `60.0` | Request timeout in seconds |
+| `strip_domain` | No | `false` | Strip `@domain` from usernames before sending to RAG API (e.g. `user@corp.com` → `user`) |
 | `groups` | No | `[]` | Required groups for access |
 | `compliance_level` | No | `null` | Compliance level restriction |
 | `enabled` | No | `true` | Whether this source is active |
@@ -140,6 +141,42 @@ For MCP-based RAG servers that expose `rag_discover_resources` tool:
 | `compliance_level` | No | `null` | Compliance level restriction |
 
 \* Either `command` or `url` is required for MCP sources.
+
+### Username Domain Stripping
+
+Some RAG backends expect plain usernames (e.g. `alice`) rather than full email addresses (e.g. `alice@corp.com`). The `strip_domain` option handles this automatically.
+
+When `strip_domain` is set to `true`, Atlas strips the `@domain` portion from the username before sending it in the `as_user` query parameter to the RAG API. This affects both discovery and query requests.
+
+**Example:**
+
+```json
+{
+  "atlas_rag": {
+    "type": "http",
+    "url": "${ATLAS_RAG_URL}",
+    "bearer_token": "${ATLAS_RAG_BEARER_TOKEN}",
+    "strip_domain": true
+  }
+}
+```
+
+With this configuration, if the authenticated user is `alice@corp.com`, the discovery request becomes:
+
+```
+GET /discover/datasources?as_user=alice
+```
+
+instead of:
+
+```
+GET /discover/datasources?as_user=alice@corp.com
+```
+
+**Behavior details:**
+- Defaults to `false` (full email is sent as-is)
+- If the username contains no `@`, it is sent unchanged regardless of this setting
+- Only the portion before the first `@` is kept (e.g. `user@sub@corp.com` → `user`)
 
 ## API Contract (HTTP Sources)
 

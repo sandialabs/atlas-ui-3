@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 import httpx
 from fastapi import HTTPException
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.modules.rag.client import DataSource, DocumentMetadata, RAGMetadata, RAGResponse
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class AtlasRAGClient:
         default_model: str = "openai/gpt-oss-120b",
         top_k: int = 4,
         timeout: float = 60.0,
+        strip_domain: bool = False,
     ):
         """Initialize the external RAG client.
 
@@ -42,19 +44,34 @@ class AtlasRAGClient:
             default_model: Default model to use for RAG queries.
             top_k: Default number of documents to retrieve.
             timeout: Request timeout in seconds.
+            strip_domain: If True, strip @domain from usernames before sending
+                to the RAG API (e.g. user@corp.com -> user).
         """
         self.base_url = base_url.rstrip("/")
         self.bearer_token = bearer_token
         self.default_model = default_model
         self.top_k = top_k
         self.timeout = timeout
+        self.strip_domain = strip_domain
 
         logger.info(
-            "AtlasRAGClient initialized: url=%s, model=%s, top_k=%d",
+            "AtlasRAGClient initialized: url=%s, model=%s, top_k=%d, strip_domain=%s",
             self.base_url,
             self.default_model,
             self.top_k,
+            self.strip_domain,
         )
+
+    def _resolve_username(self, user_name: str) -> str:
+        """Resolve the username to send to the RAG API.
+
+        If strip_domain is enabled, strips the @domain portion from email addresses.
+        """
+        if self.strip_domain and "@" in user_name:
+            stripped = user_name.split("@", 1)[0]
+            logger.debug("Stripped domain from username: %s -> %s", sanitize_for_logging(user_name), sanitize_for_logging(stripped))
+            return stripped
+        return user_name
 
     def _get_headers(self) -> Dict[str, str]:
         """Build HTTP headers for API requests."""
@@ -74,6 +91,7 @@ class AtlasRAGClient:
         Returns:
             List of DataSource objects the user can access.
         """
+        user_name = self._resolve_username(user_name)
         logger.info("Discovering data sources for user: %s", user_name)
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -124,7 +142,8 @@ class AtlasRAGClient:
                 return []
 
     async def query_rag(
-        self, user_name: str, data_source: str, messages: List[Dict]
+        self, user_name: str, data_source: str, messages: List[Dict],
+        data_sources: Optional[List[str]] = None,
     ) -> RAGResponse:
         """Query RAG endpoint for a response with metadata.
 
@@ -132,8 +151,11 @@ class AtlasRAGClient:
 
         Args:
             user_name: The username making the query.
-            data_source: The data source (corpus) to query.
+            data_source: A single data source (corpus) to query. Ignored if data_sources is provided.
             messages: List of message dictionaries with role and content.
+            data_sources: Multiple data sources (corpora) to query in a single request.
+                When provided, all sources are sent as one batched request instead of
+                requiring separate calls per source.
 
         Returns:
             RAGResponse containing content and optional metadata.
@@ -141,10 +163,14 @@ class AtlasRAGClient:
         Raises:
             HTTPException: On API errors (403, 404, 500).
         """
+        # Resolve corpora list: prefer explicit list, fall back to single source
+        corpora = data_sources if data_sources else ([data_source] if data_source else None)
+        user_name = self._resolve_username(user_name)
+
         logger.info(
-            "[HTTP-RAG] query_rag called: user=%s, data_source=%s, message_count=%d",
+            "[HTTP-RAG] query_rag called: user=%s, corpora=%s, message_count=%d",
             user_name,
-            data_source,
+            corpora,
             len(messages),
         )
 
@@ -165,7 +191,7 @@ class AtlasRAGClient:
             "stream": False,
             "model": self.default_model,
             "top_k": self.top_k,
-            "corpora": [data_source] if data_source else None,
+            "corpora": corpora,
             "threshold": None,
             "expanded_window": [0, 0],
         }
@@ -290,20 +316,33 @@ class AtlasRAGClient:
             # Map documents_found to DocumentMetadata list
             documents_found = []
             for doc in rm.get("documents_found", []):
+                # data_source may be a nested dict {id, label, ...} or absent;
+                # corpus_id and title are the legacy flat-field equivalents.
+                ds = doc.get("data_source") if isinstance(doc.get("data_source"), dict) else {}
+                source = doc.get("corpus_id") or ds.get("id") or ""
+                title = doc.get("title") or ds.get("label") or None
                 doc_metadata = DocumentMetadata(
-                    source=doc.get("corpus_id", ""),
+                    source=source,
                     content_type=doc.get("content_type", "atlas-search"),
                     confidence_score=doc.get("confidence_score", 0.0),
                     chunk_id=str(doc.get("id")) if doc.get("id") else None,
                     last_modified=doc.get("last_modified"),
+                    title=title,
+                    url=doc.get("url"),
                 )
                 documents_found.append(doc_metadata)
 
-            # Determine data source name from response or fallback
+            # Determine data source name from response or fallback.
+            # data_sources entries may be plain strings or dicts with id/label.
             data_sources_list = rm.get("data_sources", [])
-            data_source_name = (
-                data_sources_list[0] if data_sources_list else data_source
-            )
+            if data_sources_list:
+                first = data_sources_list[0]
+                if isinstance(first, dict):
+                    data_source_name = first.get("label") or first.get("id") or data_source
+                else:
+                    data_source_name = first
+            else:
+                data_source_name = data_source
 
             return RAGMetadata(
                 query_processing_time_ms=rm.get("query_processing_time_ms", 0),

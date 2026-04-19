@@ -194,7 +194,7 @@ const MCPServerManager = ({ addNotification }) => {
           placeholder="Search servers..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-50 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
         />
       </div>
 
@@ -218,7 +218,7 @@ const MCPServerManager = ({ addNotification }) => {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">
                     {getStatusIcon(status)}
-                    <h3 className="font-medium text-white">{serverName}</h3>
+                    <h3 className="font-medium text-gray-50">{serverName}</h3>
                     {serverInfo?.compliance_level && (
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${getComplianceLevelColor(serverInfo.compliance_level)}`}>
                         {serverInfo.compliance_level}

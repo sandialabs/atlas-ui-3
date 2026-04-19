@@ -24,6 +24,10 @@ param(
     [Alias("m")][switch]$StartMcpMock
 )
 
+# Force UTF-8 output encoding for the console and all output streams on Windows
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # Store the project root directory
 $PROJECT_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $PROJECT_ROOT
@@ -85,7 +89,7 @@ function Stop-Processes {
 function Clear-Logs {
     Write-Host "Clearing log for fresh start"
     New-Item -ItemType Directory -Path "$PROJECT_ROOT/logs" -Force | Out-Null
-    "NEW LOG" | Out-File -FilePath "$PROJECT_ROOT/logs/app.jsonl"
+    [System.IO.File]::WriteAllText("$PROJECT_ROOT/logs/app.jsonl", "NEW LOG`n", [System.Text.Encoding]::UTF8)
 }
 
 # =============================================================================
@@ -264,8 +268,20 @@ function Build-Frontend {
         $env:VITE_APP_NAME = "Chat UI 13"
     }
 
+    # RAG citations UI is opt-in at build time; default to off if unset.
+    if (-not $env:VITE_FEATURE_RAG_CITATIONS) {
+        $env:VITE_FEATURE_RAG_CITATIONS = "false"
+    }
+
     npm run build
     Set-Location $PROJECT_ROOT
+
+    # Copy build output to atlas/static/ so the backend always serves from one
+    # location, matching the PyPI package layout.
+    if (Test-Path "$PROJECT_ROOT/atlas/static") {
+        Remove-Item -Recurse -Force "$PROJECT_ROOT/atlas/static"
+    }
+    Copy-Item -Recurse "$PROJECT_ROOT/frontend/dist" "$PROJECT_ROOT/atlas/static"
 }
 
 # =============================================================================

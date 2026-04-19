@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image, Wrench } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
+import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
 
@@ -35,6 +36,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     isSynthesizing,
     sendChatMessage,
     currentModel,
+    models,
     tools,
     selectedTools,
     toggleTool,
@@ -59,6 +61,16 @@ const ChatArea = ({ onOpenRagPanel }) => {
     setFollowUpSuggestions,
   } = useChat()
   const { isConnected } = useWS()
+
+  // Whether the currently selected model supports vision (image) input
+  const currentModelSupportsVision = models?.some(
+    m => m.name === currentModel && m.supports_vision === true
+  ) ?? false
+
+  // Whether the currently selected model supports tool/function calling
+  const currentModelSupportsTools = models?.some(
+    m => m.name === currentModel && m.supports_tools !== false
+  ) ?? true
 
   // Auto-resize textarea
   const autoResizeTextarea = () => {
@@ -212,7 +224,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
       if (file && file.s3_key) {
         try {
           // Fetch file content from S3 via API
-          const response = await fetch(`/api/files/${encodeURIComponent(file.s3_key)}`, {
+          const response = await fetch(`/api/files/${encodeFileKeyPath(file.s3_key)}`, {
             headers: {
               'Authorization': `Bearer ${localStorage.getItem('userEmail') || 'user@example.com'}`
             }
@@ -557,7 +569,21 @@ const ChatArea = ({ onOpenRagPanel }) => {
     return 'No Extract'
   }
 
-  const sanitizeFilename = (name) => name.replace(/\s+/g, '_')
+  const sanitizeFilename = (name) => name.replace(/[^\w.-]+/g, '_')
+
+  // Raster formats only — SVG is vector XML, not useful for LLM vision.
+  const IMAGE_MIME_TYPES = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp'
+  }
+
+  const isImageFile = (filename) =>
+    /\.(jpe?g|png|gif|webp|bmp)$/i.test(filename)
+
+  const getImageMimeType = (filename) => {
+    const ext = filename.split('.').pop()?.toLowerCase()
+    return IMAGE_MIME_TYPES[ext] || 'image/png'
+  }
 
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files)
@@ -615,6 +641,14 @@ const ChatArea = ({ onOpenRagPanel }) => {
     if (!items) return
     const pastedFiles = Array.from(items).filter(item => item.kind === 'file')
     if (pastedFiles.length === 0) return
+    // When clipboard has both text and images (e.g. copy from Office docs),
+    // default to text paste so the user gets the text they copied, not a screenshot.
+    // Excludes text/uri-list which accompanies file copies from file managers.
+    const allFilesAreImages = pastedFiles.every(item => item.type && item.type.startsWith('image/'))
+    const hasText = Array.from(items).some(
+      item => item.kind === 'string' && item.type?.startsWith('text/') && item.type !== 'text/uri-list'
+    )
+    if (hasText && allFilesAreImages) return
     e.preventDefault()
     pastedFiles.forEach((item, idx) => {
       const file = item.getAsFile()
@@ -766,7 +800,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
       <main
         ref={messagesRef}
-        className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0"
+        className={`overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
         {messages.map((message, index) => (
           <Message
@@ -859,6 +893,27 @@ const ChatArea = ({ onOpenRagPanel }) => {
         <div className="max-w-4xl mx-auto">
           {/* Enabled Tools Indicator */}
           <EnabledToolsIndicator />
+
+          {/* Warning: tools selected but model doesn't support tools */}
+          {selectedTools.size > 0 && !currentModelSupportsTools && (
+            <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
+              <Wrench className="w-4 h-4 flex-shrink-0" />
+              <span>
+                <strong>{currentModel}</strong> does not support tool/function calling. Selected tools will be ignored. Switch to a tool-capable model to use tools.
+              </span>
+            </div>
+          )}
+
+          {/* Warning: images uploaded but model doesn't support vision */}
+          {Object.keys(uploadedFiles).some(f => isImageFile(f)) && !currentModelSupportsVision && (
+            <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
+              <Image className="w-4 h-4 flex-shrink-0" />
+              <span>
+                <strong>{currentModel}</strong> does not support vision/image input. Uploaded images will be listed as file references but cannot be visually analyzed. Switch to a vision-capable model for image analysis.
+              </span>
+            </div>
+          )}
+
           {/* Uploaded Files Display */}
           {Object.keys(uploadedFiles).length > 0 && (
             <div className="mb-3 p-3 bg-gray-800 rounded-lg border border-gray-600">
@@ -886,6 +941,40 @@ const ChatArea = ({ onOpenRagPanel }) => {
               </div>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(uploadedFiles).map(([filename, fileData]) => {
+                  const isImage = isImageFile(filename)
+                  const showAsVisionImage = isImage && currentModelSupportsVision
+
+                  // Vision image: show thumbnail card
+                  if (showAsVisionImage) {
+                    const mimeType = getImageMimeType(filename)
+                    const dataUrl = `data:${mimeType};base64,${fileData.content}`
+                    return (
+                      <div
+                        key={filename}
+                        className="relative flex flex-col items-center bg-gray-800 border border-indigo-500/50 rounded-lg p-1 gap-1"
+                        style={{ maxWidth: '80px' }}
+                      >
+                        <img
+                          src={dataUrl}
+                          alt={filename}
+                          className="w-16 h-16 object-cover rounded"
+                          title={filename}
+                        />
+                        <div className="flex items-center gap-1 w-full justify-between px-1">
+                          <Image className="w-3 h-3 text-indigo-400 flex-shrink-0" title="Sent as image to vision model" />
+                          <span className="text-gray-300 text-xs truncate" title={filename} style={{ maxWidth: '44px' }}>{filename}</span>
+                          <button
+                            onClick={() => removeFile(filename)}
+                            className="text-gray-400 hover:text-red-400 transition-colors flex-shrink-0"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  // Non-image file (or image with non-vision model): show pill chip
                   const supportsExtraction = canExtractFile(filename)
                   const mode = fileData.extractMode || 'none'
                   const borderColors = {
@@ -1012,7 +1101,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <span className="font-black text-white">/{tool.name}</span>
+                        <span className="font-black">/{tool.name}</span>
                         <span className="text-xs text-gray-400">from {tool.server}</span>
                       </div>
                     </div>
@@ -1038,7 +1127,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="font-medium text-white">@file {file.filename}</span>
+                          <span className="font-medium">@file {file.filename}</span>
                           <span className="text-xs px-2 py-1 rounded bg-gray-600 text-gray-300">{file.type}</span>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-gray-400">

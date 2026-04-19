@@ -108,6 +108,24 @@ class FileContentExtractor:
 
         return extractor
 
+    def is_plain_text_type(self, filename: str) -> bool:
+        """
+        Check if a file's extension is in the configured plain-text types list.
+
+        Plain-text files are read directly from their base64-encoded content
+        without requiring a remote extractor service.
+
+        Args:
+            filename: The filename to check
+
+        Returns:
+            True if the extension is listed in plain_text_types
+        """
+        if not self.is_enabled():
+            return False
+        ext = Path(filename).suffix.lower()
+        return ext in self.config.plain_text_types
+
     def can_extract(self, filename: str, mime_type: Optional[str] = None) -> bool:
         """
         Check if content extraction is possible for a given file.
@@ -117,19 +135,22 @@ class FileContentExtractor:
             mime_type: Optional MIME type
 
         Returns:
-            True if an enabled extractor is available for this file type
+            True if an enabled extractor or plain-text read is available for this file type
         """
-        return self.get_extractor_for_file(filename, mime_type) is not None
+        return (
+            self.is_plain_text_type(filename)
+            or self.get_extractor_for_file(filename, mime_type) is not None
+        )
 
     def get_supported_extensions(self) -> list[str]:
         """Get list of file extensions that have extraction support."""
         if not self.is_enabled():
             return []
 
-        supported = []
+        supported = list(self.config.plain_text_types)
         for ext, extractor_name in self.config.extension_mapping.items():
             extractor = self.config.extractors.get(extractor_name)
-            if extractor and extractor.enabled:
+            if extractor and extractor.enabled and ext not in supported:
                 supported.append(ext)
         return supported
 
@@ -140,7 +161,12 @@ class FileContentExtractor:
         mime_type: Optional[str] = None,
     ) -> ExtractionResult:
         """
-        Extract content from a file using the appropriate HTTP extractor service.
+        Extract content from a file using the appropriate method.
+
+        For files listed in plain_text_types the base64 payload is decoded and
+        returned directly without calling an external extractor service.  For
+        all other supported file types the configured HTTP extractor service is
+        called.
 
         Args:
             filename: The name of the file
@@ -150,6 +176,49 @@ class FileContentExtractor:
         Returns:
             ExtractionResult with extracted content or error information
         """
+        # --- Plain-text fast path: decode and return directly ---
+        if self.is_plain_text_type(filename):
+            # Enforce size limit (mirrors the per-extractor max_file_size_mb check)
+            max_size_mb = self.config.max_plain_text_size_mb
+            content_size_mb = len(content_base64) * 3 / 4 / (1024 * 1024)
+            if content_size_mb > max_size_mb:
+                return ExtractionResult(
+                    success=False,
+                    error=f"File too large: {content_size_mb:.1f}MB exceeds limit of {max_size_mb}MB"
+                )
+
+            try:
+                raw_bytes = base64.b64decode(content_base64)
+            except Exception as e:
+                return ExtractionResult(
+                    success=False,
+                    error=f"Failed to decode base64 content: {str(e)}"
+                )
+            try:
+                text = raw_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                try:
+                    text = raw_bytes.decode("latin-1")
+                except Exception as e:
+                    return ExtractionResult(
+                        success=False,
+                        error=f"Failed to decode file as text: {str(e)}"
+                    )
+
+            preview_chars = self.config.plain_text_preview_chars
+            if len(text) > preview_chars:
+                preview = text[:preview_chars] + "..."
+            else:
+                preview = text
+
+            logger.debug(f"Plain-text read for {filename}: {len(text)} chars")
+            return ExtractionResult(
+                success=True,
+                content=text,
+                preview=preview,
+                metadata={"method": "plain_text_read"}
+            )
+
         extractor = self.get_extractor_for_file(filename, mime_type)
         if not extractor:
             return ExtractionResult(

@@ -194,7 +194,7 @@ const MarketplacePanel = () => {
 
                 {/* Server Info */}
                 <div className="mb-3">
-                  <h3 className="text-base font-semibold text-white capitalize mb-1">
+                  <h3 className="text-base font-semibold text-gray-50 capitalize mb-1">
                     {server.server}
                   </h3>
                   

@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom' 
 import { ChatProvider, useChat } from './contexts/ChatContext'
 import { WSProvider } from './contexts/WSContext'
 import { MarketplaceProvider } from './contexts/MarketplaceContext'
+import { ThemeProvider } from './contexts/ThemeContext'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import ChatArea from './components/ChatArea'
@@ -221,16 +222,18 @@ function App() {
   }, [])
   
   return (
-    <Router>
-      <WSProvider>
-        <ChatProvider>
-          <MarketplaceProvider>
-            <SplashScreen config={splashConfig} />
-            <AppRoutes />
-          </MarketplaceProvider>
-        </ChatProvider>
-      </WSProvider>
-    </Router>
+    <ThemeProvider>
+      <Router>
+        <WSProvider>
+          <ChatProvider>
+            <MarketplaceProvider>
+              <SplashScreen config={splashConfig} />
+              <AppRoutes />
+            </MarketplaceProvider>
+          </ChatProvider>
+        </WSProvider>
+      </Router>
+    </ThemeProvider>
   )
 }
 

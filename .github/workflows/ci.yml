@@ -69,13 +69,24 @@ jobs:
         echo "Running tests in production mode (DEBUG_MODE=false)"
         docker run --rm --workdir /app test-image-prod:latest bash /app/test/run_tests.sh all
 
+    - name: Get build metadata
+      id: build_meta
+      run: |
+        echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
+
     - name: Build production Docker image
       uses: docker/build-push-action@v7
       with:
         context: .
         load: true
         build-args: |
-          VITE_APP_NAME=Chat UI
+          VITE_APP_NAME=ATLAS
+          VITE_FEATURE_ANIMATED_LOGO=true
+          VITE_FEATURE_POWERED_BY_ATLAS=false
+          VITE_FEATURE_RAG_CITATIONS=false
+          GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
+          APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
 
@@ -85,6 +96,11 @@ jobs:
         context: .
         push: true
         build-args: |
-          VITE_APP_NAME=Chat UI
+          VITE_APP_NAME=ATLAS
+          VITE_FEATURE_ANIMATED_LOGO=true
+          VITE_FEATURE_POWERED_BY_ATLAS=false
+          VITE_FEATURE_RAG_CITATIONS=false
+          GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
+          APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}

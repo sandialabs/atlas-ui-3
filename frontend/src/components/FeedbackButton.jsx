@@ -117,7 +117,7 @@ const FeedbackButton = () => {
             <div className="p-6">
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-white">Share Your Feedback</h3>
+                <h3 className="text-lg font-semibold text-gray-50">Share Your Feedback</h3>
                 <button
                   onClick={() => setIsOpen(false)}
                   className="text-gray-400 hover:text-white transition-colors"

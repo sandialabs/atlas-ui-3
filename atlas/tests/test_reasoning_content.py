@@ -96,7 +96,8 @@ async def test_stream_plain_yields_reasoning_block():
     mixin = LiteLLMStreamingMixin()
     mixin._get_litellm_model_name = lambda m: m
     mixin._get_model_kwargs = lambda m, t, user_email=None: {"max_tokens": 100, "temperature": 0.7}
-    mixin._sanitize_messages = lambda m: m
+    mixin._prepare_messages = lambda model_name, messages: messages
+    mixin._raise_llm_domain_error = lambda exc: (_ for _ in ()).throw(exc)
 
     with patch('atlas.modules.llm.litellm_streaming.acompletion', side_effect=mock_acompletion):
         items = []
@@ -140,7 +141,8 @@ async def test_stream_with_tools_yields_reasoning_block():
     mixin = LiteLLMStreamingMixin()
     mixin._get_litellm_model_name = lambda m: m
     mixin._get_model_kwargs = lambda m, t, user_email=None: {"max_tokens": 100, "temperature": 0.7}
-    mixin._sanitize_messages = lambda m: m
+    mixin._prepare_messages = lambda model_name, messages: messages
+    mixin._raise_llm_domain_error = lambda exc: (_ for _ in ()).throw(exc)
 
     with patch('atlas.modules.llm.litellm_streaming.acompletion', side_effect=mock_acompletion):
         items = []

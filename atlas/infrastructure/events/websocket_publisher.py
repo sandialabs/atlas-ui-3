@@ -26,6 +26,17 @@ class WebSocketEventPublisher:
         """
         self.connection = connection
 
+    async def publish_warning(
+        self,
+        message: str,
+    ) -> None:
+        """Publish a warning message to the client."""
+        if self.connection:
+            await self.connection.send_json({
+                "type": "warning",
+                "message": message,
+            })
+
     async def publish_chat_response(
         self,
         message: str,

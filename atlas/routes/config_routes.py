@@ -88,6 +88,11 @@ async def get_config_shell(
         elif api_key_source == "globus":
             model_info["api_key_source"] = "globus"
             model_info["globus_scope"] = getattr(model_config, "globus_scope", None)
+        model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
+        model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
+        model_card = getattr(model_config, "model_card", None)
+        if model_card:
+            model_info["model_card"] = model_card
         models_list.append(model_info)
 
     return {
@@ -257,9 +262,8 @@ async def get_config(
                         'compliance_level': server_config.get('compliance_level')
                     })
 
-    # Read help page configuration (supports new config directory layout + legacy paths)
-    help_config = {}
-    import json
+    # Read help page content from a markdown file (with legacy JSON fallback)
+    help_content = ""
     help_config_filename = config_manager.app_settings.help_config_file
     help_paths = []
     try:
@@ -285,19 +289,41 @@ async def get_config(
             if p.exists():
                 found_path = p
                 break
+
+        # Legacy fallback: if help.md was not found, try help-config.json
+        if not found_path and help_config_filename.endswith(".md"):
+            legacy_filename = help_config_filename.rsplit(".", 1)[0] + "-config.json"
+            try:
+                legacy_paths = config_manager._search_paths(legacy_filename)  # type: ignore[attr-defined]
+            except AttributeError:
+                from pathlib import Path
+                atlas_root = Path(__file__).parent.parent
+                project_root = atlas_root.parent
+                legacy_paths = [
+                    project_root / "config" / "overrides" / legacy_filename,
+                    project_root / "config" / "defaults" / legacy_filename,
+                    atlas_root / "configfilesadmin" / legacy_filename,
+                    atlas_root / "configfiles" / legacy_filename,
+                    atlas_root / legacy_filename,
+                    project_root / legacy_filename,
+                ]
+            for p in legacy_paths:
+                if p.exists():
+                    found_path = p
+                    logger.info("Using legacy help config %s (migrate to help.md)", found_path)
+                    break
+
         if found_path:
             with open(found_path, "r", encoding="utf-8") as f:
-                help_config = json.load(f)
-            logger.info(f"Loaded help config from {found_path}")
+                help_content = f.read()
+            logger.info(f"Loaded help content from {found_path}")
         else:
             logger.warning(
-                "Help config not found in any of these locations: %s",
+                "Help content file not found in any of these locations: %s",
                 [str(p) for p in help_paths]
             )
-            help_config = {"title": "Help & Documentation", "sections": []}
     except Exception as e:
-        logger.warning(f"Error loading help config: {e}")
-        help_config = {"title": "Help & Documentation", "sections": []}
+        logger.warning(f"Error loading help content: {e}")
 
     # Keep INFO logging concise; server lists can be very long.
     logger.info(
@@ -339,6 +365,11 @@ async def get_config(
                 model_info["user_has_key"] = stored is not None
             else:
                 model_info["user_has_key"] = False
+        model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
+        model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
+        model_card = getattr(model_config, "model_card", None)
+        if model_card:
+            model_info["model_card"] = model_card
         models_list.append(model_info)
 
     # Build tool approval settings - only include tools from authorized servers
@@ -376,7 +407,7 @@ async def get_config(
         "authorized_servers": authorized_servers,  # Optional: expose for debugging
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
-        "help_config": help_config,  # Help page configuration from help-config.json
+        "help_content": help_content,  # Help page content from help.md
         "tool_approvals": {
             "require_approval_by_default": tool_approvals_config.require_approval_by_default,
             "tools": filtered_tool_approvals
@@ -431,11 +462,11 @@ def _get_file_extraction_config(config_manager) -> dict:
     try:
         extractors_config = config_manager.file_extractors_config
 
-        # Get list of extensions with enabled extractors
-        supported_extensions = []
+        # Get list of all extractable extensions (plain-text + enabled HTTP extractors)
+        supported_extensions = list(extractors_config.plain_text_types)
         for ext, extractor_name in extractors_config.extension_mapping.items():
             extractor = extractors_config.extractors.get(extractor_name)
-            if extractor and extractor.enabled:
+            if extractor and extractor.enabled and ext not in supported_extensions:
                 supported_extensions.append(ext)
 
         return {

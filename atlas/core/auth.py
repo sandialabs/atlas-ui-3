@@ -56,9 +56,11 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         # Everybody is in the users group by default
         if (group_id == "users"):
             return True
-        # Fallback to mock implementation if no external endpoint is configured
-        if (app_settings.debug_mode and
-                user_id == app_settings.test_user and
+        # Mock group membership is only available in debug mode
+        if not app_settings.debug_mode:
+            return False
+        # Allow configured test user to access admin group in debug mode
+        if (user_id == app_settings.test_user and
                 group_id == app_settings.admin_group):
             return True
 

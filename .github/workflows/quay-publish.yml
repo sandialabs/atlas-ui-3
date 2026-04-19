@@ -43,6 +43,12 @@ jobs:
           type=sha,enable=true,prefix=${{ github.ref_name }}-
           type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
+    - name: Get build metadata
+      id: build_meta
+      run: |
+        echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
+
     - name: Build and push to Quay.io
       uses: docker/build-push-action@v7
       with:
@@ -50,7 +56,12 @@ jobs:
         file: ./Dockerfile
         push: true
         build-args: |
-          VITE_APP_NAME=Chat UI
+          VITE_APP_NAME=ATLAS
+          VITE_FEATURE_ANIMATED_LOGO=true
+          VITE_FEATURE_POWERED_BY_ATLAS=false
+          VITE_FEATURE_RAG_CITATIONS=false
+          GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
+          APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha

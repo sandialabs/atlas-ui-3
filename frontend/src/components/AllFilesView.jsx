@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
+import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 
 const AllFilesView = () => {
   const { token, user: userEmail, ensureSession, addSystemEvent, addPendingFileEvent, attachments } = useChat()
@@ -163,7 +164,7 @@ const AllFilesView = () => {
 
   const handleDownloadFile = async (file) => {
     try {
-      const response = await fetch(`/api/files/download/${encodeURIComponent(file.key)}`, {
+      const response = await fetch(`/api/files/download/${encodeFileKeyPath(file.key)}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -193,7 +194,7 @@ const AllFilesView = () => {
     }
 
     try {
-      const response = await fetch(`/api/files/${encodeURIComponent(file.key)}`, {
+      const response = await fetch(`/api/files/${encodeFileKeyPath(file.key)}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -288,7 +289,7 @@ const AllFilesView = () => {
 
       {/* Section Header */}
       <div className="mb-4">
-        <h3 className="text-lg font-semibold text-white">
+        <h3 className="text-lg font-semibold text-gray-50">
           All Files ({filteredFiles.length})
         </h3>
         <p className="text-sm text-gray-400 mt-1">
@@ -307,7 +308,7 @@ const AllFilesView = () => {
               placeholder="Search files..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+              className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-50 placeholder-gray-400 focus:outline-none focus:border-blue-500"
             />
           </div>
 
@@ -315,7 +316,7 @@ const AllFilesView = () => {
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
-            className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
+            className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-50 focus:outline-none focus:border-blue-500"
           >
             <option value="all">All Types</option>
             <option value="user">Uploaded</option>
@@ -379,7 +380,7 @@ const AllFilesView = () => {
                 {/* File Content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1">
-                    <h3 className="text-white font-semibold text-base truncate font-mono">
+                    <h3 className="text-gray-50 font-semibold text-base truncate font-mono">
                       {file.filename}
                     </h3>
                     <div className="flex items-center gap-2 text-xs">

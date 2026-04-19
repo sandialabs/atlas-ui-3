@@ -8,6 +8,7 @@ def _ensure_litellm_stub():
     m = types.ModuleType("litellm")
     # Attributes used at import time
     m.drop_params = True
+    m.modify_params = True
     def _set_verbose(*args, **kwargs):
         return None
     m.set_verbose = _set_verbose

@@ -1,0 +1,13 @@
+[project]
+name = "mcp-http-mock"
+version = "0.1.0"
+description = "MCP HTTP Mock Server for ATLAS testing"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=3.2.3,<4.0.0",
+    "requests>=2.31.0",
+]
+
+[build-system]
+requires = ["setuptools>=82.0.1", "wheel"]
+build-backend = "setuptools.build_meta"

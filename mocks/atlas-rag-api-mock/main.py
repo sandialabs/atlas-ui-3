@@ -159,6 +159,7 @@ class DocumentFound(BaseModel):
     confidence_score: float
     content_type: str = "text"
     last_modified: Optional[str] = None
+    url: Optional[str] = None
 
 
 class RagMetadata(BaseModel):
@@ -265,6 +266,7 @@ def search_corpus(query: str, corpus_id: str, top_k: int = 4) -> List[DocumentFo
                 confidence_score=round(score, 2),
                 content_type="text",
                 last_modified=doc.get("last_modified"),
+                url=doc.get("url"),
             ))
 
     # Sort by confidence and return top_k

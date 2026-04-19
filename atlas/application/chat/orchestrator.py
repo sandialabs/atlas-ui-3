@@ -45,6 +45,7 @@ class ChatOrchestrator:
         rag_mode: Optional[RagModeRunner] = None,
         tools_mode: Optional[ToolsModeRunner] = None,
         agent_mode: Optional[AgentModeRunner] = None,
+        config_manager: Optional[Any] = None,
     ):
         """
         Initialize chat orchestrator.
@@ -61,6 +62,7 @@ class ChatOrchestrator:
             rag_mode: Optional pre-configured RAG mode runner
             tools_mode: Optional pre-configured tools mode runner
             agent_mode: Optional pre-configured agent mode runner
+            config_manager: Optional config manager for model capability lookups
         """
         self.llm = llm
         self.event_publisher = event_publisher
@@ -68,6 +70,7 @@ class ChatOrchestrator:
         self.tool_manager = tool_manager
         self.prompt_provider = prompt_provider
         self.file_manager = file_manager
+        self.config_manager = config_manager
 
         # Initialize services
         self.tool_authorization = ToolAuthorizationService(tool_manager=tool_manager)
@@ -91,6 +94,28 @@ class ChatOrchestrator:
             artifact_processor=artifact_processor,
         )
         self.agent_mode = agent_mode
+
+    def _model_supports_vision(self, model: str) -> bool:
+        """Return True if the named model is configured with supports_vision=True."""
+        if not self.config_manager:
+            return False
+        try:
+            model_config = self.config_manager.llm_config.models.get(model)
+            return bool(model_config and getattr(model_config, "supports_vision", False))
+        except Exception:
+            return False
+
+    def _model_supports_tools(self, model: str) -> bool:
+        """Return True if the named model is configured with supports_tools=True."""
+        if not self.config_manager:
+            return True  # Default to True for backward compat
+        try:
+            model_config = self.config_manager.llm_config.models.get(model)
+            if not model_config:
+                return True  # Unknown models default to tool-capable
+            return bool(getattr(model_config, "supports_tools", True))
+        except Exception:
+            return True
 
     async def execute(
         self,
@@ -146,18 +171,22 @@ class ChatOrchestrator:
         # Handle file ingestion
         update_callback = kwargs.get("update_callback")
         logger.debug(f"Orchestrator.execute: update_callback present = {update_callback is not None}")
+        model_supports_vision = self._model_supports_vision(model)
         session.context = await file_processor.handle_session_files(
             session_context=session.context,
             user_email=user_email,
             files_map=files,
             file_manager=self.file_manager,
-            update_callback=update_callback
+            update_callback=update_callback,
+            model_supports_vision=model_supports_vision,
+            event_publisher=self.event_publisher,
         )
 
         # Build messages with history and files manifest
         messages = await self.message_builder.build_messages(
             session=session,
-            include_files_manifest=True
+            include_files_manifest=True,
+            model_supports_vision=model_supports_vision,
         )
 
         # Apply MCP prompt override
@@ -167,6 +196,33 @@ class ChatOrchestrator:
             user_email=user_email,
             conversation_id=session.context.get("conversation_id", str(session_id)),
         )
+
+        # Strip tools / agent mode and warn if the model does not support tool/function calling
+        if not self._model_supports_tools(model):
+            warnings = []
+            if selected_tools:
+                logger.warning(
+                    "Model %s does not support tool calling; stripping %d selected tools",
+                    model,
+                    len(selected_tools),
+                )
+                warnings.append("Your selected tools have been disabled for this request.")
+                selected_tools = None
+            if agent_mode:
+                logger.warning(
+                    "Model %s does not support tool calling; disabling agent mode",
+                    model,
+                )
+                warnings.append("Agent mode has been disabled for this request.")
+                agent_mode = False
+            if warnings:
+                await self.event_publisher.publish_warning(
+                    message=(
+                        f"**Note:** The model `{model}` does not support tool/function calling. "
+                        + " ".join(warnings)
+                        + " Please switch to a tool-capable model."
+                    ),
+                )
 
         # Route to appropriate mode (always streaming)
         if agent_mode and self.agent_mode:
