@@ -98,10 +98,6 @@ class ChatService:
         # Track incognito sessions
         self._incognito_sessions: set = set()
 
-        # Legacy sessions dict - deprecated, use session_repository instead
-        # Kept temporarily for backward compatibility
-        self.sessions: Dict[UUID, Session] = {}
-
         # Initialize refactored services
         self.tool_authorization = ToolAuthorizationService(tool_manager=self.tool_manager)
         self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
@@ -188,9 +184,6 @@ class ChatService:
     ) -> Session:
         """Create a new chat session."""
         session = Session(id=session_id, user_email=user_email)
-
-        # Store in both legacy dict and new repository
-        self.sessions[session_id] = session
         await self.session_repository.create(session)
 
         logger.info(f"Created session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
@@ -237,15 +230,9 @@ class ChatService:
             )
 
         # Get or create session
-        session = self.sessions.get(session_id)
+        session = await self.session_repository.get(session_id)
         if not session:
-            # Try session repository
-            session = await self.session_repository.get(session_id)
-            if not session:
-                await self.create_session(session_id, user_email)
-            else:
-                # Sync to legacy dict
-                self.sessions[session_id] = session
+            session = await self.create_session(session_id, user_email)
 
         # Check incognito mode
         _incognito_sentinel = object()
@@ -258,9 +245,7 @@ class ChatService:
         # Track conversation_id for continuing saved conversations
         conversation_id = kwargs.pop("conversation_id", None)
         if conversation_id:
-            session = self.sessions.get(session_id)
-            if session:
-                session.context["conversation_id"] = conversation_id
+            session.context["conversation_id"] = conversation_id
 
         try:
             # Delegate to orchestrator
@@ -288,10 +273,9 @@ class ChatService:
                 and user_email
             ):
                 try:
-                    self._save_conversation(session_id, user_email, model)
+                    self._save_conversation(session, user_email, model)
                     # Notify frontend of the conversation_id so it can track the active conversation
-                    session = self.sessions.get(session_id)
-                    conv_id = session.context.get("conversation_id", str(session_id)) if session else str(session_id)
+                    conv_id = session.context.get("conversation_id", str(session_id))
                     if update_callback:
                         await update_callback({
                             "type": "conversation_saved",
@@ -334,33 +318,31 @@ class ChatService:
                 return {"type": "error", "error": "Conversation not found"}
 
         # Reset the session
-        self.end_session(session_id)
-        await self.create_session(session_id, user_email)
+        await self.end_session(session_id)
+        session = await self.create_session(session_id, user_email)
 
-        session = self.sessions.get(session_id)
-        if session:
-            # Store the conversation_id mapping and mark as restored
-            session.context["conversation_id"] = conversation_id
-            session.context["_restored"] = True
+        # Store the conversation_id mapping and mark as restored
+        session.context["conversation_id"] = conversation_id
+        session.context["_restored"] = True
 
-            # Load previous messages into session history for LLM context
-            for msg_data in messages:
-                role_value = msg_data.get("role", "user") or "user"
-                content = msg_data.get("content", "")
-                try:
-                    message_role = MessageRole(role_value)
-                except ValueError:
-                    logger.warning(
-                        "Skipping message with invalid role %s in conversation %s",
-                        sanitize_for_logging(str(role_value)),
-                        sanitize_for_logging(conversation_id),
-                    )
-                    continue
-                msg = Message(
-                    role=message_role,
-                    content=content,
+        # Load previous messages into session history for LLM context
+        for msg_data in messages:
+            role_value = msg_data.get("role", "user") or "user"
+            content = msg_data.get("content", "")
+            try:
+                message_role = MessageRole(role_value)
+            except ValueError:
+                logger.warning(
+                    "Skipping message with invalid role %s in conversation %s",
+                    sanitize_for_logging(str(role_value)),
+                    sanitize_for_logging(conversation_id),
                 )
-                session.history.add_message(msg)
+                continue
+            msg = Message(
+                role=message_role,
+                content=content,
+            )
+            session.history.add_message(msg)
 
         logger.info(
             "Restored conversation %s into session %s for user %s (%d messages)",
@@ -388,14 +370,12 @@ class ChatService:
         same for the lifetime of the WebSocket connection).
         """
         # End the current session
-        self.end_session(session_id)
+        await self.end_session(session_id)
 
         # Create a new session with a fresh conversation_id
-        await self.create_session(session_id, user_email)
-        session = self.sessions.get(session_id)
-        if session:
-            new_conv_id = str(uuid4())
-            session.context["conversation_id"] = new_conv_id
+        session = await self.create_session(session_id, user_email)
+        new_conv_id = str(uuid4())
+        session.context["conversation_id"] = new_conv_id
 
         logger.info(f"Reset session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
 
@@ -413,7 +393,7 @@ class ChatService:
         update_callback: Optional[UpdateCallback] = None
     ) -> Dict[str, Any]:
         """Attach a file from library to the current session."""
-        session = self.sessions.get(session_id)
+        session = await self.session_repository.get(session_id)
         if not session:
             session = await self.create_session(session_id, user_email)
 
@@ -492,7 +472,7 @@ class ChatService:
         user_email: Optional[str]
     ) -> Dict[str, Any]:
         """Download a file by original filename (within session context)."""
-        session = self.sessions.get(session_id)
+        session = await self.session_repository.get(session_id)
         if not session or not self.file_manager or not user_email:
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
@@ -563,9 +543,8 @@ class ChatService:
         except Exception as e:
             logger.error(f"Failed to update session from tool results: {e}", exc_info=True)
 
-    def _save_conversation(self, session_id: UUID, user_email: str, model: str) -> None:
-        """Persist the current session's conversation history to the database."""
-        session = self.sessions.get(session_id)
+    def _save_conversation(self, session: Session, user_email: str, model: str) -> None:
+        """Persist a session's conversation history to the database."""
         if not session or not session.history.messages:
             return
 
@@ -577,7 +556,7 @@ class ChatService:
             messages.append(msg_dict)
 
         # Use stored conversation_id if set, otherwise use session_id
-        conv_id = session.context.get("conversation_id", str(session_id))
+        conv_id = session.context.get("conversation_id", str(session.id))
 
         # Only generate title for new conversations (not restored ones)
         title = None
@@ -598,13 +577,16 @@ class ChatService:
             },
         )
 
-    def get_session(self, session_id: UUID) -> Optional[Session]:
+    async def get_session(self, session_id: UUID) -> Optional[Session]:
         """Get session by ID."""
-        return self.sessions.get(session_id)
+        return await self.session_repository.get(session_id)
 
-    def end_session(self, session_id: UUID) -> None:
+    async def end_session(self, session_id: UUID) -> None:
         """End a session."""
-        if session_id in self.sessions:
-            self.sessions[session_id].active = False
-            self._incognito_sessions.discard(session_id)
-            logger.info(f"Ended session {sanitize_for_logging(str(session_id))}")
+        session = await self.session_repository.get(session_id)
+        if session is None:
+            return
+        session.active = False
+        await self.session_repository.update(session)
+        self._incognito_sessions.discard(session_id)
+        logger.info(f"Ended session {sanitize_for_logging(str(session_id))}")

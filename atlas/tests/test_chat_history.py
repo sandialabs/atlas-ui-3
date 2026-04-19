@@ -717,12 +717,12 @@ class TestSessionResetConversationIsolation:
         session_id = uuid4()
         await chat_service.create_session(session_id, "user@test.com")
 
-        session = chat_service.sessions.get(session_id)
+        session = await chat_service.session_repository.get(session_id)
         conv_id_before = session.context.get("conversation_id")
 
         await chat_service.handle_reset_session(session_id, "user@test.com")
 
-        session = chat_service.sessions.get(session_id)
+        session = await chat_service.session_repository.get(session_id)
         conv_id_after = session.context.get("conversation_id")
 
         assert conv_id_after is not None
@@ -742,10 +742,10 @@ class TestSessionResetConversationIsolation:
 
         # First conversation
         await chat_service.create_session(session_id, user)
-        session = chat_service.sessions.get(session_id)
+        session = await chat_service.session_repository.get(session_id)
         session.history.add_message(Message(role=MessageRole.USER, content="First question"))
         session.history.add_message(Message(role=MessageRole.ASSISTANT, content="First answer"))
-        chat_service._save_conversation(session_id, user, "gpt-4")
+        chat_service._save_conversation(session, user, "gpt-4")
 
         first_conv_id = session.context.get("conversation_id", str(session_id))
         first_conv = repo.get_conversation(first_conv_id, user)
@@ -754,13 +754,13 @@ class TestSessionResetConversationIsolation:
 
         # Reset and start second conversation
         await chat_service.handle_reset_session(session_id, user)
-        session = chat_service.sessions.get(session_id)
+        session = await chat_service.session_repository.get(session_id)
         second_conv_id = session.context.get("conversation_id")
         assert second_conv_id != first_conv_id
 
         session.history.add_message(Message(role=MessageRole.USER, content="Second question"))
         session.history.add_message(Message(role=MessageRole.ASSISTANT, content="Second answer"))
-        chat_service._save_conversation(session_id, user, "gpt-4")
+        chat_service._save_conversation(session, user, "gpt-4")
 
         # Verify both conversations exist independently
         first_after = repo.get_conversation(first_conv_id, user)
@@ -790,9 +790,9 @@ class TestSessionResetConversationIsolation:
             else:
                 await chat_service.handle_reset_session(session_id, user)
 
-            session = chat_service.sessions.get(session_id)
+            session = await chat_service.session_repository.get(session_id)
             session.history.add_message(Message(role=MessageRole.USER, content=f"Question {i}"))
-            chat_service._save_conversation(session_id, user, "gpt-4")
+            chat_service._save_conversation(session, user, "gpt-4")
             conv_ids.append(session.context.get("conversation_id", str(session_id)))
 
         # All conversation_ids should be unique
@@ -830,13 +830,13 @@ class TestSessionResetConversationIsolation:
 
         # Reset to start a new conversation
         await chat_service.handle_reset_session(session_id, user)
-        session = chat_service.sessions.get(session_id)
+        session = await chat_service.session_repository.get(session_id)
         new_conv_id = session.context.get("conversation_id")
         assert new_conv_id != "original-conv"
 
         # Save the new conversation
         session.history.add_message(Message(role=MessageRole.USER, content="New question"))
-        chat_service._save_conversation(session_id, user, "gpt-4")
+        chat_service._save_conversation(session, user, "gpt-4")
 
         # Original should still be intact
         original = repo.get_conversation("original-conv", user)
@@ -861,22 +861,19 @@ class TestConversationSavedEvent:
         )
         return service
 
-    def test_save_conversation_returns_conv_id(self, chat_service, repo):
+    @pytest.mark.asyncio
+    async def test_save_conversation_returns_conv_id(self, chat_service, repo):
         """After saving, the conversation_id should be retrievable from session context."""
-        import asyncio
         from uuid import uuid4
 
         from atlas.domain.messages.models import Message, MessageRole
 
         session_id = uuid4()
-        asyncio.get_event_loop().run_until_complete(
-            chat_service.create_session(session_id, "user@test.com")
-        )
-        session = chat_service.sessions.get(session_id)
+        session = await chat_service.create_session(session_id, "user@test.com")
         session.history.add_message(Message(role=MessageRole.USER, content="Hello"))
         session.history.add_message(Message(role=MessageRole.ASSISTANT, content="Hi"))
 
-        chat_service._save_conversation(session_id, "user@test.com", "gpt-4")
+        chat_service._save_conversation(session, "user@test.com", "gpt-4")
 
         conv_id = session.context.get("conversation_id", str(session_id))
         saved = repo.get_conversation(conv_id, "user@test.com")

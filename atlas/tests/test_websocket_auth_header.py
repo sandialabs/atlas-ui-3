@@ -32,7 +32,8 @@ def mock_app_factory():
         mock_chat_service = MagicMock()
         mock_chat_service.handle_chat_message = AsyncMock(return_value={})
         mock_chat_service.handle_attach_file = AsyncMock(return_value={'type': 'file_attach', 'success': True})
-        mock_chat_service.end_session = MagicMock()
+        mock_chat_service.end_session = AsyncMock()
+        mock_chat_service.session_repository.get = AsyncMock(return_value=None)
         mock_factory.create_chat_service.return_value = mock_chat_service
 
         yield mock_factory
@@ -108,7 +109,8 @@ def mock_app_factory_debug_mode():
         mock_chat_service = MagicMock()
         mock_chat_service.handle_chat_message = AsyncMock(return_value={})
         mock_chat_service.handle_attach_file = AsyncMock(return_value={'type': 'file_attach', 'success': True})
-        mock_chat_service.end_session = MagicMock()
+        mock_chat_service.end_session = AsyncMock()
+        mock_chat_service.session_repository.get = AsyncMock(return_value=None)
         mock_factory.create_chat_service.return_value = mock_chat_service
 
         yield mock_factory
