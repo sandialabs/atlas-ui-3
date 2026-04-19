@@ -165,33 +165,3 @@ class TestManagedSession:
         # Simulate server-side disconnect
         mock_client.is_connected = MagicMock(return_value=False)
         assert not session.is_open
-
-    @pytest.mark.asyncio
-    async def test_poison_marks_session_unusable(self, mock_client):
-        """poison() should make is_open return False even when transport is alive."""
-        session = ManagedSession(mock_client)
-        await session.open()
-        assert session.is_open
-
-        # Transport still reports connected, but session is poisoned
-        session.poison()
-        assert not session.is_open
-
-    @pytest.mark.asyncio
-    async def test_acquire_evicts_poisoned_session(self, session_manager, mock_client):
-        """acquire() should evict a poisoned session and open a fresh one."""
-        s1 = await session_manager.acquire("conv-1", "server-a", mock_client)
-        assert s1.is_open
-
-        # Poison the session (simulates server-side session ID invalidation
-        # while transport-level connection remains alive)
-        s1.poison()
-        assert not s1.is_open
-
-        mock_client.__aenter__.reset_mock()
-        s2 = await session_manager.acquire("conv-1", "server-a", mock_client)
-        assert s2 is not s1
-        # Old session should have been closed during eviction
-        mock_client.__aexit__.assert_called_once()
-        # New session should have been opened
-        mock_client.__aenter__.assert_called_once()

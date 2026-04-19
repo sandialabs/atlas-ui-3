@@ -33,7 +33,6 @@ class ManagedSession:
         self._client = client
         self._opened = False
         self._closed = False
-        self._poisoned = False
 
     @property
     def client(self) -> Client:
@@ -44,22 +43,10 @@ class ManagedSession:
         """Check if session is open and the underlying transport is still alive."""
         if not self._opened or self._closed:
             return False
-        # Session explicitly poisoned by a server-side termination error
-        if self._poisoned:
-            return False
         # Detect server-side disconnects that our flags don't know about
         if not self._client.is_connected():
             return False
         return True
-
-    def poison(self) -> None:
-        """Mark this session as unusable due to a server-side termination.
-
-        Even if the underlying transport still reports connected (e.g. HTTP
-        socket is alive but the server-side session ID was invalidated), the
-        next ``acquire()`` will evict this session and open a fresh one.
-        """
-        self._poisoned = True
 
     async def open(self) -> None:
         if self._opened:

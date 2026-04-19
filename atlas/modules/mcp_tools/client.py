@@ -40,6 +40,9 @@ def _is_task_forbidden_error(exc: BaseException) -> bool:
     return "does not support task-augmented execution" in str(exc)
 
 
+_SESSION_TERMINATED_MARKERS = ("session terminated", "session not found", "invalid session")
+
+
 def _is_session_terminated_error(exc: BaseException) -> bool:
     """Return True when an MCP call failed because the server-side session
     was terminated or invalidated.
@@ -47,10 +50,16 @@ def _is_session_terminated_error(exc: BaseException) -> bool:
     This can happen when the backing process for a stateful MCP server
     restarts and invalidates its session ID while the transport-level
     connection still appears alive (e.g. HTTP socket open, 404 response).
-    We match on common error messages because the exception class varies.
+
+    The exception chain is walked (``__cause__`` / ``__context__``) because
+    FastMCP may wrap the underlying error before surfacing it.
     """
-    msg = str(exc).lower()
-    return "session terminated" in msg or "session not found" in msg or "invalid session" in msg
+    cur: Optional[BaseException] = exc
+    while cur is not None:
+        if any(m in str(cur).lower() for m in _SESSION_TERMINATED_MARKERS):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 class _ElicitationRoutingContext:
