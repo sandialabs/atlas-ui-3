@@ -125,15 +125,22 @@ def load_spans(path: Path) -> pd.DataFrame:
 
 
 def tool_success_rate(df: pd.DataFrame) -> pd.DataFrame:
-    """Count calls, success rate, and p95 duration per tool."""
+    """Count calls, success rate, and p95 duration per tool.
+
+    Resilient to missing ``attr_success``: datasets containing only very
+    old tool.call spans that predate the attribute still get call_count
+    and p95_ms rows.
+    """
     tool_df = df[df["name"] == "tool.call"].copy()
-    if tool_df.empty:
+    if tool_df.empty or "attr_tool_name" not in tool_df.columns:
         return pd.DataFrame(columns=["tool_name", "call_count", "success_rate", "p95_ms"])
-    grouped = tool_df.groupby("attr_tool_name").agg(
-        call_count=("span_id", "count"),
-        success_rate=("attr_success", "mean"),
-        p95_ms=("duration_ms", lambda s: s.quantile(0.95)),
-    )
+    agg_spec: Dict[str, Any] = {
+        "call_count": ("span_id", "count"),
+        "p95_ms": ("duration_ms", lambda s: s.quantile(0.95)),
+    }
+    if "attr_success" in tool_df.columns:
+        agg_spec["success_rate"] = ("attr_success", "mean")
+    grouped = tool_df.groupby("attr_tool_name").agg(**agg_spec)
     return (
         grouped.reset_index()
         .rename(columns={"attr_tool_name": "tool_name"})
@@ -158,25 +165,38 @@ def tool_call_counts(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def llm_latency_by_model(df: pd.DataFrame) -> pd.DataFrame:
-    """p50 / p95 LLM latency + token usage grouped by model."""
+    """p50 / p95 LLM latency + token usage grouped by model.
+
+    Resilient to missing columns: ``attr_input_tokens`` / ``attr_output_tokens``
+    only appear on non-streaming ``llm.call`` spans (streaming calls don't
+    carry litellm usage metadata and publish ``attr_output_tokens_estimate``
+    under a distinct name). The agg dict is built dynamically so a dataset
+    with only streaming spans still produces latency + retry stats.
+    """
     llm_df = df[df["name"] == "llm.call"].copy()
-    if llm_df.empty:
+    if llm_df.empty or "attr_model" not in llm_df.columns:
         return pd.DataFrame()
-    grouped = llm_df.groupby("attr_model").agg(
-        calls=("span_id", "count"),
-        p50_ms=("duration_ms", lambda s: s.quantile(0.50)),
-        p95_ms=("duration_ms", lambda s: s.quantile(0.95)),
-        avg_input_tokens=("attr_input_tokens", "mean"),
-        avg_output_tokens=("attr_output_tokens", "mean"),
-        avg_retries=("attr_retry_count", "mean"),
-    )
+    agg_spec: Dict[str, Any] = {
+        "calls": ("span_id", "count"),
+        "p50_ms": ("duration_ms", lambda s: s.quantile(0.50)),
+        "p95_ms": ("duration_ms", lambda s: s.quantile(0.95)),
+    }
+    if "attr_input_tokens" in llm_df.columns:
+        agg_spec["avg_input_tokens"] = ("attr_input_tokens", "mean")
+    if "attr_output_tokens" in llm_df.columns:
+        agg_spec["avg_output_tokens"] = ("attr_output_tokens", "mean")
+    if "attr_output_tokens_estimate" in llm_df.columns:
+        agg_spec["avg_output_tokens_estimate"] = ("attr_output_tokens_estimate", "mean")
+    if "attr_retry_count" in llm_df.columns:
+        agg_spec["avg_retries"] = ("attr_retry_count", "mean")
+    grouped = llm_df.groupby("attr_model").agg(**agg_spec)
     return grouped.reset_index().rename(columns={"attr_model": "model"})
 
 
 def rag_retrieval_ratio(df: pd.DataFrame) -> pd.DataFrame:
     """Retrieved-vs-used document ratio per RAG data source."""
     rag_df = df[df["name"] == "rag.query"].copy()
-    if rag_df.empty:
+    if rag_df.empty or "attr_data_source" not in rag_df.columns:
         return pd.DataFrame()
 
     def used_count(row) -> int:
@@ -195,12 +215,14 @@ def rag_retrieval_ratio(df: pd.DataFrame) -> pd.DataFrame:
     rag_df["retrieved"] = rag_df.apply(retrieved_count, axis=1)
     rag_df["used"] = rag_df.apply(used_count, axis=1)
 
-    grouped = rag_df.groupby("attr_data_source").agg(
-        queries=("span_id", "count"),
-        avg_retrieved=("retrieved", "mean"),
-        avg_used=("used", "mean"),
-        avg_top_score=("attr_top_score", "mean"),
-    )
+    rag_agg: Dict[str, Any] = {
+        "queries": ("span_id", "count"),
+        "avg_retrieved": ("retrieved", "mean"),
+        "avg_used": ("used", "mean"),
+    }
+    if "attr_top_score" in rag_df.columns:
+        rag_agg["avg_top_score"] = ("attr_top_score", "mean")
+    grouped = rag_df.groupby("attr_data_source").agg(**rag_agg)
     grouped["use_ratio"] = grouped["avg_used"] / grouped["avg_retrieved"].replace(0, pd.NA)
     return grouped.reset_index().rename(columns={"attr_data_source": "data_source"})
 
@@ -311,7 +333,11 @@ def llm_latency_over_time(df: pd.DataFrame, freq: str = "D") -> pd.DataFrame:
 def tool_success_over_time(df: pd.DataFrame, freq: str = "D") -> pd.DataFrame:
     """Resampled tool success rate and call count at ``freq`` frequency."""
     tool_df = df[df["name"] == "tool.call"].copy()
-    if tool_df.empty or "start_time" not in tool_df.columns:
+    if (
+        tool_df.empty
+        or "start_time" not in tool_df.columns
+        or "attr_success" not in tool_df.columns
+    ):
         return pd.DataFrame()
     tool_df = tool_df.set_index(tool_df["start_time"].dt.tz_convert(None))
     tool_df["success_num"] = tool_df["attr_success"].astype(float)
