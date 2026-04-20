@@ -123,6 +123,10 @@ def _coerce_attr(value: Any) -> Any:
 def set_attrs(span: Optional[Span], attrs: Mapping[str, Any]) -> None:
     """Attach a dict of attributes to ``span``, skipping ``None`` values.
 
+    Empty lists ARE preserved so list-typed contract fields like ``doc_ids``
+    appear as explicit ``[]`` rather than disappearing — downstream analyzers
+    rely on that to distinguish "present but empty" from "missing".
+
     No-op when ``span`` is not recording (e.g. when OTel is not initialized).
     """
     if span is None or not span.is_recording():
@@ -131,12 +135,17 @@ def set_attrs(span: Optional[Span], attrs: Mapping[str, Any]) -> None:
         coerced = _coerce_attr(value)
         if coerced is None:
             continue
-        if isinstance(coerced, list) and not coerced:
-            continue
         try:
             span.set_attribute(key, coerced)
         except Exception as e:  # noqa: BLE001
-            logger.debug("Failed to set span attribute %s: %s", key, e)
+            # Sanitize the exception string before logging — attribute values
+            # may have originated from tool output / user content in edge
+            # cases, and set_attribute errors can echo them back.
+            logger.debug(
+                "Failed to set span attribute %s: %s",
+                sanitize_for_logging(str(key)),
+                sanitize_for_logging(str(e)),
+            )
 
 
 @contextmanager
@@ -157,9 +166,15 @@ def start_span(
         try:
             yield span
         except Exception as exc:
+            # Record ERROR status and the exception *class name* only.
+            # Deliberately do not call ``span.record_exception`` — that
+            # attaches the full exception message and stack trace as a span
+            # event, which is forwarded verbatim by OTLP exporters and can
+            # include user content, prompts, or tool output that happened to
+            # land in an exception message.
             try:
-                span.record_exception(exc)
-                span.set_status(Status(StatusCode.ERROR, str(exc)[:200]))
+                span.set_status(Status(StatusCode.ERROR, type(exc).__name__))
+                span.set_attribute("error_type", type(exc).__name__)
             except Exception:  # noqa: BLE001 – never let telemetry break the app
                 pass
             raise

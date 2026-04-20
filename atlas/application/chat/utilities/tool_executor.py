@@ -356,10 +356,18 @@ async def execute_single_tool(
     from . import event_notifier
 
     tool_name = tool_call.function.name
-    # By convention (AGENTS.md), MCP tool names are exposed as "server_toolName";
-    # the server name is the prefix before the first underscore. This is a
-    # heuristic used for filtering in analysis — not a security boundary.
-    tool_source = tool_name.split("_", 1)[0] if "_" in tool_name else tool_name
+    # Look up the owning MCP server from the tool manager's authoritative
+    # index (server names can contain underscores, so splitting on '_' is
+    # wrong for tools like `pptx_generator_create`). Falls back to None when
+    # the mapping is unavailable so analysis code can distinguish
+    # unknown-source from mis-attributed-source.
+    tool_source = None
+    get_server = getattr(tool_manager, "get_server_for_tool", None)
+    if callable(get_server):
+        try:
+            tool_source = get_server(tool_name)
+        except Exception:
+            tool_source = None
     raw_args = getattr(tool_call.function, "arguments", "") or ""
     span_attrs = {
         "tool_name": tool_name,
@@ -373,20 +381,27 @@ async def execute_single_tool(
     with start_span("tool.call", span_attrs) as span:
         tool_start_ns = _time.monotonic_ns()
 
-        def _finalize_span(result: ToolResult) -> ToolResult:
-            content_str = (
-                result.content if isinstance(result.content, str) else str(result.content)
-            )
+        def _finalize_span(
+            result: ToolResult, telemetry_content: Optional[str] = None
+        ) -> ToolResult:
+            # `telemetry_content` lets callers record the *unmodified* tool
+            # output when later code has prepended an edit note or other
+            # context string containing injected arguments. Defaults to
+            # result.content when no override is given.
+            if telemetry_content is None:
+                telemetry_content = (
+                    result.content if isinstance(result.content, str) else str(result.content)
+                )
             set_attrs(span, {
                 "success": bool(result.success),
                 "duration_ms": (_time.monotonic_ns() - tool_start_ns) // 1_000_000,
-                "output_size": size_bytes(content_str),
-                "output_sha256": sha256_full(content_str),
-                "output_preview": preview(content_str),
+                "output_size": size_bytes(telemetry_content),
+                "output_sha256": sha256_full(telemetry_content),
+                "output_preview": preview(telemetry_content),
                 "error_message": (result.error if not result.success else None),
             })
             if result.success:
-                write_tool_output_sidecar(content_str)
+                write_tool_output_sidecar(telemetry_content)
             return result
 
         try:
@@ -516,6 +531,13 @@ async def execute_single_tool(
                 }
             )
 
+            # Capture the raw tool output for telemetry *before* we mutate
+            # result.content with an edit_note — the edit note inlines
+            # executed arguments (per the existing LLM-context contract),
+            # which would otherwise leak into the span's output_preview.
+            raw_output_for_telemetry = (
+                result.content if isinstance(result.content, str) else str(result.content)
+            )
             # If arguments were edited, prepend a note to the result for LLM context
             if arguments_were_edited:
                 edit_note = (
@@ -533,7 +555,8 @@ async def execute_single_tool(
             # Send tool complete notification
             await event_notifier.notify_tool_complete(tool_call, result, parsed_args, update_callback)
 
-            return _finalize_span(result)
+            set_attrs(span, {"args_edited": bool(arguments_were_edited)})
+            return _finalize_span(result, telemetry_content=raw_output_for_telemetry)
 
         except AuthenticationRequiredException as auth_err:
             # Special handling for authentication required - send OAuth redirect info

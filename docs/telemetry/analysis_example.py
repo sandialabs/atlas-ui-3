@@ -121,16 +121,28 @@ def rag_retrieval_ratio(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def retries_per_turn(df: pd.DataFrame) -> pd.DataFrame:
-    """Total LLM retry attempts grouped by parent chat.turn."""
+    """Total LLM retry attempts grouped by parent chat.turn.
+
+    Uses ``reindex`` so partial span files (e.g. only ``tool.call`` spans)
+    don't raise KeyError on missing attribute columns.
+    """
     if df.empty:
         return pd.DataFrame()
-    turns = df[df["name"] == "chat.turn"][["span_id", "attr_turn_id", "attr_model"]]
-    llm = df[df["name"] == "llm.call"][["parent_span_id", "attr_retry_count"]]
+    turns = df[df["name"] == "chat.turn"].reindex(
+        columns=["span_id", "attr_turn_id", "attr_model"]
+    )
+    llm = df[df["name"] == "llm.call"].reindex(
+        columns=["parent_span_id", "attr_retry_count"]
+    )
     if turns.empty or llm.empty:
+        return pd.DataFrame()
+    if turns["attr_turn_id"].isna().all() or llm["attr_retry_count"].isna().all():
         return pd.DataFrame()
     joined = llm.merge(
         turns, left_on="parent_span_id", right_on="span_id", how="inner"
     )
+    if joined.empty or joined["attr_turn_id"].isna().all():
+        return pd.DataFrame()
     grouped = joined.groupby("attr_turn_id").agg(
         llm_calls=("attr_retry_count", "count"),
         total_retries=("attr_retry_count", "sum"),

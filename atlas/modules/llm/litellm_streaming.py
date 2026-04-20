@@ -15,7 +15,7 @@ from litellm import acompletion
 from atlas.core.metrics_logger import log_metric
 from atlas.core.telemetry import set_attrs, start_span
 
-from .models import LLMResponse
+from .models import LLMResponse, split_provider
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +45,13 @@ class LiteLLMStreamingMixin:
 
         Yields string chunks as they arrive from the LLM provider.
         """
-        from .litellm_caller import _split_provider
-
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
 
         if max_tokens is not None:
             model_kwargs["max_tokens"] = max_tokens
 
-        provider, model_suffix = _split_provider(litellm_model)
+        provider, model_suffix = split_provider(litellm_model)
         span_attrs = {
             "model": litellm_model,
             "provider": provider,
@@ -109,7 +107,11 @@ class LiteLLMStreamingMixin:
                     "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                     "chunk_count": chunk_count,
                     "output_chars": accumulated_chars,
-                    "output_tokens": accumulated_chars // 4,
+                    # Streaming LLM calls don't carry usage metadata; publish a
+                    # char-based estimate under a distinct name so downstream
+                    # aggregations never silently mix real token counts with
+                    # approximations.
+                    "output_tokens_estimate": accumulated_chars // 4,
                     "retry_count": 0,
                 })
 
@@ -136,8 +138,6 @@ class LiteLLMStreamingMixin:
         Accumulates tool_calls fragments across chunks.
         Yields a final LLMResponse with accumulated tool_calls at the end.
         """
-        from .litellm_caller import _split_provider
-
         if not tools_schema:
             async for chunk in self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email):
                 yield chunk
@@ -146,7 +146,7 @@ class LiteLLMStreamingMixin:
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
 
-        provider, model_suffix = _split_provider(litellm_model)
+        provider, model_suffix = split_provider(litellm_model)
         span_attrs = {
             "model": litellm_model,
             "provider": provider,
@@ -240,7 +240,7 @@ class LiteLLMStreamingMixin:
                     "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                     "chunk_count": chunk_count,
                     "output_chars": len(accumulated_content),
-                    "output_tokens": len(accumulated_content) // 4,
+                    "output_tokens_estimate": len(accumulated_content) // 4,
                     "tool_calls_count": len(tool_calls_list) if tool_calls_list else 0,
                     "retry_count": 0,
                 })

@@ -105,6 +105,7 @@ async def drive():
         {"function": {"name": "calculator_add",
                        "parameters": {"properties": {"a": {}, "b": {}, "secret": {}}}}}
     ]
+    tool_manager.get_server_for_tool.return_value = "calculator"
     tool_manager.execute_tool = AsyncMock(return_value=ToolResult(
         tool_call_id="call_pr547",
         content="result=42 TOP_SECRET_OUTPUT",

@@ -71,6 +71,7 @@ context propagation.
 | `latency_ms` | int | Wall-clock duration in ms |
 | `chunk_count` | int | Streaming only: number of content chunks received |
 | `output_chars` | int | Streaming only: total accumulated output characters |
+| `output_tokens_estimate` | int | Streaming only: rough token estimate (`chars / 4`). Published under a distinct name from the authoritative `output_tokens` so aggregations never silently mix real counts with approximations. |
 | `error_type` | string | Exception class name when the call failed |
 
 ### `tool.call`
@@ -78,16 +79,23 @@ context propagation.
 | Attribute | Type | Description |
 |---|---|---|
 | `tool_name` | string | Full tool name as exposed to the LLM (e.g. `calculator_add`) |
-| `tool_source` | string | Heuristic MCP server prefix — text before the first `_` |
+| `tool_source` | string | MCP server name, looked up via `tool_manager.get_server_for_tool(name)`. `null` when the mapping is unavailable. |
 | `tool_call_id` | string | LLM-assigned call ID |
 | `args_hash` | string | SHA-256[:16] of the raw arguments JSON |
 | `args_size` | int | UTF-8 byte size of the raw arguments |
+| `args_edited` | bool | User edited the arguments in the approval dialog before execution |
 | `success` | bool | Tool returned without error |
 | `duration_ms` | int | Wall-clock duration in ms |
-| `output_size` | int | UTF-8 byte size of the tool output |
-| `output_sha256` | string | Full SHA-256 hex digest of the tool output |
-| `output_preview` | string | First 500 chars of the output, sanitized (no CR/LF) |
+| `output_size` | int | UTF-8 byte size of the tool output (pre-edit-note) |
+| `output_sha256` | string | Full SHA-256 hex digest of the tool output (pre-edit-note) |
+| `output_preview` | string | First 500 chars of the pre-edit-note output, sanitized (no CR/LF) |
 | `error_message` | string | Error detail when `success=false` |
+
+> `output_*` attributes always reflect the raw tool output. When
+> `args_edited=true`, ATLAS prepends an "edit note" (containing the
+> user-edited arguments) to `result.content` for the LLM — but the span
+> captures telemetry from the pre-edit content so executed arguments don't
+> leak into span attributes.
 
 ### `rag.query`
 
@@ -171,6 +179,151 @@ It computes:
 - p50 / p95 LLM latency per model + average token usage and retry count
 - RAG retrieval-to-use ratio per data source
 - LLM call and retry counts per chat turn
+
+## Optional: visualizing spans with Grafana Tempo + Grafana
+
+The JSONL file is the primary audit artifact, but you can also forward spans to
+a full tracing stack for interactive exploration (search by tool name, span
+duration heatmaps, waterfall views of a single turn, etc.). A minimal
+setup uses three containers: an OpenTelemetry Collector, Grafana Tempo for
+trace storage, and Grafana for the UI.
+
+This is entirely optional — ATLAS still works with just `logs/spans.jsonl`.
+
+### 1. Drop this `docker-compose.yml` next to ATLAS
+
+```yaml
+version: "3"
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC (what ATLAS will send to)
+      - "4318:4318"   # OTLP HTTP
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo query API
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+    ports:
+      - "3000:3000"
+    depends_on:
+      - tempo
+
+volumes:
+  tempo-data:
+```
+
+### 2. Minimal `otel-collector-config.yaml`
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlp/tempo]
+```
+
+### 3. Minimal `tempo.yaml`
+
+```yaml
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+```
+
+### 4. Grafana datasource provisioning (`grafana-datasources.yaml`)
+
+```yaml
+apiVersion: 1
+datasources:
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    isDefault: true
+```
+
+### 5. Point ATLAS at the collector
+
+```bash
+# .env
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+```
+
+Restart ATLAS. Spans now go to *both* `logs/spans.jsonl` (always) and the
+OTLP collector (when configured).
+
+### 6. Explore in Grafana
+
+```bash
+docker compose up -d
+# Grafana: http://localhost:3000  (anonymous admin — dev only)
+```
+
+Open Grafana -> Explore -> Tempo datasource. Useful queries:
+
+- **Search for a turn**: filter by service name `atlas-ui-3-backend` and span
+  name `chat.turn`. Click a result to see the full span tree.
+- **Slowest tool calls**: search for `tool.call` spans, sort by duration.
+- **Failing tools**: filter `tool.call` spans where `success=false`.
+- **Per-model latency**: `llm.call` spans grouped by `model` attribute.
+
+### Alternatives
+
+- **Only want offline analysis?** Skip this section and use
+  `docs/telemetry/analysis_example.py` against `logs/spans.jsonl`.
+- **Want long-term storage without running Tempo?** Point the collector's
+  `otlp/tempo` exporter at a hosted backend (Grafana Cloud Traces,
+  Honeycomb, Jaeger, etc.) instead.
+- **Don't want Docker at all?** Install Jaeger as a single binary
+  (`jaeger-all-in-one`) — it accepts OTLP directly on port 4317.
 
 ## Extending the contract
 

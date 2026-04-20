@@ -123,12 +123,17 @@ def test_start_span_emits_with_attributes(span_exporter):
 
 
 def test_start_span_records_exception(span_exporter):
-    with pytest.raises(ValueError):
+    raised = False
+    try:
         with telemetry.start_span("unit.err"):
             raise ValueError("boom")
+    except ValueError:
+        raised = True
+    assert raised
     spans = span_exporter.get_finished_spans()
     span = _by_name(spans, "unit.err")
     assert span.status.status_code.name == "ERROR"
+    assert span.attributes.get("error_type") == "ValueError"
 
 
 def test_set_attrs_drops_none_values(span_exporter):
@@ -158,6 +163,7 @@ async def test_tool_call_span_attributes(span_exporter):
     tool_manager.get_tools_schema.return_value = [
         {"function": {"name": "calculator_add", "parameters": {"properties": {"a": {}, "b": {}}}}}
     ]
+    tool_manager.get_server_for_tool.return_value = "calculator"
     tool_manager.execute_tool = AsyncMock(
         return_value=ToolResult(
             tool_call_id="call_abc",
@@ -199,6 +205,7 @@ async def test_tool_call_span_marks_failure(span_exporter):
 
     tool_manager = MagicMock()
     tool_manager.get_tools_schema.return_value = []
+    tool_manager.get_server_for_tool.return_value = "foo"
     tool_manager.execute_tool = AsyncMock(side_effect=RuntimeError("kaboom"))
 
     result = await execute_single_tool(
@@ -212,6 +219,114 @@ async def test_tool_call_span_marks_failure(span_exporter):
     span = _by_name(span_exporter.get_finished_spans(), "tool.call")
     assert span.attributes["success"] is False
     assert "kaboom" in span.attributes["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_tool_source_uses_manager_index_not_string_split(span_exporter):
+    """Regression: tool_source must come from the manager's authoritative
+    index, not from splitting the tool name on the first underscore.
+
+    Server names can contain underscores (``pptx_generator``) and tool names
+    can contain underscores (``create_form_demo``) — string splitting
+    produces the wrong answer in both cases.
+    """
+    from atlas.application.chat.utilities.tool_executor import execute_single_tool
+    from atlas.domain.messages.models import ToolResult
+
+    tool_call = MagicMock()
+    tool_call.id = "call_pptx"
+    tool_call.function.name = "pptx_generator_create_slide"
+    tool_call.function.arguments = "{}"
+
+    tool_manager = MagicMock()
+    tool_manager.get_tools_schema.return_value = []
+    tool_manager.get_server_for_tool.return_value = "pptx_generator"
+    tool_manager.execute_tool = AsyncMock(
+        return_value=ToolResult(tool_call_id="call_pptx", content="ok", success=True)
+    )
+
+    await execute_single_tool(
+        tool_call=tool_call,
+        session_context={},
+        tool_manager=tool_manager,
+        skip_approval=True,
+    )
+
+    span = _by_name(span_exporter.get_finished_spans(), "tool.call")
+    # The naive split-on-first-underscore heuristic would have produced "pptx".
+    assert span.attributes["tool_source"] == "pptx_generator"
+
+
+@pytest.mark.asyncio
+async def test_tool_call_span_does_not_leak_edit_note_args(span_exporter):
+    """Regression: when arguments are edited, the LLM-facing edit_note that
+    ends up in ``result.content`` embeds the executed args. Those args must
+    NOT appear in ``output_preview`` — telemetry reads the pre-edit content.
+    """
+    from atlas.application.chat.utilities.tool_executor import execute_single_tool
+    from atlas.domain.messages.models import ToolResult
+
+    tool_call = MagicMock()
+    tool_call.id = "call_edit"
+    tool_call.function.name = "db_run_query"
+    tool_call.function.arguments = '{"query": "SELECT 1"}'
+
+    tool_manager = MagicMock()
+    tool_manager.get_tools_schema.return_value = [
+        {"function": {"name": "db_run_query",
+                       "parameters": {"properties": {"query": {}}}}}
+    ]
+    tool_manager.get_server_for_tool.return_value = "db"
+    tool_manager.execute_tool = AsyncMock(
+        return_value=ToolResult(
+            tool_call_id="call_edit",
+            content="rows=[1]",
+            success=True,
+        )
+    )
+
+    # Force the approval-edited path so edit_note gets prepended to result.content.
+    approval_manager = MagicMock()
+    approval_request = MagicMock()
+    approval_request.wait_for_response = AsyncMock(
+        return_value={
+            "approved": True,
+            "arguments": {"query": "DROP TABLE SECRETS_LEAKED_VIA_EDIT"},
+        }
+    )
+    approval_manager.create_approval_request.return_value = approval_request
+    approval_manager.cleanup_request = MagicMock()
+
+    def _requires_approval(name, cfg):
+        return (True, True, False)  # needs_approval, allow_edit, admin_required
+
+    import atlas.application.chat.utilities.tool_executor as te
+
+    monkey_get_am = lambda: approval_manager  # noqa: E731
+    original_get_am = te.get_approval_manager
+    original_requires_approval = te.requires_approval
+    te.get_approval_manager = monkey_get_am
+    te.requires_approval = _requires_approval
+    try:
+        cfg = MagicMock()
+        result = await execute_single_tool(
+            tool_call=tool_call,
+            session_context={"user_email": "u@x.com"},
+            tool_manager=tool_manager,
+            config_manager=cfg,
+        )
+    finally:
+        te.get_approval_manager = original_get_am
+        te.requires_approval = original_requires_approval
+
+    # The edit_note should now be in result.content (LLM-facing contract).
+    assert "SECRETS_LEAKED_VIA_EDIT" in result.content
+
+    # But telemetry must have captured the PRE-edit output.
+    span = _by_name(span_exporter.get_finished_spans(), "tool.call")
+    assert span.attributes["output_preview"] == "rows=[1]"
+    assert "SECRETS_LEAKED_VIA_EDIT" not in span.attributes["output_preview"]
+    assert span.attributes["args_edited"] is True
 
 
 # ---------------------------------------------------------------------------

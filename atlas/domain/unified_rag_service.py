@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from atlas.core.compliance import get_compliance_manager
 from atlas.core.log_sanitizer import sanitize_for_logging
-from atlas.core.telemetry import hash_short, set_attrs, start_span
+from atlas.core.telemetry import hash_short, set_attrs, size_bytes, start_span
 from atlas.modules.config.config_manager import ConfigManager, RAGSourceConfig, resolve_env_var
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
 from atlas.modules.rag.client import RAGResponse
@@ -39,7 +39,7 @@ def _rag_response_attrs(response: RAGResponse) -> Dict[str, Any]:
     """
     attrs: Dict[str, Any] = {
         "is_completion": bool(response.is_completion),
-        "content_size": len(response.content or ""),
+        "content_size": size_bytes(response.content or ""),
     }
     metadata = response.metadata
     if metadata is None:
