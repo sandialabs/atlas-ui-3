@@ -80,6 +80,57 @@ def test_hash_short_none_and_empty():
     assert telemetry.hash_short("") is None
 
 
+def test_hash_short_uses_hmac_keying(monkeypatch):
+    """hash_short must not equal truncated plain SHA-256 of the same value.
+
+    Regression guard: if someone reverts the HMAC wiring back to plain
+    hashlib.sha256, hashes become reversible via a generic rainbow table
+    of common emails and short prompts.
+    """
+    import hashlib
+
+    monkeypatch.setenv("ATLAS_TELEMETRY_HMAC_SECRET", "unit-test-secret-xyz")
+    value = "alice@example.com"
+    plain = hashlib.sha256(value.encode()).hexdigest()[:16]
+    keyed = telemetry.hash_short(value)
+    assert keyed != plain, "hash_short should be keyed, not plain SHA-256"
+
+
+def test_hash_short_depends_on_secret(monkeypatch):
+    """Changing the HMAC secret must change the resulting hash."""
+    value = "user@example.com"
+    monkeypatch.setenv("ATLAS_TELEMETRY_HMAC_SECRET", "secret-a")
+    h_a = telemetry.hash_short(value)
+    monkeypatch.setenv("ATLAS_TELEMETRY_HMAC_SECRET", "secret-b")
+    h_b = telemetry.hash_short(value)
+    assert h_a != h_b
+
+
+def test_safe_label_sanitizes_and_caps():
+    assert telemetry.safe_label(None) == ""
+    assert telemetry.safe_label("") == ""
+    # Control chars stripped
+    assert "\n" not in telemetry.safe_label("a\nb")
+    assert "\r" not in telemetry.safe_label("a\rb")
+    # Hard-capped
+    long_label = "x" * (telemetry.LABEL_MAX_CHARS + 50)
+    out = telemetry.safe_label(long_label)
+    assert len(out) == telemetry.LABEL_MAX_CHARS
+
+
+def test_coerce_attr_caps_long_strings():
+    """Defense-in-depth: an unbounded string must never reach span.set_attribute."""
+    huge = "y" * (telemetry.ATTR_STR_HARD_CAP + 1000)
+    coerced = telemetry._coerce_attr(huge)
+    assert isinstance(coerced, str)
+    assert len(coerced) <= telemetry.ATTR_STR_HARD_CAP + 64  # +truncation marker
+    # List elements also capped
+    coerced_list = telemetry._coerce_attr([huge, "short"])
+    assert isinstance(coerced_list, list)
+    assert len(coerced_list[0]) <= telemetry.ATTR_STR_HARD_CAP + 64
+    assert coerced_list[1] == "short"
+
+
 def test_sha256_full_is_full_hex_and_stable():
     h = telemetry.sha256_full("abc")
     assert len(h) == 64
@@ -219,6 +270,55 @@ async def test_tool_call_span_marks_failure(span_exporter):
     span = _by_name(span_exporter.get_finished_spans(), "tool.call")
     assert span.attributes["success"] is False
     assert "kaboom" in span.attributes["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_tool_call_span_sanitizes_and_caps_error_message(span_exporter):
+    """Regression: exception strings can embed caller args / URLs / PII.
+
+    The span's error_message attribute must be sanitized (control chars
+    removed) and length-capped, never carrying a raw upstream exception.
+    """
+    from atlas.application.chat.utilities.tool_executor import execute_single_tool
+    from atlas.core.telemetry import ERROR_MESSAGE_MAX_CHARS
+
+    tool_call = MagicMock()
+    tool_call.id = "call_leaky"
+    tool_call.function.name = "db_run_query"
+    tool_call.function.arguments = "{}"
+
+    # Simulate a realistic upstream error that embeds user content +
+    # control characters + way more data than should hit telemetry.
+    leaky = (
+        "OperationalError: syntax error near 'SECRET_TOKEN_abc123'\n"
+        "at line 42\r\n"
+        + ("PAYLOAD" * 500)  # 3500 chars of padding
+    )
+
+    tool_manager = MagicMock()
+    tool_manager.get_tools_schema.return_value = []
+    tool_manager.get_server_for_tool.return_value = "db"
+    tool_manager.execute_tool = AsyncMock(side_effect=RuntimeError(leaky))
+
+    result = await execute_single_tool(
+        tool_call=tool_call,
+        session_context={"session_id": "s"},
+        tool_manager=tool_manager,
+        skip_approval=True,
+    )
+    assert not result.success
+
+    span = _by_name(span_exporter.get_finished_spans(), "tool.call")
+    emsg = span.attributes["error_message"]
+    # Sanitized: no CR/LF/control chars
+    assert "\n" not in emsg
+    assert "\r" not in emsg
+    # Capped: significantly shorter than the raw exception
+    assert len(emsg) < len(leaky)
+    # Truncation marker present when capped
+    assert "truncated" in emsg
+    # Cap respected (bounded by configured maximum + truncation suffix)
+    assert len(emsg) <= ERROR_MESSAGE_MAX_CHARS + 64
 
 
 @pytest.mark.asyncio
@@ -393,6 +493,59 @@ async def test_rag_query_span_extracts_docs(span_exporter):
     assert "what is X" not in "|".join(attr_values)
 
 
+@pytest.mark.asyncio
+async def test_rag_doc_ids_are_sanitized_when_falling_back_to_title(span_exporter):
+    """Regression: doc.title/source come from untrusted RAG backends.
+
+    When chunk_id is missing, the fallback string must be sanitized (no
+    control chars) and length-capped before landing on the span.
+    """
+    from atlas.core.telemetry import LABEL_MAX_CHARS
+    from atlas.domain.unified_rag_service import UnifiedRAGService
+    from atlas.modules.rag.client import DocumentMetadata, RAGMetadata, RAGResponse
+
+    svc = UnifiedRAGService.__new__(UnifiedRAGService)
+    svc.config_manager = MagicMock()
+    svc.mcp_manager = None
+    svc.auth_check_func = None
+    svc.rag_mcp_service = None
+    svc._http_clients = {}
+
+    evil_title = "Leaky\nTitle\rWith Controls " + ("Z" * 500)
+
+    fake_response = RAGResponse(
+        content="answer",
+        metadata=RAGMetadata(
+            query_processing_time_ms=1,
+            total_documents_searched=1,
+            documents_found=[
+                # No chunk_id → service falls back to title
+                DocumentMetadata(
+                    source="src",
+                    content_type="text",
+                    confidence_score=0.5,
+                    title=evil_title,
+                ),
+            ],
+            data_source_name="ds",
+            retrieval_method="hybrid",
+        ),
+    )
+
+    async def fake_impl(username, qualified, messages):
+        return fake_response
+
+    svc._query_rag_impl = fake_impl
+
+    await svc.query_rag("alice@x.com", "atlas_rag:docs", [{"role": "user", "content": "q"}])
+
+    span = _by_name(span_exporter.get_finished_spans(), "rag.query")
+    (only_id,) = list(span.attributes["doc_ids"])
+    assert "\n" not in only_id
+    assert "\r" not in only_id
+    assert len(only_id) <= LABEL_MAX_CHARS
+
+
 # ---------------------------------------------------------------------------
 # chat.turn span — via ChatService
 # ---------------------------------------------------------------------------
@@ -517,6 +670,92 @@ def test_tool_output_sidecar_respects_flag(monkeypatch, tmp_path):
         from pathlib import Path as _Path
         assert _Path(path).read_text() == "secret payload"
         assert _Path(path).parent.name == "tool_outputs"
+
+
+def test_tool_output_sidecar_sets_restrictive_permissions(monkeypatch, tmp_path):
+    """Sidecar files must not be world/group-readable on POSIX filesystems.
+
+    The tool output is raw content by design when the flag is on, so disk
+    permissions are the only thing preventing a second local user from
+    reading another user's captures.
+    """
+    import os as _os
+    import stat as _stat
+    import sys
+
+    if sys.platform.startswith("win"):
+        pytest.skip("POSIX mode bits not enforced on Windows")
+
+    monkeypatch.setenv("APP_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("ATLAS_LOG_TOOL_OUTPUTS", "true")
+    with telemetry.start_span("sidecar.perms"):
+        path = telemetry.write_tool_output_sidecar("payload")
+        assert path is not None
+        mode = _stat.S_IMODE(_os.stat(path).st_mode)
+        # No group/other permissions
+        assert mode & 0o077 == 0, f"sidecar file mode {oct(mode)} is too permissive"
+        # Directory also restrictive
+        parent_mode = _stat.S_IMODE(_os.stat(_os.path.dirname(path)).st_mode)
+        assert parent_mode & 0o077 == 0, (
+            f"tool_outputs dir mode {oct(parent_mode)} is too permissive"
+        )
+
+
+def test_jsonl_exporter_force_flush_and_shutdown(tmp_path):
+    """force_flush must fsync the file; shutdown must close the handle.
+
+    Reliability regression: the initial implementation returned True from
+    force_flush without touching disk and did nothing on shutdown, which
+    made it impossible to trust that spans were durable on crash.
+    """
+    from atlas.core.otel_config import JSONLSpanExporter
+
+    out_file = tmp_path / "spans.jsonl"
+    exporter = JSONLSpanExporter(out_file)
+
+    attach_processor = SimpleSpanProcessor(exporter)
+    provider = trace.get_tracer_provider()
+    provider.add_span_processor(attach_processor)
+    try:
+        with telemetry.start_span("flush.test", {"k": "v"}):
+            pass
+    finally:
+        attach_processor.shutdown()
+
+    # force_flush returns True when handle is still open (SimpleSpanProcessor
+    # already flushed before shutdown, but exporter handle should accept a
+    # redundant flush). After shutdown it must return False.
+    assert exporter.force_flush() is False, (
+        "force_flush must report False after shutdown (file handle closed)"
+    )
+
+    # Shutdown is idempotent
+    exporter.shutdown()
+    exporter.shutdown()
+
+    # Content was written
+    lines = [ln for ln in out_file.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1
+
+
+def test_jsonl_exporter_file_mode_restrictive(tmp_path):
+    """spans.jsonl must be created with mode 0600 on POSIX filesystems."""
+    import os as _os
+    import stat as _stat
+    import sys
+
+    if sys.platform.startswith("win"):
+        pytest.skip("POSIX mode bits not enforced on Windows")
+
+    from atlas.core.otel_config import JSONLSpanExporter
+
+    out_file = tmp_path / "spans.jsonl"
+    exporter = JSONLSpanExporter(out_file)
+    try:
+        mode = _stat.S_IMODE(_os.stat(out_file).st_mode)
+        assert mode & 0o077 == 0, f"spans.jsonl mode {oct(mode)} is too permissive"
+    finally:
+        exporter.shutdown()
 
 
 @pytest.mark.asyncio

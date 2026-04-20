@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #547 hardening pass - 2026-04-19 (issue #545 follow-up, same PR)
+- **Security / privacy**:
+  - `tool.call.error_message` is now routed through `preview()` (sanitized,
+    CR/LF stripped, capped at 300 chars). Upstream exception strings from
+    DB drivers / HTTP clients / MCP tools routinely embed caller args,
+    URLs with tokens, and user content; the prior contract allowed those
+    to reach span attributes and OTLP exporters verbatim.
+  - RAG `doc_ids` now sanitize + length-cap each element (≤200 chars,
+    control chars stripped), preferring `chunk_id` and only falling back
+    to `title`/`source` after sanitization — external RAG backends can
+    return untrusted strings with injection payloads.
+  - `hash_short` switched from truncated SHA-256 to HMAC-SHA256 keyed by
+    `ATLAS_TELEMETRY_HMAC_SECRET` (falls back to `CAPABILITY_TOKEN_SECRET`,
+    then to a per-process random key with a startup warning). Prevents
+    rainbow-table reversal of short identifiers in small populations.
+    Docs updated to describe this as pseudonymization, not anonymization.
+  - `write_tool_output_sidecar` creates files with `0600` and the
+    `tool_outputs/` directory with `0700`. `spans.jsonl` and `app.jsonl`
+    are likewise tightened to `0600` on POSIX filesystems.
+  - `_coerce_attr` gained a 4000-char hard cap on all string attribute
+    values (including list elements) as defense-in-depth against a future
+    call site forgetting to use `preview()` or `safe_label()`.
+- **Reliability**: `JSONLSpanExporter` now holds a long-lived file handle
+  guarded by a lock; `force_flush` issues `fsync` and `shutdown` closes
+  the handle. `OpenTelemetryConfig.shutdown()` flushes processors and
+  tears them down cleanly. Previous behavior returned `True` from
+  `force_flush` without touching disk and did nothing on shutdown.
+- **OpenShift manifest**: Grafana anonymous-admin is now **off** by
+  default — replaced with a `grafana-admin` Secret and
+  `GF_SECURITY_ADMIN_*` env wiring. A commented `ANONYMOUS_DEV_ONLY`
+  block preserves the laptop-only shortcut. In-cluster
+  `tls: insecure: true` is documented as namespace-scoped only.
+- **Tests**: Added 9 new test cases covering sanitized `error_message`,
+  HMAC keying and secret dependence, sanitized RAG `doc_ids`,
+  `_coerce_attr` hard-capping, sidecar/spans file permissions, and
+  `JSONLSpanExporter` flush/shutdown semantics. PR-validation script
+  extended with a failing-tool negative control and file-mode assertion.
+
 ### PR #547 - 2026-04-19 (issue #545)
 - **Feature**: OpenTelemetry audit trail. ATLAS now emits structured spans for every high-value event in a chat turn: `chat.turn` (per user message), `llm.call` (per LiteLLM call, including streaming), `tool.call` (per tool invocation), and `rag.query` (per RAG query, including batched multi-source queries). Spans are written as one JSON line per span to `logs/spans.jsonl` via a `BatchSpanProcessor`; optional OTLP export is enabled via `OTEL_EXPORTER_OTLP_ENDPOINT`. Attribute contract is frozen and documented in `docs/telemetry/README.md`: sanitized previews, hashes, sizes, token counts, retry counts, RAG document IDs/scores, and tool success/duration — never raw prompts, raw tool outputs, or raw RAG document text. Full tool outputs are opt-in only via `ATLAS_LOG_TOOL_OUTPUTS=true` (written to `logs/tool_outputs/{span_id}.txt`). A reference pandas analysis script lives at `docs/telemetry/analysis_example.py` and computes per-tool success rates, per-model p95 latency, RAG retrieval/use ratios, and retries per turn. An optional Grafana Tempo / Grafana stack recipe is included in the telemetry README for interactive trace exploration. 19 unit tests cover span emission, sensitive-data containment, and the JSONL exporter contract.
 - **Review fixes** (addressed on the same PR):

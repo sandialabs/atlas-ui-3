@@ -136,18 +136,54 @@ without leaking chat content.
 - Raw tool outputs
 - Raw RAG document text
 - Raw user emails
+- Raw exception messages (sanitized + capped previews only — upstream
+  exception strings routinely embed caller args, URLs with tokens, and
+  user content)
 
 **Always written (useful for analysis):**
 
-- SHA-256 hashes (16-char for attributes, 64-char for output fingerprinting)
+- Keyed HMAC-SHA256 identifiers (16 hex chars — see *Pseudonymization*
+  below)
+- Full SHA-256 content fingerprints for tool outputs (64 hex chars)
 - Sizes, counts, durations, token counts
 - Model names, tool names, server names, data source IDs
-- Status and error class names
+- Status and error class names, plus a sanitized + capped error message
+  preview (max 300 chars, control chars stripped)
+- RAG document identifiers: `chunk_id` when available (opaque, low leak
+  risk); otherwise a sanitized and length-capped fallback (≤200 chars)
+  derived from `title`/`source`
 
 **Optional, opt-in only:**
 
 - Full tool outputs, written to `logs/tool_outputs/{span_id}.txt` when
-  `ATLAS_LOG_TOOL_OUTPUTS=true`. Off by default.
+  `ATLAS_LOG_TOOL_OUTPUTS=true`. Off by default. Files are created with
+  mode `0600` and the directory with mode `0700` on POSIX filesystems.
+
+### Pseudonymization vs. anonymization
+
+Identifier hashes (`user_hash`, `prompt_hash`, `query_hash`, `args_hash`)
+are **pseudonymized, not anonymized**. They are short (64-bit) keyed
+HMAC-SHA256 digests. In a small population (a few thousand known emails,
+or short common prompts like "hi"), a plain SHA-256 truncated digest
+would be trivially reversible via a rainbow table. ATLAS therefore uses
+HMAC with a per-deployment secret so hashes cannot be reversed without
+access to the secret:
+
+```bash
+# Preferred: dedicated telemetry secret
+ATLAS_TELEMETRY_HMAC_SECRET=$(openssl rand -hex 32)
+
+# Fallback: reuses the CAPABILITY_TOKEN_SECRET already set in production
+# CAPABILITY_TOKEN_SECRET=...
+```
+
+If neither is set, ATLAS uses a per-process random key and emits a
+startup warning — hashes in that mode won't match across restarts.
+
+> The on-disk artifacts (`spans.jsonl`, `tool_outputs/*.txt`) are
+> audit-trail records of *who did what when*, minus the content. Treat
+> them with the same access controls you apply to other security logs.
+> `spans.jsonl` and `app.jsonl` are created with mode `0600`.
 
 ## Configuration
 
@@ -162,6 +198,11 @@ Set in `.env`:
 
 # Log directory (used for app.jsonl, spans.jsonl, and tool_outputs/)
 # APP_LOG_DIR=/path/to/logs
+
+# HMAC secret for identifier pseudonymization. When unset, ATLAS falls back
+# to CAPABILITY_TOKEN_SECRET, then to an ephemeral per-process key (with a
+# startup warning). Set this for stable, non-rainbow-reversible hashes.
+# ATLAS_TELEMETRY_HMAC_SECRET=$(openssl rand -hex 32)
 ```
 
 ## Analyzing spans
@@ -368,10 +409,16 @@ additional `Route` that uses **passthrough** TLS termination (OTLP gRPC
 won't traverse an edge-terminated HTTP Route). For most deployments it's
 simpler to run ATLAS in the same cluster.
 
-Open the Grafana URL from `oc get route grafana -n atlas-telemetry`.
-Anonymous admin is enabled for quick evaluation — disable it before
-exposing to anyone outside your team by removing the three
-`GF_AUTH_ANONYMOUS_*` / `GF_AUTH_DISABLE_LOGIN_FORM` env vars.
+**Before `oc apply`**, replace the placeholder `admin-password` in the
+`grafana-admin` Secret with a strong value (e.g. `openssl rand -base64
+24`). The manifest ships with anonymous access **disabled** and a
+password-protected admin login so trace data is never exposed to an
+unauthenticated visitor. A commented `ANONYMOUS_DEV_ONLY` block shows
+how to flip to anonymous-admin for a laptop-only preview — do not use
+that mode outside a single-user dev machine.
+
+Open the Grafana URL from `oc get route grafana -n atlas-telemetry` and
+log in with the credentials from the Secret.
 
 ### Alternatives
 

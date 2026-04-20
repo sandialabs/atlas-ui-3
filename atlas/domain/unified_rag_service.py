@@ -12,7 +12,14 @@ from typing import Any, Callable, Dict, List, Optional
 
 from atlas.core.compliance import get_compliance_manager
 from atlas.core.log_sanitizer import sanitize_for_logging
-from atlas.core.telemetry import hash_short, set_attrs, size_bytes, start_span
+from atlas.core.telemetry import (
+    LABEL_MAX_CHARS,
+    hash_short,
+    safe_label,
+    set_attrs,
+    size_bytes,
+    start_span,
+)
 from atlas.modules.config.config_manager import ConfigManager, RAGSourceConfig, resolve_env_var
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
 from atlas.modules.rag.client import RAGResponse
@@ -53,7 +60,16 @@ def _rag_response_attrs(response: RAGResponse) -> Dict[str, Any]:
     doc_ids: List[str] = []
     doc_scores: List[float] = []
     for doc in docs:
-        identifier = doc.chunk_id or doc.title or doc.source or ""
+        # Prefer chunk_id (opaque, backend-generated, low leak risk). Fall
+        # back to title/source only when no chunk_id is available and
+        # sanitize + cap aggressively — titles and sources are untrusted
+        # text from the RAG backend that can contain control characters,
+        # prompt-injection payloads, or user PII.
+        if doc.chunk_id:
+            identifier = safe_label(doc.chunk_id, max_chars=LABEL_MAX_CHARS)
+        else:
+            raw_fallback = doc.title or doc.source or ""
+            identifier = safe_label(raw_fallback, max_chars=LABEL_MAX_CHARS)
         doc_ids.append(identifier)
         doc_scores.append(float(doc.confidence_score))
 

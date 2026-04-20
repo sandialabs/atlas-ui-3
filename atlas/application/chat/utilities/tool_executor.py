@@ -344,6 +344,7 @@ async def execute_single_tool(
     import time as _time
 
     from atlas.core.telemetry import (
+        ERROR_MESSAGE_MAX_CHARS,
         hash_short,
         preview,
         set_attrs,
@@ -392,13 +393,23 @@ async def execute_single_tool(
                 telemetry_content = (
                     result.content if isinstance(result.content, str) else str(result.content)
                 )
+            # error_message is sanitized + capped because upstream exception
+            # strings from MCP tools, HTTP clients, and DB drivers routinely
+            # embed the caller's arguments, URLs (with tokens), or user
+            # content. Using preview() matches the output_preview policy so
+            # no raw payload ever reaches span attributes or OTLP forwarding.
+            error_attr = (
+                preview(result.error, max_chars=ERROR_MESSAGE_MAX_CHARS)
+                if (not result.success and result.error)
+                else None
+            )
             set_attrs(span, {
                 "success": bool(result.success),
                 "duration_ms": (_time.monotonic_ns() - tool_start_ns) // 1_000_000,
                 "output_size": size_bytes(telemetry_content),
                 "output_sha256": sha256_full(telemetry_content),
                 "output_preview": preview(telemetry_content),
-                "error_message": (result.error if not result.success else None),
+                "error_message": error_attr,
             })
             if result.success:
                 write_tool_output_sidecar(telemetry_content)

@@ -1,3 +1,20 @@
+# ATLAS telemetry stack for OpenShift.
+#
+# SECURITY POSTURE (read before `oc apply`):
+#   * Grafana is configured to require a password (see the `grafana` Secret
+#     below). Anonymous admin is OFF by default. For a quick local-dev
+#     preview, see the commented ANONYMOUS_DEV_ONLY block further down.
+#   * The OTEL Collector → Tempo gRPC hop is cluster-internal and uses
+#     `tls: insecure: true`. This is acceptable ONLY when the two pods sit
+#     inside the same namespace on an SDN with pod-to-pod isolation. For
+#     cross-namespace or cross-cluster traffic, switch to mTLS via a
+#     service mesh (e.g. Red Hat Service Mesh / Istio) or Tempo's native
+#     TLS options.
+#   * Span attributes emitted by ATLAS contain sanitized previews and
+#     keyed hashes (HMAC) of user identifiers — never raw prompts, tool
+#     arguments, tool outputs, or RAG document text. Even so, treat this
+#     data as sensitive: restrict Grafana access to the team that should
+#     see audit traces.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -20,6 +37,8 @@ data:
     exporters:
       otlp/tempo:
         endpoint: tempo.atlas-telemetry.svc:4317
+        # Pod-to-pod within atlas-telemetry namespace only. Do not expose
+        # this collector outside the namespace without switching to mTLS.
         tls:
           insecure: true
     service:
@@ -165,6 +184,22 @@ spec:
     - { name: query, port: 3200, targetPort: 3200 }
     - { name: otlp-grpc, port: 4317, targetPort: 4317 }
 ---
+# Grafana admin credentials. Replace the placeholder with a strong password
+# before `oc apply`, or generate one with:
+#   oc -n atlas-telemetry create secret generic grafana-admin \
+#     --from-literal=admin-user=admin \
+#     --from-literal=admin-password="$(openssl rand -base64 24)"
+# and delete this Secret manifest.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin
+  namespace: atlas-telemetry
+type: Opaque
+stringData:
+  admin-user: admin
+  admin-password: CHANGE_ME_BEFORE_APPLYING
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -182,9 +217,30 @@ spec:
         - name: grafana
           image: grafana/grafana:latest
           env:
-            - { name: GF_AUTH_ANONYMOUS_ENABLED, value: "true" }
-            - { name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: "Admin" }
-            - { name: GF_AUTH_DISABLE_LOGIN_FORM, value: "true" }
+            # Authenticated-by-default. Anonymous admin is NEVER safe outside
+            # a personal laptop — leaving it on exposes the full audit trail
+            # (tool names, user hashes, doc_ids) to anyone who can reach the
+            # Route.
+            - { name: GF_AUTH_ANONYMOUS_ENABLED, value: "false" }
+            - { name: GF_AUTH_DISABLE_LOGIN_FORM, value: "false" }
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-password
+            # --- ANONYMOUS_DEV_ONLY ---------------------------------------
+            # For a quick local-dev preview ONLY (single-user laptop, no
+            # data classified above Public), uncomment these three lines
+            # AND delete the GF_SECURITY_ADMIN_* env entries above:
+            # - { name: GF_AUTH_ANONYMOUS_ENABLED, value: "true" }
+            # - { name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: "Admin" }
+            # - { name: GF_AUTH_DISABLE_LOGIN_FORM, value: "true" }
+            # -------------------------------------------------------------
           ports:
             - { name: http, containerPort: 3000 }
           volumeMounts:

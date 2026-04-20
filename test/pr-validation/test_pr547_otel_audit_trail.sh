@@ -120,7 +120,32 @@ async def drive():
     )
     assert result.success, "tool should have succeeded"
 
+async def drive_err():
+    """Drive a failing tool call so we can assert error_message handling."""
+    tool_call = MagicMock()
+    tool_call.id = "call_err"
+    tool_call.function.name = "db_run_query"
+    tool_call.function.arguments = "{}"
+
+    tool_manager = MagicMock()
+    tool_manager.get_tools_schema.return_value = []
+    tool_manager.get_server_for_tool.return_value = "db"
+    # Exception string intentionally embeds a secret + CR/LF + bulk padding
+    leaky = "OperationalError near 'SECRET_IN_EXCEPTION'\r\n" + ("Z" * 2000)
+    tool_manager.execute_tool = AsyncMock(side_effect=RuntimeError(leaky))
+
+    r = await execute_single_tool(
+        tool_call=tool_call,
+        session_context={"session_id": "sess_err"},
+        tool_manager=tool_manager,
+        skip_approval=True,
+    )
+    assert not r.success
+
+# Run both scenarios BEFORE shutting the provider down — shutdown closes the
+# exporter file handle and no further spans can be written.
 asyncio.run(drive())
+asyncio.run(drive_err())
 
 # Flush: trace provider shutdown sends final batch.
 provider.shutdown()
@@ -129,7 +154,11 @@ assert spans_file.exists(), f"spans file missing: {spans_file}"
 records = [json.loads(l) for l in spans_file.read_text().splitlines() if l.strip()]
 tool_spans = [r for r in records if r["name"] == "tool.call"]
 assert tool_spans, "expected a tool.call span"
-attrs = tool_spans[-1]["attributes"]
+# The success span is the one from drive(); pick it explicitly instead of
+# relying on ordering.
+success_spans = [r for r in tool_spans if r["attributes"].get("success") is True]
+assert success_spans, "expected a successful tool.call span"
+attrs = success_spans[-1]["attributes"]
 
 assert attrs.get("tool_name") == "calculator_add"
 assert attrs.get("tool_source") == "calculator"
@@ -138,12 +167,31 @@ assert isinstance(attrs.get("args_hash"), str) and len(attrs["args_hash"]) == 16
 assert isinstance(attrs.get("output_sha256"), str) and len(attrs["output_sha256"]) == 64
 assert isinstance(attrs.get("duration_ms"), int)
 
-# NEGATIVE CONTROL: raw secrets must never appear on span attributes
+# NEGATIVE CONTROL 1: raw secrets must never appear on span attributes
 flat = json.dumps(attrs)
 assert "SHOULD_NOT_LEAK" not in flat, "raw tool args leaked into span attrs"
 assert "TOP_SECRET_OUTPUT" in flat, "preview should contain sanitized output text"
-# This confirms the preview is bounded and sanitized (sanitize_for_logging
-# strips control chars; it does NOT hash arbitrary payload strings).
+
+# NEGATIVE CONTROL 2: error_message is sanitized + capped, never raw.
+err_spans = [r for r in tool_spans if r["attributes"].get("success") is False]
+assert err_spans, "expected a failing tool.call span"
+eattrs = err_spans[-1]["attributes"]
+emsg = eattrs.get("error_message", "")
+assert emsg, "failing span must carry an error_message"
+# Sanitized: no CR/LF
+assert "\r" not in emsg and "\n" not in emsg, (
+    "error_message must be sanitized: no CR/LF"
+)
+# Length-capped vs. the raw exception
+raw_len = len("OperationalError near 'SECRET_IN_EXCEPTION'\r\n" + "Z" * 2000)
+assert len(emsg) < raw_len, "error_message must be length-capped"
+# Truncation marker present when the cap kicked in
+assert "truncated" in emsg, "error_message should indicate truncation"
+
+# NEGATIVE CONTROL 3: JSONL exporter file must be mode 0600 on POSIX
+import stat
+mode = stat.S_IMODE(os.stat(spans_file).st_mode)
+assert mode & 0o077 == 0, f"spans.jsonl mode {oct(mode)} is world/group-readable"
 
 print("E2E_OK")
 PYEOF
@@ -185,6 +233,12 @@ with telemetry.start_span("sidecar.on_check"):
     assert path is not None, "flag-on should write file"
     assert Path(path).read_text() == "payload-on"
     assert Path(path).parent.name == "tool_outputs"
+    # Permissions: file 0600, dir 0700 on POSIX
+    import stat
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+    assert mode & 0o077 == 0, f"sidecar file mode {oct(mode)} is too permissive"
+    parent_mode = stat.S_IMODE(os.stat(os.path.dirname(path)).st_mode)
+    assert parent_mode & 0o077 == 0, f"tool_outputs dir mode {oct(parent_mode)} is too permissive"
 
 print("SIDECAR_OK")
 PYEOF

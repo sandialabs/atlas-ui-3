@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -73,15 +74,41 @@ class JSONLSpanExporter(SpanExporter):
     Fields emitted are stable and form the public contract documented in
     ``docs/telemetry/README.md``. Downstream analyzers rely on the exact
     attribute names defined in ``atlas/core/telemetry.py`` call sites.
+
+    The exporter holds a single long-lived file handle guarded by a lock so
+    batched exports don't pay per-call ``open``/``close`` and concurrent
+    exports don't interleave partial JSON lines. ``force_flush`` issues an
+    ``fsync`` so tests and graceful shutdown can observe durable writes;
+    ``shutdown`` closes the handle.
     """
 
     def __init__(self, file_path: Path) -> None:
         self.file_path = file_path
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._shutdown = False
+        # Create the file up-front with restrictive perms so the first span
+        # export doesn't race against a world-readable file on disk.
+        try:
+            fd = os.open(
+                str(self.file_path),
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                0o600,
+            )
+            self._fh = os.fdopen(fd, "a", encoding="utf-8")
+        except OSError:
+            # Fall back to plain open for platforms without os.open perms.
+            self._fh = self.file_path.open("a", encoding="utf-8")
+        try:
+            os.chmod(self.file_path, 0o600)
+        except OSError:
+            pass
 
     def export(self, spans: list[ReadableSpan]) -> SpanExportResult:  # noqa: D401
-        try:
-            with self.file_path.open("a", encoding="utf-8") as f:
+        with self._lock:
+            if self._shutdown or self._fh is None or self._fh.closed:
+                return SpanExportResult.FAILURE
+            try:
                 for span in spans:
                     ctx = span.get_span_context()
                     parent = span.parent
@@ -101,17 +128,48 @@ class JSONLSpanExporter(SpanExporter):
                         "kind": span.kind.name if span.kind else None,
                         "attributes": dict(span.attributes or {}),
                     }
-                    f.write(json.dumps(record, default=str) + "\n")
-            return SpanExportResult.SUCCESS
-        except Exception as e:  # noqa: BLE001
-            logging.getLogger(__name__).error("JSONL span export failed: %s", e)
-            return SpanExportResult.FAILURE
+                    self._fh.write(json.dumps(record, default=str) + "\n")
+                self._fh.flush()
+                return SpanExportResult.SUCCESS
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).error("JSONL span export failed: %s", e)
+                return SpanExportResult.FAILURE
 
     def shutdown(self) -> None:
-        return None
+        with self._lock:
+            if self._shutdown:
+                return
+            self._shutdown = True
+            if self._fh is not None and not self._fh.closed:
+                try:
+                    self._fh.flush()
+                    try:
+                        os.fsync(self._fh.fileno())
+                    except (OSError, ValueError):
+                        pass
+                    self._fh.close()
+                except Exception as e:  # noqa: BLE001
+                    logging.getLogger(__name__).debug(
+                        "JSONLSpanExporter shutdown close failed: %s", e
+                    )
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:  # noqa: ARG002
-        return True
+        with self._lock:
+            if self._fh is None or self._fh.closed:
+                return False
+            try:
+                self._fh.flush()
+                try:
+                    os.fsync(self._fh.fileno())
+                except (OSError, ValueError):
+                    # fsync unsupported on some file types (pipes, etc.)
+                    pass
+                return True
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).debug(
+                    "JSONLSpanExporter force_flush failed: %s", e
+                )
+                return False
 
 
 class OpenTelemetryConfig:
@@ -217,6 +275,14 @@ class OpenTelemetryConfig:
         file_handler = logging.FileHandler(self.log_file, encoding="utf-8")
         file_handler.setFormatter(json_formatter)
         file_handler.setLevel(self.log_level)
+        # Restrict app log file perms — structured logs can contain user
+        # identifiers, sanitized previews, and error context that shouldn't
+        # be world-readable on shared hosts. Best-effort; fails silently on
+        # filesystems without POSIX modes.
+        try:
+            os.chmod(self.log_file, 0o600)
+        except OSError:
+            pass
         root.addHandler(file_handler)
         root.setLevel(self.log_level)
 
@@ -269,13 +335,40 @@ class OpenTelemetryConfig:
         return self.spans_file
 
     def flush_spans(self, timeout_millis: int = 30000) -> bool:
-        """Force-flush pending spans to disk/OTLP. Used by tests and shutdown."""
+        """Force-flush pending spans to disk/OTLP. Used by tests and shutdown.
+
+        Triggers the BatchSpanProcessor to drain, which in turn calls
+        ``JSONLSpanExporter.force_flush`` (fsync) and the OTLP exporter's
+        flush. Returns True only when every configured processor reported
+        success within ``timeout_millis``.
+        """
         ok = True
         if self._span_processor is not None:
             ok = self._span_processor.force_flush(timeout_millis) and ok
         if self._otlp_processor is not None:
             ok = self._otlp_processor.force_flush(timeout_millis) and ok
         return ok
+
+    def shutdown(self, timeout_millis: int = 30000) -> None:
+        """Flush and tear down span processors + exporters.
+
+        Safe to call multiple times. Intended for application shutdown hooks
+        and test teardown so in-flight spans aren't lost and file handles
+        get closed cleanly.
+        """
+        try:
+            self.flush_spans(timeout_millis)
+        except Exception:  # noqa: BLE001
+            pass
+        for proc in (self._span_processor, self._otlp_processor):
+            if proc is None:
+                continue
+            try:
+                proc.shutdown()
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).debug(
+                    "Span processor shutdown failed: %s", e
+                )
 
     def read_logs(self, lines: int = 100) -> list[Dict[str, Any]]:
         if not self.log_file.exists():
