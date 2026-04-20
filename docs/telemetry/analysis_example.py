@@ -42,11 +42,51 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 
 
+# Attributes that every aggregation treats as numeric. Coerced at load time
+# via ``pd.to_numeric(errors="coerce")`` so a single legacy span with a
+# garbage value (e.g. a stringified MagicMock left over from a dev test
+# that accidentally wrote to logs/spans.jsonl) doesn't crash the entire
+# report. Bad values become NaN; mean/sum/quantile skip NaN automatically.
+_NUMERIC_ATTRS = (
+    "attr_input_tokens",
+    "attr_output_tokens",
+    "attr_total_tokens",
+    "attr_output_tokens_estimate",
+    "attr_retry_count",
+    "attr_latency_ms",
+    "attr_duration_ms",
+    "attr_top_score",
+    "attr_num_results",
+    "attr_total_documents_searched",
+    "attr_query_processing_time_ms",
+    "attr_content_size",
+    "attr_query_chars",
+    "attr_prompt_chars",
+    "attr_prompt_tokens",
+    "attr_args_size",
+    "attr_output_size",
+    "attr_temperature",
+    "attr_max_tokens",
+    "attr_message_count",
+    "attr_tool_calls_count",
+    "attr_tools_schema_count",
+    "attr_chunk_count",
+    "attr_output_chars",
+    "attr_batch_size",
+    "attr_selected_tools_count",
+    "attr_selected_prompts_count",
+    "attr_selected_data_sources_count",
+)
+
+
 def load_spans(path: Path) -> pd.DataFrame:
     """Load one-line-per-span JSONL into a flat DataFrame.
 
     Span attributes are promoted into top-level columns prefixed with ``attr_``.
     ``duration_ms`` and ``start_time`` (datetime64) are derived for convenience.
+    Known-numeric attributes are coerced to numeric; unparseable values
+    (legacy dev data, MagicMock leftovers) become NaN rather than crashing
+    aggregations downstream.
     """
     records: List[Dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as f:
@@ -70,6 +110,12 @@ def load_spans(path: Path) -> pd.DataFrame:
         df["duration_ms"] = df["duration_ns"] / 1_000_000.0
     if "start_time_ns" in df.columns:
         df["start_time"] = pd.to_datetime(df["start_time_ns"], unit="ns", utc=True)
+
+    # Defensive numeric coercion — see note on _NUMERIC_ATTRS above.
+    for col in _NUMERIC_ATTRS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
     return df
 
 

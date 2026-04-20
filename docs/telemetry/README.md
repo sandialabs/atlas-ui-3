@@ -14,6 +14,34 @@ All spans are written as one JSON line per span to
 ``logs/spans.jsonl``. The schema is stable and forms the contract that
 downstream tooling (analysis scripts, admin dashboards) relies on.
 
+## File layout
+
+The **directory** is configurable via `APP_LOG_DIR` in `.env`; the
+**filenames are fixed** so downstream tooling (analysis scripts,
+dashboards, log-shipping agents) can hard-code them.
+
+```bash
+# .env — point all telemetry artifacts at a custom directory
+APP_LOG_DIR=/var/log/atlas
+```
+
+Resulting layout (whether default `<project_root>/logs/` or your custom
+`APP_LOG_DIR`):
+
+```
+<APP_LOG_DIR>/
+├── spans.jsonl              # one JSON line per span (always this name)
+├── app.jsonl                # structured application logs
+└── tool_outputs/            # only when ATLAS_LOG_TOOL_OUTPUTS=true
+    └── <span_id>.txt        # one file per successful tool call
+```
+
+Resolution order: `config_manager.app_settings.app_log_dir` →
+`APP_LOG_DIR` env var → `<project_root>/logs/`. Need separate files per
+instance on a shared host? Point each instance at a different
+`APP_LOG_DIR` (e.g. `/var/log/atlas/instance-a/`) — the filenames stay
+`spans.jsonl` / `app.jsonl` inside each directory.
+
 ## Span types
 
 Every user turn emits one root span with child spans parented under it:
