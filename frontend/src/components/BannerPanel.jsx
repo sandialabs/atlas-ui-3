@@ -1,14 +1,20 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { usePollingWithBackoff } from '../hooks/usePollingWithBackoff'
+import { useUserActivity } from '../hooks/useUserActivity'
 
 const BANNER_POLL_INTERVAL = 5 * 60 * 1000 // 5 minutes
 const BANNER_MAX_BACKOFF = 30 * 60 * 1000 // 30 minutes max backoff
+const BANNER_IDLE_TIMEOUT = 5 * 60 * 1000 // pause polling after 5 min idle
 
 function BannerPanel() {
   const [bannerMessages, setBannerMessages] = useState([])
   const [dismissedMessages, setDismissedMessages] = useState(new Set())
   const [bannerEnabled, setBannerEnabled] = useState(false)
+
+  // Pause /api/config and /api/banners polling when the user has been idle,
+  // and resume automatically on the next mouse/keyboard/touch/scroll event.
+  const userActive = useUserActivity({ idleTimeoutMs: BANNER_IDLE_TIMEOUT })
 
   usePollingWithBackoff(
     async () => {
@@ -31,6 +37,7 @@ function BannerPanel() {
     {
       normalInterval: BANNER_POLL_INTERVAL,
       maxBackoffDelay: BANNER_MAX_BACKOFF,
+      enabled: userActive,
     }
   )
 

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR - 2026-04-20 - Pause banner/config polling when user is idle
+- Added `useUserActivity` hook that tracks mouse/keyboard/touch/scroll activity.
+- `BannerPanel` now pauses `/api/config` and `/api/banners` polling after 5
+  minutes of no user activity and resumes automatically (with an immediate
+  refresh) on the next user event.
+
 ### PR #547 hardening pass - 2026-04-19 (issue #545 follow-up, same PR)
 - **Security / privacy**:
   - `tool.call.error_message` is now routed through `preview()` (sanitized,
