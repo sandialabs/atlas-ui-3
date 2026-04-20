@@ -166,19 +166,36 @@ Set in `.env`:
 
 ## Analyzing spans
 
-A reference pandas script is provided:
+A reference pandas + matplotlib script is provided:
 
 ```bash
-python docs/telemetry/analysis_example.py                  # default path
-python docs/telemetry/analysis_example.py /path/to/spans.jsonl
+python docs/telemetry/analysis_example.py                            # default paths
+python docs/telemetry/analysis_example.py /path/to/spans.jsonl       # custom input
+python docs/telemetry/analysis_example.py --output-dir ./plots       # custom plot dir
 ```
 
-It computes:
+Requires: `uv pip install pandas matplotlib`.
+
+**Tables printed to stdout:**
 
 - Tool success rate and p95 duration per tool
+- Tool call counts (pure volume breakdown, sorted descending)
 - p50 / p95 LLM latency per model + average token usage and retry count
 - RAG retrieval-to-use ratio per data source
 - LLM call and retry counts per chat turn
+- Daily span counts by type
+- Average daily counts by day-of-week (surfaces weekend-vs-weekday patterns)
+- Daily p50 / p95 LLM latency
+- Daily tool success rate + call count
+
+**PNG plots saved to `<spans_parent>/analysis/`** (or `--output-dir`):
+
+- `tool_call_counts.png` — horizontal bar chart of calls per tool
+- `daily_counts.png` — daily turns/tool calls/LLM calls/RAG queries over time
+- `day_of_week.png` — average usage by day of week (weekend dip shows here)
+- `hourly_pattern.png` — hour-of-day usage (UTC)
+- `llm_latency_trend.png` — p50 / p95 LLM latency trend
+- `tool_success_trend.png` — daily tool success rate + call volume
 
 ## Optional: visualizing spans with Grafana Tempo + Grafana
 
