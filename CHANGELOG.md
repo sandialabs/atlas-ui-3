@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #547 hardening pass - 2026-04-19 (issue #545 follow-up, same PR)
+- **Security / privacy**:
+  - `tool.call.error_message` is now routed through `preview()` (sanitized,
+    CR/LF stripped, capped at 300 chars). Upstream exception strings from
+    DB drivers / HTTP clients / MCP tools routinely embed caller args,
+    URLs with tokens, and user content; the prior contract allowed those
+    to reach span attributes and OTLP exporters verbatim.
+  - RAG `doc_ids` now sanitize + length-cap each element (≤200 chars,
+    control chars stripped), preferring `chunk_id` and only falling back
+    to `title`/`source` after sanitization — external RAG backends can
+    return untrusted strings with injection payloads.
+  - `hash_short` switched from truncated SHA-256 to HMAC-SHA256 keyed by
+    `ATLAS_TELEMETRY_HMAC_SECRET` (falls back to `CAPABILITY_TOKEN_SECRET`,
+    then to a per-process random key with a startup warning). Prevents
+    rainbow-table reversal of short identifiers in small populations.
+    Docs updated to describe this as pseudonymization, not anonymization.
+  - `write_tool_output_sidecar` creates files with `0600` and the
+    `tool_outputs/` directory with `0700`. `spans.jsonl` and `app.jsonl`
+    are likewise tightened to `0600` on POSIX filesystems.
+  - `_coerce_attr` gained a 4000-char hard cap on all string attribute
+    values (including list elements) as defense-in-depth against a future
+    call site forgetting to use `preview()` or `safe_label()`.
+- **Reliability**: `JSONLSpanExporter` now holds a long-lived file handle
+  guarded by a lock; `force_flush` issues `fsync` and `shutdown` closes
+  the handle. `OpenTelemetryConfig.shutdown()` flushes processors and
+  tears them down cleanly. Previous behavior returned `True` from
+  `force_flush` without touching disk and did nothing on shutdown.
+- **OpenShift manifest**: Grafana anonymous-admin is now **off** by
+  default — replaced with a `grafana-admin` Secret and
+  `GF_SECURITY_ADMIN_*` env wiring. A commented `ANONYMOUS_DEV_ONLY`
+  block preserves the laptop-only shortcut. In-cluster
+  `tls: insecure: true` is documented as namespace-scoped only.
+- **Tests**: Added 9 new test cases covering sanitized `error_message`,
+  HMAC keying and secret dependence, sanitized RAG `doc_ids`,
+  `_coerce_attr` hard-capping, sidecar/spans file permissions, and
+  `JSONLSpanExporter` flush/shutdown semantics. PR-validation script
+  extended with a failing-tool negative control and file-mode assertion.
+
+### PR #547 - 2026-04-19 (issue #545)
+- **Feature**: OpenTelemetry audit trail. ATLAS now emits structured spans for every high-value event in a chat turn: `chat.turn` (per user message), `llm.call` (per LiteLLM call, including streaming), `tool.call` (per tool invocation), and `rag.query` (per RAG query, including batched multi-source queries). Spans are written as one JSON line per span to `logs/spans.jsonl` via a `BatchSpanProcessor`; optional OTLP export is enabled via `OTEL_EXPORTER_OTLP_ENDPOINT`. Attribute contract is frozen and documented in `docs/telemetry/README.md`: sanitized previews, hashes, sizes, token counts, retry counts, RAG document IDs/scores, and tool success/duration — never raw prompts, raw tool outputs, or raw RAG document text. Full tool outputs are opt-in only via `ATLAS_LOG_TOOL_OUTPUTS=true` (written to `logs/tool_outputs/{span_id}.txt`). A reference pandas analysis script lives at `docs/telemetry/analysis_example.py` and computes per-tool success rates, per-model p95 latency, RAG retrieval/use ratios, and retries per turn. An optional Grafana Tempo / Grafana stack recipe is included in the telemetry README for interactive trace exploration. 19 unit tests cover span emission, sensitive-data containment, and the JSONL exporter contract.
+- **Review fixes** (addressed on the same PR):
+  - Fixed `tool.call` **output leak** when `args_edited=true`: the LLM-facing edit note containing executed arguments was being captured into `output_preview`/`output_sha256`/`output_size`. Telemetry now reads the pre-edit-note content; a new `args_edited` boolean attribute records whether the edit happened. Regression test added.
+  - Fixed `tool_source` attribution for MCP servers whose names contain underscores (e.g. `pptx_generator`). Previously split the tool name on the first `_`, which mis-attributed tools like `pptx_generator_create` to `pptx`. Now uses `MCPToolManager.get_server_for_tool(name)` (authoritative tool index). Falls back to `null` when unavailable so analysis code never sees a fabricated prefix. Regression test added.
+  - Fixed `rag.query.content_size` to report UTF-8 byte size (via `telemetry.size_bytes`) instead of character count, matching the documented contract.
+  - Replaced `span.record_exception(exc)` with an `error_type` attribute only — avoids forwarding full exception messages (which can contain user/tool content) via OTLP.
+  - `set_attrs` now preserves empty lists so list-typed contract fields (`doc_ids`, `doc_scores`, `docs_used_in_context`) appear as explicit `[]` rather than silently vanishing.
+  - Renamed streaming `llm.call.output_tokens` to `output_tokens_estimate` (it's computed from `output_chars // 4`, not from real usage metadata) so aggregations don't silently mix estimates with authoritative token counts.
+  - Broke the `litellm_streaming` → `litellm_caller` cyclic import: `split_provider` moved to `atlas/modules/llm/models.py`.
+  - `set_attrs` debug-log now sanitizes attribute key/exception strings via `sanitize_for_logging`.
+  - `docs/telemetry/analysis_example.py::retries_per_turn` uses `df.reindex` so partial span files (e.g. only `tool.call` spans) no longer raise `KeyError`.
+
 ### PR #541 - 2026-04-19
 - **Fix**: MCP tool calls kept failing with `Session terminated` until a backend restart when a stateful MCP server's backing process invalidated its session ID while the HTTP transport still reported connected. `MCPToolManager.execute_tool` now detects session-termination errors (`"session terminated"`, `"session not found"`, `"invalid session id"`) — including when wrapped via `__cause__` / `__context__` — and calls `_session_manager.release(conversation_id, server_name)` so the next tool call transparently opens a fresh session. Also promoted the on-disconnect `release_sessions` failure log from `debug` to `warning` so silent failures are visible. Added three regression tests covering the direct, chained-exception, and negative (unrelated error) paths.
 

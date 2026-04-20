@@ -341,197 +341,277 @@ async def execute_single_tool(
     Pure function that doesn't maintain state - all context passed as parameters.
     """
     logger.debug("Entering execute_single_tool")
+    import time as _time
+
+    from atlas.core.telemetry import (
+        ERROR_MESSAGE_MAX_CHARS,
+        hash_short,
+        preview,
+        set_attrs,
+        sha256_full,
+        size_bytes,
+        start_span,
+        write_tool_output_sidecar,
+    )
+
     from . import event_notifier
 
-    try:
-        # Prepare arguments with injections (username, filename URL mapping)
-        parsed_args = prepare_tool_arguments(tool_call, session_context, tool_manager)
+    tool_name = tool_call.function.name
+    # Look up the owning MCP server from the tool manager's authoritative
+    # index (server names can contain underscores, so splitting on '_' is
+    # wrong for tools like `pptx_generator_create`). Falls back to None when
+    # the mapping is unavailable so analysis code can distinguish
+    # unknown-source from mis-attributed-source.
+    tool_source = None
+    get_server = getattr(tool_manager, "get_server_for_tool", None)
+    if callable(get_server):
+        try:
+            tool_source = get_server(tool_name)
+        except Exception:
+            tool_source = None
+    raw_args = getattr(tool_call.function, "arguments", "") or ""
+    span_attrs = {
+        "tool_name": tool_name,
+        "tool_source": tool_source,
+        "tool_call_id": getattr(tool_call, "id", None),
+        "args_hash": hash_short(raw_args),
+        "args_size": size_bytes(raw_args),
+        "session_id": session_context.get("session_id"),
+    }
 
-        # Filter to only schema-declared parameters so MCP tools don't receive extras
-        filtered_args = _filter_args_to_schema(parsed_args, tool_call.function.name, tool_manager)
+    with start_span("tool.call", span_attrs) as span:
+        tool_start_ns = _time.monotonic_ns()
 
-        # Sanitize arguments for UI (hide tokens in URLs, etc.)
-        display_args = _sanitize_args_for_ui(dict(filtered_args))
+        def _finalize_span(
+            result: ToolResult, telemetry_content: Optional[str] = None
+        ) -> ToolResult:
+            # `telemetry_content` lets callers record the *unmodified* tool
+            # output when later code has prepended an edit note or other
+            # context string containing injected arguments. Defaults to
+            # result.content when no override is given.
+            if telemetry_content is None:
+                telemetry_content = (
+                    result.content if isinstance(result.content, str) else str(result.content)
+                )
+            # error_message is sanitized + capped because upstream exception
+            # strings from MCP tools, HTTP clients, and DB drivers routinely
+            # embed the caller's arguments, URLs (with tokens), or user
+            # content. Using preview() matches the output_preview policy so
+            # no raw payload ever reaches span attributes or OTLP forwarding.
+            error_attr = (
+                preview(result.error, max_chars=ERROR_MESSAGE_MAX_CHARS)
+                if (not result.success and result.error)
+                else None
+            )
+            set_attrs(span, {
+                "success": bool(result.success),
+                "duration_ms": (_time.monotonic_ns() - tool_start_ns) // 1_000_000,
+                "output_size": size_bytes(telemetry_content),
+                "output_sha256": sha256_full(telemetry_content),
+                "output_preview": preview(telemetry_content),
+                "error_message": error_attr,
+            })
+            if result.success:
+                write_tool_output_sidecar(telemetry_content)
+            return result
 
-        # Check if this tool requires approval
-        needs_approval = False
-        allow_edit = True
-        admin_required = False
-        if skip_approval:
+        try:
+            # Prepare arguments with injections (username, filename URL mapping)
+            parsed_args = prepare_tool_arguments(tool_call, session_context, tool_manager)
+
+            # Filter to only schema-declared parameters so MCP tools don't receive extras
+            filtered_args = _filter_args_to_schema(parsed_args, tool_call.function.name, tool_manager)
+
+            # Sanitize arguments for UI (hide tokens in URLs, etc.)
+            display_args = _sanitize_args_for_ui(dict(filtered_args))
+
+            # Check if this tool requires approval
             needs_approval = False
-        elif config_manager:
-            needs_approval, allow_edit, admin_required = requires_approval(tool_call.function.name, config_manager)
-        else:
-            # No config manager means user-level approval by default
-            needs_approval = True
             allow_edit = True
             admin_required = False
+            if skip_approval:
+                needs_approval = False
+            elif config_manager:
+                needs_approval, allow_edit, admin_required = requires_approval(tool_call.function.name, config_manager)
+            else:
+                # No config manager means user-level approval by default
+                needs_approval = True
+                allow_edit = True
+                admin_required = False
 
-        # Track if arguments were edited (for LLM context)
-        arguments_were_edited = False
-        original_display_args = dict(display_args) if isinstance(display_args, dict) else display_args
+            # Track if arguments were edited (for LLM context)
+            arguments_were_edited = False
+            original_display_args = dict(display_args) if isinstance(display_args, dict) else display_args
 
-        # If approval is required, request it from the user
-        if needs_approval:
-            logger.info(f"Tool {tool_call.function.name} requires approval (admin_required={admin_required})")
+            # If approval is required, request it from the user
+            if needs_approval:
+                logger.info(f"Tool {tool_call.function.name} requires approval (admin_required={admin_required})")
 
-            # Send approval request to frontend
-            if update_callback:
-                await update_callback({
-                    "type": "tool_approval_request",
-                    "tool_call_id": tool_call.id,
-                    "tool_name": tool_call.function.name,
-                    "arguments": display_args,
-                    "allow_edit": allow_edit,
-                    "admin_required": admin_required
-                })
+                # Send approval request to frontend
+                if update_callback:
+                    await update_callback({
+                        "type": "tool_approval_request",
+                        "tool_call_id": tool_call.id,
+                        "tool_name": tool_call.function.name,
+                        "arguments": display_args,
+                        "allow_edit": allow_edit,
+                        "admin_required": admin_required
+                    })
 
-            # Wait for approval response
-            approval_manager = get_approval_manager()
-            request = approval_manager.create_approval_request(
-                tool_call.id,
-                tool_call.function.name,
-                filtered_args,
-                allow_edit,
-                user_email=session_context.get("user_email", ""),
-            )
-
-            try:
-                response = await request.wait_for_response(timeout=300.0)
-                approval_manager.cleanup_request(tool_call.id)
-
-                if not response["approved"]:
-                    # Tool was rejected
-                    reason = response.get("reason", "User rejected the tool call")
-                    logger.info(f"Tool {tool_call.function.name} rejected by user: {reason}")
-                    return ToolResult(
-                        tool_call_id=tool_call.id,
-                        content=f"Tool execution rejected by user: {reason}",
-                        success=False,
-                        error=reason
-                    )
-
-                # Use potentially edited arguments
-                if allow_edit and response.get("arguments"):
-                    edited_args = response["arguments"]
-                    # Check if arguments actually changed by comparing with what we sent (display_args)
-                    # Use json comparison to avoid false positives from dict ordering
-                    if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
-                        arguments_were_edited = True
-                        logger.info(f"User edited arguments for tool {tool_call.function.name}")
-
-                        # SECURITY: Re-apply security injections after user edits
-                        # This ensures username and other security-critical parameters cannot be tampered with
-                        re_injected_args = inject_context_into_args(
-                            edited_args,
-                            session_context,
-                            tool_call.function.name,
-                            tool_manager
-                        )
-
-                        # Re-filter to schema to ensure only valid parameters
-                        filtered_args = _filter_args_to_schema(
-                            re_injected_args,
-                            tool_call.function.name,
-                            tool_manager
-                        )
-                    else:
-                        # No actual changes, but response included arguments - keep original filtered_args
-                        logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
-
-            except asyncio.TimeoutError:
-                approval_manager.cleanup_request(tool_call.id)
-                logger.warning(f"Approval timeout for tool {tool_call.function.name}")
-                return ToolResult(
-                    tool_call_id=tool_call.id,
-                    content="Tool execution timed out waiting for user approval",
-                    success=False,
-                    error="Approval timeout"
+                # Wait for approval response
+                approval_manager = get_approval_manager()
+                request = approval_manager.create_approval_request(
+                    tool_call.id,
+                    tool_call.function.name,
+                    filtered_args,
+                    allow_edit,
+                    user_email=session_context.get("user_email", ""),
                 )
 
-        # Send tool start notification with sanitized args
-        await event_notifier.notify_tool_start(tool_call, display_args, update_callback)
+                try:
+                    response = await request.wait_for_response(timeout=300.0)
+                    approval_manager.cleanup_request(tool_call.id)
 
-        # Create tool call object and execute with filtered args only
-        tool_call_obj = ToolCall(
-            id=tool_call.id,
-            name=tool_call.function.name,
-            arguments=filtered_args
-        )
+                    if not response["approved"]:
+                        # Tool was rejected
+                        reason = response.get("reason", "User rejected the tool call")
+                        logger.info(f"Tool {tool_call.function.name} rejected by user: {reason}")
+                        return _finalize_span(ToolResult(
+                            tool_call_id=tool_call.id,
+                            content=f"Tool execution rejected by user: {reason}",
+                            success=False,
+                            error=reason
+                        ))
 
-        result = await tool_manager.execute_tool(
-            tool_call_obj,
-            context={
-                "session_id": session_context.get("session_id"),
-                "user_email": session_context.get("user_email"),
-                "conversation_id": session_context.get("conversation_id"),
-                # pass update callback so MCP client can emit progress
-                "update_callback": update_callback,
-            }
-        )
+                    # Use potentially edited arguments
+                    if allow_edit and response.get("arguments"):
+                        edited_args = response["arguments"]
+                        # Check if arguments actually changed by comparing with what we sent (display_args)
+                        # Use json comparison to avoid false positives from dict ordering
+                        if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
+                            arguments_were_edited = True
+                            logger.info(f"User edited arguments for tool {tool_call.function.name}")
 
-        # If arguments were edited, prepend a note to the result for LLM context
-        if arguments_were_edited:
-            edit_note = (
-                f"[IMPORTANT: The user manually edited the tool arguments before execution. "
-                f"Security-critical parameters (like username) were re-injected by the system and cannot be modified. "
-                f"The ACTUAL arguments executed were: {json.dumps(filtered_args)}. "
-                f"Your response must reflect these arguments as the user's true intent.]\\n\\n"
+                            # SECURITY: Re-apply security injections after user edits
+                            # This ensures username and other security-critical parameters cannot be tampered with
+                            re_injected_args = inject_context_into_args(
+                                edited_args,
+                                session_context,
+                                tool_call.function.name,
+                                tool_manager
+                            )
+
+                            # Re-filter to schema to ensure only valid parameters
+                            filtered_args = _filter_args_to_schema(
+                                re_injected_args,
+                                tool_call.function.name,
+                                tool_manager
+                            )
+                        else:
+                            # No actual changes, but response included arguments - keep original filtered_args
+                            logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
+
+                except asyncio.TimeoutError:
+                    approval_manager.cleanup_request(tool_call.id)
+                    logger.warning(f"Approval timeout for tool {tool_call.function.name}")
+                    return _finalize_span(ToolResult(
+                        tool_call_id=tool_call.id,
+                        content="Tool execution timed out waiting for user approval",
+                        success=False,
+                        error="Approval timeout"
+                    ))
+
+            # Send tool start notification with sanitized args
+            await event_notifier.notify_tool_start(tool_call, display_args, update_callback)
+
+            # Create tool call object and execute with filtered args only
+            tool_call_obj = ToolCall(
+                id=tool_call.id,
+                name=tool_call.function.name,
+                arguments=filtered_args
             )
-            if isinstance(result.content, str):
-                result.content = edit_note + result.content
-            else:
-                # If content is not a string, convert and prepend
-                result.content = edit_note + str(result.content)
 
-        # Send tool complete notification
-        await event_notifier.notify_tool_complete(tool_call, result, parsed_args, update_callback)
+            result = await tool_manager.execute_tool(
+                tool_call_obj,
+                context={
+                    "session_id": session_context.get("session_id"),
+                    "user_email": session_context.get("user_email"),
+                    "conversation_id": session_context.get("conversation_id"),
+                    # pass update callback so MCP client can emit progress
+                    "update_callback": update_callback,
+                }
+            )
 
-        return result
+            # Capture the raw tool output for telemetry *before* we mutate
+            # result.content with an edit_note — the edit note inlines
+            # executed arguments (per the existing LLM-context contract),
+            # which would otherwise leak into the span's output_preview.
+            raw_output_for_telemetry = (
+                result.content if isinstance(result.content, str) else str(result.content)
+            )
+            # If arguments were edited, prepend a note to the result for LLM context
+            if arguments_were_edited:
+                edit_note = (
+                    f"[IMPORTANT: The user manually edited the tool arguments before execution. "
+                    f"Security-critical parameters (like username) were re-injected by the system and cannot be modified. "
+                    f"The ACTUAL arguments executed were: {json.dumps(filtered_args)}. "
+                    f"Your response must reflect these arguments as the user's true intent.]\\n\\n"
+                )
+                if isinstance(result.content, str):
+                    result.content = edit_note + result.content
+                else:
+                    # If content is not a string, convert and prepend
+                    result.content = edit_note + str(result.content)
 
-    except AuthenticationRequiredException as auth_err:
-        # Special handling for authentication required - send OAuth redirect info
-        logger.info(f"Tool {tool_call.function.name} requires authentication for server {auth_err.server_name}")
+            # Send tool complete notification
+            await event_notifier.notify_tool_complete(tool_call, result, parsed_args, update_callback)
 
-        # Send authentication required notification with OAuth URL
-        if update_callback:
-            await update_callback({
-                "type": "auth_required",
-                "tool_call_id": tool_call.id,
-                "tool_name": tool_call.function.name,
-                "server_name": auth_err.server_name,
-                "auth_type": auth_err.auth_type,
-                "oauth_start_url": auth_err.oauth_start_url,
-                "message": auth_err.message,
-            })
+            set_attrs(span, {"args_edited": bool(arguments_were_edited)})
+            return _finalize_span(result, telemetry_content=raw_output_for_telemetry)
 
-        # Return error result with auth info
-        return ToolResult(
-            tool_call_id=tool_call.id,
-            content=f"Authentication required: {auth_err.message}",
-            success=False,
-            error=str(auth_err),
-            meta_data={
-                "auth_required": True,
-                "server_name": auth_err.server_name,
-                "auth_type": auth_err.auth_type,
-                "oauth_start_url": auth_err.oauth_start_url,
-            }
-        )
+        except AuthenticationRequiredException as auth_err:
+            # Special handling for authentication required - send OAuth redirect info
+            logger.info(f"Tool {tool_call.function.name} requires authentication for server {auth_err.server_name}")
 
-    except Exception as e:
-        logger.error(f"Error executing tool {tool_call.function.name}: {e}")
+            # Send authentication required notification with OAuth URL
+            if update_callback:
+                await update_callback({
+                    "type": "auth_required",
+                    "tool_call_id": tool_call.id,
+                    "tool_name": tool_call.function.name,
+                    "server_name": auth_err.server_name,
+                    "auth_type": auth_err.auth_type,
+                    "oauth_start_url": auth_err.oauth_start_url,
+                    "message": auth_err.message,
+                })
 
-        # Send tool error notification
-        await event_notifier.notify_tool_error(tool_call, str(e), update_callback)
+            # Return error result with auth info
+            return _finalize_span(ToolResult(
+                tool_call_id=tool_call.id,
+                content=f"Authentication required: {auth_err.message}",
+                success=False,
+                error=str(auth_err),
+                meta_data={
+                    "auth_required": True,
+                    "server_name": auth_err.server_name,
+                    "auth_type": auth_err.auth_type,
+                    "oauth_start_url": auth_err.oauth_start_url,
+                }
+            ))
 
-        # Return error result instead of raising
-        return ToolResult(
-            tool_call_id=tool_call.id,
-            content=f"Tool execution failed: {str(e)}",
-            success=False,
-            error=str(e)
-        )
+        except Exception as e:
+            logger.error(f"Error executing tool {tool_call.function.name}: {e}")
+
+            # Send tool error notification
+            await event_notifier.notify_tool_error(tool_call, str(e), update_callback)
+
+            # Return error result instead of raising
+            return _finalize_span(ToolResult(
+                tool_call_id=tool_call.id,
+                content=f"Tool execution failed: {str(e)}",
+                success=False,
+                error=str(e)
+            ))
 
 
 def _filter_args_to_schema(parsed_args: Dict[str, Any], tool_name: str, tool_manager) -> Dict[str, Any]:
