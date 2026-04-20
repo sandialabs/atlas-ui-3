@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### New Chat stops in-flight generation - 2026-04-20
+- Clicking "New Chat" while a reply is streaming no longer lets orphaned tokens
+  bleed into the fresh session. `clearChat` now cancels the active task
+  (`stop_streaming` + `agent_control: stop` when in agent mode) before
+  requesting a new session, fully resets local thinking / synthesizing /
+  agent-step state, and asks for confirmation before discarding an existing
+  conversation or interrupting generation. Backend `reset_session` also
+  cancels any running chat task as defense-in-depth.
+
 ### PR #547 hardening pass - 2026-04-19 (issue #545 follow-up, same PR)
 - **Security / privacy**:
   - `tool.call.error_message` is now routed through `preview()` (sanitized,

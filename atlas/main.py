@@ -615,6 +615,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "reset_session":
+                # If a chat is still generating when the user starts a new chat,
+                # cancel it first so tokens don't keep streaming into the fresh
+                # session (defense-in-depth; the frontend also sends
+                # stop_streaming before reset_session when it knows generation
+                # is in progress).
+                task = active_chat_task.get("task")
+                if task and not task.done():
+                    logger.info("Cancelling active chat task (reset_session)")
+                    task.cancel()
+
                 # Handle session reset (use authenticated user from connection)
                 response = await chat_service.handle_reset_session(
                     session_id=session_id,
