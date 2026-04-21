@@ -1,29 +1,34 @@
 #!/usr/bin/env python3
 """
-ATLAS RAG API Mock Service with Grep-Based Search
+ATLAS RAG API Mock Service (OpenAPI v0.3.x).
 
-Provides mock endpoints that simulate the external ATLAS RAG API:
-  - GET  /discover/datasources  - Discover accessible data sources
-  - POST /rag/completions       - Query RAG with grep-based search
+Implements the ATLAS RAG API shape described in the public OpenAPI spec:
 
-This mock searches through realistic text data using simple keyword matching.
-Mock data is loaded from mock_data.json in the same directory.
+  - GET  /api/v1/discover/datasources?role=read|write&as_user=<user>
+  - POST /api/v1/rag/completions?as_user=<user>
+
+Responses follow the OpenAI chat.completion schema, with an extra
+``rag_metadata`` field and per-message ``annotations`` (url_citation)
+that link specific character ranges in the assistant content to the
+source documents they were derived from.
+
+Mock data is loaded from mock_data.json next to this file.
 """
 
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import time
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
+import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-import uvicorn
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,13 +52,15 @@ def load_mock_data() -> Tuple[Dict[str, Any], Dict[str, List[str]]]:
     data_sources = data.get("data_sources", {})
     users_groups = data.get("users_groups", {})
 
-    logger.info("Loaded mock data: %d data sources, %d users",
-                len(data_sources), len(users_groups))
+    logger.info(
+        "Loaded mock data: %d data sources, %d users",
+        len(data_sources),
+        len(users_groups),
+    )
 
     return data_sources, users_groups
 
 
-# Load data at module level
 DATA_SOURCES, USERS_GROUPS_DB = load_mock_data()
 
 
@@ -70,10 +77,6 @@ class StaticTokenVerifier:
     def verify(self, token: str) -> Optional[Dict[str, Any]]:
         return self.tokens.get(token)
 
-
-# ------------------------------------------------------------------------------
-# Configuration
-# ------------------------------------------------------------------------------
 
 shared_key = (
     os.getenv("ATLAS_RAG_SHARED_KEY")
@@ -92,16 +95,14 @@ verifier = StaticTokenVerifier(
 )
 
 
-
-
 # ------------------------------------------------------------------------------
 # FastAPI App
 # ------------------------------------------------------------------------------
 
 app = FastAPI(
     title="ATLAS RAG API Mock",
-    description="Mock API with grep-based search over realistic data",
-    version="2.0.0",
+    description="Mock aligned with the ATLAS RAG OpenAPI v0.3.x spec",
+    version="0.3.0",
 )
 
 PUBLIC_PATHS = {"/", "/health", "/docs", "/redoc", "/openapi.json"}
@@ -114,7 +115,10 @@ async def verify_token_middleware(request, call_next):
 
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        return JSONResponse(status_code=401, content={"detail": "Missing or invalid Authorization header"})
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Missing or invalid Authorization header"},
+        )
 
     token = auth_header[7:]
     if verifier.verify(token) is None:
@@ -124,270 +128,395 @@ async def verify_token_middleware(request, call_next):
 
 
 # ------------------------------------------------------------------------------
-# Pydantic Models
+# Pydantic Models (OpenAPI v0.3.x)
 # ------------------------------------------------------------------------------
 
-class DataSourceInfo(BaseModel):
-    id: str
-    label: str
-    compliance_level: str = "CUI"
-    description: str = ""
+class DataSource(BaseModel):
+    id: str = Field(..., description="Unique identifier")
+    label: str = Field(..., description="Label")
+    compliance_level: str = Field("CUI", description="Compliance level of data source")
+    description: str = Field("", description="Description")
 
 
-class DataSourceDiscoveryResponse(BaseModel):
-    data_sources: List[DataSourceInfo]
+class DiscoverDataSourcesResponse(BaseModel):
+    data_sources: List[DataSource]
 
 
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-
-class RagRequest(BaseModel):
-    messages: List[ChatMessage]
-    stream: bool = False
-    model: str = "gpt-4"
-    top_k: int = 4
-    corpora: Optional[List[str]] = None
-
-
-class DocumentFound(BaseModel):
-    id: str
-    corpus_id: str
+class AnnotationURLCitation(BaseModel):
+    end_index: int
+    start_index: int
     title: str
+    url: str
+
+
+class Annotation(BaseModel):
+    type: Literal["url_citation"] = "url_citation"
+    url_citation: AnnotationURLCitation
+
+
+class ChatCompletionMessage(BaseModel):
+    role: Literal["assistant"] = "assistant"
+    content: Optional[str] = None
+    refusal: Optional[str] = None
+    annotations: Optional[List[Annotation]] = None
+
+
+class Choice(BaseModel):
+    finish_reason: Literal[
+        "stop", "length", "tool_calls", "content_filter", "function_call"
+    ] = "stop"
+    index: int = 0
+    message: ChatCompletionMessage
+
+
+class DocumentMetadata(BaseModel):
+    data_source: DataSource
     text: str
+    id: Optional[int] = None
+    content_type: str = "atlas-search"
     confidence_score: float
-    content_type: str = "text"
     last_modified: Optional[str] = None
-    url: Optional[str] = None
 
 
 class RagMetadata(BaseModel):
     query_processing_time_ms: int
-    documents_found: List[DocumentFound]
-    data_sources: List[str]
-    retrieval_method: str = "keyword-search"
+    documents_found: List[DocumentMetadata]
+    data_sources: List[DataSource]
+    retrieval_method: str = "similarity"
 
 
-class RagResponseChoice(BaseModel):
-    index: int = 0
-    message: ChatMessage
-    finish_reason: str = "stop"
+class CompletionUsage(BaseModel):
+    completion_tokens: int
+    prompt_tokens: int
+    total_tokens: int
+
+
+class RagRequest(BaseModel):
+    messages: List[Dict[str, Any]] = Field(..., description="Message history")
+    stream: bool = Field(False, description="Stream response")
+    model: str = Field("openai/gpt-oss-120b", description="LLM used to generate response")
+    hybrid_search_kwargs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional arguments to be passed to HybridSearch",
+    )
+    shirty_api_key: Optional[str] = None
+    search_api_key: Optional[str] = None
+    as_user: Optional[str] = None
 
 
 class RagResponse(BaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex[:12]}")
-    object: str = "chat.completion"
+    choices: List[Choice]
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
-    choices: List[RagResponseChoice]
-    rag_metadata: Optional[RagMetadata] = None
+    object: Literal["chat.completion"] = "chat.completion"
+    service_tier: Optional[str] = None
+    system_fingerprint: Optional[str] = None
+    usage: Optional[CompletionUsage] = None
+    rag_metadata: RagMetadata
 
 
 # ------------------------------------------------------------------------------
-# Search Functions
+# Search Helpers
 # ------------------------------------------------------------------------------
+
+STOP_WORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "must", "shall", "can", "to", "of", "in",
+    "for", "on", "with", "at", "by", "from", "as", "into", "through",
+    "during", "before", "after", "above", "below", "between", "under",
+    "and", "or", "but", "if", "then", "else", "when", "where", "why",
+    "how", "what", "which", "who", "whom", "this", "that", "these",
+    "those", "it", "its", "i", "me", "my", "we", "our", "you", "your",
+}
+
 
 def grep_search(query: str, text: str, context_chars: int = 200) -> List[Tuple[str, float]]:
-    """
-    Search for query terms in text and return matching snippets with scores.
-    Returns list of (snippet, score) tuples.
-    """
+    """Return snippets in ``text`` that match any non-stopword token in ``query``."""
     if not query or not text:
         return []
 
-    # Tokenize query into words (ignore common stop words)
-    stop_words = {"the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-                  "have", "has", "had", "do", "does", "did", "will", "would", "could",
-                  "should", "may", "might", "must", "shall", "can", "to", "of", "in",
-                  "for", "on", "with", "at", "by", "from", "as", "into", "through",
-                  "during", "before", "after", "above", "below", "between", "under",
-                  "and", "or", "but", "if", "then", "else", "when", "where", "why",
-                  "how", "what", "which", "who", "whom", "this", "that", "these",
-                  "those", "it", "its", "i", "me", "my", "we", "our", "you", "your"}
-
-    query_words = [w.lower() for w in re.findall(r'\w+', query) if w.lower() not in stop_words]
-
+    query_words = [
+        w.lower() for w in re.findall(r"\w+", query) if w.lower() not in STOP_WORDS
+    ]
     if not query_words:
         return []
 
-    results = []
-    lines = text.split('\n')
+    results: List[Tuple[str, float]] = []
+    lines = text.split("\n")
 
     for i, line in enumerate(lines):
         line_lower = line.lower()
-        matches = sum(1 for word in query_words if word in line_lower)
+        matches = sum(1 for w in query_words if w in line_lower)
+        if matches == 0:
+            continue
+        score = matches / len(query_words)
 
-        if matches > 0:
-            # Calculate score based on match ratio and position
-            score = matches / len(query_words)
+        start_line = max(0, i - 1)
+        end_line = min(len(lines), i + 2)
+        snippet = "\n".join(lines[start_line:end_line]).strip()
+        if len(snippet) > context_chars:
+            snippet = snippet[:context_chars] + "..."
+        results.append((snippet, score))
 
-            # Build context (include surrounding lines)
-            start_line = max(0, i - 1)
-            end_line = min(len(lines), i + 2)
-            snippet = '\n'.join(lines[start_line:end_line]).strip()
-
-            # Truncate if too long
-            if len(snippet) > context_chars:
-                snippet = snippet[:context_chars] + "..."
-
-            results.append((snippet, score))
-
-    # Sort by score and deduplicate
     results.sort(key=lambda x: -x[1])
+
     seen = set()
-    unique_results = []
+    unique: List[Tuple[str, float]] = []
     for snippet, score in results:
-        snippet_key = snippet[:50]  # Use first 50 chars as key
-        if snippet_key not in seen:
-            seen.add(snippet_key)
-            unique_results.append((snippet, score))
+        key = snippet[:50]
+        if key not in seen:
+            seen.add(key)
+            unique.append((snippet, score))
+    return unique[:5]
 
-    return unique_results[:5]  # Return top 5 matches
+
+def _make_data_source(corpus_id: str) -> DataSource:
+    corpus = DATA_SOURCES[corpus_id]
+    return DataSource(
+        id=corpus_id,
+        label=corpus.get("name", corpus_id),
+        compliance_level=corpus.get("compliance_level", "CUI"),
+        description=corpus.get("description", ""),
+    )
 
 
-def search_corpus(query: str, corpus_id: str, top_k: int = 4) -> List[DocumentFound]:
-    """Search a corpus for relevant documents."""
+def search_corpus(
+    query: str, corpus_id: str, top_k: int
+) -> List[Tuple[DocumentMetadata, Optional[str], Optional[str]]]:
+    """Return ``(DocumentMetadata, title, url)`` tuples for top matches in ``corpus_id``."""
     if corpus_id not in DATA_SOURCES:
         return []
 
     corpus = DATA_SOURCES[corpus_id]
-    all_results = []
+    data_source = _make_data_source(corpus_id)
 
+    scored: List[Tuple[DocumentMetadata, Optional[str], Optional[str], float]] = []
+    chunk_id = 1
     for doc in corpus["documents"]:
-        matches = grep_search(query, doc["content"])
-
-        for snippet, score in matches:
-            all_results.append(DocumentFound(
-                id=doc["id"],
-                corpus_id=corpus_id,
-                title=doc["title"],
+        for snippet, score in grep_search(query, doc["content"]):
+            metadata = DocumentMetadata(
+                data_source=data_source,
                 text=snippet,
-                confidence_score=round(score, 2),
-                content_type="text",
+                id=chunk_id,
+                content_type="atlas-search",
+                confidence_score=round(score, 4),
                 last_modified=doc.get("last_modified"),
-                url=doc.get("url"),
-            ))
+            )
+            scored.append((metadata, doc.get("title"), doc.get("url"), score))
+            chunk_id += 1
 
-    # Sort by confidence and return top_k
-    all_results.sort(key=lambda x: -x.confidence_score)
-    return all_results[:top_k]
+    scored.sort(key=lambda x: -x[3])
+    return [(m, t, u) for m, t, u, _ in scored[:top_k]]
 
 
 # ------------------------------------------------------------------------------
 # Authorization Helpers
 # ------------------------------------------------------------------------------
 
-def get_accessible_corpora(user_name: str) -> List[DataSourceInfo]:
-    """Get list of data sources accessible by a user."""
+def get_accessible_corpora(user_name: str) -> List[DataSource]:
+    """Return data sources accessible by ``user_name``."""
     user_groups = set(USERS_GROUPS_DB.get(user_name, []))
-    accessible = []
+    accessible: List[DataSource] = []
 
     for corpus_id, corpus in DATA_SOURCES.items():
         required = set(corpus.get("required_groups", []))
-
-        # Public if no required groups, or user has at least one required group
         if not required or (user_groups & required):
-            accessible.append(DataSourceInfo(
-                id=corpus_id,
-                label=corpus.get("name", corpus_id),
-                compliance_level=corpus.get("compliance_level", "CUI"),
-                description=corpus.get("description", ""),
-            ))
+            accessible.append(_make_data_source(corpus_id))
 
     return accessible
 
 
 def can_access_corpus(user_name: str, corpus_id: str) -> bool:
-    """Check if a user can access a corpus."""
     if corpus_id not in DATA_SOURCES:
         return False
-
     required = set(DATA_SOURCES[corpus_id].get("required_groups", []))
     if not required:
-        return True  # Public access
-
+        return True
     user_groups = set(USERS_GROUPS_DB.get(user_name, []))
     return bool(user_groups & required)
+
+
+# ------------------------------------------------------------------------------
+# Response Composition
+# ------------------------------------------------------------------------------
+
+def _compose_answer_with_citations(
+    corpora_searched: List[str],
+    docs_with_meta: List[Tuple[DocumentMetadata, Optional[str], Optional[str]]],
+    user_query: str,
+) -> Tuple[str, List[Annotation]]:
+    """Build assistant content and url_citation annotations pointing into it.
+
+    Each annotation's ``start_index``/``end_index`` bounds the exact characters
+    in the generated content that came from the referenced document.
+    """
+    if not docs_with_meta:
+        content = (
+            f"No results found for: \"{user_query}\"\n\n"
+            f"Searched in: {', '.join(corpora_searched)}\n"
+            "Try different keywords or check your data source access."
+        )
+        return content, []
+
+    parts: List[str] = []
+    annotations: List[Annotation] = []
+
+    intro = (
+        f"Based on searching {len(corpora_searched)} data source(s), "
+        f"I found {len(docs_with_meta)} relevant result(s):\n\n"
+    )
+    parts.append(intro)
+    cursor = len(intro)
+
+    for idx, (doc, title, url) in enumerate(docs_with_meta, start=1):
+        title_str = title or doc.data_source.label
+        header = f"[{idx}] {title_str}\n"
+        body = doc.text
+        citation_marker = f" [{idx}]"
+
+        parts.append(header)
+        cursor += len(header)
+
+        body_start = cursor
+        parts.append(body)
+        cursor += len(body)
+        body_end = cursor
+
+        parts.append(citation_marker)
+        cursor += len(citation_marker)
+        parts.append("\n\n")
+        cursor += 2
+
+        annotations.append(
+            Annotation(
+                type="url_citation",
+                url_citation=AnnotationURLCitation(
+                    start_index=body_start,
+                    end_index=body_end,
+                    title=title_str,
+                    url=url or "",
+                ),
+            )
+        )
+
+    footer = (
+        f"These results are from: "
+        f"{', '.join(sorted({d.data_source.id for d, _, _ in docs_with_meta}))}"
+    )
+    parts.append(footer)
+
+    return "".join(parts), annotations
 
 
 # ------------------------------------------------------------------------------
 # API Endpoints
 # ------------------------------------------------------------------------------
 
-@app.get("/discover/datasources", response_model=DataSourceDiscoveryResponse)
-async def discover_data_sources(as_user: str = Query(...)):
-    """Discover data sources accessible by a user."""
-    logger.info("Discovery request for user: %s", as_user)
+@app.get("/api/v1/discover/datasources", response_model=DiscoverDataSourcesResponse)
+async def discover_data_sources(
+    role: Literal["read", "write"] = Query("read"),
+    as_user: Optional[str] = Query(None, description="User ID to impersonate"),
+):
+    """Discover data sources accessible by a user.
 
-    accessible = get_accessible_corpora(as_user)
-    logger.info("User %s can access %d data sources", as_user, len(accessible))
-
-    return DataSourceDiscoveryResponse(
-        data_sources=accessible,
+    The mock treats ``read`` and ``write`` identically; a production impl would
+    filter further by role.
+    """
+    user = as_user or ""
+    logger.info("Discovery request: user=%s role=%s", user, role)
+    accessible = get_accessible_corpora(user)
+    logger.info(
+        "User %s can access %d data sources (role=%s)",
+        user,
+        len(accessible),
+        role,
     )
+    return DiscoverDataSourcesResponse(data_sources=accessible)
 
 
-@app.post("/rag/completions", response_model=RagResponse)
-async def rag_completions(request: RagRequest, as_user: str = Query(...)):
+@app.post("/api/v1/rag/completions", response_model=RagResponse)
+async def rag_completions(
+    request: RagRequest,
+    as_user: Optional[str] = Query(None, description="User ID to impersonate"),
+):
     """Query RAG with grep-based search."""
     start_time = time.time()
 
+    user = as_user or request.as_user or ""
     logger.info("---------- RAG query ----------")
-    logger.info("RAG query from user: %s, corpora: %s", as_user, request.corpora)
+    logger.info(
+        "RAG query user=%s model=%s hybrid_kwargs=%s",
+        user,
+        request.model,
+        request.hybrid_search_kwargs,
+    )
 
-    # Determine corpora to search
-    corpora_to_search = request.corpora or [c.id for c in get_accessible_corpora(as_user)]
+    top_k = int(request.hybrid_search_kwargs.get("top_k", 4))
+    requested_corpora = (
+        request.hybrid_search_kwargs.get("corpora")
+        or request.hybrid_search_kwargs.get("data_sources")
+    )
+    if requested_corpora is None:
+        corpora_to_search = [ds.id for ds in get_accessible_corpora(user)]
+    else:
+        corpora_to_search = list(requested_corpora)
 
-    # Validate access
     for corpus in corpora_to_search:
         if corpus not in DATA_SOURCES:
             raise HTTPException(status_code=404, detail=f"Corpus '{corpus}' not found")
-        if not can_access_corpus(as_user, corpus):
+        if not can_access_corpus(user, corpus):
             raise HTTPException(status_code=403, detail=f"Access denied to '{corpus}'")
 
-    # Extract user query
-    user_query = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
-    logger.info("RAG user query (exact): %r", user_query)
+    user_query = ""
+    for m in reversed(request.messages):
+        if m.get("role") == "user":
+            c = m.get("content", "")
+            if isinstance(c, list):
+                user_query = " ".join(
+                    p.get("text", "")
+                    for p in c
+                    if isinstance(p, dict) and p.get("type") == "text"
+                )
+            else:
+                user_query = c or ""
+            break
+    logger.info("RAG user query: %r", user_query)
 
-    # Search each corpus
-    all_documents = []
+    docs_with_meta: List[Tuple[DocumentMetadata, Optional[str], Optional[str]]] = []
     for corpus in corpora_to_search:
-        docs = search_corpus(user_query, corpus, request.top_k)
-        all_documents.extend(docs)
+        docs_with_meta.extend(search_corpus(user_query, corpus, top_k))
 
-    # Sort by confidence and limit
-    all_documents.sort(key=lambda x: -x.confidence_score)
-    all_documents = all_documents[:request.top_k]
+    docs_with_meta.sort(key=lambda x: -x[0].confidence_score)
+    docs_with_meta = docs_with_meta[:top_k]
 
-    # Generate response
+    content, annotations = _compose_answer_with_citations(
+        corpora_to_search, docs_with_meta, user_query
+    )
+
     processing_time = int((time.time() - start_time) * 1000) + 20
-
-    if all_documents:
-        context_parts = [f"[{d.title}]\n{d.text}" for d in all_documents]
-        context = "\n\n---\n\n".join(context_parts)
-
-        response_content = (
-            f"Based on searching {len(corpora_to_search)} data source(s), "
-            f"I found {len(all_documents)} relevant result(s):\n\n"
-            f"{context}\n\n"
-            f"These results are from: {', '.join(set(d.corpus_id for d in all_documents))}"
-        )
-    else:
-        response_content = (
-            f"No results found for: \"{user_query}\"\n\n"
-            f"Searched in: {', '.join(corpora_to_search)}\n"
-            "Try different keywords or check your data source access."
-        )
 
     return RagResponse(
         model=request.model,
-        choices=[RagResponseChoice(message=ChatMessage(role="assistant", content=response_content))],
+        choices=[
+            Choice(
+                index=0,
+                finish_reason="stop",
+                message=ChatCompletionMessage(
+                    role="assistant",
+                    content=content,
+                    annotations=annotations or None,
+                ),
+            )
+        ],
         rag_metadata=RagMetadata(
             query_processing_time_ms=processing_time,
-            documents_found=all_documents,
-            data_sources=corpora_to_search,
-            retrieval_method="keyword-search",
+            documents_found=[m for m, _, _ in docs_with_meta],
+            data_sources=[
+                _make_data_source(c) for c in corpora_to_search if c in DATA_SOURCES
+            ],
+            retrieval_method="similarity",
         ),
     )
 
@@ -401,13 +530,15 @@ async def health_check():
 async def root():
     return {
         "service": "ATLAS RAG API Mock",
-        "version": "2.0.0",
-        "search_method": "grep-based keyword search",
+        "version": "0.3.0",
+        "openapi": "v0.3.x",
         "data_sources": list(DATA_SOURCES.keys()),
         "test_users": list(USERS_GROUPS_DB.keys()),
         "endpoints": {
-            "GET /discover/datasources?as_user=<email>": "List accessible data sources",
-            "POST /rag/completions?as_user=<email>": "Search and query",
+            "GET /api/v1/discover/datasources?role=read|write&as_user=<user>":
+                "List accessible data sources",
+            "POST /api/v1/rag/completions?as_user=<user>":
+                "Search and query",
             "GET /health": "Health check",
         },
     }

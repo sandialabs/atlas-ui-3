@@ -202,8 +202,8 @@ class RAGSourceConfig(BaseModel):
     strip_domain: bool = False  # Strip @domain from username (e.g. user@corp.com -> user)
 
     # API endpoint customization (HTTP type)
-    discovery_endpoint: str = "/discover/datasources"
-    query_endpoint: str = "/rag/completions"
+    discovery_endpoint: str = "/api/v1/discover/datasources"
+    query_endpoint: str = "/api/v1/rag/completions"
 
     @model_validator(mode='after')
     def validate_type_specific_fields(self):
