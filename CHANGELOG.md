@@ -23,6 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   side-effects (close canvas, focus input) on the confirm result — if the
   user clicks Cancel, the chat stays intact.
 
+### PR #544 - 2026-04-19
+- **Fix**: MCP client tore down the streamable-HTTP session (POST → DELETE) after every tool call on stateful servers, so state written by one tool was invisible to the next. Root cause: `ChatService.handle_chat_message` only set `session.context["conversation_id"]` when the client sent one, but the frontend doesn't send a conversation id on the first message of a new conversation. That left `conversation_id=None` for tool execution, which forced `MCPToolManager.call_tool` into its per-call `async with client:` fallback instead of reusing the persistent session held by `MCPSessionManager`. Fix: default `session.context["conversation_id"]` to `str(session_id)` when the client doesn't send one (matches the fallback already used by `_save_conversation` and the `conversation_saved` notification, so the stable id round-trips to the client). Stateful MCP servers (e.g. FastMCP 3.x streamable-HTTP servers that key per-tool state on `Context.session_id`) now see a reused `Mcp-Session-Id` across tool calls within a conversation, as required by the MCP spec.
+
 ### PR #547 hardening pass - 2026-04-19 (issue #545 follow-up, same PR)
 - **Security / privacy**:
   - `tool.call.error_message` is now routed through `preview()` (sanitized,
