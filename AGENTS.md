@@ -72,7 +72,9 @@ cd atlas && python main.py  # don't use uvicorn --reload
 
 **Documentation**: PRs must update relevant docs in `/docs` (architecture, features, API, config, troubleshooting).
 
-**Changelog**: Add a 1-2 line entry to `CHANGELOG.md` for every PR. Format: `### PR #<number> - YYYY-MM-DD`.
+**Changelog**: Add a 1-2 line entry to `CHANGELOG.md` for every PR. Format: `### PR #<number> - YYYY-MM-DD`. Always add the entry under the `## [Unreleased]` section — the monthly release automation renames that heading at cut time, so anything above a prior release heading has already shipped.
+
+**Releases**: Atlas ships monthly. The `release-cut` workflow opens a draft release PR on the 22nd of each month. Full runbook at [docs/developer/release-process.md](./docs/developer/release-process.md). Do not push `v*.*.*` tags or create GitHub Releases outside that flow.
 
 **Date Stamps**: Include `YYYY-MM-DD` dates in doc filenames or section headers to track staleness.
 

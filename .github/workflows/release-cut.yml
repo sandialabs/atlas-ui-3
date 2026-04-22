@@ -1,0 +1,344 @@
+name: Release - cut monthly branch
+
+# Cuts a release branch, bumps versions, reshapes CHANGELOG, and opens
+# a draft PR. Does NOT publish. Full runbook:
+# docs/developer/release-process.md
+
+on:
+  schedule:
+    # 14:00 UTC on the 22nd of every month. Day 22 is the earliest
+    # date guaranteed to fall within the last 10 days of any month,
+    # which we treat as "the last week" for scheduling purposes.
+    - cron: '0 14 22 * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.2.0). Blank = auto-bump minor.'
+        required: false
+        type: string
+        default: ''
+      bump:
+        description: 'Which part to auto-bump when version is blank'
+        required: false
+        type: choice
+        options:
+          - minor
+          - patch
+          - major
+        default: minor
+      dry_run:
+        description: 'Dry run: print the plan, do not push or open a PR'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-cut
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    name: Cut release branch
+    runs-on: ubuntu-latest
+    # Guardrail: do not run scheduled cuts on forks. workflow_dispatch
+    # is allowed on any repo so maintainers can dry-run from a fork.
+    if: github.event_name != 'schedule' || github.repository == 'sandialabs/atlas-ui-3'
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          # Use a PAT if you need the PR to trigger downstream
+          # workflows (GITHUB_TOKEN-created PRs do not). For now we
+          # rely on GITHUB_TOKEN; maintainers can re-run CI on the PR.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current="$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)"
+          if [[ -z "$current" ]]; then
+            echo "::error::Could not read VERSION from atlas/version.py"
+            exit 1
+          fi
+          IFS='.' read -r cur_major cur_minor cur_patch <<< "$current"
+
+          input_version="${{ github.event.inputs.version }}"
+          bump_kind="${{ github.event.inputs.bump }}"
+          if [[ -z "$bump_kind" ]]; then
+            bump_kind="minor"
+          fi
+
+          if [[ -n "$input_version" ]]; then
+            if ! [[ "$input_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::version input must look like X.Y.Z, got '$input_version'"
+              exit 1
+            fi
+            new_version="$input_version"
+          else
+            case "$bump_kind" in
+              major) new_version="$((cur_major + 1)).0.0" ;;
+              minor) new_version="${cur_major}.$((cur_minor + 1)).0" ;;
+              patch) new_version="${cur_major}.${cur_minor}.$((cur_patch + 1))" ;;
+              *) echo "::error::Unknown bump kind '$bump_kind'"; exit 1 ;;
+            esac
+          fi
+
+          year_month="$(date -u +%Y.%m)"
+          release_date="$(date -u +%Y-%m-%d)"
+          release_branch="release/${year_month}"
+          commit_sha="$(git rev-parse HEAD)"
+          commit_short="$(git rev-parse --short HEAD)"
+
+          {
+            echo "current_version=$current"
+            echo "new_version=$new_version"
+            echo "year_month=$year_month"
+            echo "release_date=$release_date"
+            echo "release_branch=$release_branch"
+            echo "commit_sha=$commit_sha"
+            echo "commit_short=$commit_short"
+            echo "pr_title=release: ${new_version} (${year_month})"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "::notice::Planning release ${current} -> ${new_version} on ${release_branch} from ${commit_short}"
+
+      - name: Check if release branch already exists
+        id: branch_check
+        shell: bash
+        env:
+          BRANCH: ${{ steps.meta.outputs.release_branch }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Branch $BRANCH already exists on origin. This run is a no-op."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop early if branch exists
+        if: steps.branch_check.outputs.exists == 'true'
+        run: |
+          echo "Release branch ${{ steps.meta.outputs.release_branch }} already exists."
+          echo "This run exits cleanly without changing anything."
+          exit 0
+
+      - name: Create release branch
+        if: steps.branch_check.outputs.exists == 'false'
+        env:
+          BRANCH: ${{ steps.meta.outputs.release_branch }}
+        run: |
+          set -euo pipefail
+          git checkout -b "$BRANCH"
+
+      - name: Bump atlas/version.py
+        if: steps.branch_check.outputs.exists == 'false'
+        env:
+          OLD_VERSION: ${{ steps.meta.outputs.current_version }}
+          NEW_VERSION: ${{ steps.meta.outputs.new_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, re, pathlib
+          path = pathlib.Path("atlas/version.py")
+          text = path.read_text()
+          old, new = os.environ["OLD_VERSION"], os.environ["NEW_VERSION"]
+          replaced, n = re.subn(
+              rf'^VERSION\s*=\s*"{re.escape(old)}"',
+              f'VERSION = "{new}"',
+              text,
+              flags=re.MULTILINE,
+          )
+          if n != 1:
+              raise SystemExit(
+                  f"Expected exactly 1 VERSION line matching {old!r} in atlas/version.py, found {n}"
+              )
+          path.write_text(replaced)
+          print(f"atlas/version.py: {old} -> {new}")
+          PY
+
+      - name: Bump pyproject.toml
+        if: steps.branch_check.outputs.exists == 'false'
+        env:
+          OLD_VERSION: ${{ steps.meta.outputs.current_version }}
+          NEW_VERSION: ${{ steps.meta.outputs.new_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, re, pathlib
+          path = pathlib.Path("pyproject.toml")
+          text = path.read_text()
+          old, new = os.environ["OLD_VERSION"], os.environ["NEW_VERSION"]
+          # Match the first occurrence of `version = "X.Y.Z"` in the
+          # top-level [project] table; we do not want to touch
+          # dependency pin strings that happen to match the version.
+          pattern = re.compile(
+              rf'(?m)^(?P<prefix>version\s*=\s*")' + re.escape(old) + r'(?P<suffix>")'
+          )
+          replaced, n = pattern.subn(lambda m: f'{m.group("prefix")}{new}{m.group("suffix")}', text, count=1)
+          if n != 1:
+              raise SystemExit(
+                  f"Expected exactly 1 top-level version={old!r} in pyproject.toml, found {n}"
+              )
+          path.write_text(replaced)
+          print(f"pyproject.toml: {old} -> {new}")
+          PY
+
+      - name: Update CHANGELOG.md
+        if: steps.branch_check.outputs.exists == 'false'
+        env:
+          NEW_VERSION: ${{ steps.meta.outputs.new_version }}
+          RELEASE_DATE: ${{ steps.meta.outputs.release_date }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, pathlib, re
+          path = pathlib.Path("CHANGELOG.md")
+          text = path.read_text()
+          new_version = os.environ["NEW_VERSION"]
+          release_date = os.environ["RELEASE_DATE"]
+
+          # Rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and
+          # insert a fresh empty Unreleased section above it.
+          # Use [ \t]* rather than \s* so the regex does not consume
+          # the terminating newline of the heading line; otherwise the
+          # blank line between the new version heading and the first
+          # entry would be eaten.
+          unreleased_re = re.compile(r'^## \[Unreleased\][ \t]*$', re.MULTILINE)
+          m = unreleased_re.search(text)
+          if not m:
+              raise SystemExit(
+                  "CHANGELOG.md is missing a '## [Unreleased]' section; refusing to touch it."
+              )
+          new_heading = f"## [{new_version}] - {release_date}"
+          fresh_unreleased = "## [Unreleased]\n\n"
+          before = text[:m.start()]
+          after = text[m.end():]
+          text_out = before + fresh_unreleased + new_heading + after
+          path.write_text(text_out)
+          print(f"CHANGELOG.md: [Unreleased] -> [{new_version}] - {release_date}")
+          PY
+
+      - name: Show diff
+        if: steps.branch_check.outputs.exists == 'false'
+        run: |
+          git --no-pager diff --stat
+          git --no-pager diff
+
+      - name: Dry run stops here
+        if: steps.branch_check.outputs.exists == 'false' && github.event.inputs.dry_run == 'true'
+        run: |
+          echo "::notice::dry_run=true — not committing, not pushing, not opening a PR."
+
+      - name: Commit bump
+        if: steps.branch_check.outputs.exists == 'false' && github.event.inputs.dry_run != 'true'
+        env:
+          NEW_VERSION: ${{ steps.meta.outputs.new_version }}
+          YEAR_MONTH: ${{ steps.meta.outputs.year_month }}
+        run: |
+          set -euo pipefail
+          git config user.name "atlas-release-bot"
+          git config user.email "atlas-release-bot@users.noreply.github.com"
+          git add atlas/version.py pyproject.toml CHANGELOG.md
+          git commit -m "chore(release): cut ${YEAR_MONTH} at v${NEW_VERSION}"
+
+      - name: Push release branch
+        if: steps.branch_check.outputs.exists == 'false' && github.event.inputs.dry_run != 'true'
+        env:
+          BRANCH: ${{ steps.meta.outputs.release_branch }}
+        run: |
+          set -euo pipefail
+          git push --set-upstream origin "$BRANCH"
+
+      - name: Build PR body from checklist template
+        if: steps.branch_check.outputs.exists == 'false' && github.event.inputs.dry_run != 'true'
+        id: pr_body
+        env:
+          VERSION: ${{ steps.meta.outputs.new_version }}
+          OLD_VERSION: ${{ steps.meta.outputs.current_version }}
+          YEAR_MONTH: ${{ steps.meta.outputs.year_month }}
+          RELEASE_DATE: ${{ steps.meta.outputs.release_date }}
+          COMMIT_SHA: ${{ steps.meta.outputs.commit_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, pathlib
+          body = pathlib.Path(".github/release-checklist.md").read_text()
+          subs = {
+              "{{VERSION}}": os.environ["VERSION"],
+              "{{OLD_VERSION}}": os.environ["OLD_VERSION"],
+              "{{YEAR_MONTH}}": os.environ["YEAR_MONTH"],
+              "{{RELEASE_DATE}}": os.environ["RELEASE_DATE"],
+              "{{COMMIT_SHA}}": os.environ["COMMIT_SHA"],
+          }
+          for k, v in subs.items():
+              body = body.replace(k, v)
+          pathlib.Path("release-pr-body.md").write_text(body)
+          PY
+          echo "body_file=release-pr-body.md" >> "$GITHUB_OUTPUT"
+
+      - name: Open draft release PR
+        if: steps.branch_check.outputs.exists == 'false' && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: ${{ steps.meta.outputs.pr_title }}
+          HEAD: ${{ steps.meta.outputs.release_branch }}
+          BODY_FILE: ${{ steps.pr_body.outputs.body_file }}
+        run: |
+          set -euo pipefail
+          gh pr create \
+            --draft \
+            --base main \
+            --head "$HEAD" \
+            --title "$TITLE" \
+            --body-file "$BODY_FILE" \
+            --label "release" \
+            || {
+              echo "::warning::gh pr create failed (label may not exist). Retrying without label."
+              gh pr create \
+                --draft \
+                --base main \
+                --head "$HEAD" \
+                --title "$TITLE" \
+                --body-file "$BODY_FILE"
+            }
+
+      - name: Summary
+        if: always()
+        env:
+          EXISTS: ${{ steps.branch_check.outputs.exists }}
+          BRANCH: ${{ steps.meta.outputs.release_branch }}
+          OLD: ${{ steps.meta.outputs.current_version }}
+          NEW: ${{ steps.meta.outputs.new_version }}
+          DRY: ${{ github.event.inputs.dry_run }}
+        run: |
+          {
+            echo "## Release cut summary"
+            echo ""
+            echo "- Branch: \`$BRANCH\`"
+            echo "- Version: \`$OLD\` → \`$NEW\`"
+            echo "- Pre-existing branch: \`$EXISTS\`"
+            echo "- Dry run: \`${DRY:-false}\`"
+            echo ""
+            if [[ "$EXISTS" == "true" ]]; then
+              echo "No changes made — release branch already exists."
+            elif [[ "$DRY" == "true" ]]; then
+              echo "No changes pushed — dry run only."
+            else
+              echo "Draft release PR opened. Next step: a maintainer"
+              echo "claims it and follows the checklist in the PR body."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
