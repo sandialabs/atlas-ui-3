@@ -6,14 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### New Chat stops in-flight generation - 2026-04-20
-- Clicking "New Chat" while a reply is streaming no longer lets orphaned tokens
-  bleed into the fresh session. `clearChat` now cancels the active task
-  (`stop_streaming` + `agent_control: stop` when in agent mode) before
-  requesting a new session, fully resets local thinking / synthesizing /
-  agent-step state, and asks for confirmation before discarding an existing
-  conversation or interrupting generation. Backend `reset_session` also
-  cancels any running chat task as defense-in-depth.
+### PR #552 - 2026-04-20
+- New Chat stops in-flight generation: clicking "New Chat" while a reply is
+  streaming no longer lets orphaned tokens bleed into the fresh session.
+  `clearChat` now cancels the active task (`stop_streaming` +
+  `agent_control: stop` when in agent mode) before requesting a new session,
+  fully resets local thinking / synthesizing / agent-step state, and asks
+  for confirmation before discarding an existing conversation or
+  interrupting generation. Backend `reset_session` also cancels any running
+  chat task as defense-in-depth, and a new `agent_control` server handler
+  replaces the prior "Unknown message type" echo.
+- Sidebar "Delete Conversation" (of the active conversation) now bypasses the
+  New-Chat confirm prompt via `clearChat({ skipConfirm: true })` so users
+  don't see a second "Start a new chat?" dialog right after deleting.
+- Header "New Chat" button and `Ctrl+Alt+N` hotkey now gate their follow-up
+  side-effects (close canvas, focus input) on the confirm result — if the
+  user clicks Cancel, the chat stays intact.
 
 ### PR #547 hardening pass - 2026-04-19 (issue #545 follow-up, same PR)
 - **Security / privacy**:

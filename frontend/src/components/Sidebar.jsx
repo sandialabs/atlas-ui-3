@@ -199,7 +199,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     const wasActive = activeConversationId === conversationId
     await history.deleteConversation(conversationId)
     setContextMenu(null)
-    if (wasActive) clearChat()
+    if (wasActive) clearChat({ skipConfirm: true })
   }, [contextMenu, activeConversationId, history, clearChat])
 
   const formatDate = (dateStr) => {

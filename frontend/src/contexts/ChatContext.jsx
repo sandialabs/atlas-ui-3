@@ -352,6 +352,9 @@ export const ChatProvider = ({ children }) => {
 		// If there is any chat content or generation in progress, confirm before
 		// discarding it -- "New Chat" should not silently throw away a reply the
 		// user is actively reading / waiting on (mistakes happen).
+		// Returns true if the chat was cleared, false if the user cancelled --
+		// callers (Header/Ctrl+Alt+N) gate follow-up side-effects on this so a
+		// cancelled confirm doesn't still close the canvas or steal focus.
 		const isGenerating = isThinking || isSynthesizing || isStreaming
 		const hasContent = messages.length > 0
 		if (!skipConfirm && (hasContent || isGenerating)) {
@@ -359,7 +362,7 @@ export const ChatProvider = ({ children }) => {
 				? 'A response is still being generated. Start a new chat and stop the current response?'
 				: 'Start a new chat? This will clear the current conversation from view.'
 			if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
-				if (!window.confirm(prompt)) return
+				if (!window.confirm(prompt)) return false
 			}
 		}
 
@@ -394,6 +397,7 @@ export const ChatProvider = ({ children }) => {
 		if (sendMessage) {
 			sendMessage({ type: 'reset_session' })
 		}
+		return true
 	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd])
 
 	// Load a saved conversation from history into the chat view

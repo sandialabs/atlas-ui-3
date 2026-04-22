@@ -678,6 +678,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     logger.info("Cancelling active chat task (stop_streaming)")
                     task.cancel()
 
+            elif message_type == "agent_control":
+                # `agent_control` is normally consumed by the agent loop's
+                # internal receive_json poll while it's waiting on user input
+                # (react_loop._poll_control_message). If the main endpoint
+                # sees it here, the agent isn't in the input-wait branch, so
+                # treat action="stop" as a plain cancel of the chat task.
+                action = data.get("action")
+                if action == "stop":
+                    task = active_chat_task.get("task")
+                    if task and not task.done():
+                        logger.info("Cancelling active chat task (agent_control stop)")
+                        task.cancel()
+
             elif message_type == "elicitation_response":
                 # Handle elicitation response
                 from atlas.application.chat.elicitation_manager import get_elicitation_manager

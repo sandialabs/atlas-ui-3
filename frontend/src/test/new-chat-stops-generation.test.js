@@ -36,7 +36,7 @@ function clearChat({
     const prompt = isGenerating
       ? 'A response is still being generated. Start a new chat and stop the current response?'
       : 'Start a new chat? This will clear the current conversation from view.'
-    if (!confirmFn(prompt)) return { aborted: true }
+    if (!confirmFn(prompt)) return false
   }
 
   if (sendMessage && isGenerating) {
@@ -48,7 +48,7 @@ function clearChat({
 
   resetLocalState()
   if (sendMessage) sendMessage({ type: 'reset_session' })
-  return { aborted: false }
+  return true
 }
 
 describe('New Chat while generating', () => {
@@ -133,9 +133,23 @@ describe('New Chat while generating', () => {
       confirmFn: () => false,
     })
 
-    expect(result.aborted).toBe(true)
+    expect(result).toBe(false)
     expect(sendMessage).not.toHaveBeenCalled()
     expect(resetLocalState).not.toHaveBeenCalled()
+  })
+
+  it('returns true after a successful clear so callers can gate side-effects', () => {
+    const result = clearChat({
+      isThinking: false,
+      isSynthesizing: false,
+      isStreaming: false,
+      hasContent: false,
+      agentModeEnabled: false,
+      sendMessage,
+      resetLocalState,
+      confirmFn: () => true,
+    })
+    expect(result).toBe(true)
   })
 
   it('does not prompt when the chat is empty and idle', () => {
