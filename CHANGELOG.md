@@ -9,18 +9,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #544 - 2026-04-19
 - **Fix**: MCP client tore down the streamable-HTTP session (POST → DELETE) after every tool call on stateful servers, so state written by one tool was invisible to the next. Root cause: `ChatService.handle_chat_message` only set `session.context["conversation_id"]` when the client sent one, but the frontend doesn't send a conversation id on the first message of a new conversation. That left `conversation_id=None` for tool execution, which forced `MCPToolManager.call_tool` into its per-call `async with client:` fallback instead of reusing the persistent session held by `MCPSessionManager`. Fix: default `session.context["conversation_id"]` to `str(session_id)` when the client doesn't send one (matches the fallback already used by `_save_conversation` and the `conversation_saved` notification, so the stable id round-trips to the client). Stateful MCP servers (e.g. FastMCP 3.x streamable-HTTP servers that key per-tool state on `Context.session_id`) now see a reused `Mcp-Session-Id` across tool calls within a conversation, as required by the MCP spec.
 
-### Agent Portal foundation (experimental) - 2026-04-20
-- Added generalized Agent Portal substrate under `atlas/modules/agent_portal/`:
-  session state machine, SHA-256-chained JSONL audit writer, sandbox
-  profile model (Landlock + network + seccomp), pure-function
-  bubblewrap command builder, and a single `local_process` adapter.
-- Added `/api/agent-portal/*` routes gated by `FEATURE_AGENT_PORTAL_ENABLED`
-  (default `false`). Companion settings: `AGENT_PORTAL_DEFAULT_SANDBOX_TIER`,
-  `AGENT_PORTAL_ALLOW_PERMISSIVE_TIER`, `AGENT_PORTAL_SANDBOX_BACKEND`,
-  `AGENT_PORTAL_AUDIT_SUBDIR`.
-- Design: `docs/planning/agent-portal-2026-04-20.md`.
-- Not yet included: SSH/tmux adapter, Kubernetes/SLURM adapters,
-  filtering egress proxy, browser attach UI, artifact packaging.
+### PR #554 - 2026-04-21
+- **Feature (experimental, flag-gated)**: Agent Portal generalization
+  foundation. Adds a substrate for governed, sandboxed agent sessions
+  under `atlas/modules/agent_portal/`: a `RuntimeAdapter` protocol, a
+  `SandboxProfile` model (Landlock + network + optional seccomp), a
+  pure-function bubblewrap command builder, a SHA-256-chained JSONL
+  audit writer, an explicit `Session` state machine, a single
+  `local_process` adapter, and an `AgentPortalService` facade that
+  performs all policy checks.
+- **Routes**: `/api/agent-portal/*` is mounted only when
+  `FEATURE_AGENT_PORTAL_ENABLED=true` (default `false`). A conditional
+  import in `atlas/main.py` keeps the cold path zero-cost.
+- **Settings** (all default-safe): `FEATURE_AGENT_PORTAL_ENABLED`,
+  `AGENT_PORTAL_DEFAULT_SANDBOX_TIER`,
+  `AGENT_PORTAL_ALLOW_PERMISSIVE_TIER`,
+  `AGENT_PORTAL_SANDBOX_BACKEND`, `AGENT_PORTAL_AUDIT_SUBDIR`.
+  Documented in `.env.example` and `docker-compose.yml`.
+- **CodeQL hygiene**: the repository CodeQL query-filter is updated
+  from the legacy `py/unnecessary-statement` rule id to the current
+  `py/ineffectual-statement`, so Protocol-method ellipsis bodies are
+  suppressed under modern CodeQL packs. `py/empty-except` findings in
+  the audit writer are resolved by documenting why the `OSError` from
+  `chmod` / `fsync` is intentionally tolerated (audit integrity
+  depends on the SHA-256 chain, not mode bits or fsync).
+- **Tests**: 36 unit tests cover profile defaults, bwrap argv
+  construction, audit-chain verify + tamper detection, state-machine
+  edges, feature-flag gating, and the permissive-tier opt-in.
+- **Docs**: design in `docs/planning/agent-portal-2026-04-20.md`;
+  user-facing overview plus configuration reference and screenshots
+  in `docs/features/agent-portal.md`.
+- **PR validation**: `test/pr-validation/test_pr554_agent_portal.sh`
+  exercises the flag-off (no routes mounted) and flag-on (config
+  endpoint responds) postures with dedicated fixture envs under
+  `test/pr-validation/fixtures/pr554/`.
+- **Not included** (tracked in the design doc): SSH/tmux adapter,
+  Kubernetes/SLURM adapters, filtering egress proxy, browser attach
+  UI, artifact packaging, persistent cross-restart session store.
 
 ### PR #547 hardening pass - 2026-04-19 (issue #545 follow-up, same PR)
 - **Security / privacy**:

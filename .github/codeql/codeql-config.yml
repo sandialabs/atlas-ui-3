@@ -6,6 +6,11 @@ queries:
   - uses: github/codeql/javascript-queries@latest
 
 query-filters:
-  # Suppress "statement has no effect" findings for Python, e.g. ellipsis in Protocols
+  # Suppress "statement has no effect" findings for Python, e.g. ellipsis
+  # bodies in Protocol methods. The current CodeQL query id is
+  # py/ineffectual-statement; the older py/unnecessary-statement is kept
+  # for compatibility with any lingering legacy packs.
+  - exclude:
+      id: py/ineffectual-statement
   - exclude:
       id: py/unnecessary-statement

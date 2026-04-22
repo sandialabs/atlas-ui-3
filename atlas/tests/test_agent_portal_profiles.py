@@ -5,7 +5,7 @@ from atlas.modules.agent_portal.sandbox.profiles import DEFAULT_PROFILES, get_de
 
 
 def test_all_tiers_have_defaults():
-    for tier in SandboxTier:
+    for tier in list(SandboxTier):
         assert tier in DEFAULT_PROFILES
         profile = DEFAULT_PROFILES[tier]
         assert profile.tier is tier

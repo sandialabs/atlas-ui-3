@@ -52,7 +52,10 @@ class AuditStream:
         self._prev = _GENESIS_PREV
         self._lock = Lock()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        # Restrict audit directory to owner-only (best-effort on POSIX)
+        # Restrict audit directory to owner-only (best-effort on POSIX).
+        # chmod is not supported on some filesystems (FUSE mounts,
+        # network shares, Windows); audit integrity does not depend on
+        # permission bits, so silently skip when the syscall is rejected.
         try:
             os.chmod(self._path.parent, 0o700)
         except OSError:
@@ -101,10 +104,17 @@ class AuditStream:
             with self._path.open("ab") as fh:
                 fh.write(encoded + b"\n")
                 fh.flush()
+                # fsync is not available on all platforms/filesystems
+                # (e.g. tmpfs in some containers); flush() above already
+                # hands the bytes to the kernel, so durability is the
+                # only thing degraded - audit integrity remains intact
+                # via the SHA-256 chain.
                 try:
                     os.fsync(fh.fileno())
                 except OSError:
                     pass
+            # chmod best-effort: audit integrity does not rely on mode
+            # bits, and some filesystems reject chmod. See __init__.
             try:
                 os.chmod(self._path, 0o600)
             except OSError:
