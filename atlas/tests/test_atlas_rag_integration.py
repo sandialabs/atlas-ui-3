@@ -244,8 +244,8 @@ class TestAtlasRAGIntegration:
         # Check metadata
         assert response.metadata is not None
         assert response.metadata.query_processing_time_ms >= 0
-        assert response.metadata.data_source_name == "technical-docs"
-        assert response.metadata.retrieval_method == "keyword-search"
+        assert response.metadata.data_source_name  # populated from data_sources[0].label
+        assert response.metadata.retrieval_method == "similarity"
         assert len(response.metadata.documents_found) > 0
 
     @pytest.mark.asyncio

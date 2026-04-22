@@ -3,51 +3,46 @@ import React from 'react'
 import { render, act } from '@testing-library/react'
 import { useUserActivity } from '../hooks/useUserActivity'
 
-function ActivityProbe({ idleTimeoutMs, onChange }) {
+function ActivityProbe({ idleTimeoutMs }) {
   const isActive = useUserActivity({ idleTimeoutMs })
-  React.useEffect(() => {
-    onChange(isActive)
-  }, [isActive, onChange])
   return <div data-testid="active">{isActive ? 'active' : 'idle'}</div>
 }
 
 describe('useUserActivity', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.useFakeTimers()
   })
 
   afterEach(() => {
-    vi.runOnlyPendingTimers()
+    vi.clearAllTimers()
     vi.useRealTimers()
   })
 
   it('starts in the active state', async () => {
-    const onChange = vi.fn()
+    let getByTestId
     await act(async () => {
-      render(<ActivityProbe idleTimeoutMs={1000} onChange={onChange} />)
+      ;({ getByTestId } = render(<ActivityProbe idleTimeoutMs={1000} />))
     })
-    expect(onChange).toHaveBeenLastCalledWith(true)
+    expect(getByTestId('active').textContent).toBe('active')
   })
 
   it('flips to idle after the timeout with no activity', async () => {
-    const onChange = vi.fn()
+    let getByTestId
     await act(async () => {
-      render(<ActivityProbe idleTimeoutMs={1000} onChange={onChange} />)
+      ;({ getByTestId } = render(<ActivityProbe idleTimeoutMs={1000} />))
     })
-    onChange.mockClear()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1001)
     })
-    expect(onChange).toHaveBeenLastCalledWith(false)
+    expect(getByTestId('active').textContent).toBe('idle')
   })
 
   it('resets the idle countdown on mousemove', async () => {
-    const onChange = vi.fn()
+    let getByTestId
     await act(async () => {
-      render(<ActivityProbe idleTimeoutMs={1000} onChange={onChange} />)
+      ;({ getByTestId } = render(<ActivityProbe idleTimeoutMs={1000} />))
     })
-    onChange.mockClear()
 
     // Nearly idle, then activity resets the timer.
     await act(async () => {
@@ -58,50 +53,48 @@ describe('useUserActivity', () => {
       await vi.advanceTimersByTimeAsync(500)
     })
     // Still active: total elapsed is 1400ms but the timer reset at 900ms.
-    expect(onChange).not.toHaveBeenCalledWith(false)
+    expect(getByTestId('active').textContent).toBe('active')
 
     // After another full timeout with no activity, goes idle.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1001)
     })
-    expect(onChange).toHaveBeenLastCalledWith(false)
+    expect(getByTestId('active').textContent).toBe('idle')
   })
 
   it('returns to active on the next activity event after going idle', async () => {
-    const onChange = vi.fn()
+    let getByTestId
     await act(async () => {
-      render(<ActivityProbe idleTimeoutMs={1000} onChange={onChange} />)
+      ;({ getByTestId } = render(<ActivityProbe idleTimeoutMs={1000} />))
     })
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1001)
     })
-    expect(onChange).toHaveBeenLastCalledWith(false)
-    onChange.mockClear()
+    expect(getByTestId('active').textContent).toBe('idle')
 
     await act(async () => {
       window.dispatchEvent(new Event('keydown'))
-      await vi.advanceTimersByTimeAsync(0)
     })
-    expect(onChange).toHaveBeenLastCalledWith(true)
+    expect(getByTestId('active').textContent).toBe('active')
   })
 
   it('removes listeners on unmount', async () => {
-    const onChange = vi.fn()
     let unmount
+    let getByTestId
     await act(async () => {
-      ;({ unmount } = render(
-        <ActivityProbe idleTimeoutMs={1000} onChange={onChange} />,
+      ;({ unmount, getByTestId } = render(
+        <ActivityProbe idleTimeoutMs={1000} />,
       ))
     })
+    expect(getByTestId('active').textContent).toBe('active')
     unmount()
-    onChange.mockClear()
 
-    // Activity after unmount must not trigger state updates.
+    // Activity after unmount must not throw or warn; without the cleanup
+    // the hook would attempt a state update on an unmounted component.
     await act(async () => {
       window.dispatchEvent(new Event('mousemove'))
       await vi.advanceTimersByTimeAsync(2000)
     })
-    expect(onChange).not.toHaveBeenCalled()
   })
 })

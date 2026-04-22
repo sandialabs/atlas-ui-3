@@ -5,7 +5,7 @@ import re
 from typing import Dict, List, Optional
 
 from fastapi import HTTPException
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from atlas.core.http_client import create_rag_client
 
@@ -65,11 +65,25 @@ class RAGMetadata(BaseModel):
     query_embedding_time_ms: Optional[int] = None
 
 
+class URLCitation(BaseModel):
+    """A ``url_citation`` annotation returned by the RAG API.
+
+    Mirrors the ATLAS-RAG OpenAPI ``AnnotationURLCitation`` shape:
+    ``start_index``/``end_index`` are offsets into the assistant message
+    ``content`` identifying the span of text the citation supports.
+    """
+    start_index: int
+    end_index: int
+    title: str
+    url: str
+
+
 class RAGResponse(BaseModel):
     """Combined response from RAG system including content and metadata."""
     content: str
     metadata: Optional[RAGMetadata] = None
     is_completion: bool = False  # True if content is already LLM-interpreted (from /rag/completions)
+    annotations: List[URLCitation] = Field(default_factory=list)
 
 
 class RAGClient:

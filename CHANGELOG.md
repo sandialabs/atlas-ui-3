@@ -6,11 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR - 2026-04-20 - Pause banner/config polling when user is idle
+### PR #552 - 2026-04-20
+- New Chat stops in-flight generation: clicking "New Chat" while a reply is
+  streaming no longer lets orphaned tokens bleed into the fresh session.
+  `clearChat` now cancels the active task (`stop_streaming` +
+  `agent_control: stop` when in agent mode) before requesting a new session,
+  fully resets local thinking / synthesizing / agent-step state, and asks
+  for confirmation before discarding an existing conversation or
+  interrupting generation. Backend `reset_session` also cancels any running
+  chat task as defense-in-depth, and a new `agent_control` server handler
+  replaces the prior "Unknown message type" echo.
+- Sidebar "Delete Conversation" (of the active conversation) now bypasses the
+  New-Chat confirm prompt via `clearChat({ skipConfirm: true })` so users
+  don't see a second "Start a new chat?" dialog right after deleting.
+- Header "New Chat" button and `Ctrl+Alt+N` hotkey now gate their follow-up
+  side-effects (close canvas, focus input) on the confirm result — if the
+  user clicks Cancel, the chat stays intact.
+
+### PR #551 - 2026-04-20 - Pause banner/config polling when user is idle
 - Added `useUserActivity` hook that tracks mouse/keyboard/touch/scroll activity.
 - `BannerPanel` now pauses `/api/config` and `/api/banners` polling after 5
   minutes of no user activity and resumes automatically (with an immediate
   refresh) on the next user event.
+
+### PR #544 - 2026-04-19
+- **Fix**: MCP client tore down the streamable-HTTP session (POST → DELETE) after every tool call on stateful servers, so state written by one tool was invisible to the next. Root cause: `ChatService.handle_chat_message` only set `session.context["conversation_id"]` when the client sent one, but the frontend doesn't send a conversation id on the first message of a new conversation. That left `conversation_id=None` for tool execution, which forced `MCPToolManager.call_tool` into its per-call `async with client:` fallback instead of reusing the persistent session held by `MCPSessionManager`. Fix: default `session.context["conversation_id"]` to `str(session_id)` when the client doesn't send one (matches the fallback already used by `_save_conversation` and the `conversation_saved` notification, so the stable id round-trips to the client). Stateful MCP servers (e.g. FastMCP 3.x streamable-HTTP servers that key per-tool state on `Context.session_id`) now see a reused `Mcp-Session-Id` across tool calls within a conversation, as required by the MCP spec.
 
 ### PR #547 hardening pass - 2026-04-19 (issue #545 follow-up, same PR)
 - **Security / privacy**:

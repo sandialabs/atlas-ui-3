@@ -348,8 +348,44 @@ export const ChatProvider = ({ children }) => {
 		})
 	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId])
 
-	const clearChat = useCallback(() => {
+	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
+		// If there is any chat content or generation in progress, confirm before
+		// discarding it -- "New Chat" should not silently throw away a reply the
+		// user is actively reading / waiting on (mistakes happen).
+		// Returns true if the chat was cleared, false if the user cancelled --
+		// callers (Header/Ctrl+Alt+N) gate follow-up side-effects on this so a
+		// cancelled confirm doesn't still close the canvas or steal focus.
+		const isGenerating = isThinking || isSynthesizing || isStreaming
+		const hasContent = messages.length > 0
+		if (!skipConfirm && (hasContent || isGenerating)) {
+			const prompt = isGenerating
+				? 'A response is still being generated. Start a new chat and stop the current response?'
+				: 'Start a new chat? This will clear the current conversation from view.'
+			if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+				if (!window.confirm(prompt)) return false
+			}
+		}
+
+		// If generation is in progress, tell the backend to cancel it *before* we
+		// ask for a new session. Otherwise the in-flight task keeps streaming
+		// tokens and they get appended to the fresh, empty chat (the bug users
+		// see where "the first amount of the output is removed from view").
+		if (sendMessage && isGenerating) {
+			if (agent?.agentModeEnabled) {
+				sendMessage({ type: 'agent_control', action: 'stop' })
+			}
+			sendMessage({ type: 'stop_streaming' })
+		}
+
+		// Fully reset local UI state so the centered logo reappears and no stale
+		// thinking / agent indicators linger.
+		cleanupStreamState()
+		streamEnd()
 		resetMessages()
+		setIsThinking(false)
+		setIsSynthesizing(false)
+		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
+		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		setIsWelcomeVisible(true)
 		setActiveConversationId(null)
 		setFollowUpSuggestions([])
@@ -361,7 +397,8 @@ export const ChatProvider = ({ children }) => {
 		if (sendMessage) {
 			sendMessage({ type: 'reset_session' })
 		}
-	}, [resetMessages, files, sendMessage])
+		return true
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData) => {

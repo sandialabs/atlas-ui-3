@@ -243,10 +243,12 @@ class ChatService:
         elif incognito is False:
             self._incognito_sessions.discard(session_id)
 
-        # Track conversation_id for continuing saved conversations
+        # Default to session_id so MCP tool calls share a persistent session (see MCPSessionManager).
         conversation_id = kwargs.pop("conversation_id", None)
         if conversation_id:
             session.context["conversation_id"] = conversation_id
+        elif "conversation_id" not in session.context:
+            session.context["conversation_id"] = str(session_id)
 
         turn_id = str(uuid4())
         turn_attrs = {

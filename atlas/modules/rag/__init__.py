@@ -7,7 +7,14 @@ This module provides:
 """
 
 from .atlas_rag_client import AtlasRAGClient, create_atlas_rag_client_from_config
-from .client import DataSource, DocumentMetadata, RAGClient, RAGMetadata, RAGResponse
+from .client import (
+    DataSource,
+    DocumentMetadata,
+    RAGClient,
+    RAGMetadata,
+    RAGResponse,
+    URLCitation,
+)
 
 __all__ = [
     "RAGClient",
@@ -17,4 +24,5 @@ __all__ = [
     "DocumentMetadata",
     "RAGMetadata",
     "RAGResponse",
+    "URLCitation",
 ]
