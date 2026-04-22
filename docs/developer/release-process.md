@@ -1,6 +1,6 @@
 # Release Process
 
-Last updated: 2026-04-22
+Last updated: 2026-04-23
 
 This document is the canonical runbook for cutting a release of Atlas UI 3.
 It covers both the **monthly release cadence** and **hotfix releases**. If
@@ -22,13 +22,32 @@ The model is small and deliberately boring:
 - **`release/YYYY.MM`** is cut from `main` during the last week of each
   month. It is the stabilization branch for that month's release. The
   release branch is frozen to bug fixes only until the tag is pushed.
-- **`vX.Y.Z`** is the tag that ships. Pushing a `v*.*.*` tag triggers
-  `pypi-publish.yml` (on GitHub Release) and `quay-publish.yml` (on tag
-  push). There is no other way to publish.
+- **`vX.Y.Z`** is the tag that ships. Publishing a GitHub Release (created
+  from a `v*.*.*` tag) triggers `pypi-publish.yml`; pushing a `v*.*.*` tag
+  triggers `quay-publish.yml`. This is the intended release path.
 
 Automation handles the mechanical parts of cutting the branch; humans
 make the go/no-go call, run the smoke tests, and push the tag. See
 [Guardrails](#guardrails) for what automation will and will not do.
+
+### Other publish paths (non-release)
+
+Two publish paths exist outside the tag-driven release flow. Both are
+preserved deliberately, but they should not be used to ship a version
+to end users:
+
+- **`quay-publish.yml` also fires on `push` to `main`, `develop`, and
+  `quay`.** Every merge to `main` builds and pushes a container image
+  tagged with the branch name and commit SHA. Those images are for
+  continuous smoke-testing, not for external consumption. The
+  `X.Y.Z` and `X.Y` semver tags only appear on a `v*.*.*` tag push.
+- **`pypi-publish.yml` exposes a `workflow_dispatch` with a `target`
+  input** (`testpypi` or `pypi`). This is an emergency escape hatch to
+  re-publish the current `main` build if the tag-driven run failed and
+  the tag cannot be recreated. Using `target: pypi` publishes to
+  production PyPI immediately — only maintainers should run it, and only
+  as a last resort. Prefer cutting a patch release via the hotfix flow
+  over reaching for this lever.
 
 ### Versioning
 
@@ -92,6 +111,13 @@ run), use **Actions → Release: cut monthly branch → Run workflow**.
 You can override the computed version with the `version` input, and
 `dry_run: true` prints the plan without pushing anything.
 
+If the release branch was pushed but the PR creation failed (network
+blip, permission hiccup), rerun the workflow. It detects the existing
+branch, sees no open PR, and takes the **recovery path**: it opens a
+draft PR against the existing branch without touching any files. The
+recovery PR body is flagged with a banner so the captain knows to
+verify the inferred metadata.
+
 #### 2. Release captain takes ownership
 
 A maintainer claims the draft PR (self-assign) and becomes the
@@ -124,7 +150,35 @@ git push
 Add the cherry-pick under the current release's CHANGELOG section on
 the release branch.
 
-#### 4. Pre-tag checklist
+#### 4. Kicking CI on the release PR
+
+The release captain must confirm `CI/CD Pipeline` and `Security Checks`
+are green on the release PR before tagging. Which path produces those
+checks depends on how the PR was opened:
+
+- **`RELEASE_PAT` is configured** (recommended). The `release-cut`
+  workflow uses the PAT to push the branch and open the PR, so the
+  `pull_request` event fires normally and both workflows run without
+  any manual kick.
+- **`RELEASE_PAT` is not configured.** The workflow falls back to the
+  default `GITHUB_TOKEN`. GitHub deliberately suppresses workflow
+  triggers for actions taken with `GITHUB_TOKEN`, so the release PR
+  opens with no CI runs attached. The captain must kick CI manually:
+  1. Close and immediately reopen the PR (simplest), **or**
+  2. Push any commit to the release branch from a personal account
+     (e.g., an empty `git commit --allow-empty -m "ci: kick"` then
+     `git push`). The resulting `synchronize` event triggers both
+     workflows.
+
+  The release PR body is pre-populated with a `CI kick required`
+  banner when this fallback is in effect.
+
+> **One-time setup**: to enable the PAT path, a maintainer creates a
+> GitHub PAT (classic, scope `repo` + `workflow`) or a fine-grained
+> token with `Contents: write`, `Pull requests: write`, and `Actions:
+> write`, then stores it as the `RELEASE_PAT` repository secret.
+
+#### 5. Pre-tag checklist
 
 Before tagging, the release captain completes every item on the
 checklist embedded in the release PR (see
@@ -138,7 +192,7 @@ The critical items:
       [Smoke test](#smoke-test) below).
 - [ ] No known P0/P1 bugs filed against the release branch.
 
-#### 5. Tag and publish
+#### 6. Tag and publish
 
 When the checklist is green:
 
@@ -151,13 +205,34 @@ git tag -a vX.Y.Z -m "Atlas UI 3 vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-Then create a GitHub Release from that tag using the web UI or:
+Then create a GitHub Release from that tag. The easiest path is the
+web UI (**Releases → Draft a new release → pick the tag → paste the
+`## [X.Y.Z] - YYYY-MM-DD` section of `CHANGELOG.md` as the body**).
+
+To do it from the CLI, extract the current release's CHANGELOG section
+into a scratch file first — do not try to inline it with process
+substitution, it is fragile and does not handle the first-ever release
+(which has no following `## [` to delimit the section):
 
 ```bash
-gh release create vX.Y.Z \
-  --title "vX.Y.Z" \
-  --notes-file <(awk '/^## \[X\.Y\.Z\]/,/^## \[/' CHANGELOG.md | sed '$d') \
-  --target release/YYYY.MM
+# Set V to the bare version once, and let the script do the extraction.
+V=X.Y.Z
+python3 - "$V" > /tmp/release-notes.md <<'PY'
+import re, sys, pathlib
+version = sys.argv[1]
+text = pathlib.Path("CHANGELOG.md").read_text()
+# Grab the block starting at `## [<version>]` up to the next `## [` or EOF.
+m = re.search(rf'(^## \[{re.escape(version)}\][^\n]*\n.*?)(?=^## \[|\Z)',
+              text, flags=re.MULTILINE | re.DOTALL)
+if not m:
+    sys.exit(f"No `## [{version}]` section in CHANGELOG.md")
+sys.stdout.write(m.group(1).rstrip() + "\n")
+PY
+
+gh release create "v$V" \
+  --title "v$V" \
+  --notes-file /tmp/release-notes.md \
+  --target "release/$(date -u +%Y.%m)"
 ```
 
 Publishing a GitHub Release triggers `pypi-publish.yml`. Pushing the
@@ -167,7 +242,7 @@ Actions tab and confirm:
 - `atlas-chat X.Y.Z` is visible on <https://pypi.org/project/atlas-chat/>.
 - `quay.io/<namespace>/atlas-ui-3:X.Y.Z` and `:X.Y` tags exist.
 
-#### 6. Carry the bump back to main
+#### 7. Carry the bump back to main
 
 Open a PR merging `release/YYYY.MM` into `main`. This carries the
 version bump commit and any hotfix cherry-picks that did not originate
@@ -262,8 +337,8 @@ image, build locally from the release branch using `podman build`.
 
 PyPI releases cannot be overwritten. If a release is broken:
 
-1. **Yank** the bad version from PyPI with `twine upload --skip-existing`
-   cannot help here; use the PyPI web UI → project → Manage → Yank.
+1. **Yank the bad version from PyPI.** There is no CLI yank — `twine`
+   only uploads. Use the PyPI web UI → project → Manage → Yank.
    Yanking keeps existing installs working but hides the version from
    `pip install atlas-chat` resolution.
 2. Cut a patch release (`X.Y.(Z+1)`) using the hotfix flow above. This
@@ -295,6 +370,15 @@ The `release-cut.yml` workflow will **never**:
 What automation *does* do: cuts the branch, bumps version files,
 reshapes `CHANGELOG.md`, and opens a draft PR with the checklist. Every
 step from "run smoke tests" forward is manual and requires a human.
+
+The workflow is idempotent with a recovery path:
+
+- If `release/YYYY.MM` exists **with** an open PR, the run is a no-op.
+- If `release/YYYY.MM` exists **without** an open PR (e.g., a prior run
+  pushed the branch but `gh pr create` failed), the next run takes the
+  recovery path: it reads version metadata from the branch tip, builds
+  the PR body, and opens a draft PR. It does not rewrite the branch.
+- If the branch does not exist, the run does the full cut.
 
 If you need to override automation (off-cycle release, custom version,
 etc.), use the workflow's `workflow_dispatch` inputs. Use `dry_run:
@@ -332,8 +416,8 @@ when one is made.
 ## Related files
 
 - [.github/workflows/release-cut.yml](../../.github/workflows/release-cut.yml) — the cron automation
-- [.github/workflows/pypi-publish.yml](../../.github/workflows/pypi-publish.yml) — triggers on GitHub Release
-- [.github/workflows/quay-publish.yml](../../.github/workflows/quay-publish.yml) — triggers on `v*.*.*` tag push
+- [.github/workflows/pypi-publish.yml](../../.github/workflows/pypi-publish.yml) — publishes on GitHub Release; also has a `workflow_dispatch` escape hatch
+- [.github/workflows/quay-publish.yml](../../.github/workflows/quay-publish.yml) — publishes semver-tagged images on `v*.*.*` tag push, and branch-named images on push to `main`/`develop`/`quay`
 - [.github/release-checklist.md](../../.github/release-checklist.md) — PR body used by automation
 - [CHANGELOG.md](../../CHANGELOG.md) — format contract for release notes
 - [AGENTS.md](../../AGENTS.md) — version-bump and changelog conventions for contributors

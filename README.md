@@ -177,7 +177,7 @@ We have created a set of comprehensive guides to help you get the most out of At
 
 ## Releases
 
-Atlas UI 3 ships on a **monthly cadence**. During the last week of each calendar month the `release-cut` workflow opens a draft release PR from a new `release/YYYY.MM` branch, bumps `atlas/version.py` and `pyproject.toml`, and finalizes the `CHANGELOG.md` section for that release. A maintainer (the release captain) runs the smoke test, pushes a `vX.Y.Z` tag, and publishes — automation never publishes by itself.
+Atlas UI 3 ships on a **monthly cadence**. During the last week of each calendar month the `release-cut` workflow opens a draft release PR from a new `release/YYYY.MM` branch, bumps `atlas/version.py` and `pyproject.toml`, and finalizes the `CHANGELOG.md` section for that release. A maintainer (the release captain) runs the smoke test, pushes a `vX.Y.Z` tag, and publishes — the `release-cut` workflow itself never tags or publishes.
 
 The full runbook — branch strategy, versioning (SemVer), stabilization window, hotfix flow, rollback — lives in **[docs/developer/release-process.md](./docs/developer/release-process.md)**. Published versions land on [PyPI](https://pypi.org/project/atlas-chat/) and as container images on Quay.io.
 
