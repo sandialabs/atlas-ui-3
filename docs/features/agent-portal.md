@@ -137,6 +137,45 @@ curl -s -H 'X-User-Email: me@example.com' \
 With the flag off the same request returns `404 Not Found` because the
 route was never registered.
 
+### Live API surface
+
+The screenshots below are captured from a running backend with
+`FEATURE_AGENT_PORTAL_ENABLED=true`. All JSON shown is produced by the
+service itself; nothing is mocked or hand-edited.
+
+![Public config, admin config, sessions list, and a session detail](./img/live_api_surface.png)
+
+The left column shows `GET /api/agent-portal/config` (the non-admin
+summary) and `GET /api/agent-portal/admin/config` (the full effective
+config, including `sandbox_backend` and the resolved on-disk
+`audit_dir`). The wider panels show `GET /api/agent-portal/sessions`
+for a user with a mix of `restrictive` and `standard` tier sessions,
+including one that was cancelled and is now in the terminal `failed`
+state with `termination_reason: "user_cancel"`.
+
+### Policy enforcement and audit trail
+
+![Permissive-tier rejection, 404 on unknown session, cancel → failed, and three chained audit frames](./img/policy_and_audit.png)
+
+This view exercises the service's negative paths and shows a tail of
+the audit stream:
+
+- Top-left: a launch with `sandbox_tier: "permissive"` is rejected with
+  `HTTP 403` because `AGENT_PORTAL_ALLOW_PERMISSIVE_TIER` is `false`.
+  The service refuses the request before any adapter is consulted.
+- Top-right: `GET` on an unknown `session_id` returns `HTTP 404`.
+- Middle: a valid `restrictive`-tier launch returns `HTTP 201` with
+  the new session in the `pending` state.
+- Middle-right: `POST /.../cancel` on that pending session drives it
+  directly to the terminal `failed` state with
+  `termination_reason: "user_cancel"` — a valid edge in the state
+  machine (see §3).
+- Bottom: three real audit frames, each with `prev` set to the
+  all-zero genesis hash because each is the first frame of its own
+  session's stream, a monotonic `seq`, and the structured fields
+  (`event`, `sandbox_tier`, `tool_allowlist_len`, `user`, etc.) that
+  external tailers can filter on without base64-decoding.
+
 ## 7. Testing
 
 - `atlas/tests/test_agent_portal_*.py` — 36 unit tests covering
