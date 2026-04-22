@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -21,7 +22,8 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
 
 
 class JSONFormatter(logging.Formatter):
@@ -66,6 +68,110 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(entry, default=str)
 
 
+class JSONLSpanExporter(SpanExporter):
+    """Append one JSON line per finished span to a file.
+
+    Fields emitted are stable and form the public contract documented in
+    ``docs/telemetry/README.md``. Downstream analyzers rely on the exact
+    attribute names defined in ``atlas/core/telemetry.py`` call sites.
+
+    The exporter holds a single long-lived file handle guarded by a lock so
+    batched exports don't pay per-call ``open``/``close`` and concurrent
+    exports don't interleave partial JSON lines. ``force_flush`` issues an
+    ``fsync`` so tests and graceful shutdown can observe durable writes;
+    ``shutdown`` closes the handle.
+    """
+
+    def __init__(self, file_path: Path) -> None:
+        self.file_path = file_path
+        self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._shutdown = False
+        # Create the file up-front with restrictive perms so the first span
+        # export doesn't race against a world-readable file on disk.
+        try:
+            fd = os.open(
+                str(self.file_path),
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                0o600,
+            )
+            self._fh = os.fdopen(fd, "a", encoding="utf-8")
+        except OSError:
+            # Fall back to plain open for platforms without os.open perms.
+            self._fh = self.file_path.open("a", encoding="utf-8")
+        try:
+            os.chmod(self.file_path, 0o600)
+        except OSError:
+            pass
+
+    def export(self, spans: list[ReadableSpan]) -> SpanExportResult:  # noqa: D401
+        with self._lock:
+            if self._shutdown or self._fh is None or self._fh.closed:
+                return SpanExportResult.FAILURE
+            try:
+                for span in spans:
+                    ctx = span.get_span_context()
+                    parent = span.parent
+                    record: Dict[str, Any] = {
+                        "name": span.name,
+                        "trace_id": f"{ctx.trace_id:032x}",
+                        "span_id": f"{ctx.span_id:016x}",
+                        "parent_span_id": f"{parent.span_id:016x}" if parent else None,
+                        "start_time_ns": span.start_time,
+                        "end_time_ns": span.end_time,
+                        "duration_ns": (
+                            span.end_time - span.start_time
+                            if span.start_time and span.end_time
+                            else None
+                        ),
+                        "status": span.status.status_code.name if span.status else None,
+                        "kind": span.kind.name if span.kind else None,
+                        "attributes": dict(span.attributes or {}),
+                    }
+                    self._fh.write(json.dumps(record, default=str) + "\n")
+                self._fh.flush()
+                return SpanExportResult.SUCCESS
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).error("JSONL span export failed: %s", e)
+                return SpanExportResult.FAILURE
+
+    def shutdown(self) -> None:
+        with self._lock:
+            if self._shutdown:
+                return
+            self._shutdown = True
+            if self._fh is not None and not self._fh.closed:
+                try:
+                    self._fh.flush()
+                    try:
+                        os.fsync(self._fh.fileno())
+                    except (OSError, ValueError):
+                        pass
+                    self._fh.close()
+                except Exception as e:  # noqa: BLE001
+                    logging.getLogger(__name__).debug(
+                        "JSONLSpanExporter shutdown close failed: %s", e
+                    )
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:  # noqa: ARG002
+        with self._lock:
+            if self._fh is None or self._fh.closed:
+                return False
+            try:
+                self._fh.flush()
+                try:
+                    os.fsync(self._fh.fileno())
+                except (OSError, ValueError):
+                    # fsync unsupported on some file types (pipes, etc.)
+                    pass
+                return True
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).debug(
+                    "JSONLSpanExporter force_flush failed: %s", e
+                )
+                return False
+
+
 class OpenTelemetryConfig:
     """Configure OpenTelemetry + structured logging."""
 
@@ -77,7 +183,10 @@ class OpenTelemetryConfig:
         # Resolve logs directory robustly: use config manager
         self.logs_dir = self._get_logs_dir()
         self.log_file = self.logs_dir / "app.jsonl"
+        self.spans_file = self.logs_dir / "spans.jsonl"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self._span_processor = None
+        self._otlp_processor = None
         self._setup_telemetry()
         self._setup_logging()
 
@@ -131,7 +240,31 @@ class OpenTelemetryConfig:
                 "environment": "development" if self.is_development else "production",
             }
         )
-        trace.set_tracer_provider(TracerProvider(resource=resource))
+        provider = TracerProvider(resource=resource)
+
+        # File-based JSONL exporter — always on; forms the audit trail
+        # consumed by docs/telemetry/analysis_example.py and downstream
+        # dashboards.
+        jsonl_exporter = JSONLSpanExporter(self.spans_file)
+        self._span_processor = BatchSpanProcessor(jsonl_exporter)
+        provider.add_span_processor(self._span_processor)
+
+        # Optional OTLP exporter — only when a collector endpoint is configured.
+        otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+        if otlp_endpoint:
+            try:
+                from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+                    OTLPSpanExporter,
+                )
+                otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
+                self._otlp_processor = BatchSpanProcessor(otlp_exporter)
+                provider.add_span_processor(self._otlp_processor)
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).warning(
+                    "OTLP exporter setup failed (endpoint=%s): %s", otlp_endpoint, e
+                )
+
+        trace.set_tracer_provider(provider)
 
     def _setup_logging(self) -> None:
         root = logging.getLogger()
@@ -142,6 +275,14 @@ class OpenTelemetryConfig:
         file_handler = logging.FileHandler(self.log_file, encoding="utf-8")
         file_handler.setFormatter(json_formatter)
         file_handler.setLevel(self.log_level)
+        # Restrict app log file perms — structured logs can contain user
+        # identifiers, sanitized previews, and error context that shouldn't
+        # be world-readable on shared hosts. Best-effort; fails silently on
+        # filesystems without POSIX modes.
+        try:
+            os.chmod(self.log_file, 0o600)
+        except OSError:
+            pass
         root.addHandler(file_handler)
         root.setLevel(self.log_level)
 
@@ -189,6 +330,45 @@ class OpenTelemetryConfig:
 
     def get_log_file_path(self) -> Path:
         return self.log_file
+
+    def get_spans_file_path(self) -> Path:
+        return self.spans_file
+
+    def flush_spans(self, timeout_millis: int = 30000) -> bool:
+        """Force-flush pending spans to disk/OTLP. Used by tests and shutdown.
+
+        Triggers the BatchSpanProcessor to drain, which in turn calls
+        ``JSONLSpanExporter.force_flush`` (fsync) and the OTLP exporter's
+        flush. Returns True only when every configured processor reported
+        success within ``timeout_millis``.
+        """
+        ok = True
+        if self._span_processor is not None:
+            ok = self._span_processor.force_flush(timeout_millis) and ok
+        if self._otlp_processor is not None:
+            ok = self._otlp_processor.force_flush(timeout_millis) and ok
+        return ok
+
+    def shutdown(self, timeout_millis: int = 30000) -> None:
+        """Flush and tear down span processors + exporters.
+
+        Safe to call multiple times. Intended for application shutdown hooks
+        and test teardown so in-flight spans aren't lost and file handles
+        get closed cleanly.
+        """
+        try:
+            self.flush_spans(timeout_millis)
+        except Exception:  # noqa: BLE001
+            pass
+        for proc in (self._span_processor, self._otlp_processor):
+            if proc is None:
+                continue
+            try:
+                proc.shutdown()
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).debug(
+                    "Span processor shutdown failed: %s", e
+                )
 
     def read_logs(self, lines: int = 100) -> list[Dict[str, Any]]:
         if not self.log_file.exists():

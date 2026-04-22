@@ -5,6 +5,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.telemetry import hash_short, start_span
 from atlas.domain.errors import DomainError
 from atlas.domain.messages.models import Message, MessageRole, MessageType, ToolResult
 from atlas.domain.sessions.models import Session
@@ -249,24 +250,44 @@ class ChatService:
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
 
+        turn_id = str(uuid4())
+        turn_attrs = {
+            "turn_id": turn_id,
+            "session_id": str(session_id),
+            "user_hash": hash_short(user_email),
+            "prompt_hash": hash_short(content),
+            "prompt_chars": len(content) if content else 0,
+            "prompt_tokens": (len(content) // 4) if content else 0,
+            "model": model,
+            "agent_mode": bool(agent_mode),
+            "only_rag": bool(only_rag),
+            "tool_choice_required": bool(tool_choice_required),
+            "selected_tools_count": len(selected_tools) if selected_tools else 0,
+            "selected_prompts_count": len(selected_prompts) if selected_prompts else 0,
+            "selected_data_sources_count": (
+                len(selected_data_sources) if selected_data_sources else 0
+            ),
+        }
+
         try:
-            # Delegate to orchestrator
-            orchestrator = self._get_orchestrator()
-            result = await orchestrator.execute(
-                session_id=session_id,
-                content=content,
-                model=model,
-                user_email=user_email,
-                selected_tools=selected_tools,
-                selected_prompts=selected_prompts,
-                selected_data_sources=selected_data_sources,
-                only_rag=only_rag,
-                tool_choice_required=tool_choice_required,
-                agent_mode=agent_mode,
-                temperature=temperature,
-                update_callback=update_callback,
-                **kwargs
-            )
+            with start_span("chat.turn", turn_attrs):
+                # Delegate to orchestrator
+                orchestrator = self._get_orchestrator()
+                result = await orchestrator.execute(
+                    session_id=session_id,
+                    content=content,
+                    model=model,
+                    user_email=user_email,
+                    selected_tools=selected_tools,
+                    selected_prompts=selected_prompts,
+                    selected_data_sources=selected_data_sources,
+                    only_rag=only_rag,
+                    tool_choice_required=tool_choice_required,
+                    agent_mode=agent_mode,
+                    temperature=temperature,
+                    update_callback=update_callback,
+                    **kwargs
+                )
 
             # Persist conversation (if not incognito and feature enabled)
             if (

@@ -518,8 +518,8 @@ class TestRAGSourceConfig:
         assert config.compliance_level is None
         assert config.top_k == 4
         assert config.timeout == 60.0
-        assert config.discovery_endpoint == "/discover/datasources"
-        assert config.query_endpoint == "/rag/completions"
+        assert config.discovery_endpoint == "/api/v1/discover/datasources"
+        assert config.query_endpoint == "/api/v1/rag/completions"
 
     def test_rag_source_with_all_fields(self):
         """RAGSourceConfig should accept all optional fields."""

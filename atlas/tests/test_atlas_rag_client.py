@@ -108,8 +108,8 @@ class TestDiscoverDataSources:
         # Verify correct URL and params
         mock_instance.get.assert_called_once()
         call_args = mock_instance.get.call_args
-        assert call_args[0][0] == "https://rag-api.example.com/discover/datasources"
-        assert call_args[1]["params"] == {"as_user": "test-user"}
+        assert call_args[0][0] == "https://rag-api.example.com/api/v1/discover/datasources"
+        assert call_args[1]["params"] == {"role": "read", "as_user": "test-user"}
         assert call_args[1]["headers"]["Authorization"] == "Bearer test-token"
 
     @pytest.mark.asyncio
@@ -233,14 +233,14 @@ class TestQueryRag:
         # Verify correct URL, params, and payload
         mock_instance.post.assert_called_once()
         call_args = mock_instance.post.call_args
-        assert call_args[0][0] == "https://rag-api.example.com/rag/completions"
+        assert call_args[0][0] == "https://rag-api.example.com/api/v1/rag/completions"
         assert call_args[1]["params"] == {"as_user": "test-user"}
         payload = call_args[1]["json"]
         assert payload["messages"] == messages
         assert payload["stream"] is False
         assert payload["model"] == "test-model"
-        assert payload["top_k"] == 4
-        assert payload["corpora"] == ["corpus1"]
+        assert payload["hybrid_search_kwargs"]["top_k"] == 4
+        assert payload["hybrid_search_kwargs"]["corpora"] == ["corpus1"]
 
     @pytest.mark.asyncio
     async def test_query_without_metadata(self, client):
@@ -523,8 +523,72 @@ class TestParseRagMetadata:
         assert result.documents_found[1].source == "atlas_team_data"
         assert result.documents_found[1].title == "Search Dataset | UUR: ATLAS Team Data"
 
-    def test_parse_documents_flat_corpus_id_takes_precedence(self, client):
-        """Flat corpus_id overrides nested data_source.id when both present."""
+    def test_annotations_enrich_documents_with_title_and_url(self, client):
+        """url_citation annotations pair with documents by index to supply title/url."""
+        from atlas.modules.rag.client import URLCitation
+
+        data = {
+            "rag_metadata": {
+                "query_processing_time_ms": 150,
+                "documents_found": [
+                    {
+                        "data_source": {"id": "corpus-1", "label": "Corpus 1"},
+                        "text": "Snippet one.",
+                        "content_type": "atlas-search",
+                        "confidence_score": 0.9,
+                    },
+                    {
+                        "data_source": {"id": "corpus-1", "label": "Corpus 1"},
+                        "text": "Snippet two.",
+                        "content_type": "atlas-search",
+                        "confidence_score": 0.8,
+                    },
+                ],
+                "data_sources": [
+                    {"id": "corpus-1", "label": "Corpus 1"},
+                ],
+                "retrieval_method": "similarity",
+            }
+        }
+        annotations = [
+            URLCitation(
+                start_index=0, end_index=12,
+                title="First Doc", url="https://example.com/doc1",
+            ),
+            URLCitation(
+                start_index=20, end_index=32,
+                title="Second Doc", url="https://example.com/doc2",
+            ),
+        ]
+
+        result = client._parse_rag_metadata(data, "fallback", annotations=annotations)
+
+        assert result is not None
+        assert result.documents_found[0].title == "First Doc"
+        assert result.documents_found[0].url == "https://example.com/doc1"
+        assert result.documents_found[1].title == "Second Doc"
+        assert result.documents_found[1].url == "https://example.com/doc2"
+
+    def test_parse_annotations_skips_unknown_types(self):
+        """_parse_annotations ignores non-url_citation annotations and malformed entries."""
+        message = {
+            "annotations": [
+                {"type": "url_citation", "url_citation": {
+                    "start_index": 0, "end_index": 5, "title": "T", "url": "https://x.y",
+                }},
+                {"type": "other_type", "url_citation": {
+                    "start_index": 0, "end_index": 5, "title": "T", "url": "https://x.y",
+                }},
+                {"type": "url_citation"},  # missing payload
+                "not-a-dict",
+            ]
+        }
+        result = AtlasRAGClient._parse_annotations(message)
+        assert len(result) == 1
+        assert result[0].title == "T"
+
+    def test_parse_documents_nested_data_source_takes_precedence(self, client):
+        """Nested data_source.id is primary per OpenAPI v0.3.x; corpus_id is legacy fallback."""
         data = {
             "rag_metadata": {
                 "query_processing_time_ms": 100,
@@ -532,6 +596,28 @@ class TestParseRagMetadata:
                     {
                         "corpus_id": "legacy-corpus",
                         "data_source": {"id": "nested-id", "label": "Nested Label"},
+                        "content_type": "atlas-search",
+                        "confidence_score": 0.9,
+                    },
+                ],
+                "data_sources": [],
+                "retrieval_method": "similarity",
+            }
+        }
+
+        result = client._parse_rag_metadata(data, "fallback-corpus")
+
+        assert result is not None
+        assert result.documents_found[0].source == "nested-id"
+
+    def test_parse_documents_legacy_corpus_id_when_no_nested(self, client):
+        """Legacy corpus_id still works when the nested data_source is absent."""
+        data = {
+            "rag_metadata": {
+                "query_processing_time_ms": 100,
+                "documents_found": [
+                    {
+                        "corpus_id": "legacy-corpus",
                         "content_type": "atlas-search",
                         "confidence_score": 0.9,
                     },
@@ -653,7 +739,7 @@ class TestQueryRagBatchCorpora:
 
         # Verify the corpora list in the payload uses data_sources, not single source
         payload = mock_instance.post.call_args[1]["json"]
-        assert payload["corpora"] == ["corpus1", "corpus2"]
+        assert payload["hybrid_search_kwargs"]["corpora"] == ["corpus1", "corpus2"]
 
     @pytest.mark.asyncio
     async def test_query_data_sources_overrides_single_source(self, client):
@@ -681,7 +767,7 @@ class TestQueryRagBatchCorpora:
             )
 
         payload = mock_instance.post.call_args[1]["json"]
-        assert payload["corpora"] == ["real-a", "real-b"]
+        assert payload["hybrid_search_kwargs"]["corpora"] == ["real-a", "real-b"]
 
     @pytest.mark.asyncio
     async def test_query_single_source_fallback(self, client):
@@ -706,4 +792,4 @@ class TestQueryRagBatchCorpora:
             await client.query_rag("test-user", "single-corpus", messages)
 
         payload = mock_instance.post.call_args[1]["json"]
-        assert payload["corpora"] == ["single-corpus"]
+        assert payload["hybrid_search_kwargs"]["corpora"] == ["single-corpus"]
