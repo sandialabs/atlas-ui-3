@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #555 - 2026-04-23
+- Monthly release process + cron automation: `docs/developer/release-process.md`
+  runbook, `.github/workflows/release-cut.yml` scheduled cut (day 22, 14:00
+  UTC) that creates `release/YYYY.MM`, bumps versions, reshapes CHANGELOG,
+  and opens a draft release PR from `.github/release-checklist.md`. Workflow
+  uses an optional `RELEASE_PAT` secret so the PR triggers `CI/CD Pipeline`
+  and `Security Checks`, falls back to `GITHUB_TOKEN` with a visible
+  kick-CI banner, and includes a recovery path that opens a PR when a prior
+  run stranded a pushed branch without one. No publish paths change.
+
 ### PR #552 - 2026-04-20
 - New Chat stops in-flight generation: clicking "New Chat" while a reply is
   streaming no longer lets orphaned tokens bleed into the fresh session.

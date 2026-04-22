@@ -47,16 +47,32 @@ jobs:
     # Guardrail: do not run scheduled cuts on forks. workflow_dispatch
     # is allowed on any repo so maintainers can dry-run from a fork.
     if: github.event_name != 'schedule' || github.repository == 'sandialabs/atlas-ui-3'
+    env:
+      # Prefer a PAT so the branch push and PR creation trigger
+      # downstream workflows (CI/CD Pipeline, Security Checks). PRs
+      # opened with the default GITHUB_TOKEN do not trigger other
+      # workflows, which would leave the release-PR checklist
+      # permanently blocking on missing required status checks. If
+      # RELEASE_PAT is unset we fall back to GITHUB_TOKEN and annotate
+      # the PR body so the release captain knows they must kick CI
+      # manually. See docs/developer/release-process.md → "Kicking CI
+      # on the release PR".
+      RELEASE_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+      HAS_RELEASE_PAT: ${{ secrets.RELEASE_PAT != '' && 'true' || 'false' }}
     steps:
+      - name: Warn if no PAT is configured
+        if: env.HAS_RELEASE_PAT != 'true'
+        run: |
+          echo "::warning::RELEASE_PAT secret is not configured; falling back to GITHUB_TOKEN."
+          echo "::warning::The release PR will open, but CI/CD Pipeline and Security Checks will NOT auto-run on it."
+          echo "::warning::The release captain must kick CI manually — see docs/developer/release-process.md."
+
       - name: Checkout main
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
-          # Use a PAT if you need the PR to trigger downstream
-          # workflows (GITHUB_TOKEN-created PRs do not). For now we
-          # rely on GITHUB_TOKEN; maintainers can re-run CI on the PR.
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ env.RELEASE_TOKEN }}
 
       - name: Compute release metadata
         id: meta
@@ -106,34 +122,43 @@ jobs:
             echo "release_branch=$release_branch"
             echo "commit_sha=$commit_sha"
             echo "commit_short=$commit_short"
-            echo "pr_title=release: ${new_version} (${year_month})"
           } >> "$GITHUB_OUTPUT"
 
           echo "::notice::Planning release ${current} -> ${new_version} on ${release_branch} from ${commit_short}"
 
-      - name: Check if release branch already exists
-        id: branch_check
+      - name: Check branch and PR state
+        id: state
         shell: bash
         env:
+          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
           BRANCH: ${{ steps.meta.outputs.release_branch }}
         run: |
           set -euo pipefail
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Branch $BRANCH already exists on origin. This run is a no-op."
+            echo "branch_exists=true" >> "$GITHUB_OUTPUT"
+            pr_count="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
+            if [[ "$pr_count" == "0" ]]; then
+              echo "pr_exists=false" >> "$GITHUB_OUTPUT"
+              echo "::warning::Release branch $BRANCH exists on origin but has no open PR — recovery path will open one."
+            else
+              echo "pr_exists=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::Release branch $BRANCH already exists and has an open PR. This run is a no-op."
+            fi
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "branch_exists=false" >> "$GITHUB_OUTPUT"
+            echo "pr_exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Stop early if branch exists
-        if: steps.branch_check.outputs.exists == 'true'
+      - name: Stop early if nothing to do
+        if: steps.state.outputs.branch_exists == 'true' && steps.state.outputs.pr_exists == 'true'
         run: |
-          echo "Release branch ${{ steps.meta.outputs.release_branch }} already exists."
-          echo "This run exits cleanly without changing anything."
+          echo "Nothing to do: release branch and open PR already exist."
           exit 0
 
-      - name: Create release branch
-        if: steps.branch_check.outputs.exists == 'false'
+      # --- Fresh-cut path: branch does not exist ---
+
+      - name: Create release branch (fresh cut)
+        if: steps.state.outputs.branch_exists == 'false'
         env:
           BRANCH: ${{ steps.meta.outputs.release_branch }}
         run: |
@@ -141,7 +166,7 @@ jobs:
           git checkout -b "$BRANCH"
 
       - name: Bump atlas/version.py
-        if: steps.branch_check.outputs.exists == 'false'
+        if: steps.state.outputs.branch_exists == 'false'
         env:
           OLD_VERSION: ${{ steps.meta.outputs.current_version }}
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
@@ -168,7 +193,7 @@ jobs:
           PY
 
       - name: Bump pyproject.toml
-        if: steps.branch_check.outputs.exists == 'false'
+        if: steps.state.outputs.branch_exists == 'false'
         env:
           OLD_VERSION: ${{ steps.meta.outputs.current_version }}
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
@@ -196,7 +221,7 @@ jobs:
           PY
 
       - name: Update CHANGELOG.md
-        if: steps.branch_check.outputs.exists == 'false'
+        if: steps.state.outputs.branch_exists == 'false'
         env:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
           RELEASE_DATE: ${{ steps.meta.outputs.release_date }}
@@ -232,18 +257,18 @@ jobs:
           PY
 
       - name: Show diff
-        if: steps.branch_check.outputs.exists == 'false'
+        if: steps.state.outputs.branch_exists == 'false'
         run: |
           git --no-pager diff --stat
           git --no-pager diff
 
       - name: Dry run stops here
-        if: steps.branch_check.outputs.exists == 'false' && github.event.inputs.dry_run == 'true'
+        if: steps.state.outputs.branch_exists == 'false' && github.event.inputs.dry_run == 'true'
         run: |
           echo "::notice::dry_run=true — not committing, not pushing, not opening a PR."
 
       - name: Commit bump
-        if: steps.branch_check.outputs.exists == 'false' && github.event.inputs.dry_run != 'true'
+        if: steps.state.outputs.branch_exists == 'false' && github.event.inputs.dry_run != 'true'
         env:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
           YEAR_MONTH: ${{ steps.meta.outputs.year_month }}
@@ -255,22 +280,116 @@ jobs:
           git commit -m "chore(release): cut ${YEAR_MONTH} at v${NEW_VERSION}"
 
       - name: Push release branch
-        if: steps.branch_check.outputs.exists == 'false' && github.event.inputs.dry_run != 'true'
+        if: steps.state.outputs.branch_exists == 'false' && github.event.inputs.dry_run != 'true'
         env:
           BRANCH: ${{ steps.meta.outputs.release_branch }}
         run: |
           set -euo pipefail
           git push --set-upstream origin "$BRANCH"
 
+      # --- Recovery path: branch already exists but no open PR ---
+
+      - name: Check out existing release branch (recovery)
+        if: steps.state.outputs.branch_exists == 'true' && steps.state.outputs.pr_exists == 'false'
+        env:
+          BRANCH: ${{ steps.meta.outputs.release_branch }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+
+      - name: Recover metadata from existing branch
+        if: steps.state.outputs.branch_exists == 'true' && steps.state.outputs.pr_exists == 'false'
+        id: recover
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - >> "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, subprocess
+
+          def sh(*cmd):
+              return subprocess.check_output(list(cmd), text=True).strip()
+
+          def read_version(blob):
+              for line in blob.splitlines():
+                  m = re.match(r'^VERSION\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', line)
+                  if m:
+                      return m.group(1)
+              return ""
+
+          new_version = read_version(pathlib.Path("atlas/version.py").read_text())
+          if not new_version:
+              raise SystemExit("Could not read VERSION from release branch atlas/version.py")
+
+          # Best-effort: the tip of a freshly cut branch IS the bump
+          # commit, so HEAD~1 carries the pre-bump version.
+          try:
+              pre = sh("git", "show", "HEAD~1:atlas/version.py")
+              old_version = read_version(pre) or "unknown"
+          except subprocess.CalledProcessError:
+              old_version = "unknown"
+
+          release_date = sh("git", "show", "-s", "--format=%cs", "HEAD")
+          commit_sha = sh("git", "rev-parse", "HEAD")
+
+          print(f"new_version={new_version}")
+          print(f"current_version={old_version}")
+          print(f"release_date={release_date}")
+          print(f"commit_sha={commit_sha}")
+          PY
+
+      # --- Consolidate metadata for PR body / title ---
+
+      - name: Select final metadata
+        id: final
+        if: steps.state.outputs.pr_exists == 'false' && github.event.inputs.dry_run != 'true'
+        shell: bash
+        env:
+          BRANCH_EXISTS: ${{ steps.state.outputs.branch_exists }}
+          YEAR_MONTH: ${{ steps.meta.outputs.year_month }}
+          FRESH_VERSION: ${{ steps.meta.outputs.new_version }}
+          FRESH_OLD: ${{ steps.meta.outputs.current_version }}
+          FRESH_DATE: ${{ steps.meta.outputs.release_date }}
+          FRESH_SHA: ${{ steps.meta.outputs.commit_sha }}
+          REC_VERSION: ${{ steps.recover.outputs.new_version }}
+          REC_OLD: ${{ steps.recover.outputs.current_version }}
+          REC_DATE: ${{ steps.recover.outputs.release_date }}
+          REC_SHA: ${{ steps.recover.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$BRANCH_EXISTS" == "true" ]]; then
+            version="$REC_VERSION"
+            old_version="$REC_OLD"
+            release_date="$REC_DATE"
+            commit_sha="$REC_SHA"
+            is_recovery="true"
+          else
+            version="$FRESH_VERSION"
+            old_version="$FRESH_OLD"
+            release_date="$FRESH_DATE"
+            commit_sha="$FRESH_SHA"
+            is_recovery="false"
+          fi
+          {
+            echo "version=$version"
+            echo "old_version=$old_version"
+            echo "release_date=$release_date"
+            echo "commit_sha=$commit_sha"
+            echo "is_recovery=$is_recovery"
+            echo "pr_title=release: ${version} (${YEAR_MONTH})"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build PR body from checklist template
-        if: steps.branch_check.outputs.exists == 'false' && github.event.inputs.dry_run != 'true'
+        if: steps.state.outputs.pr_exists == 'false' && github.event.inputs.dry_run != 'true'
         id: pr_body
         env:
-          VERSION: ${{ steps.meta.outputs.new_version }}
-          OLD_VERSION: ${{ steps.meta.outputs.current_version }}
+          VERSION: ${{ steps.final.outputs.version }}
+          OLD_VERSION: ${{ steps.final.outputs.old_version }}
           YEAR_MONTH: ${{ steps.meta.outputs.year_month }}
-          RELEASE_DATE: ${{ steps.meta.outputs.release_date }}
-          COMMIT_SHA: ${{ steps.meta.outputs.commit_sha }}
+          RELEASE_DATE: ${{ steps.final.outputs.release_date }}
+          COMMIT_SHA: ${{ steps.final.outputs.commit_sha }}
+          IS_RECOVERY: ${{ steps.final.outputs.is_recovery }}
+          HAS_PAT: ${{ env.HAS_RELEASE_PAT }}
         shell: bash
         run: |
           set -euo pipefail
@@ -286,15 +405,59 @@ jobs:
           }
           for k, v in subs.items():
               body = body.replace(k, v)
+
+          banners = []
+          if os.environ.get("IS_RECOVERY") == "true":
+              banners.append(
+                  "> **Recovery open**: the release branch already existed "
+                  "on origin but no open PR tracked it — this PR was opened "
+                  "by the `release-cut` workflow's recovery path. Verify the "
+                  "version and commit metadata above against the branch "
+                  "contents before tagging."
+              )
+          if os.environ.get("HAS_PAT") != "true":
+              banners.append(
+                  "> **CI kick required**: this PR was opened with the "
+                  "default `GITHUB_TOKEN`, which does not trigger "
+                  "`pull_request` workflows. To satisfy the checklist's "
+                  "`CI/CD Pipeline` and `Security Checks` gates, the "
+                  "release captain must either (a) close this PR and "
+                  "immediately reopen it, or (b) push any commit to this "
+                  "branch from a personal account. See "
+                  "`docs/developer/release-process.md` → \"Kicking CI on "
+                  "the release PR\"."
+              )
+          if banners:
+              body = "\n\n".join(banners) + "\n\n---\n\n" + body
+
           pathlib.Path("release-pr-body.md").write_text(body)
           PY
           echo "body_file=release-pr-body.md" >> "$GITHUB_OUTPUT"
 
-      - name: Open draft release PR
-        if: steps.branch_check.outputs.exists == 'false' && github.event.inputs.dry_run != 'true'
+      - name: Ensure 'release' label exists
+        if: steps.state.outputs.pr_exists == 'false' && github.event.inputs.dry_run != 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TITLE: ${{ steps.meta.outputs.pr_title }}
+          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Idempotent label create. gh exits non-zero if the label
+          # already exists; swallow that specific case only.
+          if ! gh label create "release" \
+               --description "Monthly release cut PR" \
+               --color "0e8a16" 2>/tmp/label-err; then
+            if grep -qi "already exists" /tmp/label-err; then
+              echo "Label 'release' already exists — continuing."
+            else
+              cat /tmp/label-err
+              exit 1
+            fi
+          fi
+
+      - name: Open draft release PR
+        if: steps.state.outputs.pr_exists == 'false' && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
+          TITLE: ${{ steps.final.outputs.pr_title }}
           HEAD: ${{ steps.meta.outputs.release_branch }}
           BODY_FILE: ${{ steps.pr_body.outputs.body_file }}
         run: |
@@ -305,40 +468,40 @@ jobs:
             --head "$HEAD" \
             --title "$TITLE" \
             --body-file "$BODY_FILE" \
-            --label "release" \
-            || {
-              echo "::warning::gh pr create failed (label may not exist). Retrying without label."
-              gh pr create \
-                --draft \
-                --base main \
-                --head "$HEAD" \
-                --title "$TITLE" \
-                --body-file "$BODY_FILE"
-            }
+            --label "release"
 
       - name: Summary
         if: always()
         env:
-          EXISTS: ${{ steps.branch_check.outputs.exists }}
+          BRANCH_EXISTS: ${{ steps.state.outputs.branch_exists }}
+          PR_EXISTS: ${{ steps.state.outputs.pr_exists }}
           BRANCH: ${{ steps.meta.outputs.release_branch }}
           OLD: ${{ steps.meta.outputs.current_version }}
           NEW: ${{ steps.meta.outputs.new_version }}
           DRY: ${{ github.event.inputs.dry_run }}
+          HAS_PAT: ${{ env.HAS_RELEASE_PAT }}
         run: |
           {
             echo "## Release cut summary"
             echo ""
             echo "- Branch: \`$BRANCH\`"
             echo "- Version: \`$OLD\` → \`$NEW\`"
-            echo "- Pre-existing branch: \`$EXISTS\`"
+            echo "- Pre-existing branch: \`$BRANCH_EXISTS\`"
+            echo "- Pre-existing PR: \`$PR_EXISTS\`"
             echo "- Dry run: \`${DRY:-false}\`"
+            echo "- RELEASE_PAT configured: \`$HAS_PAT\`"
             echo ""
-            if [[ "$EXISTS" == "true" ]]; then
-              echo "No changes made — release branch already exists."
+            if [[ "$BRANCH_EXISTS" == "true" && "$PR_EXISTS" == "true" ]]; then
+              echo "No changes made — release branch and PR already exist."
             elif [[ "$DRY" == "true" ]]; then
               echo "No changes pushed — dry run only."
+            elif [[ "$BRANCH_EXISTS" == "true" && "$PR_EXISTS" == "false" ]]; then
+              echo "Recovery path: existing release branch had no open PR. Opened a new draft PR."
             else
-              echo "Draft release PR opened. Next step: a maintainer"
-              echo "claims it and follows the checklist in the PR body."
+              echo "Draft release PR opened. Next step: a maintainer claims it and follows the checklist in the PR body."
+            fi
+            if [[ "$HAS_PAT" != "true" ]]; then
+              echo ""
+              echo "> RELEASE_PAT not set → CI/Security workflows will not auto-run on the PR. See docs/developer/release-process.md for the kick-CI recipe."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
