@@ -275,6 +275,31 @@ app.include_router(suggestion_router)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
 
+# Agent Portal (experimental) - gated by FEATURE_AGENT_PORTAL_ENABLED.
+# Routes, service, and background tasks are all omitted when disabled.
+if config.app_settings.feature_agent_portal_enabled:
+    from atlas.modules.agent_portal.models import SandboxTier
+    from atlas.modules.agent_portal.service import AgentPortalService
+    from atlas.routes.agent_portal_routes import build_agent_portal_router
+
+    _log_dir = config.app_settings.app_log_dir or str(Path(__file__).resolve().parents[1] / "logs")
+    _audit_dir = Path(_log_dir) / config.app_settings.agent_portal_audit_subdir
+    _audit_dir.mkdir(parents=True, exist_ok=True)
+    _portal_service = AgentPortalService(
+        enabled=True,
+        default_tier=SandboxTier(config.app_settings.agent_portal_default_sandbox_tier),
+        allow_permissive_tier=config.app_settings.agent_portal_allow_permissive_tier,
+        sandbox_backend=config.app_settings.agent_portal_sandbox_backend,
+        audit_dir=_audit_dir,
+    )
+    app.include_router(build_agent_portal_router(_portal_service))
+    logging.getLogger(__name__).info(
+        "Agent Portal mounted (tier=%s, backend=%s, audit_dir=%s)",
+        _portal_service.default_tier.value,
+        config.app_settings.agent_portal_sandbox_backend,
+        _audit_dir,
+    )
+
 # Serve frontend build (Vite)
 # PyPI package bundles frontend into atlas/static/; local dev uses frontend/dist/
 _package_static = Path(__file__).resolve().parent / "static"

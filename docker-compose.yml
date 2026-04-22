@@ -119,6 +119,13 @@ services:
       - FEATURE_AGENT_MODE_AVAILABLE=true
       - FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED=false
       - AGENT_LOOP_STRATEGY=think-act
+
+      # Agent Portal (experimental) - default off; see docs/planning/agent-portal-*.md
+      - FEATURE_AGENT_PORTAL_ENABLED=false
+      - AGENT_PORTAL_DEFAULT_SANDBOX_TIER=standard
+      - AGENT_PORTAL_ALLOW_PERMISSIVE_TIER=false
+      - AGENT_PORTAL_SANDBOX_BACKEND=bubblewrap
+      - AGENT_PORTAL_AUDIT_SUBDIR=agent_portal
       
       # Tool approval configuration
       - REQUIRE_TOOL_APPROVAL_BY_DEFAULT=false

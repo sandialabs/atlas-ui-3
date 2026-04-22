@@ -14,6 +14,10 @@ This file provides guidance to AI coding agents (Claude Code, GitHub Copilot, Go
 
 The in-app agent loop inside ATLAS is **not** the main focus of this product. The plan is for the ATLAS app to continue as-is with its core capabilities — **chat, RAG, and MCP tools** — and to add a separate **Agent Portal** that lets users launch and control agents from a UI-friendly surface with **governed controls suitable for enterprise and government use** (authorization, auditing, approval gates, resource limits, and role-scoped access). When working on agent-related features, prefer investment in the Agent Portal and its governance surface over deepening the in-chat agent loop. If a request would expand the in-chat agent loop in a significant way, flag it and ask whether it belongs in the Agent Portal instead.
 
+### Agent Portal (experimental)
+
+A generalized foundation for the Agent Portal lives under `atlas/modules/agent_portal/` with protocols in `atlas/interfaces/agent_portal.py` and routes in `atlas/routes/agent_portal_routes.py`. Everything is gated behind `FEATURE_AGENT_PORTAL_ENABLED` (default `false`): with the flag off no routes are mounted, no background tasks run, and the service hard-rejects all operations. With the flag on, agents are launched behind a kernel-level sandbox (Landlock + network restriction, optional seccomp) driven by a `SandboxProfile` per session; a developer escape hatch exists via `AGENT_PORTAL_SANDBOX_BACKEND=none` gated by `AGENT_PORTAL_ALLOW_PERMISSIVE_TIER=true`. A single `local_process` adapter ships first; `ssh_tmux`, `kubernetes`, and `slurm` adapters are planned. Design lives at `docs/planning/agent-portal-2026-04-20.md`. Do not extend the in-chat agent loop in ways that should belong here.
+
 ## Project Overview
 
 Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) integration, supporting multiple LLM providers (OpenAI, Anthropic Claude, Google Gemini), RAG, and agentic capabilities.
@@ -203,6 +207,7 @@ frontend/src/
 - `FEATURE_RAG_MCP_ENABLED` - RAG over MCP
 - `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Compliance level enforcement
 - `FEATURE_AGENT_MODE_AVAILABLE` - Agent mode UI toggle
+- `FEATURE_AGENT_PORTAL_ENABLED` - Agent Portal (experimental): governed, sandboxed launchable agent sessions. Default: `false`. See `docs/planning/agent-portal-*.md`. Companion settings: `AGENT_PORTAL_DEFAULT_SANDBOX_TIER`, `AGENT_PORTAL_ALLOW_PERMISSIVE_TIER`, `AGENT_PORTAL_SANDBOX_BACKEND`, `AGENT_PORTAL_AUDIT_SUBDIR`.
 - `VITE_FEATURE_ANIMATED_LOGO` - Animated logo (build-time Vite flag; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
 - `VITE_FEATURE_RAG_CITATIONS` - Perplexity-style inline citations & collapsible Sources section for RAG responses (build-time Vite flag; defaults to `false`; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
 
