@@ -111,4 +111,5 @@ scratch/
 backend/report.md
 .playwright-mcp/
 screenshots/
+!docs/**/screenshots/
 docs/planning/improvements1.md

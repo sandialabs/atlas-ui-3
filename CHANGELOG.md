@@ -44,6 +44,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   minutes of no user activity and resumes automatically (with an immediate
   refresh) on the next user event.
 
+### PR #550 - 2026-04-20
+- **Admin telemetry dashboard (issue #546)**: New `/admin/telemetry` page with
+  five read-only views backed by the OpenTelemetry span audit trail: Overview
+  (turn / tool / LLM / RAG rollups over 1h–30d), Tool health (per-tool call
+  count, success rate, p95 duration, click-through to recent failures), LLM
+  performance (per-model p50/p95/p99 latency, token totals, retry rate), RAG
+  effectiveness (per-source retrieval-to-use ratio, top-score distribution),
+  and Session drill-down (span tree waterfall by `session_id` or `turn_id`).
+  Data source is pluggable via a `SpanReader` protocol; the default
+  `FileSpanReader` streams `logs/spans.jsonl` and an OTLP/Jaeger/Tempo backend
+  can be swapped in without UI changes. All endpoints require admin authz and
+  defensively whitelist the span attributes they echo — no raw prompts, tool
+  outputs, or RAG document text ever reach the dashboard.
+
 ### PR #549 - 2026-04-20 - OpenTelemetry spans for S3 / file-storage operations
 - Emit `file.upload`, `file.download`, `storage.list`, and `storage.delete`
   spans from `S3StorageClient` and `MockS3StorageClient`. Contract uses
