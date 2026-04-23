@@ -1,6 +1,6 @@
 # Telemetry: OpenTelemetry audit trail
 
-Last updated: 2026-04-19
+Last updated: 2026-04-20
 
 ATLAS emits OpenTelemetry spans for every high-value event in a chat turn so
 operators, T&E analysts, and downstream dashboards can answer questions like:
@@ -50,7 +50,13 @@ Every user turn emits one root span with child spans parented under it:
 chat.turn               (root — one per user message)
 ├── llm.call            (one per LiteLLM call, incl. retries as retry_count)
 ├── tool.call           (one per tool invocation)
+│   └── file.upload     (storage spans parent under the producing tool call)
 └── rag.query           (one per RAG data-source query, incl. batched queries)
+
+file.upload / file.download / storage.list / storage.delete
+    emitted from S3StorageClient and MockS3StorageClient; parent under
+    tool.call when triggered by a tool artifact, otherwise stand alone
+    (e.g. user uploads via /api/files, admin listing, etc.)
 ```
 
 Parent/child relationships are populated automatically by OpenTelemetry's
@@ -152,6 +158,76 @@ context propagation.
 > field is preserved for future reranking/filtering so dashboards don't need a
 > schema change later.
 
+### `file.upload`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `user_hash` | string | HMAC-SHA256[:16] of the user email |
+| `key_hash` | string | HMAC-SHA256[:16] of the generated S3 key |
+| `filename` | string | Sanitized + capped via `safe_label` (≤200 chars, no CR/LF) |
+| `content_type` | string | MIME type from caller (server-validated upstream) |
+| `file_size` | int | Bytes after base64 decode |
+| `source_type` | string | `user` \| `tool` |
+| `category` | string | `uploads` \| `generated` \| `other` (derived from key) |
+| `storage_backend` | string | `s3` \| `mock` |
+| `success` | bool | Upload completed without error |
+| `duration_ms` | int | Wall-clock from entry to return |
+| `error_type` | string | Exception class name when `success=false` |
+| `error_message` | string | Sanitized preview via `preview(..., max_chars=300)` when `success=false` |
+
+### `file.download`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `user_hash` | string | HMAC-SHA256[:16] of the user email |
+| `key_hash` | string | HMAC-SHA256[:16] of the requested key |
+| `filename` | string | `safe_label` of original filename (from S3 metadata) |
+| `content_type` | string | From S3 object |
+| `file_size` | int | Bytes read |
+| `category` | string | Derived from key |
+| `storage_backend` | string | `s3` \| `mock` |
+| `success` | bool | Download completed without error |
+| `access_denied` | bool | Cross-user key attempt — set true *before raising*, so the span persists the event |
+| `not_found` | bool | S3 returned NoSuchKey |
+| `duration_ms` | int | Wall-clock |
+| `error_type` | string | Exception class name on failure |
+| `error_message` | string | Sanitized preview on failure |
+
+### `storage.list`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `user_hash` | string | HMAC-SHA256[:16] of the user email |
+| `file_type` | string | `user` \| `tool` \| `null` (sentinel — no filter applied) |
+| `limit` | int | Requested max count |
+| `num_results` | int | Files returned |
+| `total_bytes` | int | Sum of sizes across returned files |
+| `storage_backend` | string | `s3` \| `mock` |
+| `success` | bool | List completed without error |
+| `duration_ms` | int | Wall-clock |
+| `error_type` | string | Exception class name on failure |
+| `error_message` | string | Sanitized preview via `preview(..., max_chars=300)` on failure |
+
+### `storage.delete`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `user_hash` | string | HMAC-SHA256[:16] of the user email |
+| `key_hash` | string | HMAC-SHA256[:16] of the requested key |
+| `category` | string | Derived from key |
+| `storage_backend` | string | `s3` \| `mock` |
+| `success` | bool | Delete returned True |
+| `access_denied` | bool | Cross-user key attempt — set true *before raising* |
+| `not_found` | bool | NoSuchKey (deletes return False, not raise) — also sets `error_type` for consistent failure aggregation |
+| `duration_ms` | int | Wall-clock |
+| `error_type` | string | Exception class name on failure (`"NoSuchKey"`/`"NotFound"` on non-raising not-found branches) |
+| `error_message` | string | Sanitized preview via `preview(..., max_chars=300)` on failure |
+
+> Storage spans propagate the ambient trace context. When a tool produces an
+> artifact that gets uploaded via `file_processor.process_tool_artifacts`,
+> the `file.upload` span naturally parents under the `tool.call` span, giving
+> a single waterfall from user prompt → tool execution → S3 PUT.
+
 ## Sensitive-data policy
 
 The audit trail is designed so the span file can be shared across teams
@@ -164,6 +240,8 @@ without leaking chat content.
 - Raw tool outputs
 - Raw RAG document text
 - Raw user emails
+- Raw S3 keys, raw bucket names, raw filenames beyond the sanitized label,
+  raw file contents
 - Raw exception messages (sanitized + capped previews only — upstream
   exception strings routinely embed caller args, URLs with tokens, and
   user content)
