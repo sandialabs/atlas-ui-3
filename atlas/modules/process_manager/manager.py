@@ -8,6 +8,7 @@ per-subscriber asyncio.Queue instances.
 from __future__ import annotations
 
 import asyncio
+import base64
 import fcntl
 import logging
 import os
@@ -110,8 +111,35 @@ class ProcessManager:
     def __init__(self, max_processes: int = 50):
         self._processes: Dict[str, ManagedProcess] = {}
         self._asyncio_procs: Dict[str, asyncio.subprocess.Process] = {}
+        self._pty_masters: Dict[str, int] = {}
         self._lock = asyncio.Lock()
         self._max_processes = max_processes
+
+    def write_input(self, process_id: str, data: bytes) -> None:
+        """Write bytes to the pty master end of a running process."""
+        master_fd = self._pty_masters.get(process_id)
+        if master_fd is None:
+            return
+        try:
+            os.write(master_fd, data)
+        except OSError as e:
+            logger.warning("pty write failed for %s: %s", process_id, e)
+
+    def resize_pty(self, process_id: str, cols: int, rows: int) -> None:
+        """Resize the pty window for a running process."""
+        master_fd = self._pty_masters.get(process_id)
+        if master_fd is None:
+            return
+        cols = max(1, min(1000, int(cols)))
+        rows = max(1, min(1000, int(rows)))
+        try:
+            fcntl.ioctl(
+                master_fd,
+                termios.TIOCSWINSZ,
+                struct.pack("HHHH", rows, cols, 0, 0),
+            )
+        except OSError as e:
+            logger.debug("pty resize failed for %s: %s", process_id, e)
 
     def list_processes(self, user_email: Optional[str] = None) -> List[dict]:
         items = list(self._processes.values())
@@ -309,6 +337,7 @@ class ProcessManager:
         self._record_chunk(managed, "system", launch_msg)
 
         if use_pty and master_fd is not None:
+            self._pty_masters[process_id] = master_fd
             asyncio.create_task(self._pump_pty(managed, master_fd))
         else:
             asyncio.create_task(self._pump_stream(managed, asyncio_proc.stdout, "stdout"))
@@ -416,14 +445,14 @@ class ProcessManager:
             logger.warning("Error pumping %s for %s: %s", label, managed.id, e)
 
     async def _pump_pty(self, managed: ManagedProcess, master_fd: int) -> None:
-        """Read bytes from a pty master, split into lines, dispatch as output.
+        """Read bytes from a pty master, relay as base64-encoded raw chunks.
 
-        pty output is byte-stream, not line-aligned; accumulate across
-        reads and split on CR/LF so TUIs and progress bars stream in
-        real time. ANSI escape sequences are passed through.
+        For pty-backed processes we keep the raw bytes -- including
+        ANSI escape sequences -- so the frontend can render them in
+        xterm.js. Text is encoded base64 to travel through the JSON
+        WebSocket without losing high bits.
         """
         loop = asyncio.get_event_loop()
-        buf = bytearray()
         done = asyncio.Event()
 
         def _on_ready():
@@ -438,33 +467,8 @@ class ProcessManager:
             if not data:
                 done.set()
                 return
-            buf.extend(data)
-            # Flush any complete lines, keeping the trailing partial.
-            # Treat CRLF as a single line terminator, plus lone LF, plus
-            # lone CR (carriage-return-only redraws common in TUIs).
-            while True:
-                crlf = buf.find(b"\r\n")
-                lf = buf.find(b"\n")
-                cr = buf.find(b"\r")
-                # Prefer CRLF if it's the earliest terminator
-                candidates = []
-                if crlf != -1:
-                    candidates.append((crlf, 2))
-                if lf != -1 and (crlf == -1 or lf < crlf):
-                    candidates.append((lf, 1))
-                if cr != -1 and (crlf == -1 or cr < crlf):
-                    candidates.append((cr, 1))
-                if not candidates:
-                    break
-                idx, sep_len = min(candidates, key=lambda t: t[0])
-                line = bytes(buf[:idx])
-                del buf[: idx + sep_len]
-                text = _strip_ansi(line.decode(errors="replace"))
-                # After stripping, many lines collapse to empty
-                # (pure cursor-move/color frames). Drop those to
-                # keep the view readable.
-                if text.strip():
-                    self._record_chunk(managed, "stdout", text)
+            encoded = base64.b64encode(data).decode("ascii")
+            self._record_chunk(managed, "raw", encoded)
 
         try:
             loop.add_reader(master_fd, _on_ready)
@@ -478,16 +482,12 @@ class ProcessManager:
 
         try:
             await done.wait()
-            # Flush any trailing partial line
-            if buf:
-                text = _strip_ansi(bytes(buf).decode(errors="replace")).rstrip()
-                if text:
-                    self._record_chunk(managed, "stdout", text)
         finally:
             try:
                 loop.remove_reader(master_fd)
             except Exception:
                 pass
+            self._pty_masters.pop(managed.id, None)
             try:
                 os.close(master_fd)
             except OSError:

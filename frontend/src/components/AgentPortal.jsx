@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot } from 'lucide-react'
+import { Terminal as XTerm } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 
 const LAUNCH_HISTORY_KEY = 'atlas.agentPortal.launchHistory.v1'
 const LAUNCH_HISTORY_MAX = 15
@@ -195,6 +198,92 @@ function StreamView({ process, chunks }) {
   )
 }
 
+// xterm.js terminal view for pty-backed processes. Registers itself
+// on `termHandleRef` so the parent WebSocket handler can push raw
+// bytes in, and sends keystrokes + resize events back over the WS.
+function XtermView({ process, wsRef, termHandleRef }) {
+  const hostRef = useRef(null)
+  const termRef = useRef(null)
+  const fitRef = useRef(null)
+
+  useEffect(() => {
+    if (!hostRef.current) return
+    const term = new XTerm({
+      convertEol: false,
+      cursorBlink: true,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
+      fontSize: 13,
+      theme: {
+        background: '#000000',
+        foreground: '#e5e7eb',
+      },
+      allowProposedApi: true,
+      scrollback: 5000,
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(hostRef.current)
+    try { fit.fit() } catch { /* container not sized yet */ }
+    termRef.current = term
+    fitRef.current = fit
+
+    const sendResize = () => {
+      const ws = wsRef.current
+      if (!ws || ws.readyState !== 1) return
+      try {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+      } catch { /* ignore */ }
+    }
+
+    // Forward keystrokes to the backend as base64 so binary-safe.
+    const onDataDisp = term.onData((data) => {
+      const ws = wsRef.current
+      if (!ws || ws.readyState !== 1) return
+      const bytes = new TextEncoder().encode(data)
+      let bin = ''
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+      ws.send(JSON.stringify({ type: 'input', data: btoa(bin) }))
+    })
+
+    const onResizeDisp = term.onResize(sendResize)
+
+    const doFit = () => {
+      try { fit.fit() } catch { /* ignore */ }
+    }
+    doFit()
+    sendResize()
+    const ro = new ResizeObserver(doFit)
+    ro.observe(hostRef.current)
+    window.addEventListener('resize', doFit)
+
+    // Expose a writer so the WS handler can push bytes in.
+    termHandleRef.current = {
+      write(base64Data) {
+        const bin = atob(base64Data)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+        term.write(bytes)
+      },
+      clear() { term.clear() },
+    }
+
+    return () => {
+      termHandleRef.current = null
+      ro.disconnect()
+      window.removeEventListener('resize', doFit)
+      onDataDisp.dispose()
+      onResizeDisp.dispose()
+      term.dispose()
+    }
+  }, [process?.id, wsRef, termHandleRef])
+
+  return (
+    <div className="flex-1 min-h-0 w-full bg-black rounded-lg overflow-hidden p-2">
+      <div ref={hostRef} className="h-full w-full" />
+    </div>
+  )
+}
+
 function AgentPortal() {
   const navigate = useNavigate()
   const [processes, setProcesses] = useState([])
@@ -214,6 +303,7 @@ function AgentPortal() {
   const [landlockSupported, setLandlockSupported] = useState(null)
   const [launchHistory, setLaunchHistory] = useState(() => loadLaunchHistory())
   const wsRef = useRef(null)
+  const termHandleRef = useRef(null)
 
   useEffect(() => {
     fetch('/api/agent-portal/capabilities', { credentials: 'include' })
@@ -333,6 +423,10 @@ function AgentPortal() {
             text: msg.text,
             timestamp: msg.timestamp,
           }])
+        } else if (msg.type === 'output_raw') {
+          // pty mode: push raw bytes straight into xterm.js
+          const h = termHandleRef.current
+          if (h) h.write(msg.data)
         }
       } catch {
         // Ignore parse failures
@@ -703,7 +797,15 @@ function AgentPortal() {
             </button>
           </div>
           <div className="flex-1 p-3 min-h-0 flex">
-            <StreamView process={selectedProcess} chunks={chunks} />
+            {selectedProcess && selectedProcess.use_pty ? (
+              <XtermView
+                process={selectedProcess}
+                wsRef={wsRef}
+                termHandleRef={termHandleRef}
+              />
+            ) : (
+              <StreamView process={selectedProcess} chunks={chunks} />
+            )}
           </div>
         </div>
       </div>

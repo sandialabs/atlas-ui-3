@@ -8,6 +8,7 @@ audit trail) will be added in follow-up work.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from typing import List, Optional
 
@@ -202,27 +203,75 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
         "process": managed.to_summary(),
     })
 
-    try:
+    async def _pump_output():
         async for chunk in manager.subscribe(process_id):
-            await websocket.send_json({
-                "type": "output",
-                "stream": chunk.stream,
-                "text": chunk.text,
-                "timestamp": chunk.timestamp,
-            })
-        # Send final state so client can reflect exit status
+            if chunk.stream == "raw":
+                # pty mode: relay base64 bytes directly so xterm.js can
+                # render ANSI/cursor/SGR sequences verbatim.
+                await websocket.send_json({
+                    "type": "output_raw",
+                    "data": chunk.text,
+                    "timestamp": chunk.timestamp,
+                })
+            else:
+                await websocket.send_json({
+                    "type": "output",
+                    "stream": chunk.stream,
+                    "text": chunk.text,
+                    "timestamp": chunk.timestamp,
+                })
         await websocket.send_json({
             "type": "process_end",
             "process": manager.get(process_id).to_summary(),
         })
-    except WebSocketDisconnect:
-        logger.info("agent_portal stream client disconnected process=%s", sanitize_for_logging(process_id))
-        return
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error("agent_portal stream error process=%s: %s", process_id, e, exc_info=True)
+
+    async def _pump_input():
+        """Receive input/resize frames from the client."""
+        while True:
+            msg = await websocket.receive_json()
+            mtype = msg.get("type")
+            if mtype == "input":
+                encoded = msg.get("data") or ""
+                try:
+                    data = base64.b64decode(encoded)
+                except Exception:
+                    continue
+                manager.write_input(process_id, data)
+            elif mtype == "resize":
+                try:
+                    cols = int(msg.get("cols", 80))
+                    rows = int(msg.get("rows", 24))
+                except (TypeError, ValueError):
+                    continue
+                manager.resize_pty(process_id, cols, rows)
+
+    output_task = asyncio.create_task(_pump_output())
+    input_task = asyncio.create_task(_pump_input())
+    try:
+        # End when the output stream closes (process ended); cancel
+        # the input reader so it stops waiting on receive_json.
+        done, pending = await asyncio.wait(
+            {output_task, input_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for t in pending:
+            t.cancel()
+        for t in done:
+            exc = t.exception()
+            if isinstance(exc, WebSocketDisconnect):
+                logger.info(
+                    "agent_portal stream client disconnected process=%s",
+                    sanitize_for_logging(process_id),
+                )
+                return
+            if exc and not isinstance(exc, asyncio.CancelledError):
+                logger.error(
+                    "agent_portal stream error process=%s: %s",
+                    process_id, exc, exc_info=exc,
+                )
     finally:
+        for t in (output_task, input_task):
+            if not t.done():
+                t.cancel()
         try:
             await websocket.close()
         except Exception:
