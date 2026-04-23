@@ -12,6 +12,7 @@ import logging
 import os
 import shlex
 import signal
+import sys
 import time
 import uuid
 from collections import deque
@@ -125,15 +126,18 @@ class ProcessManager:
         if resolved_cwd and not os.path.isdir(resolved_cwd):
             raise ValueError(f"cwd does not exist: {resolved_cwd}")
 
-        preexec = None
+        # Sandboxed launches are routed through a Python wrapper that
+        # applies Landlock after the first exec and before the second
+        # execvp into the user's command. This avoids ``preexec_fn``,
+        # which interacts badly with uvloop-backed subprocess creation.
+        spawn_cmd = command
+        spawn_args: List[str] = args
         if restrict_to_cwd:
             if not resolved_cwd:
                 raise ValueError("restrict_to_cwd requires a cwd to be set")
-            # Import lazily; may raise at child-side if kernel lacks Landlock.
             from atlas.modules.process_manager.landlock import (
                 LandlockUnavailableError,
                 is_supported,
-                restrict_to_workdir,
             )
             if not is_supported():
                 raise LandlockUnavailableError(
@@ -141,15 +145,27 @@ class ProcessManager:
                 )
 
             workdir_abs = os.path.abspath(resolved_cwd)
-
-            def _apply_landlock():  # runs in child, between fork and exec
-                restrict_to_workdir(workdir_abs)
-
-            preexec = _apply_landlock
+            spawn_cmd = sys.executable
+            spawn_args = [
+                "-m",
+                "atlas.modules.process_manager._sandbox_launch",
+                workdir_abs,
+                command,
+                *args,
+            ]
 
         proc_env = os.environ.copy()
         if env:
             proc_env.update(env)
+        # Make sure the wrapper can import the atlas package.
+        if restrict_to_cwd:
+            project_root = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "..", "..")
+            )
+            existing = proc_env.get("PYTHONPATH", "")
+            proc_env["PYTHONPATH"] = (
+                project_root if not existing else f"{project_root}{os.pathsep}{existing}"
+            )
 
         process_id = str(uuid.uuid4())
         managed = ManagedProcess(
@@ -164,15 +180,14 @@ class ProcessManager:
 
         try:
             asyncio_proc = await asyncio.create_subprocess_exec(
-                command,
-                *args,
+                spawn_cmd,
+                *spawn_args,
                 cwd=resolved_cwd,
                 env=proc_env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.DEVNULL,
                 start_new_session=True,
-                preexec_fn=preexec,
             )
         except FileNotFoundError as e:
             managed.status = ProcessStatus.FAILED
