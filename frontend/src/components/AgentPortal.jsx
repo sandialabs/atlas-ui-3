@@ -453,7 +453,7 @@ function AgentPortal() {
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[360px_1fr] min-h-0">
         {/* Left column: launcher + process list */}
-        <div className="flex flex-col border-r border-gray-700 min-h-0">
+        <div className="flex flex-col border-r border-gray-700 min-h-0 overflow-y-auto">
           <form onSubmit={handleLaunch} className="p-4 space-y-3 border-b border-gray-700">
             <div>
               <label className="block text-xs uppercase text-gray-400 mb-1">Command</label>
@@ -656,7 +656,7 @@ function AgentPortal() {
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          <div className="flex-1 p-3 space-y-2">
             <div className="text-xs uppercase text-gray-400 mb-1">Your processes</div>
             {listError && <div className="text-xs text-red-300">{listError}</div>}
             {processes.length === 0 && !listError && (
