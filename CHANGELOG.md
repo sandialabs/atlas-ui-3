@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Agent Portal (initial) - 2026-04-23
+- New `/agent-portal` page (behind `FEATURE_AGENT_PORTAL_ENABLED`, off by default)
+  lets a user launch a host subprocess (command + args + optional cwd), view the
+  list of their running / finished processes, stream stdout/stderr live over a
+  dedicated WebSocket, and cancel a running process (SIGTERM, SIGKILL after 3s).
+  Backend: `atlas/modules/process_manager/` + `atlas/routes/agent_portal_routes.py`.
+  Dev preview only — no allow-list, quotas, or audit trail yet; governance layer
+  will be added in follow-up work.
+- Optional Landlock sandbox: a "Restrict to working directory" checkbox confines
+  the child's filesystem writes to cwd via Linux Landlock (set up from
+  `preexec_fn` between fork and exec, with `PR_SET_NO_NEW_PRIVS`). Capability
+  probed via `GET /api/agent-portal/capabilities` so the checkbox is disabled
+  when the kernel lacks support. Writes outside cwd return `EACCES`; reads and
+  `exec` on system roots (`/usr`, `/lib`, `/etc`, ...) are still permitted so
+  normal binaries run.
+- Frontend persists recent launches (command, args, cwd, sandbox flag) to
+  `localStorage` (`atlas.agentPortal.launchHistory.v1`, up to 15 entries) and
+  prepopulates the form from the most recent entry on load. A "Recent launches"
+  list lets the user click to reapply or remove past entries.
+
 ### PR #557 - 2026-04-22
 - MCP task-augmented execution fixes: discovery-time seeding of task-forbidden
   cache from per-tool execution.taskSupport metadata (SEP-1686), and runtime
