@@ -75,6 +75,7 @@ from atlas.routes.health_routes import router as health_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.routes.suggestion_routes import suggestion_router
+from atlas.routes.telemetry_routes import telemetry_router
 from atlas.version import VERSION
 
 # Load environment variables from the parent directory
@@ -263,6 +264,7 @@ app.add_middleware(
 # Include essential routes (add files API)
 app.include_router(config_router)
 app.include_router(admin_router)
+app.include_router(telemetry_router)
 app.include_router(files_router)
 app.include_router(mcp_files_router)
 app.include_router(health_router)

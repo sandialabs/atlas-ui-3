@@ -4,7 +4,7 @@ import {
   ArrowLeft, Settings, Database, FileText, Activity,
   Download, Save, X, Check, RefreshCw, Shield,
   MessageSquare, Heart, RotateCcw, Eye, ThumbsUp, ThumbsDown, Minus,
-  WifiOff
+  WifiOff, BarChart3
 } from 'lucide-react'
 import LogViewer from './LogViewer'
 import AdminModal from './AdminModal'
@@ -363,6 +363,26 @@ const AdminDashboard = () => {
               className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg transition-colors"
             >
               View Logs
+            </button>
+          </div>
+
+          {/* Telemetry */}
+          <div className="bg-gray-800 rounded-lg p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <BarChart3 className="w-6 h-6 text-emerald-400" />
+              <h2 className="text-lg font-semibold">Telemetry</h2>
+            </div>
+            <p className="text-gray-400 mb-4">
+              OpenTelemetry rollups: tool health, LLM latency, RAG effectiveness, and session drill-down.
+            </p>
+            <div className={`px-3 py-1 rounded text-sm font-medium mb-4 ${getStatusColor('healthy')}`}>
+              Ready
+            </div>
+            <button
+              onClick={() => navigate('/admin/telemetry')}
+              className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"
+            >
+              View Telemetry
             </button>
           </div>
 

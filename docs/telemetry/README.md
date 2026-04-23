@@ -313,6 +313,52 @@ Set in `.env`:
 
 ## Analyzing spans
 
+### Admin dashboard (built in)
+
+The ATLAS admin dashboard exposes a **Telemetry** page at ``/admin/telemetry`` with
+read-only views backed by the same span audit trail. All views require admin
+authz and never render raw prompts, tool outputs, or RAG document text — only
+what is already in the span attribute contract (hashes, sizes, counts,
+model/tool names, durations). The dashboard reads ``logs/spans.jsonl`` by
+default; the backend is pluggable via the ``SpanReader`` protocol in
+``atlas/routes/telemetry_routes.py``, so an OTLP / Jaeger / Tempo backend can
+be swapped in later without UI changes.
+
+The five tabs share a range selector (1h / 24h / 7d / 30d) and a refresh
+button:
+
+**Overview** — turns, tool calls, tool success rate, p50/p95 LLM latency, RAG
+query count.
+
+![Telemetry overview tab](screenshots/admin-telemetry-overview.png)
+
+**Tool health** — per-tool call count, success rate, p95 duration, and
+click-through to recent failures (expanded row shows the six most recent errors
+with sanitized messages):
+
+![Telemetry tool health tab with failures expanded](screenshots/admin-telemetry-tool-health.png)
+
+**LLM performance** — per-model p50/p95/p99 latency, token totals, retry rate.
+Elevated retry rates are highlighted so model-side flakiness shows up at a
+glance:
+
+![Telemetry LLM performance tab](screenshots/admin-telemetry-llm-performance.png)
+
+**RAG effectiveness** — per-data-source query count, docs retrieved vs. docs
+used, and top-score quantiles. Low retrieval-to-use ratios flag data sources
+where chunks are being retrieved but not making it into context:
+
+![Telemetry RAG effectiveness tab](screenshots/admin-telemetry-rag-effectiveness.png)
+
+**Session drill-down** — look up by ``session_id`` or ``turn_id`` and render
+the full span tree as a proportional timing waterfall, reconstructed from
+``parent_span_id`` links. Error spans are color-coded and each span's
+attributes can be inspected inline:
+
+![Telemetry session drill-down waterfall](screenshots/admin-telemetry-session-waterfall.png)
+
+### Offline pandas + matplotlib script
+
 A reference pandas + matplotlib script is provided:
 
 ```bash
