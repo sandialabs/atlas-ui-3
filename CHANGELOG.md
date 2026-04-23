@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #557 - 2026-04-22
+- MCP task-augmented execution fixes: discovery-time seeding of task-forbidden
+  cache from per-tool execution.taskSupport metadata (SEP-1686), and runtime
+  fallback detection for immediate error results that don't raise exceptions.
+
 ### PR #555 - 2026-04-23
 - Monthly release process + cron automation: `docs/developer/release-process.md`
   runbook, `.github/workflows/release-cut.yml` scheduled cut (day 22, 14:00

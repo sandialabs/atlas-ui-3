@@ -1184,17 +1184,20 @@ class MCPToolManager:
                     'tools': tools,
                     'config': self.servers_config[server_name]
                 }
-                # Pre-seed the per-tool task-forbidden cache from the
-                # discovered metadata. The MCP spec (SEP-1686) lets each tool
-                # advertise execution.taskSupport in tools/list; when set to
-                # "forbidden" (or absent — "forbidden" is the spec default)
-                # we should never attempt task=True for it. This avoids the
-                # wasted round-trip + error-result that the runtime fallback
-                # handles. Only "optional" or "required" leaves us willing to
-                # try task mode for a given tool.
+                # Rebuild the per-tool task-forbidden cache for this server
+                # from the freshly discovered metadata. Drop any stale entries
+                # first so a server upgrade that flips a tool from "forbidden"
+                # to "optional"/"required" takes effect on next reload without
+                # a process restart. Per MCP SEP-1686, an absent taskSupport
+                # value defaults to "forbidden"; only "optional" or "required"
+                # leaves us willing to try task mode for a given tool.
+                self._tool_task_forbidden = {
+                    entry for entry in self._tool_task_forbidden
+                    if entry[0] != server_name
+                }
                 for tool in tools:
                     mode = self._discover_task_support_mode(tool)
-                    if mode not in ("optional", "required"):
+                    if mode in ("forbidden", None):
                         self._tool_task_forbidden.add((server_name, tool.name))
                 logger.debug("Stored %d tools for %s", len(tools), safe_server_name)
                 return server_data

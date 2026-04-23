@@ -374,9 +374,9 @@ class TestTaskSupportDiscoverySeed:
     forbidden tools never get a wasted task=True attempt at runtime."""
 
     @pytest.mark.asyncio
-    async def test_discovery_seeds_forbidden_tools_and_skips_optional(self, manager):
-        # Three tools: forbidden, optional, and one with no execution metadata
-        # (per spec, absent → "forbidden")
+    async def test_discovery_seeds_forbidden_tools_and_skips_task_capable(self, manager):
+        # Four tools: forbidden, optional, required, and one with no
+        # execution metadata (per spec, absent → "forbidden")
         forbidden_tool = MagicMock()
         forbidden_tool.name = "fast_lookup"
         forbidden_tool.execution = MagicMock(taskSupport="forbidden")
@@ -385,13 +385,17 @@ class TestTaskSupportDiscoverySeed:
         optional_tool.name = "search_index"
         optional_tool.execution = MagicMock(taskSupport="optional")
 
+        required_tool = MagicMock()
+        required_tool.name = "build_project"
+        required_tool.execution = MagicMock(taskSupport="required")
+
         unspecified_tool = MagicMock()
         unspecified_tool.name = "legacy_tool"
         unspecified_tool.execution = None
 
         mock_client = AsyncMock()
         mock_client.list_tools = AsyncMock(
-            return_value=[forbidden_tool, optional_tool, unspecified_tool]
+            return_value=[forbidden_tool, optional_tool, required_tool, unspecified_tool]
         )
 
         manager.servers_config["srv"] = {}
@@ -400,6 +404,36 @@ class TestTaskSupportDiscoverySeed:
         assert ("srv", "fast_lookup") in manager._tool_task_forbidden
         assert ("srv", "legacy_tool") in manager._tool_task_forbidden
         assert ("srv", "search_index") not in manager._tool_task_forbidden
+        assert ("srv", "build_project") not in manager._tool_task_forbidden
+
+    @pytest.mark.asyncio
+    async def test_rediscovery_drops_stale_forbidden_entries(self, manager):
+        """A server upgrade that flips a tool from forbidden → optional must
+        take effect on the next discovery — the stale forbidden entry is
+        dropped, not retained until process restart."""
+        v1_tool = MagicMock()
+        v1_tool.name = "evolving_tool"
+        v1_tool.execution = MagicMock(taskSupport="forbidden")
+
+        mock_client = AsyncMock()
+        mock_client.list_tools = AsyncMock(return_value=[v1_tool])
+
+        manager.servers_config["srv"] = {}
+        await manager._discover_tools_for_server("srv", mock_client)
+        assert ("srv", "evolving_tool") in manager._tool_task_forbidden
+
+        # Seed a forbidden entry from a different server — must survive
+        manager._tool_task_forbidden.add(("other_srv", "other_tool"))
+
+        v2_tool = MagicMock()
+        v2_tool.name = "evolving_tool"
+        v2_tool.execution = MagicMock(taskSupport="optional")
+        mock_client.list_tools = AsyncMock(return_value=[v2_tool])
+
+        await manager._discover_tools_for_server("srv", mock_client)
+
+        assert ("srv", "evolving_tool") not in manager._tool_task_forbidden
+        assert ("other_srv", "other_tool") in manager._tool_task_forbidden
 
     @pytest.mark.asyncio
     async def test_seeded_forbidden_tool_skips_task_mode_at_call_time(self, manager):
