@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save } from 'lucide-react'
+import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot } from 'lucide-react'
 
 const LAUNCH_HISTORY_KEY = 'atlas.agentPortal.launchHistory.v1'
 const LAUNCH_HISTORY_MAX = 15
@@ -206,6 +206,7 @@ function AgentPortal() {
   const [cwd, setCwd] = useState('')
   const [sandboxMode, setSandboxMode] = useState('off')
   const [extraWritablePathsText, setExtraWritablePathsText] = useState('')
+  const [usePty, setUsePty] = useState(false)
   const [launchConfigs, setLaunchConfigs] = useState(() => loadLaunchConfigs())
   const [launchError, setLaunchError] = useState(null)
   const [launching, setLaunching] = useState(false)
@@ -234,6 +235,7 @@ function AgentPortal() {
       setCwd(last.cwd || '')
       setSandboxMode(normalizeSandboxMode(last))
       setExtraWritablePathsText((last.extraWritablePaths || []).join('\n'))
+      setUsePty(!!last.usePty)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -244,6 +246,7 @@ function AgentPortal() {
     setCwd(entry.cwd || '')
     setSandboxMode(normalizeSandboxMode(entry))
     setExtraWritablePathsText((entry.extraWritablePaths || []).join('\n'))
+    setUsePty(!!entry.usePty)
   }
 
   const saveCurrentAsConfig = () => {
@@ -261,6 +264,7 @@ function AgentPortal() {
       sandboxMode,
       extraWritablePaths: extraWritablePathsText
         .split('\n').map((s) => s.trim()).filter(Boolean),
+      usePty,
     }
     const next = [config, ...launchConfigs.filter((c) => c.name !== name.trim())]
       .slice(0, LAUNCH_CONFIGS_MAX)
@@ -357,6 +361,7 @@ function AgentPortal() {
         args: tokenize(argsString),
         sandbox_mode: sandboxMode,
         extra_writable_paths: extraWritable,
+        use_pty: usePty,
       }
       if (trimmedCwd) body.cwd = trimmedCwd
       const res = await fetch('/api/agent-portal/processes', {
@@ -380,6 +385,7 @@ function AgentPortal() {
         cwd: trimmedCwd,
         sandboxMode,
         extraWritablePaths: extraWritable,
+        usePty,
         lastUsed: Date.now(),
       }
       const key = makeHistoryKey(entry)
@@ -513,6 +519,25 @@ function AgentPortal() {
                   : SANDBOX_MODE_OPTIONS.find((o) => o.value === sandboxMode)?.description}
               </p>
             </div>
+
+            <label className="flex items-start gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={usePty}
+                onChange={(e) => setUsePty(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="inline-flex items-center gap-1 font-medium text-gray-200">
+                  <MonitorDot className="w-3.5 h-3.5" /> Allocate a pseudo-terminal (PTY)
+                </span>
+                <span className="block text-[11px] text-gray-500">
+                  The child sees stdout as a TTY, so line-buffered / TUI output (cline, progress
+                  bars, colored logs) streams in real time instead of being stuck in libc's block
+                  buffer. stdout and stderr are merged.
+                </span>
+              </span>
+            </label>
 
             {sandboxMode !== 'off' && (
               <div>

@@ -48,6 +48,10 @@ class LaunchRequest(BaseModel):
         default_factory=list,
         description="Additional directories granted write access alongside cwd in sandboxed modes.",
     )
+    use_pty: bool = Field(
+        default=False,
+        description="Allocate a pseudo-terminal so the child sees stdout as a TTY (TUIs, progress bars).",
+    )
 
 
 def _require_enabled():
@@ -92,6 +96,7 @@ async def launch_process(
             user_email=current_user,
             sandbox_mode=sandbox_mode,
             extra_writable_paths=body.extra_writable_paths,
+            use_pty=body.use_pty,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=f"Command not found: {e}")

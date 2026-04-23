@@ -8,8 +8,10 @@ per-subscriber asyncio.Queue instances.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
 import os
+import pty
 import shlex
 import signal
 import sys
@@ -52,6 +54,7 @@ class ManagedProcess:
     sandboxed: bool = False
     sandbox_mode: str = "off"
     extra_writable_paths: List[str] = field(default_factory=list)
+    use_pty: bool = False
     history: Deque[OutputChunk] = field(default_factory=lambda: deque(maxlen=2000))
     subscribers: List[asyncio.Queue] = field(default_factory=list)
 
@@ -70,6 +73,7 @@ class ManagedProcess:
             "sandboxed": self.sandboxed,
             "sandbox_mode": self.sandbox_mode,
             "extra_writable_paths": list(self.extra_writable_paths),
+            "use_pty": self.use_pty,
         }
 
 
@@ -108,6 +112,7 @@ class ProcessManager:
         env: Optional[Dict[str, str]] = None,
         sandbox_mode: str = "off",
         extra_writable_paths: Optional[List[str]] = None,
+        use_pty: bool = False,
     ) -> ManagedProcess:
         """Launch a subprocess and register it.
 
@@ -199,19 +204,46 @@ class ProcessManager:
             sandboxed=sandboxed,
             sandbox_mode=sandbox_mode,
             extra_writable_paths=normalized_extra,
+            use_pty=bool(use_pty),
         )
 
+        master_fd: Optional[int] = None
+        slave_fd: Optional[int] = None
+        if use_pty:
+            # When the child expects a TTY (TUIs, progress bars, most
+            # interactive tools), pipe-based stdout is line-buffered by
+            # libc and nothing streams out until big chunks accumulate.
+            # Allocate a pseudo-tty so isatty(1) returns true in the
+            # child, and read the master end asynchronously.
+            master_fd, slave_fd = pty.openpty()
+            flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+            fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            if "TERM" not in proc_env:
+                proc_env["TERM"] = "xterm-256color"
+
         try:
-            asyncio_proc = await asyncio.create_subprocess_exec(
-                spawn_cmd,
-                *spawn_args,
-                cwd=resolved_cwd,
-                env=proc_env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                stdin=asyncio.subprocess.DEVNULL,
-                start_new_session=True,
-            )
+            if use_pty:
+                asyncio_proc = await asyncio.create_subprocess_exec(
+                    spawn_cmd,
+                    *spawn_args,
+                    cwd=resolved_cwd,
+                    env=proc_env,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    stdin=slave_fd,
+                    start_new_session=True,
+                )
+            else:
+                asyncio_proc = await asyncio.create_subprocess_exec(
+                    spawn_cmd,
+                    *spawn_args,
+                    cwd=resolved_cwd,
+                    env=proc_env,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    start_new_session=True,
+                )
         except FileNotFoundError as e:
             managed.status = ProcessStatus.FAILED
             managed.ended_at = time.time()
@@ -220,6 +252,13 @@ class ProcessManager:
             async with self._lock:
                 self._processes[process_id] = managed
             raise
+
+        # Parent no longer needs the slave end; the child has it.
+        if slave_fd is not None:
+            try:
+                os.close(slave_fd)
+            except OSError:
+                pass
 
         managed.pid = asyncio_proc.pid
         async with self._lock:
@@ -231,10 +270,15 @@ class ProcessManager:
             launch_msg += f"  [Landlock sandbox: {managed.sandbox_mode}]"
             if managed.extra_writable_paths:
                 launch_msg += f" +write: {', '.join(managed.extra_writable_paths)}"
+        if managed.use_pty:
+            launch_msg += "  [pty]"
         self._record_chunk(managed, "system", launch_msg)
 
-        asyncio.create_task(self._pump_stream(managed, asyncio_proc.stdout, "stdout"))
-        asyncio.create_task(self._pump_stream(managed, asyncio_proc.stderr, "stderr"))
+        if use_pty and master_fd is not None:
+            asyncio.create_task(self._pump_pty(managed, master_fd))
+        else:
+            asyncio.create_task(self._pump_stream(managed, asyncio_proc.stdout, "stdout"))
+            asyncio.create_task(self._pump_stream(managed, asyncio_proc.stderr, "stderr"))
         asyncio.create_task(self._wait_and_finalize(managed, asyncio_proc))
 
         logger.info(
@@ -336,6 +380,80 @@ class ProcessManager:
                 self._record_chunk(managed, label, text)
         except Exception as e:
             logger.warning("Error pumping %s for %s: %s", label, managed.id, e)
+
+    async def _pump_pty(self, managed: ManagedProcess, master_fd: int) -> None:
+        """Read bytes from a pty master, split into lines, dispatch as output.
+
+        pty output is byte-stream, not line-aligned; accumulate across
+        reads and split on CR/LF so TUIs and progress bars stream in
+        real time. ANSI escape sequences are passed through.
+        """
+        loop = asyncio.get_event_loop()
+        buf = bytearray()
+        done = asyncio.Event()
+
+        def _on_ready():
+            try:
+                data = os.read(master_fd, 4096)
+            except BlockingIOError:
+                return
+            except OSError:
+                # Child closed the pty (usual path on exit)
+                done.set()
+                return
+            if not data:
+                done.set()
+                return
+            buf.extend(data)
+            # Flush any complete lines, keeping the trailing partial.
+            # Treat CRLF as a single line terminator, plus lone LF, plus
+            # lone CR (carriage-return-only redraws common in TUIs).
+            while True:
+                crlf = buf.find(b"\r\n")
+                lf = buf.find(b"\n")
+                cr = buf.find(b"\r")
+                # Prefer CRLF if it's the earliest terminator
+                candidates = []
+                if crlf != -1:
+                    candidates.append((crlf, 2))
+                if lf != -1 and (crlf == -1 or lf < crlf):
+                    candidates.append((lf, 1))
+                if cr != -1 and (crlf == -1 or cr < crlf):
+                    candidates.append((cr, 1))
+                if not candidates:
+                    break
+                idx, sep_len = min(candidates, key=lambda t: t[0])
+                line = bytes(buf[:idx])
+                del buf[: idx + sep_len]
+                text = line.decode(errors="replace")
+                self._record_chunk(managed, "stdout", text)
+
+        try:
+            loop.add_reader(master_fd, _on_ready)
+        except Exception as e:
+            logger.warning("pty add_reader failed for %s: %s", managed.id, e)
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+            return
+
+        try:
+            await done.wait()
+            # Flush any trailing partial line
+            if buf:
+                text = bytes(buf).decode(errors="replace").rstrip()
+                if text:
+                    self._record_chunk(managed, "stdout", text)
+        finally:
+            try:
+                loop.remove_reader(master_fd)
+            except Exception:
+                pass
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
 
     async def _wait_and_finalize(
         self,
