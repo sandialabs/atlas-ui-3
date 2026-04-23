@@ -517,7 +517,7 @@ function AgentPortal() {
             {sandboxMode !== 'off' && (
               <div>
                 <label className="block text-xs uppercase text-gray-400 mb-1">
-                  Extra writable paths (one per line)
+                  Extra read + write paths (one per line)
                 </label>
                 <textarea
                   value={extraWritablePathsText}
@@ -527,9 +527,10 @@ function AgentPortal() {
                   className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-[11px] text-gray-500 mt-1">
-                  Directories granted the same R/W access as the workspace. Use for tool
-                  cache/log locations (e.g. <code>~/.cline</code>, <code>~/.cache/&lt;tool&gt;</code>).
-                  Created if missing.
+                  Each directory gets the <strong>same full read + write + exec access</strong> as the
+                  workspace. Use for tool cache/log/config locations the child needs to both read
+                  and write (e.g. <code>~/.cline</code>, <code>~/.cache/&lt;tool&gt;</code>). Created
+                  if missing.
                 </p>
               </div>
             )}
