@@ -45,11 +45,13 @@ def test_permissive_rejected_without_opt_in(tmp_path):
 
 
 def test_permissive_allowed_with_opt_in(tmp_path):
+    # permissive tier is only accepted in dev mode with the opt-in flag.
     svc = AgentPortalService(
         enabled=True,
         audit_dir=tmp_path,
         allow_permissive_tier=True,
         sandbox_backend="none",
+        mode="dev",
     )
     session, profile, _ = svc.create_session("u@x", _spec(SandboxTier.permissive))
     assert session.state is SessionState.pending
@@ -63,6 +65,7 @@ def test_effective_config_shape(tmp_path):
         default_tier=SandboxTier.restrictive,
         allow_permissive_tier=False,
         sandbox_backend="bubblewrap",
+        mode="prod",
     )
     cfg = svc.effective_config()
     assert cfg == {
@@ -71,4 +74,5 @@ def test_effective_config_shape(tmp_path):
         "allow_permissive_tier": False,
         "sandbox_backend": "bubblewrap",
         "audit_dir": str(tmp_path),
+        "mode": "prod",
     }

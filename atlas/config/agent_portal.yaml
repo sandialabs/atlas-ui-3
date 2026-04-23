@@ -1,0 +1,139 @@
+# Agent Portal policy.
+#
+# This is the single source of truth for:
+#   - what launchable agent "presets" exist
+#   - what workspace roots each user's group is allowed to pick
+#   - sandbox tier descriptions shown in the UI
+#   - mode (dev/prod) enforcement
+#
+# Presets define the exact command that runs; users never type arbitrary
+# commands. Per-preset `visible_to_groups` lets an admin restrict who
+# sees which presets. `workspace_roots` uses fnmatch globs to control
+# which filesystem roots a user may launch an agent against.
+#
+# This file is loaded at backend startup. Errors fail startup loudly.
+
+# "prod" - permissive tier is always rejected, "none" sandbox backend refused.
+# "dev"  - permissive allowed if AGENT_PORTAL_ALLOW_PERMISSIVE_TIER=true.
+# The env var AGENT_PORTAL_MODE overrides this value.
+mode: dev
+
+# Human-readable tier summaries used by the UI (i) popovers.
+tiers:
+  restrictive:
+    summary: "No network. Workspace mounted read-only. Best for analysis and review."
+    network: "denied"
+    filesystem: "root (read-only) + minimal system paths"
+    env: "PATH, LANG, LC_ALL only"
+  standard:
+    summary: "Egress via allowlist proxy. Workspace read-write. Normal dev work."
+    network: "allowlist proxy"
+    filesystem: "root (read-write) + additional configured paths"
+    env: "HTTPS_PROXY, HOME, minimal shell vars"
+  permissive:
+    summary: "No sandboxing. Direct host access. Dev mode only; never enable in prod."
+    network: "unrestricted"
+    filesystem: "host paths as-is"
+    env: "inherits full parent environment"
+
+# Which workspace root paths each group may select. `group: "*"` means
+# "anyone." Paths are fnmatch patterns; `**` matches any depth.
+# The first rule that matches a user's group + path wins; if nothing
+# matches the request is rejected.
+workspace_roots:
+  - group: "*"
+    paths:
+      - "/tmp/**"
+  - group: "admin"
+    paths:
+      - "/**"
+  - group: "atlas-devs"
+    paths:
+      - "/home/**"
+      - "/workspace/**"
+
+# Launchable presets. Each is a fixed command with tier/mount policy.
+#
+# Fields:
+#   id                 unique identifier
+#   label              display name
+#   description        one-liner shown in the modal
+#   executor           "local" (only option in v1; reserved for remote in v2)
+#   command            argv list, runs inside the sandbox
+#   pty                true for TUI apps; false for plain stdout
+#   default_tier       pre-selected in the UI
+#   allowed_tiers      tiers the user may choose from for this preset
+#   visible_to_groups  list of groups (or ["*"]) that can see this preset
+#   requires_root      if false, workspace root input is hidden (rare; meant for no-fs agents)
+#   budget_overrides   (optional) override default Budget fields
+#
+# Note: v1 only supports executor=local. The field is validated so a
+# typo or future "remote" value fails fast at load time.
+presets:
+  - id: echo-demo
+    label: "Echo demo"
+    description: "Prints the scope back and exits. Smoke test for the portal itself."
+    executor: local
+    command: ["bash", "-c", "echo 'Agent started.'; echo \"scope=$AGENT_PORTAL_SCOPE\"; for i in 1 2 3; do echo \"tick $i\"; sleep 1; done; echo 'done.'"]
+    pty: false
+    default_tier: restrictive
+    allowed_tiers: [restrictive, standard]
+    visible_to_groups: ["*"]
+    requires_root: true
+
+  - id: long-tick
+    label: "Long ticker (cancel-me)"
+    description: "Prints ticks once per second for 10 minutes. For testing cancel + long-running streams."
+    executor: local
+    command: ["bash", "-c", "echo 'starting long ticker'; for i in $(seq 1 600); do echo \"tick $i\"; sleep 1; done"]
+    pty: false
+    default_tier: restrictive
+    allowed_tiers: [restrictive, standard]
+    visible_to_groups: ["*"]
+    requires_root: true
+
+  - id: shell-interactive
+    label: "Interactive shell"
+    description: "Plain bash session. Useful for debugging the sandbox."
+    executor: local
+    command: ["bash", "-l"]
+    pty: true
+    default_tier: standard
+    allowed_tiers: [standard, permissive]
+    visible_to_groups: ["atlas-devs", "admin"]
+    requires_root: true
+
+  - id: claude-safe
+    label: "Claude"
+    description: "Claude Code with normal tool approval. Conservative default."
+    executor: local
+    command: ["claude"]
+    pty: true
+    default_tier: restrictive
+    allowed_tiers: [restrictive, standard]
+    visible_to_groups: ["*"]
+    requires_root: true
+
+  - id: claude-danger
+    label: "Claude (skip permissions)"
+    description: "Claude Code with --dangerously-skip-permissions. Trusted scopes only."
+    executor: local
+    command: ["claude", "--dangerously-skip-permissions"]
+    pty: true
+    default_tier: standard
+    allowed_tiers: [restrictive, standard, permissive]
+    visible_to_groups: ["atlas-devs", "admin"]
+    requires_root: true
+    budget_overrides:
+      wall_clock_seconds: 7200
+
+  - id: cline-tui
+    label: "Cline (TUI)"
+    description: "Cline interactive TUI. Requires a PTY."
+    executor: local
+    command: ["cline", "--tui"]
+    pty: true
+    default_tier: standard
+    allowed_tiers: [standard, permissive]
+    visible_to_groups: ["atlas-devs", "admin"]
+    requires_root: true

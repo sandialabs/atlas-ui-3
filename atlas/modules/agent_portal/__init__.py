@@ -18,6 +18,7 @@ from atlas.modules.agent_portal.models import (
     SandboxTier,
     Session,
     SessionState,
+    WorkspaceSpec,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "SandboxTier",
     "Session",
     "SessionState",
+    "WorkspaceSpec",
 ]

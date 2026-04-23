@@ -10,9 +10,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SandboxTier(str, Enum):
@@ -98,21 +98,54 @@ class SandboxProfile(BaseModel):
     clear_env: bool = True
 
 
+class WorkspaceSpec(BaseModel):
+    """The filesystem scope the agent is allowed to work within.
+
+    `root` is mandatory for presets that declare `requires_root=true`.
+    Additional paths let the user widen access without changing the root,
+    e.g. a source tree under `root` plus a scratch dir for outputs.
+
+    Allowed-root enforcement happens in `AgentPortalService.validate_spec`
+    against the policy file, so the API layer cannot be tricked into
+    mounting `/etc` no matter what the user submits.
+    """
+
+    root: str = Field(..., min_length=1)
+    additional_read_paths: List[str] = Field(default_factory=list)
+    additional_read_write_paths: List[str] = Field(default_factory=list)
+
+
 class LaunchSpec(BaseModel):
     """User-facing launch request.
 
-    Templates produce one of these server-side after policy validation;
-    the API also accepts raw specs for testing when the template registry
-    has not been configured.
+    The UI always sends `preset_id`; the backend resolves it to a fixed
+    command from policy. Direct `agent_command` remains accepted for
+    tests and headless callers but is not exposed through the UI.
+
+    `executor` and `target` are reserved for v2 remote launches. v1
+    refuses any value other than executor=local / target=None, so a
+    stale client cannot smuggle in a remote launch.
     """
 
-    template_id: Optional[str] = None
+    preset_id: Optional[str] = None
+    template_id: Optional[str] = None  # retained for backwards-compatible audit logging
     scope: str = Field(..., min_length=1, max_length=4000)
     tool_allowlist: List[str] = Field(default_factory=list)
     sandbox_tier: SandboxTier = SandboxTier.standard
     budget: Budget = Field(default_factory=Budget)
-    workspace_hint: Optional[str] = None
-    agent_command: List[str] = Field(..., min_length=1)
+    workspace: Optional[WorkspaceSpec] = None
+    workspace_hint: Optional[str] = None  # legacy free-form hint
+    agent_command: Optional[List[str]] = Field(default=None, min_length=1)
+    executor: Literal["local"] = "local"
+    target: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _require_preset_or_command(self) -> "LaunchSpec":
+        if self.preset_id is None and not self.agent_command:
+            raise ValueError("either preset_id or agent_command must be provided")
+        if self.target is not None:
+            raise ValueError("target must be null in v1 (remote launch is v2)")
+        return self
 
 
 class Session(BaseModel):

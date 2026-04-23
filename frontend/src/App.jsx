@@ -18,6 +18,7 @@ import HelpPage from './components/HelpPage'
 import AdminDashboard from './components/AdminDashboard'
 import LogViewer from './components/LogViewer' // Import LogViewer
 import TelemetryDashboard from './components/TelemetryDashboard'
+import AgentPortal from './components/AgentPortal'
 import FeedbackButton from './components/FeedbackButton'
 import FileManagerPanel from './components/FileManagerPanel'
 import FilesPage from './components/FilesPage'
@@ -195,6 +196,7 @@ function AppRoutes() {
       <Route path="/files" element={<FilesPage />} />
       <Route path="/admin/logview" element={<LogViewer />} /> {/* New route for LogViewer */}
       <Route path="/admin/telemetry" element={<TelemetryDashboard />} />
+      {features?.agent_portal && <Route path="/agent-portal" element={<AgentPortal />} />}
     </Routes>
   )
 }
