@@ -106,9 +106,10 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
       if (event.ctrlKey && event.altKey && (event.key === 'N' || event.key === 'n')) {
         event.preventDefault()
         event.stopPropagation()
-        clearChat()
+        // Gate canvas-close + focus on a successful clear so a cancelled
+        // confirm doesn't still slam the canvas shut or steal focus.
+        if (clearChat() === false) return
         onCloseCanvas()
-        // Focus the message input after a brief delay
         setTimeout(() => {
           const messageInput = document.querySelector('textarea[placeholder*="message"]')
           if (messageInput) {
@@ -158,9 +159,8 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         {/* New Chat Button */}
         <button
           onClick={() => {
-            clearChat()
+            if (clearChat() === false) return
             onCloseCanvas()
-            // Focus the message input after a brief delay
             setTimeout(() => {
               const messageInput = document.querySelector('textarea[placeholder*="message"]')
               if (messageInput) {

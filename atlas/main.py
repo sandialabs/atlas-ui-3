@@ -75,6 +75,7 @@ from atlas.routes.health_routes import router as health_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.routes.suggestion_routes import suggestion_router
+from atlas.routes.telemetry_routes import telemetry_router
 from atlas.version import VERSION
 
 # Load environment variables from the parent directory
@@ -263,6 +264,7 @@ app.add_middleware(
 # Include essential routes (add files API)
 app.include_router(config_router)
 app.include_router(admin_router)
+app.include_router(telemetry_router)
 app.include_router(files_router)
 app.include_router(mcp_files_router)
 app.include_router(health_router)
@@ -640,6 +642,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "reset_session":
+                # If a chat is still generating when the user starts a new chat,
+                # cancel it first so tokens don't keep streaming into the fresh
+                # session (defense-in-depth; the frontend also sends
+                # stop_streaming before reset_session when it knows generation
+                # is in progress).
+                task = active_chat_task.get("task")
+                if task and not task.done():
+                    logger.info("Cancelling active chat task (reset_session)")
+                    task.cancel()
+
                 # Handle session reset (use authenticated user from connection)
                 response = await chat_service.handle_reset_session(
                     session_id=session_id,
@@ -692,6 +704,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 if task and not task.done():
                     logger.info("Cancelling active chat task (stop_streaming)")
                     task.cancel()
+
+            elif message_type == "agent_control":
+                # `agent_control` is normally consumed by the agent loop's
+                # internal receive_json poll while it's waiting on user input
+                # (react_loop._poll_control_message). If the main endpoint
+                # sees it here, the agent isn't in the input-wait branch, so
+                # treat action="stop" as a plain cancel of the chat task.
+                action = data.get("action")
+                if action == "stop":
+                    task = active_chat_task.get("task")
+                    if task and not task.done():
+                        logger.info("Cancelling active chat task (agent_control stop)")
+                        task.cancel()
 
             elif message_type == "elicitation_response":
                 # Handle elicitation response

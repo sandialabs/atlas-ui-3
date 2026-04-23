@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 LogCallback = Callable[[str, str, str, Dict[str, Any]], Awaitable[None]]
 
 
+_TASK_FORBIDDEN_MARKER = "does not support task-augmented execution"
+
+
 def _is_task_forbidden_error(exc: BaseException) -> bool:
     """Return True when an MCP call failed because the specific tool refuses
     task-augmented execution (fastmcp `tasks.mode="forbidden"`).
@@ -37,7 +40,28 @@ def _is_task_forbidden_error(exc: BaseException) -> bool:
     (see fastmcp/server/tasks/routing.py). We match on the message text
     because the concrete exception class varies across fastmcp versions.
     """
-    return "does not support task-augmented execution" in str(exc)
+    return _TASK_FORBIDDEN_MARKER in str(exc)
+
+
+def _is_task_forbidden_result(result: Any) -> bool:
+    """Return True when a CallToolResult-shaped object carries the
+    task-forbidden marker as an error.
+
+    fastmcp does not always raise on this condition: when the server-side
+    McpError is wrapped as a ToolError, the low-level MCP handler converts
+    it to a CallToolResult with isError=True instead of propagating an
+    exception. The client's _call_tool_as_task then returns a ToolTask whose
+    immediate_result is that error result, so the call site sees no
+    exception and our fallback never runs.
+    """
+    if not getattr(result, "is_error", False):
+        return False
+    content = getattr(result, "content", None) or []
+    for block in content:
+        text = getattr(block, "text", "") or ""
+        if _TASK_FORBIDDEN_MARKER in text:
+            return True
+    return False
 
 
 _SESSION_TERMINATED_MARKERS = ("session terminated", "session not found", "invalid session id")
@@ -1160,6 +1184,21 @@ class MCPToolManager:
                     'tools': tools,
                     'config': self.servers_config[server_name]
                 }
+                # Rebuild the per-tool task-forbidden cache for this server
+                # from the freshly discovered metadata. Drop any stale entries
+                # first so a server upgrade that flips a tool from "forbidden"
+                # to "optional"/"required" takes effect on next reload without
+                # a process restart. Per MCP SEP-1686, an absent taskSupport
+                # value defaults to "forbidden"; only "optional" or "required"
+                # leaves us willing to try task mode for a given tool.
+                self._tool_task_forbidden = {
+                    entry for entry in self._tool_task_forbidden
+                    if entry[0] != server_name
+                }
+                for tool in tools:
+                    mode = self._discover_task_support_mode(tool)
+                    if mode in ("forbidden", None):
+                        self._tool_task_forbidden.add((server_name, tool.name))
                 logger.debug("Stored %d tools for %s", len(tools), safe_server_name)
                 return server_data
         except Exception as e:
@@ -1697,6 +1736,23 @@ class MCPToolManager:
 
         return routing
 
+    @staticmethod
+    def _discover_task_support_mode(tool: Any) -> Optional[str]:
+        """Read the per-tool taskSupport mode from a discovered MCP Tool.
+
+        Returns "required", "optional", "forbidden", or None when the tool
+        doesn't expose execution metadata. Per MCP SEP-1686, an absent value
+        defaults to "forbidden" — callers treat None the same as "forbidden"
+        for the purpose of skipping task-mode attempts.
+        """
+        execution = getattr(tool, "execution", None)
+        if execution is None:
+            return None
+        mode = getattr(execution, "taskSupport", None)
+        if mode is None:
+            return None
+        return getattr(mode, "value", mode)
+
     def _supports_tasks(self, server_name: str, client: Any) -> bool:
         """Check if a server supports background tasks (cached)."""
         if server_name in self._server_task_support:
@@ -1851,6 +1907,22 @@ class MCPToolManager:
             if use_tasks:
                 if tool_task.returned_immediately:
                     result = await tool_task.result()
+                    # fastmcp's graceful-degradation path does not raise when
+                    # the server refuses task mode mid-request: the McpError
+                    # is wrapped as a ToolError on the server, the low-level
+                    # handler converts it to CallToolResult(isError=True),
+                    # and _call_tool_as_task returns it as an immediate
+                    # result. Detect that here and fall back to sync.
+                    if _is_task_forbidden_result(result):
+                        logger.info(
+                            "Tool %s on %s returned task-forbidden as an "
+                            "immediate error result; falling back to "
+                            "synchronous call and caching the decision.",
+                            sanitize_for_logging(tool_name),
+                            sanitize_for_logging(server_name),
+                        )
+                        self._tool_task_forbidden.add((server_name, tool_name))
+                        use_tasks = False
                 else:
                     try:
                         await asyncio.wait_for(

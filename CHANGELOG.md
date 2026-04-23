@@ -6,6 +6,93 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #557 - 2026-04-22
+- MCP task-augmented execution fixes: discovery-time seeding of task-forbidden
+  cache from per-tool execution.taskSupport metadata (SEP-1686), and runtime
+  fallback detection for immediate error results that don't raise exceptions.
+
+### PR #555 - 2026-04-23
+- Monthly release process + cron automation: `docs/developer/release-process.md`
+  runbook, `.github/workflows/release-cut.yml` scheduled cut (day 22, 14:00
+  UTC) that creates `release/YYYY.MM`, bumps versions, reshapes CHANGELOG,
+  and opens a draft release PR from `.github/release-checklist.md`. Workflow
+  uses an optional `RELEASE_PAT` secret so the PR triggers `CI/CD Pipeline`
+  and `Security Checks`, falls back to `GITHUB_TOKEN` with a visible
+  kick-CI banner, and includes a recovery path that opens a PR when a prior
+  run stranded a pushed branch without one. No publish paths change.
+
+### PR #552 - 2026-04-20
+- New Chat stops in-flight generation: clicking "New Chat" while a reply is
+  streaming no longer lets orphaned tokens bleed into the fresh session.
+  `clearChat` now cancels the active task (`stop_streaming` +
+  `agent_control: stop` when in agent mode) before requesting a new session,
+  fully resets local thinking / synthesizing / agent-step state, and asks
+  for confirmation before discarding an existing conversation or
+  interrupting generation. Backend `reset_session` also cancels any running
+  chat task as defense-in-depth, and a new `agent_control` server handler
+  replaces the prior "Unknown message type" echo.
+- Sidebar "Delete Conversation" (of the active conversation) now bypasses the
+  New-Chat confirm prompt via `clearChat({ skipConfirm: true })` so users
+  don't see a second "Start a new chat?" dialog right after deleting.
+- Header "New Chat" button and `Ctrl+Alt+N` hotkey now gate their follow-up
+  side-effects (close canvas, focus input) on the confirm result — if the
+  user clicks Cancel, the chat stays intact.
+
+### PR #551 - 2026-04-20 - Pause banner/config polling when user is idle
+- Added `useUserActivity` hook that tracks mouse/keyboard/touch/scroll activity.
+- `BannerPanel` now pauses `/api/config` and `/api/banners` polling after 5
+  minutes of no user activity and resumes automatically (with an immediate
+  refresh) on the next user event.
+
+### PR #550 - 2026-04-20
+- **Admin telemetry dashboard (issue #546)**: New `/admin/telemetry` page with
+  five read-only views backed by the OpenTelemetry span audit trail: Overview
+  (turn / tool / LLM / RAG rollups over 1h–30d), Tool health (per-tool call
+  count, success rate, p95 duration, click-through to recent failures), LLM
+  performance (per-model p50/p95/p99 latency, token totals, retry rate), RAG
+  effectiveness (per-source retrieval-to-use ratio, top-score distribution),
+  and Session drill-down (span tree waterfall by `session_id` or `turn_id`).
+  Data source is pluggable via a `SpanReader` protocol; the default
+  `FileSpanReader` streams `logs/spans.jsonl` and an OTLP/Jaeger/Tempo backend
+  can be swapped in without UI changes. All endpoints require admin authz and
+  defensively whitelist the span attributes they echo — no raw prompts, tool
+  outputs, or RAG document text ever reach the dashboard.
+
+### PR #549 - 2026-04-20 - OpenTelemetry spans for S3 / file-storage operations
+- Emit `file.upload`, `file.download`, `storage.list`, and `storage.delete`
+  spans from `S3StorageClient` and `MockS3StorageClient`. Contract uses
+  HMAC-SHA256 hashes for user/key, `safe_label` for filenames, and
+  `preview(..., max_chars=300)` for error messages — never raw keys,
+  bucket names, filenames (beyond the sanitized label), or user emails.
+- Cross-user access attempts set `access_denied=true` before the exception
+  is raised so the event survives in `spans.jsonl` even on failure.
+- `docs/telemetry/README.md` gains attribute tables for the four new span
+  types; `docs/telemetry/analysis_example.py` gains
+  `upload_volume_by_user` and `storage_success_rate_by_backend`
+  aggregations.
+
+### PR #549 review follow-up - 2026-04-21
+- **Security**: `S3StorageClient` no longer embeds the raw boto
+  `Error.Message` in the raised `Exception` string. Those messages can
+  carry tokens, caller args, or user content and previously leaked up to
+  API responses / upstream logs. The sanitized preview still goes on the
+  span; the exception message is now generic (`"S3 upload failed"` etc.)
+  and the underlying cause is chained via `raise ... from e`.
+- **Correctness**: upload-failure spans now populate `file_size`,
+  `category`, and `key_hash` from the values computed before the failure
+  (when available) instead of writing `0` / `"other"` unconditionally,
+  so `upload_volume_by_user` and category breakdowns include failed
+  attempts.
+- **Contract consistency**: the `NoSuchKey` / 404 branches on download
+  and delete now also set `error_type` (`"NoSuchKey"` for real S3,
+  `"NotFound"` for the mock) so failure-mode aggregation groups them
+  alongside raised errors. `error_message` rows added to the
+  `storage.list` / `storage.delete` attribute tables to match emission.
+- **Analysis hygiene**: `file_type=None` on `storage.list` now surfaces
+  as the string sentinel `"null"` so the attribute is always present
+  (OTel drops `None` attrs). Duplicate `attr_num_results` removed from
+  `_NUMERIC_ATTRS`.
+
 ### PR #544 - 2026-04-19
 - **Fix**: MCP client tore down the streamable-HTTP session (POST → DELETE) after every tool call on stateful servers, so state written by one tool was invisible to the next. Root cause: `ChatService.handle_chat_message` only set `session.context["conversation_id"]` when the client sent one, but the frontend doesn't send a conversation id on the first message of a new conversation. That left `conversation_id=None` for tool execution, which forced `MCPToolManager.call_tool` into its per-call `async with client:` fallback instead of reusing the persistent session held by `MCPSessionManager`. Fix: default `session.context["conversation_id"]` to `str(session_id)` when the client doesn't send one (matches the fallback already used by `_save_conversation` and the `conversation_saved` notification, so the stable id round-trips to the client). Stateful MCP servers (e.g. FastMCP 3.x streamable-HTTP servers that key per-tool state on `Context.session_id`) now see a reused `Mcp-Session-Id` across tool calls within a conversation, as required by the MCP spec.
 
