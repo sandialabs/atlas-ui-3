@@ -51,6 +51,7 @@ class ManagedProcess:
     pid: Optional[int] = None
     sandboxed: bool = False
     sandbox_mode: str = "off"
+    extra_writable_paths: List[str] = field(default_factory=list)
     history: Deque[OutputChunk] = field(default_factory=lambda: deque(maxlen=2000))
     subscribers: List[asyncio.Queue] = field(default_factory=list)
 
@@ -68,6 +69,7 @@ class ManagedProcess:
             "ended_at": self.ended_at,
             "sandboxed": self.sandboxed,
             "sandbox_mode": self.sandbox_mode,
+            "extra_writable_paths": list(self.extra_writable_paths),
         }
 
 
@@ -105,6 +107,7 @@ class ProcessManager:
         user_email: str = "",
         env: Optional[Dict[str, str]] = None,
         sandbox_mode: str = "off",
+        extra_writable_paths: Optional[List[str]] = None,
     ) -> ManagedProcess:
         """Launch a subprocess and register it.
 
@@ -173,6 +176,17 @@ class ProcessManager:
         proc_env = os.environ.copy()
         if env:
             proc_env.update(env)
+        # Pass extra writable paths through to the sandbox wrapper via
+        # env var so they can be granted write access alongside cwd.
+        normalized_extra: List[str] = []
+        if sandboxed and extra_writable_paths:
+            for raw in extra_writable_paths:
+                if not raw or not raw.strip():
+                    continue
+                expanded = os.path.abspath(os.path.expanduser(raw.strip()))
+                normalized_extra.append(expanded)
+            if normalized_extra:
+                proc_env["ATLAS_SANDBOX_EXTRA_WRITE_PATHS"] = ":".join(normalized_extra)
 
         process_id = str(uuid.uuid4())
         managed = ManagedProcess(
@@ -184,6 +198,7 @@ class ProcessManager:
             started_at=time.time(),
             sandboxed=sandboxed,
             sandbox_mode=sandbox_mode,
+            extra_writable_paths=normalized_extra,
         )
 
         try:
@@ -214,6 +229,8 @@ class ProcessManager:
         launch_msg = f"Started pid={asyncio_proc.pid}: {command} {shlex.join(args)}".rstrip()
         if managed.sandboxed:
             launch_msg += f"  [Landlock sandbox: {managed.sandbox_mode}]"
+            if managed.extra_writable_paths:
+                launch_msg += f" +write: {', '.join(managed.extra_writable_paths)}"
         self._record_chunk(managed, "system", launch_msg)
 
         asyncio.create_task(self._pump_stream(managed, asyncio_proc.stdout, "stdout"))

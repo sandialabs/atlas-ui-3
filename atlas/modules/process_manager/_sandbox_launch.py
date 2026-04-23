@@ -15,6 +15,11 @@ Where MODE is one of:
   configs or invoke interpreters under ``~/.local/bin``, ``/nix``,
   ``~/.nvm``, etc.
 
+Extra writable paths (e.g. ``~/.cline``, ``~/.cache/cline``) can be
+passed via the ``ATLAS_SANDBOX_EXTRA_WRITE_PATHS`` environment
+variable as a colon-separated list of absolute paths. Each path is
+granted the same access set as WORKDIR.
+
 This file is intentionally self-contained (only stdlib imports) so it
 can be run by absolute path without the ``atlas`` package being on
 ``sys.path`` -- which matters because the child inherits cwd from the
@@ -158,7 +163,7 @@ def _add_rule(libc, ruleset_fd: int, path: str, allowed: int, handled: int) -> N
         os.close(dir_fd)
 
 
-def _apply_landlock(workdir: str, mode: str, extra_read_dirs=()) -> None:
+def _apply_landlock(workdir: str, mode: str, extra_read_dirs=(), extra_write_dirs=()) -> None:
     if not workdir or not os.path.isdir(workdir):
         raise ValueError(f"workdir must be an existing directory: {workdir!r}")
     if mode not in ("strict", "workspace-write"):
@@ -189,6 +194,17 @@ def _apply_landlock(workdir: str, mode: str, extra_read_dirs=()) -> None:
         # Always: read + write_file on /dev so /dev/null, /dev/tty, and
         # /dev/stderr work for typical shell redirections.
         _add_rule(libc, ruleset_fd, "/dev", _DEV_ACCESS, handled)
+        # Caller-supplied additional writable directories (e.g. tool
+        # cache/log locations like ~/.cline, ~/.cache/<tool>).
+        for extra in extra_write_dirs:
+            if extra:
+                if not os.path.isdir(extra):
+                    # Create on demand so the rule can be attached.
+                    try:
+                        os.makedirs(extra, exist_ok=True)
+                    except OSError:
+                        continue
+                _add_rule(libc, ruleset_fd, extra, _WORKDIR_ACCESS, handled)
 
         if mode == "workspace-write":
             # Allow read+exec on the entire filesystem. Writes are still
@@ -239,8 +255,19 @@ def main() -> int:
         elif os.path.sep in target:
             extra_read_dirs.append(os.path.dirname(os.path.realpath(target)))
 
+    extra_write_raw = os.environ.get("ATLAS_SANDBOX_EXTRA_WRITE_PATHS", "")
+    extra_write_dirs = [
+        os.path.abspath(os.path.expanduser(p))
+        for p in extra_write_raw.split(":")
+        if p.strip()
+    ]
+
     try:
-        _apply_landlock(workdir, mode, extra_read_dirs=extra_read_dirs)
+        _apply_landlock(
+            workdir, mode,
+            extra_read_dirs=extra_read_dirs,
+            extra_write_dirs=extra_write_dirs,
+        )
     except Exception as e:
         sys.stderr.write(f"sandbox setup failed: {e}\n")
         return 1

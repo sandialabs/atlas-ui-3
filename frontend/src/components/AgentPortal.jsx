@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X } from 'lucide-react'
+import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save } from 'lucide-react'
 
 const LAUNCH_HISTORY_KEY = 'atlas.agentPortal.launchHistory.v1'
 const LAUNCH_HISTORY_MAX = 15
+const LAUNCH_CONFIGS_KEY = 'atlas.agentPortal.launchConfigs.v1'
+const LAUNCH_CONFIGS_MAX = 50
 
 function loadLaunchHistory() {
   try {
@@ -29,6 +31,28 @@ function normalizeSandboxMode(entry) {
   if (entry.sandboxMode) return entry.sandboxMode
   if (entry.restrictToCwd) return 'strict'
   return 'off'
+}
+
+function loadLaunchConfigs() {
+  try {
+    const raw = localStorage.getItem(LAUNCH_CONFIGS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((e) => e && typeof e.name === 'string' && typeof e.command === 'string')
+      .slice(0, LAUNCH_CONFIGS_MAX)
+  } catch {
+    return []
+  }
+}
+
+function saveLaunchConfigs(configs) {
+  try {
+    localStorage.setItem(LAUNCH_CONFIGS_KEY, JSON.stringify(configs.slice(0, LAUNCH_CONFIGS_MAX)))
+  } catch {
+    // localStorage may be disabled; ignore
+  }
 }
 
 function makeHistoryKey(entry) {
@@ -181,6 +205,8 @@ function AgentPortal() {
   const [argsString, setArgsString] = useState('')
   const [cwd, setCwd] = useState('')
   const [sandboxMode, setSandboxMode] = useState('off')
+  const [extraWritablePathsText, setExtraWritablePathsText] = useState('')
+  const [launchConfigs, setLaunchConfigs] = useState(() => loadLaunchConfigs())
   const [launchError, setLaunchError] = useState(null)
   const [launching, setLaunching] = useState(false)
   const [listError, setListError] = useState(null)
@@ -207,15 +233,45 @@ function AgentPortal() {
       setArgsString(last.argsString || '')
       setCwd(last.cwd || '')
       setSandboxMode(normalizeSandboxMode(last))
+      setExtraWritablePathsText((last.extraWritablePaths || []).join('\n'))
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const applyHistoryEntry = (entry) => {
+  const applyEntry = (entry) => {
     setCommand(entry.command || '')
     setArgsString(entry.argsString || '')
     setCwd(entry.cwd || '')
     setSandboxMode(normalizeSandboxMode(entry))
+    setExtraWritablePathsText((entry.extraWritablePaths || []).join('\n'))
+  }
+
+  const saveCurrentAsConfig = () => {
+    const trimmedCommand = command.trim()
+    if (!trimmedCommand) return
+    const defaultName = trimmedCommand + (argsString ? ' ' + argsString.slice(0, 40) : '')
+    const name = window.prompt('Name this launch config:', defaultName)
+    if (!name) return
+    const config = {
+      id: `cfg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name: name.trim(),
+      command: trimmedCommand,
+      argsString,
+      cwd: cwd.trim(),
+      sandboxMode,
+      extraWritablePaths: extraWritablePathsText
+        .split('\n').map((s) => s.trim()).filter(Boolean),
+    }
+    const next = [config, ...launchConfigs.filter((c) => c.name !== name.trim())]
+      .slice(0, LAUNCH_CONFIGS_MAX)
+    setLaunchConfigs(next)
+    saveLaunchConfigs(next)
+  }
+
+  const deleteConfig = (id) => {
+    const next = launchConfigs.filter((c) => c.id !== id)
+    setLaunchConfigs(next)
+    saveLaunchConfigs(next)
   }
 
   const removeHistoryEntry = (entry) => {
@@ -294,10 +350,13 @@ function AgentPortal() {
     try {
       const trimmedCommand = command.trim()
       const trimmedCwd = cwd.trim()
+      const extraWritable = extraWritablePathsText
+        .split('\n').map((s) => s.trim()).filter(Boolean)
       const body = {
         command: trimmedCommand,
         args: tokenize(argsString),
         sandbox_mode: sandboxMode,
+        extra_writable_paths: extraWritable,
       }
       if (trimmedCwd) body.cwd = trimmedCwd
       const res = await fetch('/api/agent-portal/processes', {
@@ -320,6 +379,7 @@ function AgentPortal() {
         argsString,
         cwd: trimmedCwd,
         sandboxMode,
+        extraWritablePaths: extraWritable,
         lastUsed: Date.now(),
       }
       const key = makeHistoryKey(entry)
@@ -453,20 +513,88 @@ function AgentPortal() {
                   : SANDBOX_MODE_OPTIONS.find((o) => o.value === sandboxMode)?.description}
               </p>
             </div>
+
+            {sandboxMode !== 'off' && (
+              <div>
+                <label className="block text-xs uppercase text-gray-400 mb-1">
+                  Extra writable paths (one per line)
+                </label>
+                <textarea
+                  value={extraWritablePathsText}
+                  onChange={(e) => setExtraWritablePathsText(e.target.value)}
+                  placeholder={'~/.cline\n~/.cache/cline'}
+                  rows={3}
+                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Directories granted the same R/W access as the workspace. Use for tool
+                  cache/log locations (e.g. <code>~/.cline</code>, <code>~/.cache/&lt;tool&gt;</code>).
+                  Created if missing.
+                </p>
+              </div>
+            )}
             {launchError && (
               <div className="text-xs text-red-300 bg-red-900/40 border border-red-700 rounded p-2">
                 {launchError}
               </div>
             )}
-            <button
-              type="submit"
-              disabled={launching || !command.trim()}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium"
-            >
-              <Play className="w-4 h-4" />
-              {launching ? 'Launching...' : 'Launch'}
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={launching || !command.trim()}
+                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium"
+              >
+                <Play className="w-4 h-4" />
+                {launching ? 'Launching...' : 'Launch'}
+              </button>
+              <button
+                type="button"
+                onClick={saveCurrentAsConfig}
+                disabled={!command.trim()}
+                className="flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-sm"
+                title="Save the current form as a named launch config"
+              >
+                <Save className="w-4 h-4" />
+                <span className="hidden sm:inline">Save</span>
+              </button>
+            </div>
           </form>
+
+          {launchConfigs.length > 0 && (
+            <div className="p-3 border-b border-gray-700">
+              <div className="flex items-center gap-2 text-xs uppercase text-gray-400 mb-2">
+                <Bookmark className="w-3.5 h-3.5" /> Saved configs
+              </div>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {launchConfigs.map((cfg) => (
+                  <div
+                    key={cfg.id}
+                    className="flex items-center gap-1 text-xs bg-gray-800 rounded px-2 py-1 border border-gray-700"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => applyEntry(cfg)}
+                      className="flex-1 min-w-0 text-left truncate hover:text-blue-300"
+                      title={`${cfg.command} ${cfg.argsString || ''}${normalizeSandboxMode(cfg) !== 'off' ? ` [${normalizeSandboxMode(cfg)}]` : ''}`}
+                    >
+                      <span className="font-medium text-gray-100">{cfg.name}</span>
+                      <span className="block text-[10px] text-gray-500 font-mono truncate">
+                        {cfg.command} {cfg.argsString}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteConfig(cfg.id)}
+                      className="p-0.5 text-gray-500 hover:text-red-400 flex-shrink-0"
+                      title="Delete config"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {launchHistory.length > 0 && (
             <div className="p-3 border-b border-gray-700">
@@ -481,7 +609,7 @@ function AgentPortal() {
                   >
                     <button
                       type="button"
-                      onClick={() => applyHistoryEntry(entry)}
+                      onClick={() => applyEntry(entry)}
                       className="flex-1 min-w-0 text-left font-mono truncate text-gray-200 hover:text-blue-300"
                       title="Use this launch"
                     >

@@ -44,6 +44,10 @@ class LaunchRequest(BaseModel):
     )
     # Back-compat alias: older clients may still send restrict_to_cwd=true.
     restrict_to_cwd: bool = Field(default=False, description="Deprecated; use sandbox_mode='strict'.")
+    extra_writable_paths: List[str] = Field(
+        default_factory=list,
+        description="Additional directories granted write access alongside cwd in sandboxed modes.",
+    )
 
 
 def _require_enabled():
@@ -87,6 +91,7 @@ async def launch_process(
             cwd=body.cwd,
             user_email=current_user,
             sandbox_mode=sandbox_mode,
+            extra_writable_paths=body.extra_writable_paths,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=f"Command not found: {e}")

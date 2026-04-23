@@ -33,6 +33,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   working. The UI exposes the choice as a dropdown; the request body now
   carries `sandbox_mode` (`off` | `strict` | `workspace-write`) with backward
   compatibility for the earlier `restrict_to_cwd` flag.
+- Extra writable paths: a new textarea lets the user whitelist additional
+  directories for write access alongside cwd (e.g. `~/.cline`,
+  `~/.cache/<tool>`). Backend field `extra_writable_paths` is passed to the
+  Landlock wrapper via the `ATLAS_SANDBOX_EXTRA_WRITE_PATHS` env var; each
+  directory gets the same access set as the workspace and is created on
+  demand.
+- Named launch configs: the user can save the current form (command, args,
+  cwd, sandbox mode, extra writable paths) as a named preset. Presets are
+  stored in `localStorage` under `atlas.agentPortal.launchConfigs.v1` and
+  shown in a "Saved configs" panel separate from the auto-history; each
+  config can be reapplied to the form with one click or deleted.
 
 ### PR #557 - 2026-04-22
 - MCP task-augmented execution fixes: discovery-time seeding of task-forbidden
