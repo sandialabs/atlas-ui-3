@@ -76,6 +76,9 @@ _NUMERIC_ATTRS = (
     "attr_selected_tools_count",
     "attr_selected_prompts_count",
     "attr_selected_data_sources_count",
+    "attr_file_size",
+    "attr_total_bytes",
+    "attr_limit",
 )
 
 
@@ -251,6 +254,50 @@ def retries_per_turn(df: pd.DataFrame) -> pd.DataFrame:
         total_retries=("attr_retry_count", "sum"),
     )
     return grouped.reset_index().rename(columns={"attr_turn_id": "turn_id"})
+
+
+def upload_volume_by_user(df: pd.DataFrame) -> pd.DataFrame:
+    """Bytes uploaded + upload count per user per day.
+
+    Groups by ``attr_user_hash`` (pseudonymized) × date so operators can
+    answer "which user uploaded how much, and when?" without needing the raw
+    email. Only counts successful ``file.upload`` spans.
+    """
+    up = df[df["name"] == "file.upload"].copy()
+    if up.empty or "start_time" not in up.columns or "attr_user_hash" not in up.columns:
+        return pd.DataFrame()
+    if "attr_success" in up.columns:
+        up = up[up["attr_success"].astype("boolean").fillna(False)]
+    if up.empty:
+        return pd.DataFrame()
+    up["date"] = up["start_time"].dt.tz_convert(None).dt.floor("D")
+    agg_spec: Dict[str, Any] = {"uploads": ("span_id", "count")}
+    if "attr_file_size" in up.columns:
+        agg_spec["bytes"] = ("attr_file_size", "sum")
+    grouped = up.groupby(["attr_user_hash", "date"]).agg(**agg_spec)
+    return grouped.reset_index().rename(columns={"attr_user_hash": "user_hash"})
+
+
+def storage_success_rate_by_backend(df: pd.DataFrame) -> pd.DataFrame:
+    """Success rate + call count per (span type × backend).
+
+    Compares ``s3`` vs. ``mock`` behavior across all four storage span types
+    — useful for verifying parity between dev/test and prod and for spotting
+    backend-specific failure modes.
+    """
+    storage_names = ("file.upload", "file.download", "storage.list", "storage.delete")
+    sub = df[df["name"].isin(storage_names)].copy()
+    if sub.empty or "attr_storage_backend" not in sub.columns:
+        return pd.DataFrame()
+    agg_spec: Dict[str, Any] = {"calls": ("span_id", "count")}
+    if "attr_success" in sub.columns:
+        agg_spec["success_rate"] = ("attr_success", "mean")
+    if "duration_ms" in sub.columns:
+        agg_spec["p95_ms"] = ("duration_ms", lambda s: s.quantile(0.95))
+    grouped = sub.groupby(["name", "attr_storage_backend"]).agg(**agg_spec)
+    return grouped.reset_index().rename(
+        columns={"name": "span", "attr_storage_backend": "backend"}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +532,8 @@ def main(path: Path, output_dir: Path) -> None:
     _print("LLM latency by model", llm_latency_by_model(df))
     _print("RAG retrieval ratio", rag_retrieval_ratio(df))
     _print("Retries per turn", retries_per_turn(df))
+    _print("Upload volume by user per day", upload_volume_by_user(df))
+    _print("Storage success rate by backend", storage_success_rate_by_backend(df))
 
     daily = daily_counts(df)
     dow = day_of_week_counts(df)
