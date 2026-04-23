@@ -103,7 +103,9 @@ function OverviewView({ range }) {
       {loading && <div className="text-gray-400 text-sm mb-3">Loading…</div>}
       {data && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Stat label="Chat turns" value={fmtNumber(data.turns)} />
+          <Stat label="Chat sessions" value={fmtNumber(data.sessions)} />
+          <Stat label="Chat turns" value={fmtNumber(data.turns)}
+            hint={data.sessions ? `${(data.turns / data.sessions).toFixed(1)} turns/session` : undefined} />
           <Stat label="Tool calls" value={fmtNumber(data.tool_calls)}
             hint={`success rate ${fmtPct(data.tool_success_rate)}`} />
           <Stat label="LLM calls" value={fmtNumber(data.llm_calls)}

@@ -354,6 +354,7 @@ async def telemetry_overview(
     )
 
     turns = 0
+    session_ids: set[str] = set()
     llm_calls = 0
     llm_latencies: List[float] = []
     tool_calls = 0
@@ -366,6 +367,9 @@ async def telemetry_overview(
         attrs = _attrs(span)
         if name == SPAN_CHAT_TURN:
             turns += 1
+            sid = attrs.get("session_id")
+            if isinstance(sid, str) and sid:
+                session_ids.add(sid)
         elif name == SPAN_LLM_CALL:
             llm_calls += 1
             latency = attrs.get("latency_ms")
@@ -386,6 +390,7 @@ async def telemetry_overview(
         "since_ns": since_ns,
         "until_ns": until_ns,
         "turns": turns,
+        "sessions": len(session_ids),
         "tool_calls": tool_calls,
         "tool_success_rate": (tool_success / tool_calls) if tool_calls else None,
         "llm_calls": llm_calls,
