@@ -12,9 +12,12 @@ import fcntl
 import logging
 import os
 import pty
+import re
 import shlex
 import signal
+import struct
 import sys
+import termios
 import time
 import uuid
 from collections import deque
@@ -23,6 +26,26 @@ from enum import Enum
 from typing import AsyncIterator, Deque, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Strip ANSI CSI, OSC, and other escape sequences. TUIs emit cursor
+# moves, screen clears, and SGR color codes that the plain-text stream
+# view cannot render, so pass cleaned text upstream.
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"   # CSI: ESC [ ... final
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC: ESC ] ... BEL | ST
+    r"|\x1b[PX^_][^\x1b]*\x1b\\"  # DCS/SOS/PM/APC
+    r"|\x1b[@-Z\\-_]"              # Single-char escapes (ESC c, ESC =, etc.)
+)
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text for plain-text display."""
+    # Drop CSI/OSC/etc, then drop lone C0 control chars that have no
+    # visual meaning in a plain view (BS, VT, FF, etc.); keep tabs.
+    cleaned = _ANSI_RE.sub("", text)
+    cleaned = cleaned.replace("\x08", "").replace("\x0b", "").replace("\x0c", "")
+    cleaned = cleaned.replace("\x07", "")  # BEL
+    return cleaned
 
 
 class ProcessStatus(str, Enum):
@@ -218,6 +241,17 @@ class ProcessManager:
             master_fd, slave_fd = pty.openpty()
             flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
             fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            # Set a wide/tall window so TUIs don't wrap at the libc
+            # default 24x80. 160x40 fits cline, progress bars, and
+            # log viewers without being absurd.
+            try:
+                fcntl.ioctl(
+                    slave_fd,
+                    termios.TIOCSWINSZ,
+                    struct.pack("HHHH", 40, 160, 0, 0),
+                )
+            except OSError as e:
+                logger.debug("TIOCSWINSZ failed: %s", e)
             if "TERM" not in proc_env:
                 proc_env["TERM"] = "xterm-256color"
 
@@ -425,8 +459,12 @@ class ProcessManager:
                 idx, sep_len = min(candidates, key=lambda t: t[0])
                 line = bytes(buf[:idx])
                 del buf[: idx + sep_len]
-                text = line.decode(errors="replace")
-                self._record_chunk(managed, "stdout", text)
+                text = _strip_ansi(line.decode(errors="replace"))
+                # After stripping, many lines collapse to empty
+                # (pure cursor-move/color frames). Drop those to
+                # keep the view readable.
+                if text.strip():
+                    self._record_chunk(managed, "stdout", text)
 
         try:
             loop.add_reader(master_fd, _on_ready)
@@ -442,7 +480,7 @@ class ProcessManager:
             await done.wait()
             # Flush any trailing partial line
             if buf:
-                text = bytes(buf).decode(errors="replace").rstrip()
+                text = _strip_ansi(bytes(buf).decode(errors="replace")).rstrip()
                 if text:
                     self._record_chunk(managed, "stdout", text)
         finally:
