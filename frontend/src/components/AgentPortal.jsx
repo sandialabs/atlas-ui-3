@@ -25,14 +25,38 @@ function saveLaunchHistory(entries) {
   }
 }
 
+function normalizeSandboxMode(entry) {
+  if (entry.sandboxMode) return entry.sandboxMode
+  if (entry.restrictToCwd) return 'strict'
+  return 'off'
+}
+
 function makeHistoryKey(entry) {
   return JSON.stringify([
     entry.command,
     entry.argsString || '',
     entry.cwd || '',
-    !!entry.restrictToCwd,
+    normalizeSandboxMode(entry),
   ])
 }
+
+const SANDBOX_MODE_OPTIONS = [
+  {
+    value: 'off',
+    label: 'No sandbox',
+    description: 'Child runs with the server process\' normal permissions.',
+  },
+  {
+    value: 'workspace-write',
+    label: 'Writes confined to workspace (reads allowed everywhere)',
+    description: 'Landlock: the child can read/exec any file on the host, but can only write under the working directory and /dev. Best for tools like cline that need to read configs or invoke interpreters outside cwd.',
+  },
+  {
+    value: 'strict',
+    label: 'Strict workspace sandbox (reads restricted)',
+    description: 'Landlock: reads restricted to /usr /lib /bin /etc /opt /proc /sys /dev and the target binary\'s directory; writes only under the working directory and /dev.',
+  },
+]
 
 // Split a command-line-like string into tokens.
 // Respects simple double and single quotes. No shell substitution.
@@ -156,7 +180,7 @@ function AgentPortal() {
   const [command, setCommand] = useState('')
   const [argsString, setArgsString] = useState('')
   const [cwd, setCwd] = useState('')
-  const [restrictToCwd, setRestrictToCwd] = useState(false)
+  const [sandboxMode, setSandboxMode] = useState('off')
   const [launchError, setLaunchError] = useState(null)
   const [launching, setLaunching] = useState(false)
   const [listError, setListError] = useState(null)
@@ -182,7 +206,7 @@ function AgentPortal() {
       setCommand(last.command || '')
       setArgsString(last.argsString || '')
       setCwd(last.cwd || '')
-      setRestrictToCwd(!!last.restrictToCwd)
+      setSandboxMode(normalizeSandboxMode(last))
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -191,7 +215,7 @@ function AgentPortal() {
     setCommand(entry.command || '')
     setArgsString(entry.argsString || '')
     setCwd(entry.cwd || '')
-    setRestrictToCwd(!!entry.restrictToCwd)
+    setSandboxMode(normalizeSandboxMode(entry))
   }
 
   const removeHistoryEntry = (entry) => {
@@ -273,7 +297,7 @@ function AgentPortal() {
       const body = {
         command: trimmedCommand,
         args: tokenize(argsString),
-        restrict_to_cwd: !!restrictToCwd,
+        sandbox_mode: sandboxMode,
       }
       if (trimmedCwd) body.cwd = trimmedCwd
       const res = await fetch('/api/agent-portal/processes', {
@@ -295,7 +319,7 @@ function AgentPortal() {
         command: trimmedCommand,
         argsString,
         cwd: trimmedCwd,
-        restrictToCwd: !!restrictToCwd,
+        sandboxMode,
         lastUsed: Date.now(),
       }
       const key = makeHistoryKey(entry)
@@ -399,29 +423,36 @@ function AgentPortal() {
                 className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <label className={`flex items-start gap-2 text-xs ${
-              !cwd.trim() || landlockSupported === false ? 'opacity-60' : ''
-            }`}>
-              <input
-                type="checkbox"
-                checked={restrictToCwd}
-                disabled={!cwd.trim() || landlockSupported === false}
-                onChange={(e) => setRestrictToCwd(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="inline-flex items-center gap-1 font-medium text-gray-200">
-                  <Shield className="w-3.5 h-3.5" /> Restrict to working directory (Landlock)
+            <div className={(!cwd.trim() && sandboxMode !== 'off') || landlockSupported === false ? 'opacity-60' : ''}>
+              <label className="block text-xs uppercase text-gray-400 mb-1">
+                <span className="inline-flex items-center gap-1">
+                  <Shield className="w-3.5 h-3.5" /> Sandbox
                 </span>
-                <span className="block text-[11px] text-gray-500">
-                  {landlockSupported === false
-                    ? 'Kernel does not support Landlock on this host.'
-                    : !cwd.trim()
-                    ? 'Set a working directory to enable.'
-                    : 'Blocks filesystem writes outside cwd. Not a full sandbox (network/ipc/etc unrestricted).'}
-                </span>
-              </span>
-            </label>
+              </label>
+              <select
+                value={sandboxMode}
+                onChange={(e) => setSandboxMode(e.target.value)}
+                disabled={landlockSupported === false}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {SANDBOX_MODE_OPTIONS.map((o) => (
+                  <option
+                    key={o.value}
+                    value={o.value}
+                    disabled={o.value !== 'off' && (!cwd.trim() || landlockSupported === false)}
+                  >
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {landlockSupported === false
+                  ? 'Kernel does not support Landlock on this host; sandbox modes are unavailable.'
+                  : !cwd.trim() && sandboxMode !== 'off'
+                  ? 'Set a working directory to use a sandbox mode.'
+                  : SANDBOX_MODE_OPTIONS.find((o) => o.value === sandboxMode)?.description}
+              </p>
+            </div>
             {launchError && (
               <div className="text-xs text-red-300 bg-red-900/40 border border-red-700 rounded p-2">
                 {launchError}
@@ -455,7 +486,7 @@ function AgentPortal() {
                       title="Use this launch"
                     >
                       {entry.command} {entry.argsString}
-                      {entry.restrictToCwd && ' [sandboxed]'}
+                      {normalizeSandboxMode(entry) !== 'off' && ` [${normalizeSandboxMode(entry)}]`}
                     </button>
                     <button
                       type="button"

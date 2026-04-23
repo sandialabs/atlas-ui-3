@@ -33,10 +33,17 @@ class LaunchRequest(BaseModel):
     command: str = Field(..., min_length=1, description="Executable to run")
     args: List[str] = Field(default_factory=list)
     cwd: Optional[str] = Field(default=None, description="Working directory")
-    restrict_to_cwd: bool = Field(
-        default=False,
-        description="Sandbox the child to cwd via Linux Landlock (filesystem writes confined to cwd).",
+    sandbox_mode: str = Field(
+        default="off",
+        description=(
+            "Landlock sandbox mode. 'off' = no sandbox; 'strict' = reads "
+            "restricted to standard system roots + the target binary's "
+            "directory, writes only in cwd; 'workspace-write' = reads "
+            "allowed everywhere, writes only in cwd."
+        ),
     )
+    # Back-compat alias: older clients may still send restrict_to_cwd=true.
+    restrict_to_cwd: bool = Field(default=False, description="Deprecated; use sandbox_mode='strict'.")
 
 
 def _require_enabled():
@@ -67,13 +74,19 @@ async def launch_process(
 ):
     _require_enabled()
     manager = get_process_manager()
+    sandbox_mode = body.sandbox_mode
+    if sandbox_mode == "off" and body.restrict_to_cwd:
+        sandbox_mode = "strict"
+    if sandbox_mode not in ("off", "strict", "workspace-write"):
+        raise HTTPException(status_code=400, detail=f"invalid sandbox_mode: {sandbox_mode}")
+
     try:
         managed = await manager.launch(
             command=body.command,
             args=body.args,
             cwd=body.cwd,
             user_email=current_user,
-            restrict_to_cwd=body.restrict_to_cwd,
+            sandbox_mode=sandbox_mode,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=f"Command not found: {e}")

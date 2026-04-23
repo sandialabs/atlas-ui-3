@@ -119,20 +119,77 @@ async def test_empty_command_rejected():
 
 
 @pytest.mark.asyncio
-async def test_restrict_to_cwd_requires_cwd():
+async def test_sandbox_requires_cwd():
     manager = ProcessManager()
     with pytest.raises(ValueError):
         await manager.launch(
             command=sys.executable,
             args=["-c", "pass"],
-            restrict_to_cwd=True,
+            sandbox_mode="strict",
         )
+    with pytest.raises(ValueError):
+        await manager.launch(
+            command=sys.executable,
+            args=["-c", "pass"],
+            sandbox_mode="workspace-write",
+        )
+
+
+@pytest.mark.asyncio
+async def test_invalid_sandbox_mode_rejected():
+    manager = ProcessManager()
+    with pytest.raises(ValueError):
+        await manager.launch(
+            command=sys.executable,
+            args=["-c", "pass"],
+            sandbox_mode="bogus",
+        )
+
+
+@pytest.mark.asyncio
+async def test_workspace_write_allows_reads_outside_cwd(tmp_path):
+    """workspace-write mode lets the child read system files but not write outside cwd."""
+    import os
+
+    from atlas.modules.process_manager import landlock_is_supported
+
+    if not landlock_is_supported():
+        pytest.skip("Landlock not supported on this kernel")
+
+    manager = ProcessManager()
+    escape_path = "/tmp/atlas-workspace-write-escape-xyz.txt"
+    if os.path.exists(escape_path):
+        os.unlink(escape_path)
+
+    managed = await manager.launch(
+        command="bash",
+        args=[
+            "-c",
+            # Reading /etc/hostname should succeed in workspace-write
+            # mode (it would fail in strict mode outside /etc since /etc
+            # is explicitly allowed — but pick a path where strict also
+            # differs, like a file under $HOME).
+            f"cat /etc/hostname > /dev/null && echo READ_OK && "
+            f"(echo bad > {escape_path} 2>&1 || echo BLOCKED)",
+        ],
+        cwd=str(tmp_path),
+        sandbox_mode="workspace-write",
+    )
+    for _ in range(50):
+        if managed.status != ProcessStatus.RUNNING:
+            break
+        await asyncio.sleep(0.05)
+    stdout_texts = [c.text for c in managed.history if c.stream == "stdout"]
+    assert "READ_OK" in stdout_texts
+    assert "BLOCKED" in stdout_texts
+    assert not os.path.exists(escape_path)
 
 
 @pytest.mark.asyncio
 async def test_landlock_confines_writes_to_cwd(tmp_path):
     """Writes inside cwd succeed; writes outside it fail with EACCES."""
     import os
+
     from atlas.modules.process_manager import landlock_is_supported
 
     if not landlock_is_supported():
@@ -150,7 +207,7 @@ async def test_landlock_confines_writes_to_cwd(tmp_path):
             f"echo inside > inside.txt && (echo outside > {escape_path} 2>&1 || echo BLOCKED)",
         ],
         cwd=str(tmp_path),
-        restrict_to_cwd=True,
+        sandbox_mode="strict",
     )
     for _ in range(50):
         if managed.status != ProcessStatus.RUNNING:

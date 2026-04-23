@@ -50,6 +50,7 @@ class ManagedProcess:
     ended_at: Optional[float] = None
     pid: Optional[int] = None
     sandboxed: bool = False
+    sandbox_mode: str = "off"
     history: Deque[OutputChunk] = field(default_factory=lambda: deque(maxlen=2000))
     subscribers: List[asyncio.Queue] = field(default_factory=list)
 
@@ -66,6 +67,7 @@ class ManagedProcess:
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "sandboxed": self.sandboxed,
+            "sandbox_mode": self.sandbox_mode,
         }
 
 
@@ -102,13 +104,20 @@ class ProcessManager:
         cwd: Optional[str] = None,
         user_email: str = "",
         env: Optional[Dict[str, str]] = None,
-        restrict_to_cwd: bool = False,
+        sandbox_mode: str = "off",
     ) -> ManagedProcess:
         """Launch a subprocess and register it.
 
-        When ``restrict_to_cwd`` is true, the child is sandboxed with
-        Landlock so that writes are confined to ``cwd``. This requires
-        ``cwd`` to be set and the kernel to support Landlock.
+        ``sandbox_mode`` controls Landlock filesystem sandboxing:
+
+        - ``off``: no sandbox.
+        - ``strict``: reads restricted to standard system roots + the
+          target binary's directory; writes confined to ``cwd``.
+        - ``workspace-write``: reads allowed anywhere, writes confined
+          to ``cwd``.
+
+        The sandboxed modes require ``cwd`` to be set and the kernel
+        to support Landlock.
         """
         args = list(args or [])
         if not command or not command.strip():
@@ -130,11 +139,15 @@ class ProcessManager:
         # applies Landlock after the first exec and before the second
         # execvp into the user's command. This avoids ``preexec_fn``,
         # which interacts badly with uvloop-backed subprocess creation.
+        if sandbox_mode not in ("off", "strict", "workspace-write"):
+            raise ValueError(f"unknown sandbox_mode: {sandbox_mode!r}")
+        sandboxed = sandbox_mode != "off"
+
         spawn_cmd = command
         spawn_args: List[str] = args
-        if restrict_to_cwd:
+        if sandboxed:
             if not resolved_cwd:
-                raise ValueError("restrict_to_cwd requires a cwd to be set")
+                raise ValueError("sandbox mode requires a cwd to be set")
             from atlas.modules.process_manager.landlock import (
                 LandlockUnavailableError,
                 is_supported,
@@ -151,6 +164,7 @@ class ProcessManager:
             spawn_cmd = sys.executable
             spawn_args = [
                 wrapper_path,
+                sandbox_mode,
                 workdir_abs,
                 command,
                 *args,
@@ -168,7 +182,8 @@ class ProcessManager:
             cwd=resolved_cwd,
             user_email=user_email,
             started_at=time.time(),
-            sandboxed=bool(restrict_to_cwd),
+            sandboxed=sandboxed,
+            sandbox_mode=sandbox_mode,
         )
 
         try:
@@ -198,7 +213,7 @@ class ProcessManager:
 
         launch_msg = f"Started pid={asyncio_proc.pid}: {command} {shlex.join(args)}".rstrip()
         if managed.sandboxed:
-            launch_msg += "  [sandboxed to cwd via Landlock]"
+            launch_msg += f"  [Landlock sandbox: {managed.sandbox_mode}]"
         self._record_chunk(managed, "system", launch_msg)
 
         asyncio.create_task(self._pump_stream(managed, asyncio_proc.stdout, "stdout"))

@@ -21,10 +21,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   when the kernel lacks support. Writes outside cwd return `EACCES`; reads and
   `exec` on system roots (`/usr`, `/lib`, `/etc`, ...) are still permitted so
   normal binaries run.
-- Frontend persists recent launches (command, args, cwd, sandbox flag) to
+- Frontend persists recent launches (command, args, cwd, sandbox mode) to
   `localStorage` (`atlas.agentPortal.launchHistory.v1`, up to 15 entries) and
   prepopulates the form from the most recent entry on load. A "Recent launches"
   list lets the user click to reapply or remove past entries.
+- Third sandbox mode `workspace-write`: reads are allowed across the entire
+  filesystem (so tools like `cline` can find `node` / configs / caches under
+  `~/.local`, `~/.nvm`, `/nix`, etc.) but writes are still confined to cwd.
+  The `strict` mode remains for tighter isolation. Both modes allow read +
+  write on `/dev` so `/dev/null`, `/dev/tty`, and shell redirections keep
+  working. The UI exposes the choice as a dropdown; the request body now
+  carries `sandbox_mode` (`off` | `strict` | `workspace-write`) with backward
+  compatibility for the earlier `restrict_to_cwd` flag.
 
 ### PR #557 - 2026-04-22
 - MCP task-augmented execution fixes: discovery-time seeding of task-forbidden

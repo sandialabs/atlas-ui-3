@@ -2,7 +2,18 @@
 
 Invoked as::
 
-    python /abs/path/to/_sandbox_launch.py WORKDIR CMD [ARGS...]
+    python /abs/path/to/_sandbox_launch.py MODE WORKDIR CMD [ARGS...]
+
+Where MODE is one of:
+
+- ``strict``: only read+exec under the standard system roots
+  (``/usr``, ``/lib``, ``/bin``, ``/etc``, ``/opt``, ``/proc``, ``/sys``,
+  ``/dev``, plus the target binary's directory) are allowed; reads and
+  writes outside those are blocked. Writes only under WORKDIR.
+- ``workspace-write``: read+exec allowed anywhere on the filesystem,
+  but writes only under WORKDIR. Useful for tools that need to read
+  configs or invoke interpreters under ``~/.local/bin``, ``/nix``,
+  ``~/.nvm``, etc.
 
 This file is intentionally self-contained (only stdlib imports) so it
 can be run by absolute path without the ``atlas`` package being on
@@ -67,8 +78,14 @@ _WORKDIR_ACCESS = (
 
 _EXTRA_READ_ROOTS = (
     "/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc",
-    "/opt", "/proc", "/sys", "/dev",
+    "/opt", "/proc", "/sys",
 )
+
+# /dev contains character devices tools need to WRITE to in normal
+# operation (/dev/null, /dev/tty, /dev/stderr). Grant read + write_file
+# there in both sandbox modes so typical shell redirection keeps
+# working.
+_DEV_ACCESS = _READ_ACCESS | _ACCESS_WRITE_FILE
 
 
 class _RulesetAttr(ctypes.Structure):
@@ -141,9 +158,12 @@ def _add_rule(libc, ruleset_fd: int, path: str, allowed: int, handled: int) -> N
         os.close(dir_fd)
 
 
-def _apply_landlock(workdir: str, extra_read_dirs=()) -> None:
+def _apply_landlock(workdir: str, mode: str, extra_read_dirs=()) -> None:
     if not workdir or not os.path.isdir(workdir):
         raise ValueError(f"workdir must be an existing directory: {workdir!r}")
+    if mode not in ("strict", "workspace-write"):
+        raise ValueError(f"unknown sandbox mode: {mode!r}")
+
     libc = _libc()
     libc.syscall.restype = ctypes.c_long
     handled = _handled_mask(libc)
@@ -164,12 +184,25 @@ def _apply_landlock(workdir: str, extra_read_dirs=()) -> None:
             raise OSError(err, "Landlock not supported by this kernel")
         raise OSError(err, os.strerror(err), "landlock_create_ruleset")
     try:
+        # Always: full read/write under the workspace.
         _add_rule(libc, ruleset_fd, workdir, _WORKDIR_ACCESS, handled)
-        for root in _EXTRA_READ_ROOTS:
-            _add_rule(libc, ruleset_fd, root, _READ_ACCESS, handled)
-        for extra in extra_read_dirs:
-            if extra:
-                _add_rule(libc, ruleset_fd, extra, _READ_ACCESS, handled)
+        # Always: read + write_file on /dev so /dev/null, /dev/tty, and
+        # /dev/stderr work for typical shell redirections.
+        _add_rule(libc, ruleset_fd, "/dev", _DEV_ACCESS, handled)
+
+        if mode == "workspace-write":
+            # Allow read+exec on the entire filesystem. Writes are still
+            # blocked everywhere except `workdir` and /dev (the ruleset's
+            # handled mask covers all FS bits; only bits granted by a
+            # rule are permitted).
+            _add_rule(libc, ruleset_fd, "/", _READ_ACCESS, handled)
+        else:
+            for root in _EXTRA_READ_ROOTS:
+                _add_rule(libc, ruleset_fd, root, _READ_ACCESS, handled)
+            for extra in extra_read_dirs:
+                if extra:
+                    _add_rule(libc, ruleset_fd, extra, _READ_ACCESS, handled)
+
         rc = libc.syscall(
             _SYS_LANDLOCK_RESTRICT_SELF,
             ctypes.c_int(ruleset_fd),
@@ -183,27 +216,31 @@ def _apply_landlock(workdir: str, extra_read_dirs=()) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
-        sys.stderr.write("usage: _sandbox_launch WORKDIR CMD [ARGS...]\n")
+    if len(sys.argv) < 4:
+        sys.stderr.write(
+            "usage: _sandbox_launch MODE WORKDIR CMD [ARGS...]\n"
+        )
         return 2
 
-    workdir = sys.argv[1]
-    argv = sys.argv[2:]
+    mode = sys.argv[1]
+    workdir = sys.argv[2]
+    argv = sys.argv[3:]
 
-    # Resolve the target binary BEFORE Landlock is applied so we can
-    # whitelist its containing directory for read+exec. Without this,
-    # binaries installed outside /usr /bin /sbin /opt (e.g. under
-    # ~/.local/bin or ~/.nvm) would fail to exec after restriction.
+    # For strict mode, resolve the target binary BEFORE Landlock is
+    # applied so we can whitelist its containing directory for
+    # read+exec. In workspace-write mode the whole filesystem is
+    # already readable, so this is unnecessary.
     extra_read_dirs = []
-    target = argv[0]
-    resolved = shutil.which(target)
-    if resolved:
-        extra_read_dirs.append(os.path.dirname(os.path.realpath(resolved)))
-    elif os.path.sep in target:
-        extra_read_dirs.append(os.path.dirname(os.path.realpath(target)))
+    if mode == "strict":
+        target = argv[0]
+        resolved = shutil.which(target)
+        if resolved:
+            extra_read_dirs.append(os.path.dirname(os.path.realpath(resolved)))
+        elif os.path.sep in target:
+            extra_read_dirs.append(os.path.dirname(os.path.realpath(target)))
 
     try:
-        _apply_landlock(workdir, extra_read_dirs=extra_read_dirs)
+        _apply_landlock(workdir, mode, extra_read_dirs=extra_read_dirs)
     except Exception as e:
         sys.stderr.write(f"sandbox setup failed: {e}\n")
         return 1
