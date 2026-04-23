@@ -145,10 +145,12 @@ class ProcessManager:
                 )
 
             workdir_abs = os.path.abspath(resolved_cwd)
+            wrapper_path = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "_sandbox_launch.py")
+            )
             spawn_cmd = sys.executable
             spawn_args = [
-                "-m",
-                "atlas.modules.process_manager._sandbox_launch",
+                wrapper_path,
                 workdir_abs,
                 command,
                 *args,
@@ -157,15 +159,6 @@ class ProcessManager:
         proc_env = os.environ.copy()
         if env:
             proc_env.update(env)
-        # Make sure the wrapper can import the atlas package.
-        if restrict_to_cwd:
-            project_root = os.path.abspath(
-                os.path.join(os.path.dirname(__file__), "..", "..", "..")
-            )
-            existing = proc_env.get("PYTHONPATH", "")
-            proc_env["PYTHONPATH"] = (
-                project_root if not existing else f"{project_root}{os.pathsep}{existing}"
-            )
 
         process_id = str(uuid.uuid4())
         managed = ManagedProcess(
