@@ -584,6 +584,12 @@ class AppSettings(BaseSettings):
         description="Enable AI-generated follow-up question suggestions after each chat response",
         validation_alias=AliasChoices("FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED"),
     )
+    # Agent Portal feature gate (launch and stream host processes from the UI)
+    feature_agent_portal_enabled: bool = Field(
+        False,
+        description="Enable the Agent Portal UI for launching and streaming host processes",
+        validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_ENABLED"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""

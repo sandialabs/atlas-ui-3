@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Agent Portal (initial) - 2026-04-23
+- New `/agent-portal` page (behind `FEATURE_AGENT_PORTAL_ENABLED`, off by default)
+  lets a user launch a host subprocess (command + args + optional cwd), view the
+  list of their running / finished processes, stream stdout/stderr live over a
+  dedicated WebSocket, and cancel a running process (SIGTERM, SIGKILL after 3s).
+  Backend: `atlas/modules/process_manager/` + `atlas/routes/agent_portal_routes.py`.
+  Dev preview only — no allow-list, quotas, or audit trail yet; governance layer
+  will be added in follow-up work.
+- Optional Landlock sandbox: a "Restrict to working directory" checkbox confines
+  the child's filesystem writes to cwd via Linux Landlock (set up from
+  `preexec_fn` between fork and exec, with `PR_SET_NO_NEW_PRIVS`). Capability
+  probed via `GET /api/agent-portal/capabilities` so the checkbox is disabled
+  when the kernel lacks support. Writes outside cwd return `EACCES`; reads and
+  `exec` on system roots (`/usr`, `/lib`, `/etc`, ...) are still permitted so
+  normal binaries run.
+- Frontend persists recent launches (command, args, cwd, sandbox mode) to
+  `localStorage` (`atlas.agentPortal.launchHistory.v1`, up to 15 entries) and
+  prepopulates the form from the most recent entry on load. A "Recent launches"
+  list lets the user click to reapply or remove past entries.
+- Third sandbox mode `workspace-write`: reads are allowed across the entire
+  filesystem (so tools like `cline` can find `node` / configs / caches under
+  `~/.local`, `~/.nvm`, `/nix`, etc.) but writes are still confined to cwd.
+  The `strict` mode remains for tighter isolation. Both modes allow read +
+  write on `/dev` so `/dev/null`, `/dev/tty`, and shell redirections keep
+  working. The UI exposes the choice as a dropdown; the request body now
+  carries `sandbox_mode` (`off` | `strict` | `workspace-write`) with backward
+  compatibility for the earlier `restrict_to_cwd` flag.
+- Extra writable paths: a new textarea lets the user whitelist additional
+  directories for write access alongside cwd (e.g. `~/.cline`,
+  `~/.cache/<tool>`). Backend field `extra_writable_paths` is passed to the
+  Landlock wrapper via the `ATLAS_SANDBOX_EXTRA_WRITE_PATHS` env var; each
+  directory gets the same access set as the workspace and is created on
+  demand.
+- Named launch configs: the user can save the current form (command, args,
+  cwd, sandbox mode, extra writable paths) as a named preset. Presets are
+  stored in `localStorage` under `atlas.agentPortal.launchConfigs.v1` and
+  shown in a "Saved configs" panel separate from the auto-history; each
+  config can be reapplied to the form with one click or deleted.
+
 ### PR #557 - 2026-04-22
 - MCP task-augmented execution fixes: discovery-time seeding of task-forbidden
   cache from per-tool execution.taskSupport metadata (SEP-1686), and runtime
