@@ -15,7 +15,6 @@ from atlas.modules.agent_portal.presets_store import (
     PresetStore,
 )
 
-
 # ---------------------------------------------------------------------------
 # Store-level tests — pure JSON, no HTTP
 # ---------------------------------------------------------------------------
@@ -143,9 +142,9 @@ def test_corrupt_file_recovers_as_empty(tmp_path: Path):
 
 @pytest.fixture
 def api_client(tmp_path: Path, monkeypatch):
+    from atlas.core import log_sanitizer as log_san
     from atlas.modules.agent_portal import presets_store as ps_mod
     from atlas.routes import agent_portal_routes as ap_routes
-    from atlas.core import log_sanitizer as log_san
 
     # Point the store singleton at a temp file
     ps_mod._singleton = PresetStore(path=tmp_path / "presets.json")

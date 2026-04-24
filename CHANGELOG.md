@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Agent Portal UX refresh, CLI, and E2E tests - 2026-04-24
+- Launch form moves from the cramped left panel into a roomy modal
+  popup opened by a "New launch" button, giving each field room to
+  breathe and letting the form scroll instead of clipping. Left
+  panel now shows only active sessions and the presets library,
+  plus a Recent launches section that is collapsed by default.
+- Replace every `window.prompt` / `window.alert` / `window.confirm`
+  in the portal with a toast system and a custom prompt/confirm
+  dialog component. Preset save/update/delete and launch all emit
+  a toast instead of silent state updates or inline banners.
+- New `atlas-portal` CLI (`atlas.portal_cli`) lets developers
+  launch, list, get, cancel, inspect processes and manage presets
+  from the terminal — useful for debugging launch failures that are
+  awkward to reproduce through the UI, and for e2e automation.
+- Add eleven integration tests walking the full launch →
+  list → get → cancel flow through the real FastAPI router
+  plus the CLI parser, covering env isolation, bare-command
+  resolution, preset round-trip, and the feature-flag kill switch.
+
 ### Agent Portal bare-command resolution - 2026-04-24
 - Fix: after the env-isolation change pinned the child's `PATH` to
   `/usr/local/bin:/usr/bin:/bin`, bare command names like `claude` or
