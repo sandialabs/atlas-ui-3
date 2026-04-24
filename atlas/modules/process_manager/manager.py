@@ -15,8 +15,10 @@ import os
 import pty
 import re
 import shlex
+import shutil
 import signal
 import struct
+import subprocess
 import sys
 import termios
 import time
@@ -49,6 +51,53 @@ def _strip_ansi(text: str) -> str:
     return cleaned
 
 
+def probe_isolation_capabilities() -> Dict[str, bool]:
+    """Detect what process-isolation facilities are usable on this host.
+
+    Checked lazily but memoized on first call.
+    """
+    global _ISOLATION_CAPS
+    if _ISOLATION_CAPS is not None:
+        return _ISOLATION_CAPS
+
+    caps: Dict[str, bool] = {
+        "namespaces": False,
+        "cgroups": False,
+    }
+
+    # unprivileged user+pid namespaces via unshare(1)
+    if shutil.which("unshare"):
+        try:
+            rc = subprocess.run(
+                ["unshare", "--user", "--map-root-user", "--", "true"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+            caps["namespaces"] = rc.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            caps["namespaces"] = False
+
+    # cgroup resource limits via systemd-run --user --scope
+    if shutil.which("systemd-run"):
+        try:
+            rc = subprocess.run(
+                ["systemd-run", "--user", "--quiet", "--scope", "--collect", "--", "true"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+            caps["cgroups"] = rc.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            caps["cgroups"] = False
+
+    _ISOLATION_CAPS = caps
+    return caps
+
+
+_ISOLATION_CAPS: Optional[Dict[str, bool]] = None
+
+
 class ProcessStatus(str, Enum):
     RUNNING = "running"
     EXITED = "exited"
@@ -79,6 +128,11 @@ class ManagedProcess:
     sandbox_mode: str = "off"
     extra_writable_paths: List[str] = field(default_factory=list)
     use_pty: bool = False
+    namespaces: bool = False
+    isolate_network: bool = False
+    memory_limit: Optional[str] = None
+    cpu_limit: Optional[str] = None
+    pids_limit: Optional[int] = None
     history: Deque[OutputChunk] = field(default_factory=lambda: deque(maxlen=2000))
     subscribers: List[asyncio.Queue] = field(default_factory=list)
 
@@ -98,6 +152,11 @@ class ManagedProcess:
             "sandbox_mode": self.sandbox_mode,
             "extra_writable_paths": list(self.extra_writable_paths),
             "use_pty": self.use_pty,
+            "namespaces": self.namespaces,
+            "isolate_network": self.isolate_network,
+            "memory_limit": self.memory_limit,
+            "cpu_limit": self.cpu_limit,
+            "pids_limit": self.pids_limit,
         }
 
 
@@ -164,6 +223,11 @@ class ProcessManager:
         sandbox_mode: str = "off",
         extra_writable_paths: Optional[List[str]] = None,
         use_pty: bool = False,
+        namespaces: bool = False,
+        isolate_network: bool = False,
+        memory_limit: Optional[str] = None,
+        cpu_limit: Optional[str] = None,
+        pids_limit: Optional[int] = None,
     ) -> ManagedProcess:
         """Launch a subprocess and register it.
 
@@ -229,6 +293,37 @@ class ProcessManager:
                 *args,
             ]
 
+        # Stack isolation layers from innermost to outermost:
+        #   cgroup-wrap -> namespace-wrap -> landlock-wrap -> command
+        # which at exec time unrolls left-to-right.
+        if namespaces:
+            if not shutil.which("unshare"):
+                raise RuntimeError("unshare(1) is not installed on this host")
+            unshare_args = [
+                "--user", "--map-root-user",
+                "--pid", "--fork", "--mount-proc",
+                "--uts", "--ipc",
+            ]
+            if isolate_network:
+                unshare_args.append("--net")
+            spawn_args = unshare_args + ["--", spawn_cmd, *spawn_args]
+            spawn_cmd = "unshare"
+
+        if memory_limit or cpu_limit or pids_limit:
+            if not shutil.which("systemd-run"):
+                raise RuntimeError(
+                    "systemd-run is not available; resource limits require systemd cgroups"
+                )
+            systemd_args = ["--user", "--scope", "--quiet", "--collect"]
+            if memory_limit:
+                systemd_args += ["--property", f"MemoryMax={memory_limit}"]
+            if cpu_limit:
+                systemd_args += ["--property", f"CPUQuota={cpu_limit}"]
+            if pids_limit:
+                systemd_args += ["--property", f"TasksMax={int(pids_limit)}"]
+            spawn_args = systemd_args + ["--", spawn_cmd, *spawn_args]
+            spawn_cmd = "systemd-run"
+
         proc_env = os.environ.copy()
         if env:
             proc_env.update(env)
@@ -256,6 +351,11 @@ class ProcessManager:
             sandbox_mode=sandbox_mode,
             extra_writable_paths=normalized_extra,
             use_pty=bool(use_pty),
+            namespaces=bool(namespaces),
+            isolate_network=bool(isolate_network),
+            memory_limit=memory_limit,
+            cpu_limit=cpu_limit,
+            pids_limit=pids_limit,
         )
 
         master_fd: Optional[int] = None
@@ -334,6 +434,20 @@ class ProcessManager:
                 launch_msg += f" +write: {', '.join(managed.extra_writable_paths)}"
         if managed.use_pty:
             launch_msg += "  [pty]"
+        if managed.namespaces:
+            launch_msg += "  [namespaces"
+            if managed.isolate_network:
+                launch_msg += "+net"
+            launch_msg += "]"
+        limits: List[str] = []
+        if managed.memory_limit:
+            limits.append(f"mem={managed.memory_limit}")
+        if managed.cpu_limit:
+            limits.append(f"cpu={managed.cpu_limit}")
+        if managed.pids_limit:
+            limits.append(f"pids={managed.pids_limit}")
+        if limits:
+            launch_msg += f"  [cgroup: {', '.join(limits)}]"
         self._record_chunk(managed, "system", launch_msg)
 
         if use_pty and master_fd is not None:

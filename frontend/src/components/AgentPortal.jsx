@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -296,6 +296,13 @@ function AgentPortal() {
   const [sandboxMode, setSandboxMode] = useState('off')
   const [extraWritablePathsText, setExtraWritablePathsText] = useState('')
   const [usePty, setUsePty] = useState(false)
+  const [namespaces, setNamespaces] = useState(false)
+  const [isolateNetwork, setIsolateNetwork] = useState(false)
+  const [memoryLimit, setMemoryLimit] = useState('')
+  const [cpuLimit, setCpuLimit] = useState('')
+  const [pidsLimit, setPidsLimit] = useState('')
+  const [namespacesSupported, setNamespacesSupported] = useState(null)
+  const [cgroupsSupported, setCgroupsSupported] = useState(null)
   const [launchConfigs, setLaunchConfigs] = useState(() => loadLaunchConfigs())
   const [launchError, setLaunchError] = useState(null)
   const [launching, setLaunching] = useState(false)
@@ -312,6 +319,12 @@ function AgentPortal() {
         if (c && typeof c.landlock_supported === 'boolean') {
           setLandlockSupported(c.landlock_supported)
         }
+        if (c && typeof c.namespaces_supported === 'boolean') {
+          setNamespacesSupported(c.namespaces_supported)
+        }
+        if (c && typeof c.cgroups_supported === 'boolean') {
+          setCgroupsSupported(c.cgroups_supported)
+        }
       })
       .catch(() => {})
   }, [])
@@ -326,6 +339,11 @@ function AgentPortal() {
       setSandboxMode(normalizeSandboxMode(last))
       setExtraWritablePathsText((last.extraWritablePaths || []).join('\n'))
       setUsePty(!!last.usePty)
+      setNamespaces(!!last.namespaces)
+      setIsolateNetwork(!!last.isolateNetwork)
+      setMemoryLimit(last.memoryLimit || '')
+      setCpuLimit(last.cpuLimit || '')
+      setPidsLimit(last.pidsLimit == null ? '' : String(last.pidsLimit))
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -337,6 +355,11 @@ function AgentPortal() {
     setSandboxMode(normalizeSandboxMode(entry))
     setExtraWritablePathsText((entry.extraWritablePaths || []).join('\n'))
     setUsePty(!!entry.usePty)
+    setNamespaces(!!entry.namespaces)
+    setIsolateNetwork(!!entry.isolateNetwork)
+    setMemoryLimit(entry.memoryLimit || '')
+    setCpuLimit(entry.cpuLimit || '')
+    setPidsLimit(entry.pidsLimit == null ? '' : String(entry.pidsLimit))
   }
 
   const saveCurrentAsConfig = () => {
@@ -355,6 +378,11 @@ function AgentPortal() {
       extraWritablePaths: extraWritablePathsText
         .split('\n').map((s) => s.trim()).filter(Boolean),
       usePty,
+      namespaces,
+      isolateNetwork,
+      memoryLimit: memoryLimit.trim() || null,
+      cpuLimit: cpuLimit.trim() || null,
+      pidsLimit: pidsLimit.trim() ? parseInt(pidsLimit, 10) : null,
     }
     const next = [config, ...launchConfigs.filter((c) => c.name !== name.trim())]
       .slice(0, LAUNCH_CONFIGS_MAX)
@@ -456,8 +484,13 @@ function AgentPortal() {
         sandbox_mode: sandboxMode,
         extra_writable_paths: extraWritable,
         use_pty: usePty,
+        namespaces,
+        isolate_network: isolateNetwork,
       }
       if (trimmedCwd) body.cwd = trimmedCwd
+      if (memoryLimit.trim()) body.memory_limit = memoryLimit.trim()
+      if (cpuLimit.trim()) body.cpu_limit = cpuLimit.trim()
+      if (pidsLimit.trim()) body.pids_limit = parseInt(pidsLimit, 10)
       const res = await fetch('/api/agent-portal/processes', {
         method: 'POST',
         credentials: 'include',
@@ -480,6 +513,11 @@ function AgentPortal() {
         sandboxMode,
         extraWritablePaths: extraWritable,
         usePty,
+        namespaces,
+        isolateNetwork,
+        memoryLimit: memoryLimit.trim() || null,
+        cpuLimit: cpuLimit.trim() || null,
+        pidsLimit: pidsLimit.trim() ? parseInt(pidsLimit, 10) : null,
         lastUsed: Date.now(),
       }
       const key = makeHistoryKey(entry)
@@ -647,6 +685,92 @@ function AgentPortal() {
                 </span>
               </span>
             </label>
+
+            <div className={namespacesSupported === false ? 'opacity-60' : ''}>
+              <label className="flex items-start gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={namespaces}
+                  disabled={namespacesSupported === false}
+                  onChange={(e) => {
+                    setNamespaces(e.target.checked)
+                    if (!e.target.checked) setIsolateNetwork(false)
+                  }}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="inline-flex items-center gap-1 font-medium text-gray-200">
+                    <Boxes className="w-3.5 h-3.5" /> Isolate Linux namespaces (user, pid, uts, ipc, mnt)
+                  </span>
+                  <span className="block text-[11px] text-gray-500">
+                    {namespacesSupported === false
+                      ? 'unshare(1) or unprivileged user namespaces not available on this host.'
+                      : 'The child runs with its own pid tree (no host processes visible), isolated hostname/ipc, mounted /proc, and the invoking user mapped to UID 0 inside.'}
+                  </span>
+                </span>
+              </label>
+              {namespaces && (
+                <label className="flex items-start gap-2 text-xs mt-1 ml-5">
+                  <input
+                    type="checkbox"
+                    checked={isolateNetwork}
+                    onChange={(e) => setIsolateNetwork(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium text-gray-200">Also isolate the network</span>
+                    <span className="block text-[11px] text-gray-500">
+                      Drops the child into an empty net namespace -- no external connections. Leave off for tools that need LLM API access.
+                    </span>
+                  </span>
+                </label>
+              )}
+            </div>
+
+            <div className={cgroupsSupported === false ? 'opacity-60' : ''}>
+              <label className="block text-xs uppercase text-gray-400 mb-1">
+                <span className="inline-flex items-center gap-1">
+                  <Gauge className="w-3.5 h-3.5" /> Resource limits (cgroup)
+                </span>
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <input
+                    type="text"
+                    value={memoryLimit}
+                    onChange={(e) => setMemoryLimit(e.target.value)}
+                    placeholder="Mem (e.g. 512M)"
+                    disabled={cgroupsSupported === false}
+                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    value={cpuLimit}
+                    onChange={(e) => setCpuLimit(e.target.value)}
+                    placeholder="CPU (e.g. 50%)"
+                    disabled={cgroupsSupported === false}
+                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    value={pidsLimit}
+                    onChange={(e) => setPidsLimit(e.target.value)}
+                    placeholder="PIDs (e.g. 200)"
+                    disabled={cgroupsSupported === false}
+                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {cgroupsSupported === false
+                  ? 'systemd-run --user --scope unavailable on this host; cgroup limits cannot be applied.'
+                  : 'Passed to systemd-run --user --scope as MemoryMax / CPUQuota / TasksMax. Leave blank to skip.'}
+              </p>
+            </div>
 
             {sandboxMode !== 'off' && (
               <div>

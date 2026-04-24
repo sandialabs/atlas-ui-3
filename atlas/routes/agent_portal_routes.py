@@ -24,6 +24,7 @@ from atlas.modules.process_manager import (
     get_process_manager,
     landlock_is_supported,
 )
+from atlas.modules.process_manager.manager import probe_isolation_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,26 @@ class LaunchRequest(BaseModel):
         default=False,
         description="Allocate a pseudo-terminal so the child sees stdout as a TTY (TUIs, progress bars).",
     )
+    namespaces: bool = Field(
+        default=False,
+        description="Run the child in isolated Linux namespaces (user, pid, uts, ipc, mnt).",
+    )
+    isolate_network: bool = Field(
+        default=False,
+        description="Also isolate the network namespace (blocks all outbound connections). Requires namespaces=true.",
+    )
+    memory_limit: Optional[str] = Field(
+        default=None,
+        description="Cgroup MemoryMax (e.g. '512M', '2G'). Uses systemd-run --user --scope.",
+    )
+    cpu_limit: Optional[str] = Field(
+        default=None,
+        description="Cgroup CPUQuota percent (e.g. '50%', '200%').",
+    )
+    pids_limit: Optional[int] = Field(
+        default=None,
+        description="Cgroup TasksMax (max pids/threads).",
+    )
 
 
 def _require_enabled():
@@ -64,8 +85,11 @@ def _require_enabled():
 @router.get("/capabilities")
 async def capabilities(current_user: str = Depends(get_current_user)):
     _require_enabled()
+    iso = probe_isolation_capabilities()
     return {
         "landlock_supported": landlock_is_supported(),
+        "namespaces_supported": iso.get("namespaces", False),
+        "cgroups_supported": iso.get("cgroups", False),
     }
 
 
@@ -98,6 +122,11 @@ async def launch_process(
             sandbox_mode=sandbox_mode,
             extra_writable_paths=body.extra_writable_paths,
             use_pty=body.use_pty,
+            namespaces=body.namespaces,
+            isolate_network=body.isolate_network,
+            memory_limit=body.memory_limit,
+            cpu_limit=body.cpu_limit,
+            pids_limit=body.pids_limit,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=f"Command not found: {e}")
