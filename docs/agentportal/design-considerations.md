@@ -44,6 +44,25 @@ whatever env it itself inherited from the backend, fixing the
 single call site in `manager.py` is sufficient for both sandboxed
 and plain launches.
 
+### Bare command resolution
+
+Pinning the child's `PATH` to `/usr/local/bin:/usr/bin:/bin` means
+binaries under `~/.local/bin`, a venv, Nix profiles, or Homebrew
+locations are invisible to the child's `execvp`. To preserve
+ergonomics (so the user can type `claude` or `uvx` instead of the
+absolute path), `ProcessManager.launch` resolves non-absolute
+commands against the **server's** own `PATH` via `shutil.which()`
+in the parent, then passes the resulting absolute path into the
+child. The child's `PATH` stays minimal — the resolution is a
+one-shot parent-side lookup, not a leak of the server's full
+search path into the child environment.
+
+If the lookup fails, the manager raises `FileNotFoundError` with
+a message that names the command and points the user at "use an
+absolute path, or install it on the server PATH" — far more
+useful than the raw `[Errno 2] No such file or directory` that
+surfaced when the child's pinned `PATH` was the only search path.
+
 ## cwd and extra_writable_paths accepted verbatim
 
 The launch endpoint accepts an absolute `cwd` and a list of

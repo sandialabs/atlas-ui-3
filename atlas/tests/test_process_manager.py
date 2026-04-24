@@ -40,6 +40,62 @@ async def test_failed_command_reports_error():
 
 
 @pytest.mark.asyncio
+async def test_bare_command_resolves_via_server_path(tmp_path, monkeypatch):
+    """A bare command name should resolve against the server's PATH.
+
+    The child's PATH is pinned to /usr/local/bin:/usr/bin:/bin, so if
+    we did not pre-resolve the binary, anything installed under e.g.
+    ~/.local/bin (or a venv) would fail with ENOENT even though it
+    would have worked interactively on the server user's shell.
+    """
+    import os
+    import stat
+
+    # Put an executable named ``mycmd-xyz`` in a dir that will NOT be on
+    # the child's pinned PATH, and expose that dir on the server PATH.
+    custom_bin = tmp_path / "custom_bin"
+    custom_bin.mkdir()
+    script = custom_bin / "mycmd-xyz"
+    script.write_text("#!/bin/sh\necho resolved-ok\n")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    monkeypatch.setenv("PATH", f"{custom_bin}:/usr/bin:/bin")
+
+    manager = ProcessManager()
+    managed = await manager.launch(command="mycmd-xyz")
+
+    for _ in range(50):
+        if managed.status != ProcessStatus.RUNNING:
+            break
+        await asyncio.sleep(0.05)
+
+    assert managed.status == ProcessStatus.EXITED, (
+        f"expected EXITED, got {managed.status}; "
+        f"command recorded as {managed.command}; "
+        f"history: {[c.text for c in managed.history]}"
+    )
+    assert managed.exit_code == 0
+    # The manager should have recorded the absolute path it resolved.
+    assert os.path.isabs(managed.command)
+    assert managed.command == str(script)
+    stdout_lines = [c.text for c in managed.history if c.stream == "stdout"]
+    assert "resolved-ok" in stdout_lines
+
+
+@pytest.mark.asyncio
+async def test_missing_bare_command_raises_with_clear_message(monkeypatch):
+    """When a bare command isn't on the server's PATH, the error should
+    name the command and say where to look, not just echo ENOENT."""
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    manager = ProcessManager()
+    with pytest.raises(FileNotFoundError) as excinfo:
+        await manager.launch(command="definitely-not-a-real-binary-xyzzy")
+    msg = str(excinfo.value)
+    assert "definitely-not-a-real-binary-xyzzy" in msg
+    assert "server PATH" in msg
+
+
+@pytest.mark.asyncio
 async def test_list_filters_by_user():
     manager = ProcessManager()
     await manager.launch(

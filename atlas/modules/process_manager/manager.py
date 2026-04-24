@@ -360,6 +360,23 @@ class ProcessManager:
         if not command or not command.strip():
             raise ValueError("command is required")
 
+        # The child's env is minimal and PATH is pinned
+        # (/usr/local/bin:/usr/bin:/bin) so secrets cannot leak into
+        # subprocesses. That also means the child cannot find binaries
+        # under ~/.local/bin, a venv, Nix profiles, etc. Resolve
+        # non-absolute commands here using the *server's* full PATH so
+        # users can type ``claude`` or ``uvx`` without knowing the
+        # absolute path — but the child still runs with the pinned PATH.
+        if not os.path.isabs(command):
+            resolved = shutil.which(command)
+            if resolved is None:
+                raise FileNotFoundError(
+                    f"command not found in server PATH: {command!r}. "
+                    f"Either pass an absolute path, or install it on "
+                    f"the server PATH."
+                )
+            command = resolved
+
         # Soft cap on concurrent tracked processes
         live = sum(1 for p in self._processes.values() if p.status == ProcessStatus.RUNNING)
         if live >= self._max_processes:

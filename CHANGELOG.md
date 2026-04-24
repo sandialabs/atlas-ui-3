@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Agent Portal bare-command resolution - 2026-04-24
+- Fix: after the env-isolation change pinned the child's `PATH` to
+  `/usr/local/bin:/usr/bin:/bin`, bare command names like `claude` or
+  `uvx` that lived under `~/.local/bin`, a venv, or a Nix profile
+  failed to launch with a bare `[Errno 2] No such file or directory`.
+  `ProcessManager.launch` now resolves non-absolute commands against
+  the server's own `PATH` via `shutil.which()` before spawning (a
+  one-shot parent-side lookup that does not leak the server's search
+  path into the child) and raises a clear `FileNotFoundError` naming
+  the command when the lookup fails.
+
 ### Agent Portal preset library - 2026-04-24
 - Server-side preset CRUD at `/api/agent-portal/presets` (list/create/get/
   update/delete). Each preset captures the full launch-form payload
