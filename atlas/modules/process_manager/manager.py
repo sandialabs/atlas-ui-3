@@ -53,6 +53,100 @@ def _strip_ansi(text: str) -> str:
     return cleaned
 
 
+# Environment isolation for launched children. The backend process
+# holds provider API keys, DB credentials, and cloud creds; passing
+# os.environ.copy() leaks all of them to every subprocess a user
+# launches. Build a minimal env from an allow-list instead, with a
+# defense-in-depth deny-list to catch any secret-shaped variable a
+# caller explicitly passes in.
+_ENV_ALLOW_EXACT = (
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "TERM",
+    "TZ",
+    "TMPDIR",
+)
+
+# Fixed PATH so the server's venv and any tool dirs on the backend's
+# PATH do not leak into children. Users must invoke tools by absolute
+# path, or rely on what is installed in these standard locations.
+_ENV_FIXED_PATH = "/usr/local/bin:/usr/bin:/bin"
+
+# Deny-list of secret-shaped env vars. Applied after the allow-list
+# and caller-supplied extras so that even if a future caller passes
+# extra={"AWS_ACCESS_KEY_ID": "..."}, it gets stripped.
+_ENV_DENY_SUFFIXES = ("_KEY", "_SECRET", "_TOKEN", "_PASSWORD", "_PASSWD")
+_ENV_DENY_PREFIXES = (
+    "AWS_",
+    "GCP_",
+    "ATLAS_",
+    "ANTHROPIC_",
+    "OPENAI_",
+    "CONDA_",
+)
+_ENV_DENY_EXACT = frozenset(
+    {
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "PYTHONPATH",
+        "VIRTUAL_ENV",
+        "NODE_PATH",
+    }
+)
+
+
+def _is_denied_env_key(key: str) -> bool:
+    k = key.upper()
+    if k in _ENV_DENY_EXACT:
+        return True
+    if any(k.startswith(p) for p in _ENV_DENY_PREFIXES):
+        return True
+    if any(k.endswith(s) for s in _ENV_DENY_SUFFIXES):
+        return True
+    return False
+
+
+def _build_child_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Build a minimal env for a launched child process.
+
+    Copies a small allow-list of benign variables from ``os.environ``,
+    pins ``PATH`` to a conservative default, layers any caller-supplied
+    ``extra`` on top, then strips any key matching the secret-shaped
+    deny-list. Denied keys are logged at INFO so a caller can tell
+    their addition was dropped.
+
+    TODO: expose a user-supplied env dict on the launch request schema
+    once the UI needs it; wiring already accepts it through ``extra``.
+    """
+    env: Dict[str, str] = {}
+    for key in _ENV_ALLOW_EXACT:
+        value = os.environ.get(key)
+        if value is not None:
+            env[key] = value
+    for key, value in os.environ.items():
+        if key.startswith("LC_"):
+            env[key] = value
+    env["PATH"] = _ENV_FIXED_PATH
+    if extra:
+        env.update(extra)
+
+    dropped: List[str] = []
+    for key in list(env.keys()):
+        if _is_denied_env_key(key):
+            dropped.append(key)
+            env.pop(key, None)
+    if dropped:
+        logger.info(
+            "agent_portal env isolation dropped %d key(s): %s",
+            len(dropped),
+            sanitize_for_logging(",".join(sorted(dropped))),
+        )
+    return env
+
+
 _ISOLATION_CAPS: Optional[Dict[str, bool]] = None
 
 
@@ -344,9 +438,7 @@ class ProcessManager:
             spawn_args = systemd_args + ["--", spawn_cmd, *spawn_args]
             spawn_cmd = "systemd-run"
 
-        proc_env = os.environ.copy()
-        if env:
-            proc_env.update(env)
+        proc_env = _build_child_env(extra=env)
         # Pass extra writable paths through to the sandbox wrapper via
         # env var so they can be granted write access alongside cwd.
         normalized_extra: List[str] = []

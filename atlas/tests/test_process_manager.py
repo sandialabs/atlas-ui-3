@@ -219,3 +219,48 @@ async def test_landlock_confines_writes_to_cwd(tmp_path):
     assert not os.path.exists(escape_path)
     stdout_texts = [c.text for c in managed.history if c.stream == "stdout"]
     assert "BLOCKED" in stdout_texts
+
+
+@pytest.mark.asyncio
+async def test_child_env_is_isolated(monkeypatch):
+    """Child process must see a minimal env: allow-listed keys plus the
+    pinned PATH, with no secret-shaped variables from the backend."""
+    # Seed the parent env with values the backend might plausibly hold.
+    secrets = {
+        "AWS_ACCESS_KEY_ID": "AKIA_TEST",
+        "AWS_SECRET_ACCESS_KEY": "wouldneverleak",
+        "ANTHROPIC_API_KEY": "sk-ant-test",
+        "OPENAI_API_KEY": "sk-openai-test",
+        "ATLAS_DB_URL": "postgres://u:p@h/d",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/gcp.json",
+        "PYTHONPATH": "/srv/atlas",
+        "LD_PRELOAD": "/tmp/evil.so",
+        "LD_LIBRARY_PATH": "/tmp",
+        "VIRTUAL_ENV": "/srv/atlas/.venv",
+        "SOME_API_TOKEN": "token-val",
+        "MY_DB_PASSWORD": "pw-val",
+    }
+    for k, v in secrets.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("HOME", "/home/testhome")
+    monkeypatch.setenv("LANG", "en_US.UTF-8")
+
+    manager = ProcessManager()
+    managed = await manager.launch(
+        command="/usr/bin/env",
+    )
+    for _ in range(50):
+        if managed.status != ProcessStatus.RUNNING:
+            break
+        await asyncio.sleep(0.05)
+    assert managed.status == ProcessStatus.EXITED
+    assert managed.exit_code == 0
+
+    stdout = "\n".join(c.text for c in managed.history if c.stream == "stdout")
+    env_keys = {line.split("=", 1)[0] for line in stdout.splitlines() if "=" in line}
+
+    assert "PATH=/usr/local/bin:/usr/bin:/bin" in stdout
+    assert "HOME" in env_keys
+    assert "LANG" in env_keys
+    for denied in secrets:
+        assert denied not in env_keys, f"{denied} leaked to child"
