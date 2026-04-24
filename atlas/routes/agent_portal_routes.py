@@ -11,6 +11,7 @@ import asyncio
 import base64
 import logging
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -190,6 +191,34 @@ async def rename_process(
     return managed.to_summary()
 
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _origin_is_loopback(origin: Optional[str]) -> bool:
+    """Return True if the Origin header names a loopback host over http(s).
+
+    WebSocket upgrades are not covered by CORS preflight, so a page at any
+    origin can open a WS to localhost:<port>. Limiting accept() to loopback
+    origins blocks drive-by CSRF from an untrusted browser tab while still
+    allowing the local dev UI. Any port is accepted on the loopback hosts
+    for now; tighten to the configured backend port once that is threaded
+    through.
+
+    TODO: restrict the allowed port to the backend's own port instead of
+    accepting any.
+    """
+    if not origin:
+        return False
+    try:
+        parsed = urlparse(origin)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    hostname = (parsed.hostname or "").lower()
+    return hostname in _LOOPBACK_HOSTS
+
+
 def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
     """Mirror the authentication flow used by /ws for consistency."""
     config_manager = app_factory.get_config_manager()
@@ -229,6 +258,19 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
     app_settings = app_factory.get_config_manager().app_settings
     if not getattr(app_settings, "feature_agent_portal_enabled", False):
         await websocket.close(code=1008, reason="Agent portal disabled")
+        return
+
+    # Origin check: WS upgrades bypass CORS preflight, so a cross-origin
+    # page can open a socket to the dev server unless we reject it here.
+    # See docs/agentportal/threat-model.md.
+    origin = websocket.headers.get("origin")
+    if not _origin_is_loopback(origin):
+        logger.warning(
+            "agent_portal stream rejected non-loopback origin=%s process=%s",
+            sanitize_for_logging(origin or ""),
+            sanitize_for_logging(process_id),
+        )
+        await websocket.close(code=4403, reason="Origin not allowed")
         return
 
     user_email = _authenticate_ws(websocket)
