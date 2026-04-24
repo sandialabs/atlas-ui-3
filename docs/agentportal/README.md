@@ -19,3 +19,6 @@ guard that refuses to let it run outside debug mode.
   worked through before the feature can come out of dev-preview.
 - [presets.md](./presets.md) — the server-side preset library (CRUD
   endpoints, storage layout, migration from legacy localStorage).
+- [cli.md](./cli.md) — the `atlas-portal` CLI for launching /
+  inspecting / cancelling processes and managing presets from the
+  terminal. Useful for debugging and for the e2e test suite.
