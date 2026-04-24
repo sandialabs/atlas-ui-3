@@ -19,6 +19,10 @@ from pydantic import BaseModel, Field
 from atlas.core.auth import get_user_from_header
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.infrastructure.app_factory import app_factory
+from atlas.modules.agent_portal import (
+    PresetNotFoundError,
+    get_preset_store,
+)
 from atlas.modules.process_manager import (
     LandlockUnavailableError,
     ProcessNotFoundError,
@@ -83,6 +87,58 @@ class LaunchRequest(BaseModel):
 
 class RenameRequest(BaseModel):
     display_name: str = Field(default="", description="New display name for the process.")
+
+
+class PresetCreateRequest(BaseModel):
+    """All launch-form fields plus a human label and optional description.
+
+    Mirrors LaunchRequest except ``command`` is not marked required here;
+    a partially-specified preset is allowed so users can stub one out.
+    """
+
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
+    command: str = Field(default="")
+    args: List[str] = Field(default_factory=list)
+    cwd: Optional[str] = None
+    sandbox_mode: str = Field(default="off")
+    extra_writable_paths: List[str] = Field(default_factory=list)
+    use_pty: bool = False
+    namespaces: bool = False
+    isolate_network: bool = False
+    memory_limit: Optional[str] = None
+    cpu_limit: Optional[str] = None
+    pids_limit: Optional[int] = None
+    display_name: Optional[str] = None
+
+
+class PresetUpdateRequest(BaseModel):
+    """Partial update. Any field omitted (or explicitly None) is unchanged."""
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    command: Optional[str] = None
+    args: Optional[List[str]] = None
+    cwd: Optional[str] = None
+    sandbox_mode: Optional[str] = None
+    extra_writable_paths: Optional[List[str]] = None
+    use_pty: Optional[bool] = None
+    namespaces: Optional[bool] = None
+    isolate_network: Optional[bool] = None
+    memory_limit: Optional[str] = None
+    cpu_limit: Optional[str] = None
+    pids_limit: Optional[int] = None
+    display_name: Optional[str] = None
+
+
+_VALID_SANDBOX_MODES = ("off", "strict", "workspace-write")
+
+
+def _validate_sandbox_mode(mode: Optional[str]) -> None:
+    if mode is None:
+        return
+    if mode not in _VALID_SANDBOX_MODES:
+        raise HTTPException(status_code=400, detail=f"invalid sandbox_mode: {mode}")
 
 
 def _require_enabled():
@@ -192,6 +248,96 @@ async def rename_process(
     except ProcessNotFoundError:
         raise HTTPException(status_code=404, detail="Process not found")
     return managed.to_summary()
+
+
+# ---------------------------------------------------------------------------
+# Preset library — saved launch templates
+# ---------------------------------------------------------------------------
+#
+# Presets are per-user (owner-scoped inside the store), so unlike the
+# per-process endpoints they do not carry a "graduation" TODO: the store
+# itself filters by user_email on every read/write.
+
+
+@router.get("/presets")
+async def list_presets(current_user: str = Depends(get_current_user)):
+    _require_enabled()
+    store = get_preset_store()
+    return {"presets": [p.to_public() for p in store.list_for_user(current_user)]}
+
+
+@router.post("/presets", status_code=201)
+async def create_preset(
+    body: PresetCreateRequest,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    _validate_sandbox_mode(body.sandbox_mode)
+    store = get_preset_store()
+    preset = store.create(body.model_dump(), current_user)
+    logger.info(
+        "agent_portal preset created id=%s user=%s name=%s",
+        sanitize_for_logging(preset.id),
+        sanitize_for_logging(current_user),
+        sanitize_for_logging(preset.name),
+    )
+    return preset.to_public()
+
+
+@router.get("/presets/{preset_id}")
+async def get_preset(
+    preset_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_preset_store()
+    try:
+        preset = store.get(preset_id, current_user)
+    except PresetNotFoundError:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    return preset.to_public()
+
+
+@router.patch("/presets/{preset_id}")
+async def update_preset(
+    preset_id: str,
+    body: PresetUpdateRequest,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    _validate_sandbox_mode(body.sandbox_mode)
+    store = get_preset_store()
+    # exclude_unset=True so fields the client omitted are not overwritten.
+    patch = body.model_dump(exclude_unset=True)
+    try:
+        preset = store.update(preset_id, patch, current_user)
+    except PresetNotFoundError:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    logger.info(
+        "agent_portal preset updated id=%s user=%s",
+        sanitize_for_logging(preset.id),
+        sanitize_for_logging(current_user),
+    )
+    return preset.to_public()
+
+
+@router.delete("/presets/{preset_id}", status_code=204)
+async def delete_preset(
+    preset_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_preset_store()
+    try:
+        store.delete(preset_id, current_user)
+    except PresetNotFoundError:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    logger.info(
+        "agent_portal preset deleted id=%s user=%s",
+        sanitize_for_logging(preset_id),
+        sanitize_for_logging(current_user),
+    )
+    return None
 
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
