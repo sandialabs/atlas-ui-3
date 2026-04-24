@@ -679,6 +679,26 @@ class AppSettings(BaseSettings):
                 )
         return self
 
+    @model_validator(mode='after')
+    def validate_agent_portal_dev_only(self):
+        """Refuse to boot with Agent Portal enabled outside debug mode.
+
+        The feature is a dev-preview that grants any authenticated caller
+        arbitrary command execution on the host. See
+        docs/agentportal/threat-model.md for the full rationale.
+        """
+        if self.feature_agent_portal_enabled and not self.debug_mode:
+            logging.getLogger(__name__).error(
+                "SECURITY: FEATURE_AGENT_PORTAL_ENABLED=true but DEBUG_MODE=false. "
+                "The Agent Portal is a dev-only preview and must not run outside debug mode. "
+                "See docs/agentportal/threat-model.md. Refusing to start."
+            )
+            raise ValueError(
+                "FEATURE_AGENT_PORTAL_ENABLED is only permitted when DEBUG_MODE=true. "
+                "See docs/agentportal/threat-model.md."
+            )
+        return self
+
     model_config = {
         "env_file": "../.env",
         "env_file_encoding": "utf-8",
