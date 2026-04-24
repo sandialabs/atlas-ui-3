@@ -133,6 +133,7 @@ class ManagedProcess:
     memory_limit: Optional[str] = None
     cpu_limit: Optional[str] = None
     pids_limit: Optional[int] = None
+    display_name: str = ""
     history: Deque[OutputChunk] = field(default_factory=lambda: deque(maxlen=2000))
     subscribers: List[asyncio.Queue] = field(default_factory=list)
 
@@ -157,6 +158,7 @@ class ManagedProcess:
             "memory_limit": self.memory_limit,
             "cpu_limit": self.cpu_limit,
             "pids_limit": self.pids_limit,
+            "display_name": self.display_name,
         }
 
 
@@ -213,6 +215,13 @@ class ProcessManager:
             raise ProcessNotFoundError(process_id)
         return proc
 
+    def rename(self, process_id: str, display_name: str) -> ManagedProcess:
+        proc = self._processes.get(process_id)
+        if proc is None:
+            raise ProcessNotFoundError(process_id)
+        proc.display_name = (display_name or "").strip()
+        return proc
+
     async def launch(
         self,
         command: str,
@@ -228,6 +237,7 @@ class ProcessManager:
         memory_limit: Optional[str] = None,
         cpu_limit: Optional[str] = None,
         pids_limit: Optional[int] = None,
+        display_name: str = "",
     ) -> ManagedProcess:
         """Launch a subprocess and register it.
 
@@ -356,6 +366,7 @@ class ProcessManager:
             memory_limit=memory_limit,
             cpu_limit=cpu_limit,
             pids_limit=pids_limit,
+            display_name=(display_name or "").strip(),
         )
 
         master_fd: Optional[int] = None

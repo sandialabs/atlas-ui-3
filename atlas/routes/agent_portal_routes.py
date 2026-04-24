@@ -74,6 +74,14 @@ class LaunchRequest(BaseModel):
         default=None,
         description="Cgroup TasksMax (max pids/threads).",
     )
+    display_name: Optional[str] = Field(
+        default="",
+        description="Friendly name shown in the process list. Defaults to the command.",
+    )
+
+
+class RenameRequest(BaseModel):
+    display_name: str = Field(default="", description="New display name for the process.")
 
 
 def _require_enabled():
@@ -162,6 +170,21 @@ async def cancel_process(
     manager = get_process_manager()
     try:
         managed = await manager.cancel(process_id)
+    except ProcessNotFoundError:
+        raise HTTPException(status_code=404, detail="Process not found")
+    return managed.to_summary()
+
+
+@router.patch("/processes/{process_id}")
+async def rename_process(
+    process_id: str,
+    body: RenameRequest,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    manager = get_process_manager()
+    try:
+        managed = manager.rename(process_id, body.display_name)
     except ProcessNotFoundError:
         raise HTTPException(status_code=404, detail="Process not found")
     return managed.to_summary()

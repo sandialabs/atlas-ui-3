@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge } from 'lucide-react'
+import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge, PanelLeftClose, PanelLeftOpen, Edit2, Check } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -127,38 +127,92 @@ const STREAM_COLORS = {
   system: 'text-blue-300 italic',
 }
 
-function ProcessListItem({ proc, isSelected, onSelect }) {
+function ProcessListItem({ proc, isSelected, onSelect, onRename }) {
   const statusCls = STATUS_COLORS[proc.status] || STATUS_COLORS.exited
   const started = proc.started_at ? new Date(proc.started_at * 1000).toLocaleTimeString() : ''
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(proc.display_name || '')
+
+  useEffect(() => {
+    if (!editing) setDraft(proc.display_name || '')
+  }, [proc.display_name, editing])
+
+  const displayTitle = proc.display_name?.trim() || proc.command
+
+  const commit = () => {
+    setEditing(false)
+    const newName = draft.trim()
+    if (newName !== (proc.display_name || '').trim()) {
+      onRename(proc.id, newName)
+    }
+  }
+
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(proc.id)}
-      className={`w-full text-left p-3 rounded-lg border transition-colors ${
+    <div
+      className={`p-3 rounded-lg border transition-colors ${
         isSelected
           ? 'bg-gray-700 border-blue-500'
           : 'bg-gray-800 border-gray-700 hover:bg-gray-700'
       }`}
     >
       <div className="flex items-center justify-between gap-2 mb-1">
-        <span className="font-mono text-sm text-gray-100 truncate flex items-center gap-1">
-          {proc.sandboxed && (
-            <Shield className="w-3 h-3 text-blue-400" title="Sandboxed to cwd (Landlock)" />
-          )}
-          {proc.command}
-        </span>
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commit()
+              else if (e.key === 'Escape') { setEditing(false); setDraft(proc.display_name || '') }
+            }}
+            className="flex-1 min-w-0 bg-gray-900 border border-gray-600 rounded px-2 py-0.5 text-sm text-gray-100"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => onSelect(proc.id)}
+            className="flex-1 min-w-0 text-left text-sm text-gray-100 truncate flex items-center gap-1"
+          >
+            {proc.sandboxed && (
+              <Shield className="w-3 h-3 text-blue-400 flex-shrink-0" title="Sandboxed (Landlock)" />
+            )}
+            {proc.namespaces && (
+              <Boxes className="w-3 h-3 text-purple-400 flex-shrink-0" title="Isolated namespaces" />
+            )}
+            <span className="truncate font-medium">{displayTitle}</span>
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            if (editing) commit()
+            else setEditing(true)
+          }}
+          className="p-1 text-gray-500 hover:text-blue-300 flex-shrink-0"
+          title={editing ? 'Save name' : 'Rename'}
+        >
+          {editing ? <Check className="w-3 h-3" /> : <Edit2 className="w-3 h-3" />}
+        </button>
         <span className={`text-xs px-2 py-0.5 rounded border ${statusCls}`}>{proc.status}</span>
       </div>
-      <div className="text-xs text-gray-400 font-mono truncate">
-        {(proc.args || []).join(' ')}
-      </div>
-      <div className="text-xs text-gray-500 mt-1">
-        pid {proc.pid || '-'} · started {started}
-        {proc.exit_code !== null && proc.exit_code !== undefined && (
-          <> · exit {proc.exit_code}</>
-        )}
-      </div>
-    </button>
+      <button
+        type="button"
+        onClick={() => onSelect(proc.id)}
+        className="w-full text-left"
+      >
+        <div className="text-xs text-gray-400 font-mono truncate">
+          {proc.command} {(proc.args || []).join(' ')}
+        </div>
+        <div className="text-xs text-gray-500 mt-1">
+          pid {proc.pid || '-'} · {started}
+          {proc.exit_code !== null && proc.exit_code !== undefined && (
+            <> · exit {proc.exit_code}</>
+          )}
+        </div>
+      </button>
+    </div>
   )
 }
 
@@ -303,6 +357,8 @@ function AgentPortal() {
   const [pidsLimit, setPidsLimit] = useState('')
   const [namespacesSupported, setNamespacesSupported] = useState(null)
   const [cgroupsSupported, setCgroupsSupported] = useState(null)
+  const [displayName, setDisplayName] = useState('')
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [launchConfigs, setLaunchConfigs] = useState(() => loadLaunchConfigs())
   const [launchError, setLaunchError] = useState(null)
   const [launching, setLaunching] = useState(false)
@@ -486,6 +542,7 @@ function AgentPortal() {
         use_pty: usePty,
         namespaces,
         isolate_network: isolateNetwork,
+        display_name: displayName.trim(),
       }
       if (trimmedCwd) body.cwd = trimmedCwd
       if (memoryLimit.trim()) body.memory_limit = memoryLimit.trim()
@@ -533,6 +590,24 @@ function AgentPortal() {
       setLaunching(false)
     }
   }
+
+  const renameProcess = useCallback(async (id, newName) => {
+    try {
+      const res = await fetch(`/api/agent-portal/processes/${id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_name: newName }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setProcesses((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+        setSelectedProcess((prev) => (prev && prev.id === updated.id ? updated : prev))
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
 
   const handleCancel = async () => {
     if (!selectedId) return
@@ -589,19 +664,46 @@ function AgentPortal() {
             </p>
           </div>
         </div>
-        <button
-          onClick={fetchProcesses}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm"
-          title="Refresh process list"
-        >
-          <RefreshCw className="w-4 h-4" /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setLeftCollapsed((v) => !v)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm"
+            title={leftCollapsed ? 'Show launcher panel' : 'Hide launcher panel (expand output)'}
+          >
+            {leftCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            <span className="hidden sm:inline">{leftCollapsed ? 'Show panel' : 'Hide panel'}</span>
+          </button>
+          <button
+            onClick={fetchProcesses}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm"
+            title="Refresh process list"
+          >
+            <RefreshCw className="w-4 h-4" /> <span className="hidden sm:inline">Refresh</span>
+          </button>
+        </div>
       </header>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[360px_1fr] min-h-0">
+      <div
+        className={`flex-1 grid grid-cols-1 min-h-0 ${
+          leftCollapsed ? '' : 'lg:grid-cols-[360px_1fr]'
+        }`}
+      >
         {/* Left column: launcher + process list */}
-        <div className="flex flex-col border-r border-gray-700 min-h-0 overflow-y-auto">
+        <div className={`flex flex-col border-r border-gray-700 min-h-0 overflow-y-auto ${leftCollapsed ? 'hidden' : ''}`}>
           <form onSubmit={handleLaunch} className="p-4 space-y-3 border-b border-gray-700">
+            <div>
+              <label className="block text-xs uppercase text-gray-400 mb-1">Name (optional)</label>
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="e.g. cline diagram run"
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                Shown in the process list. You can edit it later on each process.
+              </p>
+            </div>
             <div>
               <label className="block text-xs uppercase text-gray-400 mb-1">Command</label>
               <input
@@ -901,6 +1003,7 @@ function AgentPortal() {
                 proc={p}
                 isSelected={p.id === selectedId}
                 onSelect={setSelectedId}
+                onRename={renameProcess}
               />
             ))}
           </div>
