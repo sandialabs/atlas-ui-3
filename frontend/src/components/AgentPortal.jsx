@@ -666,6 +666,14 @@ function AgentPortal() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={handleCancel}
+            disabled={!canCancel}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-700 hover:bg-red-600 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white text-sm"
+            title="Send SIGTERM to the selected running process"
+          >
+            <Square className="w-4 h-4" /> <span className="hidden sm:inline">Cancel</span>
+          </button>
+          <button
             onClick={() => setLeftCollapsed((v) => !v)}
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm"
             title={leftCollapsed ? 'Show launcher panel' : 'Hide launcher panel (expand output)'}
@@ -1011,32 +1019,29 @@ function AgentPortal() {
 
         {/* Right column: stream view */}
         <div className="flex flex-col min-h-0">
-          <div className="flex items-center justify-between p-3 border-b border-gray-700 bg-gray-800">
-            <div className="min-w-0">
+          <div className="flex items-center justify-between gap-3 px-3 py-1.5 border-b border-gray-700 bg-gray-800">
+            <div className="min-w-0 flex-1">
               {selectedProcess ? (
-                <>
-                  <div className="font-mono text-sm truncate">
-                    {selectedProcess.command} {(selectedProcess.args || []).join(' ')}
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    pid {selectedProcess.pid || '-'} · status {selectedProcess.status}
-                    {selectedProcess.exit_code !== null && selectedProcess.exit_code !== undefined && (
-                      <> · exit {selectedProcess.exit_code}</>
-                    )}
-                  </div>
-                </>
+                <div className="flex items-center gap-2 text-xs text-gray-300 truncate">
+                  <span className="font-mono text-gray-100 truncate">
+                    {selectedProcess.display_name?.trim()
+                      || `${selectedProcess.command} ${(selectedProcess.args || []).join(' ')}`}
+                  </span>
+                  <span className="text-gray-500">·</span>
+                  <span>pid {selectedProcess.pid || '-'}</span>
+                  <span className="text-gray-500">·</span>
+                  <span>{selectedProcess.status}</span>
+                  {selectedProcess.exit_code !== null && selectedProcess.exit_code !== undefined && (
+                    <>
+                      <span className="text-gray-500">·</span>
+                      <span>exit {selectedProcess.exit_code}</span>
+                    </>
+                  )}
+                </div>
               ) : (
-                <div className="text-sm text-gray-400">No process selected</div>
+                <div className="text-xs text-gray-400">No process selected</div>
               )}
             </div>
-            <button
-              onClick={handleCancel}
-              disabled={!canCancel}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-700 hover:bg-red-600 disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm"
-              title="Send SIGTERM to the process"
-            >
-              <Square className="w-4 h-4" /> Cancel
-            </button>
           </div>
           <div className="flex-1 p-3 min-h-0 flex">
             {selectedProcess && selectedProcess.use_pty ? (
