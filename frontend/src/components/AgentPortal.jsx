@@ -58,6 +58,59 @@ function saveLaunchConfigs(configs) {
   }
 }
 
+// Re-quote any token containing whitespace so round-tripping
+//   args=["foo", "bar baz"]  <->  argsString='foo "bar baz"'
+// preserves the user's original intent.
+function quoteArg(tok) {
+  if (!/\s/.test(tok) && !/["']/.test(tok)) return tok
+  return '"' + tok.replace(/"/g, '\\"') + '"'
+}
+
+// Server presets use snake_case and a fuller field set; the UI has always
+// worked in camelCase. Bridge both directions so the existing applyEntry /
+// launch plumbing keeps working without touching every caller.
+function serverPresetToUi(p) {
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.description || '',
+    command: p.command || '',
+    argsString: Array.isArray(p.args) ? p.args.map(quoteArg).join(' ') : '',
+    cwd: p.cwd || '',
+    sandboxMode: p.sandbox_mode || 'off',
+    extraWritablePaths: p.extra_writable_paths || [],
+    usePty: !!p.use_pty,
+    namespaces: !!p.namespaces,
+    isolateNetwork: !!p.isolate_network,
+    memoryLimit: p.memory_limit || null,
+    cpuLimit: p.cpu_limit || null,
+    pidsLimit: p.pids_limit == null ? null : Number(p.pids_limit),
+    displayName: p.display_name || '',
+    _source: 'server',
+  }
+}
+
+function uiToServerPayload(ui) {
+  return {
+    name: ui.name,
+    description: ui.description || '',
+    command: ui.command || '',
+    // Reuse the form's own tokenize() for round-trip stability (handles
+    // quoted tokens the same way the launch path does).
+    args: tokenize(ui.argsString || ''),
+    cwd: ui.cwd || null,
+    sandbox_mode: ui.sandboxMode || 'off',
+    extra_writable_paths: ui.extraWritablePaths || [],
+    use_pty: !!ui.usePty,
+    namespaces: !!ui.namespaces,
+    isolate_network: !!ui.isolateNetwork,
+    memory_limit: ui.memoryLimit || null,
+    cpu_limit: ui.cpuLimit || null,
+    pids_limit: ui.pidsLimit == null ? null : Number(ui.pidsLimit),
+    display_name: ui.displayName || null,
+  }
+}
+
 function makeHistoryKey(entry) {
   return JSON.stringify([
     entry.command,
@@ -359,7 +412,12 @@ function AgentPortal() {
   const [cgroupsSupported, setCgroupsSupported] = useState(null)
   const [displayName, setDisplayName] = useState('')
   const [leftCollapsed, setLeftCollapsed] = useState(false)
+  // launchConfigs holds the merged UI-shape list shown in the sidebar.
+  // Server-backed entries have _source === 'server' and a pst_* id; legacy
+  // localStorage-only entries have cfg_* ids.
   const [launchConfigs, setLaunchConfigs] = useState(() => loadLaunchConfigs())
+  const [loadedPresetId, setLoadedPresetId] = useState(null)
+  const [presetsError, setPresetsError] = useState(null)
   const [launchError, setLaunchError] = useState(null)
   const [launching, setLaunching] = useState(false)
   const [listError, setListError] = useState(null)
@@ -385,6 +443,56 @@ function AgentPortal() {
       .catch(() => {})
   }, [])
 
+  // Fetch presets from the server on mount. If the server has no presets
+  // yet but localStorage has legacy ones, migrate them up so the user
+  // doesn't lose their library on first upgrade. Subsequent CRUD operations
+  // update launchConfigs in place — no periodic refresh.
+  useEffect(() => {
+    let cancelled = false
+    const bootstrap = async () => {
+      try {
+        const res = await fetch('/api/agent-portal/presets', { credentials: 'include' })
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+        const serverUi = (data.presets || []).map(serverPresetToUi)
+        if (serverUi.length === 0) {
+          // Migrate legacy localStorage entries to the server on first run.
+          const legacy = loadLaunchConfigs()
+          if (legacy.length > 0) {
+            const migrated = []
+            for (const cfg of legacy) {
+              try {
+                const r = await fetch('/api/agent-portal/presets', {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(uiToServerPayload(cfg)),
+                })
+                if (r.ok) {
+                  const created = await r.json()
+                  migrated.push(serverPresetToUi(created))
+                }
+              } catch { /* skip bad entries */ }
+            }
+            if (!cancelled) {
+              setLaunchConfigs(migrated)
+              // Clear the legacy key only after successful migration so we
+              // don't lose data on a partial failure.
+              if (migrated.length === legacy.length) {
+                try { localStorage.removeItem(LAUNCH_CONFIGS_KEY) } catch { /* ignore */ }
+              }
+            }
+          }
+          return
+        }
+        setLaunchConfigs(serverUi)
+      } catch { /* ignore — keep the localStorage list */ }
+    }
+    bootstrap()
+    return () => { cancelled = true }
+  }, [])
+
   // Prepopulate form from most recent entry on first load (if form is empty)
   useEffect(() => {
     if (!command && launchHistory.length > 0) {
@@ -404,7 +512,7 @@ function AgentPortal() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const applyEntry = (entry) => {
+  const applyEntry = (entry, opts = {}) => {
     setCommand(entry.command || '')
     setArgsString(entry.argsString || '')
     setCwd(entry.cwd || '')
@@ -416,40 +524,114 @@ function AgentPortal() {
     setMemoryLimit(entry.memoryLimit || '')
     setCpuLimit(entry.cpuLimit || '')
     setPidsLimit(entry.pidsLimit == null ? '' : String(entry.pidsLimit))
+    // Only server-backed presets are "loaded" in the updatable sense.
+    if (opts.asPreset && entry._source === 'server' && entry.id) {
+      setLoadedPresetId(entry.id)
+    } else {
+      setLoadedPresetId(null)
+    }
   }
 
-  const saveCurrentAsConfig = () => {
+  const currentFormAsUiConfig = (nameOverride, descriptionOverride) => ({
+    name: nameOverride || '',
+    description: descriptionOverride || '',
+    command: command.trim(),
+    argsString,
+    cwd: cwd.trim(),
+    sandboxMode,
+    extraWritablePaths: extraWritablePathsText
+      .split('\n').map((s) => s.trim()).filter(Boolean),
+    usePty,
+    namespaces,
+    isolateNetwork,
+    memoryLimit: memoryLimit.trim() || null,
+    cpuLimit: cpuLimit.trim() || null,
+    pidsLimit: pidsLimit.trim() ? parseInt(pidsLimit, 10) : null,
+    displayName: displayName.trim() || null,
+  })
+
+  const saveCurrentAsPreset = async () => {
     const trimmedCommand = command.trim()
     if (!trimmedCommand) return
     const defaultName = trimmedCommand + (argsString ? ' ' + argsString.slice(0, 40) : '')
-    const name = window.prompt('Name this launch config:', defaultName)
+    const name = window.prompt('Name this preset:', defaultName)
     if (!name) return
-    const config = {
-      id: `cfg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      name: name.trim(),
-      command: trimmedCommand,
-      argsString,
-      cwd: cwd.trim(),
-      sandboxMode,
-      extraWritablePaths: extraWritablePathsText
-        .split('\n').map((s) => s.trim()).filter(Boolean),
-      usePty,
-      namespaces,
-      isolateNetwork,
-      memoryLimit: memoryLimit.trim() || null,
-      cpuLimit: cpuLimit.trim() || null,
-      pidsLimit: pidsLimit.trim() ? parseInt(pidsLimit, 10) : null,
+    const description = window.prompt('Optional description (leave blank to skip):', '') || ''
+    const payload = uiToServerPayload(currentFormAsUiConfig(name.trim(), description))
+    try {
+      const res = await fetch('/api/agent-portal/presets', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        setPresetsError(`Save failed (${res.status})`)
+        return
+      }
+      const created = await res.json()
+      setLaunchConfigs((prev) => [serverPresetToUi(created), ...prev])
+      setLoadedPresetId(created.id)
+      setPresetsError(null)
+    } catch (err) {
+      setPresetsError(err.message || 'Save failed')
     }
-    const next = [config, ...launchConfigs.filter((c) => c.name !== name.trim())]
-      .slice(0, LAUNCH_CONFIGS_MAX)
-    setLaunchConfigs(next)
-    saveLaunchConfigs(next)
   }
 
-  const deleteConfig = (id) => {
-    const next = launchConfigs.filter((c) => c.id !== id)
-    setLaunchConfigs(next)
-    saveLaunchConfigs(next)
+  const updateLoadedPreset = async () => {
+    if (!loadedPresetId) return
+    const existing = launchConfigs.find((c) => c.id === loadedPresetId)
+    if (!existing) return
+    const payload = uiToServerPayload(
+      currentFormAsUiConfig(existing.name, existing.description)
+    )
+    try {
+      const res = await fetch(`/api/agent-portal/presets/${encodeURIComponent(loadedPresetId)}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        setPresetsError(`Update failed (${res.status})`)
+        return
+      }
+      const updated = await res.json()
+      const uiUpdated = serverPresetToUi(updated)
+      setLaunchConfigs((prev) => prev.map((c) => (c.id === uiUpdated.id ? uiUpdated : c)))
+      setPresetsError(null)
+    } catch (err) {
+      setPresetsError(err.message || 'Update failed')
+    }
+  }
+
+  const deletePreset = async (id) => {
+    // Legacy (pre-migration) entries have cfg_* ids and live only in
+    // localStorage; drop them locally and rewrite the cache.
+    if (!id || !id.startsWith('pst_')) {
+      setLaunchConfigs((prev) => {
+        const next = prev.filter((c) => c.id !== id)
+        saveLaunchConfigs(next)
+        return next
+      })
+      if (loadedPresetId === id) setLoadedPresetId(null)
+      return
+    }
+    try {
+      const res = await fetch(`/api/agent-portal/presets/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      if (!res.ok && res.status !== 404) {
+        setPresetsError(`Delete failed (${res.status})`)
+        return
+      }
+      setLaunchConfigs((prev) => prev.filter((c) => c.id !== id))
+      if (loadedPresetId === id) setLoadedPresetId(null)
+      setPresetsError(null)
+    } catch (err) {
+      setPresetsError(err.message || 'Delete failed')
+    }
   }
 
   const removeHistoryEntry = (entry) => {
@@ -916,51 +1098,79 @@ function AgentPortal() {
                 <Play className="w-4 h-4" />
                 {launching ? 'Launching...' : 'Launch'}
               </button>
+              {loadedPresetId && (
+                <button
+                  type="button"
+                  onClick={updateLoadedPreset}
+                  disabled={!command.trim()}
+                  className="flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-indigo-700 hover:bg-indigo-600 disabled:bg-gray-800 disabled:text-gray-500 text-sm"
+                  title="Save changes back to the loaded preset"
+                >
+                  <Check className="w-4 h-4" />
+                  <span className="hidden sm:inline">Update</span>
+                </button>
+              )}
               <button
                 type="button"
-                onClick={saveCurrentAsConfig}
+                onClick={saveCurrentAsPreset}
                 disabled={!command.trim()}
                 className="flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-sm"
-                title="Save the current form as a named launch config"
+                title="Save the current form as a new named preset"
               >
                 <Save className="w-4 h-4" />
-                <span className="hidden sm:inline">Save</span>
+                <span className="hidden sm:inline">Save as…</span>
               </button>
             </div>
           </form>
 
           {launchConfigs.length > 0 && (
             <div className="p-3 border-b border-gray-700">
-              <div className="flex items-center gap-2 text-xs uppercase text-gray-400 mb-2">
-                <Bookmark className="w-3.5 h-3.5" /> Saved configs
+              <div className="flex items-center justify-between gap-2 text-xs uppercase text-gray-400 mb-2">
+                <span className="flex items-center gap-2">
+                  <Bookmark className="w-3.5 h-3.5" /> Presets library
+                </span>
+                {presetsError && (
+                  <span className="text-red-400 normal-case" title={presetsError}>⚠</span>
+                )}
               </div>
               <div className="space-y-1 max-h-48 overflow-y-auto">
-                {launchConfigs.map((cfg) => (
-                  <div
-                    key={cfg.id}
-                    className="flex items-center gap-1 text-xs bg-gray-800 rounded px-2 py-1 border border-gray-700"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => applyEntry(cfg)}
-                      className="flex-1 min-w-0 text-left truncate hover:text-blue-300"
-                      title={`${cfg.command} ${cfg.argsString || ''}${normalizeSandboxMode(cfg) !== 'off' ? ` [${normalizeSandboxMode(cfg)}]` : ''}`}
+                {launchConfigs.map((cfg) => {
+                  const isLoaded = cfg.id === loadedPresetId
+                  return (
+                    <div
+                      key={cfg.id}
+                      className={`flex items-center gap-1 text-xs rounded px-2 py-1 border ${
+                        isLoaded
+                          ? 'bg-indigo-900/40 border-indigo-600'
+                          : 'bg-gray-800 border-gray-700'
+                      }`}
                     >
-                      <span className="font-medium text-gray-100">{cfg.name}</span>
-                      <span className="block text-[10px] text-gray-500 font-mono truncate">
-                        {cfg.command} {cfg.argsString}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteConfig(cfg.id)}
-                      className="p-0.5 text-gray-500 hover:text-red-400 flex-shrink-0"
-                      title="Delete config"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+                      <button
+                        type="button"
+                        onClick={() => applyEntry(cfg, { asPreset: true })}
+                        className="flex-1 min-w-0 text-left truncate hover:text-blue-300"
+                        title={
+                          (cfg.description ? `${cfg.description}\n\n` : '') +
+                          `${cfg.command} ${cfg.argsString || ''}` +
+                          (normalizeSandboxMode(cfg) !== 'off' ? ` [${normalizeSandboxMode(cfg)}]` : '')
+                        }
+                      >
+                        <span className="font-medium text-gray-100">{cfg.name}</span>
+                        <span className="block text-[10px] text-gray-500 font-mono truncate">
+                          {cfg.command} {cfg.argsString}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deletePreset(cfg.id)}
+                        className="p-0.5 text-gray-500 hover:text-red-400 flex-shrink-0"
+                        title="Delete preset"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
