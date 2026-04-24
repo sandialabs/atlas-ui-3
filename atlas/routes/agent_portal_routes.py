@@ -153,6 +153,7 @@ async def get_process(
     process_id: str,
     current_user: str = Depends(get_current_user),
 ):
+    # TODO(graduation): add per-user ownership check — see docs/agentportal/threat-model.md
     _require_enabled()
     manager = get_process_manager()
     try:
@@ -167,6 +168,7 @@ async def cancel_process(
     process_id: str,
     current_user: str = Depends(get_current_user),
 ):
+    # TODO(graduation): add per-user ownership check — see docs/agentportal/threat-model.md
     _require_enabled()
     manager = get_process_manager()
     try:
@@ -182,6 +184,7 @@ async def rename_process(
     body: RenameRequest,
     current_user: str = Depends(get_current_user),
 ):
+    # TODO(graduation): add per-user ownership check — see docs/agentportal/threat-model.md
     _require_enabled()
     manager = get_process_manager()
     try:
@@ -255,6 +258,7 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
     live chunks as the process produces them, then closes when the
     process ends.
     """
+    # TODO(graduation): add per-user ownership check — see docs/agentportal/threat-model.md
     app_settings = app_factory.get_config_manager().app_settings
     if not getattr(app_settings, "feature_agent_portal_enabled", False):
         await websocket.close(code=1008, reason="Agent portal disabled")
