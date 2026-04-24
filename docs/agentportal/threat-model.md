@@ -81,6 +81,25 @@ preflight behavior above. That is acceptable for dev-only, but is the
 reason this doc flags CSRF as an assumed-but-not-independently-
 enforced mitigation.
 
+### Environment isolation for child processes
+
+Launched children no longer inherit the backend's full
+`os.environ`. `atlas/modules/process_manager/manager.py` builds the
+child env from a small allow-list (`HOME`, `USER`, `LOGNAME`,
+`LANG`, `TERM`, `TZ`, `TMPDIR`, `LC_*`), pins `PATH` to
+`/usr/local/bin:/usr/bin:/bin`, merges any caller-supplied extras,
+and then strips any key matching the secret-shaped deny-list
+(`*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`/`_PASSWD`, `AWS_*`,
+`GCP_*`, `ATLAS_*`, `ANTHROPIC_*`, `OPENAI_*`, `CONDA_*`,
+`GOOGLE_APPLICATION_CREDENTIALS`, `LD_PRELOAD`, `LD_LIBRARY_PATH`,
+`PYTHONPATH`, `VIRTUAL_ENV`, `NODE_PATH`). Dropped keys are logged.
+
+This keeps provider API keys, database URLs, cloud credentials,
+and other backend config out of user-launched processes. It does
+not stop a user from reading those secrets from disk if the
+filesystem sandbox is off — env isolation is one layer, not a
+full sandbox.
+
 ### WebSocket Origin check (explicit)
 
 WebSocket upgrades bypass the CORS preflight model entirely — the
@@ -108,9 +127,6 @@ points back here.
   caller. In a multi-user deployment, user A could enumerate, cancel,
   or rename user B's processes. Not material while the feature is
   single-user dev-only. Must be implemented before graduation.
-- **Environment allow-list.** Child processes currently inherit the
-  backend's full `os.environ`, which leaks backend secrets. See
-  design-considerations.
 - **Path-root validation for `cwd` and `extra_writable_paths`.** These
   are currently taken as arbitrary absolute paths. See
   design-considerations.

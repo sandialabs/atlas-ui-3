@@ -18,20 +18,31 @@ execute in the forked child before the target binary took over. A side
 benefit is that the rule set is expressed in normal Python, which keeps
 the path logic easy to read.
 
-## Environment inherited from the backend
+## Environment isolation (implemented)
 
-Launched processes currently receive `os.environ.copy()` — i.e., every
-environment variable the backend itself has. For a dev box this is
-usually fine, but it does mean that launched children can read:
+Launched processes no longer inherit `os.environ.copy()`. The spawn
+path in `atlas/modules/process_manager/manager.py` builds the child
+env via `_build_child_env()`:
 
-- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and any other provider keys
-- database URLs and credentials
-- any proxy secret configured in `.env`
+- allow-list of benign keys copied from the parent
+  (`HOME`, `USER`, `LOGNAME`, `LANG`, `TERM`, `TZ`, `TMPDIR`,
+  plus every `LC_*` locale variable);
+- `PATH` pinned to `/usr/local/bin:/usr/bin:/bin` so the backend's
+  venv / project dirs do not leak;
+- caller-supplied `extra` dict merged in (wired through
+  `ProcessManager.launch(env=...)`, not yet exposed on the request
+  schema);
+- secret-shaped deny-list applied last, covering provider keys
+  (`*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`/`_PASSWD`), cloud
+  creds (`AWS_*`, `GCP_*`, `GOOGLE_APPLICATION_CREDENTIALS`), Atlas
+  config (`ATLAS_*`), ANTHROPIC/OPENAI/CONDA, and loader-level
+  dangerous vars (`LD_PRELOAD`, `LD_LIBRARY_PATH`, `PYTHONPATH`,
+  `VIRTUAL_ENV`, `NODE_PATH`). Denied keys are logged at INFO.
 
-This must change to an explicit allow-list before the feature is used
-anywhere other than a developer's own machine. The intent is that a
-launched agent should only see a curated subset (`PATH`, `HOME`,
-`LANG`, `TERM`, and whatever the caller explicitly passes).
+Because `_sandbox_launch.py` exec'vp's the target command with
+whatever env it itself inherited from the backend, fixing the
+single call site in `manager.py` is sufficient for both sandboxed
+and plain launches.
 
 ## cwd and extra_writable_paths accepted verbatim
 
@@ -55,9 +66,6 @@ Items that must be addressed before the feature can come out of
 dev-preview and be turned on in any deployment other than a single
 developer's own machine:
 
-- **Environment allow-list.** Replace `os.environ.copy()` with an
-  explicit list of permitted variables. Any secret — provider keys,
-  DB URLs, session secrets, proxy secret — must not reach children.
 - **Path-root validation.** Require that `cwd` and every entry of
   `extra_writable_paths` resolve under a configured per-user workspace
   root. Reject absolute paths that escape via `..` or symlinks.
