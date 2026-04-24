@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Agent Portal preset library - 2026-04-24
+- Server-side preset CRUD at `/api/agent-portal/presets` (list/create/get/
+  update/delete). Each preset captures the full launch-form payload
+  (command, args, cwd, sandbox settings, resource limits) plus a name and
+  optional description. Stored at `<APP_CONFIG_DIR>/agent_portal_presets.json`
+  with atomic writes and a `fcntl.flock`-backed lock file; filtered by
+  `user_email` at the storage layer on every read and write.
+- Frontend migrates any legacy `localStorage`-backed launch configs to the
+  server on first mount, renames the "Saved configs" panel to "Presets
+  library", and adds an **Update** button that appears when a preset is
+  loaded so the form can be saved back in place instead of spawning a
+  duplicate. **Save as…** now also prompts for an optional description.
+- Docs: `docs/agentportal/presets.md` covers the storage layout, HTTP API,
+  and migration behavior.
+
 ### Agent Portal (initial) - 2026-04-23
 - New `/agent-portal` page (behind `FEATURE_AGENT_PORTAL_ENABLED`, off by default)
   lets a user launch a host subprocess (command + args + optional cwd), view the

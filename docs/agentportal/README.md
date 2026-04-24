@@ -17,3 +17,5 @@ guard that refuses to let it run outside debug mode.
 - [design-considerations.md](./design-considerations.md) — implementation
   choices worth knowing about, plus the graduation checklist that must be
   worked through before the feature can come out of dev-preview.
+- [presets.md](./presets.md) — the server-side preset library (CRUD
+  endpoints, storage layout, migration from legacy localStorage).
