@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge, PanelLeftClose, PanelLeftOpen, Edit2, Check } from 'lucide-react'
+import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge, PanelLeftClose, PanelLeftOpen, Edit2, Check, Plus, ChevronDown, ChevronRight } from 'lucide-react'
+import { useToast, useDialog } from './ui/toastContext'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -393,6 +394,10 @@ function XtermView({ process, wsRef, termHandleRef }) {
 
 function AgentPortal() {
   const navigate = useNavigate()
+  const toast = useToast()
+  const dialog = useDialog()
+  const [launchModalOpen, setLaunchModalOpen] = useState(false)
+  const [showRecent, setShowRecent] = useState(false)
   const [processes, setProcesses] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [chunks, setChunks] = useState([])
@@ -417,7 +422,6 @@ function AgentPortal() {
   // localStorage-only entries have cfg_* ids.
   const [launchConfigs, setLaunchConfigs] = useState(() => loadLaunchConfigs())
   const [loadedPresetId, setLoadedPresetId] = useState(null)
-  const [presetsError, setPresetsError] = useState(null)
   const [launchError, setLaunchError] = useState(null)
   const [launching, setLaunching] = useState(false)
   const [listError, setListError] = useState(null)
@@ -554,10 +558,19 @@ function AgentPortal() {
     const trimmedCommand = command.trim()
     if (!trimmedCommand) return
     const defaultName = trimmedCommand + (argsString ? ' ' + argsString.slice(0, 40) : '')
-    const name = window.prompt('Name this preset:', defaultName)
-    if (!name) return
-    const description = window.prompt('Optional description (leave blank to skip):', '') || ''
-    const payload = uiToServerPayload(currentFormAsUiConfig(name.trim(), description))
+    const answer = await dialog.prompt({
+      title: 'Save launch as preset',
+      label: 'Name',
+      defaultValue: defaultName,
+      placeholder: 'e.g. Claude in repo-a',
+      secondaryLabel: 'Description (optional)',
+      secondaryPlaceholder: 'What is this preset for?',
+      okText: 'Save',
+      required: true,
+    })
+    if (!answer) return
+    const { value: name, secondary: description = '' } = answer
+    const payload = uiToServerPayload(currentFormAsUiConfig(name, description))
     try {
       const res = await fetch('/api/agent-portal/presets', {
         method: 'POST',
@@ -566,15 +579,15 @@ function AgentPortal() {
         body: JSON.stringify(payload),
       })
       if (!res.ok) {
-        setPresetsError(`Save failed (${res.status})`)
+        toast.error(`Save failed (${res.status})`)
         return
       }
       const created = await res.json()
       setLaunchConfigs((prev) => [serverPresetToUi(created), ...prev])
       setLoadedPresetId(created.id)
-      setPresetsError(null)
+      toast.success(`Preset "${created.name}" saved`)
     } catch (err) {
-      setPresetsError(err.message || 'Save failed')
+      toast.error(err.message || 'Save failed')
     }
   }
 
@@ -593,19 +606,27 @@ function AgentPortal() {
         body: JSON.stringify(payload),
       })
       if (!res.ok) {
-        setPresetsError(`Update failed (${res.status})`)
+        toast.error(`Update failed (${res.status})`)
         return
       }
       const updated = await res.json()
       const uiUpdated = serverPresetToUi(updated)
       setLaunchConfigs((prev) => prev.map((c) => (c.id === uiUpdated.id ? uiUpdated : c)))
-      setPresetsError(null)
+      toast.success(`Preset "${uiUpdated.name}" updated`)
     } catch (err) {
-      setPresetsError(err.message || 'Update failed')
+      toast.error(err.message || 'Update failed')
     }
   }
 
   const deletePreset = async (id) => {
+    const target = launchConfigs.find((c) => c.id === id)
+    const confirmed = await dialog.confirm({
+      title: 'Delete preset?',
+      message: target ? `"${target.name}" will be removed.` : 'This preset will be removed.',
+      okText: 'Delete',
+      destructive: true,
+    })
+    if (!confirmed) return
     // Legacy (pre-migration) entries have cfg_* ids and live only in
     // localStorage; drop them locally and rewrite the cache.
     if (!id || !id.startsWith('pst_')) {
@@ -615,6 +636,7 @@ function AgentPortal() {
         return next
       })
       if (loadedPresetId === id) setLoadedPresetId(null)
+      toast.info('Preset removed (local)')
       return
     }
     try {
@@ -623,14 +645,14 @@ function AgentPortal() {
         credentials: 'include',
       })
       if (!res.ok && res.status !== 404) {
-        setPresetsError(`Delete failed (${res.status})`)
+        toast.error(`Delete failed (${res.status})`)
         return
       }
       setLaunchConfigs((prev) => prev.filter((c) => c.id !== id))
       if (loadedPresetId === id) setLoadedPresetId(null)
-      setPresetsError(null)
+      toast.success(target ? `Deleted "${target.name}"` : 'Preset deleted')
     } catch (err) {
-      setPresetsError(err.message || 'Delete failed')
+      toast.error(err.message || 'Delete failed')
     }
   }
 
@@ -743,6 +765,8 @@ function AgentPortal() {
       }
       const proc = await res.json()
       setSelectedId(proc.id)
+      toast.success(`Launched: ${proc.display_name || proc.command}`)
+      setLaunchModalOpen(false)
 
       // Record history (dedupe by content, newest first)
       const entry = {
@@ -878,9 +902,62 @@ function AgentPortal() {
           leftCollapsed ? '' : 'lg:grid-cols-[360px_1fr]'
         }`}
       >
-        {/* Left column: launcher + process list */}
+        {/* Left column: active sessions + presets + collapsible recent */}
         <div className={`flex flex-col border-r border-gray-700 min-h-0 overflow-y-auto ${leftCollapsed ? 'hidden' : ''}`}>
-          <form onSubmit={handleLaunch} className="p-4 space-y-3 border-b border-gray-700">
+          <div className="p-3 border-b border-gray-700">
+            <button
+              type="button"
+              onClick={() => setLaunchModalOpen(true)}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium"
+            >
+              <Plus className="w-4 h-4" /> New launch
+            </button>
+          </div>
+
+          <div className="p-3 space-y-2 border-b border-gray-700">
+            <div className="text-xs uppercase text-gray-400 mb-1">Active sessions</div>
+            {listError && <div className="text-xs text-red-300">{listError}</div>}
+            {processes.length === 0 && !listError && (
+              <div className="text-xs text-gray-500">No processes yet. Click <strong>New launch</strong> to start one.</div>
+            )}
+            {processes.map((p) => (
+              <ProcessListItem
+                key={p.id}
+                proc={p}
+                isSelected={p.id === selectedId}
+                onSelect={setSelectedId}
+                onRename={renameProcess}
+              />
+            ))}
+          </div>
+
+        {/* Launch modal — opens via the "New launch" button above */}
+        {launchModalOpen && (
+        <div
+          className="fixed inset-0 z-[9997] bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
+          onClick={() => setLaunchModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="New launch"
+        >
+        <div
+          className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-3xl my-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 sticky top-0 bg-gray-900 rounded-t-xl z-10">
+          <h2 className="text-lg font-semibold text-gray-100 flex items-center gap-2">
+            <Play className="w-4 h-4 text-blue-400" /> New launch
+          </h2>
+          <button
+            type="button"
+            onClick={() => setLaunchModalOpen(false)}
+            className="p-1 text-gray-400 hover:text-gray-200"
+            aria-label="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+          <form onSubmit={handleLaunch} className="p-5 space-y-4">
             <div>
               <label className="block text-xs uppercase text-gray-400 mb-1">Name (optional)</label>
               <input
@@ -1122,6 +1199,9 @@ function AgentPortal() {
               </button>
             </div>
           </form>
+        </div>
+        </div>
+        )}
 
           {launchConfigs.length > 0 && (
             <div className="p-3 border-b border-gray-700">
@@ -1129,9 +1209,6 @@ function AgentPortal() {
                 <span className="flex items-center gap-2">
                   <Bookmark className="w-3.5 h-3.5" /> Presets library
                 </span>
-                {presetsError && (
-                  <span className="text-red-400 normal-case" title={presetsError}>⚠</span>
-                )}
               </div>
               <div className="space-y-1 max-h-48 overflow-y-auto">
                 {launchConfigs.map((cfg) => {
@@ -1147,7 +1224,10 @@ function AgentPortal() {
                     >
                       <button
                         type="button"
-                        onClick={() => applyEntry(cfg, { asPreset: true })}
+                        onClick={() => {
+                          applyEntry(cfg, { asPreset: true })
+                          setLaunchModalOpen(true)
+                        }}
                         className="flex-1 min-w-0 text-left truncate hover:text-blue-300"
                         title={
                           (cfg.description ? `${cfg.description}\n\n` : '') +
@@ -1177,54 +1257,54 @@ function AgentPortal() {
 
           {launchHistory.length > 0 && (
             <div className="p-3 border-b border-gray-700">
-              <div className="flex items-center gap-2 text-xs uppercase text-gray-400 mb-2">
-                <History className="w-3.5 h-3.5" /> Recent launches
-              </div>
-              <div className="space-y-1 max-h-40 overflow-y-auto">
-                {launchHistory.map((entry) => (
-                  <div
-                    key={makeHistoryKey(entry)}
-                    className="flex items-center gap-1 text-xs bg-gray-800 rounded px-2 py-1 border border-gray-700"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => applyEntry(entry)}
-                      className="flex-1 min-w-0 text-left font-mono truncate text-gray-200 hover:text-blue-300"
-                      title="Use this launch"
+              <button
+                type="button"
+                onClick={() => setShowRecent((v) => !v)}
+                className="w-full flex items-center gap-2 text-xs uppercase text-gray-400 hover:text-gray-200"
+                aria-expanded={showRecent}
+              >
+                {showRecent ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+                <History className="w-3.5 h-3.5" />
+                <span>Recent launches</span>
+                <span className="text-gray-500 normal-case">({launchHistory.length})</span>
+              </button>
+              {showRecent && (
+                <div className="space-y-1 max-h-40 overflow-y-auto mt-2">
+                  {launchHistory.map((entry) => (
+                    <div
+                      key={makeHistoryKey(entry)}
+                      className="flex items-center gap-1 text-xs bg-gray-800 rounded px-2 py-1 border border-gray-700"
                     >
-                      {entry.command} {entry.argsString}
-                      {normalizeSandboxMode(entry) !== 'off' && ` [${normalizeSandboxMode(entry)}]`}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeHistoryEntry(entry)}
-                      className="p-0.5 text-gray-500 hover:text-red-400 flex-shrink-0"
-                      title="Remove from history"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          applyEntry(entry)
+                          setLaunchModalOpen(true)
+                        }}
+                        className="flex-1 min-w-0 text-left font-mono truncate text-gray-200 hover:text-blue-300"
+                        title="Use this launch"
+                      >
+                        {entry.command} {entry.argsString}
+                        {normalizeSandboxMode(entry) !== 'off' && ` [${normalizeSandboxMode(entry)}]`}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeHistoryEntry(entry)}
+                        className="p-0.5 text-gray-500 hover:text-red-400 flex-shrink-0"
+                        title="Remove from history"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-
-          <div className="flex-1 p-3 space-y-2">
-            <div className="text-xs uppercase text-gray-400 mb-1">Your processes</div>
-            {listError && <div className="text-xs text-red-300">{listError}</div>}
-            {processes.length === 0 && !listError && (
-              <div className="text-xs text-gray-500">No processes yet.</div>
-            )}
-            {processes.map((p) => (
-              <ProcessListItem
-                key={p.id}
-                proc={p}
-                isSelected={p.id === selectedId}
-                onSelect={setSelectedId}
-                onRename={renameProcess}
-              />
-            ))}
-          </div>
         </div>
 
         {/* Right column: stream view */}
