@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot } from 'lucide-react'
+import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -520,6 +520,21 @@ function AgentPortal() {
 
   return (
     <div className="flex flex-col h-screen w-full bg-gray-900 text-gray-200">
+      <div
+        role="alert"
+        className="flex items-center gap-3 px-4 py-2 bg-red-900/70 border-b-2 border-red-500 text-red-100 text-sm"
+      >
+        <AlertTriangle className="w-5 h-5 flex-shrink-0 text-red-300" />
+        <div className="flex-1 min-w-0">
+          <span className="font-semibold uppercase tracking-wide text-red-200">Dev preview</span>
+          <span className="mx-2 opacity-60">·</span>
+          <span>
+            This page gives the browser direct access to launch and control host
+            processes. <strong>Do not enable in production.</strong> No allow-list,
+            quotas, or audit trail are in place yet.
+          </span>
+        </div>
+      </div>
       <header className="flex items-center justify-between p-3 bg-gray-800 border-b border-gray-700">
         <div className="flex items-center gap-3">
           <button
@@ -532,7 +547,7 @@ function AgentPortal() {
           <div>
             <h1 className="text-lg font-semibold">Agent Portal</h1>
             <p className="text-xs text-gray-400">
-              Launch host processes and stream their output. Dev preview — no access controls yet.
+              Launch host processes and stream their output.
             </p>
           </div>
         </div>
