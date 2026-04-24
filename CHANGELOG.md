@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #558 - 2026-04-24
+- Fix: nvm/venv/uv-installed CLIs (e.g. `cline`) no longer fail with
+  a misleading exit 127. The launched binary's own directory is now
+  prepended to the child `PATH` so the shebang interpreter
+  (`/usr/bin/env node`, `/usr/bin/env python`, …) can be resolved
+  alongside the binary. Smallest path extension that fixes the
+  common shebang-interpreter case without re-introducing the full
+  server `PATH`.
+- Fix: PTY-mode race where `output_raw` chunks arrived during
+  history replay before XtermView mounted, dropping early stdout/
+  stderr silently. The WS handler now buffers raw chunks in a ref
+  and XtermView flushes them on mount.
+- Non-zero process exits now surface as a toast with the exit code,
+  with a hint pointing at the PATH issue when the code is 127.
 - Agent Portal UX refresh: launch form moves from the cramped left
   panel into a roomy modal popup opened by a "New launch" button.
   Left panel now shows only active sessions and the presets library,

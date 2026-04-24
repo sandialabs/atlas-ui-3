@@ -57,6 +57,27 @@ child. The child's `PATH` stays minimal — the resolution is a
 one-shot parent-side lookup, not a leak of the server's full
 search path into the child environment.
 
+### Command-dir on the child PATH
+
+Resolving the binary is not enough on its own. nvm CLIs, venv
+scripts, and `uv`-installed tools usually have a shebang like
+`#!/usr/bin/env node` or `#!/usr/bin/env python`. The kernel
+hands the shebang off to `/usr/bin/env`, which then looks up the
+named interpreter on the **child's** `PATH`. With the pinned
+default that lookup fails and the user sees a misleading exit
+127 with the shebang interpreter's `: No such file or directory`
+in stderr.
+
+Mitigation: after the parent resolves the command to an absolute
+path, the manager prepends that command's own directory to the
+child `PATH` (in `_build_child_env(extra_path_dirs=...)`). For an
+nvm-installed `cline` that means `~/.nvm/.../bin` is on the
+child PATH, so `env node` works. The child still cannot reach
+arbitrary other dirs — only the one alongside the binary it was
+asked to launch. This is the smallest path extension that fixes
+the common shebang-interpreter case without re-introducing the
+full server `PATH`.
+
 If the lookup fails, the manager raises `FileNotFoundError` with
 a message that names the command and points the user at "use an
 absolute path, or install it on the server PATH" — far more

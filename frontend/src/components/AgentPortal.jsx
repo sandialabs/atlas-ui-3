@@ -309,7 +309,7 @@ function StreamView({ process, chunks }) {
 // xterm.js terminal view for pty-backed processes. Registers itself
 // on `termHandleRef` so the parent WebSocket handler can push raw
 // bytes in, and sends keystrokes + resize events back over the WS.
-function XtermView({ process, wsRef, termHandleRef }) {
+function XtermView({ process, wsRef, termHandleRef, pendingRawRef }) {
   const hostRef = useRef(null)
   const termRef = useRef(null)
   const fitRef = useRef(null)
@@ -365,7 +365,7 @@ function XtermView({ process, wsRef, termHandleRef }) {
     window.addEventListener('resize', doFit)
 
     // Expose a writer so the WS handler can push bytes in.
-    termHandleRef.current = {
+    const writer = {
       write(base64Data) {
         const bin = atob(base64Data)
         const bytes = new Uint8Array(bin.length)
@@ -373,6 +373,13 @@ function XtermView({ process, wsRef, termHandleRef }) {
         term.write(bytes)
       },
       clear() { term.clear() },
+    }
+    termHandleRef.current = writer
+
+    // Flush any raw chunks the WS buffered before this xterm existed.
+    if (pendingRawRef && pendingRawRef.current && pendingRawRef.current.length > 0) {
+      for (const data of pendingRawRef.current) writer.write(data)
+      pendingRawRef.current = []
     }
 
     return () => {
@@ -383,7 +390,7 @@ function XtermView({ process, wsRef, termHandleRef }) {
       onResizeDisp.dispose()
       term.dispose()
     }
-  }, [process?.id, wsRef, termHandleRef])
+  }, [process?.id, wsRef, termHandleRef, pendingRawRef])
 
   return (
     <div className="flex-1 min-h-0 w-full bg-black rounded-lg overflow-hidden p-2">
@@ -429,6 +436,10 @@ function AgentPortal() {
   const [launchHistory, setLaunchHistory] = useState(() => loadLaunchHistory())
   const wsRef = useRef(null)
   const termHandleRef = useRef(null)
+  // PTY-mode race buffer: raw chunks may arrive on the WS during the
+  // history replay before the XtermView mounts and registers its
+  // writer. Buffer them here and flush when the writer appears.
+  const pendingRawRef = useRef([])
 
   useEffect(() => {
     fetch('/api/agent-portal/capabilities', { credentials: 'include' })
@@ -692,6 +703,7 @@ function AgentPortal() {
     }
     setChunks([])
     setSelectedProcess(null)
+    pendingRawRef.current = []
     if (!selectedId) return
 
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
@@ -704,7 +716,23 @@ function AgentPortal() {
         const msg = JSON.parse(evt.data)
         if (msg.type === 'process_info' || msg.type === 'process_end') {
           setSelectedProcess(msg.process)
-          if (msg.type === 'process_end') fetchProcesses()
+          if (msg.type === 'process_end') {
+            fetchProcesses()
+            // Loud heads-up on a non-zero exit so the user is not left
+            // wondering why the process disappeared. Exit 127 in
+            // particular is almost always "binary or its shebang
+            // interpreter not on PATH".
+            const exit = msg.process?.exit_code
+            if (typeof exit === 'number' && exit !== 0) {
+              const label = msg.process.display_name
+                || msg.process.command
+                || 'process'
+              const hint = exit === 127
+                ? '\nHint: exit 127 usually means a binary or its shebang interpreter is missing from the child PATH. The portal pins PATH to /usr/local/bin:/usr/bin:/bin (plus the command’s own dir).'
+                : ''
+              toast.error(`${label} exited with code ${exit}.${hint}`, { duration: 8000 })
+            }
+          }
         } else if (msg.type === 'output') {
           setChunks((prev) => [...prev, {
             stream: msg.stream,
@@ -712,9 +740,15 @@ function AgentPortal() {
             timestamp: msg.timestamp,
           }])
         } else if (msg.type === 'output_raw') {
-          // pty mode: push raw bytes straight into xterm.js
+          // pty mode: push raw bytes straight into xterm.js, or buffer
+          // for flush once the XtermView mounts (history replay races
+          // with xterm initialization on a fast-arriving stream).
           const h = termHandleRef.current
-          if (h) h.write(msg.data)
+          if (h) {
+            h.write(msg.data)
+          } else {
+            pendingRawRef.current.push(msg.data)
+          }
         }
       } catch {
         // Ignore parse failures
@@ -727,7 +761,7 @@ function AgentPortal() {
     return () => {
       try { ws.close() } catch { /* ignore */ }
     }
-  }, [selectedId, fetchProcesses])
+  }, [selectedId, fetchProcesses, toast])
 
   const handleLaunch = async (e) => {
     e.preventDefault()
@@ -1339,6 +1373,7 @@ function AgentPortal() {
                 process={selectedProcess}
                 wsRef={wsRef}
                 termHandleRef={termHandleRef}
+                pendingRawRef={pendingRawRef}
               />
             ) : (
               <StreamView process={selectedProcess} chunks={chunks} />

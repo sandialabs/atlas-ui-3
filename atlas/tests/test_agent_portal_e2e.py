@@ -203,7 +203,10 @@ def test_env_isolation_end_to_end(app_client: TestClient, monkeypatch: pytest.Mo
     assert "this-must-not-leak" not in stdout
     assert "likewise-this-must-not-leak" not in stdout
     # PATH is pinned; should be the hardcoded value
-    assert "PATH=/usr/local/bin:/usr/bin:/bin" in stdout
+    # PATH ends with the pinned defaults; the resolved command's
+    # directory is prepended so shebang interpreters resolve.
+    path_line = next(line for line in stdout.splitlines() if line.startswith("PATH="))
+    assert path_line.endswith("/usr/local/bin:/usr/bin:/bin"), path_line
 
 
 def test_bare_command_resolves_via_server_path_end_to_end(

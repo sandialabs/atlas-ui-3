@@ -83,6 +83,52 @@ async def test_bare_command_resolves_via_server_path(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_command_dir_is_added_to_child_path(tmp_path, monkeypatch):
+    """The launched binary's own directory must be on the child PATH so
+    that a shebang interpreter (``node``, ``python``, etc.) installed
+    alongside it can be resolved by ``/usr/bin/env <interp>``.
+
+    Without this, nvm/venv/uv-installed CLIs fail with a misleading
+    exit 127 even though the binary itself was found.
+    """
+    import stat
+
+    # Put two files in the same dir: a "binary" (a shell script that
+    # tries to run our fake "interp"), and the "interp" itself.
+    bin_dir = tmp_path / "tools_bin"
+    bin_dir.mkdir()
+    interp = bin_dir / "fake-interp"
+    interp.write_text("#!/bin/sh\necho interp-found\n")
+    interp.chmod(interp.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    binary = bin_dir / "mytool"
+    # Mimic an nvm-style shebang: /usr/bin/env <interp>. env will look
+    # up `fake-interp` on the *child's* PATH, which by default is
+    # pinned and would not include this dir.
+    binary.write_text("#!/usr/bin/env fake-interp\n")
+    binary.chmod(binary.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    # Server PATH does NOT include bin_dir; user passes the absolute
+    # path so the parent finds it without shutil.which.
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+
+    manager = ProcessManager()
+    managed = await manager.launch(command=str(binary))
+
+    for _ in range(50):
+        if managed.status != ProcessStatus.RUNNING:
+            break
+        await asyncio.sleep(0.05)
+
+    assert managed.status == ProcessStatus.EXITED, (
+        f"expected EXITED, got {managed.status}; "
+        f"history: {[(c.stream, c.text) for c in managed.history]}"
+    )
+    assert managed.exit_code == 0
+    stdout = [c.text for c in managed.history if c.stream == "stdout"]
+    assert "interp-found" in stdout
+
+
+@pytest.mark.asyncio
 async def test_missing_bare_command_raises_with_clear_message(monkeypatch):
     """When a bare command isn't on the server's PATH, the error should
     name the command and say where to look, not just echo ENOENT."""
@@ -315,7 +361,10 @@ async def test_child_env_is_isolated(monkeypatch):
     stdout = "\n".join(c.text for c in managed.history if c.stream == "stdout")
     env_keys = {line.split("=", 1)[0] for line in stdout.splitlines() if "=" in line}
 
-    assert "PATH=/usr/local/bin:/usr/bin:/bin" in stdout
+    # PATH ends with the pinned defaults; the resolved command's
+    # directory is prepended so shebang interpreters can be found.
+    path_line = next(line for line in stdout.splitlines() if line.startswith("PATH="))
+    assert path_line.endswith("/usr/local/bin:/usr/bin:/bin"), path_line
     assert "HOME" in env_keys
     assert "LANG" in env_keys
     for denied in secrets:

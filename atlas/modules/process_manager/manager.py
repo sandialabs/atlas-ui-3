@@ -109,7 +109,11 @@ def _is_denied_env_key(key: str) -> bool:
     return False
 
 
-def _build_child_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+def _build_child_env(
+    extra: Optional[Dict[str, str]] = None,
+    *,
+    extra_path_dirs: Optional[List[str]] = None,
+) -> Dict[str, str]:
     """Build a minimal env for a launched child process.
 
     Copies a small allow-list of benign variables from ``os.environ``,
@@ -117,6 +121,13 @@ def _build_child_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     ``extra`` on top, then strips any key matching the secret-shaped
     deny-list. Denied keys are logged at INFO so a caller can tell
     their addition was dropped.
+
+    ``extra_path_dirs`` are prepended to the pinned ``PATH``. The launch
+    path uses this to add the directory of the resolved command so that
+    a shebang interpreter alongside the binary (``node`` for an
+    nvm-installed CLI, ``python`` for a venv, etc.) can be found by
+    ``/usr/bin/env <interp>`` — without that, well-formed CLIs from
+    nvm/venv/uv fail with the misleading exit 127.
 
     TODO: expose a user-supplied env dict on the launch request schema
     once the UI needs it; wiring already accepts it through ``extra``.
@@ -129,7 +140,13 @@ def _build_child_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     for key, value in os.environ.items():
         if key.startswith("LC_"):
             env[key] = value
-    env["PATH"] = _ENV_FIXED_PATH
+    path_parts: List[str] = []
+    if extra_path_dirs:
+        for d in extra_path_dirs:
+            if d and d not in path_parts:
+                path_parts.append(d)
+    path_parts.extend(_ENV_FIXED_PATH.split(":"))
+    env["PATH"] = ":".join(path_parts)
     if extra:
         env.update(extra)
 
@@ -455,7 +472,19 @@ class ProcessManager:
             spawn_args = systemd_args + ["--", spawn_cmd, *spawn_args]
             spawn_cmd = "systemd-run"
 
-        proc_env = _build_child_env(extra=env)
+        # Add the resolved command's directory to the child PATH. This
+        # lets a shebang interpreter alongside the binary (node for an
+        # nvm CLI, python for a venv, uv-installed tools, ...) be found
+        # by /usr/bin/env <interp>; without it, those CLIs hit a
+        # misleading exit 127 because the pinned PATH doesn't see
+        # ~/.nvm/.../bin or .venv/bin. ``command`` is absolute by this
+        # point — either the user passed an absolute path, or shutil
+        # .which resolved a bare name above.
+        cmd_dir = os.path.dirname(command) if os.path.isabs(command) else None
+        proc_env = _build_child_env(
+            extra=env,
+            extra_path_dirs=[cmd_dir] if cmd_dir else None,
+        )
         # Pass extra writable paths through to the sandbox wrapper via
         # env var so they can be granted write access alongside cwd.
         normalized_extra: List[str] = []
