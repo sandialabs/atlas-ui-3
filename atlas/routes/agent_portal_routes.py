@@ -318,7 +318,9 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
             if exc and not isinstance(exc, asyncio.CancelledError):
                 logger.error(
                     "agent_portal stream error process=%s: %s",
-                    process_id, exc, exc_info=exc,
+                    sanitize_for_logging(process_id),
+                    sanitize_for_logging(exc),
+                    exc_info=exc,
                 )
     finally:
         for t in (output_task, input_task):
@@ -327,4 +329,5 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
         try:
             await websocket.close()
         except Exception:
+            # Socket already closed by peer or framework — nothing to do.
             pass

@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import AsyncIterator, Deque, Dict, List, Optional
 
+from atlas.core.log_sanitizer import sanitize_for_logging
+
 logger = logging.getLogger(__name__)
 
 # Strip ANSI CSI, OSC, and other escape sequences. TUIs emit cursor
@@ -49,6 +51,9 @@ def _strip_ansi(text: str) -> str:
     cleaned = cleaned.replace("\x08", "").replace("\x0b", "").replace("\x0c", "")
     cleaned = cleaned.replace("\x07", "")  # BEL
     return cleaned
+
+
+_ISOLATION_CAPS: Optional[Dict[str, bool]] = None
 
 
 def probe_isolation_capabilities() -> Dict[str, bool]:
@@ -93,9 +98,6 @@ def probe_isolation_capabilities() -> Dict[str, bool]:
 
     _ISOLATION_CAPS = caps
     return caps
-
-
-_ISOLATION_CAPS: Optional[Dict[str, bool]] = None
 
 
 class ProcessStatus(str, Enum):
@@ -184,7 +186,11 @@ class ProcessManager:
         try:
             os.write(master_fd, data)
         except OSError as e:
-            logger.warning("pty write failed for %s: %s", process_id, e)
+            logger.warning(
+                "pty write failed for %s: %s",
+                sanitize_for_logging(process_id),
+                sanitize_for_logging(e),
+            )
 
     def resize_pty(self, process_id: str, cols: int, rows: int) -> None:
         """Resize the pty window for a running process."""
@@ -200,7 +206,11 @@ class ProcessManager:
                 struct.pack("HHHH", rows, cols, 0, 0),
             )
         except OSError as e:
-            logger.debug("pty resize failed for %s: %s", process_id, e)
+            logger.debug(
+                "pty resize failed for %s: %s",
+                sanitize_for_logging(process_id),
+                sanitize_for_logging(e),
+            )
 
     def list_processes(self, user_email: Optional[str] = None) -> List[dict]:
         items = list(self._processes.values())
@@ -431,6 +441,7 @@ class ProcessManager:
             try:
                 os.close(slave_fd)
             except OSError:
+                # Already closed or race with child — nothing to do.
                 pass
 
         managed.pid = asyncio_proc.pid
@@ -471,7 +482,10 @@ class ProcessManager:
 
         logger.info(
             "agent_portal process launched id=%s pid=%s user=%s cmd=%s",
-            process_id, asyncio_proc.pid, user_email, command,
+            sanitize_for_logging(process_id),
+            asyncio_proc.pid,
+            sanitize_for_logging(user_email),
+            sanitize_for_logging(command),
         )
         return managed
 
@@ -491,11 +505,16 @@ class ProcessManager:
                 try:
                     os.killpg(os.getpgid(asyncio_proc.pid), signal.SIGTERM)
                 except ProcessLookupError:
+                    # Process group already gone; treat cancellation as done.
                     pass
             else:
                 asyncio_proc.terminate()
         except Exception as e:
-            logger.warning("Error sending SIGTERM to %s: %s", process_id, e)
+            logger.warning(
+                "Error sending SIGTERM to %s: %s",
+                sanitize_for_logging(process_id),
+                sanitize_for_logging(e),
+            )
 
         async def _kill_if_still_alive():
             try:
@@ -507,11 +526,16 @@ class ProcessManager:
                         try:
                             os.killpg(os.getpgid(asyncio_proc.pid), signal.SIGKILL)
                         except ProcessLookupError:
+                            # Process group already gone; no-op.
                             pass
                     else:
                         asyncio_proc.kill()
                 except Exception as e:
-                    logger.warning("Error sending SIGKILL to %s: %s", process_id, e)
+                    logger.warning(
+                        "Error sending SIGKILL to %s: %s",
+                        sanitize_for_logging(process_id),
+                        sanitize_for_logging(e),
+                    )
 
         asyncio.create_task(_kill_if_still_alive())
         managed.status = ProcessStatus.CANCELLED
@@ -598,10 +622,15 @@ class ProcessManager:
         try:
             loop.add_reader(master_fd, _on_ready)
         except Exception as e:
-            logger.warning("pty add_reader failed for %s: %s", managed.id, e)
+            logger.warning(
+                "pty add_reader failed for %s: %s",
+                sanitize_for_logging(managed.id),
+                sanitize_for_logging(e),
+            )
             try:
                 os.close(master_fd)
             except OSError:
+                # fd already closed — expected during teardown races.
                 pass
             return
 
@@ -611,11 +640,13 @@ class ProcessManager:
             try:
                 loop.remove_reader(master_fd)
             except Exception:
+                # Reader may already be removed if the child closed the pty first.
                 pass
             self._pty_masters.pop(managed.id, None)
             try:
                 os.close(master_fd)
             except OSError:
+                # fd already closed — expected during teardown.
                 pass
 
     async def _wait_and_finalize(
@@ -643,6 +674,7 @@ class ProcessManager:
                 try:
                     q.put_nowait(None)
                 except asyncio.QueueFull:
+                    # Subscriber queue full; slow consumer will notice on next get().
                     pass
             self._asyncio_procs.pop(managed.id, None)
 
