@@ -334,7 +334,7 @@ class ChatService:
             return
 
         owner = owner_lookup(conversation_id)
-        if owner is not None and owner.lower() != user_email.lower():
+        if owner is not None and owner.strip().lower() != user_email.strip().lower():
             logger.warning(
                 "Rejected chat for conversation %s: not owned by user %s",
                 sanitize_for_logging(conversation_id),

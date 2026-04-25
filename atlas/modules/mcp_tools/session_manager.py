@@ -83,7 +83,7 @@ class MCPSessionManager:
 
         Unauthenticated or legacy callers use the empty-string scope.
         """
-        return user_email.lower() if user_email else ""
+        return user_email.strip().lower() if user_email else ""
 
     async def acquire(
         self,
