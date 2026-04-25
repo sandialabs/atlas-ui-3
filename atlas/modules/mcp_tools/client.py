@@ -66,6 +66,9 @@ def _is_task_forbidden_result(result: Any) -> bool:
 
 
 _SESSION_TERMINATED_MARKERS = ("session terminated", "session not found", "invalid session id")
+_DEFAULT_USER_CLIENT_CACHE_MAX_ENTRIES = 1000
+_DEFAULT_USER_CLIENT_CACHE_IDLE_TTL_SECONDS = 3600
+_DEFAULT_USER_CLIENT_CACHE_SWEEP_INTERVAL_SECONDS = 300
 
 
 def _is_session_terminated_error(exc: BaseException) -> bool:
@@ -252,15 +255,27 @@ class MCPToolManager:
         self._task_timeout = app_settings.mcp_task_timeout
         self._user_client_cache_max_entries = max(
             1,
-            int(getattr(app_settings, "mcp_user_client_cache_max_entries", 1000)),
+            int(getattr(app_settings, "mcp_user_client_cache_max_entries", _DEFAULT_USER_CLIENT_CACHE_MAX_ENTRIES)),
         )
         self._user_client_cache_idle_ttl_seconds = max(
             1,
-            int(getattr(app_settings, "mcp_user_client_cache_idle_ttl_seconds", 3600)),
+            int(
+                getattr(
+                    app_settings,
+                    "mcp_user_client_cache_idle_ttl_seconds",
+                    _DEFAULT_USER_CLIENT_CACHE_IDLE_TTL_SECONDS,
+                )
+            ),
         )
         self._user_client_cache_sweep_interval_seconds = max(
             1,
-            int(getattr(app_settings, "mcp_user_client_cache_sweep_interval_seconds", 300)),
+            int(
+                getattr(
+                    app_settings,
+                    "mcp_user_client_cache_sweep_interval_seconds",
+                    _DEFAULT_USER_CLIENT_CACHE_SWEEP_INTERVAL_SECONDS,
+                )
+            ),
         )
         self._user_client_sweeper_task: Optional[asyncio.Task] = None
 
@@ -1546,11 +1561,11 @@ class MCPToolManager:
         if not hasattr(self, "_user_client_last_used"):
             self._user_client_last_used = {}
         if not hasattr(self, "_user_client_cache_max_entries"):
-            self._user_client_cache_max_entries = 1000
+            self._user_client_cache_max_entries = _DEFAULT_USER_CLIENT_CACHE_MAX_ENTRIES
         if not hasattr(self, "_user_client_cache_idle_ttl_seconds"):
-            self._user_client_cache_idle_ttl_seconds = 3600
+            self._user_client_cache_idle_ttl_seconds = _DEFAULT_USER_CLIENT_CACHE_IDLE_TTL_SECONDS
         if not hasattr(self, "_user_client_cache_sweep_interval_seconds"):
-            self._user_client_cache_sweep_interval_seconds = 300
+            self._user_client_cache_sweep_interval_seconds = _DEFAULT_USER_CLIENT_CACHE_SWEEP_INTERVAL_SECONDS
         if not hasattr(self, "_user_client_sweeper_task"):
             self._user_client_sweeper_task = None
 
@@ -1602,9 +1617,12 @@ class MCPToolManager:
             return
 
         try:
-            result = close(None, None, None)
-            if inspect.isawaitable(result):
-                await result
+            if inspect.iscoroutinefunction(close):
+                await close(None, None, None)
+            else:
+                result = close(None, None, None)
+                if inspect.isawaitable(result):
+                    await result
         except Exception as e:
             logger.debug("Error closing cached MCP client %s: %s", cache_key, e)
 
@@ -1642,7 +1660,8 @@ class MCPToolManager:
                 pass
 
     async def _user_client_cache_sweeper(self) -> None:
-        while True:
+        current_task = asyncio.current_task()
+        while self._user_client_sweeper_task is current_task:
             await asyncio.sleep(self._user_client_cache_sweep_interval_seconds)
             await self._sweep_idle_user_clients_once()
 
