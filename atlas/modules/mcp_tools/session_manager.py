@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional, Protocol, Tuple
 
 from fastmcp import Client
 
+from atlas.core.user_identity import normalize_user_email
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,14 +79,6 @@ class MCPSessionManager:
         # Reverse index: conversation_id → set of (user_email, conversation_id, server_name) keys
         self._conv_index: Dict[str, set] = {}
 
-    @staticmethod
-    def _normalize_user_email(user_email: Optional[str]) -> str:
-        """Normalize user emails for case-insensitive keying.
-
-        Unauthenticated or legacy callers use the empty-string scope.
-        """
-        return user_email.strip().lower() if user_email else ""
-
     async def acquire(
         self,
         conversation_id: str,
@@ -102,7 +96,7 @@ class MCPSessionManager:
         ``client.is_connected()`` and automatically cleaned up before
         opening a fresh session.
         """
-        user_scope = self._normalize_user_email(user_email)
+        user_scope = normalize_user_email(user_email)
         key = (user_scope, conversation_id, server_name)
 
         # Fast path: check under global lock (no I/O)
@@ -161,7 +155,7 @@ class MCPSessionManager:
         user_email: Optional[str] = None,
     ) -> None:
         """Close and remove a specific session."""
-        key = (self._normalize_user_email(user_email), conversation_id, server_name)
+        key = (normalize_user_email(user_email), conversation_id, server_name)
         async with self._lock:
             session = self._sessions.pop(key, None)
             self._key_locks.pop(key, None)
@@ -183,16 +177,11 @@ class MCPSessionManager:
     ) -> None:
         """Close sessions for a conversation (O(1) lookup via reverse index)."""
         to_close: list[ManagedSession] = []
-        user_scope = self._normalize_user_email(user_email)
+        user_scope = normalize_user_email(user_email) if user_email else None
         async with self._lock:
-            conv_keys = self._conv_index.get(conversation_id, set())
-            if user_email:
-                keys_to_remove = {k for k in conv_keys if k[0] == user_scope}
-                conv_keys.difference_update(keys_to_remove)
-                if not conv_keys:
-                    self._conv_index.pop(conversation_id, None)
-            else:
-                keys_to_remove = self._conv_index.pop(conversation_id, set())
+            keys_to_remove = self._pop_release_keys_locked(
+                conversation_id, user_scope
+            )
             for k in keys_to_remove:
                 session = self._sessions.pop(k, None)
                 self._key_locks.pop(k, None)
@@ -208,3 +197,23 @@ class MCPSessionManager:
                 len(to_close),
                 conversation_id,
             )
+
+    def _pop_release_keys_locked(
+        self,
+        conversation_id: str,
+        user_scope: Optional[str],
+    ) -> set[Tuple[str, str, str]]:
+        """Return and remove indexed keys for a user scope, or all users."""
+        conv_keys = self._conv_index.get(conversation_id)
+        if not conv_keys:
+            return set()
+
+        if user_scope is None:
+            self._conv_index.pop(conversation_id, None)
+            return set(conv_keys)
+
+        keys_to_remove = {k for k in conv_keys if k[0] == user_scope}
+        conv_keys.difference_update(keys_to_remove)
+        if not conv_keys:
+            self._conv_index.pop(conversation_id, None)
+        return keys_to_remove

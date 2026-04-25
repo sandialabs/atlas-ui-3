@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
+from atlas.core.user_identity import normalize_user_email
 from atlas.domain.errors import AuthorizationError, DomainError
 from atlas.domain.messages.models import Message, MessageRole, MessageType, ToolResult
 from atlas.domain.sessions.models import Session
@@ -334,7 +335,9 @@ class ChatService:
             return
 
         owner = owner_lookup(conversation_id)
-        if owner is not None and owner.strip().lower() != user_email.strip().lower():
+        if owner is not None and normalize_user_email(owner) != normalize_user_email(
+            user_email
+        ):
             logger.warning(
                 "Rejected chat for conversation %s: not owned by user %s",
                 sanitize_for_logging(conversation_id),
