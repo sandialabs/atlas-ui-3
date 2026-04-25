@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #559 - 2026-04-25
+- MCP cross-conversation isolation: cache FastMCP HTTP `Client` instances by
+  `(user_email, server_name, conversation_id)` so each conversation gets its
+  own MCP session ID and FastMCP nesting counter. Fixes the
+  "nesting counter should be 0" reconnect failure that surfaced after a
+  shared client's session task died, and isolates stateful HTTP servers
+  (e.g. the per-session `PrinterService`) across the same user's conversations.
+- `handle_reset_session` now releases the previous conversation's MCP
+  sessions and per-conversation HTTP clients before generating a new
+  `conversation_id` — previously each "New chat" click orphaned the old
+  `(user, server, old_conv_id)` cache entries and `MCPSessionManager` sessions.
+- `get_prompt` now mirrors `call_tool`'s auth routing on HTTP MCP servers
+  with `auth_type` of oauth/jwt/bearer/api_key: requests go through the
+  user's stored token instead of the admin/server-default token, and missing
+  tokens raise `AuthenticationRequiredException` with the OAuth start URL.
+- `_get_or_create_user_http_client` now requires a non-empty
+  `conversation_id` (a `None` value would alias every caller into one
+  shared cache slot, recreating the bug this cache exists to prevent).
+- Added integration-style tests using a faithful `FakeFastMCPClient` that
+  drives the real `MCPSessionManager` and reproduces the pre-fix nesting
+  counter failure mode, plus unit coverage for `release_sessions`'s
+  per-conversation eviction.
+
 ### PR #557 - 2026-04-22
 - MCP task-augmented execution fixes: discovery-time seeding of task-forbidden
   cache from per-tool execution.taskSupport metadata (SEP-1686), and runtime
