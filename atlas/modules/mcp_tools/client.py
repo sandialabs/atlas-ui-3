@@ -1662,7 +1662,7 @@ class MCPToolManager:
         self,
         server_name: str,
         user_email: str,
-        conversation_id: Optional[str] = None,
+        conversation_id: str,
     ) -> Client:
         """Get or create a per-user/per-conversation HTTP client for session isolation.
 
@@ -1673,13 +1673,20 @@ class MCPToolManager:
         Args:
             server_name: Name of the MCP server
             user_email: User's email address
-            conversation_id: Conversation scope for the client. Required to
-                avoid sharing one Client across multiple conversations of
-                the same user — see the comment on ``_user_clients`` for why.
+            conversation_id: Conversation scope for the client. Required:
+                a None value would collapse every caller for the same
+                (user, server) into a single shared cache slot, recreating
+                the cross-conversation aliasing bug this caching layer
+                exists to prevent.
 
         Returns:
             FastMCP Client instance for this (user, server, conversation) tuple
         """
+        if not conversation_id:
+            raise ValueError(
+                "conversation_id is required for per-user HTTP client cache "
+                "(falsy values would alias unrelated conversations together)"
+            )
         cache_key = (user_email.lower(), server_name, conversation_id)
 
         async with self._user_clients_lock:
