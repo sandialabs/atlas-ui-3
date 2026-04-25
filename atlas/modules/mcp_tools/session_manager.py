@@ -79,6 +79,10 @@ class MCPSessionManager:
 
     @staticmethod
     def _normalize_user_email(user_email: Optional[str]) -> str:
+        """Normalize user emails for case-insensitive keying.
+
+        Unauthenticated or legacy callers use the empty-string scope.
+        """
         return user_email.lower() if user_email else ""
 
     async def acquire(

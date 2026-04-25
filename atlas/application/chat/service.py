@@ -326,9 +326,10 @@ class ChatService:
         if not user_email or self.conversation_repository is None:
             return
 
-        owner_lookup = getattr(
-            self.conversation_repository, "get_conversation_owner", None
-        )
+        # Some tests and headless callers inject minimal conversation repositories.
+        # If ownership lookup is unavailable, save_conversation still rejects
+        # cross-user updates before persistence.
+        owner_lookup = getattr(self.conversation_repository, "get_conversation_owner", None)
         if owner_lookup is None:
             return
 
