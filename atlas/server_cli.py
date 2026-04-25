@@ -92,8 +92,10 @@ def run_server(args: argparse.Namespace) -> int:
 
     # Import the FastAPI app
     from atlas.main import app
+    from atlas.modules.config import config_manager
 
     print(f"Starting Atlas server on {host}:{port}")
+    ws_keepalive_interval = config_manager.app_settings.websocket_keepalive_interval_seconds
 
     if args.reload:
         print("Warning: --reload is enabled. This is not recommended for production.")
@@ -103,6 +105,8 @@ def run_server(args: argparse.Namespace) -> int:
             port=port,
             reload=True,
             workers=1,  # reload doesn't support multiple workers
+            ws_ping_interval=ws_keepalive_interval,
+            ws_ping_timeout=ws_keepalive_interval,
         )
     else:
         uvicorn.run(
@@ -110,6 +114,8 @@ def run_server(args: argparse.Namespace) -> int:
             host=host,
             port=port,
             workers=args.workers,
+            ws_ping_interval=ws_keepalive_interval,
+            ws_ping_timeout=ws_keepalive_interval,
         )
 
     return 0

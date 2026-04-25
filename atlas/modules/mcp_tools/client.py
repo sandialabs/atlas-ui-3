@@ -2,6 +2,7 @@
 
 import asyncio
 import contextvars
+import inspect
 import json
 import logging
 import os
@@ -221,6 +222,7 @@ class MCPToolManager:
         # FastMCP refuses to reconnect ("nesting counter should be 0 when
         # starting new session, got N").
         self._user_clients: Dict[tuple, Client] = {}
+        self._user_client_last_used: Dict[tuple, float] = {}
         self._user_clients_lock = asyncio.Lock()
 
         # Dictionary-based routing for elicitation so a shared Client can still deliver
@@ -248,6 +250,19 @@ class MCPToolManager:
         # Task timeout: seconds before switching to background task polling
         app_settings = config_manager.app_settings
         self._task_timeout = app_settings.mcp_task_timeout
+        self._user_client_cache_max_entries = max(
+            1,
+            int(getattr(app_settings, "mcp_user_client_cache_max_entries", 1000)),
+        )
+        self._user_client_cache_idle_ttl_seconds = max(
+            1,
+            int(getattr(app_settings, "mcp_user_client_cache_idle_ttl_seconds", 3600)),
+        )
+        self._user_client_cache_sweep_interval_seconds = max(
+            1,
+            int(getattr(app_settings, "mcp_user_client_cache_sweep_interval_seconds", 300)),
+        )
+        self._user_client_sweeper_task: Optional[asyncio.Task] = None
 
     def _get_min_log_level(self) -> int:
         """Get the minimum log level from environment or config."""
@@ -1526,6 +1541,126 @@ class MCPToolManager:
         auth_type = config.get("auth_type", "none")
         return auth_type in ("oauth", "jwt", "bearer", "api_key")
 
+    def _ensure_user_client_cache_state(self) -> None:
+        """Initialize cache bookkeeping for tests that bypass __init__."""
+        if not hasattr(self, "_user_client_last_used"):
+            self._user_client_last_used = {}
+        if not hasattr(self, "_user_client_cache_max_entries"):
+            self._user_client_cache_max_entries = 1000
+        if not hasattr(self, "_user_client_cache_idle_ttl_seconds"):
+            self._user_client_cache_idle_ttl_seconds = 3600
+        if not hasattr(self, "_user_client_cache_sweep_interval_seconds"):
+            self._user_client_cache_sweep_interval_seconds = 300
+        if not hasattr(self, "_user_client_sweeper_task"):
+            self._user_client_sweeper_task = None
+
+    def _touch_user_client_locked(self, cache_key: tuple) -> None:
+        """Mark a cached per-user client as recently used."""
+        self._ensure_user_client_cache_state()
+        self._user_client_last_used[cache_key] = time.time()
+
+    def _pop_user_client_entries_locked(self, keys: List[tuple]) -> List[tuple[tuple, Client]]:
+        """Remove cache entries and return clients that need closing."""
+        self._ensure_user_client_cache_state()
+        removed = []
+        for key in keys:
+            client = self._user_clients.pop(key, None)
+            self._user_client_last_used.pop(key, None)
+            if client is not None:
+                removed.append((key, client))
+        return removed
+
+    def _enforce_user_client_cache_limit_locked(self) -> List[tuple[tuple, Client]]:
+        """Evict least-recently-used clients until the cache is within bounds."""
+        self._ensure_user_client_cache_state()
+        excess = len(self._user_clients) - self._user_client_cache_max_entries
+        if excess <= 0:
+            return []
+
+        keys_by_age = sorted(
+            self._user_clients,
+            key=lambda key: self._user_client_last_used.get(key, 0),
+        )
+        return self._pop_user_client_entries_locked(keys_by_age[:excess])
+
+    async def _close_user_client_entry(
+        self,
+        cache_key: tuple,
+        client: Client,
+        *,
+        release_session: bool = True,
+    ) -> None:
+        """Close one cached FastMCP client and optionally its persistent session."""
+        if release_session and cache_key[2]:
+            try:
+                await self._session_manager.release(cache_key[2], cache_key[1])
+            except Exception as e:
+                logger.debug("Error releasing MCP session for evicted client %s: %s", cache_key, e)
+
+        close = getattr(client, "__aexit__", None)
+        if close is None:
+            return
+
+        try:
+            result = close(None, None, None)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as e:
+            logger.debug("Error closing cached MCP client %s: %s", cache_key, e)
+
+    async def _close_user_client_entries(
+        self,
+        entries: List[tuple[tuple, Client]],
+        *,
+        release_session: bool = True,
+    ) -> None:
+        for cache_key, client in entries:
+            await self._close_user_client_entry(
+                cache_key,
+                client,
+                release_session=release_session,
+            )
+
+    async def start_user_client_cache_sweeper(self) -> None:
+        """Start periodic idle eviction for cached per-user MCP clients."""
+        if self._user_client_sweeper_task and not self._user_client_sweeper_task.done():
+            return
+        self._user_client_sweeper_task = asyncio.create_task(
+            self._user_client_cache_sweeper(),
+            name="mcp-user-client-cache-sweeper",
+        )
+
+    async def stop_user_client_cache_sweeper(self) -> None:
+        """Stop the cached per-user MCP client idle eviction task."""
+        task = self._user_client_sweeper_task
+        self._user_client_sweeper_task = None
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def _user_client_cache_sweeper(self) -> None:
+        while True:
+            await asyncio.sleep(self._user_client_cache_sweep_interval_seconds)
+            await self._sweep_idle_user_clients_once()
+
+    async def _sweep_idle_user_clients_once(self) -> int:
+        """Evict cached clients idle longer than the configured TTL."""
+        cutoff = time.time() - self._user_client_cache_idle_ttl_seconds
+        async with self._user_clients_lock:
+            keys_to_remove = [
+                key for key in self._user_clients
+                if self._user_client_last_used.get(key, 0) <= cutoff
+            ]
+            removed = self._pop_user_client_entries_locked(keys_to_remove)
+
+        await self._close_user_client_entries(removed)
+        if removed:
+            logger.debug("Evicted %d idle per-user MCP HTTP client(s)", len(removed))
+        return len(removed)
+
     async def _get_user_client(
         self,
         server_name: str,
@@ -1551,11 +1686,13 @@ class MCPToolManager:
         cache_key = (user_email.lower(), server_name, conversation_id)
 
         # Check cache first, but validate token is still valid
+        removed = []
         async with self._user_clients_lock:
             if cache_key in self._user_clients:
                 # Verify the token is still valid before returning cached client
                 stored_token = token_storage.get_valid_token(user_email, server_name)
                 if stored_token is not None:
+                    self._touch_user_client_locked(cache_key)
                     return self._user_clients[cache_key]
                 else:
                     # Token expired or removed, invalidate cached client
@@ -1563,7 +1700,9 @@ class MCPToolManager:
                         f"Token expired for user on server '{server_name}', "
                         f"invalidating cached client"
                     )
-                    del self._user_clients[cache_key]
+                    removed = self._pop_user_client_entries_locked([cache_key])
+
+        await self._close_user_client_entries(removed)
 
         # Get user's token from storage
         logger.debug(f"[AUTH] Looking up token for server='{server_name}'")
@@ -1621,16 +1760,28 @@ class MCPToolManager:
                 )
 
             # Cache the client (re-check to avoid duplicate creation race)
+            close_created_client = False
+            evicted = []
             async with self._user_clients_lock:
                 if cache_key in self._user_clients:
                     # Another coroutine created it while we were building ours
-                    return self._user_clients[cache_key]
-                self._user_clients[cache_key] = client
+                    self._touch_user_client_locked(cache_key)
+                    close_created_client = True
+                    cached_client = self._user_clients[cache_key]
+                else:
+                    self._user_clients[cache_key] = client
+                    self._touch_user_client_locked(cache_key)
+                    evicted = self._enforce_user_client_cache_limit_locked()
+                    cached_client = client
+
+            if close_created_client:
+                await self._close_user_client_entry(cache_key, client, release_session=False)
+            await self._close_user_client_entries(evicted)
 
             logger.debug(
                 f"Created user-specific client for server '{server_name}' (auth_type={auth_type})"
             )
-            return client
+            return cached_client
 
         except Exception as e:
             logger.error(
@@ -1650,13 +1801,13 @@ class MCPToolManager:
                 k for k in self._user_clients
                 if k[0] == user_lc and k[1] == server_name
             ]
-            for k in keys_to_remove:
-                del self._user_clients[k]
+            removed = self._pop_user_client_entries_locked(keys_to_remove)
             if keys_to_remove:
                 logger.debug(
                     "Invalidated %d user client cache entry(s) for server '%s'",
                     len(keys_to_remove), server_name,
                 )
+        await self._close_user_client_entries(removed)
 
     async def _get_or_create_user_http_client(
         self,
@@ -1691,6 +1842,7 @@ class MCPToolManager:
 
         async with self._user_clients_lock:
             if cache_key in self._user_clients:
+                self._touch_user_client_locked(cache_key)
                 return self._user_clients[cache_key]
 
             config = self.servers_config.get(server_name, {})
@@ -1715,7 +1867,10 @@ class MCPToolManager:
             )
 
             self._user_clients[cache_key] = client
+            self._touch_user_client_locked(cache_key)
+            evicted = self._enforce_user_client_cache_limit_locked()
 
+        await self._close_user_client_entries(evicted)
         logger.debug(f"Created per-user HTTP client for server '{server_name}'")
         return client
 
@@ -1729,24 +1884,23 @@ class MCPToolManager:
         """
         await self._session_manager.release_all(conversation_id)
 
-        # Evict cached clients scoped to this conversation. With the new
-        # per-conversation cache key, only the current conversation's
-        # entries are removed; other conversations for the same user
-        # keep their clients alive.
-        if user_email:
-            user_lc = user_email.lower()
-            async with self._user_clients_lock:
-                keys_to_remove = [
-                    k for k in self._user_clients
-                    if k[0] == user_lc and k[2] == conversation_id
-                ]
-                for k in keys_to_remove:
-                    del self._user_clients[k]
-                if keys_to_remove:
-                    logger.debug(
-                        "Evicted %d per-conversation HTTP client(s) for conversation=%s",
-                        len(keys_to_remove), conversation_id,
-                    )
+        # Evict cached clients scoped to this conversation. If user context is
+        # unavailable, fall back to conversation_id-only eviction so internal
+        # callers can still clean up their cache entries.
+        user_lc = user_email.lower() if user_email else None
+        async with self._user_clients_lock:
+            keys_to_remove = [
+                k for k in self._user_clients
+                if k[2] == conversation_id and (user_lc is None or k[0] == user_lc)
+            ]
+            removed = self._pop_user_client_entries_locked(keys_to_remove)
+            if keys_to_remove:
+                logger.debug(
+                    "Evicted %d per-conversation HTTP client(s) for conversation=%s",
+                    len(keys_to_remove), conversation_id,
+                )
+
+        await self._close_user_client_entries(removed, release_session=False)
 
     def _resolve_routing(
         self,
@@ -2684,6 +2838,8 @@ class MCPToolManager:
         """Cleanup all clients, persistent sessions, and per-user HTTP client cache."""
         logger.info("Cleaning up MCP clients")
 
+        await self.stop_user_client_cache_sweeper()
+
         # Close all persistent sessions
         for key in list(self._session_manager._sessions.keys()):
             try:
@@ -2691,9 +2847,11 @@ class MCPToolManager:
             except Exception as e:
                 logger.debug("Error releasing session %s: %s", key, e)
 
-        # Clear per-user HTTP client cache
+        # Close and clear per-user HTTP client cache
         async with self._user_clients_lock:
-            count = len(self._user_clients)
-            self._user_clients.clear()
-            if count:
-                logger.debug("Cleared %d per-user HTTP client(s)", count)
+            keys_to_remove = list(self._user_clients)
+            removed = self._pop_user_client_entries_locked(keys_to_remove)
+
+        await self._close_user_client_entries(removed, release_session=False)
+        if removed:
+            logger.debug("Closed and cleared %d per-user HTTP client(s)", len(removed))
