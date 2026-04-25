@@ -1,7 +1,16 @@
 """Chat service - core business logic for chat operations."""
 
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    runtime_checkable,
+)
 from uuid import UUID, uuid4
 
 from atlas.core.log_sanitizer import sanitize_for_logging
@@ -36,6 +45,15 @@ logger = logging.getLogger(__name__)
 
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+
+
+@runtime_checkable
+class ConversationOwnerRepository(Protocol):
+    """Repository capability required for conversation ownership checks."""
+
+    def get_conversation_owner(self, conversation_id: str) -> Optional[str]:
+        """Return the owner email for a conversation, if it exists."""
+        ...
 
 
 class ChatService:
@@ -337,14 +355,10 @@ class ChatService:
         if self.conversation_repository is None:
             return
 
-        # Some tests and headless callers inject minimal conversation repositories.
-        # If ownership lookup is unavailable, save_conversation still rejects
-        # cross-user updates before persistence.
-        owner_lookup = getattr(self.conversation_repository, "get_conversation_owner", None)
-        if owner_lookup is None:
+        if not isinstance(self.conversation_repository, ConversationOwnerRepository):
             return
 
-        owner = owner_lookup(conversation_id)
+        owner = self.conversation_repository.get_conversation_owner(conversation_id)
         if owner is not None and normalize_user_email(owner) != normalize_user_email(
             user_email
         ):

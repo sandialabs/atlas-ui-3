@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class SessionStore(Protocol):
     """Abstract storage interface for session metadata.
 
-    In-memory dict is the default. Swap to Redis for durable sessions
-    that survive restarts (future phase).
+    Keys include normalized user identity, conversation ID, and server name.
+    In-memory dict is the default. Swap to Redis for durable sessions that
+    survive restarts (future phase).
     """
 
     def get(self, key: Tuple[str, str, str]) -> Optional[Any]: ...
@@ -177,6 +178,7 @@ class MCPSessionManager:
     ) -> None:
         """Close sessions for a conversation (O(1) lookup via reverse index)."""
         to_close: list[ManagedSession] = []
+        # None means all user scopes; "" is the explicit unauthenticated/legacy scope.
         user_scope = normalize_user_email(user_email) if user_email else None
         async with self._lock:
             keys_to_remove = self._pop_release_keys_locked(
