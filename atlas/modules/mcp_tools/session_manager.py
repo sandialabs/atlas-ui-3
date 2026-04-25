@@ -203,7 +203,12 @@ class MCPSessionManager:
         conversation_id: str,
         user_scope: Optional[str],
     ) -> set[Tuple[str, str, str]]:
-        """Return and remove indexed keys for a user scope, or all users."""
+        """Return and remove indexed keys for a user scope, or all users.
+
+        ``user_scope=None`` is reserved for legacy/global cleanup paths where no
+        authenticated user is available; it removes every session sharing the
+        conversation ID.
+        """
         conv_keys = self._conv_index.get(conversation_id)
         if not conv_keys:
             return set()

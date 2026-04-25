@@ -143,6 +143,27 @@ async def test_explicit_conversation_id_owned_by_other_user_is_rejected():
 
 
 @pytest.mark.asyncio
+async def test_explicit_conversation_id_without_user_is_rejected():
+    service, sessions = _make_service()
+    session_id = uuid4()
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(return_value={"type": "done"})
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        with pytest.raises(AuthorizationError):
+            await service.handle_chat_message(
+                session_id=session_id,
+                content="hello",
+                model="test-model",
+                user_email=None,
+                conversation_id="client-conv",
+            )
+
+    mock_orchestrator.execute.assert_not_called()
+    assert sessions[session_id].context.get("conversation_id") is None
+
+
+@pytest.mark.asyncio
 async def test_explicit_conversation_id_owned_by_user_is_allowed():
     service, sessions = _make_service()
     service.conversation_repository = _OwnerLookupRepository(

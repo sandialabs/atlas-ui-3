@@ -324,7 +324,17 @@ class ChatService:
         user_email: Optional[str],
     ) -> None:
         """Reject client-supplied conversation IDs owned by another user."""
-        if not user_email or self.conversation_repository is None:
+        if not user_email:
+            logger.warning(
+                "Rejected chat for conversation %s: missing authenticated user",
+                sanitize_for_logging(conversation_id),
+            )
+            raise AuthorizationError(
+                "Conversation not found or access denied",
+                code="CONVERSATION_ACCESS_DENIED",
+            )
+
+        if self.conversation_repository is None:
             return
 
         # Some tests and headless callers inject minimal conversation repositories.
