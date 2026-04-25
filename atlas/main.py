@@ -627,7 +627,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     logger.info("Cancelling active chat task (reset_session)")
                     task.cancel()
 
-                # Handle session reset (use authenticated user from connection)
+                # Handle session reset (use authenticated user from connection).
+                # handle_reset_session itself releases the old conversation's
+                # MCP sessions before generating a new conversation_id.
                 response = await chat_service.handle_reset_session(
                     session_id=session_id,
                     user_email=user_email
