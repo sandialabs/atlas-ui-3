@@ -209,8 +209,17 @@ class MCPToolManager:
         # Get configured log level for filtering
         self._min_log_level = self._get_min_log_level()
 
-        # Per-user client cache for servers requiring user-specific authentication
-        # Key: (user_email, server_name), Value: FastMCP Client instance
+        # Per-user/per-conversation client cache.
+        #
+        # Key: (user_email_lower, server_name, conversation_id), Value: FastMCP Client.
+        #
+        # Keying by conversation_id (not just user) is required because the
+        # session manager opens persistent contexts per (conversation_id,
+        # server) and each open() increments FastMCP's internal nesting
+        # counter on the client. Sharing one client across conversations
+        # accumulates the counter; if the underlying session_task dies,
+        # FastMCP refuses to reconnect ("nesting counter should be 0 when
+        # starting new session, got N").
         self._user_clients: Dict[tuple, Client] = {}
         self._user_clients_lock = asyncio.Lock()
 
@@ -1521,12 +1530,17 @@ class MCPToolManager:
         self,
         server_name: str,
         user_email: str,
+        conversation_id: Optional[str] = None,
     ) -> Optional[Client]:
         """Get or create a user-specific client for servers requiring per-user auth.
 
         Args:
             server_name: Name of the MCP server
             user_email: User's email address
+            conversation_id: Conversation scope for the cached client. Each
+                conversation gets its own FastMCP Client so that persistent
+                MCP sessions opened by ``MCPSessionManager`` don't share
+                FastMCP's reentrant nesting counter across conversations.
 
         Returns:
             FastMCP Client configured with user's token, or None if no token available
@@ -1534,7 +1548,7 @@ class MCPToolManager:
         from atlas.modules.mcp_tools.token_storage import get_token_storage
 
         token_storage = get_token_storage()
-        cache_key = (user_email.lower(), server_name)
+        cache_key = (user_email.lower(), server_name, conversation_id)
 
         # Check cache first, but validate token is still valid
         async with self._user_clients_lock:
@@ -1625,32 +1639,48 @@ class MCPToolManager:
             return None
 
     async def _invalidate_user_client(self, user_email: str, server_name: str) -> None:
-        """Remove a user's cached client (e.g., when token is revoked)."""
-        cache_key = (user_email.lower(), server_name)
+        """Remove all cached clients for a user/server (e.g., when token is revoked).
+
+        Removes every entry matching ``(user_email, server_name, *)`` across
+        all conversations, since the cache key now includes conversation_id.
+        """
+        user_lc = user_email.lower()
         async with self._user_clients_lock:
-            if cache_key in self._user_clients:
-                del self._user_clients[cache_key]
-                logger.debug(f"Invalidated user client cache for server '{server_name}'")
+            keys_to_remove = [
+                k for k in self._user_clients
+                if k[0] == user_lc and k[1] == server_name
+            ]
+            for k in keys_to_remove:
+                del self._user_clients[k]
+            if keys_to_remove:
+                logger.debug(
+                    "Invalidated %d user client cache entry(s) for server '%s'",
+                    len(keys_to_remove), server_name,
+                )
 
     async def _get_or_create_user_http_client(
         self,
         server_name: str,
         user_email: str,
+        conversation_id: Optional[str] = None,
     ) -> Client:
-        """Get or create a per-user HTTP client for session isolation.
+        """Get or create a per-user/per-conversation HTTP client for session isolation.
 
         Unlike _get_user_client (which requires auth tokens), this creates
-        plain HTTP clients keyed by (user_email, server_name). Each user gets
-        their own MCP session ID, ensuring state isolation.
+        plain HTTP clients. Each (user, server, conversation) gets its own
+        FastMCP Client and therefore its own MCP session ID.
 
         Args:
             server_name: Name of the MCP server
             user_email: User's email address
+            conversation_id: Conversation scope for the client. Required to
+                avoid sharing one Client across multiple conversations of
+                the same user — see the comment on ``_user_clients`` for why.
 
         Returns:
-            FastMCP Client instance for this user+server pair
+            FastMCP Client instance for this (user, server, conversation) tuple
         """
-        cache_key = (user_email.lower(), server_name)
+        cache_key = (user_email.lower(), server_name, conversation_id)
 
         async with self._user_clients_lock:
             if cache_key in self._user_clients:
@@ -1686,23 +1716,28 @@ class MCPToolManager:
         """Release all MCP sessions for a conversation.
 
         Call this on WebSocket disconnect or conversation restore to clean up
-        persistent sessions held by the session manager. Also evicts per-user
-        HTTP clients for this user to prevent unbounded cache growth.
+        persistent sessions held by the session manager. Also evicts cached
+        FastMCP clients scoped to this (user, conversation) so the next
+        conversation on the same user gets fresh clients.
         """
         await self._session_manager.release_all(conversation_id)
 
-        # Evict per-user HTTP clients for this user to prevent unbounded growth
+        # Evict cached clients scoped to this conversation. With the new
+        # per-conversation cache key, only the current conversation's
+        # entries are removed; other conversations for the same user
+        # keep their clients alive.
         if user_email:
+            user_lc = user_email.lower()
             async with self._user_clients_lock:
                 keys_to_remove = [
                     k for k in self._user_clients
-                    if k[0] == user_email.lower()
+                    if k[0] == user_lc and k[2] == conversation_id
                 ]
                 for k in keys_to_remove:
                     del self._user_clients[k]
                 if keys_to_remove:
                     logger.debug(
-                        "Evicted %d per-user HTTP client(s) for conversation=%s",
+                        "Evicted %d per-conversation HTTP client(s) for conversation=%s",
                         len(keys_to_remove), conversation_id,
                     )
 
@@ -1813,7 +1848,7 @@ class MCPToolManager:
         if self._requires_user_auth(server_name):
             logger.debug(f"Server '{server_name}' requires user auth, user_email={user_email}")
             if user_email:
-                client = await self._get_user_client(server_name, user_email)
+                client = await self._get_user_client(server_name, user_email, conversation_id)
                 logger.debug(f"_get_user_client for '{server_name}' returned client: {client is not None}")
                 if client is None:
                     # Get auth type and build OAuth URL if applicable
@@ -1839,8 +1874,11 @@ class MCPToolManager:
                     oauth_start_url=f"/api/mcp/auth/{server_name}/oauth/start" if auth_type == "oauth" else None,
                 )
         elif self._is_http_server(server_name) and user_email:
-            # HTTP servers get per-user clients for session state isolation
-            client = await self._get_or_create_user_http_client(server_name, user_email)
+            # HTTP servers get per-user/per-conversation clients for session
+            # state isolation and to avoid FastMCP nesting-counter leaks.
+            client = await self._get_or_create_user_http_client(
+                server_name, user_email, conversation_id
+            )
         else:
             # STDIO servers use shared client (safe: BlockedStateStore prevents state use)
             if server_name not in self.clients:
@@ -2000,10 +2038,13 @@ class MCPToolManager:
         *,
         user_email: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
     ) -> Any:
         """Get a specific prompt from an MCP server."""
         if self._is_http_server(server_name) and user_email:
-            client = await self._get_or_create_user_http_client(server_name, user_email)
+            client = await self._get_or_create_user_http_client(
+                server_name, user_email, conversation_id
+            )
         elif server_name not in self.clients:
             raise ValueError(f"No client available for server: {server_name}")
         else:

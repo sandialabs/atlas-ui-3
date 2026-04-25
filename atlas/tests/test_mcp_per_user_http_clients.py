@@ -61,7 +61,9 @@ async def test_get_or_create_user_http_client_creates_client(manager):
     with patch("atlas.modules.mcp_tools.client.Client") as MockClient:
         mock_instance = MagicMock()
         MockClient.return_value = mock_instance
-        client = await manager._get_or_create_user_http_client("state_server", "alice@test.com")
+        client = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-1"
+        )
         assert client is mock_instance
 
 
@@ -74,10 +76,14 @@ async def test_get_or_create_user_http_client_caches(manager):
     with patch("atlas.modules.mcp_tools.client.Client") as MockClient:
         mock_instance = MagicMock()
         MockClient.return_value = mock_instance
-        c1 = await manager._get_or_create_user_http_client("state_server", "alice@test.com")
-        c2 = await manager._get_or_create_user_http_client("state_server", "alice@test.com")
+        c1 = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-1"
+        )
+        c2 = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-1"
+        )
         assert c1 is c2
-        assert MockClient.call_count == 1  # Only created once
+        assert MockClient.call_count == 1  # Only created once for the same conversation
 
 
 @pytest.mark.asyncio
@@ -88,7 +94,30 @@ async def test_get_or_create_user_http_client_isolates_users(manager):
     }
     with patch("atlas.modules.mcp_tools.client.Client") as MockClient:
         MockClient.side_effect = [MagicMock(), MagicMock()]
-        c1 = await manager._get_or_create_user_http_client("state_server", "alice@test.com")
-        c2 = await manager._get_or_create_user_http_client("state_server", "bob@test.com")
+        c1 = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-1"
+        )
+        c2 = await manager._get_or_create_user_http_client(
+            "state_server", "bob@test.com", "conv-1"
+        )
+        assert c1 is not c2
+        assert MockClient.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_user_http_client_isolates_conversations(manager):
+    """Each conversation gets its own Client to keep FastMCP nesting counters separate."""
+    manager.servers_config["state_server"] = {
+        "url": "http://127.0.0.1:8010/mcp",
+        "transport": "http",
+    }
+    with patch("atlas.modules.mcp_tools.client.Client") as MockClient:
+        MockClient.side_effect = [MagicMock(), MagicMock()]
+        c1 = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-1"
+        )
+        c2 = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-2"
+        )
         assert c1 is not c2
         assert MockClient.call_count == 2

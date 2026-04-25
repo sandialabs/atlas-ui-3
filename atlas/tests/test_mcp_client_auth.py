@@ -280,16 +280,16 @@ class TestGetUserClient:
 
             # First call - token valid
             mock_token_storage.get_valid_token.return_value = mock_token
-            result1 = await manager._get_user_client("test-server", "user@example.com")
+            result1 = await manager._get_user_client("test-server", "user@example.com", "conv-1")
             assert result1 is mock_client
 
             # Second call - token expired (returns None)
             mock_token_storage.get_valid_token.return_value = None
-            result2 = await manager._get_user_client("test-server", "user@example.com")
+            result2 = await manager._get_user_client("test-server", "user@example.com", "conv-1")
 
             # Should return None and cache should be invalidated
             assert result2 is None
-            cache_key = ("user@example.com", "test-server")
+            cache_key = ("user@example.com", "test-server", "conv-1")
             assert cache_key not in manager._user_clients
 
 
@@ -305,16 +305,19 @@ class TestInvalidateUserClient:
 
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._user_clients = {
-            ("user@example.com", "test-server"): MagicMock(),
-            ("other@example.com", "test-server"): MagicMock(),
+            ("user@example.com", "test-server", "conv-1"): MagicMock(),
+            ("user@example.com", "test-server", "conv-2"): MagicMock(),
+            ("other@example.com", "test-server", "conv-1"): MagicMock(),
         }
         manager._user_clients_lock = asyncio.Lock()
 
         await manager._invalidate_user_client("user@example.com", "test-server")
 
-        assert ("user@example.com", "test-server") not in manager._user_clients
+        # All conversation entries for the target user/server are removed
+        assert ("user@example.com", "test-server", "conv-1") not in manager._user_clients
+        assert ("user@example.com", "test-server", "conv-2") not in manager._user_clients
         # Other user's client should remain
-        assert ("other@example.com", "test-server") in manager._user_clients
+        assert ("other@example.com", "test-server", "conv-1") in manager._user_clients
 
     @pytest.mark.asyncio
     async def test_handles_missing_cache_entry(self):
