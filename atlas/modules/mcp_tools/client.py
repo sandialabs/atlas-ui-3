@@ -2040,8 +2040,44 @@ class MCPToolManager:
         meta: Optional[Dict[str, Any]] = None,
         conversation_id: Optional[str] = None,
     ) -> Any:
-        """Get a specific prompt from an MCP server."""
-        if self._is_http_server(server_name) and user_email:
+        """Get a specific prompt from an MCP server.
+
+        Mirrors ``call_tool``'s auth routing: servers that declare an
+        ``auth_type`` of oauth/jwt/bearer/api_key route through
+        ``_get_user_client`` so the request is sent under the user's
+        stored token. Other HTTP servers fall through to the
+        per-conversation plain HTTP client.
+        """
+        if self._requires_user_auth(server_name):
+            if not user_email:
+                server_config = self.servers_config.get(server_name, {})
+                auth_type = server_config.get("auth_type", "oauth")
+                raise AuthenticationRequiredException(
+                    server_name=server_name,
+                    auth_type=auth_type,
+                    message=(
+                        f"Server '{server_name}' requires authentication "
+                        "but no user context."
+                    ),
+                    oauth_start_url=(
+                        f"/api/mcp/auth/{server_name}/oauth/start"
+                        if auth_type == "oauth" else None
+                    ),
+                )
+            client = await self._get_user_client(server_name, user_email, conversation_id)
+            if client is None:
+                server_config = self.servers_config.get(server_name, {})
+                auth_type = server_config.get("auth_type", "oauth")
+                raise AuthenticationRequiredException(
+                    server_name=server_name,
+                    auth_type=auth_type,
+                    message=f"Server '{server_name}' requires authentication.",
+                    oauth_start_url=(
+                        f"/api/mcp/auth/{server_name}/oauth/start"
+                        if auth_type == "oauth" else None
+                    ),
+                )
+        elif self._is_http_server(server_name) and user_email:
             client = await self._get_or_create_user_http_client(
                 server_name, user_email, conversation_id
             )

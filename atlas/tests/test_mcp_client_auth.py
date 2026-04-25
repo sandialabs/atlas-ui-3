@@ -332,3 +332,156 @@ class TestInvalidateUserClient:
 
         # Should not raise
         await manager._invalidate_user_client("user@example.com", "test-server")
+
+
+class TestGetPromptAuthRouting:
+    """Tests that get_prompt mirrors call_tool's auth routing.
+
+    Pre-fix, get_prompt only checked _is_http_server and routed every HTTP
+    server through _get_or_create_user_http_client (admin/server-default
+    token). For servers with auth_type=oauth/jwt/bearer/api_key this caused
+    prompt fetches to run unauthenticated even though tool calls on the
+    same server ran as the user.
+    """
+
+    def _make_manager_for_auth_server(self, auth_type: str = "bearer"):
+        import asyncio
+
+        from atlas.modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {
+            "auth-server": {
+                "auth_type": auth_type,
+                "url": "http://auth-server.local",
+            },
+        }
+        manager.clients = {}
+        manager._user_clients = {}
+        manager._user_clients_lock = asyncio.Lock()
+        manager._create_log_handler = MagicMock(return_value=None)
+        manager._create_elicitation_handler = MagicMock(return_value=None)
+        manager._create_sampling_handler = MagicMock(return_value=None)
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_uses_user_client_for_auth_server(self):
+        """get_prompt on an auth-required HTTP server must go through
+        _get_user_client, not _get_or_create_user_http_client.
+        """
+        from unittest.mock import AsyncMock
+
+        manager = self._make_manager_for_auth_server("bearer")
+
+        user_client = MagicMock()
+        user_client.__aenter__ = AsyncMock(return_value=user_client)
+        user_client.__aexit__ = AsyncMock(return_value=None)
+        user_client.get_prompt = AsyncMock(return_value="prompt-text")
+
+        manager._get_user_client = AsyncMock(return_value=user_client)
+        manager._get_or_create_user_http_client = AsyncMock(
+            side_effect=AssertionError(
+                "auth-required server must not fall through to admin-token client"
+            )
+        )
+
+        result = await manager.get_prompt(
+            "auth-server",
+            "my_prompt",
+            user_email="alice@example.com",
+            conversation_id="conv-1",
+        )
+
+        assert result == "prompt-text"
+        manager._get_user_client.assert_awaited_once_with(
+            "auth-server", "alice@example.com", "conv-1",
+        )
+        manager._get_or_create_user_http_client.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_raises_when_no_user_token(self):
+        """Auth-required server with no stored token must raise
+        AuthenticationRequiredException, not silently fall back to admin auth.
+        """
+        from unittest.mock import AsyncMock
+
+        from atlas.modules.mcp_tools.token_storage import (
+            AuthenticationRequiredException,
+        )
+
+        manager = self._make_manager_for_auth_server("oauth")
+        manager._get_user_client = AsyncMock(return_value=None)
+        manager._get_or_create_user_http_client = AsyncMock(
+            side_effect=AssertionError("must not fall through on missing token")
+        )
+
+        with pytest.raises(AuthenticationRequiredException) as exc_info:
+            await manager.get_prompt(
+                "auth-server",
+                "my_prompt",
+                user_email="bob@example.com",
+                conversation_id="conv-2",
+            )
+
+        assert exc_info.value.server_name == "auth-server"
+        assert exc_info.value.auth_type == "oauth"
+        assert "/api/mcp/auth/auth-server/oauth/start" in (
+            exc_info.value.oauth_start_url or ""
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_raises_when_no_user_email(self):
+        """Auth-required server invoked without user_email must raise."""
+        from atlas.modules.mcp_tools.token_storage import (
+            AuthenticationRequiredException,
+        )
+
+        manager = self._make_manager_for_auth_server("jwt")
+
+        with pytest.raises(AuthenticationRequiredException):
+            await manager.get_prompt(
+                "auth-server",
+                "my_prompt",
+                user_email=None,
+                conversation_id="conv-3",
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_uses_http_client_for_unauthed_server(self):
+        """Plain HTTP server (no auth_type) with a user_email still routes
+        through the per-conversation HTTP client — unchanged behavior.
+        """
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from atlas.modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {
+            "plain-http": {"url": "http://plain.local"},
+        }
+        manager.clients = {}
+        manager._user_clients = {}
+        manager._user_clients_lock = asyncio.Lock()
+        manager._create_log_handler = MagicMock(return_value=None)
+        manager._create_elicitation_handler = MagicMock(return_value=None)
+        manager._create_sampling_handler = MagicMock(return_value=None)
+
+        plain_client = MagicMock()
+        plain_client.__aenter__ = AsyncMock(return_value=plain_client)
+        plain_client.__aexit__ = AsyncMock(return_value=None)
+        plain_client.get_prompt = AsyncMock(return_value="ok")
+
+        manager._get_or_create_user_http_client = AsyncMock(return_value=plain_client)
+        manager._get_user_client = AsyncMock(
+            side_effect=AssertionError("non-auth server must not call _get_user_client")
+        )
+
+        result = await manager.get_prompt(
+            "plain-http",
+            "p",
+            user_email="alice@example.com",
+            conversation_id="conv-x",
+        )
+        assert result == "ok"
+        manager._get_or_create_user_http_client.assert_awaited_once()
