@@ -1,12 +1,22 @@
 """Chat service - core business logic for chat operations."""
 
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    runtime_checkable,
+)
 from uuid import UUID, uuid4
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
-from atlas.domain.errors import DomainError
+from atlas.core.user_identity import normalize_user_email
+from atlas.domain.errors import AuthorizationError, DomainError
 from atlas.domain.messages.models import Message, MessageRole, MessageType, ToolResult
 from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
@@ -35,6 +45,15 @@ logger = logging.getLogger(__name__)
 
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+
+
+@runtime_checkable
+class ConversationOwnerRepository(Protocol):
+    """Repository capability required for conversation ownership checks."""
+
+    def get_conversation_owner(self, conversation_id: str) -> Optional[str]:
+        """Return the owner email for a conversation, if it exists."""
+        ...
 
 
 class ChatService:
@@ -246,6 +265,7 @@ class ChatService:
         # Default to session_id so MCP tool calls share a persistent session (see MCPSessionManager).
         conversation_id = kwargs.pop("conversation_id", None)
         if conversation_id:
+            self._validate_conversation_id_owner(conversation_id, user_email)
             session.context["conversation_id"] = conversation_id
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
@@ -315,6 +335,42 @@ class ChatService:
         except Exception as e:
             # Fallback for unexpected errors in HTTP-style callers
             return error_handler.handle_chat_message_error(e, "chat message handling")
+
+    def _validate_conversation_id_owner(
+        self,
+        conversation_id: str,
+        user_email: Optional[str],
+    ) -> None:
+        """Reject client-supplied conversation IDs owned by another user."""
+        if not user_email:
+            logger.warning(
+                "Rejected chat for conversation %s: missing authenticated user",
+                sanitize_for_logging(conversation_id),
+            )
+            raise AuthorizationError(
+                "Conversation not found or access denied",
+                code="CONVERSATION_ACCESS_DENIED",
+            )
+
+        if self.conversation_repository is None:
+            return
+
+        if not isinstance(self.conversation_repository, ConversationOwnerRepository):
+            return
+
+        owner = self.conversation_repository.get_conversation_owner(conversation_id)
+        if owner is not None and normalize_user_email(owner) != normalize_user_email(
+            user_email
+        ):
+            logger.warning(
+                "Rejected chat for conversation %s: not owned by user %s",
+                sanitize_for_logging(conversation_id),
+                sanitize_for_logging(user_email),
+            )
+            raise AuthorizationError(
+                "Conversation not found or access denied",
+                code="CONVERSATION_ACCESS_DENIED",
+            )
 
     async def handle_restore_conversation(
         self,

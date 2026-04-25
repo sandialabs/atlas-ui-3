@@ -1727,7 +1727,9 @@ class MCPToolManager:
         FastMCP clients scoped to this (user, conversation) so the next
         conversation on the same user gets fresh clients.
         """
-        await self._session_manager.release_all(conversation_id)
+        await self._session_manager.release_all(
+            conversation_id, user_email=user_email
+        )
 
         # Evict cached clients scoped to this conversation. With the new
         # per-conversation cache key, only the current conversation's
@@ -1910,7 +1912,7 @@ class MCPToolManager:
             if conversation_id:
                 # Use persistent session
                 session = await self._session_manager.acquire(
-                    conversation_id, server_name, client
+                    conversation_id, server_name, client, user_email=user_email
                 )
                 active_client = session.client
             else:

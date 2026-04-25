@@ -229,6 +229,12 @@ class ConversationRepository:
                 "tags": self._get_tag_names(session, conv.id),
             }
 
+    def get_conversation_owner(self, conversation_id: str) -> Optional[str]:
+        """Return the owner email for a conversation, or None if it does not exist."""
+        with self._get_session() as session:
+            conv = session.get(ConversationRecord, conversation_id)
+            return conv.user_email if conv else None
+
     def delete_conversation(self, conversation_id: str, user_email: str) -> bool:
         """Delete a single conversation with messages and tag associations."""
         with self._get_session() as session:
