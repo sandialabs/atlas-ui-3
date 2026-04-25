@@ -139,10 +139,10 @@ async def test_two_conversations_get_independent_session_lifecycles():
     assert client_a is not client_b
 
     sess_a = await mgr._session_manager.acquire(
-        "conv-1", "state_server", client_a
+        "conv-1", "state_server", client_a, user_email="alice@test.com"
     )
     sess_b = await mgr._session_manager.acquire(
-        "conv-2", "state_server", client_b
+        "conv-2", "state_server", client_b, user_email="alice@test.com"
     )
 
     # Each Client's nesting counter is its own — neither exceeds 1.
@@ -176,8 +176,12 @@ async def test_dead_session_in_one_conversation_does_not_break_another():
         "state_server", "alice@test.com", "conv-2"
     )
 
-    await mgr._session_manager.acquire("conv-1", "state_server", client_a)
-    await mgr._session_manager.acquire("conv-2", "state_server", client_b)
+    await mgr._session_manager.acquire(
+        "conv-1", "state_server", client_a, user_email="alice@test.com"
+    )
+    await mgr._session_manager.acquire(
+        "conv-2", "state_server", client_b, user_email="alice@test.com"
+    )
 
     # Simulate conv-1's session dying server-side.
     client_a.simulate_disconnect()
@@ -186,7 +190,7 @@ async def test_dead_session_in_one_conversation_does_not_break_another():
     # the live session) and a tool call against client_b would not raise
     # the nesting-counter error because client_b is independent.
     sess_b_again = await mgr._session_manager.acquire(
-        "conv-2", "state_server", client_b
+        "conv-2", "state_server", client_b, user_email="alice@test.com"
     )
     assert sess_b_again.is_open is True
     assert client_b.nesting == 1  # unchanged by conv-1's disaster
@@ -196,7 +200,7 @@ async def test_dead_session_in_one_conversation_does_not_break_another():
     # we open a new one. Allow recovery on the underlying client.
     client_a.simulate_recover()
     sess_a_new = await mgr._session_manager.acquire(
-        "conv-1", "state_server", client_a
+        "conv-1", "state_server", client_a, user_email="alice@test.com"
     )
     assert sess_a_new.is_open is True
 
@@ -218,8 +222,12 @@ async def test_release_sessions_only_closes_target_conversation():
     client_b = await mgr._get_or_create_user_http_client(
         "state_server", "alice@test.com", "conv-2"
     )
-    await mgr._session_manager.acquire("conv-1", "state_server", client_a)
-    await mgr._session_manager.acquire("conv-2", "state_server", client_b)
+    await mgr._session_manager.acquire(
+        "conv-1", "state_server", client_a, user_email="alice@test.com"
+    )
+    await mgr._session_manager.acquire(
+        "conv-2", "state_server", client_b, user_email="alice@test.com"
+    )
 
     await mgr.release_sessions("conv-1", user_email="alice@test.com")
 
@@ -233,8 +241,12 @@ async def test_release_sessions_only_closes_target_conversation():
     assert client_b.nesting == 1
 
     # MCPSessionManager state mirrors the cache.
-    assert ("conv-1", "state_server") not in mgr._session_manager._sessions
-    assert ("conv-2", "state_server") in mgr._session_manager._sessions
+    assert (
+        "alice@test.com", "conv-1", "state_server"
+    ) not in mgr._session_manager._sessions
+    assert (
+        "alice@test.com", "conv-2", "state_server"
+    ) in mgr._session_manager._sessions
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from uuid import uuid4
 import pytest
 
 from atlas.application.chat.service import ChatService
+from atlas.domain.errors import AuthorizationError
 
 
 def _make_service():
@@ -46,6 +47,14 @@ def _make_service():
         session_repository=mock_session_repo,
     )
     return service, sessions
+
+
+class _OwnerLookupRepository:
+    def __init__(self, owners):
+        self._owners = owners
+
+    def get_conversation_owner(self, conversation_id):
+        return self._owners.get(conversation_id)
 
 
 @pytest.mark.asyncio
@@ -107,6 +116,60 @@ async def test_explicit_conversation_id_wins_over_default():
         )
 
     assert captured["conversation_id"] == explicit_conv_id
+
+
+@pytest.mark.asyncio
+async def test_explicit_conversation_id_owned_by_other_user_is_rejected():
+    service, sessions = _make_service()
+    service.conversation_repository = _OwnerLookupRepository(
+        {"victim-conv": "victim@test.com"}
+    )
+    session_id = uuid4()
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(return_value={"type": "done"})
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        with pytest.raises(AuthorizationError):
+            await service.handle_chat_message(
+                session_id=session_id,
+                content="hello",
+                model="test-model",
+                user_email="attacker@test.com",
+                conversation_id="victim-conv",
+            )
+
+    mock_orchestrator.execute.assert_not_called()
+    assert sessions[session_id].context.get("conversation_id") is None
+
+
+@pytest.mark.asyncio
+async def test_explicit_conversation_id_owned_by_user_is_allowed():
+    service, sessions = _make_service()
+    service.conversation_repository = _OwnerLookupRepository(
+        {"own-conv": "user@test.com"}
+    )
+    session_id = uuid4()
+
+    captured = {}
+
+    async def fake_execute(**kwargs):
+        session = sessions[session_id]
+        captured["conversation_id"] = session.context.get("conversation_id")
+        return {"type": "done"}
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email="user@test.com",
+            conversation_id="own-conv",
+        )
+
+    assert captured["conversation_id"] == "own-conv"
 
 
 @pytest.mark.asyncio
