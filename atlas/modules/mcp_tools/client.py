@@ -1570,12 +1570,18 @@ class MCPToolManager:
             self._user_client_sweeper_task = None
 
     def _touch_user_client_locked(self, cache_key: tuple) -> None:
-        """Mark a cached per-user client as recently used."""
+        """Mark a cached per-user client as recently used.
+
+        Caller must hold _user_clients_lock.
+        """
         self._ensure_user_client_cache_state()
         self._user_client_last_used[cache_key] = time.time()
 
     def _pop_user_client_entries_locked(self, keys: List[tuple]) -> List[tuple[tuple, Client]]:
-        """Remove cache entries and return clients that need closing."""
+        """Remove cache entries and return clients that need closing.
+
+        Caller must hold _user_clients_lock.
+        """
         self._ensure_user_client_cache_state()
         removed = []
         for key in keys:
@@ -1586,7 +1592,10 @@ class MCPToolManager:
         return removed
 
     def _enforce_user_client_cache_limit_locked(self) -> List[tuple[tuple, Client]]:
-        """Evict least-recently-used clients until the cache is within bounds."""
+        """Evict least-recently-used clients until the cache is within bounds.
+
+        Caller must hold _user_clients_lock.
+        """
         self._ensure_user_client_cache_state()
         excess = len(self._user_clients) - self._user_client_cache_max_entries
         if excess <= 0:
@@ -1662,8 +1671,8 @@ class MCPToolManager:
     async def _user_client_cache_sweeper(self) -> None:
         current_task = asyncio.current_task()
         while self._user_client_sweeper_task is current_task:
-            await asyncio.sleep(self._user_client_cache_sweep_interval_seconds)
             await self._sweep_idle_user_clients_once()
+            await asyncio.sleep(self._user_client_cache_sweep_interval_seconds)
 
     async def _sweep_idle_user_clients_once(self) -> int:
         """Evict cached clients idle longer than the configured TTL."""
