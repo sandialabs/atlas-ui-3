@@ -429,6 +429,26 @@ class AppSettings(BaseSettings):
         description="Seconds to wait synchronously before switching to background task polling",
         validation_alias="MCP_TASK_TIMEOUT"
     )
+    mcp_user_client_cache_max_entries: int = Field(
+        default=1000,
+        description="Maximum cached per-user/per-conversation MCP HTTP clients",
+        validation_alias="MCP_USER_CLIENT_CACHE_MAX_ENTRIES",
+    )
+    mcp_user_client_cache_idle_ttl_seconds: int = Field(
+        default=3600,
+        description="Seconds before an idle cached MCP HTTP client is evicted",
+        validation_alias="MCP_USER_CLIENT_CACHE_IDLE_TTL_SECONDS",
+    )
+    mcp_user_client_cache_sweep_interval_seconds: int = Field(
+        default=300,
+        description="Interval in seconds between idle MCP HTTP client cache sweeps",
+        validation_alias="MCP_USER_CLIENT_CACHE_SWEEP_INTERVAL_SECONDS",
+    )
+    websocket_keepalive_interval_seconds: int = Field(
+        default=30,
+        description="Idle seconds before the WebSocket endpoint sends an application keepalive",
+        validation_alias="WEBSOCKET_KEEPALIVE_INTERVAL_SECONDS",
+    )
 
     # MCP Token Storage settings
     mcp_token_storage_dir: Optional[str] = Field(

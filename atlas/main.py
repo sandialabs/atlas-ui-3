@@ -193,6 +193,10 @@ async def lifespan(app: FastAPI):
         await mcp_manager.start_auto_reconnect()
         logger.info("Step 4 complete: Auto-reconnect task started (if enabled)")
 
+        logger.info("Step 5: Starting MCP user client cache sweeper...")
+        await mcp_manager.start_user_client_cache_sweeper()
+        logger.info("Step 5 complete: User client cache sweeper started")
+
     except Exception as e:
         logger.error(f"Error during MCP initialization: {e}", exc_info=True)
         # Continue startup even if MCP fails
@@ -749,4 +753,10 @@ if __name__ == "__main__":
     host = os.getenv("ATLAS_HOST", "127.0.0.1")
     port = int(os.getenv("PORT", 8000))
 
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        ws_ping_interval=config.app_settings.websocket_keepalive_interval_seconds,
+        ws_ping_timeout=config.app_settings.websocket_keepalive_interval_seconds,
+    )

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #559 Follow-up H - 2026-04-25
+- MCP per-user HTTP client cache is now bounded with LRU eviction, idle TTL
+  sweeping, and explicit FastMCP client close on eviction and shutdown.
+- Server entrypoints now enable WebSocket ping keepalives so dropped
+  connections are detected and MCP session cleanup can run sooner.
+
 ### PR #559 - 2026-04-25
 - MCP cross-conversation isolation: cache FastMCP HTTP `Client` instances by
   `(user_email, server_name, conversation_id)` so each conversation gets its
