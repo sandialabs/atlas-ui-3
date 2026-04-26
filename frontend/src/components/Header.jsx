@@ -5,7 +5,7 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, Info } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, Info, Rocket } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 import { useTheme } from '../contexts/ThemeContext'
 
@@ -441,6 +441,17 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
             </button>
           )}
 
+          {/* Agent Portal Button - gated on feature flag */}
+          {features?.agent_portal && (
+            <button
+              onClick={() => navigate('/agent-portal')}
+              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+              title="Agent Portal"
+            >
+              <Rocket className="w-5 h-5" />
+            </button>
+          )}
+
           {/* Theme Toggle */}
           <button
             onClick={toggleTheme}
@@ -660,6 +671,20 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 >
                   <Shield className="w-5 h-5" />
                   <span>Admin Dashboard</span>
+                </button>
+              )}
+
+              {/* Agent Portal */}
+              {features?.agent_portal && (
+                <button
+                  onClick={() => {
+                    navigate('/agent-portal')
+                    setMobileMenuOpen(false)
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
+                >
+                  <Rocket className="w-5 h-5" />
+                  <span>Agent Portal</span>
                 </button>
               )}
 

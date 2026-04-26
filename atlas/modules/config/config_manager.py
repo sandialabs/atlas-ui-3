@@ -585,6 +585,33 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED"),
     )
 
+    # Agent Portal feature flags (experimental, see docs/planning/agent-portal-*.md)
+    feature_agent_portal_enabled: bool = Field(
+        False,
+        description="Enable the Agent Portal: governed, sandboxed launchable agent sessions",
+        validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_ENABLED"),
+    )
+    agent_portal_default_sandbox_tier: Literal["restrictive", "standard", "permissive"] = Field(
+        default="standard",
+        description="Default sandbox tier applied when a launch spec does not specify one",
+        validation_alias="AGENT_PORTAL_DEFAULT_SANDBOX_TIER",
+    )
+    agent_portal_allow_permissive_tier: bool = Field(
+        default=False,
+        description="If true, launches may request the permissive (unsandboxed) tier",
+        validation_alias="AGENT_PORTAL_ALLOW_PERMISSIVE_TIER",
+    )
+    agent_portal_sandbox_backend: Literal["bubblewrap", "landlock+netns", "none"] = Field(
+        default="bubblewrap",
+        description="Sandbox backend used by the local-process adapter",
+        validation_alias="AGENT_PORTAL_SANDBOX_BACKEND",
+    )
+    agent_portal_audit_subdir: str = Field(
+        default="agent_portal",
+        description="Subdirectory under APP_LOG_DIR where per-session audit JSONL files are written",
+        validation_alias="AGENT_PORTAL_AUDIT_SUBDIR",
+    )
+
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
     capability_token_ttl_seconds: int = 3600

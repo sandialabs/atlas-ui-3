@@ -277,6 +277,86 @@ app.include_router(suggestion_router)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
 
+# Agent Portal (experimental) - gated by FEATURE_AGENT_PORTAL_ENABLED.
+# Routes, service, and background tasks are all omitted when disabled.
+if config.app_settings.feature_agent_portal_enabled:
+    import os as _os
+
+    from atlas.core.auth import is_user_in_group
+    from atlas.modules.agent_portal.executors import LocalExecutor
+    from atlas.modules.agent_portal.models import SandboxTier
+    from atlas.modules.agent_portal.policy import PolicyLoadError, load_policy
+    from atlas.modules.agent_portal.service import AgentPortalService
+    from atlas.routes.agent_portal_routes import build_agent_portal_router
+
+    _log_dir = config.app_settings.app_log_dir or str(Path(__file__).resolve().parents[1] / "logs")
+    _audit_dir = Path(_log_dir) / config.app_settings.agent_portal_audit_subdir
+    _audit_dir.mkdir(parents=True, exist_ok=True)
+
+    # Policy file: AGENT_PORTAL_POLICY_FILE env var, else atlas/config/agent_portal.yaml.
+    _policy_path = Path(
+        _os.environ.get(
+            "AGENT_PORTAL_POLICY_FILE",
+            str(Path(__file__).resolve().parent / "config" / "agent_portal.yaml"),
+        )
+    )
+    try:
+        _policy = load_policy(_policy_path)
+    except PolicyLoadError as _exc:
+        logging.getLogger(__name__).error("agent portal policy load failed: %s", _exc)
+        raise
+
+    # Mode: env var overrides yaml.
+    _mode = _os.environ.get("AGENT_PORTAL_MODE", _policy.mode)
+    if _mode not in ("dev", "prod"):
+        raise RuntimeError(f"AGENT_PORTAL_MODE must be 'dev' or 'prod' (got {_mode!r})")
+
+    _portal_service = AgentPortalService(
+        enabled=True,
+        default_tier=SandboxTier(config.app_settings.agent_portal_default_sandbox_tier),
+        allow_permissive_tier=config.app_settings.agent_portal_allow_permissive_tier,
+        sandbox_backend=config.app_settings.agent_portal_sandbox_backend,
+        audit_dir=_audit_dir,
+        policy=_policy,
+        mode=_mode,
+    )
+    # Register the local executor. v2 will register remote executors too.
+    _portal_service._executors["local"] = LocalExecutor(_portal_service.get_session_manager())
+
+    # Group resolution: iterate every group referenced in policy (presets
+    # + workspace_roots) and test membership once. Cheap because the set
+    # is small and is_user_in_group is fast.
+    _group_catalog = set()
+    for _p in _policy.presets:
+        for _g in _p.visible_to_groups:
+            if _g != "*":
+                _group_catalog.add(_g)
+    for _wr in _policy.workspace_roots:
+        if _wr.group != "*":
+            _group_catalog.add(_wr.group)
+    # Always include the configured admin group so admin-gated presets work.
+    _group_catalog.add(config.app_settings.admin_group)
+
+    async def _groups_for_user(user_email: str):
+        memberships = []
+        for g in _group_catalog:
+            try:
+                if await is_user_in_group(user_email, g):
+                    memberships.append(g)
+            except Exception:
+                continue
+        return memberships
+
+    app.include_router(build_agent_portal_router(_portal_service, _groups_for_user))
+    logging.getLogger(__name__).info(
+        "Agent Portal mounted (mode=%s, tier=%s, backend=%s, audit_dir=%s, presets=%d)",
+        _mode,
+        _portal_service.default_tier.value,
+        config.app_settings.agent_portal_sandbox_backend,
+        _audit_dir,
+        len(_policy.presets),
+    )
+
 # Serve frontend build (Vite)
 # PyPI package bundles frontend into atlas/static/; local dev uses frontend/dist/
 _package_static = Path(__file__).resolve().parent / "static"
