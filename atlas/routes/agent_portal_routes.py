@@ -21,6 +21,7 @@ from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.agent_portal import (
     PresetNotFoundError,
+    get_portal_store,
     get_preset_store,
 )
 from atlas.modules.process_manager import (
@@ -338,6 +339,312 @@ async def delete_preset(
         sanitize_for_logging(current_user),
     )
     return None
+
+
+# ---------------------------------------------------------------------------
+# Server-side PortalStore — UI/config state that used to live in localStorage
+# ---------------------------------------------------------------------------
+#
+# These endpoints are deliberately boring: GET returns the user's blob
+# (filtered server-side by user_email), PUT replaces it, no diff/no
+# optimistic concurrency. Single-user-on-own-machine target — a future
+# multi-tab/multi-device deploy can layer ETags on top without changing
+# the surface.
+
+
+class LayoutPutRequest(BaseModel):
+    """Whole-blob layout payload. Schema is opaque on the server — the
+    frontend owns the shape (mode, slots, slot->process_id mapping)."""
+
+    layout: dict = Field(default_factory=dict)
+
+
+class LaunchHistoryUpsertRequest(BaseModel):
+    """Single launch-history entry in the UI shape the frontend already
+    uses (command, argsString, cwd, sandboxMode, ...)."""
+
+    entry: dict
+
+
+class LaunchHistoryReplaceRequest(BaseModel):
+    """Bulk replace — used by the localStorage migration path."""
+
+    entries: List[dict] = Field(default_factory=list)
+
+
+class LaunchHistoryDeleteRequest(BaseModel):
+    """Delete a single history entry by its server-side dedup key.
+
+    Clients can recompute the dedup key locally (it's a sha256 of
+    command|args|cwd|sandboxMode joined by U+001F) but easier to just
+    take it from the GET response.
+    """
+
+    dedup_key: str = Field(..., min_length=1)
+
+
+class LaunchConfigsReplaceRequest(BaseModel):
+    """Bulk replace — used by the localStorage migration path. Per-config
+    CRUD lives on the existing /presets endpoints; this collection
+    stays as a backwards-compatible bag for legacy launchConfigs."""
+
+    configs: List[dict] = Field(default_factory=list)
+
+
+class GroupCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    max_panes: Optional[int] = None
+    mem_budget_bytes: Optional[int] = None
+    cpu_budget_pct: Optional[int] = None
+    idle_kill_seconds: Optional[int] = None
+    audit_tag: Optional[str] = None
+
+
+class GroupUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    max_panes: Optional[int] = None
+    mem_budget_bytes: Optional[int] = None
+    cpu_budget_pct: Optional[int] = None
+    idle_kill_seconds: Optional[int] = None
+    audit_tag: Optional[str] = None
+
+
+class BundleCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    group_template: dict = Field(default_factory=dict)
+    members: List[dict] = Field(default_factory=list)
+
+
+# Layout --------------------------------------------------------------------
+
+
+@router.get("/state/layout")
+async def get_layout(current_user: str = Depends(get_current_user)):
+    _require_enabled()
+    store = get_portal_store()
+    layout = store.get_layout(current_user)
+    return {"layout": layout or {}}
+
+
+@router.put("/state/layout")
+async def put_layout(
+    body: LayoutPutRequest,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_portal_store()
+    saved = store.put_layout(current_user, body.layout or {})
+    return {"layout": saved}
+
+
+# Launch history ------------------------------------------------------------
+
+
+@router.get("/state/launch-history")
+async def get_launch_history(current_user: str = Depends(get_current_user)):
+    _require_enabled()
+    store = get_portal_store()
+    return {"entries": store.list_launch_history(current_user)}
+
+
+@router.post("/state/launch-history")
+async def upsert_launch_history(
+    body: LaunchHistoryUpsertRequest,
+    current_user: str = Depends(get_current_user),
+):
+    """Insert or bump a launch-history entry. Idempotent on the dedup key
+    (command + args + cwd + sandboxMode), so the client can fire-and-forget
+    on every launch without growing the table on duplicates."""
+    _require_enabled()
+    store = get_portal_store()
+    try:
+        entry = store.upsert_launch_history(current_user, body.entry or {})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"entry": entry, "entries": store.list_launch_history(current_user)}
+
+
+@router.put("/state/launch-history")
+async def replace_launch_history(
+    body: LaunchHistoryReplaceRequest,
+    current_user: str = Depends(get_current_user),
+):
+    """Bulk replace — used by the one-shot migration from localStorage."""
+    _require_enabled()
+    store = get_portal_store()
+    entries = store.replace_launch_history(current_user, body.entries or [])
+    return {"entries": entries}
+
+
+@router.post("/state/launch-history/delete")
+async def delete_launch_history_entry(
+    body: LaunchHistoryDeleteRequest,
+    current_user: str = Depends(get_current_user),
+):
+    """Delete a single history row by its server-side dedup_key.
+
+    POST not DELETE because the dedup_key is a sha256 string and we'd
+    rather not URL-encode it; this is a private internal endpoint.
+    """
+    _require_enabled()
+    store = get_portal_store()
+    deleted = store.delete_launch_history_entry(current_user, body.dedup_key)
+    return {"deleted": deleted, "entries": store.list_launch_history(current_user)}
+
+
+# Launch configs (legacy localStorage bag — distinct from server presets) --
+
+
+@router.get("/state/launch-configs")
+async def get_launch_configs(current_user: str = Depends(get_current_user)):
+    _require_enabled()
+    store = get_portal_store()
+    return {"configs": store.list_launch_configs(current_user)}
+
+
+@router.put("/state/launch-configs")
+async def replace_launch_configs(
+    body: LaunchConfigsReplaceRequest,
+    current_user: str = Depends(get_current_user),
+):
+    """Bulk replace — used by the one-shot migration from localStorage.
+
+    Per-config CRUD continues to live on /presets (the saved-presets
+    library); this endpoint exists so the migration path is a single
+    PUT instead of N POSTs.
+    """
+    _require_enabled()
+    store = get_portal_store()
+    configs = store.replace_launch_configs(current_user, body.configs or [])
+    return {"configs": configs}
+
+
+# Groups (CRUD only here; Phase 3 wires launch-time enforcement) -----------
+
+
+@router.get("/groups")
+async def list_groups(current_user: str = Depends(get_current_user)):
+    _require_enabled()
+    store = get_portal_store()
+    return {"groups": store.list_groups(current_user)}
+
+
+@router.post("/groups", status_code=201)
+async def create_group(
+    body: GroupCreateRequest,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_portal_store()
+    try:
+        group = store.create_group(current_user, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return group
+
+
+@router.get("/groups/{group_id}")
+async def get_group(
+    group_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_portal_store()
+    group = store.get_group(current_user, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return group
+
+
+@router.patch("/groups/{group_id}")
+async def update_group(
+    group_id: str,
+    body: GroupUpdateRequest,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_portal_store()
+    patch = body.model_dump(exclude_unset=True)
+    group = store.update_group(current_user, group_id, patch)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return group
+
+
+@router.delete("/groups/{group_id}", status_code=204)
+async def delete_group(
+    group_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_portal_store()
+    deleted = store.delete_group(current_user, group_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return None
+
+
+# Bundles (CRUD only here; Phase 4 adds the launch endpoint) ---------------
+
+
+@router.get("/bundles")
+async def list_bundles(current_user: str = Depends(get_current_user)):
+    _require_enabled()
+    store = get_portal_store()
+    return {"bundles": store.list_bundles(current_user)}
+
+
+@router.post("/bundles", status_code=201)
+async def create_bundle(
+    body: BundleCreateRequest,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_portal_store()
+    try:
+        bundle = store.create_bundle(current_user, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return bundle
+
+
+@router.get("/bundles/{bundle_id}")
+async def get_bundle(
+    bundle_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_portal_store()
+    bundle = store.get_bundle(current_user, bundle_id)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    return bundle
+
+
+@router.delete("/bundles/{bundle_id}", status_code=204)
+async def delete_bundle(
+    bundle_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_portal_store()
+    deleted = store.delete_bundle(current_user, bundle_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    return None
+
+
+# Audit log (read-only here; Phase 4 wires the writers) ---------------------
+
+
+@router.get("/audit")
+async def list_audit(
+    limit: int = 200,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_portal_store()
+    return {"events": store.list_audit(current_user, limit=limit)}
 
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
