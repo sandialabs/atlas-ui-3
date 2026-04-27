@@ -1046,10 +1046,10 @@ function AgentPortal() {
   const focusedProcessId = layout.slots[focusedSlot] || null
   const focusedProcess = focusedProcessId ? processesById[focusedProcessId] : null
 
-  const handleCancel = async () => {
-    if (!focusedProcessId) return
+  const cancelProcessById = useCallback(async (processId) => {
+    if (!processId) return
     try {
-      const res = await fetch(`/api/agent-portal/processes/${focusedProcessId}`, {
+      const res = await fetch(`/api/agent-portal/processes/${processId}`, {
         method: 'DELETE',
         credentials: 'include',
       })
@@ -1063,7 +1063,9 @@ function AgentPortal() {
     } catch {
       // ignore
     }
-  }
+  }, [fetchProcesses])
+
+  const handleCancel = async () => cancelProcessById(focusedProcessId)
 
   const canCancel = useMemo(
     () => focusedProcess && focusedProcess.status === 'running',
@@ -1115,7 +1117,7 @@ function AgentPortal() {
     if (focusedProcessId) {
       acts.push({
         id: 'pane.cancel',
-        title: 'Cancel focused pane',
+        title: 'Stop focused pane',
         hint: focusedProcess?.command || '',
         scope: 'Process',
         run: () => handleCancel(),
@@ -1149,6 +1151,21 @@ function AgentPortal() {
         title: fullscreenSlot === focusedSlot ? 'Exit fullscreen' : 'Toggle fullscreen (F)',
         scope: 'Process',
         run: () => handleFullscreenSlot(focusedSlot),
+      })
+    }
+    // Per-process cancel: lets the user kill any running process by name
+    // without having to focus its slot first. Most-discoverable path for
+    // "I'm done with that, just kill it."
+    for (const p of processes) {
+      if (p.status !== 'running') continue
+      const label = p.display_name?.trim()
+        || `${p.command} ${(p.args || []).join(' ')}`.trim()
+      acts.push({
+        id: `process.cancel.${p.id}`,
+        title: `Stop: ${label}`,
+        hint: `pid ${p.pid || '-'}`,
+        scope: 'Process',
+        run: () => cancelProcessById(p.id),
       })
     }
     for (const m of LAYOUT_MODES) {
@@ -1343,7 +1360,9 @@ function AgentPortal() {
     focusedSlot,
     fullscreenSlot,
     layout,
+    processes,
     processesById,
+    cancelProcessById,
     leftCollapsed,
     command,
     dialog,
@@ -1484,7 +1503,7 @@ function AgentPortal() {
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-700 hover:bg-red-600 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white text-sm"
             title="Send SIGTERM to the selected running process"
           >
-            <Square className="w-4 h-4" /> <span className="hidden sm:inline">Cancel</span>
+            <Square className="w-4 h-4" /> <span className="hidden sm:inline">Stop</span>
           </button>
           <button
             onClick={() => setLeftCollapsed((v) => !v)}
@@ -1671,6 +1690,7 @@ function AgentPortal() {
                 onChange={(e) => setDisplayName(e.target.value)}
                 placeholder="e.g. cline diagram run"
                 className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                autoFocus
               />
               <p className="text-[11px] text-gray-500 mt-1">
                 Shown in the process list. You can edit it later on each process.
@@ -2057,6 +2077,7 @@ function AgentPortal() {
               fullscreenSlot={fullscreenSlot}
               onFocusSlot={setFocusedSlot}
               onCloseSlot={handleCloseSlot}
+              onCancelProcess={cancelProcessById}
               onFullscreenSlot={handleFullscreenSlot}
               onRenameProcess={renameProcess}
               onProcessUpdate={handleProcessUpdate}

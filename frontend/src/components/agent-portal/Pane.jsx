@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { Maximize2, X, Edit2, Check, Shield, Boxes } from 'lucide-react'
+import { Maximize2, X, Edit2, Check, Shield, Boxes, Square } from 'lucide-react'
 
 // Plain-text scrollback ring buffer for non-PTY processes. Keep the
 // last N chunks so swapping between slots in 2x2 view doesn't lose
@@ -43,6 +43,7 @@ const STREAM_COLORS = {
 function Pane({
   process,
   onClose,
+  onCancel,
   onFullscreen,
   onRename,
   isFullscreen,
@@ -320,6 +321,16 @@ function Pane({
             title={editingName ? 'Save name' : 'Rename'}
           >
             {editingName ? <Check className="w-3 h-3" /> : <Edit2 className="w-3 h-3" />}
+          </button>
+        )}
+        {procId && onCancel && process?.status === 'running' && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onCancel() }}
+            className="p-1 text-gray-500 hover:text-red-400"
+            title="Stop this process (SIGTERM)"
+          >
+            <Square className="w-3 h-3" />
           </button>
         )}
         {procId && onFullscreen && !isFullscreen && (

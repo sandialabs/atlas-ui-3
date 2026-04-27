@@ -35,6 +35,7 @@ function PaneGrid({
   fullscreenSlot,
   onFocusSlot,
   onCloseSlot,
+  onCancelProcess,
   onFullscreenSlot,
   onRenameProcess,
   onProcessUpdate,
@@ -61,6 +62,7 @@ function PaneGrid({
           isFocused
           onFocus={() => onFocusSlot?.(fullscreenSlot)}
           onClose={() => onCloseSlot?.(fullscreenSlot)}
+          onCancel={procId ? () => onCancelProcess?.(procId) : undefined}
           onFullscreen={() => onFullscreenSlot?.(fullscreenSlot)}
           onRename={onRenameProcess}
           onProcessUpdate={onProcessUpdate}
@@ -102,6 +104,7 @@ function PaneGrid({
           isFocused={focusedSlot === i}
           onFocus={() => onFocusSlot?.(i)}
           onClose={procId ? () => onCloseSlot?.(i) : undefined}
+          onCancel={procId ? () => onCancelProcess?.(procId) : undefined}
           onFullscreen={() => onFullscreenSlot?.(i)}
           onRename={onRenameProcess}
           onProcessUpdate={onProcessUpdate}
