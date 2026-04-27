@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Square, RefreshCw, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge, PanelLeftClose, PanelLeftOpen, Check, Plus, ChevronDown, ChevronRight, LayoutGrid } from 'lucide-react'
+import { ArrowLeft, Play, Square, RefreshCw, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge, PanelLeftClose, PanelLeftOpen, Check, Plus, ChevronDown, ChevronRight, LayoutGrid, Edit2 } from 'lucide-react'
 import { useToast, useDialog } from './ui/toastContext'
 import '@xterm/xterm/css/xterm.css'
 import PaneGrid from './agent-portal/PaneGrid'

@@ -739,6 +739,14 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info(f"WebSocket connection closed for session {session_id}")
 
 
+if static_dir.exists():
+    @app.get("/{full_path:path}")
+    async def spa_catchall(full_path: str):
+        if full_path.startswith("api/") or full_path.startswith("ws/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(str(static_dir / "index.html"))
+
+
 if __name__ == "__main__":
     import os
 
