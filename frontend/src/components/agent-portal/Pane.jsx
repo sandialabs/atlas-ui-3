@@ -115,13 +115,27 @@ function Pane({
       ws.send(JSON.stringify(payload))
     })
     const onResizeDisp = term.onResize(sendResize)
-    const doFit = () => { try { fit.fit() } catch { /* ignore */ } }
+    // Debounce fit + SIGWINCH: a layout-mode change fires a burst of
+    // ResizeObserver callbacks during the CSS grid transition. Refitting
+    // and resizing the PTY on each intermediate size leaves the inner
+    // program's buffer out of sync with the final cell size, which
+    // surfaces as mangled / overlapping text. Coalesce to a single fit
+    // after the transition has settled.
+    let fitTimer = null
+    const doFit = () => {
+      if (fitTimer) clearTimeout(fitTimer)
+      fitTimer = setTimeout(() => {
+        fitTimer = null
+        try { fit.fit() } catch { /* ignore */ }
+        sendResize()
+      }, 120)
+    }
 
     // Wait one frame so the grid template has settled before the first
     // fit; otherwise the row count comes in as the placeholder default
     // and the next true resize garbles the buffer.
     const raf = requestAnimationFrame(() => {
-      doFit()
+      try { fit.fit() } catch { /* ignore */ }
       sendResize()
     })
 
@@ -137,6 +151,7 @@ function Pane({
 
     return () => {
       cancelAnimationFrame(raf)
+      if (fitTimer) clearTimeout(fitTimer)
       ro.disconnect()
       window.removeEventListener('resize', doFit)
       onDataDisp.dispose()
