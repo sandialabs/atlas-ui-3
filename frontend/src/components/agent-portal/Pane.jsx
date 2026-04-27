@@ -264,7 +264,7 @@ function Pane({
   return (
     <div
       onClick={() => onFocus?.()}
-      className={`flex flex-col min-h-0 min-w-0 bg-gray-900 border-2 rounded-lg overflow-hidden ${
+      className={`flex-1 flex flex-col min-h-0 min-w-0 bg-gray-900 border-2 rounded-lg overflow-hidden ${
         // Sync wins over focus visually so the user is never confused
         // about which panes will receive their next keystroke. Don't
         // repeat tmux's silent synchronize-panes footgun.

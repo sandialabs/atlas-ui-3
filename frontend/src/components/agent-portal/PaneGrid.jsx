@@ -96,7 +96,7 @@ function PaneGrid({
 
     const syncEnabled = syncedSet && process?.group_id ? syncedSet.has(process.group_id) : false
     cells.push(
-      <div key={i} style={style} className="min-h-0 min-w-0">
+      <div key={i} style={style} className="min-h-0 min-w-0 h-full w-full flex">
         <Pane
           process={process}
           isFocused={focusedSlot === i}
