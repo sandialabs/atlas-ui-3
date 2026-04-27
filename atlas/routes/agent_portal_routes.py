@@ -25,10 +25,13 @@ from atlas.modules.agent_portal import (
     get_preset_store,
 )
 from atlas.modules.process_manager import (
+    GroupBudgetExceededError,
     LandlockUnavailableError,
     ProcessNotFoundError,
     get_process_manager,
     landlock_is_supported,
+    make_group_slice_name,
+    set_group_slice_limits,
 )
 from atlas.modules.process_manager.manager import probe_isolation_capabilities
 
@@ -83,6 +86,14 @@ class LaunchRequest(BaseModel):
     display_name: Optional[str] = Field(
         default="",
         description="Friendly name shown in the process list. Defaults to the command.",
+    )
+    group_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional Agent Portal group to launch into. If set, the "
+            "server enforces the group's max_panes budget and nests the "
+            "child cgroup under the group's parent slice."
+        ),
     )
 
 
@@ -179,6 +190,27 @@ async def launch_process(
     if sandbox_mode not in ("off", "strict", "workspace-write"):
         raise HTTPException(status_code=400, detail=f"invalid sandbox_mode: {sandbox_mode}")
 
+    # Resolve the optional group up front so we can pass enforcement
+    # hints (max_panes, parent slice) into the manager. The lookup is
+    # owner-scoped so a user cannot launch into another user's group.
+    group_max_panes: Optional[int] = None
+    group_slice: Optional[str] = None
+    if body.group_id:
+        store = get_portal_store()
+        group = store.get_group(current_user, body.group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail="Group not found")
+        group_max_panes = group.get("max_panes") or None
+        group_slice = make_group_slice_name(body.group_id)
+        # Best-effort: pin parent slice limits on every launch so they
+        # stay current if the group's budget changes between launches.
+        # Failure is non-fatal — the per-process limits still apply.
+        set_group_slice_limits(
+            group_slice,
+            mem_budget_bytes=group.get("mem_budget_bytes") or None,
+            cpu_budget_pct=group.get("cpu_budget_pct") or None,
+        )
+
     try:
         managed = await manager.launch(
             command=body.command,
@@ -193,11 +225,16 @@ async def launch_process(
             memory_limit=body.memory_limit,
             cpu_limit=body.cpu_limit,
             pids_limit=body.pids_limit,
+            group_id=body.group_id,
+            group_max_panes=group_max_panes,
+            group_slice=group_slice,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=f"Command not found: {e}")
     except LandlockUnavailableError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except GroupBudgetExceededError as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
@@ -576,12 +613,43 @@ async def delete_group(
     group_id: str,
     current_user: str = Depends(get_current_user),
 ):
+    """Delete a group definition. Idempotent: also reaps every running
+    member of the group (SIGTERM, then SIGKILL after a grace window),
+    so the group's panes don't keep streaming after the group is gone.
+    """
     _require_enabled()
     store = get_portal_store()
+    # Confirm ownership before reaping anything; cancel members of a
+    # group the user does not own would let one user kill another's
+    # processes via a known group_id.
+    group = store.get_group(current_user, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    manager = get_process_manager()
+    await manager.cancel_group(group_id)
     deleted = store.delete_group(current_user, group_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Group not found")
+        # Race with another delete — treat as already gone.
+        pass
     return None
+
+
+@router.post("/groups/{group_id}/cancel", status_code=200)
+async def cancel_group(
+    group_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    """SIGTERM all running members of the group without deleting the
+    group definition. Useful for "stop everything but keep the slot"
+    workflows."""
+    _require_enabled()
+    store = get_portal_store()
+    group = store.get_group(current_user, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    manager = get_process_manager()
+    members = await manager.cancel_group(group_id)
+    return {"cancelled": [m.id for m in members]}
 
 
 # Bundles (CRUD only here; Phase 4 adds the launch endpoint) ---------------

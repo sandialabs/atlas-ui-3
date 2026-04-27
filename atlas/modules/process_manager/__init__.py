@@ -16,15 +16,19 @@ from atlas.modules.process_manager.landlock import (
     is_supported as landlock_is_supported,
 )
 from atlas.modules.process_manager.manager import (
+    GroupBudgetExceededError,
     ManagedProcess,
     OutputChunk,
     ProcessManager,
     ProcessNotFoundError,
     ProcessStatus,
     get_process_manager,
+    make_group_slice_name,
+    set_group_slice_limits,
 )
 
 __all__ = [
+    "GroupBudgetExceededError",
     "LandlockUnavailableError",
     "ManagedProcess",
     "OutputChunk",
@@ -33,5 +37,7 @@ __all__ = [
     "ProcessStatus",
     "get_process_manager",
     "landlock_is_supported",
+    "make_group_slice_name",
     "restrict_to_workdir",
+    "set_group_slice_limits",
 ]

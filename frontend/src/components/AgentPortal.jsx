@@ -27,6 +27,12 @@ import {
   deleteLaunchHistoryEntry,
   CACHE_KEYS,
 } from './agent-portal/portalStateClient'
+import {
+  listGroups,
+  createGroup,
+  deleteGroup,
+  cancelGroup,
+} from './agent-portal/groupsClient'
 
 const LAUNCH_HISTORY_MAX = 15
 const LAUNCH_CONFIGS_KEY = 'atlas.agentPortal.launchConfigs.v1'
@@ -318,6 +324,13 @@ function AgentPortal() {
   // Command palette open state. Toggled by Ctrl-Shift-P; closed on Esc
   // or after running an action.
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // Groups (Phase 3): server-enforced collections of panes with
+  // shared budgets. Surfaced as a left-rail section + palette actions.
+  // The list itself is a thin mirror of /api/agent-portal/groups; group
+  // membership of running processes comes from each process's group_id.
+  const [groups, setGroups] = useState([])
+  // Which group future launches drop into. null = no group.
+  const [activeGroupId, setActiveGroupId] = useState(null)
 
   useEffect(() => {
     fetch('/api/agent-portal/capabilities', { credentials: 'include' })
@@ -654,6 +667,80 @@ function AgentPortal() {
     return () => { cancelled = true }
   }, [])
 
+  // ------------------------------------------------------------------
+  // Groups — fetch + helpers
+  // ------------------------------------------------------------------
+  // Hydrate the group list once on mount; refresh after any mutation.
+  // No periodic polling — group definitions change rarely and the
+  // mutating actions (create/delete/cancel) all refresh inline.
+
+  const refreshGroups = useCallback(async () => {
+    const list = await listGroups()
+    setGroups(list)
+    // If the active group was deleted out from under us, drop it.
+    setActiveGroupId((prev) => (prev && !list.some((g) => g.id === prev) ? null : prev))
+  }, [])
+
+  useEffect(() => {
+    refreshGroups()
+  }, [refreshGroups])
+
+  const handleCreateGroup = useCallback(async () => {
+    const answer = await dialog.prompt({
+      title: 'New group',
+      label: 'Name',
+      placeholder: 'e.g. demo-team',
+      secondaryLabel: 'Max panes (optional)',
+      secondaryPlaceholder: '4',
+      okText: 'Create',
+      required: true,
+    })
+    if (!answer) return
+    const max = answer.secondary ? parseInt(answer.secondary, 10) : null
+    const created = await createGroup({
+      name: (answer.value || '').trim(),
+      max_panes: Number.isFinite(max) ? max : null,
+    })
+    if (created) {
+      toast.success(`Group "${created.name}" created`)
+      setActiveGroupId(created.id)
+      refreshGroups()
+    } else {
+      toast.error('Group create failed')
+    }
+  }, [dialog, refreshGroups, toast])
+
+  const handleDeleteGroup = useCallback(async (groupId) => {
+    const target = groups.find((g) => g.id === groupId)
+    const ok = await dialog.confirm({
+      title: 'Delete group?',
+      message: target
+        ? `"${target.name}" will be deleted and all its running panes will be cancelled.`
+        : 'This group will be deleted.',
+      okText: 'Delete',
+      destructive: true,
+    })
+    if (!ok) return
+    const success = await deleteGroup(groupId)
+    if (success) {
+      toast.success('Group deleted')
+      refreshGroups()
+      fetchProcesses()
+    } else {
+      toast.error('Group delete failed')
+    }
+  }, [dialog, fetchProcesses, groups, refreshGroups, toast])
+
+  const handleCancelGroup = useCallback(async (groupId) => {
+    const result = await cancelGroup(groupId)
+    if (result) {
+      toast.success(`Cancelled ${result.cancelled?.length || 0} pane(s)`)
+      fetchProcesses()
+    } else {
+      toast.error('Cancel group failed')
+    }
+  }, [fetchProcesses, toast])
+
   // Build a stable processes-by-id map for PaneGrid so the panes can
   // resolve their slot's process_id to a summary in O(1).
   const processesById = useMemo(() => {
@@ -739,6 +826,7 @@ function AgentPortal() {
       if (memoryLimit.trim()) body.memory_limit = memoryLimit.trim()
       if (cpuLimit.trim()) body.cpu_limit = cpuLimit.trim()
       if (pidsLimit.trim()) body.pids_limit = parseInt(pidsLimit, 10)
+      if (activeGroupId) body.group_id = activeGroupId
       const res = await fetch('/api/agent-portal/processes', {
         method: 'POST',
         credentials: 'include',
@@ -966,21 +1054,50 @@ function AgentPortal() {
         })
       }
     }
-    // Stubs for later phases — discoverable from the palette today,
-    // pop a "coming soon" toast until the phase ships.
+    // Group actions (Phase 3).
+    acts.push({
+      id: 'group.create',
+      title: 'New group…',
+      scope: 'Group',
+      run: () => handleCreateGroup(),
+    })
+    acts.push({
+      id: 'group.clear-active',
+      title: 'Clear active group (launch ungrouped)',
+      hint: activeGroupId ? '' : 'already cleared',
+      scope: 'Group',
+      run: () => setActiveGroupId(null),
+      when: () => !!activeGroupId,
+    })
+    for (const g of groups) {
+      acts.push({
+        id: `group.activate.${g.id}`,
+        title: `Set active group: ${g.name}`,
+        hint: activeGroupId === g.id ? 'current' : '',
+        scope: 'Group',
+        run: () => setActiveGroupId(g.id),
+        when: () => activeGroupId !== g.id,
+      })
+      acts.push({
+        id: `group.cancel.${g.id}`,
+        title: `Cancel all panes in group: ${g.name}`,
+        scope: 'Group',
+        run: () => handleCancelGroup(g.id),
+      })
+      acts.push({
+        id: `group.delete.${g.id}`,
+        title: `Delete group: ${g.name}`,
+        scope: 'Group',
+        run: () => handleDeleteGroup(g.id),
+      })
+    }
+    // Phase-5 stub still in.
     acts.push({
       id: 'group.broadcast',
       title: 'Broadcast input to group…',
       hint: 'Phase 5',
       scope: 'Group',
       run: () => toast.info('Broadcast input lands in phase 5.'),
-    })
-    acts.push({
-      id: 'group.cancel',
-      title: 'Cancel group',
-      hint: 'Phase 3',
-      scope: 'Group',
-      run: () => toast.info('Group cancel lands in phase 3.'),
     })
     acts.push({
       id: 'audit.open',
@@ -1027,6 +1144,11 @@ function AgentPortal() {
     saveCurrentAsPreset,
     toast,
     updateLayout,
+    groups,
+    activeGroupId,
+    handleCreateGroup,
+    handleCancelGroup,
+    handleDeleteGroup,
   ])
 
   // Keyboard shortcuts.
@@ -1186,6 +1308,81 @@ function AgentPortal() {
             >
               <Plus className="w-4 h-4" /> New launch
             </button>
+          </div>
+
+          <div className="p-3 space-y-2 border-b border-gray-700">
+            <div className="flex items-center justify-between text-xs uppercase text-gray-400 mb-1">
+              <span>Groups</span>
+              <button
+                type="button"
+                onClick={handleCreateGroup}
+                className="text-blue-300 hover:text-blue-200 normal-case"
+                title="Create a new group"
+              >
+                + New
+              </button>
+            </div>
+            {groups.length === 0 ? (
+              <div className="text-[11px] text-gray-500">
+                No groups yet. Groups give panes a shared budget and a one-click cancel.
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveGroupId(null)}
+                  className={`w-full text-left text-xs px-2 py-1 rounded border ${
+                    activeGroupId == null
+                      ? 'bg-gray-700 border-blue-500 text-gray-100'
+                      : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'
+                  }`}
+                >
+                  (no group)
+                </button>
+                {groups.map((g) => {
+                  const live = processes.filter((p) => p.group_id === g.id && p.status === 'running').length
+                  const cap = g.max_panes
+                  return (
+                    <div
+                      key={g.id}
+                      className={`flex items-center gap-1 text-xs rounded px-2 py-1 border ${
+                        activeGroupId === g.id
+                          ? 'bg-gray-700 border-blue-500'
+                          : 'bg-gray-800 border-gray-700'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setActiveGroupId(g.id)}
+                        className="flex-1 min-w-0 text-left truncate text-gray-100"
+                        title={`Activate group "${g.name}"`}
+                      >
+                        <span className="font-medium">{g.name}</span>
+                        <span className="ml-1 text-gray-500 text-[10px]">
+                          {live}{cap ? `/${cap}` : ''}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCancelGroup(g.id)}
+                        className="p-0.5 text-gray-500 hover:text-yellow-300 flex-shrink-0"
+                        title="Cancel all panes in this group"
+                      >
+                        <Square className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteGroup(g.id)}
+                        className="p-0.5 text-gray-500 hover:text-red-400 flex-shrink-0"
+                        title="Delete group (and reap members)"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           <div className="p-3 space-y-2 border-b border-gray-700">

@@ -247,6 +247,10 @@ class ManagedProcess:
     cpu_limit: Optional[str] = None
     pids_limit: Optional[int] = None
     display_name: str = ""
+    # Group membership — set when the process is launched into a group
+    # via the launch endpoint. Drives parent-cgroup placement (when
+    # cgroups are available) and group-cancel reaping.
+    group_id: Optional[str] = None
     history: Deque[OutputChunk] = field(default_factory=lambda: deque(maxlen=2000))
     subscribers: List[asyncio.Queue] = field(default_factory=list)
 
@@ -272,7 +276,17 @@ class ManagedProcess:
             "cpu_limit": self.cpu_limit,
             "pids_limit": self.pids_limit,
             "display_name": self.display_name,
+            "group_id": self.group_id,
         }
+
+
+# Group runtime registry — kept separate from PortalStore (which holds
+# the *definitions*) because group membership of running processes is
+# pure runtime state. Restart-survival for processes is explicitly out
+# of scope (see Q3 in the action plan), so this lives in memory.
+class GroupBudgetExceededError(RuntimeError):
+    """Raised when adding a process to a group would push it past
+    ``max_panes`` or another budget. Caller should map to HTTP 429."""
 
 
 class ProcessNotFoundError(KeyError):
@@ -343,6 +357,33 @@ class ProcessManager:
         proc.display_name = (display_name or "").strip()
         return proc
 
+    def list_processes_in_group(self, group_id: str) -> List[ManagedProcess]:
+        """Return all *running* processes assigned to ``group_id``.
+
+        Used by ``launch`` to enforce per-group ``max_panes`` budgets
+        and by ``cancel_group`` to reap members.
+        """
+        return [
+            p for p in self._processes.values()
+            if p.group_id == group_id and p.status == ProcessStatus.RUNNING
+        ]
+
+    async def cancel_group(
+        self, group_id: str, *, sigkill_after: float = 3.0
+    ) -> List[ManagedProcess]:
+        """SIGTERM every running member of ``group_id``; SIGKILL after a
+        grace window per member. Idempotent — already-dead members are
+        skipped silently. Returns the list of processes that were
+        targeted (their statuses will flip asynchronously)."""
+        members = self.list_processes_in_group(group_id)
+        for member in members:
+            try:
+                await self.cancel(member.id, sigkill_after=sigkill_after)
+            except ProcessNotFoundError:
+                # Race with finalize — fine to skip.
+                continue
+        return members
+
     async def launch(
         self,
         command: str,
@@ -359,6 +400,9 @@ class ProcessManager:
         cpu_limit: Optional[str] = None,
         pids_limit: Optional[int] = None,
         display_name: str = "",
+        group_id: Optional[str] = None,
+        group_max_panes: Optional[int] = None,
+        group_slice: Optional[str] = None,
     ) -> ManagedProcess:
         """Launch a subprocess and register it.
 
@@ -376,6 +420,19 @@ class ProcessManager:
         args = list(args or [])
         if not command or not command.strip():
             raise ValueError("command is required")
+
+        # Group-budget enforcement happens server-side, before any work.
+        # The caller (route handler) is expected to pass the looked-up
+        # group's ``max_panes`` budget so this module stays decoupled
+        # from PortalStore.
+        if group_id and group_max_panes is not None and group_max_panes > 0:
+            current = len(self.list_processes_in_group(group_id))
+            if current >= group_max_panes:
+                raise GroupBudgetExceededError(
+                    f"group {group_id!r} is full "
+                    f"({current}/{group_max_panes} panes); cancel one before "
+                    f"launching another"
+                )
 
         # The child's env is minimal and PATH is pinned
         # (/usr/local/bin:/usr/bin:/bin) so secrets cannot leak into
@@ -457,12 +514,26 @@ class ProcessManager:
             spawn_args = unshare_args + ["--", spawn_cmd, *spawn_args]
             spawn_cmd = "unshare"
 
-        if memory_limit or cpu_limit or pids_limit:
+        # Wrap in systemd-run --user --scope when:
+        #   * the user requested per-process resource limits, OR
+        #   * the launch is into a group with a parent slice (so the
+        #     scope nests under the slice for parent-cgroup
+        #     enforcement / defense-in-depth).
+        wants_systemd = bool(memory_limit or cpu_limit or pids_limit or group_slice)
+        if wants_systemd:
             if not shutil.which("systemd-run"):
                 raise RuntimeError(
-                    "systemd-run is not available; resource limits require systemd cgroups"
+                    "systemd-run is not available; resource limits "
+                    "(and group cgroups) require systemd cgroups"
                 )
             systemd_args = ["--user", "--scope", "--quiet", "--collect"]
+            if group_slice:
+                # Nesting under a slice gives the parent slice properties
+                # (e.g. MemoryMax) authority over the sum of all child
+                # scopes. The slice itself is created lazily by
+                # systemd-run on first use, then ``set_group_slice_limits``
+                # below pins the parent budgets.
+                systemd_args += [f"--slice={group_slice}"]
             if memory_limit:
                 systemd_args += ["--property", f"MemoryMax={memory_limit}"]
             if cpu_limit:
@@ -515,6 +586,7 @@ class ProcessManager:
             cpu_limit=cpu_limit,
             pids_limit=pids_limit,
             display_name=(display_name or "").strip(),
+            group_id=group_id,
         )
 
         master_fd: Optional[int] = None
@@ -815,6 +887,66 @@ class ProcessManager:
                     # Subscriber queue full; slow consumer will notice on next get().
                     pass
             self._asyncio_procs.pop(managed.id, None)
+
+
+def make_group_slice_name(group_id: str) -> str:
+    """Build a stable systemd slice name for a portal group.
+
+    systemd slice names are constrained to a small character set; the
+    UUID-shaped group_ids satisfy it after dash→underscore swap.
+    """
+    safe = group_id.replace("-", "_")
+    return f"atlasportal_{safe}.slice"
+
+
+def set_group_slice_limits(
+    slice_name: str,
+    *,
+    mem_budget_bytes: Optional[int] = None,
+    cpu_budget_pct: Optional[int] = None,
+) -> bool:
+    """Apply parent-slice resource limits via ``systemctl --user
+    set-property``. Returns True on apparent success, False otherwise.
+
+    Idempotent: re-applying the same limits is a no-op from systemd's
+    perspective. Failures (no systemd, slice not yet realized) are
+    logged at INFO and surface as False so the caller can decide
+    whether the failure is fatal — for a parent cgroup it is best-
+    effort defense-in-depth, not a hard requirement.
+    """
+    if not (mem_budget_bytes or cpu_budget_pct):
+        return True
+    if not shutil.which("systemctl"):
+        return False
+    props: List[str] = []
+    if mem_budget_bytes:
+        props.append(f"MemoryMax={int(mem_budget_bytes)}")
+    if cpu_budget_pct:
+        props.append(f"CPUQuota={int(cpu_budget_pct)}%")
+    try:
+        rc = subprocess.run(
+            ["systemctl", "--user", "set-property", slice_name, *props],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=5,
+        )
+        if rc.returncode != 0:
+            logger.info(
+                "set-property %s on slice %s failed (rc=%s): %s",
+                ",".join(props),
+                sanitize_for_logging(slice_name),
+                rc.returncode,
+                sanitize_for_logging((rc.stderr or b"").decode(errors="replace")),
+            )
+            return False
+        return True
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.info(
+            "set-property failed for slice %s: %s",
+            sanitize_for_logging(slice_name),
+            sanitize_for_logging(exc),
+        )
+        return False
 
 
 _singleton: Optional[ProcessManager] = None
