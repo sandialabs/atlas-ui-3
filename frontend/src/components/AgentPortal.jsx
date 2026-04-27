@@ -32,6 +32,9 @@ import {
   createGroup,
   deleteGroup,
   cancelGroup,
+  listBundles,
+  launchBundle,
+  listAudit,
 } from './agent-portal/groupsClient'
 
 const LAUNCH_HISTORY_MAX = 15
@@ -331,6 +334,14 @@ function AgentPortal() {
   const [groups, setGroups] = useState([])
   // Which group future launches drop into. null = no group.
   const [activeGroupId, setActiveGroupId] = useState(null)
+  // Bundles (Phase 4): named multi-preset launches. Listed via the
+  // command palette ("Launch bundle: <name>") rather than a dedicated
+  // sidebar section to keep the chrome compact.
+  const [bundles, setBundles] = useState([])
+  // Audit log overlay (Phase 4). Closed by default; opened by the
+  // command palette or via a header button.
+  const [auditOpen, setAuditOpen] = useState(false)
+  const [auditEvents, setAuditEvents] = useState([])
 
   useEffect(() => {
     fetch('/api/agent-portal/capabilities', { credentials: 'include' })
@@ -741,6 +752,76 @@ function AgentPortal() {
     }
   }, [fetchProcesses, toast])
 
+  // Bundles + audit (Phase 4)
+  const refreshBundles = useCallback(async () => {
+    setBundles(await listBundles())
+  }, [])
+
+  useEffect(() => {
+    refreshBundles()
+  }, [refreshBundles])
+
+  const handleLaunchBundle = useCallback(async (bundleId) => {
+    const target = bundles.find((b) => b.id === bundleId)
+    const res = await launchBundle(bundleId)
+    if (res?.processes) {
+      toast.success(`Launched ${res.processes.length} pane(s) into "${res.group?.name || 'group'}"`)
+      // Drop the new processes into available slots so the user actually
+      // sees them — pick from index 0 forward.
+      setActiveGroupId(res.group?.id || null)
+      updateLayout((prev) => {
+        let next = prev
+        for (const p of res.processes) {
+          next = placeProcessInLayout(next, p.id)
+        }
+        return next
+      })
+      refreshGroups()
+      fetchProcesses()
+    } else {
+      toast.error(`Bundle launch failed${target ? ` ("${target.name}")` : ''}`)
+    }
+  }, [bundles, fetchProcesses, refreshGroups, toast, updateLayout])
+
+  const refreshAudit = useCallback(async () => {
+    setAuditEvents(await listAudit(200))
+  }, [])
+
+  const openAudit = useCallback(async () => {
+    await refreshAudit()
+    setAuditOpen(true)
+  }, [refreshAudit])
+
+  // Shareable URL: /agent-portal?preset=<id> or ?bundle=<id>. The
+  // server validates auth + ownership at launch, not at parse, so it's
+  // safe to act on the param without a pre-check round trip.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const bundle = params.get('bundle')
+    const preset = params.get('preset')
+    if (bundle) {
+      // Wait until the bundle list has been fetched at least once so we
+      // can use the friendly toast text.
+      handleLaunchBundle(bundle)
+      // Clear the param so a refresh doesn't re-launch.
+      params.delete('bundle')
+      const search = params.toString()
+      window.history.replaceState({}, '', `${window.location.pathname}${search ? '?' + search : ''}`)
+    } else if (preset) {
+      // Hand off to the existing preset-load path: open the launch
+      // modal pre-populated with the preset.
+      const cfg = launchConfigs.find((c) => c.id === preset)
+      if (cfg) {
+        applyEntry(cfg, { asPreset: true })
+        setLaunchModalOpen(true)
+      }
+      params.delete('preset')
+      const search = params.toString()
+      window.history.replaceState({}, '', `${window.location.pathname}${search ? '?' + search : ''}`)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bundles])
+
   // Build a stable processes-by-id map for PaneGrid so the panes can
   // resolve their slot's process_id to a summary in O(1).
   const processesById = useMemo(() => {
@@ -1102,10 +1183,63 @@ function AgentPortal() {
     acts.push({
       id: 'audit.open',
       title: 'Open audit log',
-      hint: 'Phase 4',
       scope: 'Global',
-      run: () => toast.info('Audit log lands in phase 4.'),
+      run: () => openAudit(),
     })
+    for (const b of bundles) {
+      acts.push({
+        id: `bundle.launch.${b.id}`,
+        title: `Launch bundle: ${b.name}`,
+        hint: `${(b.members || []).length} member(s)`,
+        scope: 'Process',
+        run: () => handleLaunchBundle(b.id),
+      })
+    }
+    if (focusedProcess && focusedProcess.status !== 'running') {
+      // "What ran here last" — re-launch.
+      acts.push({
+        id: 'pane.relaunch',
+        title: 'Re-launch the exited pane',
+        hint: focusedProcess.command || '',
+        scope: 'Process',
+        run: async () => {
+          const body = {
+            command: focusedProcess.command,
+            args: focusedProcess.args || [],
+            sandbox_mode: focusedProcess.sandbox_mode || 'off',
+            extra_writable_paths: focusedProcess.extra_writable_paths || [],
+            use_pty: !!focusedProcess.use_pty,
+            namespaces: !!focusedProcess.namespaces,
+            isolate_network: !!focusedProcess.isolate_network,
+            display_name: focusedProcess.display_name || '',
+          }
+          if (focusedProcess.cwd) body.cwd = focusedProcess.cwd
+          if (focusedProcess.memory_limit) body.memory_limit = focusedProcess.memory_limit
+          if (focusedProcess.cpu_limit) body.cpu_limit = focusedProcess.cpu_limit
+          if (focusedProcess.pids_limit) body.pids_limit = focusedProcess.pids_limit
+          if (focusedProcess.group_id) body.group_id = focusedProcess.group_id
+          try {
+            const res = await fetch('/api/agent-portal/processes', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            })
+            if (res.ok) {
+              const proc = await res.json()
+              updateLayout((prev) => placeProcessInLayout(prev, proc.id, focusedSlot))
+              fetchProcesses()
+              toast.success('Re-launched.')
+            } else {
+              const err = await res.json().catch(() => ({}))
+              toast.error(err.detail || `Re-launch failed (${res.status})`)
+            }
+          } catch (e) {
+            toast.error(e.message || 'Re-launch failed')
+          }
+        },
+      })
+    }
     acts.push({
       id: 'global.refresh',
       title: 'Refresh process list',
@@ -1149,6 +1283,9 @@ function AgentPortal() {
     handleCreateGroup,
     handleCancelGroup,
     handleDeleteGroup,
+    bundles,
+    handleLaunchBundle,
+    openAudit,
   ])
 
   // Keyboard shortcuts.
@@ -1835,6 +1972,72 @@ function AgentPortal() {
         onOpenChange={setPaletteOpen}
         actions={paletteActions}
       />
+      {auditOpen && (
+        <div
+          className="fixed inset-0 z-[10001] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setAuditOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Audit log"
+        >
+          <div
+            className="w-full max-w-4xl max-h-[80vh] flex flex-col bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-100">Audit log</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={refreshAudit}
+                  className="p-1.5 text-gray-400 hover:text-blue-300"
+                  title="Refresh"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditOpen(false)}
+                  className="p-1.5 text-gray-400 hover:text-gray-200"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto font-mono text-xs">
+              {auditEvents.length === 0 ? (
+                <div className="p-4 text-gray-500">No audit events yet.</div>
+              ) : (
+                <table className="w-full">
+                  <thead className="text-[10px] uppercase text-gray-500 sticky top-0 bg-gray-900">
+                    <tr>
+                      <th className="text-left px-3 py-2">Timestamp</th>
+                      <th className="text-left px-3 py-2">Event</th>
+                      <th className="text-left px-3 py-2">Group</th>
+                      <th className="text-left px-3 py-2">Process</th>
+                      <th className="text-left px-3 py-2">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditEvents.map((e) => (
+                      <tr key={e.id} className="border-t border-gray-800">
+                        <td className="px-3 py-1.5 text-gray-400 whitespace-nowrap">{e.ts?.replace('T', ' ').slice(0, 19)}</td>
+                        <td className="px-3 py-1.5 text-gray-200">{e.event}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{e.group_id ? e.group_id.slice(0, 8) : '—'}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{e.process_id ? e.process_id.slice(0, 8) : '—'}</td>
+                        <td className="px-3 py-1.5 text-gray-400 truncate max-w-md">
+                          {e.detail ? JSON.stringify(e.detail) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

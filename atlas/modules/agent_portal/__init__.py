@@ -1,5 +1,6 @@
 """Agent Portal supporting modules (preset library, server-side state store)."""
 
+from atlas.modules.agent_portal.audit_log import record_event as record_audit_event
 from atlas.modules.agent_portal.portal_store import (
     PortalStore,
     get_portal_store,
@@ -18,4 +19,5 @@ __all__ = [
     "get_preset_store",
     "PortalStore",
     "get_portal_store",
+    "record_audit_event",
 ]

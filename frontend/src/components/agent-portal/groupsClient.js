@@ -66,3 +66,25 @@ export async function listAudit(limit = 200) {
     return []
   }
 }
+
+export async function listBundles() {
+  try {
+    const res = await fetch('/api/agent-portal/bundles', { credentials: 'include' })
+    const body = await jsonOrNull(res)
+    return Array.isArray(body?.bundles) ? body.bundles : []
+  } catch {
+    return []
+  }
+}
+
+export async function launchBundle(bundleId) {
+  try {
+    const res = await fetch(`/api/agent-portal/bundles/${encodeURIComponent(bundleId)}/launch`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+    return await jsonOrNull(res)
+  } catch {
+    return null
+  }
+}

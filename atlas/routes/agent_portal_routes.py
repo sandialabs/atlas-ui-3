@@ -23,6 +23,7 @@ from atlas.modules.agent_portal import (
     PresetNotFoundError,
     get_portal_store,
     get_preset_store,
+    record_audit_event,
 )
 from atlas.modules.process_manager import (
     GroupBudgetExceededError,
@@ -201,15 +202,21 @@ async def launch_process(
         if group is None:
             raise HTTPException(status_code=404, detail="Group not found")
         group_max_panes = group.get("max_panes") or None
-        group_slice = make_group_slice_name(body.group_id)
-        # Best-effort: pin parent slice limits on every launch so they
-        # stay current if the group's budget changes between launches.
-        # Failure is non-fatal — the per-process limits still apply.
-        set_group_slice_limits(
-            group_slice,
-            mem_budget_bytes=group.get("mem_budget_bytes") or None,
-            cpu_budget_pct=group.get("cpu_budget_pct") or None,
-        )
+        # Only opt into the systemd-run --slice wrapping when the group
+        # actually carries a parent budget worth enforcing. Wrapping for
+        # nesting alone (no budgets) costs us a systemd-run dependency
+        # without buying any defense-in-depth, and it breaks on hosts
+        # without a per-user systemd bus (CI containers, sandboxes).
+        if group.get("mem_budget_bytes") or group.get("cpu_budget_pct"):
+            group_slice = make_group_slice_name(body.group_id)
+            # Best-effort: pin parent slice limits on every launch so they
+            # stay current if the group's budget changes between launches.
+            # Failure is non-fatal — the per-process limits still apply.
+            set_group_slice_limits(
+                group_slice,
+                mem_budget_bytes=group.get("mem_budget_bytes") or None,
+                cpu_budget_pct=group.get("cpu_budget_pct") or None,
+            )
 
     try:
         managed = await manager.launch(
@@ -239,6 +246,18 @@ async def launch_process(
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=429, detail=str(e))
+    record_audit_event(
+        current_user,
+        "launch",
+        process_id=managed.id,
+        group_id=body.group_id,
+        detail={
+            "command": body.command,
+            "args": list(body.args or []),
+            "sandbox_mode": sandbox_mode,
+            "use_pty": body.use_pty,
+        },
+    )
     return managed.to_summary()
 
 
@@ -269,6 +288,12 @@ async def cancel_process(
         managed = await manager.cancel(process_id)
     except ProcessNotFoundError:
         raise HTTPException(status_code=404, detail="Process not found")
+    record_audit_event(
+        current_user,
+        "cancel",
+        process_id=process_id,
+        group_id=managed.group_id,
+    )
     return managed.to_summary()
 
 
@@ -285,6 +310,13 @@ async def rename_process(
         managed = manager.rename(process_id, body.display_name)
     except ProcessNotFoundError:
         raise HTTPException(status_code=404, detail="Process not found")
+    record_audit_event(
+        current_user,
+        "rename",
+        process_id=process_id,
+        group_id=managed.group_id,
+        detail={"display_name": body.display_name},
+    )
     return managed.to_summary()
 
 
@@ -577,6 +609,12 @@ async def create_group(
         group = store.create_group(current_user, body.model_dump())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    record_audit_event(
+        current_user,
+        "group_create",
+        group_id=group["id"],
+        detail={"name": group["name"], "max_panes": group.get("max_panes")},
+    )
     return group
 
 
@@ -605,6 +643,17 @@ async def update_group(
     group = store.update_group(current_user, group_id, patch)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
+    # group_budget_change is a distinct event so a compliance reader can
+    # filter on it cheaply (mem/cpu changes are the operationally
+    # interesting ones, not display-only renames).
+    budget_keys = {"max_panes", "mem_budget_bytes", "cpu_budget_pct", "idle_kill_seconds"}
+    is_budget_change = any(k in patch for k in budget_keys)
+    record_audit_event(
+        current_user,
+        "group_budget_change" if is_budget_change else "group_update",
+        group_id=group_id,
+        detail=patch,
+    )
     return group
 
 
@@ -626,11 +675,17 @@ async def delete_group(
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
     manager = get_process_manager()
-    await manager.cancel_group(group_id)
+    members = await manager.cancel_group(group_id)
     deleted = store.delete_group(current_user, group_id)
     if not deleted:
         # Race with another delete — treat as already gone.
         pass
+    record_audit_event(
+        current_user,
+        "group_delete",
+        group_id=group_id,
+        detail={"members_cancelled": [m.id for m in members]},
+    )
     return None
 
 
@@ -649,6 +704,12 @@ async def cancel_group(
         raise HTTPException(status_code=404, detail="Group not found")
     manager = get_process_manager()
     members = await manager.cancel_group(group_id)
+    record_audit_event(
+        current_user,
+        "group_cancel",
+        group_id=group_id,
+        detail={"members_cancelled": [m.id for m in members]},
+    )
     return {"cancelled": [m.id for m in members]}
 
 
@@ -687,6 +748,136 @@ async def get_bundle(
     if bundle is None:
         raise HTTPException(status_code=404, detail="Bundle not found")
     return bundle
+
+
+@router.post("/bundles/{bundle_id}/launch")
+async def launch_bundle(
+    bundle_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    """Atomic-ish bundle launch.
+
+    1. Look up the bundle (owner-scoped).
+    2. Create the group from group_template.
+    3. Launch each member preset with group_id set.
+    4. If any member launch fails, cancel everything launched so far
+       and delete the group so the user is not left with a half-built
+       bundle.
+    """
+    _require_enabled()
+    store = get_portal_store()
+    bundle = store.get_bundle(current_user, bundle_id)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+
+    members = bundle.get("members") or []
+    if not members:
+        raise HTTPException(status_code=400, detail="Bundle has no members to launch")
+
+    preset_store = get_preset_store()
+    # Resolve every preset up front so a typo in member.preset_id fails
+    # before we mutate any server state.
+    resolved: List[tuple] = []  # list[(member_dict, preset)]
+    for member in members:
+        pid = member.get("preset_id")
+        if not pid:
+            raise HTTPException(status_code=400, detail="member missing preset_id")
+        try:
+            preset = preset_store.get(pid, current_user)
+        except PresetNotFoundError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"preset {pid!r} not found in user library",
+            )
+        resolved.append((member, preset))
+
+    # Step 2 — create the group.
+    group_template = bundle.get("group_template") or {}
+    group_payload = dict(group_template)
+    if not group_payload.get("name"):
+        group_payload["name"] = f"{bundle['name']} ({bundle_id[:8]})"
+    try:
+        group = store.create_group(current_user, group_payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    group_id = group["id"]
+    record_audit_event(
+        current_user,
+        "group_create",
+        group_id=group_id,
+        detail={"name": group["name"], "from_bundle": bundle_id},
+    )
+    # Same budget-gated systemd-run wrapping as the single-launch path.
+    group_slice: Optional[str] = None
+    if group.get("mem_budget_bytes") or group.get("cpu_budget_pct"):
+        group_slice = make_group_slice_name(group_id)
+        set_group_slice_limits(
+            group_slice,
+            mem_budget_bytes=group.get("mem_budget_bytes") or None,
+            cpu_budget_pct=group.get("cpu_budget_pct") or None,
+        )
+
+    manager = get_process_manager()
+    launched: List[dict] = []
+    for member, preset in resolved:
+        try:
+            display_name = (
+                (member.get("display_name_override") or "").strip()
+                or preset.display_name
+                or preset.name
+            )
+            managed = await manager.launch(
+                command=preset.command,
+                args=preset.args,
+                cwd=preset.cwd,
+                user_email=current_user,
+                sandbox_mode=preset.sandbox_mode,
+                extra_writable_paths=preset.extra_writable_paths,
+                use_pty=preset.use_pty,
+                namespaces=preset.namespaces,
+                isolate_network=preset.isolate_network,
+                memory_limit=preset.memory_limit,
+                cpu_limit=preset.cpu_limit,
+                pids_limit=preset.pids_limit,
+                group_id=group_id,
+                group_max_panes=group.get("max_panes"),
+                group_slice=group_slice,
+            )
+            # Apply the display name override (or preset display name)
+            # right away so the UI shows the right label without an
+            # extra round trip.
+            if display_name:
+                manager.rename(managed.id, display_name)
+            launched.append(managed.to_summary())
+            record_audit_event(
+                current_user,
+                "launch",
+                process_id=managed.id,
+                group_id=group_id,
+                detail={"from_bundle": bundle_id, "preset_id": preset.id},
+            )
+        except Exception as e:
+            # Roll back: cancel everything launched and drop the group.
+            await manager.cancel_group(group_id)
+            store.delete_group(current_user, group_id)
+            record_audit_event(
+                current_user,
+                "bundle_launch_rollback",
+                group_id=group_id,
+                detail={"reason": str(e), "bundle_id": bundle_id},
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"bundle member launch failed: {e}",
+            )
+
+    record_audit_event(
+        current_user,
+        "bundle_launch",
+        group_id=group_id,
+        detail={"bundle_id": bundle_id, "process_ids": [p["id"] for p in launched]},
+    )
+    return {"group": group, "processes": launched}
 
 
 @router.delete("/bundles/{bundle_id}", status_code=204)
