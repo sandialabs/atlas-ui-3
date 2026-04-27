@@ -34,7 +34,10 @@ from atlas.modules.process_manager import (
     make_group_slice_name,
     set_group_slice_limits,
 )
-from atlas.modules.process_manager.manager import probe_isolation_capabilities
+from atlas.modules.process_manager.manager import (
+    ensure_idle_sweeper_running,
+    probe_isolation_capabilities,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +261,9 @@ async def launch_process(
             "use_pty": body.use_pty,
         },
     )
+    # Lazy-start the idle-kill sweeper now that there's portal activity.
+    # Idempotent on second call.
+    ensure_idle_sweeper_running()
     return managed.to_summary()
 
 
@@ -724,6 +730,74 @@ async def broadcast_to_group(
         detail={"recipients": recipients, "byte_count": len(data)},
     )
     return {"recipients": recipients, "bytes": len(data)}
+
+
+@router.post("/groups/{group_id}/pause")
+async def pause_group(
+    group_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    """SIGSTOP every running member of the group (Phase 6 polish).
+
+    Pair with /resume to undo. The processes stay registered and their
+    status remains RUNNING; only the OS-level execution is frozen.
+    """
+    _require_enabled()
+    store = get_portal_store()
+    group = store.get_group(current_user, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    manager = get_process_manager()
+    paused = manager.pause_group(group_id)
+    record_audit_event(
+        current_user, "group_pause",
+        group_id=group_id,
+        detail={"paused": paused},
+    )
+    return {"paused": paused}
+
+
+@router.post("/groups/{group_id}/resume")
+async def resume_group(
+    group_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    _require_enabled()
+    store = get_portal_store()
+    group = store.get_group(current_user, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    manager = get_process_manager()
+    resumed = manager.resume_group(group_id)
+    record_audit_event(
+        current_user, "group_resume",
+        group_id=group_id,
+        detail={"resumed": resumed},
+    )
+    return {"resumed": resumed}
+
+
+@router.get("/groups/{group_id}/snapshot")
+async def snapshot_group(
+    group_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    """Return a JSON snapshot of every member's scrollback. Designed
+    for "save this state for later" workflows; the frontend may pack
+    the response into a downloadable file."""
+    _require_enabled()
+    store = get_portal_store()
+    group = store.get_group(current_user, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    manager = get_process_manager()
+    snap = manager.snapshot_group(group_id)
+    record_audit_event(
+        current_user, "group_snapshot",
+        group_id=group_id,
+        detail={"members": [m["process_id"] for m in snap.get("members", [])]},
+    )
+    return {"group": group, "snapshot": snap}
 
 
 @router.post("/groups/{group_id}/cancel", status_code=200)

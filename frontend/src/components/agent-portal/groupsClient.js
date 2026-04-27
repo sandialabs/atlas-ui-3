@@ -88,3 +88,38 @@ export async function launchBundle(bundleId) {
     return null
   }
 }
+
+export async function pauseGroup(groupId) {
+  try {
+    const res = await fetch(`/api/agent-portal/groups/${encodeURIComponent(groupId)}/pause`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+    return await jsonOrNull(res)
+  } catch {
+    return null
+  }
+}
+
+export async function resumeGroup(groupId) {
+  try {
+    const res = await fetch(`/api/agent-portal/groups/${encodeURIComponent(groupId)}/resume`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+    return await jsonOrNull(res)
+  } catch {
+    return null
+  }
+}
+
+export async function snapshotGroup(groupId) {
+  try {
+    const res = await fetch(`/api/agent-portal/groups/${encodeURIComponent(groupId)}/snapshot`, {
+      credentials: 'include',
+    })
+    return await jsonOrNull(res)
+  } catch {
+    return null
+  }
+}

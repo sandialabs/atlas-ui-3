@@ -26,7 +26,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import AsyncIterator, Deque, Dict, List, Optional
+from typing import Any, AsyncIterator, Deque, Dict, List, Optional
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 
@@ -251,6 +251,10 @@ class ManagedProcess:
     # via the launch endpoint. Drives parent-cgroup placement (when
     # cgroups are available) and group-cancel reaping.
     group_id: Optional[str] = None
+    # Last-activity timestamp (stdout/stderr/raw chunk seen). Used by
+    # the idle-kill sweeper to reap silent processes after their
+    # group's idle_kill_seconds has elapsed.
+    last_activity: float = 0.0
     history: Deque[OutputChunk] = field(default_factory=lambda: deque(maxlen=2000))
     subscribers: List[asyncio.Queue] = field(default_factory=list)
 
@@ -317,6 +321,61 @@ class ProcessManager:
                 sanitize_for_logging(e),
             )
 
+    def pause_group(self, group_id: str) -> List[str]:
+        """SIGSTOP every running PTY-or-not member of ``group_id``.
+
+        SIGSTOP halts the process but doesn't reap it; the audit log
+        and process registry continue to show the pane. Pair with
+        ``resume_group`` to undo. Returns the list of ids that were
+        signalled.
+        """
+        return self._signal_group(group_id, signal.SIGSTOP)
+
+    def resume_group(self, group_id: str) -> List[str]:
+        """SIGCONT every member of ``group_id``."""
+        return self._signal_group(group_id, signal.SIGCONT)
+
+    def _signal_group(self, group_id: str, sig: int) -> List[str]:
+        sent: List[str] = []
+        for proc in self.list_processes_in_group(group_id):
+            if proc.pid is None:
+                continue
+            try:
+                os.killpg(os.getpgid(proc.pid), sig)
+                sent.append(proc.id)
+            except (ProcessLookupError, PermissionError) as exc:
+                logger.info(
+                    "signal %s to %s skipped: %s",
+                    sig,
+                    sanitize_for_logging(proc.id),
+                    sanitize_for_logging(exc),
+                )
+        return sent
+
+    def snapshot_group(self, group_id: str) -> Dict[str, Any]:
+        """Build an in-memory snapshot of every member's scrollback.
+
+        Returned shape is plain JSON-friendly dicts; the caller (route
+        handler) decides whether to stream as JSON or pack into a
+        tarball / zip. Keeping the marshalling out of here means a
+        future container/remote executor can produce the same shape
+        without dragging tar dependencies into the manager.
+        """
+        members = []
+        for proc in self.list_processes_in_group(group_id):
+            members.append({
+                "process_id": proc.id,
+                "display_name": proc.display_name,
+                "command": proc.command,
+                "args": list(proc.args),
+                "status": proc.status.value,
+                "history": [
+                    {"stream": c.stream, "text": c.text, "timestamp": c.timestamp}
+                    for c in list(proc.history)
+                ],
+            })
+        return {"group_id": group_id, "captured_at": time.time(), "members": members}
+
     def broadcast_input(self, group_id: str, data: bytes) -> List[str]:
         """Fan ``data`` out to the pty master of every running member of
         ``group_id``. Returns the list of process_ids the bytes were
@@ -374,6 +433,37 @@ class ProcessManager:
             raise ProcessNotFoundError(process_id)
         proc.display_name = (display_name or "").strip()
         return proc
+
+    def idle_seconds_for(self, process_id: str) -> Optional[float]:
+        """Seconds since the process last emitted a non-system chunk.
+
+        Returns None if the process is not tracked (e.g. already
+        garbage-collected). Used by the idle-kill sweeper.
+        """
+        proc = self._processes.get(process_id)
+        if proc is None or proc.status != ProcessStatus.RUNNING:
+            return None
+        return max(0.0, time.time() - proc.last_activity)
+
+    async def reap_idle_in_group(
+        self, group_id: str, idle_kill_seconds: float
+    ) -> List[str]:
+        """Cancel members of ``group_id`` whose ``last_activity`` is
+        older than ``idle_kill_seconds``. Returns the cancelled ids so
+        the caller can audit the sweep.
+        """
+        if idle_kill_seconds is None or idle_kill_seconds <= 0:
+            return []
+        cutoff = time.time() - idle_kill_seconds
+        cancelled: List[str] = []
+        for proc in list(self.list_processes_in_group(group_id)):
+            if proc.last_activity <= cutoff:
+                try:
+                    await self.cancel(proc.id)
+                    cancelled.append(proc.id)
+                except ProcessNotFoundError:
+                    continue
+        return cancelled
 
     def list_processes_in_group(self, group_id: str) -> List[ManagedProcess]:
         """Return all *running* processes assigned to ``group_id``.
@@ -587,13 +677,15 @@ class ProcessManager:
                 proc_env["ATLAS_SANDBOX_EXTRA_WRITE_PATHS"] = ":".join(normalized_extra)
 
         process_id = str(uuid.uuid4())
+        now = time.time()
         managed = ManagedProcess(
             id=process_id,
             command=command,
             args=args,
             cwd=resolved_cwd,
             user_email=user_email,
-            started_at=time.time(),
+            started_at=now,
+            last_activity=now,
             sandboxed=sandboxed,
             sandbox_mode=sandbox_mode,
             extra_writable_paths=normalized_extra,
@@ -795,8 +887,14 @@ class ProcessManager:
                     managed.subscribers.remove(queue)
 
     def _record_chunk(self, managed: ManagedProcess, stream: str, text: str) -> None:
-        chunk = OutputChunk(stream=stream, text=text, timestamp=time.time())
+        now = time.time()
+        chunk = OutputChunk(stream=stream, text=text, timestamp=now)
         managed.history.append(chunk)
+        # Stdout/stderr/raw chunks count as activity; system messages
+        # don't, so a process that hasn't emitted any real output gets
+        # idle-killed even if the launch banner is still in the buffer.
+        if stream != "system":
+            managed.last_activity = now
         for q in list(managed.subscribers):
             try:
                 q.put_nowait(chunk)
@@ -968,6 +1066,7 @@ def set_group_slice_limits(
 
 
 _singleton: Optional[ProcessManager] = None
+_idle_sweeper_task: Optional["asyncio.Task[None]"] = None
 
 
 def get_process_manager() -> ProcessManager:
@@ -975,3 +1074,69 @@ def get_process_manager() -> ProcessManager:
     if _singleton is None:
         _singleton = ProcessManager()
     return _singleton
+
+
+async def _idle_sweep_loop(
+    *, interval: float = 30.0,
+) -> None:
+    """Periodically reap idle members of every group with a positive
+    idle_kill_seconds. Runs forever until cancelled.
+
+    Imports PortalStore lazily so this module stays decoupled from the
+    agent_portal package — handy for keeping the test surface small.
+    """
+    from atlas.modules.agent_portal.audit_log import record_event
+    from atlas.modules.agent_portal.portal_store import get_portal_store
+    pm = get_process_manager()
+    while True:
+        try:
+            store = get_portal_store()
+            # No "list all groups across all owners" surface today —
+            # walk by-owner via the live processes' user_email set so
+            # we never spy on owners with no live activity.
+            owners = {p.user_email for p in pm._processes.values() if p.user_email}
+            for owner in owners:
+                for group in store.list_groups(owner):
+                    idle_kill = group.get("idle_kill_seconds")
+                    if not idle_kill:
+                        continue
+                    cancelled = await pm.reap_idle_in_group(group["id"], idle_kill)
+                    if cancelled:
+                        record_event(
+                            owner,
+                            "idle_kill",
+                            group_id=group["id"],
+                            detail={
+                                "cancelled": cancelled,
+                                "idle_kill_seconds": idle_kill,
+                            },
+                        )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("idle-sweep iteration failed: %s", exc)
+        await asyncio.sleep(interval)
+
+
+def ensure_idle_sweeper_running(interval: float = 30.0) -> None:
+    """Start the idle-kill sweeper task if it's not already running.
+
+    Safe to call repeatedly (no-ops on the second call). Called from the
+    /processes launch handler so the sweeper only spins up when there's
+    actually portal activity — keeps unit tests that never hit the
+    route from leaking a perpetual task.
+    """
+    global _idle_sweeper_task
+    if _idle_sweeper_task is not None and not _idle_sweeper_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _idle_sweeper_task = loop.create_task(_idle_sweep_loop(interval=interval))
+
+
+def stop_idle_sweeper_for_tests() -> None:
+    """Test-only — cancels the sweeper so a follow-up test starts clean."""
+    global _idle_sweeper_task
+    if _idle_sweeper_task is not None:
+        _idle_sweeper_task.cancel()
+        _idle_sweeper_task = None

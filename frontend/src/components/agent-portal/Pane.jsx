@@ -216,10 +216,32 @@ function Pane({
     if (el) el.scrollTop = el.scrollHeight
   }, [chunks])
 
+  // Inline hint strip: show after 5s of no output, hide on next chunk.
+  // Helps users discover Ctrl-Shift-P / F / 1-9 without reading docs.
+  const [showHint, setShowHint] = useState(false)
+  useEffect(() => {
+    setShowHint(false)
+    if (!process || !procId) return
+    const t = setTimeout(() => setShowHint(true), 5000)
+    return () => clearTimeout(t)
+  }, [process, procId, chunks.length])
+
   const headerLabel = useMemo(() => {
     if (!process) return 'Empty pane'
     return process.display_name?.trim()
       || `${process.command}${process.args?.length ? ' ' + process.args.join(' ') : ''}`
+  }, [process])
+
+  // Per-pane breadcrumb (Phase 6 polish): cwd · sandbox · group.
+  // Server supplies all three as plain strings so a future remote
+  // executor doesn't have to map host paths into browser URLs.
+  const breadcrumb = useMemo(() => {
+    if (!process) return null
+    const parts = []
+    if (process.cwd) parts.push(process.cwd)
+    if (process.sandbox_mode && process.sandbox_mode !== 'off') parts.push(`sandbox:${process.sandbox_mode}`)
+    if (process.group_id) parts.push(`group:${process.group_id.slice(0, 8)}`)
+    return parts.join(' · ')
   }, [process])
 
   const commitName = () => {
@@ -322,6 +344,12 @@ function Pane({
         )}
       </div>
 
+      {breadcrumb && (
+        <div className="px-2 py-0.5 border-b border-gray-800 bg-gray-900 text-[10px] text-gray-500 font-mono truncate">
+          {breadcrumb}
+        </div>
+      )}
+
       {/* Body */}
       {!process ? (
         <div className="flex-1 flex items-center justify-center text-gray-600 text-sm">
@@ -345,6 +373,11 @@ function Pane({
               </div>
             ))
           )}
+        </div>
+      )}
+      {showHint && process && (
+        <div className="px-2 py-0.5 bg-gray-900/80 text-[10px] text-gray-500 font-mono border-t border-gray-800 truncate">
+          Ctrl-Shift-P · F fullscreen · 1-9 jump
         </div>
       )}
     </div>

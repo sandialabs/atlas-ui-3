@@ -35,6 +35,9 @@ import {
   listBundles,
   launchBundle,
   listAudit,
+  pauseGroup,
+  resumeGroup,
+  snapshotGroup,
 } from './agent-portal/groupsClient'
 
 const LAUNCH_HISTORY_MAX = 15
@@ -764,6 +767,43 @@ function AgentPortal() {
     }
   }, [fetchProcesses, toast])
 
+  // Pause / Resume / Snapshot (Phase 6 polish).
+  const handlePauseGroup = useCallback(async (groupId) => {
+    const res = await pauseGroup(groupId)
+    if (res?.paused) toast.info(`Paused ${res.paused.length} pane(s)`)
+    else toast.error('Pause failed')
+  }, [toast])
+  const handleResumeGroup = useCallback(async (groupId) => {
+    const res = await resumeGroup(groupId)
+    if (res?.resumed) toast.success(`Resumed ${res.resumed.length} pane(s)`)
+    else toast.error('Resume failed')
+  }, [toast])
+  const handleSnapshotGroup = useCallback(async (groupId) => {
+    const res = await snapshotGroup(groupId)
+    if (!res) {
+      toast.error('Snapshot failed')
+      return
+    }
+    // Offer the snapshot as a downloadable JSON. Defer the heavy
+    // tarball-of-scrollback packaging to a later iteration; JSON is
+    // small enough for typical session sizes and any text editor can
+    // open it.
+    try {
+      const blob = new Blob([JSON.stringify(res, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `agent-portal-snapshot-${groupId}-${Date.now()}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Snapshot downloaded')
+    } catch (e) {
+      toast.error(e.message || 'Snapshot save failed')
+    }
+  }, [toast])
+
   // Bundles + audit (Phase 4)
   const refreshBundles = useCallback(async () => {
     setBundles(await listBundles())
@@ -1184,7 +1224,7 @@ function AgentPortal() {
         run: () => handleDeleteGroup(g.id),
       })
     }
-    // Per-group sync toggles (Phase 5).
+    // Per-group sync toggles (Phase 5) + pause/snapshot (Phase 6).
     for (const g of groups) {
       const synced = syncedGroupIds.has(g.id)
       acts.push({
@@ -1194,6 +1234,27 @@ function AgentPortal() {
           : `Synchronize input: ${g.name}`,
         scope: 'Group',
         run: () => toggleGroupSync(g.id),
+      })
+      acts.push({
+        id: `group.pause.${g.id}`,
+        title: `Pause group: ${g.name}`,
+        hint: 'SIGSTOP every member',
+        scope: 'Group',
+        run: () => handlePauseGroup(g.id),
+      })
+      acts.push({
+        id: `group.resume.${g.id}`,
+        title: `Resume group: ${g.name}`,
+        hint: 'SIGCONT every member',
+        scope: 'Group',
+        run: () => handleResumeGroup(g.id),
+      })
+      acts.push({
+        id: `group.snapshot.${g.id}`,
+        title: `Snapshot group: ${g.name}`,
+        hint: 'Download scrollback as JSON',
+        scope: 'Group',
+        run: () => handleSnapshotGroup(g.id),
       })
     }
     acts.push({
@@ -1304,6 +1365,9 @@ function AgentPortal() {
     openAudit,
     syncedGroupIds,
     toggleGroupSync,
+    handlePauseGroup,
+    handleResumeGroup,
+    handleSnapshotGroup,
   ])
 
   // Keyboard shortcuts.
