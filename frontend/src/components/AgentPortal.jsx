@@ -4,14 +4,15 @@ import { ArrowLeft, Play, Square, RefreshCw, Shield, History, X, Bookmark, Save,
 import { useToast, useDialog } from './ui/toastContext'
 import '@xterm/xterm/css/xterm.css'
 import PaneGrid from './agent-portal/PaneGrid'
+import CommandPalette from './agent-portal/CommandPalette'
 import { LAYOUT_MODES, SOFT_CAP_LIVE, HARD_CAP_LIVE } from './agent-portal/layoutConstants'
 import {
-  DEFAULT_LAYOUT,
   normalizeLayout,
   setLayoutMode,
   placeProcessInLayout,
   clearSlot,
   countLiveSlots,
+  moveProcessToSlot,
 } from './agent-portal/layoutHelpers'
 import {
   loadLayoutFromCache,
@@ -314,6 +315,9 @@ function AgentPortal() {
   const [fullscreenSlot, setFullscreenSlot] = useState(null)
   // launchHistory: same first-paint cache + server reconcile pattern.
   const [launchHistory, setLaunchHistory] = useState(() => loadLaunchHistoryFromCache())
+  // Command palette open state. Toggled by Ctrl-Shift-P; closed on Esc
+  // or after running an action.
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   useEffect(() => {
     fetch('/api/agent-portal/capabilities', { credentials: 'include' })
@@ -871,29 +875,233 @@ function AgentPortal() {
     setFullscreenSlot((prev) => (prev === slotIndex ? null : slotIndex))
   }, [])
 
-  // Keyboard shortcuts: F toggles fullscreen for the focused slot, Esc
-  // exits fullscreen. Phase 2 (command palette) layers on top of this.
+  // ------------------------------------------------------------------
+  // Command palette actions
+  // ------------------------------------------------------------------
+  // Each action is a flat record so cmdk can fuzzy-match across title
+  // and hint. Built in useMemo so the `when` predicates and `run`
+  // closures see the latest state every render.
+
+  const paletteActions = useMemo(() => {
+    const acts = []
+    acts.push({
+      id: 'launch.new',
+      title: 'New launch…',
+      hint: 'Open the launch form',
+      scope: 'Process',
+      run: () => setLaunchModalOpen(true),
+    })
+    if (focusedProcessId) {
+      acts.push({
+        id: 'pane.cancel',
+        title: 'Cancel focused pane',
+        hint: focusedProcess?.command || '',
+        scope: 'Process',
+        run: () => handleCancel(),
+        when: () => !!focusedProcess && focusedProcess.status === 'running',
+      })
+      acts.push({
+        id: 'pane.rename',
+        title: 'Rename focused pane…',
+        scope: 'Process',
+        run: async () => {
+          const answer = await dialog.prompt({
+            title: 'Rename pane',
+            label: 'Display name',
+            defaultValue: focusedProcess?.display_name || focusedProcess?.command || '',
+            okText: 'Rename',
+          })
+          if (answer && focusedProcessId) {
+            await renameProcess(focusedProcessId, (answer.value || '').trim())
+          }
+        },
+      })
+      acts.push({
+        id: 'pane.close',
+        title: 'Remove focused pane from layout',
+        hint: 'Process keeps running',
+        scope: 'Process',
+        run: () => handleCloseSlot(focusedSlot),
+      })
+      acts.push({
+        id: 'pane.fullscreen',
+        title: fullscreenSlot === focusedSlot ? 'Exit fullscreen' : 'Toggle fullscreen (F)',
+        scope: 'Process',
+        run: () => handleFullscreenSlot(focusedSlot),
+      })
+    }
+    for (const m of LAYOUT_MODES) {
+      acts.push({
+        id: `layout.mode.${m}`,
+        title: `Layout: ${m}`,
+        hint: m === layout.mode ? 'current' : '',
+        scope: 'Layout',
+        run: () => updateLayout((prev) => setLayoutMode(prev, m)),
+        when: () => m !== layout.mode,
+      })
+    }
+    for (let i = 0; i < layout.slots.length; i++) {
+      const slotIdx = i
+      acts.push({
+        id: `layout.jump.${slotIdx}`,
+        title: `Switch to pane ${slotIdx + 1}`,
+        hint: layout.slots[slotIdx]
+          ? processesById[layout.slots[slotIdx]]?.display_name
+            || processesById[layout.slots[slotIdx]]?.command
+            || ''
+          : 'empty',
+        scope: 'Layout',
+        run: () => setFocusedSlot(slotIdx),
+      })
+    }
+    if (focusedProcessId) {
+      for (let i = 0; i < layout.slots.length; i++) {
+        if (i === focusedSlot) continue
+        const slotIdx = i
+        acts.push({
+          id: `layout.move.${slotIdx}`,
+          title: `Move focused pane to slot ${slotIdx + 1}`,
+          scope: 'Layout',
+          run: () => updateLayout((prev) => moveProcessToSlot(prev, focusedProcessId, slotIdx)),
+        })
+      }
+    }
+    // Stubs for later phases — discoverable from the palette today,
+    // pop a "coming soon" toast until the phase ships.
+    acts.push({
+      id: 'group.broadcast',
+      title: 'Broadcast input to group…',
+      hint: 'Phase 5',
+      scope: 'Group',
+      run: () => toast.info('Broadcast input lands in phase 5.'),
+    })
+    acts.push({
+      id: 'group.cancel',
+      title: 'Cancel group',
+      hint: 'Phase 3',
+      scope: 'Group',
+      run: () => toast.info('Group cancel lands in phase 3.'),
+    })
+    acts.push({
+      id: 'audit.open',
+      title: 'Open audit log',
+      hint: 'Phase 4',
+      scope: 'Global',
+      run: () => toast.info('Audit log lands in phase 4.'),
+    })
+    acts.push({
+      id: 'global.refresh',
+      title: 'Refresh process list',
+      scope: 'Global',
+      run: () => fetchProcesses(),
+    })
+    acts.push({
+      id: 'global.toggle-panel',
+      title: leftCollapsed ? 'Show launcher panel' : 'Hide launcher panel',
+      scope: 'Global',
+      run: () => setLeftCollapsed((v) => !v),
+    })
+    acts.push({
+      id: 'preset.save',
+      title: 'Save current launch as preset…',
+      scope: 'Global',
+      run: () => saveCurrentAsPreset(),
+      when: () => !!command.trim(),
+    })
+    return acts
+  }, [
+    focusedProcess,
+    focusedProcessId,
+    focusedSlot,
+    fullscreenSlot,
+    layout,
+    processesById,
+    leftCollapsed,
+    command,
+    dialog,
+    fetchProcesses,
+    handleCancel,
+    handleCloseSlot,
+    handleFullscreenSlot,
+    renameProcess,
+    saveCurrentAsPreset,
+    toast,
+    updateLayout,
+  ])
+
+  // Keyboard shortcuts.
+  //   Ctrl-Shift-P     → open the command palette (always — it's the
+  //                      one binding that wins over an active xterm so
+  //                      the user is never trapped without a way out).
+  //   Esc              → close palette / exit fullscreen.
+  //   F                → toggle fullscreen for the focused slot.
+  //   1-9              → jump to slot N (gated on activeElement so
+  //                      terminal input still wins).
+  //   Ctrl-Shift-←/→/↑/↓ → move focus between panes.
+  //
+  // The terminal-friendly bindings (F, 1-9, arrows) bail when an
+  // input, textarea, contenteditable, or xterm has focus, so they
+  // never eat user keystrokes mid-edit.
   useEffect(() => {
     const handler = (e) => {
-      // Don't swallow keystrokes meant for an input / textarea / xterm.
+      // Ctrl-Shift-P: highest priority; works even with a terminal focused.
+      if (e.key === 'P' && e.ctrlKey && e.shiftKey) {
+        setPaletteOpen((v) => !v)
+        e.preventDefault()
+        return
+      }
+
       const ae = document.activeElement
       const tag = ae?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || ae?.isContentEditable) return
-      // Don't fire when an xterm has focus — the terminal owns the keys.
-      if (ae?.closest?.('[data-testid="agent-portal-pane"] .xterm')) return
-      if (e.key === 'Escape' && fullscreenSlot != null) {
-        setFullscreenSlot(null)
-        e.preventDefault()
-      } else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const inEdit = tag === 'INPUT' || tag === 'TEXTAREA' || ae?.isContentEditable
+      const inXterm = !!ae?.closest?.('[data-testid="agent-portal-pane"] .xterm')
+
+      if (e.key === 'Escape') {
+        if (paletteOpen) {
+          setPaletteOpen(false)
+          e.preventDefault()
+        } else if (fullscreenSlot != null) {
+          setFullscreenSlot(null)
+          e.preventDefault()
+        }
+        return
+      }
+
+      if (inEdit || inXterm) return
+
+      // F → fullscreen toggle.
+      if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         if (layout.slots[focusedSlot]) {
           setFullscreenSlot((prev) => (prev === focusedSlot ? null : focusedSlot))
           e.preventDefault()
         }
+        return
+      }
+
+      // 1-9 → jump to that slot.
+      if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = parseInt(e.key, 10) - 1
+        if (target >= 0 && target < layout.slots.length) {
+          setFocusedSlot(target)
+          e.preventDefault()
+        }
+        return
+      }
+
+      // Ctrl-Shift-Arrow → move focus.
+      if (e.ctrlKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        const slots = layout.slots
+        if (slots.length === 0) return
+        let next = focusedSlot
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (focusedSlot + 1) % slots.length
+        else next = (focusedSlot - 1 + slots.length) % slots.length
+        setFocusedSlot(next)
+        e.preventDefault()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [fullscreenSlot, focusedSlot, layout])
+  }, [paletteOpen, fullscreenSlot, focusedSlot, layout])
 
   return (
     <div className="flex flex-col h-screen w-full bg-gray-900 text-gray-200">
@@ -944,6 +1152,14 @@ function AgentPortal() {
           >
             {leftCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
             <span className="hidden sm:inline">{leftCollapsed ? 'Show panel' : 'Hide panel'}</span>
+          </button>
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm"
+            title="Command palette (Ctrl-Shift-P)"
+          >
+            <span className="hidden sm:inline">Commands</span>
+            <kbd className="hidden md:inline text-[10px] bg-gray-900 border border-gray-600 rounded px-1.5 py-0.5">Ctrl+Shift+P</kbd>
           </button>
           <button
             onClick={fetchProcesses}
@@ -1417,6 +1633,11 @@ function AgentPortal() {
           </div>
         </div>
       </div>
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        actions={paletteActions}
+      />
     </div>
   )
 }
