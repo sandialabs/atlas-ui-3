@@ -31,6 +31,8 @@ __all__ = [
     "GroupBudgetExceededError",
     "LandlockUnavailableError",
     "ManagedProcess",
+    # Re-exports below alphabetized in the bottom-half so phase 5
+    # additions slot in without churn.
     "OutputChunk",
     "ProcessManager",
     "ProcessNotFoundError",

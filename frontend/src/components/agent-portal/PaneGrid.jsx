@@ -38,7 +38,11 @@ function PaneGrid({
   onFullscreenSlot,
   onRenameProcess,
   onProcessUpdate,
+  syncedGroupIds = [],
 }) {
+  const syncedSet = syncedGroupIds && syncedGroupIds.length > 0
+    ? new Set(syncedGroupIds)
+    : null
   // Fullscreen short-circuits the layout — only render the one cell,
   // chrome-free. Other panes' Pane components stay alive only if the
   // *parent* keeps them mounted; we deliberately do NOT keep them
@@ -48,6 +52,7 @@ function PaneGrid({
   if (typeof fullscreenSlot === 'number' && slots[fullscreenSlot]) {
     const procId = slots[fullscreenSlot]
     const process = processesById[procId] || null
+    const syncEnabled = syncedSet && process?.group_id ? syncedSet.has(process.group_id) : false
     return (
       <div className="h-full w-full p-2">
         <Pane
@@ -59,6 +64,7 @@ function PaneGrid({
           onFullscreen={() => onFullscreenSlot?.(fullscreenSlot)}
           onRename={onRenameProcess}
           onProcessUpdate={onProcessUpdate}
+          syncEnabled={syncEnabled}
         />
       </div>
     )
@@ -88,6 +94,7 @@ function PaneGrid({
       else style = { gridColumn: 2, gridRow: i }
     }
 
+    const syncEnabled = syncedSet && process?.group_id ? syncedSet.has(process.group_id) : false
     cells.push(
       <div key={i} style={style} className="min-h-0 min-w-0">
         <Pane
@@ -98,6 +105,7 @@ function PaneGrid({
           onFullscreen={() => onFullscreenSlot?.(i)}
           onRename={onRenameProcess}
           onProcessUpdate={onProcessUpdate}
+          syncEnabled={syncEnabled}
         />
       </div>
     )

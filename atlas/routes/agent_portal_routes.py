@@ -689,6 +689,43 @@ async def delete_group(
     return None
 
 
+class GroupBroadcastRequest(BaseModel):
+    """Bytes (base64) to fan out to every PTY-backed member of a group."""
+
+    data_base64: str = Field(..., min_length=1)
+
+
+@router.post("/groups/{group_id}/broadcast")
+async def broadcast_to_group(
+    group_id: str,
+    body: GroupBroadcastRequest,
+    current_user: str = Depends(get_current_user),
+):
+    """Fan a single chunk of input out to every PTY-backed member of
+    the group. Mostly useful for the CLI / scripted automation; the
+    interactive sync-input flow uses the per-process WebSocket with
+    ``broadcast: true`` so keystrokes don't have to traverse HTTP per
+    character."""
+    _require_enabled()
+    store = get_portal_store()
+    group = store.get_group(current_user, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    try:
+        data = base64.b64decode(body.data_base64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid base64: {e}")
+    manager = get_process_manager()
+    recipients = manager.broadcast_input(group_id, data)
+    record_audit_event(
+        current_user,
+        "sync_input",
+        group_id=group_id,
+        detail={"recipients": recipients, "byte_count": len(data)},
+    )
+    return {"recipients": recipients, "bytes": len(data)}
+
+
 @router.post("/groups/{group_id}/cancel", status_code=200)
 async def cancel_group(
     group_id: str,
@@ -1036,7 +1073,15 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
         })
 
     async def _pump_input():
-        """Receive input/resize frames from the client."""
+        """Receive input/resize frames from the client.
+
+        ``input`` frames may carry ``broadcast: true``, in which case
+        the bytes are fanned out to every running PTY-backed member of
+        the source process's group instead of being routed to the
+        focused process alone. Server-side fan-out (vs the client
+        mirroring N writes) means audit captures one broadcast event
+        with N recipients.
+        """
         while True:
             msg = await websocket.receive_json()
             mtype = msg.get("type")
@@ -1046,7 +1091,23 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
                     data = base64.b64decode(encoded)
                 except Exception:
                     continue
-                manager.write_input(process_id, data)
+                if msg.get("broadcast") and managed.group_id:
+                    recipients = manager.broadcast_input(managed.group_id, data)
+                    record_audit_event(
+                        user_email,
+                        "sync_input",
+                        process_id=process_id,
+                        group_id=managed.group_id,
+                        detail={
+                            "recipients": recipients,
+                            # Don't log raw bytes by default — admin
+                            # opt-in (Phase 6) lifts this to record the
+                            # raw input. Default keeps the size summary.
+                            "byte_count": len(data),
+                        },
+                    )
+                else:
+                    manager.write_input(process_id, data)
             elif mtype == "resize":
                 try:
                     cols = int(msg.get("cols", 80))

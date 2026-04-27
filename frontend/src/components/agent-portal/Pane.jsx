@@ -36,6 +36,9 @@ const STREAM_COLORS = {
  *   onFocus            - () => void; called when the user clicks into the pane.
  *   onProcessUpdate    - (summary) => void; raised on process_info / process_end
  *                        so the parent can keep its process list fresh.
+ *   syncEnabled        - boolean; when true, stdin from this pane fans out
+ *                        to every PTY-backed member of the same group via
+ *                        the WS broadcast flag (server enforces).
  */
 function Pane({
   process,
@@ -46,7 +49,12 @@ function Pane({
   isFocused,
   onFocus,
   onProcessUpdate,
+  syncEnabled,
 }) {
+  // Keep the latest sync flag in a ref so the xterm onData callback
+  // always reads the current value without re-creating the disposable.
+  const syncRef = useRef(!!syncEnabled)
+  useEffect(() => { syncRef.current = !!syncEnabled }, [syncEnabled])
   const wsRef = useRef(null)
   const termRef = useRef(null)
   const fitRef = useRef(null)
@@ -99,7 +107,11 @@ function Pane({
       const bytes = new TextEncoder().encode(data)
       let bin = ''
       for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-      ws.send(JSON.stringify({ type: 'input', data: btoa(bin) }))
+      // broadcast flag fans this stdin to every PTY-backed member of
+      // the focused process's group (server enforces).
+      const payload = { type: 'input', data: btoa(bin) }
+      if (syncRef.current) payload.broadcast = true
+      ws.send(JSON.stringify(payload))
     })
     const onResizeDisp = term.onResize(sendResize)
     const doFit = () => { try { fit.fit() } catch { /* ignore */ } }
@@ -230,8 +242,15 @@ function Pane({
   return (
     <div
       onClick={() => onFocus?.()}
-      className={`flex flex-col min-h-0 min-w-0 bg-gray-900 border rounded-lg overflow-hidden ${
-        isFocused ? 'border-blue-500 ring-1 ring-blue-500/40' : 'border-gray-700'
+      className={`flex flex-col min-h-0 min-w-0 bg-gray-900 border-2 rounded-lg overflow-hidden ${
+        // Sync wins over focus visually so the user is never confused
+        // about which panes will receive their next keystroke. Don't
+        // repeat tmux's silent synchronize-panes footgun.
+        syncEnabled
+          ? 'border-amber-500 ring-1 ring-amber-500/40'
+          : isFocused
+          ? 'border-blue-500 ring-1 ring-blue-500/40'
+          : 'border-gray-700'
       }`}
       data-testid="agent-portal-pane"
     >

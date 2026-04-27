@@ -342,6 +342,18 @@ function AgentPortal() {
   // command palette or via a header button.
   const [auditOpen, setAuditOpen] = useState(false)
   const [auditEvents, setAuditEvents] = useState([])
+  // Synchronize-input (Phase 5). Set of group_ids with broadcast on.
+  // Off by default per the action plan — sync is opt-in and the
+  // affordance (colored border) is unmistakable.
+  const [syncedGroupIds, setSyncedGroupIds] = useState(() => new Set())
+  const toggleGroupSync = useCallback((groupId) => {
+    setSyncedGroupIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupId)) next.delete(groupId)
+      else next.add(groupId)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     fetch('/api/agent-portal/capabilities', { credentials: 'include' })
@@ -1172,14 +1184,18 @@ function AgentPortal() {
         run: () => handleDeleteGroup(g.id),
       })
     }
-    // Phase-5 stub still in.
-    acts.push({
-      id: 'group.broadcast',
-      title: 'Broadcast input to group…',
-      hint: 'Phase 5',
-      scope: 'Group',
-      run: () => toast.info('Broadcast input lands in phase 5.'),
-    })
+    // Per-group sync toggles (Phase 5).
+    for (const g of groups) {
+      const synced = syncedGroupIds.has(g.id)
+      acts.push({
+        id: `group.sync.${g.id}`,
+        title: synced
+          ? `Stop synchronize-input: ${g.name}`
+          : `Synchronize input: ${g.name}`,
+        scope: 'Group',
+        run: () => toggleGroupSync(g.id),
+      })
+    }
     acts.push({
       id: 'audit.open',
       title: 'Open audit log',
@@ -1286,6 +1302,8 @@ function AgentPortal() {
     bundles,
     handleLaunchBundle,
     openAudit,
+    syncedGroupIds,
+    toggleGroupSync,
   ])
 
   // Keyboard shortcuts.
@@ -1479,11 +1497,14 @@ function AgentPortal() {
                 {groups.map((g) => {
                   const live = processes.filter((p) => p.group_id === g.id && p.status === 'running').length
                   const cap = g.max_panes
+                  const synced = syncedGroupIds.has(g.id)
                   return (
                     <div
                       key={g.id}
                       className={`flex items-center gap-1 text-xs rounded px-2 py-1 border ${
-                        activeGroupId === g.id
+                        synced
+                          ? 'bg-amber-900/40 border-amber-500'
+                          : activeGroupId === g.id
                           ? 'bg-gray-700 border-blue-500'
                           : 'bg-gray-800 border-gray-700'
                       }`}
@@ -1498,6 +1519,18 @@ function AgentPortal() {
                         <span className="ml-1 text-gray-500 text-[10px]">
                           {live}{cap ? `/${cap}` : ''}
                         </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleGroupSync(g.id)}
+                        className={`p-0.5 flex-shrink-0 ${
+                          synced ? 'text-amber-300' : 'text-gray-500 hover:text-amber-300'
+                        }`}
+                        title={synced
+                          ? 'Sync ON — keystrokes fan out to every PTY pane in this group'
+                          : 'Toggle synchronize-input for this group'}
+                      >
+                        {synced ? '⏵⏵' : '⏵'}
                       </button>
                       <button
                         type="button"
@@ -1963,6 +1996,7 @@ function AgentPortal() {
               onFullscreenSlot={handleFullscreenSlot}
               onRenameProcess={renameProcess}
               onProcessUpdate={handleProcessUpdate}
+              syncedGroupIds={Array.from(syncedGroupIds)}
             />
           </div>
         </div>

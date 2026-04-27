@@ -317,6 +317,24 @@ class ProcessManager:
                 sanitize_for_logging(e),
             )
 
+    def broadcast_input(self, group_id: str, data: bytes) -> List[str]:
+        """Fan ``data`` out to the pty master of every running member of
+        ``group_id``. Returns the list of process_ids the bytes were
+        written to so the caller can audit the broadcast.
+
+        Server-side fan-out (vs the client mirroring N writes) means
+        the audit log records a single broadcast event with N
+        recipients rather than N independent input events. That is the
+        difference between "I typed pwd into this group" and "the
+        client wrote pwd to four sockets" in compliance review.
+        """
+        recipients: List[str] = []
+        for proc in self.list_processes_in_group(group_id):
+            if proc.use_pty and proc.id in self._pty_masters:
+                self.write_input(proc.id, data)
+                recipients.append(proc.id)
+        return recipients
+
     def resize_pty(self, process_id: str, cols: int, rows: int) -> None:
         """Resize the pty window for a running process."""
         master_fd = self._pty_masters.get(process_id)
