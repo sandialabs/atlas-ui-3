@@ -1,35 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Square, RefreshCw, Terminal, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge, PanelLeftClose, PanelLeftOpen, Edit2, Check, Plus, ChevronDown, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Play, Square, RefreshCw, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge, PanelLeftClose, PanelLeftOpen, Check, Plus, ChevronDown, ChevronRight, LayoutGrid } from 'lucide-react'
 import { useToast, useDialog } from './ui/toastContext'
-import { Terminal as XTerm } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import PaneGrid from './agent-portal/PaneGrid'
+import { LAYOUT_MODES, SOFT_CAP_LIVE, HARD_CAP_LIVE } from './agent-portal/layoutConstants'
+import {
+  DEFAULT_LAYOUT,
+  normalizeLayout,
+  setLayoutMode,
+  placeProcessInLayout,
+  clearSlot,
+  countLiveSlots,
+} from './agent-portal/layoutHelpers'
+import {
+  loadLayoutFromCache,
+  saveLayoutToCache,
+  fetchLayoutFromServer,
+  pushLayoutToServer,
+  loadLaunchHistoryFromCache,
+  fetchLaunchHistoryFromServer,
+  uploadLaunchHistoryToServer,
+  upsertLaunchHistoryEntry,
+  computeDedupKey,
+  deleteLaunchHistoryEntry,
+  CACHE_KEYS,
+} from './agent-portal/portalStateClient'
 
-const LAUNCH_HISTORY_KEY = 'atlas.agentPortal.launchHistory.v1'
 const LAUNCH_HISTORY_MAX = 15
 const LAUNCH_CONFIGS_KEY = 'atlas.agentPortal.launchConfigs.v1'
 const LAUNCH_CONFIGS_MAX = 50
-
-function loadLaunchHistory() {
-  try {
-    const raw = localStorage.getItem(LAUNCH_HISTORY_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((e) => e && typeof e.command === 'string').slice(0, LAUNCH_HISTORY_MAX)
-  } catch {
-    return []
-  }
-}
-
-function saveLaunchHistory(entries) {
-  try {
-    localStorage.setItem(LAUNCH_HISTORY_KEY, JSON.stringify(entries.slice(0, LAUNCH_HISTORY_MAX)))
-  } catch {
-    // localStorage may be disabled; ignore
-  }
-}
 
 function normalizeSandboxMode(entry) {
   if (entry.sandboxMode) return entry.sandboxMode
@@ -270,134 +270,9 @@ function ProcessListItem({ proc, isSelected, onSelect, onRename }) {
   )
 }
 
-function StreamView({ process, chunks }) {
-  const scrollRef = useRef(null)
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [chunks])
-
-  if (!process) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-gray-500">
-        <div className="text-center">
-          <Terminal className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p className="text-sm">Select a process to view its output</p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div
-      ref={scrollRef}
-      className="flex-1 overflow-y-auto p-3 bg-black rounded-lg font-mono text-xs whitespace-pre-wrap break-words"
-    >
-      {chunks.length === 0 ? (
-        <div className="text-gray-500">Waiting for output...</div>
-      ) : (
-        chunks.map((c, i) => (
-          <div key={i} className={STREAM_COLORS[c.stream] || STREAM_COLORS.stdout}>
-            {c.text}
-          </div>
-        ))
-      )}
-    </div>
-  )
-}
-
-// xterm.js terminal view for pty-backed processes. Registers itself
-// on `termHandleRef` so the parent WebSocket handler can push raw
-// bytes in, and sends keystrokes + resize events back over the WS.
-function XtermView({ process, wsRef, termHandleRef, pendingRawRef }) {
-  const hostRef = useRef(null)
-  const termRef = useRef(null)
-  const fitRef = useRef(null)
-
-  useEffect(() => {
-    if (!hostRef.current) return
-    const term = new XTerm({
-      convertEol: false,
-      cursorBlink: true,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
-      fontSize: 13,
-      theme: {
-        background: '#000000',
-        foreground: '#e5e7eb',
-      },
-      allowProposedApi: true,
-      scrollback: 5000,
-    })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(hostRef.current)
-    try { fit.fit() } catch { /* container not sized yet */ }
-    termRef.current = term
-    fitRef.current = fit
-
-    const sendResize = () => {
-      const ws = wsRef.current
-      if (!ws || ws.readyState !== 1) return
-      try {
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
-      } catch { /* ignore */ }
-    }
-
-    // Forward keystrokes to the backend as base64 so binary-safe.
-    const onDataDisp = term.onData((data) => {
-      const ws = wsRef.current
-      if (!ws || ws.readyState !== 1) return
-      const bytes = new TextEncoder().encode(data)
-      let bin = ''
-      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-      ws.send(JSON.stringify({ type: 'input', data: btoa(bin) }))
-    })
-
-    const onResizeDisp = term.onResize(sendResize)
-
-    const doFit = () => {
-      try { fit.fit() } catch { /* ignore */ }
-    }
-    doFit()
-    sendResize()
-    const ro = new ResizeObserver(doFit)
-    ro.observe(hostRef.current)
-    window.addEventListener('resize', doFit)
-
-    // Expose a writer so the WS handler can push bytes in.
-    const writer = {
-      write(base64Data) {
-        const bin = atob(base64Data)
-        const bytes = new Uint8Array(bin.length)
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-        term.write(bytes)
-      },
-      clear() { term.clear() },
-    }
-    termHandleRef.current = writer
-
-    // Flush any raw chunks the WS buffered before this xterm existed.
-    if (pendingRawRef && pendingRawRef.current && pendingRawRef.current.length > 0) {
-      for (const data of pendingRawRef.current) writer.write(data)
-      pendingRawRef.current = []
-    }
-
-    return () => {
-      termHandleRef.current = null
-      ro.disconnect()
-      window.removeEventListener('resize', doFit)
-      onDataDisp.dispose()
-      onResizeDisp.dispose()
-      term.dispose()
-    }
-  }, [process?.id, wsRef, termHandleRef, pendingRawRef])
-
-  return (
-    <div className="flex-1 min-h-0 w-full bg-black rounded-lg overflow-hidden p-2">
-      <div ref={hostRef} className="h-full w-full" />
-    </div>
-  )
-}
+// StreamView and XtermView were merged into the per-pane Pane component
+// in components/agent-portal/Pane.jsx so that multiple panes can each
+// own their own WebSocket and xterm instance. See PaneGrid.jsx.
 
 function AgentPortal() {
   const navigate = useNavigate()
@@ -406,9 +281,6 @@ function AgentPortal() {
   const [launchModalOpen, setLaunchModalOpen] = useState(false)
   const [showRecent, setShowRecent] = useState(false)
   const [processes, setProcesses] = useState([])
-  const [selectedId, setSelectedId] = useState(null)
-  const [chunks, setChunks] = useState([])
-  const [selectedProcess, setSelectedProcess] = useState(null)
   const [command, setCommand] = useState('')
   const [argsString, setArgsString] = useState('')
   const [cwd, setCwd] = useState('')
@@ -433,13 +305,15 @@ function AgentPortal() {
   const [launching, setLaunching] = useState(false)
   const [listError, setListError] = useState(null)
   const [landlockSupported, setLandlockSupported] = useState(null)
-  const [launchHistory, setLaunchHistory] = useState(() => loadLaunchHistory())
-  const wsRef = useRef(null)
-  const termHandleRef = useRef(null)
-  // PTY-mode race buffer: raw chunks may arrive on the WS during the
-  // history replay before the XtermView mounts and registers its
-  // writer. Buffer them here and flush when the writer appears.
-  const pendingRawRef = useRef([])
+  // Multi-pane layout state. Hydrate from localStorage immediately for
+  // first-paint snappiness, then reconcile with the server (PortalStore)
+  // once the GET resolves. Both writes are mirrored to localStorage and
+  // pushed to the server on every change.
+  const [layout, setLayout] = useState(() => normalizeLayout(loadLayoutFromCache()))
+  const [focusedSlot, setFocusedSlot] = useState(0)
+  const [fullscreenSlot, setFullscreenSlot] = useState(null)
+  // launchHistory: same first-paint cache + server reconcile pattern.
+  const [launchHistory, setLaunchHistory] = useState(() => loadLaunchHistoryFromCache())
 
   useEffect(() => {
     fetch('/api/agent-portal/capabilities', { credentials: 'include' })
@@ -667,11 +541,20 @@ function AgentPortal() {
     }
   }
 
-  const removeHistoryEntry = (entry) => {
+  const removeHistoryEntry = async (entry) => {
     const key = makeHistoryKey(entry)
     const next = launchHistory.filter((e) => makeHistoryKey(e) !== key)
     setLaunchHistory(next)
-    saveLaunchHistory(next)
+    // Server-side delete uses the PortalStore's own dedup key (a
+    // sha256 over the launch identity), distinct from the client-side
+    // makeHistoryKey above.
+    try {
+      const dedup = await computeDedupKey(entry)
+      const refreshed = await deleteLaunchHistoryEntry(dedup)
+      if (refreshed) setLaunchHistory(refreshed)
+    } catch {
+      // Cache-only delete is acceptable; server reconciles on next mount.
+    }
   }
 
   const fetchProcesses = useCallback(async () => {
@@ -695,73 +578,139 @@ function AgentPortal() {
     return () => clearInterval(interval)
   }, [fetchProcesses])
 
-  // Open a WebSocket to stream whenever selectedId changes
+  // ------------------------------------------------------------------
+  // Layout — server reconciliation + write-through
+  // ------------------------------------------------------------------
+  //
+  // First paint reads localStorage (DEFAULT_LAYOUT fallback) so the
+  // grid appears instantly. The server fetch happens in parallel and
+  // overwrites the cache once it lands. After that, every layout
+  // mutation is mirrored to localStorage and pushed to the server.
+
+  const layoutHydratedRef = useRef(false)
   useEffect(() => {
-    if (wsRef.current) {
-      try { wsRef.current.close() } catch { /* ignore */ }
-      wsRef.current = null
-    }
-    setChunks([])
-    setSelectedProcess(null)
-    pendingRawRef.current = []
-    if (!selectedId) return
+    let cancelled = false
+    ;(async () => {
+      const remote = await fetchLayoutFromServer()
+      if (cancelled) return
+      if (remote) {
+        const norm = normalizeLayout(remote)
+        setLayout(norm)
+        saveLayoutToCache(norm)
+      } else {
+        // Server has nothing — upload whatever the cache had (one-shot
+        // migration). Skip if the cache was also empty.
+        const cached = loadLayoutFromCache()
+        if (cached && cached.mode) {
+          await pushLayoutToServer(normalizeLayout(cached))
+        }
+      }
+      layoutHydratedRef.current = true
+    })()
+    return () => { cancelled = true }
+  }, [])
 
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${proto}://${window.location.host}/api/agent-portal/processes/${selectedId}/stream`
-    const ws = new WebSocket(url)
-    wsRef.current = ws
+  const updateLayout = useCallback((nextOrUpdater) => {
+    setLayout((prev) => {
+      const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(prev) : nextOrUpdater
+      const norm = normalizeLayout(next)
+      saveLayoutToCache(norm)
+      // Defer the server push slightly so a burst of layout changes
+      // (e.g. switching mode immediately drops/refills slots) doesn't
+      // fan out to N HTTP calls.
+      pushLayoutToServer(norm)
+      return norm
+    })
+  }, [])
 
-    ws.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(evt.data)
-        if (msg.type === 'process_info' || msg.type === 'process_end') {
-          setSelectedProcess(msg.process)
-          if (msg.type === 'process_end') {
-            fetchProcesses()
-            // Loud heads-up on a non-zero exit so the user is not left
-            // wondering why the process disappeared. Exit 127 in
-            // particular is almost always "binary or its shebang
-            // interpreter not on PATH".
-            const exit = msg.process?.exit_code
-            if (typeof exit === 'number' && exit !== 0) {
-              const label = msg.process.display_name
-                || msg.process.command
-                || 'process'
-              const hint = exit === 127
-                ? '\nHint: exit 127 usually means a binary or its shebang interpreter is missing from the child PATH. The portal pins PATH to /usr/local/bin:/usr/bin:/bin (plus the command’s own dir).'
-                : ''
-              toast.error(`${label} exited with code ${exit}.${hint}`, { duration: 8000 })
-            }
-          }
-        } else if (msg.type === 'output') {
-          setChunks((prev) => [...prev, {
-            stream: msg.stream,
-            text: msg.text,
-            timestamp: msg.timestamp,
-          }])
-        } else if (msg.type === 'output_raw') {
-          // pty mode: push raw bytes straight into xterm.js, or buffer
-          // for flush once the XtermView mounts (history replay races
-          // with xterm initialization on a fast-arriving stream).
-          const h = termHandleRef.current
-          if (h) {
-            h.write(msg.data)
-          } else {
-            pendingRawRef.current.push(msg.data)
+  // Hydrate launch history from the server on mount. Same first-paint
+  // pattern as layout: cache shows immediately, server reconciles when
+  // it lands, and migrate the cache to the server if the server is
+  // empty on first read.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const remote = await fetchLaunchHistoryFromServer()
+      if (cancelled) return
+      if (remote && remote.length > 0) {
+        setLaunchHistory(remote)
+      } else {
+        const cached = loadLaunchHistoryFromCache()
+        if (cached.length > 0) {
+          const uploaded = await uploadLaunchHistoryToServer(cached)
+          if (!cancelled && uploaded) {
+            setLaunchHistory(uploaded)
+            // Server is now authoritative; clear the cache key so a
+            // future browser without server access doesn't double-show.
+            try { localStorage.removeItem(CACHE_KEYS.LAUNCH_HISTORY) } catch { /* ignore */ }
           }
         }
-      } catch {
-        // Ignore parse failures
       }
-    }
-    ws.onerror = () => {
-      setChunks((prev) => [...prev, { stream: 'system', text: '[stream error]', timestamp: 0 }])
-    }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
-    return () => {
-      try { ws.close() } catch { /* ignore */ }
+  // Build a stable processes-by-id map for PaneGrid so the panes can
+  // resolve their slot's process_id to a summary in O(1).
+  const processesById = useMemo(() => {
+    const out = {}
+    for (const p of processes) out[p.id] = p
+    return out
+  }, [processes])
+
+  // After the process list arrives, drop any layout slot pointing at a
+  // process the server no longer knows about (process exited and was
+  // garbage-collected). This keeps F5-survival self-healing.
+  useEffect(() => {
+    if (!layoutHydratedRef.current) return
+    const known = new Set(processes.map((p) => p.id))
+    setLayout((prev) => {
+      let changed = false
+      const slots = prev.slots.map((s) => {
+        if (s && !known.has(s)) {
+          changed = true
+          return null
+        }
+        return s
+      })
+      if (!changed) return prev
+      const next = { ...prev, slots }
+      saveLayoutToCache(next)
+      pushLayoutToServer(next)
+      return next
+    })
+  }, [processes])
+
+  // Surface an exit toast on non-zero exit codes for any tracked
+  // process. Previously this lived inside the single-pane WS handler;
+  // now the panes raise process_end via onProcessUpdate and we de-dupe
+  // by id so the same exit fires the toast at most once.
+  const exitToastShownRef = useRef(new Set())
+  const handleProcessUpdate = useCallback((summary) => {
+    if (!summary || !summary.id) return
+    setProcesses((prev) => {
+      const idx = prev.findIndex((p) => p.id === summary.id)
+      if (idx >= 0) {
+        const next = prev.slice()
+        next[idx] = summary
+        return next
+      }
+      return [summary, ...prev]
+    })
+    if (
+      summary.status !== 'running'
+      && typeof summary.exit_code === 'number'
+      && summary.exit_code !== 0
+      && !exitToastShownRef.current.has(summary.id)
+    ) {
+      exitToastShownRef.current.add(summary.id)
+      const label = summary.display_name || summary.command || 'process'
+      const hint = summary.exit_code === 127
+        ? '\nHint: exit 127 usually means a binary or its shebang interpreter is missing from the child PATH.'
+        : ''
+      toast.error(`${label} exited with code ${summary.exit_code}.${hint}`, { duration: 8000 })
     }
-  }, [selectedId, fetchProcesses, toast])
+  }, [toast])
 
   const handleLaunch = async (e) => {
     e.preventDefault()
@@ -798,11 +747,24 @@ function AgentPortal() {
         return
       }
       const proc = await res.json()
-      setSelectedId(proc.id)
+      // Slot the new process into the focused slot (or first empty
+      // slot) of the current layout. Honor the hard cap so the user
+      // can't accidentally launch their way past it.
+      const live = countLiveSlots(layout)
+      if (live >= HARD_CAP_LIVE) {
+        toast.error(`Hit the ${HARD_CAP_LIVE}-pane hard cap. Remove one before launching another.`)
+      } else {
+        if (live + 1 > SOFT_CAP_LIVE) {
+          toast.info(`Soft cap (${SOFT_CAP_LIVE} live panes) reached.`, { duration: 4000 })
+        }
+        updateLayout((prev) => placeProcessInLayout(prev, proc.id, focusedSlot))
+      }
       toast.success(`Launched: ${proc.display_name || proc.command}`)
       setLaunchModalOpen(false)
 
-      // Record history (dedupe by content, newest first)
+      // Record history (dedupe by content, newest first). Push to the
+      // server first; keep the cache in sync so refresh-before-server-
+      // responds still shows it.
       const entry = {
         command: trimmedCommand,
         argsString,
@@ -817,11 +779,17 @@ function AgentPortal() {
         pidsLimit: pidsLimit.trim() ? parseInt(pidsLimit, 10) : null,
         lastUsed: Date.now(),
       }
-      const key = makeHistoryKey(entry)
-      const next = [entry, ...launchHistory.filter((e) => makeHistoryKey(e) !== key)]
-        .slice(0, LAUNCH_HISTORY_MAX)
-      setLaunchHistory(next)
-      saveLaunchHistory(next)
+      const refreshed = await upsertLaunchHistoryEntry(entry)
+      if (refreshed) {
+        setLaunchHistory(refreshed)
+      } else {
+        // Server unavailable — keep local-only behavior so the form
+        // pre-fill loop still works.
+        const key = makeHistoryKey(entry)
+        const next = [entry, ...launchHistory.filter((e) => makeHistoryKey(e) !== key)]
+          .slice(0, LAUNCH_HISTORY_MAX)
+        setLaunchHistory(next)
+      }
 
       await fetchProcesses()
     } catch (err) {
@@ -842,23 +810,29 @@ function AgentPortal() {
       if (res.ok) {
         const updated = await res.json()
         setProcesses((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
-        setSelectedProcess((prev) => (prev && prev.id === updated.id ? updated : prev))
       }
     } catch {
       // ignore
     }
   }, [])
 
+  // Resolve which process is in the focused slot (also drives the
+  // header "Cancel" button — it cancels the focused pane).
+  const focusedProcessId = layout.slots[focusedSlot] || null
+  const focusedProcess = focusedProcessId ? processesById[focusedProcessId] : null
+
   const handleCancel = async () => {
-    if (!selectedId) return
+    if (!focusedProcessId) return
     try {
-      const res = await fetch(`/api/agent-portal/processes/${selectedId}`, {
+      const res = await fetch(`/api/agent-portal/processes/${focusedProcessId}`, {
         method: 'DELETE',
         credentials: 'include',
       })
       if (res.ok) {
         const proc = await res.json()
-        setSelectedProcess(proc)
+        // Reflect the new status immediately so the header badge updates
+        // without waiting for the next 4s poll.
+        setProcesses((prev) => prev.map((p) => (p.id === proc.id ? proc : p)))
       }
       await fetchProcesses()
     } catch {
@@ -867,9 +841,59 @@ function AgentPortal() {
   }
 
   const canCancel = useMemo(
-    () => selectedProcess && selectedProcess.status === 'running',
-    [selectedProcess]
+    () => focusedProcess && focusedProcess.status === 'running',
+    [focusedProcess]
   )
+
+  // ProcessListItem in the left rail still shows a "select" affordance.
+  // For the multi-pane world that translates to "drop this process into
+  // the focused slot" — easier than implementing drag-and-drop today.
+  const handleSelectFromList = useCallback((processId) => {
+    if (!processId) return
+    updateLayout((prev) => {
+      // Already on screen? Move focus there.
+      const existingIdx = prev.slots.indexOf(processId)
+      if (existingIdx >= 0) {
+        setFocusedSlot(existingIdx)
+        return prev
+      }
+      return placeProcessInLayout(prev, processId, focusedSlot)
+    })
+  }, [focusedSlot, updateLayout])
+
+  // Pane-grid callbacks ---------------------------------------------------
+
+  const handleCloseSlot = useCallback((slotIndex) => {
+    updateLayout((prev) => clearSlot(prev, slotIndex))
+  }, [updateLayout])
+
+  const handleFullscreenSlot = useCallback((slotIndex) => {
+    setFullscreenSlot((prev) => (prev === slotIndex ? null : slotIndex))
+  }, [])
+
+  // Keyboard shortcuts: F toggles fullscreen for the focused slot, Esc
+  // exits fullscreen. Phase 2 (command palette) layers on top of this.
+  useEffect(() => {
+    const handler = (e) => {
+      // Don't swallow keystrokes meant for an input / textarea / xterm.
+      const ae = document.activeElement
+      const tag = ae?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || ae?.isContentEditable) return
+      // Don't fire when an xterm has focus — the terminal owns the keys.
+      if (ae?.closest?.('[data-testid="agent-portal-pane"] .xterm')) return
+      if (e.key === 'Escape' && fullscreenSlot != null) {
+        setFullscreenSlot(null)
+        e.preventDefault()
+      } else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (layout.slots[focusedSlot]) {
+          setFullscreenSlot((prev) => (prev === focusedSlot ? null : focusedSlot))
+          e.preventDefault()
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [fullscreenSlot, focusedSlot, layout])
 
   return (
     <div className="flex flex-col h-screen w-full bg-gray-900 text-gray-200">
@@ -958,8 +982,8 @@ function AgentPortal() {
               <ProcessListItem
                 key={p.id}
                 proc={p}
-                isSelected={p.id === selectedId}
-                onSelect={setSelectedId}
+                isSelected={layout.slots.includes(p.id)}
+                onSelect={handleSelectFromList}
                 onRename={renameProcess}
               />
             ))}
@@ -1341,46 +1365,84 @@ function AgentPortal() {
           )}
         </div>
 
-        {/* Right column: stream view */}
+        {/* Right column: multi-pane grid + layout controls */}
         <div className="flex flex-col min-h-0">
-          <div className="flex items-center justify-between gap-3 px-3 py-1.5 border-b border-gray-700 bg-gray-800">
-            <div className="min-w-0 flex-1">
-              {selectedProcess ? (
-                <div className="flex items-center gap-2 text-xs text-gray-300 truncate">
-                  <span className="font-mono text-gray-100 truncate">
-                    {selectedProcess.display_name?.trim()
-                      || `${selectedProcess.command} ${(selectedProcess.args || []).join(' ')}`}
-                  </span>
-                  <span className="text-gray-500">·</span>
-                  <span>pid {selectedProcess.pid || '-'}</span>
-                  <span className="text-gray-500">·</span>
-                  <span>{selectedProcess.status}</span>
-                  {selectedProcess.exit_code !== null && selectedProcess.exit_code !== undefined && (
-                    <>
-                      <span className="text-gray-500">·</span>
-                      <span>exit {selectedProcess.exit_code}</span>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <div className="text-xs text-gray-400">No process selected</div>
-              )}
-            </div>
-          </div>
-          <div className="flex-1 p-3 min-h-0 flex">
-            {selectedProcess && selectedProcess.use_pty ? (
-              <XtermView
-                process={selectedProcess}
-                wsRef={wsRef}
-                termHandleRef={termHandleRef}
-                pendingRawRef={pendingRawRef}
+          {fullscreenSlot == null && (
+            <div className="flex items-center justify-between gap-3 px-3 py-1.5 border-b border-gray-700 bg-gray-800">
+              <div className="min-w-0 flex-1">
+                {focusedProcess ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-300 truncate">
+                    <span className="font-mono text-gray-100 truncate">
+                      {focusedProcess.display_name?.trim()
+                        || `${focusedProcess.command} ${(focusedProcess.args || []).join(' ')}`}
+                    </span>
+                    <span className="text-gray-500">·</span>
+                    <span>pid {focusedProcess.pid || '-'}</span>
+                    <span className="text-gray-500">·</span>
+                    <span>{focusedProcess.status}</span>
+                    {focusedProcess.exit_code !== null && focusedProcess.exit_code !== undefined && (
+                      <>
+                        <span className="text-gray-500">·</span>
+                        <span>exit {focusedProcess.exit_code}</span>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-400">
+                    {processes.length === 0
+                      ? 'No processes yet — click New launch.'
+                      : 'Click a process in the list to drop it into the focused slot.'}
+                  </div>
+                )}
+              </div>
+              <LayoutSwitcher
+                mode={layout.mode}
+                onChange={(m) => updateLayout((prev) => setLayoutMode(prev, m))}
               />
-            ) : (
-              <StreamView process={selectedProcess} chunks={chunks} />
-            )}
+            </div>
+          )}
+          <div className="flex-1 min-h-0">
+            <PaneGrid
+              mode={layout.mode}
+              slots={layout.slots}
+              processesById={processesById}
+              focusedSlot={focusedSlot}
+              fullscreenSlot={fullscreenSlot}
+              onFocusSlot={setFocusedSlot}
+              onCloseSlot={handleCloseSlot}
+              onFullscreenSlot={handleFullscreenSlot}
+              onRenameProcess={renameProcess}
+              onProcessUpdate={handleProcessUpdate}
+            />
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Tiny inline component — kept here rather than in agent-portal/ because
+// it has no logic beyond rendering one button per layout mode and would
+// just be import noise.
+function LayoutSwitcher({ mode, onChange }) {
+  const labels = { single: '1', '2x2': '2×2', '3x2': '3×2', 'focus+strip': 'Focus' }
+  return (
+    <div className="flex items-center gap-1" title="Layout mode">
+      <LayoutGrid className="w-3.5 h-3.5 text-gray-400" />
+      {LAYOUT_MODES.map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          className={`px-2 py-0.5 text-xs rounded border transition-colors ${
+            mode === m
+              ? 'bg-blue-600 border-blue-500 text-white'
+              : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          {labels[m] || m}
+        </button>
+      ))}
     </div>
   )
 }
