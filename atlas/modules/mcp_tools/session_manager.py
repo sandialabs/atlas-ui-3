@@ -178,8 +178,9 @@ class MCPSessionManager:
     ) -> None:
         """Close sessions for a conversation (O(1) lookup via reverse index)."""
         to_close: list[ManagedSession] = []
-        # None means all user scopes; "" is the explicit unauthenticated/legacy scope.
-        user_scope = normalize_user_email(user_email) if user_email else None
+        # ``None`` means all user scopes (legacy/global cleanup);
+        # an explicit "" maps to the unauthenticated/legacy scope only.
+        user_scope = normalize_user_email(user_email) if user_email is not None else None
         async with self._lock:
             keys_to_remove = self._pop_release_keys_locked(
                 conversation_id, user_scope

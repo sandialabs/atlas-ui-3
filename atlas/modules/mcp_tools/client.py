@@ -2652,7 +2652,9 @@ class MCPToolManager:
                     conversation_id,
                 )
                 try:
-                    await self._session_manager.release(conversation_id, server_name)
+                    await self._session_manager.release(
+                        conversation_id, server_name, user_email=user_email
+                    )
                 except Exception as release_exc:
                     logger.warning(
                         "Failed to release dead session for server=%s conversation=%s: %s",
@@ -2686,10 +2688,15 @@ class MCPToolManager:
         """Cleanup all clients, persistent sessions, and per-user HTTP client cache."""
         logger.info("Cleaning up MCP clients")
 
-        # Close all persistent sessions
+        # Close all persistent sessions. Keys are
+        # (user_email, conversation_id, server_name) — pass each component to release()
+        # so the correct scope is targeted.
         for key in list(self._session_manager._sessions.keys()):
             try:
-                await self._session_manager.release(key[0], key[1])
+                user_scope, conv_id, server = key
+                await self._session_manager.release(
+                    conv_id, server, user_email=user_scope
+                )
             except Exception as e:
                 logger.debug("Error releasing session %s: %s", key, e)
 
