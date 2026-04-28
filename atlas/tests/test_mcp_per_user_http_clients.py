@@ -194,8 +194,8 @@ async def test_release_sessions_without_user_email_evicts_by_conversation(manage
         ("bob@test.com", "state_server", "conv-2"): bob_conv2,
     }
     manager._user_client_last_used = {
-        ("alice@test.com", "state_server", "conv-1"): time.time(),
-        ("bob@test.com", "state_server", "conv-2"): time.time(),
+        ("alice@test.com", "state_server", "conv-1"): time.monotonic(),
+        ("bob@test.com", "state_server", "conv-2"): time.monotonic(),
     }
     release_called_with = {}
 
@@ -255,7 +255,7 @@ async def test_idle_sweeper_evicts_stale_clients(manager):
     stale_client.__aexit__ = AsyncMock(return_value=False)
     fresh_client = MagicMock()
     fresh_client.__aexit__ = AsyncMock(return_value=False)
-    now = time.time()
+    now = time.monotonic()
     manager._user_clients = {
         stale_key: stale_client,
         fresh_key: fresh_client,
@@ -283,7 +283,7 @@ async def test_cleanup_closes_cached_clients(manager):
     client = MagicMock()
     client.__aexit__ = AsyncMock(return_value=False)
     manager._user_clients = {cache_key: client}
-    manager._user_client_last_used = {cache_key: time.time()}
+    manager._user_client_last_used = {cache_key: time.monotonic()}
     manager._session_manager = MagicMock()
     manager._session_manager._sessions = {}
 

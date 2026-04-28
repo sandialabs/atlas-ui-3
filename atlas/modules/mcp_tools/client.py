@@ -2,7 +2,6 @@
 
 import asyncio
 import contextvars
-import inspect
 import json
 import logging
 import os
@@ -1572,10 +1571,12 @@ class MCPToolManager:
     def _touch_user_client_locked(self, cache_key: tuple) -> None:
         """Mark a cached per-user client as recently used.
 
-        Caller must hold _user_clients_lock.
+        Caller must hold _user_clients_lock. Uses ``time.monotonic`` so wall
+        clock jumps (NTP, DST) cannot make entries appear arbitrarily fresh
+        or stale to the idle sweeper.
         """
         self._ensure_user_client_cache_state()
-        self._user_client_last_used[cache_key] = time.time()
+        self._user_client_last_used[cache_key] = time.monotonic()
 
     def _pop_user_client_entries_locked(self, keys: List[tuple]) -> List[tuple[tuple, Client]]:
         """Remove cache entries and return clients that need closing.
@@ -1614,7 +1615,14 @@ class MCPToolManager:
         *,
         release_session: bool = True,
     ) -> None:
-        """Close one cached FastMCP client and optionally its persistent session."""
+        """Close one cached FastMCP client and optionally its persistent session.
+
+        The persistent MCP session (if any) is owned by ``MCPSessionManager``;
+        ``release_session`` drives that teardown. Calling ``client.__aexit__``
+        directly is safe because FastMCP's ``_disconnect`` clamps the nesting
+        counter at 0 and no-ops when ``session_task is None``, which is the
+        steady state for a cached-but-idle client.
+        """
         if release_session and cache_key[2]:
             try:
                 await self._session_manager.release(cache_key[2], cache_key[1])
@@ -1626,12 +1634,7 @@ class MCPToolManager:
             return
 
         try:
-            if inspect.iscoroutinefunction(close):
-                await close(None, None, None)
-            else:
-                result = close(None, None, None)
-                if inspect.isawaitable(result):
-                    await result
+            await close(None, None, None)
         except Exception as e:
             logger.debug("Error closing cached MCP client %s: %s", cache_key, e)
 
@@ -1671,12 +1674,17 @@ class MCPToolManager:
     async def _user_client_cache_sweeper(self) -> None:
         current_task = asyncio.current_task()
         while self._user_client_sweeper_task is current_task:
-            await self._sweep_idle_user_clients_once()
-            await asyncio.sleep(self._user_client_cache_sweep_interval_seconds)
+            try:
+                await asyncio.sleep(self._user_client_cache_sweep_interval_seconds)
+                await self._sweep_idle_user_clients_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("MCP user client cache sweeper iteration failed")
 
     async def _sweep_idle_user_clients_once(self) -> int:
         """Evict cached clients idle longer than the configured TTL."""
-        cutoff = time.time() - self._user_client_cache_idle_ttl_seconds
+        cutoff = time.monotonic() - self._user_client_cache_idle_ttl_seconds
         async with self._user_clients_lock:
             keys_to_remove = [
                 key for key in self._user_clients
