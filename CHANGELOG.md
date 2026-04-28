@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #573 - 2026-04-28
+- Include the top-level `prompts` package and bundled prompt markdown files in
+  built wheels so package installs can load the default system prompt templates.
+
 ### PR #559 - 2026-04-25
 - MCP cross-conversation isolation: cache FastMCP HTTP `Client` instances by
   `(user_email, server_name, conversation_id)` so each conversation gets its
