@@ -2,6 +2,7 @@
 
 import asyncio
 import contextvars
+import inspect
 import json
 import logging
 import os
@@ -1634,7 +1635,9 @@ class MCPToolManager:
             return
 
         try:
-            await close(None, None, None)
+            result = close(None, None, None)
+            if inspect.isawaitable(result):
+                await result
         except Exception as e:
             logger.debug("Error closing cached MCP client %s: %s", cache_key, e)
 
@@ -1669,6 +1672,9 @@ class MCPToolManager:
             try:
                 await task
             except asyncio.CancelledError:
+                # Expected: we just cancelled the sweeper; swallow the
+                # propagated CancelledError so callers (e.g. shutdown) see
+                # a clean stop instead of the cancellation re-raising.
                 pass
 
     async def _user_client_cache_sweeper(self) -> None:

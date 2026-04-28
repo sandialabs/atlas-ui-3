@@ -446,7 +446,7 @@ class AppSettings(BaseSettings):
     )
     websocket_keepalive_interval_seconds: int = Field(
         default=30,
-        description="Idle seconds before the WebSocket endpoint sends an application keepalive",
+        description="Interval in seconds for WebSocket ping keepalives; maps to Uvicorn's ws_ping_interval and ws_ping_timeout settings",
         validation_alias="WEBSOCKET_KEEPALIVE_INTERVAL_SECONDS",
     )
 
