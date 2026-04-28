@@ -16,6 +16,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
+from atlas.core.user_identity import normalize_user_email
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.modules.config import config_manager
 from atlas.modules.config.config_manager import resolve_env_var
@@ -1548,7 +1549,7 @@ class MCPToolManager:
         from atlas.modules.mcp_tools.token_storage import get_token_storage
 
         token_storage = get_token_storage()
-        cache_key = (user_email.lower(), server_name, conversation_id)
+        cache_key = (normalize_user_email(user_email), server_name, conversation_id)
 
         # Check cache first, but validate token is still valid
         async with self._user_clients_lock:
@@ -1644,7 +1645,7 @@ class MCPToolManager:
         Removes every entry matching ``(user_email, server_name, *)`` across
         all conversations, since the cache key now includes conversation_id.
         """
-        user_lc = user_email.lower()
+        user_lc = normalize_user_email(user_email)
         async with self._user_clients_lock:
             keys_to_remove = [
                 k for k in self._user_clients
@@ -1687,7 +1688,7 @@ class MCPToolManager:
                 "conversation_id is required for per-user HTTP client cache "
                 "(falsy values would alias unrelated conversations together)"
             )
-        cache_key = (user_email.lower(), server_name, conversation_id)
+        cache_key = (normalize_user_email(user_email), server_name, conversation_id)
 
         async with self._user_clients_lock:
             if cache_key in self._user_clients:
@@ -1736,7 +1737,7 @@ class MCPToolManager:
         # entries are removed; other conversations for the same user
         # keep their clients alive.
         if user_email:
-            user_lc = user_email.lower()
+            user_lc = normalize_user_email(user_email)
             async with self._user_clients_lock:
                 keys_to_remove = [
                     k for k in self._user_clients

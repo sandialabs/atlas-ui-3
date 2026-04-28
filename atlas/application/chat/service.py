@@ -114,6 +114,16 @@ class ChatService:
 
         # Chat history persistence (None when feature disabled)
         self.conversation_repository = conversation_repository
+        if (
+            self.conversation_repository is not None
+            and not isinstance(self.conversation_repository, ConversationOwnerRepository)
+        ):
+            # Without get_conversation_owner the per-turn ownership check
+            # silently degrades to "always allow"; surface that misconfiguration.
+            logger.warning(
+                "conversation_repository does not implement get_conversation_owner; "
+                "cross-user conversation_id validation will be skipped"
+            )
 
         # Track incognito sessions
         self._incognito_sessions: set = set()
@@ -385,8 +395,21 @@ class ChatService:
         and maps the session to the original conversation_id so
         subsequent saves update the same conversation.
         """
+        # Mirror handle_chat_message: refuse client-supplied conversation_ids
+        # without an authenticated user, so the restore path cannot be used to
+        # bypass the cross-user check the chat path enforces.
+        if not user_email:
+            logger.warning(
+                "Rejected restore for conversation %s: missing authenticated user",
+                sanitize_for_logging(conversation_id),
+            )
+            raise AuthorizationError(
+                "Conversation not found or access denied",
+                code="CONVERSATION_ACCESS_DENIED",
+            )
+
         # Validate conversation ownership before restoring
-        if user_email and getattr(self, "conversation_repository", None) is not None:
+        if getattr(self, "conversation_repository", None) is not None:
             conv = self.conversation_repository.get_conversation(conversation_id, user_email)
             if conv is None:
                 logger.warning(
@@ -394,7 +417,11 @@ class ChatService:
                     sanitize_for_logging(conversation_id),
                     sanitize_for_logging(user_email),
                 )
-                return {"type": "error", "error": "Conversation not found"}
+                return {
+                    "type": "error",
+                    "error": "Conversation not found",
+                    "message": "Conversation not found",
+                }
 
         # Reset the session
         await self.end_session(session_id)

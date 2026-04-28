@@ -194,6 +194,25 @@ async def test_explicit_conversation_id_owned_by_user_is_allowed():
 
 
 @pytest.mark.asyncio
+async def test_restore_without_user_email_is_rejected():
+    """Restore must mirror chat: refuse client-supplied conversation_id without an authenticated user."""
+    service, sessions = _make_service()
+    session_id = uuid4()
+
+    with pytest.raises(AuthorizationError):
+        await service.handle_restore_conversation(
+            session_id=session_id,
+            conversation_id="someones-conv",
+            messages=[{"role": "user", "content": "hi"}],
+            user_email=None,
+        )
+
+    # Session must not have been (re)created with the supplied conversation_id
+    session = sessions.get(session_id)
+    assert session is None or session.context.get("conversation_id") != "someones-conv"
+
+
+@pytest.mark.asyncio
 async def test_default_does_not_overwrite_existing_context_value():
     """If session.context already has a conversation_id, don't clobber it."""
     service, sessions = _make_service()

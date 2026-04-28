@@ -7,9 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #565 - 2026-04-25
-- MCP session security: client-supplied `conversation_id` values are rejected
-  when the saved conversation belongs to another user, and persistent MCP
-  sessions are keyed by user as well as conversation and server.
+- MCP sessions are now keyed by `(user, conversation, server)` and client-supplied `conversation_id` values owned by another user are rejected on chat and restore.
 
 ### PR #559 - 2026-04-25
 - MCP cross-conversation isolation: cache FastMCP HTTP `Client` instances by
