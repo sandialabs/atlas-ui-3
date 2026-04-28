@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #572 - 2026-04-28
+- Package the top-level `prompts/` markdown templates in the Python wheel so
+  installed `atlas-server` instances can load the default system and agent
+  prompts from site-packages.
+
 ### PR #559 - 2026-04-25
 - MCP cross-conversation isolation: cache FastMCP HTTP `Client` instances by
   `(user_email, server_name, conversation_id)` so each conversation gets its
