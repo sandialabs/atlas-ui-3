@@ -5,6 +5,7 @@ import { useToast, useDialog } from './ui/toastContext'
 import '@xterm/xterm/css/xterm.css'
 import PaneGrid from './agent-portal/PaneGrid'
 import CommandPalette from './agent-portal/CommandPalette'
+import FolderBrowser from './agent-portal/FolderBrowser'
 import { LAYOUT_MODES, SOFT_CAP_LIVE, HARD_CAP_LIVE } from './agent-portal/layoutConstants'
 import {
   normalizeLayout,
@@ -307,6 +308,11 @@ function AgentPortal() {
   const [pidsLimit, setPidsLimit] = useState('')
   const [namespacesSupported, setNamespacesSupported] = useState(null)
   const [cgroupsSupported, setCgroupsSupported] = useState(null)
+  // Default working directory = the dir Atlas itself is running from.
+  // Server tells us at mount time so the launch form pre-fills with a
+  // sensible value instead of an empty input.
+  const [defaultCwd, setDefaultCwd] = useState('')
+  const [browseOpen, setBrowseOpen] = useState(false)
   const [displayName, setDisplayName] = useState('')
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   // launchConfigs holds the merged UI-shape list shown in the sidebar.
@@ -370,6 +376,17 @@ function AgentPortal() {
         }
         if (c && typeof c.cgroups_supported === 'boolean') {
           setCgroupsSupported(c.cgroups_supported)
+        }
+      })
+      .catch(() => {})
+    fetch('/api/agent-portal/cwd', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c) => {
+        if (c && typeof c.cwd === 'string' && c.cwd) {
+          setDefaultCwd(c.cwd)
+          // Prefill the form's cwd field if the user hasn't typed anything
+          // yet. We do not clobber a user-entered value.
+          setCwd((prev) => (prev ? prev : c.cwd))
         }
       })
       .catch(() => {})
@@ -1722,13 +1739,38 @@ function AgentPortal() {
             </div>
             <div>
               <label className="block text-xs uppercase text-gray-400 mb-1">Working directory (optional)</label>
-              <input
-                type="text"
-                value={cwd}
-                onChange={(e) => setCwd(e.target.value)}
-                placeholder="/home/you/project"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={cwd}
+                  onChange={(e) => setCwd(e.target.value)}
+                  placeholder="/home/you/project"
+                  className="flex-1 min-w-0 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setBrowseOpen(true)}
+                  className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-sm flex-shrink-0"
+                  title="Browse for a folder"
+                >
+                  Browse…
+                </button>
+                {defaultCwd && cwd !== defaultCwd && (
+                  <button
+                    type="button"
+                    onClick={() => setCwd(defaultCwd)}
+                    className="px-2 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 text-xs text-gray-300 flex-shrink-0"
+                    title={`Reset to Atlas server cwd: ${defaultCwd}`}
+                  >
+                    Default
+                  </button>
+                )}
+              </div>
+              {defaultCwd && (
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Default = Atlas server cwd: <span className="font-mono">{defaultCwd}</span>
+                </p>
+              )}
             </div>
             <div className={(!cwd.trim() && sandboxMode !== 'off') || landlockSupported === false ? 'opacity-60' : ''}>
               <label className="block text-xs uppercase text-gray-400 mb-1">
@@ -2090,6 +2132,12 @@ function AgentPortal() {
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
         actions={paletteActions}
+      />
+      <FolderBrowser
+        open={browseOpen}
+        initialPath={cwd || defaultCwd}
+        onCancel={() => setBrowseOpen(false)}
+        onSelect={(p) => { setCwd(p); setBrowseOpen(false) }}
       />
       {auditOpen && (
         <div

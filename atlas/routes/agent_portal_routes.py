@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import os
 from typing import List, Optional
 from urllib.parse import urlparse
 
@@ -172,6 +173,51 @@ async def capabilities(current_user: str = Depends(get_current_user)):
         "namespaces_supported": iso.get("namespaces", False),
         "cgroups_supported": iso.get("cgroups", False),
     }
+
+
+@router.get("/cwd")
+async def default_cwd(current_user: str = Depends(get_current_user)):
+    """Return the directory the Atlas server is running in.
+
+    Used as the launch form's default working directory so a fresh
+    launch lands in the same place Atlas itself was started, instead
+    of asking the user to type an absolute path."""
+    _require_enabled()
+    return {"cwd": os.getcwd()}
+
+
+@router.get("/browse")
+async def browse_directory(
+    path: Optional[str] = None,
+    current_user: str = Depends(get_current_user),
+):
+    """List subdirectories of ``path`` for the launch-form folder picker.
+
+    Single-user-on-own-machine target: no per-user root jail. The
+    process running the browse is the same uid that would launch the
+    child, so the picker can only see what the child could anyway.
+    Multi-tenant deploys must add the workspace-root validation from
+    the graduation checklist before exposing this surface."""
+    _require_enabled()
+    target = os.path.abspath(os.path.expanduser(path)) if path else os.getcwd()
+    if not os.path.isdir(target):
+        raise HTTPException(status_code=404, detail=f"not a directory: {target}")
+    parent = os.path.dirname(target) if target != "/" else None
+    entries = []
+    try:
+        with os.scandir(target) as it:
+            for ent in it:
+                if ent.name.startswith("."):
+                    continue
+                try:
+                    if ent.is_dir(follow_symlinks=False):
+                        entries.append({"name": ent.name, "is_dir": True})
+                except OSError:
+                    continue
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"permission denied: {target}")
+    entries.sort(key=lambda e: e["name"].lower())
+    return {"path": target, "parent": parent, "entries": entries}
 
 
 @router.get("/processes")
