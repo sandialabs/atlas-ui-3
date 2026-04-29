@@ -742,13 +742,26 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 if static_dir.exists():
-    _SPA_NON_SPA_PREFIXES = ("api/", "ws/", "help-images/", "admin/", "static/")
+    # Known SPA frontend routes from frontend/src/App.jsx. F5 on any of
+    # these (or a deeper React Router subroute) should serve index.html.
+    # Anything else falls through to a real 404 instead of being silently
+    # masked by the SPA — important because `/help-images/...`, `/admin/
+    # telemetry/turn/{id}`, etc. have legitimate non-SPA handlers whose
+    # 404 / validation responses must not be hidden.
+    _SPA_ROUTE_PREFIXES = (
+        "marketplace",
+        "help",
+        "admin",
+        "files",
+        "agent-portal",
+    )
 
     @app.get("/{full_path:path}")
     async def spa_catchall(full_path: str):
-        if full_path.startswith(_SPA_NON_SPA_PREFIXES):
-            raise HTTPException(status_code=404, detail="Not Found")
         if ".." in full_path.split("/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        first = full_path.split("/", 1)[0]
+        if first not in _SPA_ROUTE_PREFIXES:
             raise HTTPException(status_code=404, detail="Not Found")
         return FileResponse(str(static_dir / "index.html"))
 
