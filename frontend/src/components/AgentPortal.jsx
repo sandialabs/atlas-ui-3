@@ -77,8 +77,8 @@ function saveLaunchConfigs(configs) {
 //   args=["foo", "bar baz"]  <->  argsString='foo "bar baz"'
 // preserves the user's original intent.
 function quoteArg(tok) {
-  if (!/\s/.test(tok) && !/["']/.test(tok)) return tok
-  return '"' + tok.replace(/"/g, '\\"') + '"'
+  if (!/\s/.test(tok) && !/["'\\]/.test(tok)) return tok
+  return '"' + tok.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
 }
 
 // Server presets use snake_case and a fuller field set; the UI has always

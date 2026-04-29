@@ -742,9 +742,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 if static_dir.exists():
+    _SPA_NON_SPA_PREFIXES = ("api/", "ws/", "help-images/", "admin/", "static/")
+
     @app.get("/{full_path:path}")
     async def spa_catchall(full_path: str):
-        if full_path.startswith("api/") or full_path.startswith("ws/"):
+        if full_path.startswith(_SPA_NON_SPA_PREFIXES):
+            raise HTTPException(status_code=404, detail="Not Found")
+        if ".." in full_path.split("/"):
             raise HTTPException(status_code=404, detail="Not Found")
         return FileResponse(str(static_dir / "index.html"))
 

@@ -161,7 +161,7 @@ class PresetStore:
         def __enter__(self):
             self._lock_path.parent.mkdir(parents=True, exist_ok=True)
             flags = os.O_RDWR | os.O_CREAT
-            self._fd = os.open(self._lock_path, flags, 0o644)
+            self._fd = os.open(self._lock_path, flags, 0o600)
             try:
                 fcntl.flock(self._fd, fcntl.LOCK_EX)
             except OSError:
