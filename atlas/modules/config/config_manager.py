@@ -584,6 +584,12 @@ class AppSettings(BaseSettings):
         description="Enable AI-generated follow-up question suggestions after each chat response",
         validation_alias=AliasChoices("FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED"),
     )
+    # Agent Portal feature gate (launch and stream host processes from the UI)
+    feature_agent_portal_enabled: bool = Field(
+        False,
+        description="Enable the Agent Portal UI for launching and streaming host processes",
+        validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_ENABLED"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
@@ -671,6 +677,26 @@ class AppSettings(BaseSettings):
                     "auth_aws_expected_alb_arn must be set to a valid AWS ALB ARN when auth_user_header_type is 'aws-alb-jwt'. "
                     "Current value is empty or a placeholder. Set AUTH_AWS_EXPECTED_ALB_ARN environment variable."
                 )
+        return self
+
+    @model_validator(mode='after')
+    def validate_agent_portal_dev_only(self):
+        """Refuse to boot with Agent Portal enabled outside debug mode.
+
+        The feature is a dev-preview that grants any authenticated caller
+        arbitrary command execution on the host. See
+        docs/agentportal/threat-model.md for the full rationale.
+        """
+        if self.feature_agent_portal_enabled and not self.debug_mode:
+            logging.getLogger(__name__).error(
+                "SECURITY: FEATURE_AGENT_PORTAL_ENABLED=true but DEBUG_MODE=false. "
+                "The Agent Portal is a dev-only preview and must not run outside debug mode. "
+                "See docs/agentportal/threat-model.md. Refusing to start."
+            )
+            raise ValueError(
+                "FEATURE_AGENT_PORTAL_ENABLED is only permitted when DEBUG_MODE=true. "
+                "See docs/agentportal/threat-model.md."
+            )
         return self
 
     model_config = {

@@ -5,6 +5,16 @@ queries:
   - uses: github/codeql/python-queries@latest
   - uses: github/codeql/javascript-queries@latest
 
+paths-ignore:
+  # Agent Portal's process_manager.manager exists to launch user-specified
+  # commands with user-specified args and cwd on behalf of authenticated
+  # users. The command-line-injection and path-injection sinks are the
+  # feature itself; taint-tracking on them is expected and not actionable.
+  # Exposure is gated by feature_agent_portal_enabled (off by default) +
+  # authenticated access; governance layers (allow-lists, role checks,
+  # quotas) are tracked as follow-up work.
+  - 'atlas/modules/process_manager/manager.py'
+
 query-filters:
   # Suppress "statement has no effect" findings for Python, e.g. ellipsis in Protocols
   - exclude:

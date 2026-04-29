@@ -23,6 +23,8 @@ import FileManagerPanel from './components/FileManagerPanel'
 import FilesPage from './components/FilesPage'
 import SplashScreen from './components/SplashScreen'
 import ElicitationDialog from './components/ElicitationDialog'
+import AgentPortal from './components/AgentPortal'
+import { ToastProvider, DialogProvider } from './components/ui/ToastProvider'
 
 // Log build info to browser console on startup
 console.info(
@@ -195,6 +197,7 @@ function AppRoutes() {
       <Route path="/files" element={<FilesPage />} />
       <Route path="/admin/logview" element={<LogViewer />} /> {/* New route for LogViewer */}
       <Route path="/admin/telemetry" element={<TelemetryDashboard />} />
+      {features?.agent_portal && <Route path="/agent-portal" element={<AgentPortal />} />}
     </Routes>
   )
 }
@@ -226,14 +229,18 @@ function App() {
   return (
     <ThemeProvider>
       <Router>
-        <WSProvider>
-          <ChatProvider>
-            <MarketplaceProvider>
-              <SplashScreen config={splashConfig} />
-              <AppRoutes />
-            </MarketplaceProvider>
-          </ChatProvider>
-        </WSProvider>
+        <ToastProvider>
+          <DialogProvider>
+            <WSProvider>
+              <ChatProvider>
+                <MarketplaceProvider>
+                  <SplashScreen config={splashConfig} />
+                  <AppRoutes />
+                </MarketplaceProvider>
+              </ChatProvider>
+            </WSProvider>
+          </DialogProvider>
+        </ToastProvider>
       </Router>
     </ThemeProvider>
   )

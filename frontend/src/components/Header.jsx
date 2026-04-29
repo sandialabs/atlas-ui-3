@@ -5,7 +5,7 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, Info } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, Info, Terminal } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 import { useTheme } from '../contexts/ThemeContext'
 
@@ -469,6 +469,18 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
             <span className="text-sm">Help</span>
           </button>
 
+          {/* Agent Portal Button */}
+          {features?.agent_portal && (
+            <button
+              onClick={() => navigate('/agent-portal')}
+              className="flex items-center gap-1 px-2 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+              title="Agent Portal -- launch host processes"
+            >
+              <Terminal className="w-5 h-5" />
+              <span className="text-sm">Portal</span>
+            </button>
+          )}
+
           {/* Tools Panel Toggle */}
           {(() => {
             if (features?.tools) {
@@ -698,6 +710,20 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 <HelpCircle className="w-5 h-5" />
                 <span>Help</span>
               </button>
+
+              {/* Agent Portal */}
+              {features?.agent_portal && (
+                <button
+                  onClick={() => {
+                    navigate('/agent-portal')
+                    setMobileMenuOpen(false)
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
+                >
+                  <Terminal className="w-5 h-5" />
+                  <span>Agent Portal</span>
+                </button>
+              )}
 
               {/* Tools Panel Toggle */}
               {features?.tools && (

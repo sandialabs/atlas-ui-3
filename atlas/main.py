@@ -62,6 +62,7 @@ from atlas.domain.errors import (
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.routes.admin_routes import admin_router
+from atlas.routes.agent_portal_routes import router as agent_portal_router
 
 # Import essential routes
 from atlas.routes.config_routes import router as config_router
@@ -273,6 +274,7 @@ app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
 app.include_router(suggestion_router)
+app.include_router(agent_portal_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
@@ -737,6 +739,31 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.warning("Error releasing MCP sessions on disconnect: %s", e)
         await chat_service.end_session(session_id)
         logger.info(f"WebSocket connection closed for session {session_id}")
+
+
+if static_dir.exists():
+    # Known SPA frontend routes from frontend/src/App.jsx. F5 on any of
+    # these (or a deeper React Router subroute) should serve index.html.
+    # Anything else falls through to a real 404 instead of being silently
+    # masked by the SPA — important because `/help-images/...`, `/admin/
+    # telemetry/turn/{id}`, etc. have legitimate non-SPA handlers whose
+    # 404 / validation responses must not be hidden.
+    _SPA_ROUTE_PREFIXES = (
+        "marketplace",
+        "help",
+        "admin",
+        "files",
+        "agent-portal",
+    )
+
+    @app.get("/{full_path:path}")
+    async def spa_catchall(full_path: str):
+        if ".." in full_path.split("/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        first = full_path.split("/", 1)[0]
+        if first not in _SPA_ROUTE_PREFIXES:
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(str(static_dir / "index.html"))
 
 
 if __name__ == "__main__":
