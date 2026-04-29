@@ -61,7 +61,9 @@ async def test_get_or_create_user_http_client_creates_client(manager):
     with patch("atlas.modules.mcp_tools.client.Client") as MockClient:
         mock_instance = MagicMock()
         MockClient.return_value = mock_instance
-        client = await manager._get_or_create_user_http_client("state_server", "alice@test.com")
+        client = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-1"
+        )
         assert client is mock_instance
 
 
@@ -74,10 +76,14 @@ async def test_get_or_create_user_http_client_caches(manager):
     with patch("atlas.modules.mcp_tools.client.Client") as MockClient:
         mock_instance = MagicMock()
         MockClient.return_value = mock_instance
-        c1 = await manager._get_or_create_user_http_client("state_server", "alice@test.com")
-        c2 = await manager._get_or_create_user_http_client("state_server", "alice@test.com")
+        c1 = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-1"
+        )
+        c2 = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-1"
+        )
         assert c1 is c2
-        assert MockClient.call_count == 1  # Only created once
+        assert MockClient.call_count == 1  # Only created once for the same conversation
 
 
 @pytest.mark.asyncio
@@ -88,7 +94,109 @@ async def test_get_or_create_user_http_client_isolates_users(manager):
     }
     with patch("atlas.modules.mcp_tools.client.Client") as MockClient:
         MockClient.side_effect = [MagicMock(), MagicMock()]
-        c1 = await manager._get_or_create_user_http_client("state_server", "alice@test.com")
-        c2 = await manager._get_or_create_user_http_client("state_server", "bob@test.com")
+        c1 = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-1"
+        )
+        c2 = await manager._get_or_create_user_http_client(
+            "state_server", "bob@test.com", "conv-1"
+        )
         assert c1 is not c2
         assert MockClient.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_user_http_client_isolates_conversations(manager):
+    """Each conversation gets its own Client to keep FastMCP nesting counters separate."""
+    manager.servers_config["state_server"] = {
+        "url": "http://127.0.0.1:8010/mcp",
+        "transport": "http",
+    }
+    with patch("atlas.modules.mcp_tools.client.Client") as MockClient:
+        MockClient.side_effect = [MagicMock(), MagicMock()]
+        c1 = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-1"
+        )
+        c2 = await manager._get_or_create_user_http_client(
+            "state_server", "alice@test.com", "conv-2"
+        )
+        assert c1 is not c2
+        assert MockClient.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_user_http_client_rejects_missing_conversation_id(manager):
+    """A falsy conversation_id would alias every caller for (user, server)
+    into one cache slot — exactly the cross-conversation aliasing bug this
+    cache exists to prevent. Surface that as an error rather than silently
+    sharing one Client.
+    """
+    manager.servers_config["state_server"] = {
+        "url": "http://127.0.0.1:8010/mcp",
+        "transport": "http",
+    }
+    for bad_value in (None, ""):
+        with pytest.raises(ValueError, match="conversation_id is required"):
+            await manager._get_or_create_user_http_client(
+                "state_server", "alice@test.com", bad_value
+            )
+
+
+# --- release_sessions tests ---
+
+
+@pytest.mark.asyncio
+async def test_release_sessions_evicts_only_target_conversation(manager):
+    """release_sessions must evict only entries scoped to the target
+    conversation_id, leaving other conversations for the same user
+    (and other users) intact.
+    """
+    other_user_client = MagicMock()
+    alice_conv1 = MagicMock()
+    alice_conv2 = MagicMock()
+    manager._user_clients = {
+        ("alice@test.com", "state_server", "conv-1"): alice_conv1,
+        ("alice@test.com", "state_server", "conv-2"): alice_conv2,
+        ("bob@test.com", "state_server", "conv-1"): other_user_client,
+    }
+
+    session_manager_release = MagicMock()
+
+    async def _async_release(_):
+        session_manager_release()
+
+    manager._session_manager = MagicMock()
+    manager._session_manager.release_all = _async_release
+
+    await manager.release_sessions("conv-1", user_email="alice@test.com")
+
+    # Alice's conv-1 evicted; her conv-2 and Bob's conv-1 survive.
+    assert ("alice@test.com", "state_server", "conv-1") not in manager._user_clients
+    assert ("alice@test.com", "state_server", "conv-2") in manager._user_clients
+    assert ("bob@test.com", "state_server", "conv-1") in manager._user_clients
+    session_manager_release.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_release_sessions_without_user_email_only_releases_session_manager(manager):
+    """Without user_email we cannot scope cache eviction safely, so we only
+    release the session manager entries for the conversation. The HTTP
+    client cache is left untouched (eviction will happen via the next
+    call's reuse, or when the user reconnects).
+    """
+    alice_conv1 = MagicMock()
+    manager._user_clients = {
+        ("alice@test.com", "state_server", "conv-1"): alice_conv1,
+    }
+    release_called_with = {}
+
+    async def _async_release(conv_id):
+        release_called_with["arg"] = conv_id
+
+    manager._session_manager = MagicMock()
+    manager._session_manager.release_all = _async_release
+
+    await manager.release_sessions("conv-1", user_email=None)
+
+    assert release_called_with["arg"] == "conv-1"
+    # Cache entry survives because we cannot scope to user safely.
+    assert ("alice@test.com", "state_server", "conv-1") in manager._user_clients

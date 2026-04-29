@@ -14,7 +14,7 @@ MCP session isolation prevents cross-user state leakage in multi-user deployment
 | Transport | State Strategy | Why |
 |-----------|---------------|-----|
 | STDIO | `BlockedStateStore` — reads return empty, writes raise `RuntimeError` | Single process shared across all users; any stored state would be visible to everyone |
-| HTTP | Per-user `Client` instances keyed by `(user_email, server_name)` | Each client gets its own MCP session ID, isolating state per user |
+| HTTP | Per-user/per-conversation `Client` instances keyed by `(user_email, server_name, conversation_id)` | Each client gets its own MCP session ID, isolating state per conversation. Per-conversation keying (not per-user) is required because `MCPSessionManager` opens persistent sessions per conversation and each open increments FastMCP's reentrant nesting counter on the underlying `Client`. Sharing one client across conversations accumulates the counter; if the underlying session task dies, FastMCP refuses to reconnect ("nesting counter should be 0 when starting new session, got N"). |
 
 ### BlockedStateStore (`atlas/mcp_shared/blocked_state.py`)
 
@@ -56,7 +56,7 @@ Holds live MCP sessions keyed by `(conversation_id, server_name)`:
 
 1. User calls a tool → `MCPSessionManager.acquire()` opens session if needed
 2. Subsequent tool calls reuse the open session
-3. WebSocket disconnect → `release_sessions(conversation_id, user_email)` closes all sessions and evicts per-user HTTP clients
+3. WebSocket disconnect → `release_sessions(conversation_id, user_email)` closes all sessions and evicts the conversation's HTTP clients
 4. Server shutdown → `cleanup()` closes all sessions and clears client caches
 
 ### Dead Session Recovery (PR #461, 2026-03-21)

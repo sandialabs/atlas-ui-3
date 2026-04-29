@@ -392,8 +392,25 @@ class ChatService:
         does not overwrite the previous one (session_id stays the
         same for the lifetime of the WebSocket connection).
         """
+        # Capture the old conversation_id before tearing down the session
+        # so we can release any MCP sessions/clients scoped to it.
+        old_session = await self.session_repository.get(session_id)
+        old_conv_id = old_session.context.get("conversation_id") if old_session else None
+
         # End the current session
         await self.end_session(session_id)
+
+        # Release MCP sessions and per-conversation clients for the old
+        # conversation. Without this, each reset orphans the
+        # (user, server, old_conv_id) entries in MCPSessionManager and
+        # MCPToolManager._user_clients (cache keys are per-conversation).
+        if old_conv_id:
+            release_sessions = getattr(self.tool_manager, "release_sessions", None)
+            if release_sessions is not None:
+                try:
+                    await release_sessions(old_conv_id, user_email=user_email)
+                except Exception as e:
+                    logger.debug("Error releasing MCP sessions on reset: %s", e)
 
         # Create a new session with a fresh conversation_id
         session = await self.create_session(session_id, user_email)

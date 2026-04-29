@@ -65,7 +65,11 @@ class PromptOverrideService:
                     meta["conversation_id"] = conversation_id
 
                 prompt_obj = await self.tool_manager.get_prompt(
-                    server, prompt_name, meta=meta if meta else None
+                    server,
+                    prompt_name,
+                    meta=meta if meta else None,
+                    user_email=user_email,
+                    conversation_id=conversation_id,
                 )
                 prompt_text = self._extract_prompt_text(prompt_obj)
 
