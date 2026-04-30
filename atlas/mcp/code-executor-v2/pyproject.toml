@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atlas-code-executor-v2"
+version = "0.1.0"
+description = "Stateful sandboxed Python execution MCP for Atlas (Landlock + netns + rlimits)"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Atlas UI Team" }]
+dependencies = [
+    "fastmcp>=3,<4",
+
+    # Core data
+    "numpy>=1.26,<3",
+    "pandas>=2.0,<3",
+    "polars>=1,<2",
+    "pyarrow>=15,<22",
+    "duckdb>=1.0,<2",
+    "openpyxl>=3.1,<4",
+    "xlsxwriter>=3.2,<4",
+
+    # Stats / ML
+    "scipy>=1.11,<2",
+    "statsmodels>=0.14,<1",
+    "scikit-learn>=1.3,<2",
+    "sympy>=1.12,<2",
+    "joblib>=1.3,<2",
+    "tqdm>=4.66,<5",
+
+    # Plotting
+    "matplotlib>=3.8,<4",
+    "seaborn>=0.13,<1",
+    "plotly>=5.20,<7",
+    "kaleido==0.2.1",
+
+    # Graphs / geo (light)
+    "networkx>=3.2,<4",
+    "shapely>=2.0,<3",
+
+    # Image
+    "pillow>=10,<12",
+    "opencv-python-headless>=4.9,<5",
+
+    # Parsing
+    "beautifulsoup4>=4.12,<5",
+    "lxml>=5,<6",
+    "html5lib>=1.1,<2",
+    "python-dateutil>=2.8,<3",
+    "pytz>=2024.1",
+    "jsonschema>=4.21,<5",
+
+    # Templating
+    "jinja2>=3.1,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4,<9",
+    "pytest-asyncio>=0.23,<1",
+]
+
+[project.scripts]
+atlas-code-executor-v2 = "main:main"
+
+[tool.setuptools]
+py-modules = [
+    "main",
+    "config",
+    "session",
+    "artifacts",
+    "file_ops",
+    "git_clone",
+]
+
+[tool.setuptools.packages.find]
+include = ["sandbox*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
