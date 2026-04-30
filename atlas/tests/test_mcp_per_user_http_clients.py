@@ -170,7 +170,8 @@ async def test_release_sessions_evicts_only_target_conversation(manager):
 
     session_manager_release = MagicMock()
 
-    async def _async_release(_):
+    async def _async_release(_, user_email=None):
+        assert user_email == "alice@test.com"
         session_manager_release()
 
     manager._session_manager = MagicMock()
@@ -202,8 +203,9 @@ async def test_release_sessions_without_user_email_evicts_by_conversation(manage
     }
     release_called_with = {}
 
-    async def _async_release(conv_id):
+    async def _async_release(conv_id, user_email=None):
         release_called_with["arg"] = conv_id
+        release_called_with["user_email"] = user_email
 
     manager._session_manager = MagicMock()
     manager._session_manager.release_all = _async_release
@@ -211,6 +213,14 @@ async def test_release_sessions_without_user_email_evicts_by_conversation(manage
     await manager.release_sessions("conv-1", user_email=None)
 
     assert release_called_with["arg"] == "conv-1"
+    assert release_called_with["user_email"] is None
+    # When release_sessions is called without user_email, the merged
+    # behaviour falls back to conv-id-only eviction so internal callers
+    # without auth context (e.g. WebSocket cleanup races) can still tear
+    # down per-conversation cache entries. Bob's conv-2 entry under a
+    # different conv stays untouched. PR #565 narrowed the *security*
+    # scope at the entrypoints (chat/restore validate user ownership);
+    # PR #564 retained the user-less internal fallback for cleanup paths.
     assert ("alice@test.com", "state_server", "conv-1") not in manager._user_clients
     assert ("alice@test.com", "state_server", "conv-1") not in manager._user_client_last_used
     assert ("bob@test.com", "state_server", "conv-2") in manager._user_clients

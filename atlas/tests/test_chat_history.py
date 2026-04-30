@@ -95,6 +95,18 @@ class TestSaveAndGet:
         assert result["messages"][0]["role"] == "user"
         assert result["messages"][1]["role"] == "assistant"
 
+    def test_get_conversation_owner(self, repo):
+        repo.save_conversation(
+            conversation_id="conv-owner",
+            user_email="owner@test.com",
+            title="Owner Test",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+
+        assert repo.get_conversation_owner("conv-owner") == "owner@test.com"
+        assert repo.get_conversation_owner("missing-conv") is None
+
     def test_get_nonexistent_returns_none(self, repo):
         assert repo.get_conversation("nope", "user@test.com") is None
 

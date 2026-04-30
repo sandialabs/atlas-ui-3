@@ -17,6 +17,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
+from atlas.core.user_identity import normalize_user_email
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.modules.config import config_manager
 from atlas.modules.config.config_manager import resolve_env_var
@@ -1826,7 +1827,7 @@ class MCPToolManager:
         from atlas.modules.mcp_tools.token_storage import get_token_storage
 
         token_storage = get_token_storage()
-        cache_key = (user_email.lower(), server_name, conversation_id)
+        cache_key = (normalize_user_email(user_email), server_name, conversation_id)
 
         # Check cache first, but validate token is still valid
         removed = []
@@ -1938,7 +1939,7 @@ class MCPToolManager:
         Removes every entry matching ``(user_email, server_name, *)`` across
         all conversations, since the cache key now includes conversation_id.
         """
-        user_lc = user_email.lower()
+        user_lc = normalize_user_email(user_email)
         async with self._user_clients_lock:
             keys_to_remove = [
                 k for k in self._user_clients
@@ -1981,7 +1982,7 @@ class MCPToolManager:
                 "conversation_id is required for per-user HTTP client cache "
                 "(falsy values would alias unrelated conversations together)"
             )
-        cache_key = (user_email.lower(), server_name, conversation_id)
+        cache_key = (normalize_user_email(user_email), server_name, conversation_id)
 
         async with self._user_clients_lock:
             if cache_key in self._user_clients:
@@ -2025,12 +2026,19 @@ class MCPToolManager:
         FastMCP clients scoped to this (user, conversation) so the next
         conversation on the same user gets fresh clients.
         """
-        await self._session_manager.release_all(conversation_id)
+        await self._session_manager.release_all(
+            conversation_id, user_email=user_email
+        )
 
-        # Evict cached clients scoped to this conversation. If user context is
-        # unavailable, fall back to conversation_id-only eviction so internal
-        # callers can still clean up their cache entries.
-        user_lc = user_email.lower() if user_email else None
+        # Evict cached clients scoped to this conversation. PR #565 narrowed
+        # the cache key to (user, server, conversation), so per-conversation
+        # eviction is now safe to scope by user too. When user_email is
+        # missing we fall back to conversation_id-only eviction (e.g. internal
+        # callers without auth context) and rely on the upstream
+        # release_all/session-manager teardown above to bound any cross-user
+        # exposure. Closing uses PR #564's pop-then-close pattern so each
+        # FastMCP client is properly torn down.
+        user_lc = normalize_user_email(user_email) if user_email else None
         async with self._user_clients_lock:
             keys_to_remove = [
                 k for k in self._user_clients
@@ -2207,7 +2215,7 @@ class MCPToolManager:
             if conversation_id:
                 # Use persistent session
                 session = await self._session_manager.acquire(
-                    conversation_id, server_name, client
+                    conversation_id, server_name, client, user_email=user_email
                 )
                 active_client = session.client
             else:
@@ -2947,7 +2955,9 @@ class MCPToolManager:
                     conversation_id,
                 )
                 try:
-                    await self._session_manager.release(conversation_id, server_name)
+                    await self._session_manager.release(
+                        conversation_id, server_name, user_email=user_email
+                    )
                 except Exception as release_exc:
                     logger.warning(
                         "Failed to release dead session for server=%s conversation=%s: %s",
@@ -2991,10 +3001,15 @@ class MCPToolManager:
         if pending_closes:
             await asyncio.gather(*pending_closes, return_exceptions=True)
 
-        # Close all persistent sessions
+        # Close all persistent sessions. Keys are
+        # (user_email, conversation_id, server_name) — pass each component to release()
+        # so the correct scope is targeted.
         for key in list(self._session_manager._sessions.keys()):
             try:
-                await self._session_manager.release(key[0], key[1])
+                user_scope, conv_id, server = key
+                await self._session_manager.release(
+                    conv_id, server, user_email=user_scope
+                )
             except Exception as e:
                 logger.debug("Error releasing session %s: %s", key, e)
 

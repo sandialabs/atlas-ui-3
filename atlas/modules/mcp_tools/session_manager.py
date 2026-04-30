@@ -1,4 +1,4 @@
-"""MCP Session Manager — holds live sessions per (conversation_id, server_name).
+"""MCP Session Manager — holds live sessions per (user, conversation, server).
 
 Sessions are opened lazily on first tool call and reused across subsequent calls
 within the same conversation. Cleanup happens on conversation end (WebSocket
@@ -10,19 +10,22 @@ from typing import Any, Dict, Optional, Protocol, Tuple
 
 from fastmcp import Client
 
+from atlas.core.user_identity import normalize_user_email
+
 logger = logging.getLogger(__name__)
 
 
 class SessionStore(Protocol):
     """Abstract storage interface for session metadata.
 
-    In-memory dict is the default. Swap to Redis for durable sessions
-    that survive restarts (future phase).
+    Keys include normalized user identity, conversation ID, and server name.
+    In-memory dict is the default. Swap to Redis for durable sessions that
+    survive restarts (future phase).
     """
 
-    def get(self, key: Tuple[str, str]) -> Optional[Any]: ...
-    def set(self, key: Tuple[str, str], value: Any) -> None: ...
-    def delete(self, key: Tuple[str, str]) -> None: ...
+    def get(self, key: Tuple[str, str, str]) -> Optional[Any]: ...
+    def set(self, key: Tuple[str, str, str], value: Any) -> None: ...
+    def delete(self, key: Tuple[str, str, str]) -> None: ...
     def keys_by_prefix(self, prefix: str) -> list: ...
 
 
@@ -64,17 +67,17 @@ class ManagedSession:
 
 
 class MCPSessionManager:
-    """Manages live MCP sessions keyed by (conversation_id, server_name).
+    """Manages live MCP sessions keyed by (user_email, conversation_id, server_name).
 
     Sessions are created lazily and reused. Call release_all() on
     conversation end to clean up.
     """
 
     def __init__(self) -> None:
-        self._sessions: Dict[Tuple[str, str], ManagedSession] = {}
+        self._sessions: Dict[Tuple[str, str, str], ManagedSession] = {}
         self._lock = asyncio.Lock()
-        self._key_locks: Dict[Tuple[str, str], asyncio.Lock] = {}
-        # Reverse index: conversation_id → set of (conversation_id, server_name) keys
+        self._key_locks: Dict[Tuple[str, str, str], asyncio.Lock] = {}
+        # Reverse index: conversation_id → set of (user_email, conversation_id, server_name) keys
         self._conv_index: Dict[str, set] = {}
 
     async def acquire(
@@ -82,8 +85,9 @@ class MCPSessionManager:
         conversation_id: str,
         server_name: str,
         client: Client,
+        user_email: Optional[str] = None,
     ) -> ManagedSession:
-        """Get or create a session for (conversation_id, server_name).
+        """Get or create a session for (user_email, conversation_id, server_name).
 
         If a session already exists and is open, returns it.
         Otherwise opens a new one.  Uses per-key locks so that opening
@@ -93,7 +97,8 @@ class MCPSessionManager:
         ``client.is_connected()`` and automatically cleaned up before
         opening a fresh session.
         """
-        key = (conversation_id, server_name)
+        user_scope = normalize_user_email(user_email)
+        key = (user_scope, conversation_id, server_name)
 
         # Fast path: check under global lock (no I/O)
         async with self._lock:
@@ -144,9 +149,14 @@ class MCPSessionManager:
             )
             return session
 
-    async def release(self, conversation_id: str, server_name: str) -> None:
+    async def release(
+        self,
+        conversation_id: str,
+        server_name: str,
+        user_email: Optional[str] = None,
+    ) -> None:
         """Close and remove a specific session."""
-        key = (conversation_id, server_name)
+        key = (normalize_user_email(user_email), conversation_id, server_name)
         async with self._lock:
             session = self._sessions.pop(key, None)
             self._key_locks.pop(key, None)
@@ -163,11 +173,18 @@ class MCPSessionManager:
                 server_name,
             )
 
-    async def release_all(self, conversation_id: str) -> None:
-        """Close all sessions for a conversation (O(1) lookup via reverse index)."""
+    async def release_all(
+        self, conversation_id: str, user_email: Optional[str] = None
+    ) -> None:
+        """Close sessions for a conversation (O(1) lookup via reverse index)."""
         to_close: list[ManagedSession] = []
+        # ``None`` means all user scopes (legacy/global cleanup);
+        # an explicit "" maps to the unauthenticated/legacy scope only.
+        user_scope = normalize_user_email(user_email) if user_email is not None else None
         async with self._lock:
-            keys_to_remove = self._conv_index.pop(conversation_id, set())
+            keys_to_remove = self._pop_release_keys_locked(
+                conversation_id, user_scope
+            )
             for k in keys_to_remove:
                 session = self._sessions.pop(k, None)
                 self._key_locks.pop(k, None)
@@ -183,3 +200,28 @@ class MCPSessionManager:
                 len(to_close),
                 conversation_id,
             )
+
+    def _pop_release_keys_locked(
+        self,
+        conversation_id: str,
+        user_scope: Optional[str],
+    ) -> set[Tuple[str, str, str]]:
+        """Return and remove indexed keys for a user scope, or all users.
+
+        ``user_scope=None`` is reserved for legacy/global cleanup paths where no
+        authenticated user is available; it removes every session sharing the
+        conversation ID.
+        """
+        conv_keys = self._conv_index.get(conversation_id)
+        if not conv_keys:
+            return set()
+
+        if user_scope is None:
+            self._conv_index.pop(conversation_id, None)
+            return set(conv_keys)
+
+        keys_to_remove = {k for k in conv_keys if k[0] == user_scope}
+        conv_keys.difference_update(keys_to_remove)
+        if not conv_keys:
+            self._conv_index.pop(conversation_id, None)
+        return keys_to_remove
