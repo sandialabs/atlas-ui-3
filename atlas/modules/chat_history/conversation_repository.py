@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import delete, desc
 from sqlalchemy.orm import Session, sessionmaker
 
+from atlas.core.user_identity import normalize_user_email
+
 from .models import ConversationRecord, ConversationTagLink, MessageRecord, TagRecord
 
 logger = logging.getLogger(__name__)
@@ -41,7 +43,14 @@ class ConversationRepository:
 
         Upsert: if conversation exists for this user, replaces all messages.
         Returns None if the conversation_id belongs to a different user.
+
+        Normalizes ``user_email`` so callers using mixed case (e.g. one
+        connection arrives as ``Alice@Test.com`` and a later connection as
+        ``alice@test.com`` because of reverse-proxy or OAuth provider
+        differences) still match the existing row instead of silently
+        dropping the save.
         """
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             existing = session.query(ConversationRecord).filter(
                 ConversationRecord.id == conversation_id,
@@ -176,7 +185,13 @@ class ConversationRepository:
             return results
 
     def get_conversation(self, conversation_id: str, user_email: str) -> Optional[Dict[str, Any]]:
-        """Get a full conversation with all messages."""
+        """Get a full conversation with all messages.
+
+        Normalizes ``user_email`` to keep restore symmetrical with
+        ``save_conversation``: a lookup with different email casing must
+        still hit a row written under a different casing.
+        """
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             conv = session.query(ConversationRecord).filter(
                 ConversationRecord.id == conversation_id,

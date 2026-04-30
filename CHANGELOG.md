@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #565 - 2026-04-25
 - MCP sessions are now keyed by `(user, conversation, server)` and client-supplied `conversation_id` values owned by another user are rejected on chat and restore.
+- Hardened the new ownership boundary after multi-agent review:
+  - Per-turn ownership check now fails closed when the configured `conversation_repository` does not implement `get_conversation_owner` (previously fell through to "always allow" with only a startup warning).
+  - `handle_restore_conversation` returns the canonical message list from the DB instead of replaying the client-supplied payload, so a tampered client cannot inject forged history into the LLM context and have it re-persisted.
+  - `_save_conversation` honours the repository's `None` return (TOCTOU rejection): the frontend now receives a `conversation_save_rejected` error frame instead of a false `conversation_saved` notification.
+  - `save_conversation` and `get_conversation` normalize `user_email` so mixed-case identities (proxy / OAuth normalization differences) cannot silently drop saves.
+  - Whitespace-only / non-string `conversation_id` is treated as "not provided" and falls back to the session-id default.
+  - WebSocket dispatch now has explicit `AuthorizationError` arms for both chat and restore so a denied request returns a structured `error_type: "authorization"` frame instead of falling through to the generic domain-error arm or, in the restore case, tearing down the connection.
 
 ### PR #559 - 2026-04-25
 - MCP cross-conversation isolation: cache FastMCP HTTP `Client` instances by
