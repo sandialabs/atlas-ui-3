@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-30
+
 ### PR #559 - 2026-04-25
 - MCP cross-conversation isolation: cache FastMCP HTTP `Client` instances by
   `(user_email, server_name, conversation_id)` so each conversation gets its
