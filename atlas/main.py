@@ -199,6 +199,18 @@ async def lifespan(app: FastAPI):
         # Continue startup even if MCP fails
         logger.warning("Continuing startup without MCP tools")
 
+    # The user-client cache sweeper must run even when MCP discovery
+    # failed above: any per-user HTTP clients created later (e.g. on
+    # reconnect or partial init) still need bounded eviction, otherwise
+    # the leak guard this PR adds is silently disabled in degraded
+    # startup.
+    try:
+        logger.info("Step 5: Starting MCP user client cache sweeper...")
+        await mcp_manager.start_user_client_cache_sweeper()
+        logger.info("Step 5 complete: User client cache sweeper started")
+    except Exception as e:
+        logger.error(f"Failed to start MCP user client cache sweeper: {e}", exc_info=True)
+
     yield
 
     logger.info("Shutting down Chat UI Backend")
@@ -776,4 +788,10 @@ if __name__ == "__main__":
     host = os.getenv("ATLAS_HOST", "127.0.0.1")
     port = int(os.getenv("PORT", 8000))
 
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        ws_ping_interval=config.app_settings.websocket_keepalive_interval_seconds,
+        ws_ping_timeout=config.app_settings.websocket_keepalive_interval_seconds,
+    )

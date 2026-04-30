@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #564 - 2026-04-28
+- Bounded the per-user MCP HTTP client cache with LRU/idle eviction, explicit FastMCP client close on cleanup, and enabled Uvicorn WebSocket ping keepalives so dropped connections are detected and MCP session cleanup runs sooner.
+- Hardened cache lifecycle after multi-agent review:
+  - LRU eviction now skips cached clients touched within `MCP_USER_CLIENT_CACHE_IN_USE_WINDOW_SECONDS` (default 60s) so an in-flight tool call cannot have its connection torn down; cache temporarily exceeds bound rather than evict an active client.
+  - `client.__aexit__` is bounded by `MCP_USER_CLIENT_CLOSE_TIMEOUT_SECONDS` (default 5s) so a stuck upstream cannot hang the sweeper or shutdown.
+  - Cache sweeper now starts even if MCP discovery fails during lifespan, so the leak guard is not silently disabled in degraded startup.
+  - Sweeper close batches are tracked and drained on shutdown, eliminating a cancellation race that could orphan FastMCP clients between pop and close.
+
 ### PR #559 - 2026-04-25
 - MCP cross-conversation isolation: cache FastMCP HTTP `Client` instances by
   `(user_email, server_name, conversation_id)` so each conversation gets its

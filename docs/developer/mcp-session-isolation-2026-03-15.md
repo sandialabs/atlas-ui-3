@@ -57,7 +57,8 @@ Holds live MCP sessions keyed by `(conversation_id, server_name)`:
 1. User calls a tool → `MCPSessionManager.acquire()` opens session if needed
 2. Subsequent tool calls reuse the open session
 3. WebSocket disconnect → `release_sessions(conversation_id, user_email)` closes all sessions and evicts the conversation's HTTP clients
-4. Server shutdown → `cleanup()` closes all sessions and clears client caches
+4. Idle/LRU sweeper → cached HTTP clients are evicted and closed when they exceed `MCP_USER_CLIENT_CACHE_MAX_ENTRIES` or remain idle beyond `MCP_USER_CLIENT_CACHE_IDLE_TTL_SECONDS`
+5. Server shutdown → `cleanup()` closes all sessions and cached HTTP clients
 
 ### Dead Session Recovery (PR #461, 2026-03-21)
 
