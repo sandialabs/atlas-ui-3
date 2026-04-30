@@ -429,6 +429,44 @@ class AppSettings(BaseSettings):
         description="Seconds to wait synchronously before switching to background task polling",
         validation_alias="MCP_TASK_TIMEOUT"
     )
+    mcp_user_client_cache_max_entries: int = Field(
+        default=1000,
+        description="Maximum cached per-user/per-conversation MCP HTTP clients",
+        validation_alias="MCP_USER_CLIENT_CACHE_MAX_ENTRIES",
+    )
+    mcp_user_client_cache_idle_ttl_seconds: int = Field(
+        default=3600,
+        description="Seconds before an idle cached MCP HTTP client is evicted",
+        validation_alias="MCP_USER_CLIENT_CACHE_IDLE_TTL_SECONDS",
+    )
+    mcp_user_client_cache_sweep_interval_seconds: int = Field(
+        default=300,
+        description="Interval in seconds between idle MCP HTTP client cache sweeps",
+        validation_alias="MCP_USER_CLIENT_CACHE_SWEEP_INTERVAL_SECONDS",
+    )
+    mcp_user_client_cache_in_use_window_seconds: int = Field(
+        default=60,
+        description=(
+            "LRU eviction skips cached MCP HTTP clients touched within this many "
+            "seconds; tool calls in flight should not have their connection torn "
+            "down by the cache-bound enforcer. Allows temporary cache overflow."
+        ),
+        validation_alias="MCP_USER_CLIENT_CACHE_IN_USE_WINDOW_SECONDS",
+    )
+    mcp_user_client_close_timeout_seconds: float = Field(
+        default=5.0,
+        description=(
+            "Maximum seconds to wait for a single cached MCP HTTP client to close. "
+            "Bounds sweeper iteration and shutdown so a stuck server cannot hang "
+            "Atlas teardown."
+        ),
+        validation_alias="MCP_USER_CLIENT_CLOSE_TIMEOUT_SECONDS",
+    )
+    websocket_keepalive_interval_seconds: int = Field(
+        default=30,
+        description="Interval in seconds for WebSocket ping keepalives; maps to Uvicorn's ws_ping_interval and ws_ping_timeout settings",
+        validation_alias="WEBSOCKET_KEEPALIVE_INTERVAL_SECONDS",
+    )
 
     # MCP Token Storage settings
     mcp_token_storage_dir: Optional[str] = Field(
@@ -584,6 +622,12 @@ class AppSettings(BaseSettings):
         description="Enable AI-generated follow-up question suggestions after each chat response",
         validation_alias=AliasChoices("FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED"),
     )
+    # Agent Portal feature gate (launch and stream host processes from the UI)
+    feature_agent_portal_enabled: bool = Field(
+        False,
+        description="Enable the Agent Portal UI for launching and streaming host processes",
+        validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_ENABLED"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
@@ -671,6 +715,26 @@ class AppSettings(BaseSettings):
                     "auth_aws_expected_alb_arn must be set to a valid AWS ALB ARN when auth_user_header_type is 'aws-alb-jwt'. "
                     "Current value is empty or a placeholder. Set AUTH_AWS_EXPECTED_ALB_ARN environment variable."
                 )
+        return self
+
+    @model_validator(mode='after')
+    def validate_agent_portal_dev_only(self):
+        """Refuse to boot with Agent Portal enabled outside debug mode.
+
+        The feature is a dev-preview that grants any authenticated caller
+        arbitrary command execution on the host. See
+        docs/agentportal/threat-model.md for the full rationale.
+        """
+        if self.feature_agent_portal_enabled and not self.debug_mode:
+            logging.getLogger(__name__).error(
+                "SECURITY: FEATURE_AGENT_PORTAL_ENABLED=true but DEBUG_MODE=false. "
+                "The Agent Portal is a dev-only preview and must not run outside debug mode. "
+                "See docs/agentportal/threat-model.md. Refusing to start."
+            )
+            raise ValueError(
+                "FEATURE_AGENT_PORTAL_ENABLED is only permitted when DEBUG_MODE=true. "
+                "See docs/agentportal/threat-model.md."
+            )
         return self
 
     model_config = {

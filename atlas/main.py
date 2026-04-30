@@ -63,6 +63,7 @@ from atlas.domain.errors import (
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.routes.admin_routes import admin_router
+from atlas.routes.agent_portal_routes import router as agent_portal_router
 
 # Import essential routes
 from atlas.routes.config_routes import router as config_router
@@ -199,6 +200,18 @@ async def lifespan(app: FastAPI):
         # Continue startup even if MCP fails
         logger.warning("Continuing startup without MCP tools")
 
+    # The user-client cache sweeper must run even when MCP discovery
+    # failed above: any per-user HTTP clients created later (e.g. on
+    # reconnect or partial init) still need bounded eviction, otherwise
+    # the leak guard this PR adds is silently disabled in degraded
+    # startup.
+    try:
+        logger.info("Step 5: Starting MCP user client cache sweeper...")
+        await mcp_manager.start_user_client_cache_sweeper()
+        logger.info("Step 5 complete: User client cache sweeper started")
+    except Exception as e:
+        logger.error(f"Failed to start MCP user client cache sweeper: {e}", exc_info=True)
+
     yield
 
     logger.info("Shutting down Chat UI Backend")
@@ -274,6 +287,7 @@ app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
 app.include_router(suggestion_router)
+app.include_router(agent_portal_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
@@ -767,6 +781,31 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info(f"WebSocket connection closed for session {session_id}")
 
 
+if static_dir.exists():
+    # Known SPA frontend routes from frontend/src/App.jsx. F5 on any of
+    # these (or a deeper React Router subroute) should serve index.html.
+    # Anything else falls through to a real 404 instead of being silently
+    # masked by the SPA — important because `/help-images/...`, `/admin/
+    # telemetry/turn/{id}`, etc. have legitimate non-SPA handlers whose
+    # 404 / validation responses must not be hidden.
+    _SPA_ROUTE_PREFIXES = (
+        "marketplace",
+        "help",
+        "admin",
+        "files",
+        "agent-portal",
+    )
+
+    @app.get("/{full_path:path}")
+    async def spa_catchall(full_path: str):
+        if ".." in full_path.split("/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        first = full_path.split("/", 1)[0]
+        if first not in _SPA_ROUTE_PREFIXES:
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(str(static_dir / "index.html"))
+
+
 if __name__ == "__main__":
     import os
 
@@ -777,4 +816,10 @@ if __name__ == "__main__":
     host = os.getenv("ATLAS_HOST", "127.0.0.1")
     port = int(os.getenv("PORT", 8000))
 
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        ws_ping_interval=config.app_settings.websocket_keepalive_interval_seconds,
+        ws_ping_timeout=config.app_settings.websocket_keepalive_interval_seconds,
+    )

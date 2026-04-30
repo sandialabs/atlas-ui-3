@@ -16,6 +16,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Whitespace-only / non-string `conversation_id` is treated as "not provided" and falls back to the session-id default.
   - WebSocket dispatch now has explicit `AuthorizationError` arms for both chat and restore so a denied request returns a structured `error_type: "authorization"` frame instead of falling through to the generic domain-error arm or, in the restore case, tearing down the connection.
 
+### PR #564 - 2026-04-28
+- Bounded the per-user MCP HTTP client cache with LRU/idle eviction, explicit FastMCP client close on cleanup, and enabled Uvicorn WebSocket ping keepalives so dropped connections are detected and MCP session cleanup runs sooner.
+- Hardened cache lifecycle after multi-agent review:
+  - LRU eviction now skips cached clients touched within `MCP_USER_CLIENT_CACHE_IN_USE_WINDOW_SECONDS` (default 60s) so an in-flight tool call cannot have its connection torn down; cache temporarily exceeds bound rather than evict an active client.
+  - `client.__aexit__` is bounded by `MCP_USER_CLIENT_CLOSE_TIMEOUT_SECONDS` (default 5s) so a stuck upstream cannot hang the sweeper or shutdown.
+  - Cache sweeper now starts even if MCP discovery fails during lifespan, so the leak guard is not silently disabled in degraded startup.
+  - Sweeper close batches are tracked and drained on shutdown, eliminating a cancellation race that could orphan FastMCP clients between pop and close.
+
 ### PR #559 - 2026-04-25
 - MCP cross-conversation isolation: cache FastMCP HTTP `Client` instances by
   `(user_email, server_name, conversation_id)` so each conversation gets its
@@ -38,6 +46,108 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   drives the real `MCPSessionManager` and reproduces the pre-fix nesting
   counter failure mode, plus unit coverage for `release_sessions`'s
   per-conversation eviction.
+
+### PR #558 - 2026-04-24
+- Fix: nvm/venv/uv-installed CLIs (e.g. `cline`) no longer fail with
+  a misleading exit 127. The launched binary's own directory is now
+  prepended to the child `PATH` so the shebang interpreter
+  (`/usr/bin/env node`, `/usr/bin/env python`, …) can be resolved
+  alongside the binary. Smallest path extension that fixes the
+  common shebang-interpreter case without re-introducing the full
+  server `PATH`.
+- Fix: PTY-mode race where `output_raw` chunks arrived during
+  history replay before XtermView mounted, dropping early stdout/
+  stderr silently. The WS handler now buffers raw chunks in a ref
+  and XtermView flushes them on mount.
+- Non-zero process exits now surface as a toast with the exit code,
+  with a hint pointing at the PATH issue when the code is 127.
+- Agent Portal UX refresh: launch form moves from the cramped left
+  panel into a roomy modal popup opened by a "New launch" button.
+  Left panel now shows only active sessions and the presets library,
+  plus a Recent launches section collapsed by default. Replace every
+  `window.prompt` / `window.alert` / `window.confirm` in the portal
+  with a toast system and a custom prompt/confirm dialog component;
+  preset save/update/delete and launch all emit a toast instead of
+  silent state updates or inline banners.
+- New `atlas-portal` CLI (`atlas.portal_cli`) lets developers launch,
+  list, get, cancel, inspect processes and manage presets from the
+  terminal — useful for debugging launch failures that are awkward to
+  reproduce through the UI, and for e2e automation.
+- Eleven integration tests walk the full launch → list → get → cancel
+  flow through the real FastAPI router plus the CLI parser, covering
+  env isolation, bare-command resolution, preset round-trip, and the
+  feature-flag kill switch.
+- Fix: bare command names like `claude` or `uvx` installed under
+  `~/.local/bin`, a venv, or a Nix profile no longer fail to launch
+  with `[Errno 2] No such file or directory`. `ProcessManager.launch`
+  resolves non-absolute commands against the server's own `PATH` via
+  `shutil.which()` before spawning (a one-shot parent-side lookup that
+  does not leak the server's search path into the child) and raises a
+  clear `FileNotFoundError` naming the command when the lookup fails.
+- Server-side preset library at `/api/agent-portal/presets` (CRUD)
+  with atomic writes + `fcntl.flock`; filtered by `user_email` at the
+  storage layer. Frontend migrates legacy `localStorage` entries on
+  first mount and adds an **Update** button for round-trip preset edits.
+- Env isolation: child processes no longer inherit `os.environ.copy()`.
+  Allow-list of benign keys + pinned `PATH` + deny-list for secret-
+  shaped keys prevents backend secrets leaking to launched commands.
+- Dev-only hardening: startup guard refuses to enable the feature
+  unless `DEBUG_MODE=true`; WebSocket stream endpoint rejects non-
+  loopback Origin headers to block drive-by CSRF from untrusted tabs.
+
+### Agent Portal preset library - 2026-04-24
+- Server-side preset CRUD at `/api/agent-portal/presets` (list/create/get/
+  update/delete). Each preset captures the full launch-form payload
+  (command, args, cwd, sandbox settings, resource limits) plus a name and
+  optional description. Stored at `<APP_CONFIG_DIR>/agent_portal_presets.json`
+  with atomic writes and a `fcntl.flock`-backed lock file; filtered by
+  `user_email` at the storage layer on every read and write.
+- Frontend migrates any legacy `localStorage`-backed launch configs to the
+  server on first mount, renames the "Saved configs" panel to "Presets
+  library", and adds an **Update** button that appears when a preset is
+  loaded so the form can be saved back in place instead of spawning a
+  duplicate. **Save as…** now also prompts for an optional description.
+- Docs: `docs/agentportal/presets.md` covers the storage layout, HTTP API,
+  and migration behavior.
+
+### Agent Portal (initial) - 2026-04-23
+- New `/agent-portal` page (behind `FEATURE_AGENT_PORTAL_ENABLED`, off by default)
+  lets a user launch a host subprocess (command + args + optional cwd), view the
+  list of their running / finished processes, stream stdout/stderr live over a
+  dedicated WebSocket, and cancel a running process (SIGTERM, SIGKILL after 3s).
+  Backend: `atlas/modules/process_manager/` + `atlas/routes/agent_portal_routes.py`.
+  Dev preview only — no allow-list, quotas, or audit trail yet; governance layer
+  will be added in follow-up work.
+- Optional Landlock sandbox: a "Restrict to working directory" checkbox confines
+  the child's filesystem writes to cwd via Linux Landlock (set up from
+  `preexec_fn` between fork and exec, with `PR_SET_NO_NEW_PRIVS`). Capability
+  probed via `GET /api/agent-portal/capabilities` so the checkbox is disabled
+  when the kernel lacks support. Writes outside cwd return `EACCES`; reads and
+  `exec` on system roots (`/usr`, `/lib`, `/etc`, ...) are still permitted so
+  normal binaries run.
+- Frontend persists recent launches (command, args, cwd, sandbox mode) to
+  `localStorage` (`atlas.agentPortal.launchHistory.v1`, up to 15 entries) and
+  prepopulates the form from the most recent entry on load. A "Recent launches"
+  list lets the user click to reapply or remove past entries.
+- Third sandbox mode `workspace-write`: reads are allowed across the entire
+  filesystem (so tools like `cline` can find `node` / configs / caches under
+  `~/.local`, `~/.nvm`, `/nix`, etc.) but writes are still confined to cwd.
+  The `strict` mode remains for tighter isolation. Both modes allow read +
+  write on `/dev` so `/dev/null`, `/dev/tty`, and shell redirections keep
+  working. The UI exposes the choice as a dropdown; the request body now
+  carries `sandbox_mode` (`off` | `strict` | `workspace-write`) with backward
+  compatibility for the earlier `restrict_to_cwd` flag.
+- Extra writable paths: a new textarea lets the user whitelist additional
+  directories for write access alongside cwd (e.g. `~/.cline`,
+  `~/.cache/<tool>`). Backend field `extra_writable_paths` is passed to the
+  Landlock wrapper via the `ATLAS_SANDBOX_EXTRA_WRITE_PATHS` env var; each
+  directory gets the same access set as the workspace and is created on
+  demand.
+- Named launch configs: the user can save the current form (command, args,
+  cwd, sandbox mode, extra writable paths) as a named preset. Presets are
+  stored in `localStorage` under `atlas.agentPortal.launchConfigs.v1` and
+  shown in a "Saved configs" panel separate from the auto-history; each
+  config can be reapplied to the form with one click or deleted.
 
 ### PR #557 - 2026-04-22
 - MCP task-augmented execution fixes: discovery-time seeding of task-forbidden
