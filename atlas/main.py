@@ -193,14 +193,22 @@ async def lifespan(app: FastAPI):
         await mcp_manager.start_auto_reconnect()
         logger.info("Step 4 complete: Auto-reconnect task started (if enabled)")
 
-        logger.info("Step 5: Starting MCP user client cache sweeper...")
-        await mcp_manager.start_user_client_cache_sweeper()
-        logger.info("Step 5 complete: User client cache sweeper started")
-
     except Exception as e:
         logger.error(f"Error during MCP initialization: {e}", exc_info=True)
         # Continue startup even if MCP fails
         logger.warning("Continuing startup without MCP tools")
+
+    # The user-client cache sweeper must run even when MCP discovery
+    # failed above: any per-user HTTP clients created later (e.g. on
+    # reconnect or partial init) still need bounded eviction, otherwise
+    # the leak guard this PR adds is silently disabled in degraded
+    # startup.
+    try:
+        logger.info("Step 5: Starting MCP user client cache sweeper...")
+        await mcp_manager.start_user_client_cache_sweeper()
+        logger.info("Step 5 complete: User client cache sweeper started")
+    except Exception as e:
+        logger.error(f"Failed to start MCP user client cache sweeper: {e}", exc_info=True)
 
     yield
 

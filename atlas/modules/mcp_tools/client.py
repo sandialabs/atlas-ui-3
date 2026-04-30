@@ -69,6 +69,8 @@ _SESSION_TERMINATED_MARKERS = ("session terminated", "session not found", "inval
 _DEFAULT_USER_CLIENT_CACHE_MAX_ENTRIES = 1000
 _DEFAULT_USER_CLIENT_CACHE_IDLE_TTL_SECONDS = 3600
 _DEFAULT_USER_CLIENT_CACHE_SWEEP_INTERVAL_SECONDS = 300
+_DEFAULT_USER_CLIENT_CACHE_IN_USE_WINDOW_SECONDS = 60
+_DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS = 5.0
 
 
 def _is_session_terminated_error(exc: BaseException) -> bool:
@@ -277,7 +279,36 @@ class MCPToolManager:
                 )
             ),
         )
+        # LRU eviction skips entries touched within this window so a tool
+        # call in flight does not have its connection torn down. The
+        # caller of _get_user_client holds the Client reference outside
+        # the cache lock; touch-time is the only signal we have for "in
+        # use right now."
+        self._user_client_cache_in_use_window_seconds = max(
+            0,
+            int(
+                getattr(
+                    app_settings,
+                    "mcp_user_client_cache_in_use_window_seconds",
+                    _DEFAULT_USER_CLIENT_CACHE_IN_USE_WINDOW_SECONDS,
+                )
+            ),
+        )
+        self._user_client_close_timeout_seconds = max(
+            0.1,
+            float(
+                getattr(
+                    app_settings,
+                    "mcp_user_client_close_timeout_seconds",
+                    _DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS,
+                )
+            ),
+        )
         self._user_client_sweeper_task: Optional[asyncio.Task] = None
+        # In-flight close batches kicked off by the sweeper. cleanup()
+        # awaits these so cancellation between pop-and-close cannot
+        # orphan FastMCP clients (codex review #2 on PR #564).
+        self._user_client_close_tasks: set[asyncio.Task] = set()
 
     def _get_min_log_level(self) -> int:
         """Get the minimum log level from environment or config."""
@@ -1566,8 +1597,14 @@ class MCPToolManager:
             self._user_client_cache_idle_ttl_seconds = _DEFAULT_USER_CLIENT_CACHE_IDLE_TTL_SECONDS
         if not hasattr(self, "_user_client_cache_sweep_interval_seconds"):
             self._user_client_cache_sweep_interval_seconds = _DEFAULT_USER_CLIENT_CACHE_SWEEP_INTERVAL_SECONDS
+        if not hasattr(self, "_user_client_cache_in_use_window_seconds"):
+            self._user_client_cache_in_use_window_seconds = _DEFAULT_USER_CLIENT_CACHE_IN_USE_WINDOW_SECONDS
+        if not hasattr(self, "_user_client_close_timeout_seconds"):
+            self._user_client_close_timeout_seconds = _DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS
         if not hasattr(self, "_user_client_sweeper_task"):
             self._user_client_sweeper_task = None
+        if not hasattr(self, "_user_client_close_tasks"):
+            self._user_client_close_tasks = set()
 
     def _touch_user_client_locked(self, cache_key: tuple) -> None:
         """Mark a cached per-user client as recently used.
@@ -1596,6 +1633,12 @@ class MCPToolManager:
     def _enforce_user_client_cache_limit_locked(self) -> List[tuple[tuple, Client]]:
         """Evict least-recently-used clients until the cache is within bounds.
 
+        Skips entries touched within ``_user_client_cache_in_use_window_seconds``
+        so a tool call still holding the Client reference does not have its
+        connection torn down by the cache-bound enforcer. If every entry is
+        in-use we accept temporary cache overflow and let the next sweep
+        catch up; that is safer than evicting an active client.
+
         Caller must hold _user_clients_lock.
         """
         self._ensure_user_client_cache_state()
@@ -1603,11 +1646,28 @@ class MCPToolManager:
         if excess <= 0:
             return []
 
+        now = time.monotonic()
+        in_use_window = self._user_client_cache_in_use_window_seconds
+
         keys_by_age = sorted(
             self._user_clients,
             key=lambda key: self._user_client_last_used.get(key, 0),
         )
-        return self._pop_user_client_entries_locked(keys_by_age[:excess])
+
+        evictable = [
+            key for key in keys_by_age
+            if (now - self._user_client_last_used.get(key, 0.0)) > in_use_window
+        ]
+
+        if not evictable:
+            logger.debug(
+                "MCP user-client cache over bound by %d but every entry is in-use; "
+                "deferring eviction to next sweep",
+                excess,
+            )
+            return []
+
+        return self._pop_user_client_entries_locked(evictable[:excess])
 
     async def _close_user_client_entry(
         self,
@@ -1623,7 +1683,16 @@ class MCPToolManager:
         directly is safe because FastMCP's ``_disconnect`` clamps the nesting
         counter at 0 and no-ops when ``session_task is None``, which is the
         steady state for a cached-but-idle client.
+
+        Bounded by ``_user_client_close_timeout_seconds`` so a stuck upstream
+        cannot block the sweeper or shutdown.
+
+        IMPORTANT: only safe for *idle* cached clients. Callers above the
+        cache (LRU/idle/release paths) are responsible for not handing this
+        entry to a new in-flight tool call. ``_enforce_user_client_cache_limit_locked``
+        skips recently-touched entries to honour that invariant.
         """
+        self._ensure_user_client_cache_state()
         if release_session and cache_key[2]:
             try:
                 await self._session_manager.release(cache_key[2], cache_key[1])
@@ -1637,7 +1706,15 @@ class MCPToolManager:
         try:
             result = close(None, None, None)
             if inspect.isawaitable(result):
-                await result
+                await asyncio.wait_for(
+                    result, timeout=self._user_client_close_timeout_seconds
+                )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Timed out closing cached MCP client %s after %.1fs",
+                cache_key,
+                self._user_client_close_timeout_seconds,
+            )
         except Exception as e:
             logger.debug("Error closing cached MCP client %s: %s", cache_key, e)
 
@@ -1689,7 +1766,15 @@ class MCPToolManager:
                 logger.exception("MCP user client cache sweeper iteration failed")
 
     async def _sweep_idle_user_clients_once(self) -> int:
-        """Evict cached clients idle longer than the configured TTL."""
+        """Evict cached clients idle longer than the configured TTL.
+
+        Close work runs in a tracked subtask shielded from the sweeper's
+        own cancellation so that ``cleanup() -> stop_user_client_cache_sweeper()``
+        cannot orphan FastMCP clients that have already been popped from
+        the cache but not yet closed. ``cleanup()`` drains
+        ``_user_client_close_tasks`` after stopping the sweeper.
+        """
+        self._ensure_user_client_cache_state()
         cutoff = time.monotonic() - self._user_client_cache_idle_ttl_seconds
         async with self._user_clients_lock:
             keys_to_remove = [
@@ -1698,9 +1783,25 @@ class MCPToolManager:
             ]
             removed = self._pop_user_client_entries_locked(keys_to_remove)
 
-        await self._close_user_client_entries(removed)
-        if removed:
-            logger.debug("Evicted %d idle per-user MCP HTTP client(s)", len(removed))
+        if not removed:
+            return 0
+
+        close_task = asyncio.create_task(
+            self._close_user_client_entries(removed),
+            name="mcp-user-client-close-batch",
+        )
+        self._user_client_close_tasks.add(close_task)
+        close_task.add_done_callback(self._user_client_close_tasks.discard)
+
+        try:
+            await asyncio.shield(close_task)
+        except asyncio.CancelledError:
+            # Cancellation propagated from the sweeper; the shielded
+            # close_task continues independently. cleanup() will await it
+            # via the _user_client_close_tasks set.
+            raise
+
+        logger.debug("Evicted %d idle per-user MCP HTTP client(s)", len(removed))
         return len(removed)
 
     async def _get_user_client(
@@ -2880,7 +2981,15 @@ class MCPToolManager:
         """Cleanup all clients, persistent sessions, and per-user HTTP client cache."""
         logger.info("Cleaning up MCP clients")
 
+        self._ensure_user_client_cache_state()
         await self.stop_user_client_cache_sweeper()
+
+        # Drain any close batches the sweeper had in flight when we
+        # cancelled it. These already had their entries popped from the
+        # cache, so without the drain the FastMCP clients would leak.
+        pending_closes = list(self._user_client_close_tasks)
+        if pending_closes:
+            await asyncio.gather(*pending_closes, return_exceptions=True)
 
         # Close all persistent sessions
         for key in list(self._session_manager._sessions.keys()):

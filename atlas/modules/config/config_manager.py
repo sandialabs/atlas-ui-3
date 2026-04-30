@@ -444,6 +444,24 @@ class AppSettings(BaseSettings):
         description="Interval in seconds between idle MCP HTTP client cache sweeps",
         validation_alias="MCP_USER_CLIENT_CACHE_SWEEP_INTERVAL_SECONDS",
     )
+    mcp_user_client_cache_in_use_window_seconds: int = Field(
+        default=60,
+        description=(
+            "LRU eviction skips cached MCP HTTP clients touched within this many "
+            "seconds; tool calls in flight should not have their connection torn "
+            "down by the cache-bound enforcer. Allows temporary cache overflow."
+        ),
+        validation_alias="MCP_USER_CLIENT_CACHE_IN_USE_WINDOW_SECONDS",
+    )
+    mcp_user_client_close_timeout_seconds: float = Field(
+        default=5.0,
+        description=(
+            "Maximum seconds to wait for a single cached MCP HTTP client to close. "
+            "Bounds sweeper iteration and shutdown so a stuck server cannot hang "
+            "Atlas teardown."
+        ),
+        validation_alias="MCP_USER_CLIENT_CLOSE_TIMEOUT_SECONDS",
+    )
     websocket_keepalive_interval_seconds: int = Field(
         default=30,
         description="Interval in seconds for WebSocket ping keepalives; maps to Uvicorn's ws_ping_interval and ws_ping_timeout settings",
