@@ -670,7 +670,9 @@ class AppSettings(BaseSettings):
     security_referrer_policy_value: str = Field(default="no-referrer", validation_alias="SECURITY_REFERRER_POLICY_VALUE")
 
     # Prompt / template settings
-    prompt_base_path: str = "prompts"  # Relative or absolute path to directory containing prompt templates
+    # "prompts" (default, or empty) → load templates bundled under atlas/prompts/.
+    # Any other value is treated as a filesystem path (absolute, or relative to CWD).
+    prompt_base_path: str = "prompts"
     system_prompt_filename: str = "system_prompt.md"  # Filename for system prompt template
     tool_synthesis_prompt_filename: str = "tool_synthesis_prompt.md"  # Filename for tool synthesis prompt template
     # Agent prompts
