@@ -2,16 +2,27 @@
 
 Centralizes prompt path resolution & template retrieval so core services stay
 focused on orchestration/business logic.
+
+Templates ship as package data inside ``atlas/prompts/`` and are loaded via
+``importlib.resources``. Operators may override the location by setting
+``prompt_base_path`` to a filesystem directory (absolute, or relative to the
+current working directory).
 """
 from __future__ import annotations
 
 import logging
 import os
+from importlib.resources import as_file, files
+from importlib.resources.abc import Traversable
 from typing import Dict, Optional
 
 from atlas.modules.config import ConfigManager
 
 logger = logging.getLogger(__name__)
+
+# Sentinel value of ``prompt_base_path`` that means "use the bundled package
+# resources shipped under ``atlas/prompts/``".
+_BUNDLED_SENTINEL = "prompts"
 
 
 class PromptProvider:
@@ -20,31 +31,64 @@ class PromptProvider:
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
         self._cache: Dict[str, str] = {}
-        # Resolve base path (relative paths resolved against repo root)
-        app_settings = self.config_manager.app_settings
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-        base_candidate = app_settings.prompt_base_path
-        if not os.path.isabs(base_candidate):
-            self.base_path = os.path.join(repo_root, base_candidate)
+        base_candidate = (self.config_manager.app_settings.prompt_base_path or "").strip()
+
+        # Default (or explicit "prompts") → bundled package resources.
+        # Anything else → filesystem path, resolved against CWD if relative.
+        self._fs_base_path: Optional[str]
+        self._resource_root: Optional[Traversable]
+        if not base_candidate or base_candidate == _BUNDLED_SENTINEL:
+            self._fs_base_path = None
+            self._resource_root = files("atlas").joinpath("prompts")
         else:
-            self.base_path = base_candidate
+            self._fs_base_path = os.path.abspath(base_candidate)
+            self._resource_root = None
+
+    @property
+    def base_path(self) -> str:
+        """Human-readable base location for logging/debugging."""
+        if self._fs_base_path is not None:
+            return self._fs_base_path
+        # Resolve the resource root to a concrete path when possible (best-effort,
+        # purely informational — the actual loader uses importlib.resources).
+        try:
+            with as_file(self._resource_root) as p:  # type: ignore[arg-type]
+                return str(p)
+        except Exception:
+            return "<atlas package resources: prompts>"
 
     def _load_template(self, filename: str) -> Optional[str]:
         cache_key = filename
         if cache_key in self._cache:
             return self._cache[cache_key]
-        path = os.path.join(self.base_path, filename)
-        if not os.path.exists(path):
-            logger.warning("Prompt template not found: %s", path)
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
+
+        if self._fs_base_path is not None:
+            path = os.path.join(self._fs_base_path, filename)
+            if not os.path.exists(path):
+                logger.warning("Prompt template not found: %s", path)
+                return None
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception as e:  # pragma: no cover
+                logger.error("Failed reading prompt template %s: %s", path, e)
+                return None
             self._cache[cache_key] = content
             return content
-        except Exception as e:  # pragma: no cover
-            logger.error("Failed reading prompt template %s: %s", path, e)
+
+        # Bundled package resource path.
+        assert self._resource_root is not None
+        resource = self._resource_root.joinpath(filename)
+        if not resource.is_file():
+            logger.warning("Prompt template not found in atlas package: prompts/%s", filename)
             return None
+        try:
+            content = resource.read_text(encoding="utf-8")
+        except Exception as e:  # pragma: no cover
+            logger.error("Failed reading bundled prompt template prompts/%s: %s", filename, e)
+            return None
+        self._cache[cache_key] = content
+        return content
 
     def get_tool_synthesis_prompt(self, user_question: str) -> Optional[str]:
         """Return formatted tool synthesis prompt or None if unavailable."""
