@@ -1695,8 +1695,14 @@ class MCPToolManager:
         """
         self._ensure_user_client_cache_state()
         if release_session and cache_key[2]:
+            # cache_key shape is (normalized_user_email, server_name, conversation_id).
+            # Pass user_email so release() targets the correct user-scoped session
+            # entry; without it the session was acquired under one scope and would
+            # be looked up under "" — leaking ManagedSession entries in _sessions.
             try:
-                await self._session_manager.release(cache_key[2], cache_key[1])
+                await self._session_manager.release(
+                    cache_key[2], cache_key[1], user_email=cache_key[0]
+                )
             except Exception as e:
                 logger.debug("Error releasing MCP session for evicted client %s: %s", cache_key, e)
 

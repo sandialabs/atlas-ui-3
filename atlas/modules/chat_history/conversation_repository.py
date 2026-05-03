@@ -3,6 +3,14 @@
 Handles all conversation CRUD, search, and tag operations.
 Referential integrity is enforced here rather than via database FK constraints
 for DuckDB compatibility.
+
+User identity invariant: every public method that takes ``user_email``
+normalizes it via ``normalize_user_email`` at the entry point. This is the
+single chokepoint, so callers can pass mixed-case emails (different SSO/
+proxy paths sometimes deliver ``Alice@Test.com`` vs ``alice@test.com``)
+and still hit the same row. ``get_conversation_owner`` also normalizes its
+return value so legacy rows written before normalization still compare
+correctly against the authenticated user.
 """
 
 import json
@@ -133,6 +141,7 @@ class ConversationRepository:
         tag_name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """List conversations for a user, most recent first."""
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             query = session.query(ConversationRecord).filter(
                 ConversationRecord.user_email == user_email
@@ -245,13 +254,19 @@ class ConversationRepository:
             }
 
     def get_conversation_owner(self, conversation_id: str) -> Optional[str]:
-        """Return the owner email for a conversation, or None if it does not exist."""
+        """Return the owner email for a conversation, or None if it does not exist.
+
+        Result is normalized so callers comparing against an authenticated user
+        get a consistent answer even for legacy rows written before the
+        repository normalized on write.
+        """
         with self._get_session() as session:
             conv = session.get(ConversationRecord, conversation_id)
-            return conv.user_email if conv else None
+            return normalize_user_email(conv.user_email) if conv else None
 
     def delete_conversation(self, conversation_id: str, user_email: str) -> bool:
         """Delete a single conversation with messages and tag associations."""
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             conv = session.query(ConversationRecord).filter(
                 ConversationRecord.id == conversation_id,
@@ -265,6 +280,7 @@ class ConversationRepository:
 
     def delete_conversations(self, conversation_ids: List[str], user_email: str) -> int:
         """Delete multiple conversations. Returns count of deleted."""
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             convs = session.query(ConversationRecord).filter(
                 ConversationRecord.id.in_(conversation_ids),
@@ -278,6 +294,7 @@ class ConversationRepository:
 
     def export_all_conversations(self, user_email: str) -> List[Dict[str, Any]]:
         """Export all conversations with their full messages for a user."""
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             convs = session.query(ConversationRecord).filter(
                 ConversationRecord.user_email == user_email,
@@ -327,6 +344,7 @@ class ConversationRepository:
 
     def delete_all_conversations(self, user_email: str) -> int:
         """Delete all conversations for a user. Returns count deleted."""
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             convs = session.query(ConversationRecord).filter(
                 ConversationRecord.user_email == user_email,
@@ -344,6 +362,7 @@ class ConversationRepository:
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
         """Search conversations by title or message content."""
+        user_email = normalize_user_email(user_email)
         search_pattern = f"%{query}%"
         with self._get_session() as session:
             # Find conversation IDs with matching messages
@@ -396,6 +415,7 @@ class ConversationRepository:
 
     def add_tag(self, conversation_id: str, tag_name: str, user_email: str) -> Optional[str]:
         """Add a tag to a conversation. Creates the tag if it doesn't exist."""
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             conv = session.query(ConversationRecord).filter(
                 ConversationRecord.id == conversation_id,
@@ -436,6 +456,7 @@ class ConversationRepository:
 
     def remove_tag(self, conversation_id: str, tag_id: str, user_email: str) -> bool:
         """Remove a tag from a conversation."""
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             conv = session.query(ConversationRecord).filter(
                 ConversationRecord.id == conversation_id,
@@ -462,6 +483,7 @@ class ConversationRepository:
 
     def list_tags(self, user_email: str) -> List[Dict[str, Any]]:
         """List all tags for a user with conversation counts."""
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             tags = session.query(TagRecord).filter(
                 TagRecord.user_email == user_email,
@@ -481,6 +503,7 @@ class ConversationRepository:
 
     def update_title(self, conversation_id: str, title: str, user_email: str) -> bool:
         """Update the title of a conversation."""
+        user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             conv = session.query(ConversationRecord).filter(
                 ConversationRecord.id == conversation_id,

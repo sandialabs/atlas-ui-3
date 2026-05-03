@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `save_conversation` and `get_conversation` normalize `user_email` so mixed-case identities (proxy / OAuth normalization differences) cannot silently drop saves.
   - Whitespace-only / non-string `conversation_id` is treated as "not provided" and falls back to the session-id default.
   - WebSocket dispatch now has explicit `AuthorizationError` arms for both chat and restore so a denied request returns a structured `error_type: "authorization"` frame instead of falling through to the generic domain-error arm or, in the restore case, tearing down the connection.
+- Post-merge review fixes:
+  - `_close_user_client_entry` now passes `user_email` when releasing the underlying MCP session. Without it the cache evicted the per-user HTTP client but called `MCPSessionManager.release` with an empty user scope, leaving the original `(user, conversation, server)` `ManagedSession` orphaned in `_sessions` — defeating the bound the cache exists to enforce. Tests previously mocked the session manager and missed it; a regression test now exercises the real session manager.
+  - Email normalization is now applied at every public `ConversationRepository` entry (list / search / export / delete / delete_conversations / delete_all / add_tag / remove_tag / list_tags / update_title) and `get_conversation_owner` returns its result normalized. Earlier the chokepoint was partial — only `save_conversation` and `get_conversation` normalized — so a deployment with mixed-case historical rows would see inconsistent results across operations.
 
 ### PR #564 - 2026-04-28
 - Bounded the per-user MCP HTTP client cache with LRU/idle eviction, explicit FastMCP client close on cleanup, and enabled Uvicorn WebSocket ping keepalives so dropped connections are detected and MCP session cleanup runs sooner.
