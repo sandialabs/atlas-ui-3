@@ -34,6 +34,8 @@ _MODULE_NAME = "_atlas_test_s3_prune_old_files"
 
 @pytest.fixture(scope="module")
 def prune_mod():
+    if not _SCRIPT_PATH.is_file():
+        pytest.skip(f"prune script not present at {_SCRIPT_PATH}")
     spec = importlib.util.spec_from_file_location(_MODULE_NAME, _SCRIPT_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
