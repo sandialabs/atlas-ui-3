@@ -599,7 +599,8 @@ class AppSettings(BaseSettings):
         validation_alias="CHAT_HISTORY_DB_URL",
     )
     # Individual database connection components (alternative to CHAT_HISTORY_DB_URL).
-    # When CHAT_HISTORY_DB_URL is not set in the environment but DB_HOST or DB_NAME is,
+    # When chat_history_db_url is not explicitly provided by any source (process env,
+    # .env file, or init kwargs) but at least one of DB_HOST / DB_NAME / DB_USER is,
     # chat_history_db_url is assembled from these parts in a model validator below.
     db_driver: str = Field(
         default="postgresql",
@@ -722,12 +723,15 @@ class AppSettings(BaseSettings):
     def assemble_chat_history_db_url(self):
         """Build chat_history_db_url from DB_* parts when no full URL is supplied.
 
-        CHAT_HISTORY_DB_URL (if set in the environment) always wins. Otherwise, if any
-        of DB_HOST / DB_NAME / DB_USER is provided we treat the user as opting in to
+        An explicitly-provided chat_history_db_url always wins, regardless of which
+        pydantic-settings source supplied it (process env, .env file, or init kwargs).
+        We detect "explicitly provided" via self.model_fields_set, which excludes
+        the field's static default. Otherwise, if at least one of
+        DB_HOST / DB_NAME / DB_USER is set we treat the operator as opting in to
         component-based config and assemble a SQLAlchemy URL from the parts. User and
         password are URL-encoded so special characters (e.g. '@', ':', '/') are safe.
         """
-        if "CHAT_HISTORY_DB_URL" in os.environ:
+        if "chat_history_db_url" in self.model_fields_set:
             return self
         if not (self.db_host or self.db_name or self.db_user):
             return self

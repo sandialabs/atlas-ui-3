@@ -116,3 +116,54 @@ class TestChatHistoryDbUrlAssembly:
         monkeypatch.setenv("DB_NAME", "atlas")
         settings = _settings()
         assert settings.chat_history_db_url == "postgresql://localhost/atlas"
+
+
+class TestChatHistoryDbUrlPrecedenceFromAllSources:
+    """Precedence guard must fire for every pydantic-settings source, not just os.environ.
+
+    Regression coverage for the case where CHAT_HISTORY_DB_URL is supplied via an
+    .env file or directly as a constructor kwarg while DB_* parts are also present —
+    the explicit URL must still win.
+    """
+
+    def test_url_from_env_file_wins_over_parts(self, tmp_path, monkeypatch):
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "CHAT_HISTORY_DB_URL=postgresql://envfile:pw@db.example.com:5432/from_envfile\n"
+        )
+        # DB_* parts on the process env would otherwise trigger assembly.
+        monkeypatch.setenv("DB_HOST", "ignored.example.com")
+        monkeypatch.setenv("DB_NAME", "ignored")
+        monkeypatch.setenv("DB_USER", "ignored")
+        monkeypatch.setenv("DB_PASSWORD", "ignored")
+
+        settings = AppSettings(_env_file=str(env_file))
+        assert (
+            settings.chat_history_db_url
+            == "postgresql://envfile:pw@db.example.com:5432/from_envfile"
+        )
+
+    def test_url_from_init_kwarg_wins_over_parts(self, monkeypatch):
+        # The field's validation_alias is "CHAT_HISTORY_DB_URL", so init kwargs must
+        # use the alias name (pydantic v2 behavior without populate_by_name).
+        monkeypatch.setenv("DB_HOST", "ignored.example.com")
+        monkeypatch.setenv("DB_NAME", "ignored")
+        monkeypatch.setenv("DB_USER", "ignored")
+        monkeypatch.setenv("DB_PASSWORD", "ignored")
+
+        settings = AppSettings(
+            _env_file=None,
+            CHAT_HISTORY_DB_URL="postgresql://kwarg:pw@db.example.com:5432/from_kwarg",
+        )
+        assert (
+            settings.chat_history_db_url
+            == "postgresql://kwarg:pw@db.example.com:5432/from_kwarg"
+        )
+
+    def test_default_url_does_not_count_as_explicit(self, monkeypatch):
+        # Sanity check: the static default must NOT register as explicitly provided,
+        # otherwise the parts path would never run.
+        monkeypatch.setenv("DB_HOST", "db")
+        monkeypatch.setenv("DB_NAME", "atlas")
+        settings = _settings()
+        assert settings.chat_history_db_url == "postgresql://db/atlas"
