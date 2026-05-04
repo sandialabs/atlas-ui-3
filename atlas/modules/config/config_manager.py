@@ -598,6 +598,19 @@ class AppSettings(BaseSettings):
         description="Database URL for chat history. Use duckdb:///path for local, postgresql://... for production",
         validation_alias="CHAT_HISTORY_DB_URL",
     )
+    # Individual database connection components (alternative to CHAT_HISTORY_DB_URL).
+    # When CHAT_HISTORY_DB_URL is not set in the environment but DB_HOST or DB_NAME is,
+    # chat_history_db_url is assembled from these parts in a model validator below.
+    db_driver: str = Field(
+        default="postgresql",
+        description="SQLAlchemy driver scheme used when assembling chat_history_db_url from DB_* parts",
+        validation_alias="DB_DRIVER",
+    )
+    db_host: Optional[str] = Field(default=None, validation_alias="DB_HOST")
+    db_port: Optional[int] = Field(default=None, validation_alias="DB_PORT")
+    db_name: Optional[str] = Field(default=None, validation_alias="DB_NAME")
+    db_user: Optional[str] = Field(default=None, validation_alias="DB_USER")
+    db_password: Optional[str] = Field(default=None, validation_alias="DB_PASSWORD")
     # Compliance level filtering feature gate
     feature_compliance_levels_enabled: bool = Field(
         False,
@@ -704,6 +717,38 @@ class AppSettings(BaseSettings):
 
     # Runtime directories
     runtime_feedback_dir: Optional[str] = Field(default=None, validation_alias="RUNTIME_FEEDBACK_DIR")
+
+    @model_validator(mode='after')
+    def assemble_chat_history_db_url(self):
+        """Build chat_history_db_url from DB_* parts when no full URL is supplied.
+
+        CHAT_HISTORY_DB_URL (if set in the environment) always wins. Otherwise, if any
+        of DB_HOST / DB_NAME / DB_USER is provided we treat the user as opting in to
+        component-based config and assemble a SQLAlchemy URL from the parts. User and
+        password are URL-encoded so special characters (e.g. '@', ':', '/') are safe.
+        """
+        if "CHAT_HISTORY_DB_URL" in os.environ:
+            return self
+        if not (self.db_host or self.db_name or self.db_user):
+            return self
+
+        from urllib.parse import quote
+
+        user_part = ""
+        if self.db_user:
+            user_part = quote(self.db_user, safe="")
+            if self.db_password is not None:
+                user_part += ":" + quote(self.db_password, safe="")
+            user_part += "@"
+
+        host_part = self.db_host or "localhost"
+        port_part = f":{self.db_port}" if self.db_port else ""
+        name_part = f"/{self.db_name}" if self.db_name else ""
+
+        self.chat_history_db_url = (
+            f"{self.db_driver}://{user_part}{host_part}{port_part}{name_part}"
+        )
+        return self
 
     @model_validator(mode='after')
     def validate_aws_alb_config(self):
