@@ -350,7 +350,9 @@ class TestSessionTerminatedEviction:
 
                 assert result.success is False
                 assert "Session terminated" in result.error
-                release_mock.assert_awaited_once_with("conv-abc", "test-server")
+                release_mock.assert_awaited_once_with(
+                    "conv-abc", "test-server", user_email="test@example.com"
+                )
 
     @pytest.mark.asyncio
     async def test_execute_tool_evicts_session_on_wrapped_session_terminated_error(self):
@@ -406,7 +408,9 @@ class TestSessionTerminatedEviction:
                 )
 
                 assert result.success is False
-                release_mock.assert_awaited_once_with("conv-xyz", "test-server")
+                release_mock.assert_awaited_once_with(
+                    "conv-xyz", "test-server", user_email="test@example.com"
+                )
 
     @pytest.mark.asyncio
     async def test_execute_tool_does_not_evict_session_on_unrelated_error(self):

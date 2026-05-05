@@ -50,6 +50,7 @@ from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
 
 # Import domain errors
 from atlas.domain.errors import (
+    AuthorizationError,
     ContextWindowExceededError,
     DomainError,
     LLMAuthenticationError,
@@ -565,6 +566,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "validation"
                         })
+                    except AuthorizationError as e:
+                        logger.warning(f"Authorization error in chat handler: {e}")
+                        log_metric("error", user_email, error_type="authorization")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "authorization"
+                        })
                     except asyncio.CancelledError:
                         logger.info("Chat task cancelled by user (stop_streaming)")
                         try:
@@ -621,13 +630,32 @@ async def websocket_endpoint(websocket: WebSocket):
                         except Exception as e:
                             logger.debug("Error releasing MCP sessions on restore: %s", e)
 
-                # Restore a saved conversation into the current session
-                response = await chat_service.handle_restore_conversation(
-                    session_id=session_id,
-                    conversation_id=data.get("conversation_id", ""),
-                    messages=data.get("messages", []),
-                    user_email=user_email
-                )
+                # Restore a saved conversation into the current session.
+                # The handler returns an error frame on access denied, but a
+                # DomainError still propagates as a transport invariant
+                # safety net so a future raise cannot tear down the
+                # WebSocket here (matches the chat-handler contract).
+                try:
+                    response = await chat_service.handle_restore_conversation(
+                        session_id=session_id,
+                        conversation_id=data.get("conversation_id", ""),
+                        messages=data.get("messages", []),
+                        user_email=user_email
+                    )
+                except DomainError as e:
+                    logger.warning(
+                        "Domain error in restore_conversation: %s", e
+                    )
+                    log_metric("error", user_email, error_type="domain")
+                    response = {
+                        "type": "error",
+                        "message": str(e.message if hasattr(e, "message") else e),
+                        "error_type": (
+                            "authorization"
+                            if isinstance(e, AuthorizationError)
+                            else "domain"
+                        ),
+                    }
                 await websocket.send_json(response)
 
             elif message_type == "reset_session":

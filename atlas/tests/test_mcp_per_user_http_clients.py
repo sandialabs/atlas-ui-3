@@ -170,7 +170,8 @@ async def test_release_sessions_evicts_only_target_conversation(manager):
 
     session_manager_release = MagicMock()
 
-    async def _async_release(_):
+    async def _async_release(_, user_email=None):
+        assert user_email == "alice@test.com"
         session_manager_release()
 
     manager._session_manager = MagicMock()
@@ -202,8 +203,9 @@ async def test_release_sessions_without_user_email_evicts_by_conversation(manage
     }
     release_called_with = {}
 
-    async def _async_release(conv_id):
+    async def _async_release(conv_id, user_email=None):
         release_called_with["arg"] = conv_id
+        release_called_with["user_email"] = user_email
 
     manager._session_manager = MagicMock()
     manager._session_manager.release_all = _async_release
@@ -211,6 +213,14 @@ async def test_release_sessions_without_user_email_evicts_by_conversation(manage
     await manager.release_sessions("conv-1", user_email=None)
 
     assert release_called_with["arg"] == "conv-1"
+    assert release_called_with["user_email"] is None
+    # When release_sessions is called without user_email, the merged
+    # behaviour falls back to conv-id-only eviction so internal callers
+    # without auth context (e.g. WebSocket cleanup races) can still tear
+    # down per-conversation cache entries. Bob's conv-2 entry under a
+    # different conv stays untouched. PR #565 narrowed the *security*
+    # scope at the entrypoints (chat/restore validate user ownership);
+    # PR #564 retained the user-less internal fallback for cleanup paths.
     assert ("alice@test.com", "state_server", "conv-1") not in manager._user_clients
     assert ("alice@test.com", "state_server", "conv-1") not in manager._user_client_last_used
     assert ("bob@test.com", "state_server", "conv-2") in manager._user_clients
@@ -250,7 +260,11 @@ async def test_user_client_cache_evicts_lru_and_closes_client(manager):
     assert c1 is clients[0]
     assert ("alice@test.com", "state_server", "conv-1") not in manager._user_clients
     assert len(manager._user_clients) == 2
-    manager._session_manager.release.assert_awaited_once_with("conv-1", "state_server")
+    # Must pass user_email so the user-scoped session entry is released; without it
+    # ManagedSession entries would orphan in MCPSessionManager._sessions.
+    manager._session_manager.release.assert_awaited_once_with(
+        "conv-1", "state_server", user_email="alice@test.com"
+    )
     clients[0].__aexit__.assert_awaited_once_with(None, None, None)
 
 
@@ -280,7 +294,11 @@ async def test_idle_sweeper_evicts_stale_clients(manager):
     assert evicted == 1
     assert stale_key not in manager._user_clients
     assert fresh_key in manager._user_clients
-    manager._session_manager.release.assert_awaited_once_with("conv-1", "state_server")
+    # See note in test_user_client_cache_evicts_lru_and_closes_client — user
+    # scope must be threaded through so the session entry is actually freed.
+    manager._session_manager.release.assert_awaited_once_with(
+        "conv-1", "state_server", user_email="alice@test.com"
+    )
     stale_client.__aexit__.assert_awaited_once_with(None, None, None)
 
 
@@ -423,6 +441,51 @@ async def test_cleanup_drains_inflight_sweeper_close(manager):
 
     client.__aexit__.assert_awaited()
     assert manager._user_client_close_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_idle_eviction_releases_user_scoped_session(manager):
+    """LRU/idle eviction of a cached user HTTP client must also release the
+    corresponding ManagedSession in MCPSessionManager. The session was
+    acquired under the normalized user scope, so the release call has to
+    include user_email — otherwise the session entry orphans in
+    MCPSessionManager._sessions and leaks across the bound the cache was
+    supposed to enforce.
+
+    This test uses the real session manager (not a mock) so it would catch
+    the regression the previous tests missed.
+    """
+    from atlas.modules.mcp_tools.session_manager import MCPSessionManager
+
+    manager._session_manager = MCPSessionManager()
+    manager._user_client_cache_idle_ttl_seconds = 1
+
+    fake_client = MagicMock()
+    fake_client.is_connected = MagicMock(return_value=True)
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+
+    cache_key = ("alice@test.com", "state_server", "conv-1")
+    manager._user_clients = {cache_key: fake_client}
+    manager._user_client_last_used = {cache_key: time.monotonic() - 9999}
+
+    # Acquire the session under the same user scope the cache uses, mirroring
+    # how execute_tool wires the session_manager.acquire call.
+    await manager._session_manager.acquire(
+        "conv-1", "state_server", fake_client, user_email="alice@test.com"
+    )
+    assert (
+        ("alice@test.com", "conv-1", "state_server")
+        in manager._session_manager._sessions
+    )
+
+    evicted = await manager._sweep_idle_user_clients_once()
+
+    assert evicted == 1
+    assert manager._session_manager._sessions == {}, (
+        "Idle eviction left an orphaned ManagedSession entry — release was "
+        "called with the wrong scope (user_email missing)"
+    )
 
 
 @pytest.mark.asyncio
