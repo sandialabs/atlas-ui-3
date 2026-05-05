@@ -5,7 +5,6 @@ These tests exercise ``_resolve_upload_url`` directly. They monkey-patch
 """
 from __future__ import annotations
 
-import os
 import socket
 
 import pytest
@@ -68,7 +67,7 @@ def test_accepts_backend_host_even_if_internal(main_module, monkeypatch):
     # that's the whole point (in-cluster service-to-service traffic).
     _stub_addrinfo(monkeypatch, "10.0.0.5")
     out = main_module._resolve_upload_url("/api/files/123/download")
-    assert out.startswith("http://backend.example:8000/")
+    assert out == "http://backend.example:8000/api/files/123/download"
 
 
 def test_blocks_loopback_for_extra_host(main_module, monkeypatch):

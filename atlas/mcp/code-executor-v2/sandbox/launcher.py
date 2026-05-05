@@ -103,10 +103,14 @@ def run_sandboxed(
             try:
                 proc.kill()
             except OSError:
+                # Race: child exited between poll() and kill(). Nothing
+                # to do — the process is already gone.
                 pass
             try:
                 proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
+                # Already SIGKILL'd; if reaping somehow stalls beyond 2s
+                # we accept the leak rather than block the request loop.
                 pass
     elapsed = time.monotonic() - start
     rc = proc.returncode if proc.returncode is not None else -1
