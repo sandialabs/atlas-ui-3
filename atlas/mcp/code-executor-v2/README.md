@@ -7,8 +7,9 @@ timeout. Each conversation gets its own persistent workspace; state survives
 across tool calls via files.
 
 This module is intended to be deployed as its own pod (a sibling to the main
-Atlas pod). It does **not** import Atlas application code beyond the shared
-`atlas.mcp.common.state` helper.
+Atlas pod). It is **fully self-contained** — `main.py` imports only modules in
+this directory, and the container can be built from this directory alone
+without needing the rest of the Atlas monorepo.
 
 The design rationale lives in [`docs/planning/code-executor-v2-2026-04-30.md`](../../../docs/planning/code-executor-v2-2026-04-30.md).
 
@@ -94,7 +95,11 @@ All knobs are environment variables; defaults in [`config.py`](./config.py).
 
 ## Build & run (container)
 
+Build from this directory — `main.py` imports only module-local files, so the
+build context does **not** need to include the rest of the monorepo.
+
 ```bash
+cd atlas/mcp/code-executor-v2
 podman build -t atlas-code-executor-v2:dev -f Dockerfile .
 podman run --rm -p 8011:8011 atlas-code-executor-v2:dev
 ```

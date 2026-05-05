@@ -5,8 +5,6 @@ Skipped when the kernel does not support all required features so CI
 on weak kernels still passes (the production server refuses to start
 in that case anyway).
 """
-import os
-import sys
 from pathlib import Path
 
 import pytest

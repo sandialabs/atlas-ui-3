@@ -1,10 +1,13 @@
 # Code Executor v2 — Planning Doc
 
-**Status:** Draft / awaiting implementation
+**Status:** Implemented (historical planning context)
 **Date:** 2026-04-30
 **Owner:** TBD
 **Target folder:** `atlas/mcp/code-executor-v2/` (sibling to existing `code-executor/`)
 **Deployment target:** OpenShift pod (separate from Atlas main pod)
+**Note:** The implementation has landed in `atlas/mcp/code-executor-v2/`. This
+document is retained as historical planning context; the source of truth for
+the current behavior is the code and `atlas/mcp/code-executor-v2/README.md`.
 
 ---
 

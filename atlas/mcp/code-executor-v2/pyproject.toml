@@ -72,6 +72,7 @@ py-modules = [
     "artifacts",
     "file_ops",
     "git_clone",
+    "state_store",
 ]
 
 [tool.setuptools.packages.find]

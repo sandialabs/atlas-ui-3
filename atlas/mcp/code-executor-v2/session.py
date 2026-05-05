@@ -79,8 +79,13 @@ class SessionRegistry:
             self._reaper_task.cancel()
             try:
                 await self._reaper_task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
+                # Expected: we just cancelled it.
                 pass
+            except Exception as e:
+                # Reaper failure during shutdown is logged but not fatal —
+                # we still need to wipe the workspaces below.
+                logger.warning("reaper raised during shutdown: %s", e)
         async with self._lock:
             for record in list(self._sessions.values()):
                 self._destroy_record(record)

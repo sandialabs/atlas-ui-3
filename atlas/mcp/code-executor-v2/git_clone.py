@@ -4,10 +4,12 @@ This is the only tool that runs with the network namespace disabled
 (``allow_net=True``). All other layers stay on (Landlock, rlimits,
 workspace-only writes, NO_NEW_PRIVS).
 
-The PAT is injected into the URL at the last possible moment via the
-child's environment so it is not persisted in argv (visible to ``ps``).
-We rebuild the URL inside a small wrapper script that the sandbox
-launcher then exec's; the wrapper reads the PAT from ``GIT_PAT``.
+The PAT is injected into the URL at the last possible moment inside
+the sandboxed child via its environment, so the parent's argv (visible
+to ``ps`` on the host) never contains the credential. After ``git clone``
+finishes, the wrapper rewrites the cloned repo's ``origin`` URL to strip
+the credential — otherwise the PAT would persist in ``<repo>/.git/config``
+and surface again on any subsequent ``git`` call against that repo.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import re
 import shlex
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 from sandbox.launcher import SandboxLimits, run_sandboxed
 
@@ -47,10 +49,19 @@ def _safe_subdir(workspace: Path, subdir: str) -> Path:
 
 
 def _wrapper_script(repo_url: str, ref: str, target: str, depth: int) -> str:
-    """Build a small shell snippet that injects the PAT into the URL.
+    """Build a small Python snippet that runs the actual clone.
 
-    The PAT comes from ``$GIT_PAT`` in the env. We use a here-doc'd
-    Python invocation to avoid shell-quoting subtleties around credentials.
+    The PAT is read from ``$GIT_PAT`` (set by ``run_sandboxed``'s
+    ``extra_env``) inside the sandboxed child, then injected into the URL
+    at clone time. After the clone succeeds, the wrapper:
+
+      1. Rewrites ``origin`` to the credential-free URL so the PAT does
+         not persist in ``.git/config``.
+      2. Disables credential helpers in the cloned repo so any later
+         ``git fetch`` against ``origin`` cannot transparently re-auth.
+
+    Stdout/stderr are scrubbed of the PAT in the parent for defense in
+    depth (some git transports echo URLs to stderr).
     """
     return (
         "import os, subprocess, sys, urllib.parse as u\n"
@@ -60,17 +71,44 @@ def _wrapper_script(repo_url: str, ref: str, target: str, depth: int) -> str:
         f"depth = {depth}\n"
         "pat = os.environ.get('GIT_PAT', '')\n"
         "p = u.urlparse(url)\n"
+        "clean_url = url\n"
+        "url_with_pat = url\n"
         "if pat and p.scheme in ('http', 'https'):\n"
         "    netloc = f'oauth2:{pat}@{p.hostname}'\n"
         "    if p.port:\n"
         "        netloc += f':{p.port}'\n"
-        "    p = p._replace(netloc=netloc)\n"
-        "url_with_pat = u.urlunparse(p)\n"
-        "argv = ['git', 'clone', '--depth', str(depth)]\n"
+        "    url_with_pat = u.urlunparse(p._replace(netloc=netloc))\n"
+        # Make sure cred helpers do not write the PAT anywhere on disk
+        # and HOME-based config files do not leak in.
+        "env = dict(os.environ)\n"
+        "env['GIT_TERMINAL_PROMPT'] = '0'\n"
+        "env['GIT_CONFIG_GLOBAL'] = '/dev/null'\n"
+        "env['GIT_CONFIG_SYSTEM'] = '/dev/null'\n"
+        "argv = ['git',\n"
+        "        '-c', 'credential.helper=',\n"
+        "        '-c', 'core.askpass=true',\n"
+        "        'clone', '--depth', str(depth)]\n"
         "if ref and ref != 'HEAD':\n"
         "    argv += ['--branch', ref]\n"
         "argv += [url_with_pat, target]\n"
-        "rc = subprocess.run(argv).returncode\n"
+        "rc = subprocess.run(argv, env=env).returncode\n"
+        # Strip the PAT out of the cloned repo's remote so it does not
+        # survive in .git/config. Best-effort: if the clone failed, target
+        # may not exist.\n"
+        "if rc == 0:\n"
+        "    try:\n"
+        "        subprocess.run(\n"
+        "            ['git', '-C', target, 'remote', 'set-url',\n"
+        "             'origin', clean_url],\n"
+        "            env=env, check=False,\n"
+        "        )\n"
+        "        subprocess.run(\n"
+        "            ['git', '-C', target, 'config',\n"
+        "             '--unset-all', 'credential.helper'],\n"
+        "            env=env, check=False,\n"
+        "        )\n"
+        "    except Exception:\n"
+        "        pass\n"
         "sys.exit(rc)\n"
     )
 
@@ -103,7 +141,7 @@ def run_git_clone(
         }
 
     limits = limits or SandboxLimits(
-        mem_mb=1024, cpu_s=60, fsize_mb=512, nproc=64, wall_s=120,
+        mem_mb=1024, cpu_s=60, fsize_mb=128, nproc=64, wall_s=60,
     )
     rel_target = str(target_path.relative_to(workspace.resolve()))
     script = _wrapper_script(repo_url, ref, rel_target, depth)
@@ -120,12 +158,14 @@ def run_git_clone(
         extra_env=extra_env,
     )
 
-    # Scrub anything that could echo the PAT (defense in depth -- git
-    # itself does not echo PATs in our argv path, but redacted output is
-    # still safer to log).
-    stderr = result.stderr
+    # Scrub anywhere the PAT could possibly echo (defense in depth — git
+    # should not echo it via our path, but stderr from network errors and
+    # progress output can be unpredictable).
+    stderr = result.stderr or ""
+    stdout = result.stdout or ""
     if pat:
         stderr = stderr.replace(pat, "***REDACTED***")
+        stdout = stdout.replace(pat, "***REDACTED***")
 
     return {
         "ok": result.returncode == 0 and not result.timed_out,
@@ -133,7 +173,8 @@ def run_git_clone(
         "timed_out": result.timed_out,
         "wall_seconds": result.wall_seconds,
         "target_subdir": name,
-        "stderr": stderr[-2000:] if stderr else "",
+        "stdout": stdout[-2000:],
+        "stderr": stderr[-2000:],
     }
 
 

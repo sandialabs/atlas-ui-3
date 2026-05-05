@@ -20,28 +20,29 @@ Tool surface:
 
 from __future__ import annotations
 
-import asyncio
 import base64
+import ipaddress
 import logging
 import os
+import socket
 import sys
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, AsyncIterator, Dict, Optional
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from fastmcp import Context, FastMCP
 
 # ---------------------------------------------------------------------------
-# Module-local imports (self-contained: keep relative)
+# Module-local imports (self-contained: kept module-relative so the Docker
+# image can be built from *this directory alone* without the rest of the
+# Atlas monorepo).
 # ---------------------------------------------------------------------------
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
-
-from atlas.mcp.common.state import get_state_store  # noqa: E402
-
-from artifacts import diff_artifacts, mime_for, pick_primary, snapshot_mtimes  # noqa: E402
-from config import load_config  # noqa: E402
-from file_ops import (  # noqa: E402
+from artifacts import diff_artifacts, mime_for, pick_primary, snapshot_mtimes
+from config import load_config
+from file_ops import (
     WorkspaceError,
     delete_path,
     list_dir,
@@ -49,10 +50,11 @@ from file_ops import (  # noqa: E402
     workspace_bytes_used,
     write_file as fs_write_file,
 )
-from git_clone import run_git_clone  # noqa: E402
-from sandbox.kernel_probe import probe_kernel  # noqa: E402
-from sandbox.launcher import SandboxLimits, run_sandboxed  # noqa: E402
-from session import SessionRegistry  # noqa: E402
+from git_clone import run_git_clone
+from sandbox.kernel_probe import probe_kernel
+from sandbox.launcher import SandboxLimits, run_sandboxed
+from session import SessionRegistry
+from state_store import get_state_store
 
 
 logger = logging.getLogger("code-executor-v2")
@@ -95,7 +97,30 @@ REGISTRY = SessionRegistry(
 )
 
 
-mcp = FastMCP("Code Executor v2", session_state_store=get_state_store())
+@asynccontextmanager
+async def _lifespan(server: "FastMCP") -> AsyncIterator[Dict[str, Any]]:
+    """Start/stop the SessionRegistry on the server's serving event loop.
+
+    Using FastMCP's lifespan hook (rather than running ``REGISTRY.start()``
+    on a separate ``new_event_loop`` before ``mcp.run()``) guarantees the
+    reaper task is created on the same loop that handles HTTP requests,
+    so it actually executes.
+    """
+    await REGISTRY.start()
+    try:
+        yield {"registry": REGISTRY}
+    finally:
+        try:
+            await REGISTRY.stop()
+        except Exception as e:
+            logger.warning("registry shutdown error: %s", e)
+
+
+mcp = FastMCP(
+    "Code Executor v2",
+    session_state_store=get_state_store(),
+    lifespan=_lifespan,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -112,10 +137,26 @@ def _limits() -> SandboxLimits:
 
 
 async def _session_for(ctx: Context):
+    """Resolve the FastMCP session id for this call.
+
+    The session id MUST come from the transport — that is what makes the
+    workspace stable across tool calls within one conversation. We do
+    *not* fall back to a per-call UUID, because that would silently
+    produce one orphan workspace per request and defeat the stateful
+    contract.
+    """
     try:
         sid = ctx.session_id
-    except Exception:
-        sid = None
+    except RuntimeError as e:
+        raise RuntimeError(
+            "Code Executor v2 requires a per-conversation session id from "
+            "the MCP transport (use the streamable-http transport)."
+        ) from e
+    if not sid:
+        raise RuntimeError(
+            "Empty MCP session id; refusing to synthesize a per-call id "
+            "(would defeat stateful workspace contract)."
+        )
     return await REGISTRY.get_or_create(sid)
 
 
@@ -146,14 +187,100 @@ def _truncate(s: str, max_chars: int = 4000) -> str:
     return s[:max_chars] + f"\n[truncated; {len(s)} chars total]"
 
 
-def _load_remote_bytes(url: str) -> bytes:
-    """Fetch a URL into bytes. Used by ``upload_file`` for backend-relative paths."""
+_REMOTE_FETCH_MAX_BYTES = 64 * 1024 * 1024  # hard cap regardless of artifact_cap
+
+
+def _backend_base_url() -> str:
+    """Return the configured Atlas backend base URL (no trailing slash)."""
+    return os.environ.get("CHATUI_BACKEND_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+
+
+def _resolve_upload_url(url: str) -> str:
+    """Validate ``url`` for ``upload_file`` and return the absolute URL.
+
+    Rules:
+      * Only ``http(s)`` is accepted; ``file://``, ``ftp://``, ``data://``,
+        etc. are rejected outright.
+      * Backend-relative paths (``/api/files/...``) resolve against
+        ``CHATUI_BACKEND_BASE_URL``.
+      * The destination host must be either the configured backend or an
+        explicit allow-list (``CODE_EXECUTOR_V2_UPLOAD_ALLOWED_HOSTS``).
+      * The destination must not resolve to a loopback / private / link-
+        local / multicast / reserved address (defeats SSRF to internal
+        services), unless the resolved host *is* the configured backend
+        host (which is allowed to be a private/internal address).
+    """
+    if not url:
+        raise ValueError("file_url is empty")
     if url.startswith("/"):
-        base = os.environ.get("CHATUI_BACKEND_BASE_URL", "http://127.0.0.1:8000")
-        url = base.rstrip("/") + url
-    req = Request(url)
-    with urlopen(req, timeout=20) as resp:  # noqa: S310 — backend-controlled URL
-        return resp.read()
+        url = _backend_base_url() + url
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"unsupported url scheme {parsed.scheme!r}; only http(s) allowed"
+        )
+    host = parsed.hostname
+    if not host:
+        raise ValueError("file_url has no host")
+
+    backend_host = urlparse(_backend_base_url()).hostname
+    extra_hosts = {
+        h.strip().lower()
+        for h in os.environ.get(
+            "CODE_EXECUTOR_V2_UPLOAD_ALLOWED_HOSTS", ""
+        ).split(",")
+        if h.strip()
+    }
+    allowed_hosts = {h for h in (backend_host,) if h} | extra_hosts
+    if host.lower() not in allowed_hosts:
+        raise ValueError(
+            f"host {host!r} not in upload allow-list "
+            f"(set CODE_EXECUTOR_V2_UPLOAD_ALLOWED_HOSTS to extend)"
+        )
+
+    # SSRF defense: every IP the host resolves to must either match the
+    # backend's own host or be globally routable. The backend-host itself
+    # is allowed to be private/loopback (that's the whole point), but no
+    # other allowed entry may point at internal infrastructure.
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError as e:
+        raise ValueError(f"failed to resolve {host!r}: {e}") from e
+    is_backend_host = (host.lower() == (backend_host or "").lower())
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        unsafe = (
+            ip.is_loopback or ip.is_private or ip.is_link_local
+            or ip.is_multicast or ip.is_reserved or ip.is_unspecified
+        )
+        if unsafe and not is_backend_host:
+            raise ValueError(
+                f"host {host!r} resolves to non-public address {addr}; "
+                "refusing to fetch (SSRF guard)"
+            )
+    return url
+
+
+def _load_remote_bytes(url: str) -> bytes:
+    """Fetch a URL into bytes for ``upload_file``.
+
+    Hard-restricted: see ``_resolve_upload_url`` for scheme + host policy.
+    The response is read with a byte cap so a malicious or runaway server
+    cannot exhaust pod memory.
+    """
+    safe_url = _resolve_upload_url(url)
+    req = Request(safe_url)
+    with urlopen(req, timeout=20) as resp:  # noqa: S310 — guarded above
+        data = resp.read(_REMOTE_FETCH_MAX_BYTES + 1)
+    if len(data) > _REMOTE_FETCH_MAX_BYTES:
+        raise ValueError(
+            f"remote file exceeds {_REMOTE_FETCH_MAX_BYTES} bytes; refusing"
+        )
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -227,13 +354,33 @@ async def python(
     )
     elapsed = round(time.monotonic() - start, 4)
 
-    artifacts = diff_artifacts(
-        record.workspace,
-        before=record.last_seen_mtimes,
-        artifact_cap_bytes=CONFIG.artifact_cap_bytes,
-    )
+    # Enforce the workspace cap *after* the run. RLIMIT_FSIZE caps each
+    # individual file written by the child, but a long-running script can
+    # write many files; without this check, user code can fill the pod's
+    # disk regardless of CODE_EXECUTOR_V2_WS_CAP_MB.
+    ws_used = workspace_bytes_used(record.workspace)
+    workspace_cap_exceeded = ws_used > CONFIG.workspace_cap_bytes
+    if workspace_cap_exceeded:
+        logger.warning(
+            "session %s exceeded workspace cap (%d > %d) — wiping workspace",
+            record.session_id, ws_used, CONFIG.workspace_cap_bytes,
+        )
+        try:
+            await REGISTRY.reset(record.session_id)
+        except Exception as e:
+            logger.error("failed to reset over-cap workspace: %s", e)
+        artifacts: list = []
+        ws_used = workspace_bytes_used(record.workspace)
+    else:
+        artifacts = diff_artifacts(
+            record.workspace,
+            before=record.last_seen_mtimes,
+            artifact_cap_bytes=CONFIG.artifact_cap_bytes,
+        )
 
-    is_error = result.returncode != 0 or result.timed_out
+    is_error = (
+        result.returncode != 0 or result.timed_out or workspace_cap_exceeded
+    )
     results = {
         "stdout": _truncate(result.stdout),
         "stderr": _truncate(result.stderr),
@@ -242,6 +389,8 @@ async def python(
         "summary": (
             "Execution timed out"
             if result.timed_out
+            else "Workspace cap exceeded; workspace was reset"
+            if workspace_cap_exceeded
             else (
                 "Execution completed successfully"
                 if not is_error else "Execution failed"
@@ -260,7 +409,8 @@ async def python(
             "cpu_s": limits.cpu_s,
             "fsize_mb": limits.fsize_mb,
         },
-        "workspace_bytes_used": workspace_bytes_used(record.workspace),
+        "workspace_bytes_used": ws_used,
+        "workspace_cap_exceeded": workspace_cap_exceeded,
         "artifact_count": len(artifacts),
     }
     return _envelope(
@@ -572,34 +722,15 @@ def _list_installed_packages() -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-async def _bootstrap() -> None:
-    await REGISTRY.start()
-
-
-async def _shutdown() -> None:
-    await REGISTRY.stop()
-
-
 def main() -> None:
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(_bootstrap())
-    except Exception:
-        loop.close()
-        raise
-    try:
-        mcp.run(
-            transport="streamable-http",
-            host=CONFIG.host,
-            port=CONFIG.port,
-            show_banner=False,
-        )
-    finally:
-        try:
-            loop.run_until_complete(_shutdown())
-        except Exception as e:
-            logger.warning("shutdown error: %s", e)
-        loop.close()
+    # Registry start/stop is wired via the FastMCP lifespan above so the
+    # reaper task lives on the same loop that serves HTTP requests.
+    mcp.run(
+        transport="streamable-http",
+        host=CONFIG.host,
+        port=CONFIG.port,
+        show_banner=False,
+    )
 
 
 if __name__ == "__main__":

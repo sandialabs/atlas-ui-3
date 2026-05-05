@@ -16,7 +16,6 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import errno
-import os
 import subprocess
 import sys
 import textwrap

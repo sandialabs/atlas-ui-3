@@ -169,13 +169,23 @@ def _apply_rlimits(mem_mb: int, cpu_s: int, fsize_mb: int, nproc: int) -> None:
     if fsize_mb > 0:
         resource.setrlimit(resource.RLIMIT_FSIZE, (fsize_mb * 1024 * 1024,) * 2)
     if nproc > 0:
-        # NPROC is per-real-user. After unshare(CLONE_NEWUSER) only "us"
-        # exists in the namespace, so this caps fork bombs reliably.
+        # RLIMIT_NPROC is enforced against the per-user-namespace ucount
+        # for our (mapped) uid. After unshare(CLONE_NEWUSER) we are the
+        # only process in the new namespace's ucount table, so the limit
+        # bounds fork-bomb growth from this process tree.
+        # Caveat: if the host kernel pre-dates per-userns ucounts, the
+        # limit applies host-wide for the real uid; either way it's a
+        # bound, just a different bound. Effective fork-bomb defense
+        # also relies on RLIMIT_AS killing the process before it blows
+        # past sane process counts.
         resource.setrlimit(resource.RLIMIT_NPROC, (nproc, nproc))
-    # Disable core dumps -- a sandboxed process should not leak via cores.
+    # Disable core dumps -- a sandboxed process should not leak memory
+    # state via cores. Failures are non-fatal: some kernels may already
+    # have core dumps disabled and reject re-setting RLIMIT_CORE.
     try:
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     except (ValueError, OSError):
+        # Non-fatal — see comment above. Continue with sandbox setup.
         pass
 
 
