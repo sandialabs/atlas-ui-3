@@ -5,10 +5,8 @@
 extensions:
   - addsTo:
       pack: codeql/python-all
-      extensible: sanitizer
+      extensible: sanitizerModel
     data:
-      # Format: [module, function, output, taintKinds]
-      # Mark the function's return value as sanitized for all taint kinds.
-      - ["core.log_sanitizer", "sanitize_for_logging", "ReturnValue", "All"]
-      # Also include fully-qualified path with atlas prefix in case imports resolve that way in analysis
-      - ["atlas.core.log_sanitizer", "sanitize_for_logging", "ReturnValue", "All"]
+      # Format: [module, member/path, kind]
+      # Teach py/log-injection that sanitize_for_logging's return value is safe.
+      - ["atlas.core.log_sanitizer", "Member[sanitize_for_logging].ReturnValue", "log-injection"]
