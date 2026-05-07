@@ -6,7 +6,7 @@ focused on orchestration/business logic.
 from __future__ import annotations
 
 import logging
-import os
+from pathlib import Path
 from typing import Dict, Optional
 
 from atlas.modules.config import ConfigManager
@@ -20,31 +20,59 @@ class PromptProvider:
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
         self._cache: Dict[str, str] = {}
-        # Resolve base path (relative paths resolved against repo root)
-        app_settings = self.config_manager.app_settings
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-        base_candidate = app_settings.prompt_base_path
-        if not os.path.isabs(base_candidate):
-            self.base_path = os.path.join(repo_root, base_candidate)
+        self._base_paths = self._resolve_base_paths()
+
+    def _resolve_base_paths(self) -> list[Path]:
+        """Resolve prompt search paths.
+
+        Follows the same override convention as other Atlas config assets:
+        user config directory first, packaged defaults second.
+        """
+        base_candidate = Path(self.config_manager.app_settings.prompt_base_path)
+        atlas_root = self.config_manager._atlas_root
+        project_root = atlas_root.parent
+
+        candidates = []
+        if base_candidate.is_absolute():
+            candidates.append(base_candidate)
         else:
-            self.base_path = base_candidate
+            candidates.extend([
+                base_candidate,
+                project_root / base_candidate,
+                atlas_root / "config" / "prompts",
+            ])
+
+        seen = set()
+        resolved: list[Path] = []
+        for path in candidates:
+            if path not in seen:
+                seen.add(path)
+                resolved.append(path)
+        return resolved
 
     def _load_template(self, filename: str) -> Optional[str]:
         cache_key = filename
         if cache_key in self._cache:
             return self._cache[cache_key]
-        path = os.path.join(self.base_path, filename)
-        if not os.path.exists(path):
-            logger.warning("Prompt template not found: %s", path)
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-            self._cache[cache_key] = content
-            return content
-        except Exception as e:  # pragma: no cover
-            logger.error("Failed reading prompt template %s: %s", path, e)
-            return None
+
+        for base_path in self._base_paths:
+            path = base_path / filename
+            if not path.exists():
+                continue
+            try:
+                content = path.read_text(encoding="utf-8")
+                self._cache[cache_key] = content
+                return content
+            except Exception as e:  # pragma: no cover
+                logger.error("Failed reading prompt template %s: %s", path, e)
+                return None
+
+        logger.warning(
+            "Prompt template not found: %s (searched: %s)",
+            filename,
+            [str(path) for path in self._base_paths],
+        )
+        return None
 
     def get_tool_synthesis_prompt(self, user_question: str) -> Optional[str]:
         """Return formatted tool synthesis prompt or None if unavailable."""
