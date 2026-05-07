@@ -95,7 +95,7 @@ from atlas.routes import telemetry_routes
 # Reset to default FileSpanReader backed by APP_LOG_DIR
 telemetry_routes.set_span_reader(None)
 
-ADMIN = {"X-User-Email": "admin@example.com"}
+ADMIN = {"X-User-Email": "${ADMIN_TEST_USER:-admin@example.com}"}
 USER = {"X-User-Email": "user@example.com"}
 client = TestClient(app)
 
