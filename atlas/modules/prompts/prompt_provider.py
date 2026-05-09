@@ -37,7 +37,6 @@ class PromptProvider:
             candidates.append(base_candidate)
         else:
             candidates.extend([
-                base_candidate,
                 project_root / base_candidate,
                 atlas_root / "config" / "prompts",
             ])
