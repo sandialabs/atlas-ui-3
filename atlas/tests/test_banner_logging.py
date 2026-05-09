@@ -4,9 +4,8 @@ import os
 
 import pytest
 from main import app
-from starlette.testclient import TestClient
-
 from atlas.modules.config import config_manager
+from starlette.testclient import TestClient
 
 _IS_PRODUCTION = os.environ.get("DEBUG_MODE", "true").lower() == "false"
 
@@ -44,7 +43,7 @@ def test_banner_save_success_logging(caplog, tmp_path, monkeypatch):
         response = client.post(
             "/admin/banners",
             json={"messages": ["Test banner message", "Another test message"]},
-            headers={"X-User-Email": "admin@example.com"}
+            headers={"X-User-Email": config_manager.app_settings.admin_test_user}
         )
 
     # Verify request succeeded
@@ -64,7 +63,7 @@ def test_banner_save_success_logging(caplog, tmp_path, monkeypatch):
     # Verify log contains file path and admin user
     log_message = banner_logs[0].message
     assert "messages.txt" in log_message
-    assert "admin@example.com" in log_message
+    assert config_manager.app_settings.admin_test_user in log_message
 
 
 @_requires_debug
@@ -102,7 +101,7 @@ def test_banner_save_failure_logging(caplog, tmp_path, monkeypatch):
         response = client.post(
             "/admin/banners",
             json={"messages": ["Test banner message"]},
-            headers={"X-User-Email": "admin@example.com"}
+            headers={"X-User-Email": config_manager.app_settings.admin_test_user}
         )
 
     # Verify request failed
@@ -152,7 +151,7 @@ def test_banner_save_logs_sanitized_paths(caplog, tmp_path, monkeypatch):
         response = client.post(
             "/admin/banners",
             json={"messages": ["Test message"]},
-            headers={"X-User-Email": "admin@example.com"}
+            headers={"X-User-Email": config_manager.app_settings.admin_test_user}
         )
 
     # Verify request succeeded
@@ -199,7 +198,7 @@ def test_banner_get_includes_enabled_status(tmp_path, monkeypatch):
     # Make request to get banner config
     response = client.get(
         "/admin/banners",
-        headers={"X-User-Email": "admin@example.com"}
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user}
     )
 
     # Verify request succeeded
@@ -245,7 +244,7 @@ def test_banner_get_with_feature_disabled(tmp_path, monkeypatch):
     # Make request to get banner config
     response = client.get(
         "/admin/banners",
-        headers={"X-User-Email": "admin@example.com"}
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user}
     )
 
     # Verify request succeeded
@@ -289,7 +288,7 @@ def test_banner_get_with_feature_enabled(tmp_path, monkeypatch):
     # Make request to get banner config
     response = client.get(
         "/admin/banners",
-        headers={"X-User-Email": "admin@example.com"}
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user}
     )
 
     # Verify request succeeded
@@ -309,7 +308,7 @@ def test_banner_admin_routes_reject_mock_users_in_production():
         response = client.request(
             method,
             path,
-            headers={"X-User-Email": "admin@example.com"},
+            headers={"X-User-Email": config_manager.app_settings.admin_test_user},
             json={"messages": ["test"]} if method == "POST" else None,
         )
         # 403 = admin auth correctly denied; 503 = proxy secret also blocks (both are correct)

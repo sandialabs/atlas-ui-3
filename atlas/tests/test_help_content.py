@@ -10,6 +10,7 @@ Covers:
 
 import pytest
 from main import app
+from atlas.modules.config import config_manager
 from starlette.testclient import TestClient
 
 
@@ -62,7 +63,7 @@ def test_config_help_content_not_empty_with_default_file():
 def test_admin_get_help_config_returns_content():
     """Admin GET should return content and file_path."""
     client = TestClient(app)
-    resp = client.get("/admin/help-config", headers={"X-User-Email": "admin@example.com"})
+    resp = client.get("/admin/help-config", headers={"X-User-Email": config_manager.app_settings.admin_test_user})
     assert resp.status_code == 200
     data = resp.json()
     assert "content" in data
@@ -88,7 +89,7 @@ def test_admin_put_help_config_writes_content(isolated_config_dir):
     new_content = "# Updated Help\n\nThis is test content."
     resp = client.put(
         "/admin/help-config",
-        headers={"X-User-Email": "admin@example.com", "Content-Type": "application/json"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user, "Content-Type": "application/json"},
         json={"content": new_content},
     )
     assert resp.status_code == 200
@@ -97,7 +98,7 @@ def test_admin_put_help_config_writes_content(isolated_config_dir):
     assert "file_path" in data
 
     # Verify the content was written by reading it back
-    resp2 = client.get("/admin/help-config", headers={"X-User-Email": "admin@example.com"})
+    resp2 = client.get("/admin/help-config", headers={"X-User-Email": config_manager.app_settings.admin_test_user})
     assert resp2.status_code == 200
     assert resp2.json()["content"] == new_content
     # And the file actually lives in the isolated tmp dir
@@ -121,7 +122,7 @@ def test_admin_put_help_config_rejects_oversized_content(isolated_config_dir):
     oversized = "x" * (1_048_576 + 1)
     resp = client.put(
         "/admin/help-config",
-        headers={"X-User-Email": "admin@example.com", "Content-Type": "application/json"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user, "Content-Type": "application/json"},
         json={"content": oversized},
     )
     assert resp.status_code == 413
@@ -133,7 +134,7 @@ def test_admin_put_help_config_accepts_content_at_size_limit(isolated_config_dir
     at_limit = "x" * 1_048_576
     resp = client.put(
         "/admin/help-config",
-        headers={"X-User-Email": "admin@example.com", "Content-Type": "application/json"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user, "Content-Type": "application/json"},
         json={"content": at_limit},
     )
     assert resp.status_code == 200
@@ -145,7 +146,7 @@ def test_admin_put_help_config_rejects_non_string_content(bad_content, isolated_
     client = TestClient(app)
     resp = client.put(
         "/admin/help-config",
-        headers={"X-User-Email": "admin@example.com", "Content-Type": "application/json"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user, "Content-Type": "application/json"},
         json={"content": bad_content},
     )
     assert resp.status_code == 400
@@ -157,7 +158,7 @@ def test_admin_put_help_config_missing_content_field_defaults_to_empty(isolated_
     client = TestClient(app)
     resp = client.put(
         "/admin/help-config",
-        headers={"X-User-Email": "admin@example.com", "Content-Type": "application/json"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user, "Content-Type": "application/json"},
         json={},
     )
     assert resp.status_code == 200
@@ -181,7 +182,7 @@ def test_admin_get_help_config_legacy_fallback(isolated_config_dir):
     legacy_path.write_text(legacy_content, encoding="utf-8")
 
     client = TestClient(app)
-    resp = client.get("/admin/help-config", headers={"X-User-Email": "admin@example.com"})
+    resp = client.get("/admin/help-config", headers={"X-User-Email": config_manager.app_settings.admin_test_user})
     assert resp.status_code == 200
     data = resp.json()
     assert data["content"] == legacy_content
@@ -191,7 +192,7 @@ def test_admin_get_help_config_legacy_fallback(isolated_config_dir):
 def test_admin_get_help_config_returns_empty_when_nothing_exists(isolated_config_dir):
     """When neither help.md nor legacy help-config.json exist, GET returns empty content."""
     client = TestClient(app)
-    resp = client.get("/admin/help-config", headers={"X-User-Email": "admin@example.com"})
+    resp = client.get("/admin/help-config", headers={"X-User-Email": config_manager.app_settings.admin_test_user})
     assert resp.status_code == 200
     data = resp.json()
     assert data["content"] == ""

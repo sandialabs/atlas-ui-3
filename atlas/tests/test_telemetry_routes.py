@@ -16,6 +16,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 import pytest
 from main import app
+from atlas.modules.config import config_manager
 from starlette.testclient import TestClient
 
 from atlas.routes import telemetry_routes
@@ -176,7 +177,7 @@ def _admin(path: str, client: TestClient, **params: Any):
     return client.get(
         path,
         params=params,
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
     )
 
 

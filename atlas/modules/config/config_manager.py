@@ -483,6 +483,11 @@ class AppSettings(BaseSettings):
     # Admin settings
     admin_group: str = "admin"
     test_user: str = "test@test.com"  # Test user for development
+    admin_test_user: str = Field(
+        default="admin@example.com",
+        validation_alias="ADMIN_TEST_USER",
+        description="Admin test user for development/test auth flows"
+    )
     auth_group_check_url: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_URL")
     auth_group_check_api_key: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_API_KEY")
 
