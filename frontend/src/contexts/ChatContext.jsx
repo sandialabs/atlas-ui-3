@@ -88,7 +88,8 @@ export const ChatProvider = ({ children }) => {
 
 		const { sendMessage, addMessageHandler } = useWS()
 	const { currentModel } = config
-	const { selectedTools, selectedPrompts, activePrompts, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
+	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
+	const lastExportPromptKeyRef = useRef(null)
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -101,6 +102,27 @@ export const ChatProvider = ({ children }) => {
 			setTimeout(() => URL.revokeObjectURL(url), 100)
 		} catch (e) { console.error('File download error', e) }
 	}, [])
+
+	const recordAppliedPrompt = useCallback((prompt) => {
+		if (!prompt?.content || !prompt.prompt_key) return
+		const promptSignature = `${prompt.prompt_key}\n${prompt.content}`
+		if (lastExportPromptKeyRef.current === promptSignature) return
+		lastExportPromptKeyRef.current = promptSignature
+		addMessage({
+			role: 'system',
+			content: prompt.content,
+			type: 'prompt_override',
+			prompt_key: prompt.prompt_key,
+			prompt_name: prompt.name,
+			server_name: prompt.server,
+			exportOnly: true,
+			timestamp: new Date().toISOString()
+		})
+	}, [addMessage])
+
+	useEffect(() => {
+		if (!activePromptKey) lastExportPromptKeyRef.current = null
+	}, [activePromptKey])
 
 	useEffect(() => {
 				const handler = createWebSocketHandler({
@@ -122,12 +144,13 @@ export const ChatProvider = ({ children }) => {
 			resolvePendingFileEvent,
 			setPendingElicitation,
 			setActiveConversationId,
+			recordAppliedPrompt,
 			streamToken,
 			streamEnd,
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, recordAppliedPrompt, streamToken, streamEnd])
 
 	// Safety timeout: if isThinking stays true for too long without any response
 	// from the backend, reset it and show an error so the user is not stuck forever.
@@ -388,6 +411,7 @@ export const ChatProvider = ({ children }) => {
 		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		setIsWelcomeVisible(true)
 		setActiveConversationId(null)
+		lastExportPromptKeyRef.current = null
 		setFollowUpSuggestions([])
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
@@ -412,6 +436,7 @@ export const ChatProvider = ({ children }) => {
 
 		// Track the loaded conversation
 		setActiveConversationId(conversationData.id)
+		lastExportPromptKeyRef.current = null
 		setIsWelcomeVisible(false)
 
 		// Load messages into the chat view
@@ -482,7 +507,7 @@ export const ChatProvider = ({ children }) => {
 			? ([...selectedDataSources].join(', ') || 'None selected')
 			: 'None (RAG disabled)'
 		if (asText) {
-			let text = `Chat Export - ${config.appName}\nDate: ${new Date().toLocaleString()}\nUser: ${config.user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected RAG Sources: ${ragSourcesDisplay}\nAgent Mode: ${agent.agentModeEnabled ? 'Enabled' : 'Disabled'}\n\n${'='.repeat(50)}\n\n`
+			let text = `Chat Export - ${config.appName}\nDate: ${new Date().toLocaleString()}\nUser: ${config.user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected Prompts: ${[...selectedPrompts].join(', ') || 'None'}\nActive Prompt: ${activePromptKey || 'Default'}\nSelected RAG Sources: ${ragSourcesDisplay}\nAgent Mode: ${agent.agentModeEnabled ? 'Enabled' : 'Disabled'}\n\n${'='.repeat(50)}\n\n`
 			messages.forEach(m => { text += `${m.role.toUpperCase()}:\n${m.content}\n\n` })
 			if (files.canvasContent) text += `${'='.repeat(50)}\nCANVAS CONTENT:\n${files.canvasContent}\n`
 			const blob = new Blob([text], { type: 'text/plain' })
@@ -500,6 +525,8 @@ export const ChatProvider = ({ children }) => {
 					user: config.user,
 					model: currentModel,
 					selectedTools: [...selectedTools],
+					selectedPrompts: [...selectedPrompts],
+					activePrompt: activePromptKey,
 					ragEnabled: ragEnabled,
 					selectedRagSources: ragEnabled ? [...selectedDataSources] : null,
 					toolChoiceRequired: selections.toolChoiceRequired,
@@ -519,7 +546,7 @@ export const ChatProvider = ({ children }) => {
 			a.download = `chat-export-${ts}.json`
 			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 		}
-	}, [messages, config.appName, config.user, config.features, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, files.canvasContent])
+	}, [messages, config.appName, config.user, config.features, currentModel, selectedTools, selectedPrompts, activePromptKey, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, files.canvasContent])
 
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])

@@ -88,6 +88,27 @@ class TestMultiPromptSupport:
         )
 
     @pytest.mark.asyncio
+    async def test_reports_applied_prompt_content(self, service, mock_tool_manager):
+        """Resolved prompt content is reported for chat export bookkeeping."""
+        mock_tool_manager.get_prompt.return_value = "You are an analyst."
+        callback = AsyncMock()
+        messages = [{"role": "user", "content": "Hello"}]
+
+        await service.apply_prompt_override(
+            messages,
+            ["server_analyst"],
+            applied_prompt_callback=callback,
+        )
+
+        callback.assert_called_once_with({
+            "type": "prompt_applied",
+            "prompt_key": "server_analyst",
+            "server": "server",
+            "name": "analyst",
+            "content": "You are an analyst.",
+        })
+
+    @pytest.mark.asyncio
     async def test_no_prompts_returns_unchanged(self, service):
         messages = [{"role": "user", "content": "Hello"}]
         result = await service.apply_prompt_override(messages, None)

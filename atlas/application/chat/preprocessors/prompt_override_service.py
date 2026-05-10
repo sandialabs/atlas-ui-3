@@ -1,7 +1,7 @@
 """Prompt override service - handles MCP system prompt injection."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,7 @@ class PromptOverrideService:
         *,
         user_email: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        applied_prompt_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Apply MCP prompt overrides for all selected prompts.
@@ -42,6 +43,7 @@ class PromptOverrideService:
             selected_prompts: List of prompt keys (format: "server_promptname")
             user_email: User's email for per-user HTTP session isolation and meta context
             conversation_id: Optional conversation ID for meta context
+            applied_prompt_callback: Optional callback for reporting resolved prompt content
 
         Returns:
             Messages with prompt overrides prepended (if applicable)
@@ -75,6 +77,17 @@ class PromptOverrideService:
 
                 if prompt_text:
                     system_messages.append({"role": "system", "content": prompt_text})
+                    if applied_prompt_callback:
+                        try:
+                            await applied_prompt_callback({
+                                "type": "prompt_applied",
+                                "prompt_key": key,
+                                "server": server,
+                                "name": prompt_name,
+                                "content": prompt_text,
+                            })
+                        except Exception:
+                            logger.debug("Failed reporting applied MCP prompt %s", key, exc_info=True)
                     logger.info(
                         "Applied MCP prompt '%s' (len=%d)", key, len(prompt_text)
                     )

@@ -71,6 +71,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
   const currentModelSupportsTools = models?.some(
     m => m.name === currentModel && m.supports_tools !== false
   ) ?? true
+  const visibleMessages = messages.filter(message => !message.exportOnly)
 
   // Auto-resize textarea
   const autoResizeTextarea = () => {
@@ -794,7 +795,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
           <div>Selected Tools: {[...selectedTools].join(', ') || 'None'}</div>
           {ragEnabled && <div>RAG Sources: {[...selectedDataSources].join(', ') || 'None selected'}</div>}
           {agentModeEnabled && <div>Agent Mode: Enabled</div>}
-          <div>Messages: {messages.length}</div>
+          <div>Messages: {visibleMessages.length}</div>
         </div>
       </div>
 
@@ -802,7 +803,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
         ref={messagesRef}
         className={`overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
-        {messages.map((message, index) => (
+        {visibleMessages.map((message, index) => (
           <Message
             key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
             message={message}

@@ -47,6 +47,7 @@ export function cleanupStreamState() {
  * @param {Function} [deps.setPendingElicitation] - Set pending elicitation request.
  * @param {Function} [deps.setIsSynthesizing] - Set the "synthesizing" indicator state.
  * @param {Function} [deps.setActiveConversationId] - Set the active conversation ID for chat history tracking.
+ * @param {Function} [deps.recordAppliedPrompt] - Record resolved prompt content for chat exports.
  * @param {Function} deps.streamToken - Dispatch a STREAM_TOKEN action with a text chunk.
  * @param {Function} deps.streamEnd - Dispatch a STREAM_END action to finalize streaming.
  * @returns {Function} A handler function that processes incoming WebSocket messages.
@@ -72,6 +73,7 @@ export function createWebSocketHandler(deps) {
     setPendingElicitation,
     setIsSynthesizing,
     setActiveConversationId,
+    recordAppliedPrompt,
     streamToken,
     streamEnd,
   } = deps
@@ -429,6 +431,23 @@ export function createWebSocketHandler(deps) {
         case 'conversation_saved': {
           if (data.conversation_id && typeof setActiveConversationId === 'function') {
             setActiveConversationId(data.conversation_id)
+          }
+          break
+        }
+        case 'prompt_applied': {
+          if (typeof recordAppliedPrompt === 'function') {
+            recordAppliedPrompt(data)
+          } else if (data.content) {
+            addMessage({
+              role: 'system',
+              content: data.content,
+              type: 'prompt_override',
+              prompt_key: data.prompt_key,
+              prompt_name: data.name,
+              server_name: data.server,
+              exportOnly: true,
+              timestamp: new Date().toISOString()
+            })
           }
           break
         }

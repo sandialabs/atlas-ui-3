@@ -22,6 +22,7 @@ const makeDeps = () => {
     triggerFileDownload: vi.fn(),
     addAttachment: vi.fn(),
     resolvePendingFileEvent: vi.fn(),
+    recordAppliedPrompt: vi.fn(),
     setIsSynthesizing: vi.fn(),
     streamToken: vi.fn(),
     streamEnd: vi.fn(),
@@ -154,6 +155,25 @@ describe('createWebSocketHandler – intermediate updates', () => {
 
     // Should open the canvas panel when display.open_canvas is true
     expect(deps.setIsCanvasOpen).toHaveBeenCalledWith(true)
+  })
+
+  it('records applied prompts for chat exports', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    const payload = {
+      type: 'prompt_applied',
+      prompt_key: 'prompts_analyst',
+      server: 'prompts',
+      name: 'analyst',
+      content: 'You are an intelligence analyst.'
+    }
+
+    handler(payload)
+
+    expect(deps.recordAppliedPrompt).toHaveBeenCalledTimes(1)
+    expect(deps.recordAppliedPrompt).toHaveBeenCalledWith(payload)
+    expect(deps.addMessage).not.toHaveBeenCalled()
   })
 })
 

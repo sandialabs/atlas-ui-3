@@ -195,6 +195,7 @@ class ChatOrchestrator:
             selected_prompts=selected_prompts,
             user_email=user_email,
             conversation_id=session.context.get("conversation_id", str(session_id)),
+            applied_prompt_callback=kwargs.get("update_callback"),
         )
 
         # Strip tools / agent mode and warn if the model does not support tool/function calling
