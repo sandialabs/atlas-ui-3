@@ -1,0 +1,14 @@
+{
+  "code_executor_v2": {
+    "url": "http://code-executor-v2:8011/mcp",
+    "transport": "http",
+    "groups": [
+      "users"
+    ],
+    "description": "Stateful Python execution sandbox: per-session workspace, Landlock + network namespace isolation, broad data-science package set. Tools: python, upload_file, ls, read_file, write_file, delete_file, download_file, info, reset_session, (optional) git_clone.",
+    "author": "Atlas UI Team",
+    "short_description": "Code executor v2 (HTTP, stateful, sandboxed)",
+    "help_email": "support@example.com",
+    "compliance_level": "Public"
+  }
+}
