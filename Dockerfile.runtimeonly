@@ -14,7 +14,7 @@ RUN dnf install -y --allowerasing curl && \
 
 COPY frontend/package*.json ./
 ENV NPM_CONFIG_CACHE=/app/.npm
-RUN npm ci --include=dev
+RUN npm ci
 
 COPY frontend/ ./
 ARG VITE_APP_NAME="ATLAS"

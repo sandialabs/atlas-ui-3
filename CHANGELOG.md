@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #566 - 2026-05-12
-- Added `Dockerfile.runtimeonly`, a multi-stage runtime-focused container recipe that keeps Node build tooling out of the final deployed image and excludes top-level docs/test/script trees.
+- Added `Dockerfile.runtimeonly`, a multi-stage runtime-focused container recipe that keeps Node build tooling out of the final deployed image and excludes top-level docs/test/scripts trees.
 - Documented how to build and run the runtime-only image in the README and installation guide.
 
 ### PR #565 - 2026-04-25
