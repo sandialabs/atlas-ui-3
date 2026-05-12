@@ -4,7 +4,7 @@
 #
 # Both stages use Chainguard images for a minimal CVE surface.
 
-FROM cgr.dev/chainguard/node:20 AS frontend-build
+FROM cgr.dev/chainguard/node:latest-dev AS frontend-build
 
 # Chainguard node defaults to nonroot; switch to root for build operations.
 USER root
@@ -30,7 +30,7 @@ ENV APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 
-FROM cgr.dev/chainguard/python:3.11
+FROM cgr.dev/chainguard/python:latest-dev
 
 # Chainguard Python image defaults to the nonroot user (65532:65532).
 # Switch to root for filesystem setup and package installation, then drop

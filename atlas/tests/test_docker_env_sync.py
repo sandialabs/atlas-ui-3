@@ -214,11 +214,11 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
     dockerfile_content = dockerfile_path.read_text(encoding='utf-8')
 
     # Both stages must use Chainguard images for a minimal CVE surface.
-    assert 'FROM cgr.dev/chainguard/python:3.11' in dockerfile_content, (
-        "Runtime stage must use the Chainguard Python 3.11 image"
+    assert 'FROM cgr.dev/chainguard/python:latest-dev' in dockerfile_content, (
+        "Runtime stage must use the Chainguard Python latest-dev image"
     )
-    assert 'FROM cgr.dev/chainguard/node:20' in dockerfile_content, (
-        "Frontend build stage must use the Chainguard Node 20 image"
+    assert 'FROM cgr.dev/chainguard/node:latest-dev' in dockerfile_content, (
+        "Frontend build stage must use the Chainguard Node latest-dev image"
     )
 
     # Runtime image should copy only built frontend assets, not the full frontend source tree.
