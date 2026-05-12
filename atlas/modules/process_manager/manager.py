@@ -856,6 +856,23 @@ class ProcessManager:
                         sanitize_for_logging(process_id),
                         sanitize_for_logging(e),
                     )
+            except asyncio.CancelledError:
+                # Loop is shutting down before we finished policing the
+                # SIGTERM grace period. Force-kill and close the asyncio
+                # transport so its __del__ doesn't fire on a closed loop
+                # later. See _wait_and_finalize for the longer
+                # explanation.
+                try:
+                    asyncio_proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
+                transport = getattr(asyncio_proc, "_transport", None)
+                if transport is not None:
+                    try:
+                        transport.close()
+                    except Exception:
+                        pass
+                raise
 
         asyncio.create_task(_kill_if_still_alive())
         managed.status = ProcessStatus.CANCELLED
@@ -980,7 +997,33 @@ class ProcessManager:
         managed: ManagedProcess,
         asyncio_proc: asyncio.subprocess.Process,
     ) -> None:
-        exit_code = await asyncio_proc.wait()
+        try:
+            exit_code = await asyncio_proc.wait()
+        except asyncio.CancelledError:
+            # The event loop is being torn down (typically a test ending
+            # while the child is still running). If we let the task die
+            # here, the asyncio subprocess transport is left "open" — its
+            # __del__ then fires at some later GC point and, depending on
+            # Python version, either emits a ResourceWarning or tries to
+            # use the now-closed loop and raises RuntimeError("Event loop
+            # is closed"), which pytest captures as
+            # PytestUnraisableExceptionWarning. Closing the transport
+            # synchronously while the loop is still alive flips
+            # ``_closed`` to True so __del__ becomes a no-op. (Python
+            # 3.13 partially fixes this via CPython gh-114177, but 3.12
+            # still trips on it; both benefit from explicit close.)
+            try:
+                asyncio_proc.kill()
+            except (ProcessLookupError, OSError):
+                pass
+            transport = getattr(asyncio_proc, "_transport", None)
+            if transport is not None:
+                try:
+                    transport.close()
+                except Exception:
+                    pass
+            self._asyncio_procs.pop(managed.id, None)
+            raise
         managed.exit_code = exit_code
         managed.ended_at = time.time()
         if managed.status == ProcessStatus.CANCELLED:
