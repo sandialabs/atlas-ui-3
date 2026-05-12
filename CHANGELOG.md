@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #599 - 2026-05-12
+- **Dependency**: Bumped minimum LiteLLM version from 1.81.14 to 1.83.10.
+
 ### PR #598 - 2026-05-12
 - Added an optional `Dockerfile.runtimeonly` that builds a slimmer deployed image using Chainguard bases (Node frontend stage + Python runtime stage), excludes top-level docs/test/scripts trees, and is documented in the README and installation guide.
 
