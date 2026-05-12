@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# PR #595 - Agent Portal WebSocket Origin allowlist
+# PR #596 - Agent Portal WebSocket Origin allowlist
 #
 # Scope validated by this script:
-#   1. CHANGELOG has a correctly formatted `### PR #595 - YYYY-MM-DD` heading.
+#   1. CHANGELOG has a correctly formatted `### PR #596 - YYYY-MM-DD` heading.
 #   2. config_manager.py exposes the new agent_portal_allowed_origins field
 #      bound to AGENT_PORTAL_ALLOWED_ORIGINS.
 #   3. agent_portal_routes.py uses _origin_is_allowed (the old
@@ -44,7 +44,7 @@ print_result() {
     fi
 }
 
-print_header "PR #595: Agent Portal WS Origin allowlist"
+print_header "PR #596: Agent Portal WS Origin allowlist"
 
 if [ -f "$PROJECT_ROOT/.venv/bin/activate" ]; then
     # shellcheck disable=SC1091
@@ -57,8 +57,8 @@ export PYTHONPATH="$PROJECT_ROOT"
 # 1. CHANGELOG heading
 # ==========================================
 print_header "1. CHANGELOG heading format"
-grep -q "^### PR #595 - 2026-" "$PROJECT_ROOT/CHANGELOG.md"
-print_result $? "CHANGELOG.md has '### PR #595 - YYYY-MM-DD' heading"
+grep -q "^### PR #596 - 2026-" "$PROJECT_ROOT/CHANGELOG.md"
+print_result $? "CHANGELOG.md has '### PR #596 - YYYY-MM-DD' heading"
 
 # ==========================================
 # 2. Config field exists and is env-bound
@@ -88,7 +88,7 @@ print_result $? "agent_portal_routes.py no longer references _origin_is_loopback
 # ==========================================
 print_header "4. Default-safe behaviour (env unset)"
 
-python - <<'PY' > /tmp/pr595_default.log 2>&1
+python - <<'PY' > /tmp/pr596_default.log 2>&1
 import sys
 from atlas.routes import agent_portal_routes as ap
 
@@ -106,7 +106,7 @@ print("OK")
 PY
 RC=$?
 if [ "$RC" -ne 0 ]; then
-    cat /tmp/pr595_default.log
+    cat /tmp/pr596_default.log
 fi
 print_result "$RC" "loopback passes and unlisted hostnames are rejected when env is empty"
 
@@ -115,7 +115,7 @@ print_result "$RC" "loopback passes and unlisted hostnames are rejected when env
 # ==========================================
 print_header "5. Allowlist behaviour (env populated)"
 
-python - <<'PY' > /tmp/pr595_allowlist.log 2>&1
+python - <<'PY' > /tmp/pr596_allowlist.log 2>&1
 from atlas.routes import agent_portal_routes as ap
 
 class S:
@@ -133,7 +133,7 @@ print("OK")
 PY
 RC=$?
 if [ "$RC" -ne 0 ]; then
-    cat /tmp/pr595_allowlist.log
+    cat /tmp/pr596_allowlist.log
 fi
 print_result "$RC" "allowlisted hostname accepted, unlisted hostname still rejected"
 
@@ -152,10 +152,10 @@ TEST_FILE="$ATLAS_DIR/tests/test_agent_portal_origin_check.py"
 [ -f "$TEST_FILE" ]
 print_result $? "atlas/tests/test_agent_portal_origin_check.py exists"
 
-python -m pytest "$TEST_FILE" -q > /tmp/pr595_pytest.log 2>&1
+python -m pytest "$TEST_FILE" -q > /tmp/pr596_pytest.log 2>&1
 PYTEST_RC=$?
 if [ "$PYTEST_RC" -ne 0 ]; then
-    tail -30 /tmp/pr595_pytest.log
+    tail -30 /tmp/pr596_pytest.log
 fi
 print_result "$PYTEST_RC" "origin-check unit tests pass"
 
