@@ -57,7 +57,7 @@ COPY prompts/ ./prompts/
 COPY --from=frontend-build /app/frontend/dist /app/atlas/static
 
 # Remove Python test package from runtime image.
-# Docker COPY cannot reliably exclude nested paths across all builder environments,
+# Container build COPY semantics cannot reliably exclude nested paths across all builder environments,
 # so we copy atlas/ once and prune tests in a separate layer.
 RUN rm -rf /app/atlas/tests
 
