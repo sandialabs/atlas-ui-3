@@ -1,0 +1,88 @@
+# Runtime-only container image for Atlas UI 3.
+# This keeps Node.js and frontend build tooling in a separate stage so the
+# final image only contains runtime dependencies.
+
+FROM registry.access.redhat.com/ubi9/ubi:latest AS frontend-build
+
+WORKDIR /app/frontend
+
+# Install Node.js only in the build stage.
+RUN dnf install -y --allowerasing curl && \
+    dnf module enable nodejs:20 -y && \
+    dnf install -y nodejs && \
+    dnf clean all
+
+COPY frontend/package*.json ./
+ENV NPM_CONFIG_CACHE=/app/.npm
+RUN npm ci --include=dev
+
+COPY frontend/ ./
+ARG VITE_APP_NAME="ATLAS"
+ENV VITE_APP_NAME=${VITE_APP_NAME}
+ARG VITE_FEATURE_POWERED_BY_ATLAS="false"
+ENV VITE_FEATURE_POWERED_BY_ATLAS=${VITE_FEATURE_POWERED_BY_ATLAS}
+ARG VITE_FEATURE_ANIMATED_LOGO="true"
+ENV VITE_FEATURE_ANIMATED_LOGO=${VITE_FEATURE_ANIMATED_LOGO}
+ARG VITE_FEATURE_RAG_CITATIONS="false"
+ENV VITE_FEATURE_RAG_CITATIONS=${VITE_FEATURE_RAG_CITATIONS}
+ARG GIT_HASH="unknown"
+ARG APP_VERSION="unknown"
+ENV GIT_HASH=${GIT_HASH}
+ENV APP_VERSION=${APP_VERSION}
+RUN npm run build
+
+
+FROM registry.access.redhat.com/ubi9/ubi:latest
+
+WORKDIR /app
+
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Install only runtime system dependencies.
+RUN dnf install -y --allowerasing \
+    python3 \
+    python3-pip \
+    curl \
+    hostname \
+    && dnf clean all
+
+# Copy only runtime application files (skip docs/test/scripts).
+COPY pyproject.toml README.md setup.py ./
+COPY atlas/ ./atlas/
+COPY prompts/ ./prompts/
+COPY --from=frontend-build /app/frontend/dist /app/atlas/static
+
+# Remove Python test package from runtime image.
+RUN rm -rf /app/atlas/tests
+
+# Create runtime/config directories and seed config defaults.
+RUN mkdir -p \
+        /app/config \
+        /app/runtime/logs \
+        /app/runtime/feedback \
+        /app/runtime/uploads && \
+    cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/config/ 2>/dev/null || true && \
+    touch /app/runtime/logs/.gitkeep /app/runtime/feedback/.gitkeep /app/runtime/uploads/.gitkeep
+
+# Install Atlas and dependencies into a dedicated virtual environment.
+RUN python3 -m venv /app/.venv
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir .
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+ENV NODE_ENV=production \
+    APP_CONFIG_DIR=/app/config \
+    RUNTIME_LOG_DIR=/app/runtime/logs \
+    RUNTIME_FEEDBACK_DIR=/app/runtime/feedback \
+    GIT_COMMIT=${GIT_HASH} \
+    ATLAS_HOST=0.0.0.0 \
+    PORT=8000
+
+WORKDIR /app/atlas
+CMD ["python3", "main.py"]

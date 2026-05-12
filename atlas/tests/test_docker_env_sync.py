@@ -202,3 +202,22 @@ def test_docker_specific_vars_present():
         assert var in docker_compose_vars, (
             f"S3 configuration variable '{var}' is required in docker-compose.yml for MinIO integration"
         )
+
+
+def test_runtime_only_dockerfile_keeps_runtime_surface_small():
+    """Ensure the optional runtime-only container build recipe stays minimal."""
+    repo_root = Path(__file__).parent.parent.parent
+    dockerfile_path = repo_root / 'Dockerfile.runtimeonly'
+
+    assert dockerfile_path.exists(), "Dockerfile.runtimeonly must exist for slim runtime builds"
+
+    dockerfile_content = dockerfile_path.read_text(encoding='utf-8')
+
+    # Runtime image should copy only built frontend assets, not the full frontend source tree.
+    assert 'COPY --from=frontend-build /app/frontend/dist /app/atlas/static' in dockerfile_content
+
+    # Runtime recipe should avoid pulling in extra top-level development/test trees.
+    for excluded_copy in ('COPY docs/', 'COPY test/', 'COPY scripts/', 'COPY mocks/'):
+        assert excluded_copy not in dockerfile_content, (
+            f"Runtime-only image should not include '{excluded_copy}'"
+        )

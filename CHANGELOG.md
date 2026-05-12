@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #566 - 2026-05-12
+- Added `Dockerfile.runtimeonly`, a multi-stage runtime-focused container recipe that keeps Node build tooling out of the final deployed image and excludes top-level docs/test/script trees.
+- Documented how to build and run the runtime-only image in the README and installation guide.
+
 ### PR #565 - 2026-04-25
 - MCP sessions are now keyed by `(user, conversation, server)` and client-supplied `conversation_id` values owned by another user are rejected on chat and restore.
 - Hardened the new ownership boundary after multi-agent review:

@@ -202,6 +202,19 @@ podman run -p 8000:8000 \
 
 The container seeds `/app/config` from package defaults at build time. Mounting your local `config/` folder overrides those defaults, so you can customize `llmconfig.yml`, `mcp.json`, etc. without rebuilding.
 
+### Runtime-only Image (smaller runtime footprint)
+
+Build the standard image when you need development-oriented files in the container.  
+Build the runtime-only recipe to keep Node.js, docs, and test trees out of the final image:
+
+```bash
+podman build -f Dockerfile.runtimeonly -t atlas-ui-3-runtime .
+podman run -p 8000:8000 \
+  -v $(pwd)/config:/app/config:Z \
+  --env-file .env \
+  atlas-ui-3-runtime
+```
+
 ### Container Images
 
 Pre-built container images are available at `quay.io/agarlan-snl/atlas-ui-3:latest` (pushes automatically from main branch).
@@ -234,4 +247,3 @@ BibTeX:
 Copyright 2025 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
 
 MIT License
-
