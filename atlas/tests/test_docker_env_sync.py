@@ -216,6 +216,9 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
     # Runtime image should copy only built frontend assets, not the full frontend source tree.
     assert 'COPY --from=frontend-build /app/frontend/dist /app/atlas/static' in dockerfile_content
 
+    # Node.js toolchain should only be installed in the frontend-build stage.
+    assert dockerfile_content.count('dnf module enable nodejs:20') == 1
+
     # Runtime recipe should avoid pulling in extra top-level development/test trees.
     for excluded_copy in ('COPY docs/', 'COPY test/', 'COPY scripts/', 'COPY mocks/'):
         assert excluded_copy not in dockerfile_content, (
