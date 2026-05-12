@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #595 - 2026-05-11
+- Added `AGENT_PORTAL_ALLOWED_ORIGINS` to let the Agent Portal WebSocket stream accept Origin headers beyond loopback when the deployment is fronted by an authenticating reverse proxy (e.g. Cloudflare Access). Loopback hosts remain allowed by default; the env var is a comma-separated hostname allowlist and is empty by default, so the gate is unchanged for stock installs.
+- Renamed `_origin_is_loopback` to `_origin_is_allowed` in `atlas/routes/agent_portal_routes.py` and updated the rejection log message; updated `docs/agentportal/threat-model.md` to describe the expanded allowlist and its residual risks.
+
 ### PR #565 - 2026-04-25
 - MCP sessions are now keyed by `(user, conversation, server)` and client-supplied `conversation_id` values owned by another user are rejected on chat and restore.
 - Hardened the new ownership boundary after multi-agent review:

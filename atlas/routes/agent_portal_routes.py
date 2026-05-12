@@ -1066,18 +1066,20 @@ async def list_audit(
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
-def _origin_is_loopback(origin: Optional[str]) -> bool:
-    """Return True if the Origin header names a loopback host over http(s).
+def _extra_allowed_origin_hosts() -> set[str]:
+    """Hostnames from AGENT_PORTAL_ALLOWED_ORIGINS, normalized to lowercase."""
+    raw = app_factory.get_config_manager().app_settings.agent_portal_allowed_origins or ""
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+def _origin_is_allowed(origin: Optional[str]) -> bool:
+    """Return True if the Origin header is loopback or in the allowlist.
 
     WebSocket upgrades are not covered by CORS preflight, so a page at any
-    origin can open a WS to localhost:<port>. Limiting accept() to loopback
-    origins blocks drive-by CSRF from an untrusted browser tab while still
-    allowing the local dev UI. Any port is accepted on the loopback hosts
-    for now; tighten to the configured backend port once that is threaded
-    through.
-
-    TODO: restrict the allowed port to the backend's own port instead of
-    accepting any.
+    origin can open a WS to the server unless we reject it here. Loopback
+    is always allowed for local dev; additional hostnames may be permitted
+    via AGENT_PORTAL_ALLOWED_ORIGINS for deployments behind an auth proxy
+    (e.g. Cloudflare Access).
     """
     if not origin:
         return False
@@ -1088,7 +1090,9 @@ def _origin_is_loopback(origin: Optional[str]) -> bool:
     if parsed.scheme not in ("http", "https"):
         return False
     hostname = (parsed.hostname or "").lower()
-    return hostname in _LOOPBACK_HOSTS
+    if hostname in _LOOPBACK_HOSTS:
+        return True
+    return hostname in _extra_allowed_origin_hosts()
 
 
 def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
@@ -1137,9 +1141,9 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
     # page can open a socket to the dev server unless we reject it here.
     # See docs/agentportal/threat-model.md.
     origin = websocket.headers.get("origin")
-    if not _origin_is_loopback(origin):
+    if not _origin_is_allowed(origin):
         logger.warning(
-            "agent_portal stream rejected non-loopback origin=%s process=%s",
+            "agent_portal stream rejected disallowed origin=%s process=%s",
             sanitize_for_logging(origin or ""),
             sanitize_for_logging(process_id),
         )
