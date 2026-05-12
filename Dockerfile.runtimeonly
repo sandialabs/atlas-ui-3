@@ -35,6 +35,9 @@ RUN npm run build
 
 FROM registry.access.redhat.com/ubi9/python-311:latest
 
+# ubi9/python-311 defaults to a non-root user; switch to root for system setup.
+USER 0
+
 WORKDIR /app
 
 ARG GIT_HASH="unknown"
