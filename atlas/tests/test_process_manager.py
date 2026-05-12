@@ -369,3 +369,117 @@ async def test_child_env_is_isolated(monkeypatch):
     assert "LANG" in env_keys
     for denied in secrets:
         assert denied not in env_keys, f"{denied} leaked to child"
+
+
+# ---------------------------------------------------------------------------
+# Loop-teardown cleanup — regression coverage for the CancelledError paths in
+# ``_wait_and_finalize`` / ``_kill_if_still_alive``. Without this, the asyncio
+# subprocess transport is left ``_closed=False`` when pytest-asyncio cancels
+# the wait task at end-of-test; ``BaseSubprocessTransport.__del__`` then fires
+# at the next GC pass and (under Python 3.12) raises
+# ``RuntimeError("Event loop is closed")``, which pytest surfaces as
+# ``PytestUnraisableExceptionWarning``.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_kill_and_close_transport_marks_transport_closed():
+    """Calling the helper directly should kill the child and flip the
+    asyncio subprocess transport's ``_closed`` flag synchronously."""
+    manager = ProcessManager()
+    managed = await manager.launch(
+        command="/usr/bin/sleep", args=["30"], user_email="alice@x",
+    )
+    asyncio_proc = manager._asyncio_procs[managed.id]
+    transport = asyncio_proc._transport
+    assert transport is not None
+    assert transport.is_closing() is False
+
+    manager._kill_and_close_transport(managed, asyncio_proc)
+
+    # _closed flips immediately; pipe-cleanup is fire-and-forget via
+    # call_soon, but is_closing() returns the _closed flag.
+    assert transport.is_closing() is True
+    # Drain so the wait task observes the dead child and clears state,
+    # otherwise we'd be the test that leaks transports.
+    await asyncio.wait_for(asyncio_proc.wait(), timeout=2.0)
+
+
+@pytest.mark.asyncio
+async def test_wait_and_finalize_closes_transport_on_cancellation():
+    """Simulate pytest-asyncio's loop teardown: cancel the long-lived
+    wait task that ``launch()`` registered while the child is still
+    running, and confirm the transport is closed and the entry is
+    dropped from ``_asyncio_procs`` so the unraisable warning path
+    can't fire later."""
+    manager = ProcessManager()
+    managed = await manager.launch(
+        command="/usr/bin/sleep", args=["30"], user_email="alice@x",
+    )
+    asyncio_proc = manager._asyncio_procs[managed.id]
+    transport = asyncio_proc._transport
+    assert transport is not None
+
+    # The wait task isn't held by ProcessManager, so locate it via the
+    # loop. There is exactly one task awaiting this proc's wait() — the
+    # one scheduled by launch(). Yield first so the task actually
+    # enters its body and reaches ``await asyncio_proc.wait()``;
+    # cancelling a task that has not yet run aborts it without running
+    # the except handler we're trying to exercise.
+    await asyncio.sleep(0)
+    wait_task = next(
+        t for t in asyncio.all_tasks()
+        if t.get_coro().__qualname__ == "ProcessManager._wait_and_finalize"
+    )
+
+    wait_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await wait_task
+
+    assert transport.is_closing() is True
+    assert managed.id not in manager._asyncio_procs
+
+
+@pytest.mark.asyncio
+async def test_loop_teardown_does_not_emit_unraisable_warning():
+    """End-to-end: after the wait task is cancelled, a GC pass must not
+    produce any ``PytestUnraisableExceptionWarning`` from
+    ``BaseSubprocessTransport.__del__``. This is the user-visible
+    symptom we shipped this fix for."""
+    import gc
+    import warnings
+
+    manager = ProcessManager()
+    managed = await manager.launch(
+        command="/usr/bin/sleep", args=["30"], user_email="alice@x",
+    )
+
+    # See companion test above for why this yield matters.
+    await asyncio.sleep(0)
+    wait_task = next(
+        t for t in asyncio.all_tasks()
+        if t.get_coro().__qualname__ == "ProcessManager._wait_and_finalize"
+    )
+    wait_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await wait_task
+
+    # Drop the only remaining strong references the test holds. The
+    # subprocess.Process and its transport should then be eligible for
+    # collection and __del__ should be a no-op (because _closed=True).
+    del managed
+    del manager
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        gc.collect()
+
+    offenders = [
+        w for w in captured
+        if "Event loop is closed" in str(w.message)
+        or "unclosed transport" in str(w.message)
+    ]
+    assert offenders == [], (
+        f"unexpected unraisable / unclosed-transport warning(s): "
+        f"{[str(w.message) for w in offenders]}"
+    )

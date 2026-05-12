@@ -856,6 +856,14 @@ class ProcessManager:
                         sanitize_for_logging(process_id),
                         sanitize_for_logging(e),
                     )
+            except asyncio.CancelledError:
+                # Loop is shutting down before we finished policing the
+                # SIGTERM grace period. Force-kill the whole process
+                # group and close the asyncio transport so its __del__
+                # doesn't fire on a closed loop later. See
+                # _wait_and_finalize for the longer explanation.
+                self._kill_and_close_transport(managed, asyncio_proc)
+                raise
 
         asyncio.create_task(_kill_if_still_alive())
         managed.status = ProcessStatus.CANCELLED
@@ -975,12 +983,77 @@ class ProcessManager:
                 # fd already closed — expected during teardown.
                 pass
 
+    def _kill_and_close_transport(
+        self,
+        managed: ManagedProcess,
+        asyncio_proc: asyncio.subprocess.Process,
+    ) -> None:
+        """Force-kill ``asyncio_proc`` and close its asyncio transport.
+
+        Used from the ``CancelledError`` paths in ``_wait_and_finalize``
+        and the inner ``_kill_if_still_alive`` task. Mirrors the
+        process-group kill that ``cancel()`` uses for normal teardown
+        — ``launch()`` always starts children with
+        ``start_new_session=True``, so killing only the session leader
+        would orphan any descendants (e.g. ``bash -c 'sleep 999'``).
+        Closing the asyncio transport while the loop is still alive
+        flips ``transport._closed`` so a later ``__del__`` short-
+        circuits before touching the closed loop.
+        """
+        if asyncio_proc.pid is not None:
+            try:
+                os.killpg(os.getpgid(asyncio_proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                # Process group already gone or we lost the right to
+                # signal it — fall through to the direct-kill path.
+                try:
+                    asyncio_proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
+        else:
+            try:
+                asyncio_proc.kill()
+            except (ProcessLookupError, OSError):
+                pass
+
+        transport = getattr(asyncio_proc, "_transport", None)
+        if transport is not None:
+            try:
+                transport.close()
+            except (RuntimeError, OSError) as exc:
+                # RuntimeError surfaces when the loop has already
+                # closed; OSError covers pipe-fd churn during teardown.
+                # Either way the transport is on its way out and the
+                # only goal here is the ``_closed=True`` side effect.
+                logger.debug(
+                    "transport.close() during teardown of %s raised: %s",
+                    sanitize_for_logging(managed.id),
+                    sanitize_for_logging(exc),
+                )
+
     async def _wait_and_finalize(
         self,
         managed: ManagedProcess,
         asyncio_proc: asyncio.subprocess.Process,
     ) -> None:
-        exit_code = await asyncio_proc.wait()
+        try:
+            exit_code = await asyncio_proc.wait()
+        except asyncio.CancelledError:
+            # The event loop is being torn down (typically a test ending
+            # while the child is still running). If we let the task die
+            # here, the asyncio subprocess transport is left "open" — its
+            # __del__ then fires at some later GC point and, depending on
+            # Python version, either emits a ResourceWarning or tries to
+            # use the now-closed loop and raises RuntimeError("Event loop
+            # is closed"), which pytest captures as
+            # PytestUnraisableExceptionWarning. Closing the transport
+            # synchronously while the loop is still alive flips
+            # ``_closed`` to True so __del__ becomes a no-op. (Python
+            # 3.13 partially fixes this via CPython gh-114177, but 3.12
+            # still trips on it; both benefit from explicit close.)
+            self._kill_and_close_transport(managed, asyncio_proc)
+            self._asyncio_procs.pop(managed.id, None)
+            raise
         managed.exit_code = exit_code
         managed.ended_at = time.time()
         if managed.status == ProcessStatus.CANCELLED:
