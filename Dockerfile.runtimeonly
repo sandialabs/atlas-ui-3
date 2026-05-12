@@ -1,0 +1,102 @@
+# Runtime-only container image for Atlas UI 3.
+# This keeps Node.js and frontend build tooling in a separate stage so the
+# final image only contains runtime dependencies.
+#
+# Both stages use Chainguard images for a minimal CVE surface.
+
+FROM cgr.dev/chainguard/node:latest-dev AS frontend-build
+
+# Chainguard node defaults to nonroot; switch to root for build operations.
+USER root
+WORKDIR /app/frontend
+
+COPY frontend/package*.json ./
+ENV NPM_CONFIG_CACHE=/tmp/.npm
+RUN npm ci
+
+COPY frontend/ ./
+ARG VITE_APP_NAME="ATLAS"
+ENV VITE_APP_NAME=${VITE_APP_NAME}
+ARG VITE_FEATURE_POWERED_BY_ATLAS="false"
+ENV VITE_FEATURE_POWERED_BY_ATLAS=${VITE_FEATURE_POWERED_BY_ATLAS}
+ARG VITE_FEATURE_ANIMATED_LOGO="true"
+ENV VITE_FEATURE_ANIMATED_LOGO=${VITE_FEATURE_ANIMATED_LOGO}
+ARG VITE_FEATURE_RAG_CITATIONS="false"
+ENV VITE_FEATURE_RAG_CITATIONS=${VITE_FEATURE_RAG_CITATIONS}
+ARG GIT_HASH="unknown"
+ARG APP_VERSION="unknown"
+ENV GIT_HASH=${GIT_HASH}
+ENV APP_VERSION=${APP_VERSION}
+RUN npm run build
+
+
+FROM cgr.dev/chainguard/python:latest-dev
+
+# Chainguard Python image defaults to the nonroot user (65532:65532).
+# Switch to root for filesystem setup and package installation, then drop
+# back to nonroot before the final CMD.
+USER root
+
+WORKDIR /app
+
+ARG GIT_HASH="unknown"
+
+# Fail fast if the rolling `latest-dev` tag points at a Python version that
+# is older than what pyproject.toml requires (>=3.11). This avoids the
+# confusing "Package 'atlas-chat' requires a different Python" error from
+# `pip install` deep in the build.
+RUN python3 -c "import sys; assert sys.version_info >= (3, 11), \
+        f'Chainguard python:latest-dev is Python {sys.version_info.major}.{sys.version_info.minor}, but atlas-chat requires >=3.11. Pin a newer tag or digest.'"
+
+# Copy only runtime application files (skip docs/test/scripts).
+COPY pyproject.toml README.md ./
+COPY atlas/ ./atlas/
+COPY prompts/ ./prompts/
+COPY --from=frontend-build /app/frontend/dist /app/atlas/static
+
+# Remove Python test package from runtime image.
+# Container build COPY semantics cannot reliably exclude nested paths across all builder environments,
+# so we copy atlas/ once and prune tests in a separate layer.
+RUN rm -rf /app/atlas/tests
+
+# Create runtime/config directories and seed config defaults.
+RUN mkdir -p \
+        /app/config \
+        /app/runtime/logs \
+        /app/runtime/feedback \
+        /app/runtime/uploads && \
+    find /app/atlas/config -maxdepth 1 -type f \( -name '*.json' -o -name '*.yml' -o -name '*.yaml' \) -exec cp {} /app/config/ \; && \
+    touch /app/runtime/logs/.gitkeep /app/runtime/feedback/.gitkeep /app/runtime/uploads/.gitkeep
+
+# Install Atlas and dependencies into a dedicated virtual environment.
+# The `[mcp-demos]` extra matches the main Dockerfile so bundled MCP demo
+# servers (e.g. pptx_generator) referenced by the seeded default mcp.json
+# work out of the box. Users who want a truly minimal image can replace the
+# seeded config and drop the extra.
+RUN python3 -m venv /app/.venv
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir ".[mcp-demos]"
+
+RUN chown -R nonroot:nonroot /app
+USER nonroot
+
+EXPOSE 8000
+
+ENV NODE_ENV=production \
+    APP_CONFIG_DIR=/app/config \
+    RUNTIME_LOG_DIR=/app/runtime/logs \
+    RUNTIME_FEEDBACK_DIR=/app/runtime/feedback \
+    GIT_HASH=${GIT_HASH} \
+    GIT_COMMIT=${GIT_HASH} \
+    ATLAS_HOST=0.0.0.0 \
+    PORT=8000
+
+WORKDIR /app/atlas
+
+# Chainguard Python images set ENTRYPOINT ["/usr/bin/python"], which would
+# prepend the system interpreter to CMD and break the exec form.  Clear it
+# so that our venv python is invoked directly.
+ENTRYPOINT []
+CMD ["/app/.venv/bin/python", "main.py"]

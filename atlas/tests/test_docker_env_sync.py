@@ -8,6 +8,8 @@ configurations.
 import re
 from pathlib import Path
 
+import pytest
+
 
 def parse_env_example(env_file_path: Path) -> dict[str, str]:
     """Parse .env.example and extract all environment variables.
@@ -201,4 +203,38 @@ def test_docker_specific_vars_present():
     for var in s3_vars:
         assert var in docker_compose_vars, (
             f"S3 configuration variable '{var}' is required in docker-compose.yml for MinIO integration"
+        )
+
+
+def test_runtime_only_dockerfile_keeps_runtime_surface_small():
+    """Ensure the optional runtime-only container build recipe stays minimal."""
+    repo_root = Path(__file__).parent.parent.parent
+    dockerfile_path = repo_root / 'Dockerfile.runtimeonly'
+
+    if not dockerfile_path.exists():
+        pytest.skip(
+            "Dockerfile.runtimeonly not present in this checkout "
+            "(expected when running tests inside a container image that does "
+            "not COPY top-level Dockerfiles)."
+        )
+
+    dockerfile_content = dockerfile_path.read_text(encoding='utf-8')
+
+    # Both stages must use Chainguard images for a minimal CVE surface.
+    # Match by registry/name prefix so the recipe can later pin to a specific
+    # tag or digest without breaking this assertion.
+    assert 'FROM cgr.dev/chainguard/python:' in dockerfile_content, (
+        "Runtime stage must use a Chainguard Python image"
+    )
+    assert 'FROM cgr.dev/chainguard/node:' in dockerfile_content, (
+        "Frontend build stage must use a Chainguard Node image"
+    )
+
+    # Runtime image should copy only built frontend assets, not the full frontend source tree.
+    assert 'COPY --from=frontend-build /app/frontend/dist /app/atlas/static' in dockerfile_content
+
+    # Runtime recipe should avoid pulling in extra top-level development/test trees.
+    for excluded_copy in ('COPY docs/', 'COPY test/', 'COPY scripts/', 'COPY mocks/'):
+        assert excluded_copy not in dockerfile_content, (
+            f"Runtime-only image should not include '{excluded_copy}'"
         )

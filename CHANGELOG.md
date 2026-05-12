@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #598 - 2026-05-12
+- Added an optional `Dockerfile.runtimeonly` that builds a slimmer deployed image using Chainguard bases (Node frontend stage + Python runtime stage), excludes top-level docs/test/scripts trees, and is documented in the README and installation guide.
+
 ### PR #565 - 2026-04-25
 - MCP sessions are now keyed by `(user, conversation, server)` and client-supplied `conversation_id` values owned by another user are rejected on chat and restore.
 - Hardened the new ownership boundary after multi-agent review:
