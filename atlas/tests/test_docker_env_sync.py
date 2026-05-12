@@ -238,3 +238,6 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
         assert excluded_copy not in dockerfile_content, (
             f"Runtime-only image should not include '{excluded_copy}'"
         )
+
+    # Runtime install must tolerate Python upper-bound constraints in transitive deps.
+    assert '--ignore-requires-python ".[mcp-demos]"' in dockerfile_content

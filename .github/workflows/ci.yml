@@ -90,6 +90,22 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
 
+    - name: Build runtime-only Docker image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./Dockerfile.runtimeonly
+        load: true
+        build-args: |
+          VITE_APP_NAME=ATLAS
+          VITE_FEATURE_ANIMATED_LOGO=true
+          VITE_FEATURE_POWERED_BY_ATLAS=false
+          VITE_FEATURE_RAG_CITATIONS=false
+          GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
+          APP_VERSION=${{ steps.build_meta.outputs.version }}
+        tags: runtime-only-image:latest
+        labels: ${{ steps.meta.outputs.labels }}
+
     - name: Push production Docker image
       uses: docker/build-push-action@v7
       with:
