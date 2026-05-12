@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { Maximize2, X, Edit2, Check, Shield, Boxes, Square } from 'lucide-react'
+import { Maximize2, X, Edit2, Check, Shield, Boxes, Square, Trash2 } from 'lucide-react'
 
 // Plain-text scrollback ring buffer for non-PTY processes. Keep the
 // last N chunks so swapping between slots in 2x2 view doesn't lose
@@ -44,6 +44,7 @@ function Pane({
   process,
   onClose,
   onCancel,
+  onRemove,
   onFullscreen,
   onRename,
   isFullscreen,
@@ -64,7 +65,14 @@ function Pane({
   // (history replay races with xterm initialization on a fast-arriving
   // stream — same race the original AgentPortal addressed).
   const pendingRawRef = useRef([])
+  // Same race for system messages — surface them in xterm once it mounts.
+  const pendingSysRef = useRef([])
   const [chunks, setChunks] = useState([])
+  // Latest system message kept for the banner under the breadcrumb.
+  // System messages tell the user about silence watchdogs, sandbox
+  // setup failures, and exit codes — without this, PTY-mode panes
+  // would hide them entirely since the body is xterm, not <chunks>.
+  const [lastSystemMsg, setLastSystemMsg] = useState(null)
   const [editingName, setEditingName] = useState(false)
   const [draftName, setDraftName] = useState(process?.display_name || '')
   const [connected, setConnected] = useState(false)
@@ -148,6 +156,10 @@ function Pane({
       for (const data of pendingRawRef.current) writePtyChunk(term, data)
       pendingRawRef.current = []
     }
+    if (pendingSysRef.current.length > 0) {
+      for (const text of pendingSysRef.current) writeSystemMessage(term, text)
+      pendingSysRef.current = []
+    }
 
     return () => {
       cancelAnimationFrame(raf)
@@ -168,6 +180,8 @@ function Pane({
     if (!procId) {
       setChunks([])
       pendingRawRef.current = []
+      pendingSysRef.current = []
+      setLastSystemMsg(null)
       return
     }
     if (wsRef.current) {
@@ -176,6 +190,8 @@ function Pane({
     }
     setChunks([])
     pendingRawRef.current = []
+    pendingSysRef.current = []
+    setLastSystemMsg(null)
     if (termRef.current) termRef.current.clear()
 
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
@@ -200,6 +216,18 @@ function Pane({
               : prev
             return [...next, { stream: msg.stream, text: msg.text, timestamp: msg.timestamp }]
           })
+          // System messages (launch banner, silence watchdog, exit code,
+          // sandbox-setup failures) need to be visible regardless of
+          // mode. In PTY mode the pane body is xterm, so chunks above
+          // are invisible — write the message into xterm too, and pin
+          // the latest one in a banner under the breadcrumb so users
+          // see exit / failure status without scrolling the terminal.
+          if (msg.stream === 'system') {
+            setLastSystemMsg({ text: msg.text || '', timestamp: msg.timestamp })
+            const term = termRef.current
+            if (term) writeSystemMessage(term, msg.text || '')
+            else pendingSysRef.current.push(msg.text || '')
+          }
         } else if (msg.type === 'output_raw') {
           const term = termRef.current
           if (term) writePtyChunk(term, msg.data)
@@ -348,6 +376,16 @@ function Pane({
             <Square className="w-3 h-3" />
           </button>
         )}
+        {procId && onRemove && process && process.status !== 'running' && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onRemove(process) }}
+            className="p-1 text-gray-500 hover:text-red-400"
+            title="Remove from list (process is finished)"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        )}
         {procId && onFullscreen && !isFullscreen && (
           <button
             type="button"
@@ -373,6 +411,16 @@ function Pane({
       {breadcrumb && (
         <div className="px-2 py-0.5 border-b border-gray-800 bg-gray-900 text-[10px] text-gray-500 font-mono truncate">
           {breadcrumb}
+        </div>
+      )}
+
+      {lastSystemMsg && (
+        <div
+          className="px-2 py-1 border-b border-yellow-900/60 bg-yellow-950/40 text-[11px] text-yellow-200 font-mono whitespace-pre-wrap"
+          data-testid="agent-portal-system-msg"
+          title="Latest system message"
+        >
+          {lastSystemMsg.text}
         </div>
       )}
 
@@ -418,6 +466,23 @@ function writePtyChunk(term, base64Data) {
     term.write(bytes)
   } catch {
     // Defensive: drop malformed chunks rather than crashing the pane.
+  }
+}
+
+// Render a system message into an xterm pane. Multi-line messages
+// get a yellow [atlas] prefix on each line so a Landlock denial,
+// silence-watchdog hint, or exit-code banner is impossible to miss
+// when it lands in the middle of the program's own output.
+function writeSystemMessage(term, text) {
+  try {
+    const lines = (text || '').split('\n')
+    for (const line of lines) {
+      // ANSI: bold yellow on default bg. Reset after each line so the
+      // user's program keeps its own colors on subsequent output.
+      term.write(`\r\n\x1b[1;33m${line}\x1b[0m\r\n`)
+    }
+  } catch {
+    // Defensive: ignore if the terminal got disposed between checks.
   }
 }
 

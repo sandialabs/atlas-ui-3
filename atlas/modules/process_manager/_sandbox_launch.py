@@ -15,10 +15,15 @@ Where MODE is one of:
   configs or invoke interpreters under ``~/.local/bin``, ``/nix``,
   ``~/.nvm``, etc.
 
-Extra writable paths (e.g. ``~/.cline``, ``~/.cache/cline``) can be
-passed via the ``ATLAS_SANDBOX_EXTRA_WRITE_PATHS`` environment
-variable as a colon-separated list of absolute paths. Each path is
-granted the same access set as WORKDIR.
+Extra writable paths (e.g. ``~/.cline``, ``~/.cache/cline``,
+``~/.claude``, ``~/.claude.json``) can be passed via the
+``ATLAS_SANDBOX_EXTRA_WRITE_PATHS`` environment variable as a
+colon-separated list of absolute paths. Each path is granted the
+same access set as WORKDIR. Both directories and single files are
+supported -- directory entries grant write recursively, file
+entries grant write to that one file only (useful for state files
+at ``$HOME`` root like ``~/.claude.json`` that you don't want to
+expose by granting write on the entire home directory).
 
 This file is intentionally self-contained (only stdlib imports) so it
 can be run by absolute path without the ``atlas`` package being on
@@ -78,6 +83,16 @@ _WORKDIR_ACCESS = (
     | _ACCESS_MAKE_SYM
     | _ACCESS_MAKE_FIFO
     | _ACCESS_MAKE_SOCK
+    | _ACCESS_TRUNCATE
+)
+
+# Access mask for a single regular file granted write. PATH_BENEATH
+# on a file fd grants only the file-level bits; directory bits like
+# MAKE_REG / REMOVE_DIR are meaningless on a non-directory and would
+# be silently dropped, so we ask only for what makes sense.
+_FILE_WRITE_ACCESS = (
+    _ACCESS_READ_FILE
+    | _ACCESS_WRITE_FILE
     | _ACCESS_TRUNCATE
 )
 
@@ -163,7 +178,7 @@ def _add_rule(libc, ruleset_fd: int, path: str, allowed: int, handled: int) -> N
         os.close(dir_fd)
 
 
-def _apply_landlock(workdir: str, mode: str, extra_read_dirs=(), extra_write_dirs=()) -> None:
+def _apply_landlock(workdir: str, mode: str, extra_read_dirs=(), extra_write_paths=()) -> None:
     if not workdir or not os.path.isdir(workdir):
         raise ValueError(f"workdir must be an existing directory: {workdir!r}")
     if mode not in ("strict", "workspace-write"):
@@ -194,17 +209,47 @@ def _apply_landlock(workdir: str, mode: str, extra_read_dirs=(), extra_write_dir
         # Always: read + write_file on /dev so /dev/null, /dev/tty, and
         # /dev/stderr work for typical shell redirections.
         _add_rule(libc, ruleset_fd, "/dev", _DEV_ACCESS, handled)
-        # Caller-supplied additional writable directories (e.g. tool
-        # cache/log locations like ~/.cline, ~/.cache/<tool>).
-        for extra in extra_write_dirs:
-            if extra:
-                if not os.path.isdir(extra):
-                    # Create on demand so the rule can be attached.
-                    try:
-                        os.makedirs(extra, exist_ok=True)
-                    except OSError:
-                        continue
+        # Caller-supplied additional writable locations. Each entry is
+        # one of:
+        #   * an existing directory  -> grant _WORKDIR_ACCESS recursively
+        #   * an existing file       -> grant _FILE_WRITE_ACCESS to that
+        #                               single file (PATH_BENEATH on a
+        #                               file fd matches only that file)
+        #   * a missing path         -> created as a directory then
+        #                               granted _WORKDIR_ACCESS. We pick
+        #                               directory because that is the
+        #                               common case (tool data dirs).
+        # Single-file support exists so callers can grant write to a
+        # state file at $HOME root (e.g. ``~/.claude.json``) without
+        # opening up all of $HOME for writes.
+        for extra in extra_write_paths:
+            if not extra:
+                continue
+            try:
+                is_dir = os.path.isdir(extra)
+                is_file = os.path.isfile(extra)
+                if not (is_dir or is_file):
+                    # Path doesn't exist (or is a symlink with no target).
+                    raise FileNotFoundError(extra)
+            except (FileNotFoundError, PermissionError):
+                # Missing -- create as a directory so the rule attaches.
+                try:
+                    os.makedirs(extra, exist_ok=True)
+                except OSError as e:
+                    sys.stderr.write(
+                        f"[sandbox] skip extra-write '{extra}': cannot create ({e})\n"
+                    )
+                    continue
+                is_dir, is_file = True, False
+            if is_dir:
                 _add_rule(libc, ruleset_fd, extra, _WORKDIR_ACCESS, handled)
+            elif is_file:
+                _add_rule(libc, ruleset_fd, extra, _FILE_WRITE_ACCESS, handled)
+            else:
+                # Symlink to nowhere, socket, char device, etc.
+                sys.stderr.write(
+                    f"[sandbox] skip extra-write '{extra}': not a regular file or directory\n"
+                )
 
         if mode == "workspace-write":
             # Allow read+exec on the entire filesystem. Writes are still
@@ -256,7 +301,7 @@ def main() -> int:
             extra_read_dirs.append(os.path.dirname(os.path.realpath(target)))
 
     extra_write_raw = os.environ.get("ATLAS_SANDBOX_EXTRA_WRITE_PATHS", "")
-    extra_write_dirs = [
+    extra_write_paths = [
         os.path.abspath(os.path.expanduser(p))
         for p in extra_write_raw.split(":")
         if p.strip()
@@ -266,7 +311,7 @@ def main() -> int:
         _apply_landlock(
             workdir, mode,
             extra_read_dirs=extra_read_dirs,
-            extra_write_dirs=extra_write_dirs,
+            extra_write_paths=extra_write_paths,
         )
     except Exception as e:
         sys.stderr.write(f"sandbox setup failed: {e}\n")

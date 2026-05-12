@@ -255,6 +255,13 @@ class ManagedProcess:
     # the idle-kill sweeper to reap silent processes after their
     # group's idle_kill_seconds has elapsed.
     last_activity: float = 0.0
+    # True once a real output chunk (stdout / stderr / pty raw) has
+    # been recorded. System chunks (launch banner, watchdog hints,
+    # exit banners) do not flip this. The silence watchdog reads this
+    # to decide whether to emit a hint — using a boolean avoids the
+    # timestamp-equality race when launch + first chunk happen inside
+    # the same microsecond (matters in tests and on very fast hosts).
+    has_real_output: bool = False
     history: Deque[OutputChunk] = field(default_factory=lambda: deque(maxlen=2000))
     subscribers: List[asyncio.Queue] = field(default_factory=list)
 
@@ -476,6 +483,69 @@ class ProcessManager:
             if p.group_id == group_id and p.status == ProcessStatus.RUNNING
         ]
 
+    def remove(self, process_id: str) -> ManagedProcess:
+        """Drop a non-running process from the registry.
+
+        Raises ``ProcessNotFoundError`` if unknown, ``RuntimeError`` if the
+        process is still running (caller should ``cancel`` or use
+        ``stop_and_remove`` first). Returns the dropped record so the
+        caller can audit/summarize it.
+        """
+        managed = self._processes.get(process_id)
+        if managed is None:
+            raise ProcessNotFoundError(process_id)
+        if managed.status == ProcessStatus.RUNNING:
+            raise RuntimeError(f"Process {process_id} is still running")
+        # Wake any lingering subscribers so their streams close.
+        for q in list(managed.subscribers):
+            try:
+                q.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+        managed.subscribers.clear()
+        self._processes.pop(process_id, None)
+        self._asyncio_procs.pop(process_id, None)
+        master_fd = self._pty_masters.pop(process_id, None)
+        if master_fd is not None:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+        return managed
+
+    async def stop_and_remove(
+        self, process_id: str, *, sigkill_after: float = 3.0, grace: float = 5.0
+    ) -> ManagedProcess:
+        """Stop the process if running, wait briefly for it to exit, then
+        drop the record from the registry.
+
+        Used by the "Remove" affordance in the UI: one click should both
+        end the session and clear the row. Returns the final summary
+        snapshot (status will be CANCELLED/EXITED/FAILED).
+        """
+        managed = self._processes.get(process_id)
+        if managed is None:
+            raise ProcessNotFoundError(process_id)
+        if managed.status == ProcessStatus.RUNNING:
+            await self.cancel(process_id, sigkill_after=sigkill_after)
+            # Wait (bounded) for _wait_and_finalize to flip the status so
+            # the post-remove summary reflects the real exit.
+            deadline = time.monotonic() + grace
+            while time.monotonic() < deadline:
+                if managed.status != ProcessStatus.RUNNING:
+                    break
+                await asyncio.sleep(0.05)
+        # Snapshot before removal so the caller still sees ended_at /
+        # exit_code if finalize landed in time.
+        snapshot = managed
+        try:
+            self.remove(process_id)
+        except RuntimeError:
+            # Still running after grace window — leave it in the registry;
+            # the caller can retry. Raising lets the route return 409.
+            raise
+        return snapshot
+
     async def cancel_group(
         self, group_id: str, *, sigkill_after: float = 3.0
     ) -> List[ManagedProcess]:
@@ -528,6 +598,29 @@ class ProcessManager:
         args = list(args or [])
         if not command or not command.strip():
             raise ValueError("command is required")
+
+        # Defense in depth: a stale client (or a saved preset whose flag
+        # predates a host downgrade) may request namespace isolation on
+        # a host that can't honor it — e.g. Ubuntu 24.04 with
+        # apparmor_restrict_unprivileged_userns=1, where unshare(1) is
+        # installed but EPERM's on /proc/self/uid_map. The frontend
+        # already grays the toggle when /capabilities reports
+        # namespaces_supported=false, but a direct API call (or a
+        # preset loaded before the capability probe responds) can still
+        # set the flag. Strip rather than fail so the launch succeeds
+        # with reduced isolation; log loudly so it is auditable.
+        if namespaces:
+            iso_caps = probe_isolation_capabilities()
+            if not iso_caps.get("namespaces", False):
+                logger.warning(
+                    "agent_portal stripping namespaces=true from launch; "
+                    "host capability probe reports unprivileged user "
+                    "namespaces unavailable. command=%s user=%s",
+                    sanitize_for_logging(command),
+                    sanitize_for_logging(user_email),
+                )
+                namespaces = False
+                isolate_network = False
 
         # Group-budget enforcement happens server-side, before any work.
         # The caller (route handler) is expected to pass the looked-up
@@ -799,6 +892,15 @@ class ProcessManager:
             asyncio.create_task(self._pump_stream(managed, asyncio_proc.stdout, "stdout"))
             asyncio.create_task(self._pump_stream(managed, asyncio_proc.stderr, "stderr"))
         asyncio.create_task(self._wait_and_finalize(managed, asyncio_proc))
+        # Surface "process is silent" hints so a blank pane doesn't look
+        # identical to a healthy start. Two thresholds: an early
+        # encouragement at 5s and a louder diagnostic at 20s. The 5s mark
+        # is short enough that a wedged tool (Landlock blocking its
+        # data-dir writes, etc.) gets flagged before the user thinks the
+        # UI is broken; the 20s mark gives a fuller diagnostic for tools
+        # that are slow to start (model warmup, network handshakes).
+        asyncio.create_task(self._silence_watchdog(managed, threshold_seconds=5.0, kind="early"))
+        asyncio.create_task(self._silence_watchdog(managed, threshold_seconds=20.0, kind="late"))
 
         logger.info(
             "agent_portal process launched id=%s pid=%s user=%s cmd=%s",
@@ -808,6 +910,60 @@ class ProcessManager:
             sanitize_for_logging(command),
         )
         return managed
+
+    async def _silence_watchdog(
+        self,
+        managed: ManagedProcess,
+        *,
+        threshold_seconds: float,
+        kind: str = "early",
+    ) -> None:
+        """Emit a system hint when a process stays silent past a threshold.
+
+        Why: a wedged sandboxed tool (Landlock denying writes to its
+        data dir, network blocked, etc.) looks identical to a healthy
+        start — both show an empty pane. Without a hint, the user has
+        no signal that something is wrong until they wait a long time
+        and click around. The watchdog records a system chunk after
+        ``threshold_seconds`` of no real output (system chunks don't
+        count as activity — see ``_record_chunk``).
+
+        Cancel-safe: this task simply returns if the process has
+        already emitted output, finished, or been cancelled.
+        """
+        try:
+            await asyncio.sleep(threshold_seconds)
+        except asyncio.CancelledError:
+            return
+        if managed.status != ProcessStatus.RUNNING:
+            return
+        # has_real_output is flipped True by ``_record_chunk`` for any
+        # stdout/stderr/raw chunk. Using a boolean (rather than
+        # ``last_activity > started_at + epsilon``) sidesteps the
+        # same-microsecond race we hit in tests where launch returned
+        # and a chunk pumped before clock advancement.
+        if managed.has_real_output:
+            return
+        if kind == "early":
+            self._record_chunk(
+                managed,
+                "system",
+                f"[atlas] No output yet after {threshold_seconds:.0f}s. "
+                "If the pane stays blank, see the next hint below.",
+            )
+            return
+        # Late hint: full diagnostic.
+        hints = [
+            f"[atlas] Still no output after {threshold_seconds:.0f}s.",
+            "Common causes when sandbox_mode is on:",
+            "  • The tool's data dir is not in 'Extra writable paths'",
+            "    (try: ~/.claude  ~/.claude.json  ~/.cline  ~/.codex)",
+            "  • Tool is waiting on stdin — click the pane and press Enter",
+            "  • Tool needs network and 'Isolate network' is on",
+            "Tip: launch with sandbox_mode='off' to confirm the tool",
+            "     itself works, then re-enable sandbox with the right paths.",
+        ]
+        self._record_chunk(managed, "system", "\n".join(hints))
 
     async def cancel(self, process_id: str, *, sigkill_after: float = 3.0) -> ManagedProcess:
         async with self._lock:
@@ -895,6 +1051,7 @@ class ProcessManager:
         # idle-killed even if the launch banner is still in the buffer.
         if stream != "system":
             managed.last_activity = now
+            managed.has_real_output = True
         for q in list(managed.subscribers):
             try:
                 q.put_nowait(chunk)

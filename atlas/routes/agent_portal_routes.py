@@ -11,7 +11,7 @@ import asyncio
 import base64
 import logging
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -349,6 +349,45 @@ async def cancel_process(
     return managed.to_summary()
 
 
+@router.post("/processes/{process_id}/remove")
+async def remove_process(
+    process_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    """Stop (if running) and drop the process from the registry.
+
+    Used by the "Remove" affordance in the UI to clear finished or
+    cancelled sessions from the active list. For a still-running
+    process this also sends SIGTERM and waits briefly for it to exit.
+
+    Coexists with ``DELETE /processes/{id}``: that endpoint cancels a
+    running process but intentionally keeps the record in the registry
+    so the UI can show the exit status and scrollback. ``/remove`` is
+    the second step — drop the record entirely. Two endpoints rather
+    than a flag because the UX is two distinct verbs ("Stop" vs.
+    "Remove") and the existing ``DELETE`` contract is depended on.
+    """
+    # TODO(graduation): add per-user ownership check — see docs/agentportal/threat-model.md
+    _require_enabled()
+    manager = get_process_manager()
+    try:
+        managed = await manager.stop_and_remove(process_id)
+    except ProcessNotFoundError:
+        raise HTTPException(status_code=404, detail="Process not found")
+    except RuntimeError as e:
+        # stop_and_remove raises if the process is still alive after the
+        # grace window; map to 409 so the client can retry or escalate.
+        raise HTTPException(status_code=409, detail=str(e))
+    record_audit_event(
+        current_user,
+        "remove",
+        process_id=process_id,
+        group_id=managed.group_id,
+        detail={"final_status": managed.status.value},
+    )
+    return managed.to_summary()
+
+
 @router.patch("/processes/{process_id}")
 async def rename_process(
     process_id: str,
@@ -386,6 +425,107 @@ async def list_presets(current_user: str = Depends(get_current_user)):
     _require_enabled()
     store = get_preset_store()
     return {"presets": [p.to_public() for p in store.list_for_user(current_user)]}
+
+
+# Built-in preset templates for common agent CLIs. These are *not*
+# stored — they are returned as starter values the UI offers in a
+# "Templates" section of the launch form. Clicking one prefills the
+# form; the user can then save it as a real preset under their account.
+#
+# The extra_writable_paths lists are the minimum each tool needs to
+# function under workspace-write Landlock: a writable data dir for
+# session/history persistence, and (for claude) the single file
+# ~/.claude.json at $HOME root via the file-path variant of the
+# sandbox rule. Without these, the tool hangs silently on first
+# write — the bug that motivated this whole change.
+#
+# namespaces is left at False because Ubuntu 24.04's
+# apparmor_restrict_unprivileged_userns blocks user-NS setup; the
+# launch path strips the flag with a logged warning anyway, but
+# leaving the template flag False keeps the UI checkbox honest.
+_BUILT_IN_PRESET_TEMPLATES: List[Dict[str, Any]] = [
+    {
+        "id": "tmpl_claude",
+        "name": "Claude Code",
+        "command": "claude",
+        "description": (
+            "Anthropic Claude Code CLI. Needs write access to ~/.claude and "
+            "the top-level state file ~/.claude.json."
+        ),
+        "args": [],
+        "cwd": None,
+        "sandbox_mode": "workspace-write",
+        "extra_writable_paths": [
+            "~/.claude",
+            "~/.claude.json",
+            "~/.cache/claude",
+        ],
+        "use_pty": True,
+        "namespaces": False,
+        "isolate_network": False,
+        "memory_limit": None,
+        "cpu_limit": None,
+        "pids_limit": None,
+        "display_name": "claude",
+    },
+    {
+        "id": "tmpl_cline",
+        "name": "Cline",
+        "command": "cline",
+        "description": (
+            "Cline coding assistant. Needs write access to ~/.cline for "
+            "session/task persistence."
+        ),
+        "args": [],
+        "cwd": None,
+        "sandbox_mode": "workspace-write",
+        "extra_writable_paths": [
+            "~/.cline",
+            "~/.cache/cline",
+        ],
+        "use_pty": True,
+        "namespaces": False,
+        "isolate_network": False,
+        "memory_limit": None,
+        "cpu_limit": None,
+        "pids_limit": None,
+        "display_name": "cline",
+    },
+    {
+        "id": "tmpl_codex",
+        "name": "Codex CLI",
+        "command": "codex",
+        "description": (
+            "OpenAI codex CLI. Needs write access to ~/.codex for auth "
+            "and history."
+        ),
+        "args": [],
+        "cwd": None,
+        "sandbox_mode": "workspace-write",
+        "extra_writable_paths": [
+            "~/.codex",
+        ],
+        "use_pty": True,
+        "namespaces": False,
+        "isolate_network": False,
+        "memory_limit": None,
+        "cpu_limit": None,
+        "pids_limit": None,
+        "display_name": "codex",
+    },
+]
+
+
+@router.get("/preset-templates")
+async def list_preset_templates(current_user: str = Depends(get_current_user)):
+    """Return built-in starter templates for common agent CLIs.
+
+    These are static — they don't touch the per-user store — and are
+    intended as one-click form fills in the launch UI. The user can
+    save a customized copy as a real preset.
+    """
+    _require_enabled()
+    return {"templates": list(_BUILT_IN_PRESET_TEMPLATES)}
 
 
 @router.post("/presets", status_code=201)
@@ -1066,18 +1206,20 @@ async def list_audit(
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
-def _origin_is_loopback(origin: Optional[str]) -> bool:
-    """Return True if the Origin header names a loopback host over http(s).
+def _extra_allowed_origin_hosts() -> set[str]:
+    """Hostnames from AGENT_PORTAL_ALLOWED_ORIGINS, normalized to lowercase."""
+    raw = app_factory.get_config_manager().app_settings.agent_portal_allowed_origins or ""
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+def _origin_is_allowed(origin: Optional[str]) -> bool:
+    """Return True if the Origin header is loopback or in the allowlist.
 
     WebSocket upgrades are not covered by CORS preflight, so a page at any
-    origin can open a WS to localhost:<port>. Limiting accept() to loopback
-    origins blocks drive-by CSRF from an untrusted browser tab while still
-    allowing the local dev UI. Any port is accepted on the loopback hosts
-    for now; tighten to the configured backend port once that is threaded
-    through.
-
-    TODO: restrict the allowed port to the backend's own port instead of
-    accepting any.
+    origin can open a WS to the server unless we reject it here. Loopback
+    is always allowed for local dev; additional hostnames may be permitted
+    via AGENT_PORTAL_ALLOWED_ORIGINS for deployments behind an auth proxy
+    (e.g. Cloudflare Access).
     """
     if not origin:
         return False
@@ -1088,7 +1230,9 @@ def _origin_is_loopback(origin: Optional[str]) -> bool:
     if parsed.scheme not in ("http", "https"):
         return False
     hostname = (parsed.hostname or "").lower()
-    return hostname in _LOOPBACK_HOSTS
+    if hostname in _LOOPBACK_HOSTS:
+        return True
+    return hostname in _extra_allowed_origin_hosts()
 
 
 def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
@@ -1137,9 +1281,9 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
     # page can open a socket to the dev server unless we reject it here.
     # See docs/agentportal/threat-model.md.
     origin = websocket.headers.get("origin")
-    if not _origin_is_loopback(origin):
+    if not _origin_is_allowed(origin):
         logger.warning(
-            "agent_portal stream rejected non-loopback origin=%s process=%s",
+            "agent_portal stream rejected disallowed origin=%s process=%s",
             sanitize_for_logging(origin or ""),
             sanitize_for_logging(process_id),
         )

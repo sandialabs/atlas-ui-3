@@ -369,3 +369,249 @@ async def test_child_env_is_isolated(monkeypatch):
     assert "LANG" in env_keys
     for denied in secrets:
         assert denied not in env_keys, f"{denied} leaked to child"
+
+
+@pytest.mark.asyncio
+async def test_launch_strips_namespaces_when_host_unsupported(monkeypatch, caplog):
+    """Caller passes namespaces=True but the host can't honour it.
+
+    The frontend grays the toggle when /capabilities reports no
+    namespace support, but a stale preset or a direct API call can
+    still set the flag. The manager must strip it and proceed rather
+    than fail with EPERM inside unshare(1). A warning is logged so the
+    silent downgrade is auditable, and the recorded launch reflects
+    the actual (non-isolated) execution.
+    """
+    from atlas.modules.process_manager import manager as pm_mod
+
+    monkeypatch.setattr(
+        pm_mod, "probe_isolation_capabilities", lambda: {"namespaces": False, "cgroups": False}
+    )
+
+    manager = ProcessManager()
+    with caplog.at_level("WARNING", logger=pm_mod.__name__):
+        managed = await manager.launch(
+            command=sys.executable,
+            args=["-c", "print('ok')"],
+            namespaces=True,
+            isolate_network=True,
+        )
+    for _ in range(50):
+        if managed.status != ProcessStatus.RUNNING:
+            break
+        await asyncio.sleep(0.05)
+
+    assert managed.status == ProcessStatus.EXITED
+    assert managed.exit_code == 0
+    # The strip happened: the record must reflect no isolation so audit
+    # / UI surfaces show the truth.
+    assert managed.namespaces is False
+    assert managed.isolate_network is False
+    assert any(
+        "stripping namespaces=true" in rec.getMessage() for rec in caplog.records
+    ), "expected warning about stripped namespace flag"
+
+
+@pytest.mark.asyncio
+async def test_silence_watchdog_emits_system_hint_when_no_output():
+    """A process that exists but stays silent should get a hint chunk.
+
+    Without this, a wedged sandboxed tool (Landlock blocking its data
+    dir, etc.) looks identical to a healthy start — both show a blank
+    pane. The watchdog records a system chunk after a short threshold
+    so the user has a starting point.
+
+    Tests call ``_silence_watchdog`` directly with a tiny threshold so
+    the behavior is exercised without depending on the production 5s
+    timing (which would make the suite slow and flaky on busy CI).
+    """
+    manager = ProcessManager()
+    managed = await manager.launch(
+        command=sys.executable,
+        args=["-c", "import time; time.sleep(2.0)"],
+    )
+    # Sanity: launch did NOT auto-record a system "No output" chunk
+    # (the production 5s schedule hasn't fired yet).
+    assert not any(
+        c.stream == "system" and "No output" in c.text
+        for c in managed.history
+    )
+
+    await manager._silence_watchdog(
+        managed, threshold_seconds=0.2, kind="early"
+    )
+    assert any(
+        c.stream == "system" and "No output" in c.text
+        for c in managed.history
+    ), "expected the early hint to be recorded"
+
+    # Late kind emits a longer multi-line diagnostic.
+    await manager._silence_watchdog(
+        managed, threshold_seconds=0.2, kind="late"
+    )
+    late = [
+        c for c in managed.history
+        if c.stream == "system" and "Still no output" in c.text
+    ]
+    assert late, "expected the late diagnostic to be recorded"
+    assert "Extra writable paths" in late[-1].text, (
+        "late hint must mention extra writable paths so the user knows "
+        "where to look"
+    )
+
+
+@pytest.mark.asyncio
+async def test_silence_watchdog_silent_when_process_produces_output():
+    """A chatty process must NOT get a silence-watchdog hint.
+
+    Guards against the watchdog over-firing: any real stdout/stderr
+    activity advances last_activity, and the watchdog must skip its
+    hint in that case.
+    """
+    import time
+
+    manager = ProcessManager()
+    managed = await manager.launch(
+        command=sys.executable,
+        args=["-c", "import time; time.sleep(2.0)"],
+    )
+    # Simulate the child having produced real output. _record_chunk
+    # flips has_real_output for any non-system stream, which is the
+    # signal the watchdog reads.
+    manager._record_chunk(managed, "stdout", "alive")
+    assert managed.has_real_output is True
+
+    await manager._silence_watchdog(
+        managed, threshold_seconds=0.2, kind="early"
+    )
+    silence_chunks = [
+        c for c in managed.history
+        if c.stream == "system" and "No output" in c.text
+    ]
+    assert silence_chunks == [], (
+        "watchdog must not emit when the process has produced output; "
+        f"got {len(silence_chunks)} unexpected chunks"
+    )
+
+
+@pytest.mark.asyncio
+async def test_silence_watchdog_skips_when_process_already_ended():
+    """If the process exited before the threshold, no hint is recorded.
+
+    Otherwise a fast-failing command (sandbox-setup error, missing
+    binary) gets its own clear "Process ended" banner *plus* a
+    spurious "No output yet" — confusing.
+    """
+    manager = ProcessManager()
+    managed = await manager.launch(
+        command=sys.executable,
+        args=["-c", "pass"],  # exits ~immediately
+    )
+    # Wait for the process to finish naturally.
+    for _ in range(60):
+        if managed.status != ProcessStatus.RUNNING:
+            break
+        await asyncio.sleep(0.05)
+    assert managed.status != ProcessStatus.RUNNING
+
+    await manager._silence_watchdog(
+        managed, threshold_seconds=0.1, kind="early"
+    )
+    assert not any(
+        c.stream == "system" and "No output" in c.text
+        for c in managed.history
+    ), "watchdog must skip when the process has already ended"
+
+
+@pytest.mark.asyncio
+async def test_extra_writable_paths_accepts_existing_file(tmp_path):
+    """A single existing file in extra_writable_paths should be granted
+    write access to that one file only — without granting write to its
+    parent dir.
+
+    Motivation: tools like Claude Code keep a state file at $HOME root
+    (~/.claude.json). The old wrapper called makedirs() on every entry
+    and silently dropped existing-file entries; this test pins the new
+    file-aware behavior in place so it doesn't regress.
+    """
+    import os
+
+    from atlas.modules.process_manager import landlock_is_supported
+
+    if not landlock_is_supported():
+        pytest.skip("Landlock not supported on this kernel")
+
+    # State file outside cwd, plus a sibling we should NOT be able to
+    # write (proves the rule is scoped to the file, not the parent).
+    state_dir = tmp_path / "fakehome"
+    state_dir.mkdir()
+    state_file = state_dir / "state.json"
+    state_file.write_text("{}")
+    sibling = state_dir / "sibling.txt"
+    sibling.write_text("untouched")
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+
+    manager = ProcessManager()
+    managed = await manager.launch(
+        command="bash",
+        args=[
+            "-c",
+            # 1) Write to the granted file: should succeed (echo writes
+            #    OK_FILE on success, BLOCKED_FILE on EACCES).
+            # 2) Write to a sibling inside the same dir: must fail.
+            f"(echo updated > {state_file} && echo OK_FILE) || echo BLOCKED_FILE; "
+            f"(echo evil > {sibling} 2>&1 && echo OK_SIBLING) || echo BLOCKED_SIBLING",
+        ],
+        cwd=str(workdir),
+        sandbox_mode="workspace-write",
+        extra_writable_paths=[str(state_file)],
+    )
+    for _ in range(80):
+        if managed.status != ProcessStatus.RUNNING:
+            break
+        await asyncio.sleep(0.05)
+    stdout = [c.text for c in managed.history if c.stream == "stdout"]
+    assert "OK_FILE" in stdout, (
+        f"file-scoped rule did not grant write; stdout={stdout}"
+    )
+    assert "BLOCKED_SIBLING" in stdout, (
+        f"file-scoped rule leaked to parent dir; stdout={stdout}"
+    )
+    assert state_file.read_text().strip() == "updated"
+    assert sibling.read_text() == "untouched"
+
+
+@pytest.mark.asyncio
+async def test_launch_skips_capability_probe_when_namespaces_false(monkeypatch):
+    """Strip path only runs when the caller requested namespaces.
+
+    Guards against the strip becoming over-eager: a launch with
+    namespaces=False must not call probe_isolation_capabilities at
+    all (it would be wasted work and could mask a regression where
+    the gate is no longer scoped to namespaces=True).
+    """
+    from atlas.modules.process_manager import manager as pm_mod
+
+    calls = {"n": 0}
+
+    def _probe():
+        calls["n"] += 1
+        return {"namespaces": False, "cgroups": False}
+
+    monkeypatch.setattr(pm_mod, "probe_isolation_capabilities", _probe)
+
+    manager = ProcessManager()
+    managed = await manager.launch(
+        command=sys.executable,
+        args=["-c", "print('ok')"],
+        namespaces=False,
+    )
+    for _ in range(50):
+        if managed.status != ProcessStatus.RUNNING:
+            break
+        await asyncio.sleep(0.05)
+
+    assert managed.status == ProcessStatus.EXITED
+    assert calls["n"] == 0, "probe should not run when namespaces=False"
