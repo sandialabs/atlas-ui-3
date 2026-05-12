@@ -349,6 +349,38 @@ async def cancel_process(
     return managed.to_summary()
 
 
+@router.post("/processes/{process_id}/remove")
+async def remove_process(
+    process_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    """Stop (if running) and drop the process from the registry.
+
+    Used by the "Remove" affordance in the UI to clear finished or
+    cancelled sessions from the active list. For a still-running
+    process this also sends SIGTERM and waits briefly for it to exit.
+    """
+    # TODO(graduation): add per-user ownership check — see docs/agentportal/threat-model.md
+    _require_enabled()
+    manager = get_process_manager()
+    try:
+        managed = await manager.stop_and_remove(process_id)
+    except ProcessNotFoundError:
+        raise HTTPException(status_code=404, detail="Process not found")
+    except RuntimeError as e:
+        # stop_and_remove raises if the process is still alive after the
+        # grace window; map to 409 so the client can retry or escalate.
+        raise HTTPException(status_code=409, detail=str(e))
+    record_audit_event(
+        current_user,
+        "remove",
+        process_id=process_id,
+        group_id=managed.group_id,
+        detail={"final_status": managed.status.value},
+    )
+    return managed.to_summary()
+
+
 @router.patch("/processes/{process_id}")
 async def rename_process(
     process_id: str,

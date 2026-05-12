@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { Maximize2, X, Edit2, Check, Shield, Boxes, Square } from 'lucide-react'
+import { Maximize2, X, Edit2, Check, Shield, Boxes, Square, Trash2 } from 'lucide-react'
 
 // Plain-text scrollback ring buffer for non-PTY processes. Keep the
 // last N chunks so swapping between slots in 2x2 view doesn't lose
@@ -44,6 +44,7 @@ function Pane({
   process,
   onClose,
   onCancel,
+  onRemove,
   onFullscreen,
   onRename,
   isFullscreen,
@@ -346,6 +347,16 @@ function Pane({
             title="Stop this process (SIGTERM)"
           >
             <Square className="w-3 h-3" />
+          </button>
+        )}
+        {procId && onRemove && process && process.status !== 'running' && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onRemove(process) }}
+            className="p-1 text-gray-500 hover:text-red-400"
+            title="Remove from list (process is finished)"
+          >
+            <Trash2 className="w-3 h-3" />
           </button>
         )}
         {procId && onFullscreen && !isFullscreen && (

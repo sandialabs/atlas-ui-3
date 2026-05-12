@@ -401,3 +401,53 @@ def test_cli_list_prints_summary(monkeypatch: pytest.MonkeyPatch, capsys):
     assert "deadbeef" in out
     assert "exited" in out
     assert "hi" in out
+
+
+# ---------------------------------------------------------------------------
+# Remove (stop + drop-from-registry)
+# ---------------------------------------------------------------------------
+
+
+def test_remove_finished_process_drops_it_from_list(app_client: TestClient):
+    r = app_client.post(
+        "/api/agent-portal/processes",
+        json={"command": "sh", "args": ["-c", "echo bye"]},
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    final = _wait_for_exit(app_client, pid)
+    assert final["status"] == "exited"
+
+    # Remove the finished record; final summary should still describe
+    # the exit (status flipped, exit_code populated).
+    r = app_client.post(f"/api/agent-portal/processes/{pid}/remove")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["id"] == pid
+    assert body["status"] == "exited"
+
+    # Process should be gone from the listing and from /get.
+    listing = app_client.get("/api/agent-portal/processes").json()["processes"]
+    assert all(p["id"] != pid for p in listing)
+    assert app_client.get(f"/api/agent-portal/processes/{pid}").status_code == 404
+
+
+def test_remove_running_process_stops_and_drops(app_client: TestClient):
+    r = app_client.post(
+        "/api/agent-portal/processes",
+        json={"command": "sh", "args": ["-c", "sleep 30"]},
+    )
+    assert r.status_code == 201
+    pid = r.json()["id"]
+    # Without an intermediate cancel — Remove should stop and drop in
+    # one shot.
+    r = app_client.post(f"/api/agent-portal/processes/{pid}/remove")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] in ("cancelled", "exited", "failed")
+    # Gone from the registry.
+    assert app_client.get(f"/api/agent-portal/processes/{pid}").status_code == 404
+
+
+def test_remove_unknown_process_returns_404(app_client: TestClient):
+    r = app_client.post("/api/agent-portal/processes/does-not-exist/remove")
+    assert r.status_code == 404

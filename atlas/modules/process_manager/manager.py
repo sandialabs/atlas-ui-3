@@ -476,6 +476,69 @@ class ProcessManager:
             if p.group_id == group_id and p.status == ProcessStatus.RUNNING
         ]
 
+    def remove(self, process_id: str) -> ManagedProcess:
+        """Drop a non-running process from the registry.
+
+        Raises ``ProcessNotFoundError`` if unknown, ``RuntimeError`` if the
+        process is still running (caller should ``cancel`` or use
+        ``stop_and_remove`` first). Returns the dropped record so the
+        caller can audit/summarize it.
+        """
+        managed = self._processes.get(process_id)
+        if managed is None:
+            raise ProcessNotFoundError(process_id)
+        if managed.status == ProcessStatus.RUNNING:
+            raise RuntimeError(f"Process {process_id} is still running")
+        # Wake any lingering subscribers so their streams close.
+        for q in list(managed.subscribers):
+            try:
+                q.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+        managed.subscribers.clear()
+        self._processes.pop(process_id, None)
+        self._asyncio_procs.pop(process_id, None)
+        master_fd = self._pty_masters.pop(process_id, None)
+        if master_fd is not None:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+        return managed
+
+    async def stop_and_remove(
+        self, process_id: str, *, sigkill_after: float = 3.0, grace: float = 5.0
+    ) -> ManagedProcess:
+        """Stop the process if running, wait briefly for it to exit, then
+        drop the record from the registry.
+
+        Used by the "Remove" affordance in the UI: one click should both
+        end the session and clear the row. Returns the final summary
+        snapshot (status will be CANCELLED/EXITED/FAILED).
+        """
+        managed = self._processes.get(process_id)
+        if managed is None:
+            raise ProcessNotFoundError(process_id)
+        if managed.status == ProcessStatus.RUNNING:
+            await self.cancel(process_id, sigkill_after=sigkill_after)
+            # Wait (bounded) for _wait_and_finalize to flip the status so
+            # the post-remove summary reflects the real exit.
+            deadline = time.monotonic() + grace
+            while time.monotonic() < deadline:
+                if managed.status != ProcessStatus.RUNNING:
+                    break
+                await asyncio.sleep(0.05)
+        # Snapshot before removal so the caller still sees ended_at /
+        # exit_code if finalize landed in time.
+        snapshot = managed
+        try:
+            self.remove(process_id)
+        except RuntimeError:
+            # Still running after grace window — leave it in the registry;
+            # the caller can retry. Raising lets the route return 409.
+            raise
+        return snapshot
+
     async def cancel_group(
         self, group_id: str, *, sigkill_after: float = 3.0
     ) -> List[ManagedProcess]:
@@ -528,6 +591,29 @@ class ProcessManager:
         args = list(args or [])
         if not command or not command.strip():
             raise ValueError("command is required")
+
+        # Defense in depth: a stale client (or a saved preset whose flag
+        # predates a host downgrade) may request namespace isolation on
+        # a host that can't honor it — e.g. Ubuntu 24.04 with
+        # apparmor_restrict_unprivileged_userns=1, where unshare(1) is
+        # installed but EPERM's on /proc/self/uid_map. The frontend
+        # already grays the toggle when /capabilities reports
+        # namespaces_supported=false, but a direct API call (or a
+        # preset loaded before the capability probe responds) can still
+        # set the flag. Strip rather than fail so the launch succeeds
+        # with reduced isolation; log loudly so it is auditable.
+        if namespaces:
+            iso_caps = probe_isolation_capabilities()
+            if not iso_caps.get("namespaces", False):
+                logger.warning(
+                    "agent_portal stripping namespaces=true from launch; "
+                    "host capability probe reports unprivileged user "
+                    "namespaces unavailable. command=%s user=%s",
+                    sanitize_for_logging(command),
+                    sanitize_for_logging(user_email),
+                )
+                namespaces = False
+                isolate_network = False
 
         # Group-budget enforcement happens server-side, before any work.
         # The caller (route handler) is expected to pass the looked-up
