@@ -1,6 +1,7 @@
 # PytestUnraisableExceptionWarning investigation
 
-Branch: `investigate/unraisable-py313-warning` (local-only, no PR.)
+Branch: `investigate/unraisable-py313-warning` — shipped as
+[sandialabs/atlas-ui-3#603](https://github.com/sandialabs/atlas-ui-3/pull/603).
 
 ## Symptom
 CI on Python 3.12.13 and 3.13.2 emits ~3–5
