@@ -11,7 +11,7 @@ import asyncio
 import base64
 import logging
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -425,6 +425,107 @@ async def list_presets(current_user: str = Depends(get_current_user)):
     _require_enabled()
     store = get_preset_store()
     return {"presets": [p.to_public() for p in store.list_for_user(current_user)]}
+
+
+# Built-in preset templates for common agent CLIs. These are *not*
+# stored — they are returned as starter values the UI offers in a
+# "Templates" section of the launch form. Clicking one prefills the
+# form; the user can then save it as a real preset under their account.
+#
+# The extra_writable_paths lists are the minimum each tool needs to
+# function under workspace-write Landlock: a writable data dir for
+# session/history persistence, and (for claude) the single file
+# ~/.claude.json at $HOME root via the file-path variant of the
+# sandbox rule. Without these, the tool hangs silently on first
+# write — the bug that motivated this whole change.
+#
+# namespaces is left at False because Ubuntu 24.04's
+# apparmor_restrict_unprivileged_userns blocks user-NS setup; the
+# launch path strips the flag with a logged warning anyway, but
+# leaving the template flag False keeps the UI checkbox honest.
+_BUILT_IN_PRESET_TEMPLATES: List[Dict[str, Any]] = [
+    {
+        "id": "tmpl_claude",
+        "name": "Claude Code",
+        "command": "claude",
+        "description": (
+            "Anthropic Claude Code CLI. Needs write access to ~/.claude and "
+            "the top-level state file ~/.claude.json."
+        ),
+        "args": [],
+        "cwd": None,
+        "sandbox_mode": "workspace-write",
+        "extra_writable_paths": [
+            "~/.claude",
+            "~/.claude.json",
+            "~/.cache/claude",
+        ],
+        "use_pty": True,
+        "namespaces": False,
+        "isolate_network": False,
+        "memory_limit": None,
+        "cpu_limit": None,
+        "pids_limit": None,
+        "display_name": "claude",
+    },
+    {
+        "id": "tmpl_cline",
+        "name": "Cline",
+        "command": "cline",
+        "description": (
+            "Cline coding assistant. Needs write access to ~/.cline for "
+            "session/task persistence."
+        ),
+        "args": [],
+        "cwd": None,
+        "sandbox_mode": "workspace-write",
+        "extra_writable_paths": [
+            "~/.cline",
+            "~/.cache/cline",
+        ],
+        "use_pty": True,
+        "namespaces": False,
+        "isolate_network": False,
+        "memory_limit": None,
+        "cpu_limit": None,
+        "pids_limit": None,
+        "display_name": "cline",
+    },
+    {
+        "id": "tmpl_codex",
+        "name": "Codex CLI",
+        "command": "codex",
+        "description": (
+            "OpenAI codex CLI. Needs write access to ~/.codex for auth "
+            "and history."
+        ),
+        "args": [],
+        "cwd": None,
+        "sandbox_mode": "workspace-write",
+        "extra_writable_paths": [
+            "~/.codex",
+        ],
+        "use_pty": True,
+        "namespaces": False,
+        "isolate_network": False,
+        "memory_limit": None,
+        "cpu_limit": None,
+        "pids_limit": None,
+        "display_name": "codex",
+    },
+]
+
+
+@router.get("/preset-templates")
+async def list_preset_templates(current_user: str = Depends(get_current_user)):
+    """Return built-in starter templates for common agent CLIs.
+
+    These are static — they don't touch the per-user store — and are
+    intended as one-click form fills in the launch UI. The user can
+    save a customized copy as a real preset.
+    """
+    _require_enabled()
+    return {"templates": list(_BUILT_IN_PRESET_TEMPLATES)}
 
 
 @router.post("/presets", status_code=201)

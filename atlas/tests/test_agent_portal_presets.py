@@ -233,3 +233,43 @@ def test_http_delete(api_client: TestClient):
     assert res.status_code == 204
     res2 = api_client.get(f"/api/agent-portal/presets/{c['id']}")
     assert res2.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Built-in preset templates (static endpoint, no per-user state)
+# ---------------------------------------------------------------------------
+
+
+def test_http_preset_templates_shipped(api_client: TestClient):
+    """The built-in templates endpoint ships the three common agent CLIs
+    with sandbox defaults that actually work.
+
+    Pin both the command names and the writable-paths so a future refactor
+    that drops a tool or removes a critical path triggers a test failure
+    instead of a silent regression to the original "nothing happens" UX.
+    """
+    res = api_client.get("/api/agent-portal/preset-templates")
+    assert res.status_code == 200
+    body = res.json()
+    templates = body["templates"]
+
+    by_cmd = {t["command"]: t for t in templates}
+    assert {"claude", "cline", "codex"} <= by_cmd.keys(), (
+        f"templates must include claude, cline, codex; got {list(by_cmd)}"
+    )
+
+    # Claude is the load-bearing case from the bug report: workspace-write
+    # sandbox + ~/.claude (dir) + ~/.claude.json (file) must all be there.
+    claude = by_cmd["claude"]
+    assert claude["sandbox_mode"] == "workspace-write"
+    assert claude["use_pty"] is True
+    paths = claude["extra_writable_paths"]
+    assert "~/.claude" in paths
+    assert "~/.claude.json" in paths, (
+        "the single-file rule for ~/.claude.json is required — without it "
+        "claude hangs on its first write to the state file"
+    )
+
+    # Cline & codex must at least have their own data dirs writable.
+    assert any("cline" in p for p in by_cmd["cline"]["extra_writable_paths"])
+    assert any("codex" in p for p in by_cmd["codex"]["extra_writable_paths"])
