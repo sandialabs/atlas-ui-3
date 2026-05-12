@@ -83,4 +83,9 @@ ENV NODE_ENV=production \
     PORT=8000
 
 WORKDIR /app/atlas
-CMD ["python3", "main.py"]
+
+# Chainguard Python images set ENTRYPOINT ["/usr/bin/python"], which would
+# prepend the system interpreter to CMD and break the exec form.  Clear it
+# so that our venv python is invoked directly.
+ENTRYPOINT []
+CMD ["/app/.venv/bin/python", "main.py"]
