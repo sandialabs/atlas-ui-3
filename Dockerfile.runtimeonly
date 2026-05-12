@@ -36,6 +36,8 @@ FROM registry.access.redhat.com/ubi9/ubi:latest
 
 WORKDIR /app
 
+ARG GIT_HASH="unknown"
+
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Install only runtime system dependencies.
@@ -61,7 +63,7 @@ RUN mkdir -p \
         /app/runtime/logs \
         /app/runtime/feedback \
         /app/runtime/uploads && \
-    cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/atlas/config/*.yaml /app/config/ 2>/dev/null || true && \
+    find /app/atlas/config -maxdepth 1 -type f \( -name '*.json' -o -name '*.yml' -o -name '*.yaml' \) -exec cp -n {} /app/config/ \; && \
     touch /app/runtime/logs/.gitkeep /app/runtime/feedback/.gitkeep /app/runtime/uploads/.gitkeep
 
 # Install Atlas and dependencies into a dedicated virtual environment.
@@ -80,6 +82,7 @@ ENV NODE_ENV=production \
     APP_CONFIG_DIR=/app/config \
     RUNTIME_LOG_DIR=/app/runtime/logs \
     RUNTIME_FEEDBACK_DIR=/app/runtime/feedback \
+    GIT_HASH=${GIT_HASH} \
     GIT_COMMIT=${GIT_HASH} \
     ATLAS_HOST=0.0.0.0 \
     PORT=8000
