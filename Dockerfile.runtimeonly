@@ -1,20 +1,17 @@
 # Runtime-only container image for Atlas UI 3.
 # This keeps Node.js and frontend build tooling in a separate stage so the
 # final image only contains runtime dependencies.
+#
+# Both stages use Chainguard images for a minimal CVE surface.
 
-FROM registry.access.redhat.com/ubi9/ubi:latest AS frontend-build
+FROM cgr.dev/chainguard/node:20 AS frontend-build
 
+# Chainguard node defaults to nonroot; switch to root for build operations.
+USER root
 WORKDIR /app/frontend
 
-# Install Node.js only in the build stage.
-# --allowerasing is required on UBI9 when switching from curl-minimal to curl.
-RUN dnf install -y --allowerasing curl && \
-    dnf module enable nodejs:20 -y && \
-    dnf install -y nodejs && \
-    dnf clean all
-
 COPY frontend/package*.json ./
-ENV NPM_CONFIG_CACHE=/app/.npm
+ENV NPM_CONFIG_CACHE=/tmp/.npm
 RUN npm ci
 
 COPY frontend/ ./
@@ -33,23 +30,16 @@ ENV APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 
-FROM registry.access.redhat.com/ubi9/python-311:latest
+FROM cgr.dev/chainguard/python:3.11
 
-# ubi9/python-311 defaults to a non-root user; switch to root for system setup.
-USER 0
+# Chainguard Python image defaults to the nonroot user (65532:65532).
+# Switch to root for filesystem setup and package installation, then drop
+# back to nonroot before the final CMD.
+USER root
 
 WORKDIR /app
 
 ARG GIT_HASH="unknown"
-
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Install only runtime system dependencies.
-# --allowerasing is required on UBI9 when installing curl over curl-minimal.
-RUN dnf install -y --allowerasing \
-    curl \
-    hostname \
-    && dnf clean all
 
 # Copy only runtime application files (skip docs/test/scripts).
 COPY pyproject.toml README.md ./
@@ -78,8 +68,8 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
 
-RUN chown -R appuser:appuser /app
-USER appuser
+RUN chown -R nonroot:nonroot /app
+USER nonroot
 
 EXPOSE 8000
 

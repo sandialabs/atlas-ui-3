@@ -213,13 +213,16 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     dockerfile_content = dockerfile_path.read_text(encoding='utf-8')
 
-    assert 'FROM registry.access.redhat.com/ubi9/python-311:latest' in dockerfile_content
+    # Both stages must use Chainguard images for a minimal CVE surface.
+    assert 'FROM cgr.dev/chainguard/python:3.11' in dockerfile_content, (
+        "Runtime stage must use the Chainguard Python 3.11 image"
+    )
+    assert 'FROM cgr.dev/chainguard/node:20' in dockerfile_content, (
+        "Frontend build stage must use the Chainguard Node 20 image"
+    )
 
     # Runtime image should copy only built frontend assets, not the full frontend source tree.
     assert 'COPY --from=frontend-build /app/frontend/dist /app/atlas/static' in dockerfile_content
-
-    # Node.js toolchain should only be installed in the frontend-build stage.
-    assert dockerfile_content.count('dnf module enable nodejs:20') == 1
 
     # Runtime recipe should avoid pulling in extra top-level development/test trees.
     for excluded_copy in ('COPY docs/', 'COPY test/', 'COPY scripts/', 'COPY mocks/'):
