@@ -7,6 +7,7 @@ FROM registry.access.redhat.com/ubi9/ubi:latest AS frontend-build
 WORKDIR /app/frontend
 
 # Install Node.js only in the build stage.
+# --allowerasing is required on UBI9 when switching from curl-minimal to curl.
 RUN dnf install -y --allowerasing curl && \
     dnf module enable nodejs:20 -y && \
     dnf install -y nodejs && \
@@ -41,6 +42,7 @@ ARG GIT_HASH="unknown"
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Install only runtime system dependencies.
+# --allowerasing is required on UBI9 when installing curl over curl-minimal.
 RUN dnf install -y --allowerasing \
     python3 \
     python3-pip \
