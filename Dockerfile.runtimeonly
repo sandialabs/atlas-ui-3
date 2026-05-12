@@ -51,7 +51,7 @@ RUN dnf install -y --allowerasing \
     && dnf clean all
 
 # Copy only runtime application files (skip docs/test/scripts).
-COPY pyproject.toml README.md setup.py ./
+COPY pyproject.toml README.md ./
 COPY atlas/ ./atlas/
 COPY prompts/ ./prompts/
 COPY --from=frontend-build /app/frontend/dist /app/atlas/static
