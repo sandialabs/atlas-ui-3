@@ -359,6 +359,13 @@ async def remove_process(
     Used by the "Remove" affordance in the UI to clear finished or
     cancelled sessions from the active list. For a still-running
     process this also sends SIGTERM and waits briefly for it to exit.
+
+    Coexists with ``DELETE /processes/{id}``: that endpoint cancels a
+    running process but intentionally keeps the record in the registry
+    so the UI can show the exit status and scrollback. ``/remove`` is
+    the second step — drop the record entirely. Two endpoints rather
+    than a flag because the UX is two distinct verbs ("Stop" vs.
+    "Remove") and the existing ``DELETE`` contract is depended on.
     """
     # TODO(graduation): add per-user ownership check — see docs/agentportal/threat-model.md
     _require_enabled()

@@ -138,11 +138,12 @@ and each is tracked with a `TODO(graduation)` comment in code that
 points back here.
 
 - **Per-user ownership checks on per-process endpoints.** `GET`,
-  `DELETE`, `PATCH`, and the WS stream on
-  `/api/agent-portal/processes/{id}` currently accept any authenticated
-  caller. In a multi-user deployment, user A could enumerate, cancel,
-  or rename user B's processes. Not material while the feature is
-  single-user dev-only. Must be implemented before graduation.
+  `DELETE`, `PATCH`, `POST /processes/{id}/remove`, and the WS stream
+  on `/api/agent-portal/processes/{id}` currently accept any
+  authenticated caller. In a multi-user deployment, user A could
+  enumerate, cancel, remove, or rename user B's processes. Not
+  material while the feature is single-user dev-only. Must be
+  implemented before graduation.
 - **Path-root validation for `cwd` and `extra_writable_paths`.** These
   are currently taken as arbitrary absolute paths. See
   design-considerations.

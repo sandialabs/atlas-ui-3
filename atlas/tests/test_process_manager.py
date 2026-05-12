@@ -369,3 +369,78 @@ async def test_child_env_is_isolated(monkeypatch):
     assert "LANG" in env_keys
     for denied in secrets:
         assert denied not in env_keys, f"{denied} leaked to child"
+
+
+@pytest.mark.asyncio
+async def test_launch_strips_namespaces_when_host_unsupported(monkeypatch, caplog):
+    """Caller passes namespaces=True but the host can't honour it.
+
+    The frontend grays the toggle when /capabilities reports no
+    namespace support, but a stale preset or a direct API call can
+    still set the flag. The manager must strip it and proceed rather
+    than fail with EPERM inside unshare(1). A warning is logged so the
+    silent downgrade is auditable, and the recorded launch reflects
+    the actual (non-isolated) execution.
+    """
+    from atlas.modules.process_manager import manager as pm_mod
+
+    monkeypatch.setattr(
+        pm_mod, "probe_isolation_capabilities", lambda: {"namespaces": False, "cgroups": False}
+    )
+
+    manager = ProcessManager()
+    with caplog.at_level("WARNING", logger=pm_mod.__name__):
+        managed = await manager.launch(
+            command=sys.executable,
+            args=["-c", "print('ok')"],
+            namespaces=True,
+            isolate_network=True,
+        )
+    for _ in range(50):
+        if managed.status != ProcessStatus.RUNNING:
+            break
+        await asyncio.sleep(0.05)
+
+    assert managed.status == ProcessStatus.EXITED
+    assert managed.exit_code == 0
+    # The strip happened: the record must reflect no isolation so audit
+    # / UI surfaces show the truth.
+    assert managed.namespaces is False
+    assert managed.isolate_network is False
+    assert any(
+        "stripping namespaces=true" in rec.getMessage() for rec in caplog.records
+    ), "expected warning about stripped namespace flag"
+
+
+@pytest.mark.asyncio
+async def test_launch_skips_capability_probe_when_namespaces_false(monkeypatch):
+    """Strip path only runs when the caller requested namespaces.
+
+    Guards against the strip becoming over-eager: a launch with
+    namespaces=False must not call probe_isolation_capabilities at
+    all (it would be wasted work and could mask a regression where
+    the gate is no longer scoped to namespaces=True).
+    """
+    from atlas.modules.process_manager import manager as pm_mod
+
+    calls = {"n": 0}
+
+    def _probe():
+        calls["n"] += 1
+        return {"namespaces": False, "cgroups": False}
+
+    monkeypatch.setattr(pm_mod, "probe_isolation_capabilities", _probe)
+
+    manager = ProcessManager()
+    managed = await manager.launch(
+        command=sys.executable,
+        args=["-c", "print('ok')"],
+        namespaces=False,
+    )
+    for _ in range(50):
+        if managed.status != ProcessStatus.RUNNING:
+            break
+        await asyncio.sleep(0.05)
+
+    assert managed.status == ProcessStatus.EXITED
+    assert calls["n"] == 0, "probe should not run when namespaces=False"
