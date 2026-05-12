@@ -226,9 +226,11 @@ def _apply_landlock(workdir: str, mode: str, extra_read_dirs=(), extra_write_pat
             if not extra:
                 continue
             try:
-                st = os.stat(extra)
                 is_dir = os.path.isdir(extra)
                 is_file = os.path.isfile(extra)
+                if not (is_dir or is_file):
+                    # Path doesn't exist (or is a symlink with no target).
+                    raise FileNotFoundError(extra)
             except (FileNotFoundError, PermissionError):
                 # Missing -- create as a directory so the rule attaches.
                 try:
@@ -239,7 +241,6 @@ def _apply_landlock(workdir: str, mode: str, extra_read_dirs=(), extra_write_pat
                     )
                     continue
                 is_dir, is_file = True, False
-                st = None  # not needed
             if is_dir:
                 _add_rule(libc, ruleset_fd, extra, _WORKDIR_ACCESS, handled)
             elif is_file:

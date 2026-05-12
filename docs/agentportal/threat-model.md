@@ -127,9 +127,12 @@ loopback is independent of this list. Residual risks:
   WebSocket if it can reach the backend. The control assumes the
   fronting proxy actually requires login for that origin; misconfigure
   the proxy and the origin allowlist is the only remaining barrier.
-- Adding `*` or a public hostname without an auth proxy effectively
-  disables the Origin gate. Treat this env var as a security-sensitive
-  setting and review it whenever deployment topology changes.
+- Comparison is exact-hostname only — `*` is not a wildcard and
+  matches nothing. The only way to weaken the gate is to list an
+  actual public hostname. Adding a public hostname without an auth
+  proxy in front of it effectively disables the Origin gate, so
+  treat this env var as a security-sensitive setting and review it
+  whenever deployment topology changes.
 
 ## Deferred items
 

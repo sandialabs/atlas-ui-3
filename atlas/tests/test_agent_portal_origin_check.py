@@ -10,7 +10,7 @@ env-list lookup) that benefit from focused coverage.
 
 from __future__ import annotations
 
-from typing import Iterator
+from typing import Callable, Iterator
 
 import pytest
 
@@ -28,7 +28,7 @@ class _CM:
 
 
 @pytest.fixture
-def patch_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[callable]:
+def patch_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[str], None]]:
     def _apply(allowed: str = "") -> None:
         monkeypatch.setattr(
             ap_routes.app_factory, "get_config_manager", lambda: _CM(allowed)
