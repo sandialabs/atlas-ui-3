@@ -204,7 +204,7 @@ The container seeds `/app/config` from package defaults at build time. Mounting 
 
 ### Runtime-only Image (smaller runtime footprint)
 
-Build the standard image when you need development-oriented files in the container.  
+Build the standard image (`Dockerfile`) when you need development-oriented files in the container.  
 Build the runtime-only recipe to keep Node.js, docs, and test trees out of the final image:
 
 ```bash
