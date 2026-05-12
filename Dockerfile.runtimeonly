@@ -77,7 +77,7 @@ RUN python3 -m venv /app/.venv
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir ".[mcp-demos]"
+    pip install --no-cache-dir --ignore-requires-python ".[mcp-demos]"
 
 RUN chown -R nonroot:nonroot /app
 USER nonroot
