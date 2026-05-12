@@ -6,11 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #566 - 2026-05-12
-- Added `Dockerfile.runtimeonly`, a multi-stage runtime-focused container recipe that keeps Node build tooling out of the final deployed image and excludes top-level docs/test/scripts trees.
-- Documented how to build and run the runtime-only image in the README and installation guide.
-- Switched `Dockerfile.runtimeonly` base images from UBI9 (`ubi9/ubi`, `ubi9/python-311`) to Chainguard (`cgr.dev/chainguard/node:latest-dev`, `cgr.dev/chainguard/python:latest-dev`) to reduce the CVE surface reported by grype.
-- Fixed container startup failure caused by Chainguard Python image's built-in `ENTRYPOINT`; cleared it and invoked the venv Python directly.
+### PR #598 - 2026-05-12
+- Added an optional `Dockerfile.runtimeonly` that builds a slimmer deployed image using Chainguard bases (Node frontend stage + Python runtime stage), excludes top-level docs/test/scripts trees, and is documented in the README and installation guide.
 
 ### PR #565 - 2026-04-25
 - MCP sessions are now keyed by `(user, conversation, server)` and client-supplied `conversation_id` values owned by another user are rejected on chat and restore.

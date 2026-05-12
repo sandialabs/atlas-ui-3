@@ -41,6 +41,13 @@ WORKDIR /app
 
 ARG GIT_HASH="unknown"
 
+# Fail fast if the rolling `latest-dev` tag points at a Python version that
+# is older than what pyproject.toml requires (>=3.11). This avoids the
+# confusing "Package 'atlas-chat' requires a different Python" error from
+# `pip install` deep in the build.
+RUN python3 -c "import sys; assert sys.version_info >= (3, 11), \
+        f'Chainguard python:latest-dev is Python {sys.version_info.major}.{sys.version_info.minor}, but atlas-chat requires >=3.11. Pin a newer tag or digest.'"
+
 # Copy only runtime application files (skip docs/test/scripts).
 COPY pyproject.toml README.md ./
 COPY atlas/ ./atlas/
@@ -62,11 +69,15 @@ RUN mkdir -p \
     touch /app/runtime/logs/.gitkeep /app/runtime/feedback/.gitkeep /app/runtime/uploads/.gitkeep
 
 # Install Atlas and dependencies into a dedicated virtual environment.
+# The `[mcp-demos]` extra matches the main Dockerfile so bundled MCP demo
+# servers (e.g. pptx_generator) referenced by the seeded default mcp.json
+# work out of the box. Users who want a truly minimal image can replace the
+# seeded config and drop the extra.
 RUN python3 -m venv /app/.venv
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir .
+    pip install --no-cache-dir ".[mcp-demos]"
 
 RUN chown -R nonroot:nonroot /app
 USER nonroot
