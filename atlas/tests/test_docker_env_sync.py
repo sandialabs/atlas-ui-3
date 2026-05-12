@@ -213,6 +213,8 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     dockerfile_content = dockerfile_path.read_text(encoding='utf-8')
 
+    assert 'FROM registry.access.redhat.com/ubi9/python-311:latest' in dockerfile_content
+
     # Runtime image should copy only built frontend assets, not the full frontend source tree.
     assert 'COPY --from=frontend-build /app/frontend/dist /app/atlas/static' in dockerfile_content
 
