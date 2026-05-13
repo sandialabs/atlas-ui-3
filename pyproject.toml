@@ -48,6 +48,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Focused extras for the pptx_generator MCP server. Install with
+# `pip install atlas-chat[pptx]` to enable the markdown-to-PowerPoint
+# tool without pulling the full mcp-demos set. Keep in sync with the
+# [dependency-groups] pptx entry below.
+pptx = [
+    "Pillow>=10.0.0,<13.0.0",
+    "python-pptx>=0.6.21,<2.0.0",
+]
 # Keep in sync with [dependency-groups] mcp-demos below
 mcp-demos = [
     "beautifulsoup4>=4.12.0,<5.0.0",
@@ -86,6 +94,11 @@ Repository = "https://github.com/sandialabs/atlas"
 Issues = "https://github.com/sandialabs/atlas/issues"
 
 [dependency-groups]
+# Keep in sync with [project.optional-dependencies] pptx above
+pptx = [
+    "Pillow>=10.0.0,<13.0.0",
+    "python-pptx>=0.6.21,<2.0.0",
+]
 # Keep in sync with [project.optional-dependencies] mcp-demos above
 mcp-demos = [
     "beautifulsoup4>=4.12.0,<5.0.0",

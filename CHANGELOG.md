@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.2.0] - 2026-05-13
 
+### PR #605 (cherry-picked) - 2026-05-13
+- **Packaging**: New focused `[pptx]` extras group (`pip install atlas-chat[pptx]`) pulls Pillow + python-pptx for the `pptx_generator` MCP server. Without it the server logged `ModuleNotFoundError: No module named 'PIL'` on a bare wheel install. Pillow stays in the broader `[mcp-demos]` extras as well.
+- **CLI**: `atlas-chat --version` now prints `atlas-chat version X.Y.Z` and exits, matching `atlas-init`. The release smoke test references this flag.
+- **Docs**: Removed `--tool-choice-required` from the smoke-test recipe in `docs/developer/release-process.md` and the release checklist; it is not (and was not) a real `atlas-chat` flag.
+
 ### PR #587 (cherry-picked) - 2026-05-13
 - Default prompt templates (`system_prompt.md`, `tool_synthesis_prompt.md`, and the agent loop prompts) are now shipped as package resources under `atlas/config/prompts/`, so a clean `pip install atlas-chat` no longer logs `Prompt template not found` and falls back to a missing system prompt. Fixes issue #572.
 
