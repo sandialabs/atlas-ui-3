@@ -38,6 +38,27 @@ async def test_prompt_provider_loads_system_prompt(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_prompt_provider_prefers_user_config_over_packaged_default(tmp_path):
+    """Test that user config prompts override packaged defaults."""
+    config_dir = tmp_path / "config" / "prompts"
+    config_dir.mkdir(parents=True)
+    (config_dir / "system_prompt.md").write_text("User override for {user_email}")
+
+    package_dir = tmp_path / "atlas" / "config" / "prompts"
+    package_dir.mkdir(parents=True)
+    (package_dir / "system_prompt.md").write_text("Packaged default for {user_email}")
+
+    config_manager = ConfigManager(atlas_root=tmp_path / "atlas")
+    config_manager.app_settings.prompt_base_path = "config/prompts"
+    config_manager.app_settings.system_prompt_filename = "system_prompt.md"
+
+    prompt_provider = PromptProvider(config_manager)
+    result = prompt_provider.get_system_prompt(user_email="test@example.com")
+
+    assert result == "User override for test@example.com"
+
+
+@pytest.mark.asyncio
 async def test_prompt_provider_handles_missing_system_prompt():
     """Test that PromptProvider returns None when system_prompt.md is missing"""
     # Create a config manager pointing to non-existent directory
