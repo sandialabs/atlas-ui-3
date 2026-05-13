@@ -307,7 +307,7 @@ cd /tmp && rm -rf atlas-smoke-work && mkdir atlas-smoke-work && cd atlas-smoke-w
 
 # Tool call path
 /tmp/atlas-smoke/bin/atlas-chat "What is 2+2?" \
-  --tools calculator_evaluate --tool-choice-required
+  --tools calculator_evaluate
 
 # Web server smoke
 /tmp/atlas-smoke/bin/atlas-server --port 18000 &

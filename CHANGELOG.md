@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #605 - 2026-05-13
+- **Packaging**: New focused `[pptx]` extras group (`pip install atlas-chat[pptx]`) pulls Pillow + python-pptx for the `pptx_generator` MCP server. Without it the server logged `ModuleNotFoundError: No module named 'PIL'` on a bare wheel install. Pillow stays in the broader `[mcp-demos]` extras as well.
+- **CLI**: `atlas-chat --version` now prints `atlas-chat version X.Y.Z` and exits, matching `atlas-init`. The release smoke test references this flag.
+- **Docs**: Removed `--tool-choice-required` from the smoke-test recipe in `docs/developer/release-process.md` and the release checklist; it is not (and was not) a real `atlas-chat` flag.
+
 ### PR #602 - 2026-05-12
 - Docker runtime-only image now installs with `--ignore-requires-python` for LiteLLM compatibility on Chainguard Python 3.14, and CI now validates `Dockerfile.runtimeonly` builds.
 
