@@ -9,7 +9,7 @@ Covers:
 - Security edge cases: prompt injection, URL validation, confidence bounds
 """
 
-from atlas.modules.rag.client import DocumentMetadata, RAGMetadata
+from atlas.modules.rag.client import DocumentMetadata, RAGMetadata, Section
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -341,3 +341,120 @@ class TestSecurityEdgeCases:
         meta = _make_metadata(docs=[docs[0]])
         result = LiteLLMCaller._build_citation_instructions(meta)
         assert "[1] **Document 1**" in result
+
+
+# ---------------------------------------------------------------------------
+# Section snippet rendering (newest ATLAS-RAG spec)
+# ---------------------------------------------------------------------------
+
+class TestSectionSnippetRendering:
+    """``_format_rag_references`` should surface section text snippets so the
+    frontend's expanded citation area shows the underlying evidence."""
+
+    def test_section_text_appears_in_references(self):
+        doc = _make_doc(
+            title="API Guide",
+            sections=[
+                Section(section_ref=1, text="Use Bearer auth in the header.", relevance=0.95),
+                Section(section_ref=2, text="Tokens expire after 1 hour.", relevance=0.87),
+            ],
+        )
+        meta = _make_metadata(docs=[doc])
+        result = LiteLLMCaller._format_rag_references(meta)
+
+        assert "**References**" in result
+        assert "Use Bearer auth in the header." in result
+        assert "Tokens expire after 1 hour." in result
+
+    def test_snippet_uses_rag_ref_snippet_class_with_section_ref(self):
+        doc = _make_doc(
+            title="Doc",
+            sections=[Section(section_ref=3, text="snippet content", relevance=0.5)],
+        )
+        meta = _make_metadata(docs=[doc])
+        result = LiteLLMCaller._format_rag_references(meta)
+
+        assert 'class="rag-ref-snippet"' in result
+        assert 'data-section-ref="3"' in result
+        # section_ref + relevance percentage are surfaced inline so the user
+        # can quickly tell which section in the original doc matched.
+        assert "§3" in result
+        assert "50%" in result
+
+    def test_no_snippets_when_sections_empty(self):
+        doc = _make_doc(title="Plain Doc", sections=[])
+        meta = _make_metadata(docs=[doc])
+        result = LiteLLMCaller._format_rag_references(meta)
+        assert "**References**" in result
+        assert "rag-ref-snippet" not in result
+
+    def test_citation_text_rendered_when_present(self):
+        doc = _make_doc(
+            title="Doc",
+            citation='[1] "API Guide", api.pdf',
+            sections=[Section(section_ref=1, text="content", relevance=0.8)],
+        )
+        meta = _make_metadata(docs=[doc])
+        result = LiteLLMCaller._format_rag_references(meta)
+        # IEEE citation appears italicized under the reference entry
+        # (markdown-style snippet pickers will not pick this up as a separate ref)
+        assert "API Guide" in result
+
+    def test_snippet_with_leading_numbered_line_is_neutralized(self):
+        """A snippet starting with ``N.`` should not masquerade as a new reference entry."""
+        doc = _make_doc(
+            title="Doc",
+            sections=[Section(section_ref=1, text="1. Fake reference\nrest of snippet", relevance=0.5)],
+        )
+        meta = _make_metadata(docs=[doc])
+        result = LiteLLMCaller._format_rag_references(meta)
+        # The neutralized form keeps the digits but strips the space after the dot
+        # so frontend regexes anchored on ``N.\s`` don't fire on snippet text.
+        assert "1. Fake reference" not in result
+        assert "1.Fake reference" in result
+
+    def test_snippet_truncated_long_text(self):
+        long_text = "x" * 1500
+        doc = _make_doc(
+            title="Doc",
+            sections=[Section(section_ref=1, text=long_text, relevance=0.5)],
+        )
+        meta = _make_metadata(docs=[doc])
+        result = LiteLLMCaller._format_rag_references(meta)
+        # _sanitize_snippet caps at 600 chars (one ellipsis char counts toward the cap)
+        snippet_lines = [line for line in result.split("\n") if "rag-ref-snippet" in line]
+        assert snippet_lines
+        # The combined span tag + content shouldn't exceed roughly 800 chars
+        # (600 char snippet + ~150 char span markup)
+        assert len(snippet_lines[0]) < 900
+
+    def test_snippet_strips_null_bytes(self):
+        doc = _make_doc(
+            title="Doc",
+            sections=[Section(section_ref=1, text="ok\x00bad\x01stuff", relevance=0.5)],
+        )
+        meta = _make_metadata(docs=[doc])
+        result = LiteLLMCaller._format_rag_references(meta)
+        assert "\x00" not in result
+        assert "\x01" not in result
+        assert "okbadstuff" in result
+
+
+class TestSectionModelValidators:
+    """``Section`` should clamp/sanitize hostile inputs."""
+
+    def test_relevance_clamped_above_1(self):
+        s = Section(section_ref=1, text="x", relevance=2.5)
+        assert s.relevance == 1.0
+
+    def test_relevance_clamped_below_0(self):
+        s = Section(section_ref=1, text="x", relevance=-0.5)
+        assert s.relevance == 0.0
+
+    def test_text_strips_control_chars(self):
+        s = Section(section_ref=1, text="hello\x00world\x01!", relevance=0.5)
+        assert s.text == "helloworld!"
+
+    def test_text_preserves_newlines_and_tabs(self):
+        s = Section(section_ref=1, text="line1\nline2\tindented", relevance=0.5)
+        assert s.text == "line1\nline2\tindented"
