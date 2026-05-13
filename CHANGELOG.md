@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.2.0] - 2026-05-13
 
+### PR #587 (cherry-picked) - 2026-05-13
+- Default prompt templates (`system_prompt.md`, `tool_synthesis_prompt.md`, and the agent loop prompts) are now shipped as package resources under `atlas/config/prompts/`, so a clean `pip install atlas-chat` no longer logs `Prompt template not found` and falls back to a missing system prompt. Fixes issue #572.
+
 ### PR #602 - 2026-05-12
 - Docker runtime-only image now installs with `--ignore-requires-python` for LiteLLM compatibility on Chainguard Python 3.14, and CI now validates `Dockerfile.runtimeonly` builds.
 
