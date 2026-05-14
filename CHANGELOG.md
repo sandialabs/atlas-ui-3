@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #606 - 2026-05-14
+- `MCPToolManager._invalidate_user_client` now calls a new `MCPSessionManager.release_sessions_for_user_server` method after evicting client cache entries, ensuring live sessions that outlived their cache entry (e.g. due to LRU eviction races) are also closed when a token is revoked.
+
 ### PR #605 - 2026-05-13
 - **Packaging**: New focused `[pptx]` extras group (`pip install atlas-chat[pptx]`) pulls Pillow + python-pptx for the `pptx_generator` MCP server. Without it the server logged `ModuleNotFoundError: No module named 'PIL'` on a bare wheel install. Pillow stays in the broader `[mcp-demos]` extras as well.
 - **CLI**: `atlas-chat --version` now prints `atlas-chat version X.Y.Z` and exits, matching `atlas-init`. The release smoke test references this flag.
