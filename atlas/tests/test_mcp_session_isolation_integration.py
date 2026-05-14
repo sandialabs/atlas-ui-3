@@ -274,3 +274,65 @@ async def test_pre_fix_failure_mode_documented():
     # per-conversation cache prevents from ever happening.
     with pytest.raises(_NestingCounterError):
         await shared.__aenter__()
+
+
+@pytest.mark.asyncio
+async def test_release_sessions_for_user_server_closes_matching_sessions():
+    """release_sessions_for_user_server must close all sessions for a
+    user/server pair across every conversation, leaving sessions for
+    other users or other servers untouched.
+    """
+    from atlas.modules.mcp_tools.session_manager import MCPSessionManager
+
+    sm = MCPSessionManager()
+
+    def _make_client(label: str) -> FakeFastMCPClient:
+        return FakeFastMCPClient(label=label)
+
+    alice_server1_conv1 = _make_client("alice-s1-c1")
+    alice_server1_conv2 = _make_client("alice-s1-c2")
+    alice_server2_conv1 = _make_client("alice-s2-c1")
+    bob_server1_conv1 = _make_client("bob-s1-c1")
+
+    sess_a1c1 = await sm.acquire("conv-1", "server-1", alice_server1_conv1, user_email="alice@test.com")
+    sess_a1c2 = await sm.acquire("conv-2", "server-1", alice_server1_conv2, user_email="alice@test.com")
+    sess_a2c1 = await sm.acquire("conv-1", "server-2", alice_server2_conv1, user_email="alice@test.com")
+    sess_b1c1 = await sm.acquire("conv-1", "server-1", bob_server1_conv1, user_email="bob@test.com")
+
+    # Revoke alice's token for server-1 only.
+    await sm.release_sessions_for_user_server("alice@test.com", "server-1")
+
+    # Alice's server-1 sessions in both conversations must be closed.
+    assert sess_a1c1._closed
+    assert sess_a1c2._closed
+
+    # Alice's session on server-2 and Bob's session on server-1 must survive.
+    assert not sess_a2c1._closed
+    assert not sess_b1c1._closed
+
+    # Session manager internal state must be consistent.
+    assert ("alice@test.com", "conv-1", "server-1") not in sm._sessions
+    assert ("alice@test.com", "conv-2", "server-1") not in sm._sessions
+    assert ("alice@test.com", "conv-1", "server-2") in sm._sessions
+    assert ("bob@test.com", "conv-1", "server-1") in sm._sessions
+
+    # conv_index must be cleaned up for conversations whose only remaining
+    # sessions were for the revoked user+server pair.
+    # conv-2 had only alice/server-1, so it should be removed from the index.
+    assert "conv-2" not in sm._conv_index
+    # conv-1 still has alice/server-2 and bob/server-1.
+    assert "conv-1" in sm._conv_index
+
+
+@pytest.mark.asyncio
+async def test_release_sessions_for_user_server_is_idempotent():
+    """Calling release_sessions_for_user_server twice must not raise."""
+    from atlas.modules.mcp_tools.session_manager import MCPSessionManager
+
+    sm = MCPSessionManager()
+    client = FakeFastMCPClient(label="c")
+    await sm.acquire("conv-1", "server-1", client, user_email="alice@test.com")
+
+    await sm.release_sessions_for_user_server("alice@test.com", "server-1")
+    # Second call on already-empty state must be a no-op.
+    await sm.release_sessions_for_user_server("alice@test.com", "server-1")
