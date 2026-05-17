@@ -1,14 +1,33 @@
-"""ATLAS RAG Client for integrating with the ATLAS RAG API (OpenAPI v0.3.x).
+"""ATLAS RAG Client for the ATLAS RAG API (OpenAPI v0.3.0.dev1+).
 
-This client implements the same interface as ``RAGClient`` but speaks the
-ATLAS RAG API described at:
+Implements the newest ATLAS RAG spec:
 
   - GET  /api/v1/discover/datasources?role=read|write&as_user={user}
   - POST /api/v1/rag/completions?as_user={user}
 
-Responses follow the OpenAI ``chat.completion`` schema with an extra
-``rag_metadata`` block and per-message ``annotations`` (``url_citation``)
-that link character ranges in the assistant content to source documents.
+Request body (RagRequest):
+
+    {"messages": [...], "stream": false, "corpora": "<id>" | ["<id>", ...]}
+
+Response body (RagResponse):
+
+    {
+      "message":  {"role": "assistant", "content": "..."},
+      "metadata": {
+        "response_time": <int seconds>,
+        "references": [
+          {
+            "citation": "IEEE format" | null,
+            "document_ref": 1,
+            "filename": "doc.pdf",
+            "sections": [
+              {"section_ref": 1, "text": "snippet...", "relevance": 0.92}
+            ]
+          },
+          ...
+        ]
+      }
+    }
 """
 
 import logging
@@ -23,6 +42,7 @@ from atlas.modules.rag.client import (
     DocumentMetadata,
     RAGMetadata,
     RAGResponse,
+    Section,
     URLCitation,
 )
 
@@ -30,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 class AtlasRAGClient:
-    """Client for communicating with external ATLAS RAG API.
+    """Client for the external ATLAS RAG API.
 
     Implements the same interface as ``RAGClient`` for seamless substitution.
     Uses Bearer token authentication with user impersonation via the ``as_user``
@@ -56,8 +76,11 @@ class AtlasRAGClient:
         Args:
             base_url: Base URL for the external RAG API.
             bearer_token: Bearer token for API authentication.
-            default_model: Default model to use for RAG queries.
-            top_k: Default number of documents to retrieve.
+            default_model: Kept for backwards-compat configuration; the newest
+                spec does not accept a model in the request body, so this is
+                effectively unused at request time.
+            top_k: Retained for legacy callers; the newest spec has no
+                top_k field in RagRequest.
             timeout: Request timeout in seconds.
             strip_domain: If True, strip ``@domain`` from usernames before
                 sending to the RAG API (``user@corp.com`` -> ``user``).
@@ -118,12 +141,8 @@ class AtlasRAGClient:
 
         Calls ``GET {discovery_path}?role={role}&as_user={user_name}``.
 
-        Args:
-            user_name: The username to discover data sources for.
-            role: Access role — ``"read"`` or ``"write"``.
-
-        Returns:
-            List of DataSource objects the user can access.
+        Accepts either a bare list or ``{"data_sources": [...]}`` envelope —
+        the OpenAPI spec returns a bare list; some servers still envelope it.
         """
         user_name = self._resolve_username(user_name)
         logger.info("Discovering data sources for user: %s (role=%s)", user_name, role)
@@ -138,7 +157,13 @@ class AtlasRAGClient:
                 response.raise_for_status()
                 data = response.json()
 
-                sources_list = data.get("data_sources", [])
+                if isinstance(data, list):
+                    sources_list = data
+                elif isinstance(data, dict):
+                    sources_list = data.get("data_sources", [])
+                else:
+                    sources_list = []
+
                 data_sources = [DataSource(**src) for src in sources_list]
 
                 logger.info(
@@ -185,29 +210,38 @@ class AtlasRAGClient:
         """Query RAG endpoint for a response with metadata.
 
         Calls ``POST {query_path}?as_user={user_name}`` with a ``RagRequest``
-        body matching the ATLAS RAG OpenAPI spec (v0.3.x).
+        body. The newest spec uses ``corpora`` (string or list) at the top
+        level — no ``hybrid_search_kwargs``, no ``model``, no ``top_k``.
 
         Args:
             user_name: The username making the query.
-            data_source: A single data source (corpus) to query. Ignored when
-                ``data_sources`` is provided.
-            messages: List of message dictionaries with role and content.
-            data_sources: Multiple data sources (corpora) to query in a single
-                request. When provided, all sources are sent as one batched
-                request via ``hybrid_search_kwargs.corpora``.
-            hybrid_search_kwargs: Additional search parameters forwarded to the
-                HybridSearch backend. ``top_k`` and ``corpora`` are injected
-                automatically when not present.
+            data_source: Single data source (corpus). Used when
+                ``data_sources`` is not provided.
+            messages: Message history (role/content dicts).
+            data_sources: Multiple data sources to query in one request.
+                When provided, takes precedence over ``data_source``.
+            hybrid_search_kwargs: Accepted for caller compatibility; the
+                newest spec has no place to forward these fields and they
+                are intentionally ignored.
 
         Returns:
-            RAGResponse containing content, metadata, and url_citation
-            annotations.
-
-        Raises:
-            HTTPException: On API errors (403, 404, 500).
+            RAGResponse containing the assistant content and parsed metadata
+            (including per-reference section snippets).
         """
-        corpora = data_sources if data_sources else ([data_source] if data_source else None)
+        if data_sources:
+            corpora: Optional[Any] = list(data_sources)
+        elif data_source:
+            corpora = data_source
+        else:
+            corpora = None
+
         user_name = self._resolve_username(user_name)
+
+        if hybrid_search_kwargs:
+            logger.debug(
+                "[HTTP-RAG] Ignoring hybrid_search_kwargs (not part of newest spec): %s",
+                hybrid_search_kwargs,
+            )
 
         logger.info(
             "[HTTP-RAG] query_rag called: user=%s, corpora=%s, message_count=%d",
@@ -216,34 +250,12 @@ class AtlasRAGClient:
             len(messages),
         )
 
-        user_query = ""
-        for msg in reversed(messages):
-            if msg.get("role") == "user":
-                content = msg.get("content", "")
-                if isinstance(content, str):
-                    user_query = content[:100]
-                break
-        logger.debug("[HTTP-RAG] Query preview: %s...", user_query)
-
-        merged_kwargs: Dict[str, Any] = {}
-        if hybrid_search_kwargs:
-            merged_kwargs.update(hybrid_search_kwargs)
-        merged_kwargs.setdefault("top_k", self.top_k)
-        if corpora is not None:
-            merged_kwargs["corpora"] = corpora
-
-        payload = {
+        payload: Dict[str, Any] = {
             "messages": messages,
             "stream": False,
-            "model": self.default_model,
-            "hybrid_search_kwargs": merged_kwargs,
         }
-
-        logger.debug(
-            "[HTTP-RAG] Request payload: model=%s, hybrid_search_kwargs=%s",
-            payload["model"],
-            merged_kwargs,
-        )
+        if corpora is not None:
+            payload["corpora"] = corpora
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
@@ -259,37 +271,26 @@ class AtlasRAGClient:
                 logger.debug(
                     "[HTTP-RAG] Response received: status=%d, keys=%s",
                     response.status_code,
-                    list(data.keys()),
+                    list(data.keys()) if isinstance(data, dict) else type(data).__name__,
                 )
 
-                is_completion = data.get("object") == "chat.completion"
-
-                content = "No response from RAG system."
-                message: Dict[str, Any] = {}
-                if "choices" in data and data["choices"]:
-                    choice = data["choices"][0]
-                    message = choice.get("message", {}) or {}
-                    msg_content = message.get("content")
-                    if msg_content:
-                        content = msg_content
-
-                annotations = self._parse_annotations(message)
-                metadata = self._parse_rag_metadata(data, data_source, annotations)
+                content, message_dict = self._extract_message(data)
+                metadata = self._parse_response_metadata(data, data_source)
+                annotations = self._parse_annotations(message_dict)
 
                 logger.info(
                     "[HTTP-RAG] query_rag complete: user=%s, source=%s, "
-                    "content_length=%d, has_metadata=%s, annotations=%d, is_completion=%s",
+                    "content_length=%d, has_metadata=%s, references=%d",
                     user_name,
                     data_source,
                     len(content),
                     metadata is not None,
-                    len(annotations),
-                    is_completion,
+                    len(metadata.documents_found) if metadata else 0,
                 )
                 return RAGResponse(
                     content=content,
                     metadata=metadata,
-                    is_completion=is_completion,
+                    is_completion=True,
                     annotations=annotations,
                 )
 
@@ -335,12 +336,39 @@ class AtlasRAGClient:
                 raise HTTPException(status_code=500, detail="Internal server error")
 
     @staticmethod
-    def _parse_annotations(message: Dict[str, Any]) -> List[URLCitation]:
-        """Extract url_citation annotations from a ChatCompletionMessage.
+    def _extract_message(data: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+        """Pull assistant content from either the newest or legacy response shape.
 
-        Spec: ``message.annotations`` is an optional list of ``Annotation``
-        objects with ``type == "url_citation"`` and a ``url_citation`` payload.
-        Unknown types are ignored.
+        Newest spec: ``{"message": {"role": "assistant", "content": "..."}, ...}``.
+        Legacy: ``{"choices": [{"message": {"content": "..."}}], ...}``.
+        """
+        content = "No response from RAG system."
+        message: Dict[str, Any] = {}
+
+        if isinstance(data.get("message"), dict):
+            message = data["message"]
+            msg_content = message.get("content")
+            if msg_content:
+                content = msg_content
+            return content, message
+
+        choices = data.get("choices") or []
+        if choices:
+            first = choices[0] or {}
+            message = first.get("message") or {}
+            msg_content = message.get("content")
+            if msg_content:
+                content = msg_content
+        return content, message
+
+    @staticmethod
+    def _parse_annotations(message: Dict[str, Any]) -> List[URLCitation]:
+        """Extract url_citation annotations from a message (legacy compat).
+
+        The newest spec does not include url_citation annotations — they
+        were specific to the prior OpenAI chat.completion envelope. Parsing
+        is kept for backwards-compat with older mock instances during the
+        roll-forward window.
         """
         raw = message.get("annotations") or []
         citations: List[URLCitation] = []
@@ -361,52 +389,116 @@ class AtlasRAGClient:
                 )
         return citations
 
-    def _parse_rag_metadata(
+    def _parse_response_metadata(
         self,
         data: Dict[str, Any],
         data_source: str,
-        annotations: Optional[List[URLCitation]] = None,
     ) -> Optional[RAGMetadata]:
-        """Parse rag_metadata from API response into RAGMetadata model.
+        """Parse the response metadata block.
 
-        Spec notes: ``DocumentMetadata.data_source`` is a nested object and
-        ``text`` carries the snippet.  Title/URL are not on the document —
-        they live on the corresponding ``url_citation`` annotation (matched
-        by index order).  Back-compat fields (``corpus_id``, ``title``,
-        ``url``) are still read when present.
-
-        Args:
-            data: The full API response dictionary.
-            data_source: The data source used in the query (fallback label).
-            annotations: Parsed url_citation annotations to enrich documents
-                with title/url by index pairing.
-
-        Returns:
-            RAGMetadata if present in response, None otherwise.
+        Prefers the newest-spec shape (``metadata.references`` + per-
+        reference ``sections``). Falls back to the legacy ``rag_metadata``
+        + ``documents_found`` shape so existing servers keep working
+        during a rolling migration.
         """
-        if "rag_metadata" not in data or not data["rag_metadata"]:
+        if isinstance(data.get("metadata"), dict) and "references" in data["metadata"]:
+            return self._parse_metadata_newest(data["metadata"], data_source)
+
+        if "rag_metadata" in data and data["rag_metadata"]:
+            return self._parse_rag_metadata_legacy(data, data_source)
+
+        return None
+
+    def _parse_metadata_newest(
+        self,
+        metadata: Dict[str, Any],
+        data_source: str,
+    ) -> Optional[RAGMetadata]:
+        """Parse the newest-spec metadata block.
+
+        Maps each ``Reference`` into a ``DocumentMetadata`` whose
+        ``sections`` carry the actual snippet text matched to the query.
+        The reference's top section relevance becomes ``confidence_score``
+        so existing UI/sorting code still works without changes.
+        """
+        try:
+            references_raw = metadata.get("references") or []
+            documents_found: List[DocumentMetadata] = []
+
+            for ref in references_raw:
+                if not isinstance(ref, dict):
+                    continue
+                sections_raw = ref.get("sections") or []
+                sections: List[Section] = []
+                for sec in sections_raw:
+                    if not isinstance(sec, dict):
+                        continue
+                    try:
+                        sections.append(Section(**sec))
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Skipping malformed section: %s", exc)
+
+                top_relevance = max((s.relevance for s in sections), default=0.0)
+                filename = ref.get("filename") or ""
+
+                try:
+                    doc_metadata = DocumentMetadata(
+                        source=data_source or filename,
+                        content_type="atlas-search",
+                        confidence_score=top_relevance,
+                        chunk_id=None,
+                        last_modified=None,
+                        title=filename or None,
+                        url=None,
+                        citation=ref.get("citation"),
+                        document_ref=ref.get("document_ref"),
+                        sections=sections,
+                    )
+                    documents_found.append(doc_metadata)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Skipping malformed reference (filename=%s): %s",
+                        filename,
+                        exc,
+                    )
+
+            response_time = metadata.get("response_time", 0) or 0
+            # Spec describes response_time in seconds; surface as ms for the
+            # existing UI footer that says "Xms".
+            processing_ms = int(response_time * 1000)
+
+            return RAGMetadata(
+                query_processing_time_ms=processing_ms,
+                total_documents_searched=len(documents_found),
+                documents_found=documents_found,
+                data_source_name=data_source or "",
+                retrieval_method="similarity",
+            )
+
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to parse newest RAG metadata: %s", str(e))
             return None
 
+    def _parse_rag_metadata_legacy(
+        self,
+        data: Dict[str, Any],
+        data_source: str,
+    ) -> Optional[RAGMetadata]:
+        """Parse the legacy ``rag_metadata`` + ``documents_found`` shape.
+
+        Retained so this client can still talk to older mock instances
+        while the spec rolls out. Newest-spec parsing in
+        ``_parse_metadata_newest`` is the primary path.
+        """
         try:
             rm = data["rag_metadata"]
-            citations = annotations or []
 
             documents_found: List[DocumentMetadata] = []
-            for i, doc in enumerate(rm.get("documents_found", [])):
+            for doc in rm.get("documents_found", []):
                 ds = doc.get("data_source") if isinstance(doc.get("data_source"), dict) else {}
-
                 source = ds.get("id") or doc.get("corpus_id") or ""
-
-                citation = citations[i] if i < len(citations) else None
-                title = (
-                    (citation.title if citation else None)
-                    or doc.get("title")
-                    or ds.get("label")
-                )
-                url = (
-                    (citation.url if citation and citation.url else None)
-                    or doc.get("url")
-                )
+                title = doc.get("title") or ds.get("label")
+                url = doc.get("url")
 
                 doc_metadata = DocumentMetadata(
                     source=source,
@@ -437,8 +529,8 @@ class AtlasRAGClient:
                 retrieval_method=rm.get("retrieval_method", "similarity"),
             )
 
-        except Exception as e:
-            logger.warning("Failed to parse RAG metadata: %s", str(e))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to parse legacy RAG metadata: %s", str(e))
             return None
 
 

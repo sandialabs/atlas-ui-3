@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-16
+
+### PR #606 - 2026-05-16
+- **RAG**: Aligned ATLAS-RAG mock and client with the newest OpenAPI spec (v0.3.0.dev1+). The client now sends a trimmed `{messages, stream, corpora}` payload (no `model`, no `hybrid_search_kwargs`) and parses `metadata.references[].sections[]` (each with `section_ref`, `text`, `relevance`) plus per-reference `citation` and `document_ref`. Legacy `rag_metadata` parsing is retained for rolling migration.
+- **Citations UI**: Reference expansion now renders each section snippet as a `.rag-ref-snippet` blockquote under its reference, with `section_ref` and a relevance label. Snippet styling added to `index.css`; `data-section-ref` is allowed through DOMPurify so spans survive sanitization. New vitest cases verify snippet pass-through and that the source-label extractor isn't fooled by them.
+- **Mock**: `mocks/atlas-rag-api-mock/main.py` rewritten to the new `RagResponse` shape (bare-list discovery endpoint, top-level `corpora` in the request, per-reference sections built from grep hits). README and screenshots updated.
+
 ### PR #605 - 2026-05-13
 - **Packaging**: New focused `[pptx]` extras group (`pip install atlas-chat[pptx]`) pulls Pillow + python-pptx for the `pptx_generator` MCP server. Without it the server logged `ModuleNotFoundError: No module named 'PIL'` on a bare wheel install. Pillow stays in the broader `[mcp-demos]` extras as well.
 - **CLI**: `atlas-chat --version` now prints `atlas-chat version X.Y.Z` and exits, matching `atlas-init`. The release smoke test references this flag.
