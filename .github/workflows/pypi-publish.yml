@@ -72,6 +72,9 @@ jobs:
     environment:
       name: testpypi
       url: https://test.pypi.org/p/atlas-chat
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v8
@@ -93,6 +96,9 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/p/atlas-chat
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v8
