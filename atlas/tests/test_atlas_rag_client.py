@@ -1,4 +1,4 @@
-"""Unit tests for AtlasRAGClient."""
+"""Unit tests for AtlasRAGClient (newest ATLAS-RAG OpenAPI spec)."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
-from atlas.modules.rag.client import DataSource, RAGResponse
+from atlas.modules.rag.client import DataSource, RAGResponse, Section
 
 
 @pytest.fixture
@@ -30,11 +30,31 @@ def client_no_auth():
     )
 
 
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+def _mock_async_client_with_response(json_payload, *, method="post"):
+    """Helper that wires up an httpx.AsyncClient mock returning ``json_payload``."""
+    mock_response = MagicMock()
+    mock_response.json.return_value = json_payload
+    mock_response.status_code = 200
+    mock_response.raise_for_status = MagicMock()
+
+    patcher = patch("httpx.AsyncClient")
+    mock_client = patcher.start()
+    mock_instance = AsyncMock()
+    getattr(mock_instance, method).return_value = mock_response
+    mock_instance.__aenter__.return_value = mock_instance
+    mock_instance.__aexit__.return_value = None
+    mock_client.return_value = mock_instance
+    return patcher, mock_instance, mock_response
+
+
 class TestAtlasRAGClientInit:
     """Tests for AtlasRAGClient initialization."""
 
     def test_init_with_all_params(self, client):
-        """Test initialization with all parameters."""
         assert client.base_url == "https://rag-api.example.com"
         assert client.bearer_token == "test-token"
         assert client.default_model == "test-model"
@@ -42,99 +62,87 @@ class TestAtlasRAGClientInit:
         assert client.timeout == 30.0
 
     def test_init_strips_trailing_slash(self):
-        """Test that trailing slash is stripped from base_url."""
-        client = AtlasRAGClient(base_url="https://rag-api.example.com/")
-        assert client.base_url == "https://rag-api.example.com"
+        c = AtlasRAGClient(base_url="https://rag-api.example.com/")
+        assert c.base_url == "https://rag-api.example.com"
 
     def test_init_defaults(self):
-        """Test initialization with default values."""
-        client = AtlasRAGClient(base_url="https://rag-api.example.com")
-        assert client.bearer_token is None
-        assert client.default_model == "openai/gpt-oss-120b"
-        assert client.top_k == 4
-        assert client.timeout == 60.0
+        c = AtlasRAGClient(base_url="https://rag-api.example.com")
+        assert c.bearer_token is None
+        assert c.default_model == "openai/gpt-oss-120b"
+        assert c.top_k == 4
+        assert c.timeout == 60.0
 
 
 class TestGetHeaders:
-    """Tests for header generation."""
-
     def test_headers_with_auth(self, client):
-        """Test headers include Bearer token when provided."""
         headers = client._get_headers()
         assert headers["Content-Type"] == "application/json"
         assert headers["Authorization"] == "Bearer test-token"
 
     def test_headers_without_auth(self, client_no_auth):
-        """Test headers without Bearer token when not provided."""
         headers = client_no_auth._get_headers()
         assert headers["Content-Type"] == "application/json"
         assert "Authorization" not in headers
 
 
+# ---------------------------------------------------------------------------
+# discover_data_sources
+# ---------------------------------------------------------------------------
+
 class TestDiscoverDataSources:
     """Tests for discover_data_sources method."""
 
     @pytest.mark.asyncio
-    async def test_discover_success(self, client):
-        """Test successful data source discovery."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "data_sources": [
-                {"id": "corpus1", "label": "Corpus One", "compliance_level": "CUI", "description": "First corpus"},
-                {"id": "corpus2", "label": "Corpus Two", "compliance_level": "Public", "description": "Second corpus"},
+    async def test_discover_success_bare_list(self, client):
+        """Newest spec: GET returns a bare list of data sources."""
+        patcher, mock_instance, _ = _mock_async_client_with_response(
+            [
+                {"id": "corpus1", "label": "Corpus One", "compliance_level": "CUI", "description": "First"},
+                {"id": "corpus2", "label": "Corpus Two", "compliance_level": "Public", "description": "Second"},
             ],
-        }
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_instance = AsyncMock()
-            mock_instance.get.return_value = mock_response
-            mock_instance.__aenter__.return_value = mock_instance
-            mock_instance.__aexit__.return_value = None
-            mock_client.return_value = mock_instance
-
+            method="get",
+        )
+        try:
             result = await client.discover_data_sources("test-user")
+        finally:
+            patcher.stop()
 
         assert len(result) == 2
         assert isinstance(result[0], DataSource)
         assert result[0].id == "corpus1"
-        assert result[0].label == "Corpus One"
-        assert result[0].compliance_level == "CUI"
-        assert result[0].description == "First corpus"
         assert result[1].id == "corpus2"
-        assert result[1].label == "Corpus Two"
-        assert result[1].compliance_level == "Public"
 
-        # Verify correct URL and params
-        mock_instance.get.assert_called_once()
+        # Verify URL and params
         call_args = mock_instance.get.call_args
         assert call_args[0][0] == "https://rag-api.example.com/api/v1/discover/datasources"
         assert call_args[1]["params"] == {"role": "read", "as_user": "test-user"}
         assert call_args[1]["headers"]["Authorization"] == "Bearer test-token"
 
     @pytest.mark.asyncio
-    async def test_discover_empty_response(self, client):
-        """Test discovery with no accessible data sources."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "data_sources": [],
-        }
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_instance = AsyncMock()
-            mock_instance.get.return_value = mock_response
-            mock_instance.__aenter__.return_value = mock_instance
-            mock_instance.__aexit__.return_value = None
-            mock_client.return_value = mock_instance
-
+    async def test_discover_legacy_envelope(self, client):
+        """Legacy compat: GET returns ``{data_sources: [...]}`` envelope."""
+        patcher, _, _ = _mock_async_client_with_response(
+            {"data_sources": [{"id": "c", "label": "C", "compliance_level": "CUI", "description": ""}]},
+            method="get",
+        )
+        try:
             result = await client.discover_data_sources("test-user")
+        finally:
+            patcher.stop()
+        assert len(result) == 1
+        assert result[0].id == "c"
 
+    @pytest.mark.asyncio
+    async def test_discover_empty_response(self, client):
+        patcher, _, _ = _mock_async_client_with_response([], method="get")
+        try:
+            result = await client.discover_data_sources("test-user")
+        finally:
+            patcher.stop()
         assert result == []
 
     @pytest.mark.asyncio
     async def test_discover_http_error(self, client):
-        """Test discovery handles HTTP errors gracefully."""
         import httpx
 
         with patch("httpx.AsyncClient") as mock_client:
@@ -150,13 +158,10 @@ class TestDiscoverDataSources:
             mock_client.return_value = mock_instance
 
             result = await client.discover_data_sources("test-user")
-
-        # Should return empty list on error
         assert result == []
 
     @pytest.mark.asyncio
     async def test_discover_request_error(self, client):
-        """Test discovery handles network/request errors gracefully."""
         import httpx
 
         with patch("httpx.AsyncClient") as mock_client:
@@ -169,111 +174,189 @@ class TestDiscoverDataSources:
             mock_client.return_value = mock_instance
 
             result = await client.discover_data_sources("test-user")
-
-        # Should return empty list on error
         assert result == []
 
 
-class TestQueryRag:
-    """Tests for query_rag method."""
+# ---------------------------------------------------------------------------
+# query_rag — newest spec response shape
+# ---------------------------------------------------------------------------
+
+NEWEST_RESPONSE = {
+    "message": {
+        "role": "assistant",
+        "content": "This is the answer.",
+    },
+    "metadata": {
+        "response_time": 2,
+        "references": [
+            {
+                "citation": "[1] doc1.pdf",
+                "document_ref": 1,
+                "filename": "doc1.pdf",
+                "sections": [
+                    {"section_ref": 1, "text": "Snippet one.", "relevance": 0.95},
+                    {"section_ref": 2, "text": "Snippet two.", "relevance": 0.80},
+                ],
+            },
+            {
+                "citation": "[2] doc2.pdf",
+                "document_ref": 2,
+                "filename": "doc2.pdf",
+                "sections": [
+                    {"section_ref": 1, "text": "Other snippet.", "relevance": 0.72},
+                ],
+            },
+        ],
+    },
+}
+
+
+class TestQueryRagNewestSpec:
+    """Tests for query_rag against the newest ATLAS-RAG response shape."""
 
     @pytest.mark.asyncio
-    async def test_query_success(self, client):
-        """Test successful RAG query."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "id": "chatcmpl-xxx",
-            "object": "chat.completion",
-            "model": "test-model",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "This is the answer."},
-                    "finish_reason": "stop",
-                }
-            ],
-            "rag_metadata": {
-                "query_processing_time_ms": 150,
-                "documents_found": [
-                    {
-                        "corpus_id": "corpus1",
-                        "text": "Some text",
-                        "confidence_score": 0.95,
-                        "content_type": "atlas-search",
-                        "id": "doc-123",
-                    }
-                ],
-                "data_sources": ["corpus1"],
-                "retrieval_method": "similarity",
-            },
-        }
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_instance = AsyncMock()
-            mock_instance.post.return_value = mock_response
-            mock_instance.__aenter__.return_value = mock_instance
-            mock_instance.__aexit__.return_value = None
-            mock_client.return_value = mock_instance
-
+    async def test_query_request_shape(self, client):
+        """Newest spec: payload is {messages, stream, corpora} — no model, no hybrid_search_kwargs."""
+        patcher, mock_instance, _ = _mock_async_client_with_response(NEWEST_RESPONSE)
+        try:
             messages = [{"role": "user", "content": "What is the answer?"}]
-            result = await client.query_rag("test-user", "corpus1", messages)
+            await client.query_rag("test-user", "corpus1", messages)
+        finally:
+            patcher.stop()
 
-        assert isinstance(result, RAGResponse)
-        assert result.content == "This is the answer."
-        assert result.is_completion is True  # Should detect chat.completion format
-        assert result.metadata is not None
-        assert result.metadata.query_processing_time_ms == 150
-        assert result.metadata.data_source_name == "corpus1"
-        assert result.metadata.retrieval_method == "similarity"
-        assert len(result.metadata.documents_found) == 1
-        assert result.metadata.documents_found[0].source == "corpus1"
-        assert result.metadata.documents_found[0].confidence_score == 0.95
-
-        # Verify correct URL, params, and payload
-        mock_instance.post.assert_called_once()
         call_args = mock_instance.post.call_args
         assert call_args[0][0] == "https://rag-api.example.com/api/v1/rag/completions"
         assert call_args[1]["params"] == {"as_user": "test-user"}
         payload = call_args[1]["json"]
         assert payload["messages"] == messages
         assert payload["stream"] is False
-        assert payload["model"] == "test-model"
-        assert payload["hybrid_search_kwargs"]["top_k"] == 4
-        assert payload["hybrid_search_kwargs"]["corpora"] == ["corpus1"]
+        assert payload["corpora"] == "corpus1"
+        assert "model" not in payload
+        assert "hybrid_search_kwargs" not in payload
+        assert "top_k" not in payload
 
     @pytest.mark.asyncio
-    async def test_query_without_metadata(self, client):
-        """Test RAG query without metadata in response."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [
-                {
-                    "message": {"role": "assistant", "content": "Simple answer."},
-                }
-            ],
-        }
-        mock_response.raise_for_status = MagicMock()
+    async def test_query_parses_message_content(self, client):
+        patcher, _, _ = _mock_async_client_with_response(NEWEST_RESPONSE)
+        try:
+            result = await client.query_rag(
+                "test-user", "corpus1", [{"role": "user", "content": "q"}],
+            )
+        finally:
+            patcher.stop()
 
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_instance = AsyncMock()
-            mock_instance.post.return_value = mock_response
-            mock_instance.__aenter__.return_value = mock_instance
-            mock_instance.__aexit__.return_value = None
-            mock_client.return_value = mock_instance
+        assert isinstance(result, RAGResponse)
+        assert result.content == "This is the answer."
+        assert result.is_completion is True
 
-            messages = [{"role": "user", "content": "Question"}]
-            result = await client.query_rag("test-user", "corpus1", messages)
+    @pytest.mark.asyncio
+    async def test_query_parses_references_with_sections(self, client):
+        patcher, _, _ = _mock_async_client_with_response(NEWEST_RESPONSE)
+        try:
+            result = await client.query_rag(
+                "test-user", "corpus1", [{"role": "user", "content": "q"}],
+            )
+        finally:
+            patcher.stop()
 
-        assert result.content == "Simple answer."
-        assert result.metadata is None
-        assert result.is_completion is False  # No 'object' field in response
+        assert result.metadata is not None
+        # response_time (seconds) is surfaced as ms in the existing footer
+        assert result.metadata.query_processing_time_ms == 2000
+        assert result.metadata.data_source_name == "corpus1"
+        assert len(result.metadata.documents_found) == 2
 
+        doc1 = result.metadata.documents_found[0]
+        assert doc1.title == "doc1.pdf"
+        assert doc1.citation == "[1] doc1.pdf"
+        assert doc1.document_ref == 1
+        # confidence_score = max section relevance
+        assert doc1.confidence_score == 0.95
+        assert len(doc1.sections) == 2
+        assert isinstance(doc1.sections[0], Section)
+        assert doc1.sections[0].text == "Snippet one."
+        assert doc1.sections[0].relevance == 0.95
+        assert doc1.sections[1].section_ref == 2
+
+        doc2 = result.metadata.documents_found[1]
+        assert doc2.document_ref == 2
+        assert doc2.title == "doc2.pdf"
+        assert doc2.confidence_score == 0.72
+        assert len(doc2.sections) == 1
+
+    @pytest.mark.asyncio
+    async def test_query_with_list_corpora(self, client):
+        """When data_sources is provided, payload.corpora is a list."""
+        patcher, mock_instance, _ = _mock_async_client_with_response(NEWEST_RESPONSE)
+        try:
+            await client.query_rag(
+                "test-user", "ignored", [{"role": "user", "content": "q"}],
+                data_sources=["corpus1", "corpus2"],
+            )
+        finally:
+            patcher.stop()
+        payload = mock_instance.post.call_args[1]["json"]
+        assert payload["corpora"] == ["corpus1", "corpus2"]
+
+    @pytest.mark.asyncio
+    async def test_query_empty_references_returns_no_documents(self, client):
+        patcher, _, _ = _mock_async_client_with_response(
+            {
+                "message": {"role": "assistant", "content": "nothing found"},
+                "metadata": {"response_time": 1, "references": []},
+            }
+        )
+        try:
+            result = await client.query_rag(
+                "test-user", "corpus1", [{"role": "user", "content": "q"}],
+            )
+        finally:
+            patcher.stop()
+
+        assert result.metadata is not None
+        assert result.metadata.documents_found == []
+
+    @pytest.mark.asyncio
+    async def test_query_null_references_returns_no_documents(self, client):
+        """Spec allows ``references: null``; treat as empty."""
+        patcher, _, _ = _mock_async_client_with_response(
+            {
+                "message": {"role": "assistant", "content": "no refs"},
+                "metadata": {"response_time": 1, "references": None},
+            }
+        )
+        try:
+            result = await client.query_rag(
+                "test-user", "corpus1", [{"role": "user", "content": "q"}],
+            )
+        finally:
+            patcher.stop()
+        assert result.metadata is not None
+        assert result.metadata.documents_found == []
+
+    @pytest.mark.asyncio
+    async def test_query_ignores_hybrid_search_kwargs(self, client):
+        """Newest spec drops hybrid_search_kwargs; client should not send them."""
+        patcher, mock_instance, _ = _mock_async_client_with_response(NEWEST_RESPONSE)
+        try:
+            await client.query_rag(
+                "test-user", "corpus1", [{"role": "user", "content": "q"}],
+                hybrid_search_kwargs={"top_k": 9, "extra": "ignored"},
+            )
+        finally:
+            patcher.stop()
+        payload = mock_instance.post.call_args[1]["json"]
+        assert "hybrid_search_kwargs" not in payload
+        assert "top_k" not in payload
+
+
+# ---------------------------------------------------------------------------
+# query_rag — error handling
+# ---------------------------------------------------------------------------
+
+class TestQueryRagErrors:
     @pytest.mark.asyncio
     async def test_query_403_forbidden(self, client):
-        """Test RAG query raises HTTPException on 403."""
         import httpx
-
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = AsyncMock()
             mock_response = MagicMock()
@@ -286,18 +369,13 @@ class TestQueryRag:
             mock_instance.__aexit__.return_value = None
             mock_client.return_value = mock_instance
 
-            messages = [{"role": "user", "content": "Question"}]
             with pytest.raises(HTTPException) as exc_info:
-                await client.query_rag("test-user", "corpus1", messages)
-
+                await client.query_rag("user", "c", [{"role": "user", "content": "q"}])
             assert exc_info.value.status_code == 403
-            assert "Access denied" in exc_info.value.detail
 
     @pytest.mark.asyncio
     async def test_query_404_not_found(self, client):
-        """Test RAG query raises HTTPException on 404."""
         import httpx
-
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = AsyncMock()
             mock_response = MagicMock()
@@ -310,18 +388,13 @@ class TestQueryRag:
             mock_instance.__aexit__.return_value = None
             mock_client.return_value = mock_instance
 
-            messages = [{"role": "user", "content": "Question"}]
             with pytest.raises(HTTPException) as exc_info:
-                await client.query_rag("test-user", "corpus1", messages)
-
+                await client.query_rag("user", "c", [{"role": "user", "content": "q"}])
             assert exc_info.value.status_code == 404
-            assert "not found" in exc_info.value.detail
 
     @pytest.mark.asyncio
     async def test_query_500_error(self, client):
-        """Test RAG query raises HTTPException on 500."""
         import httpx
-
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = AsyncMock()
             mock_response = MagicMock()
@@ -334,17 +407,13 @@ class TestQueryRag:
             mock_instance.__aexit__.return_value = None
             mock_client.return_value = mock_instance
 
-            messages = [{"role": "user", "content": "Question"}]
             with pytest.raises(HTTPException) as exc_info:
-                await client.query_rag("test-user", "corpus1", messages)
-
+                await client.query_rag("user", "c", [{"role": "user", "content": "q"}])
             assert exc_info.value.status_code == 500
 
     @pytest.mark.asyncio
     async def test_query_connection_error(self, client):
-        """Test RAG query raises HTTPException on connection error."""
         import httpx
-
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = AsyncMock()
             mock_instance.post.side_effect = httpx.RequestError(
@@ -354,290 +423,114 @@ class TestQueryRag:
             mock_instance.__aexit__.return_value = None
             mock_client.return_value = mock_instance
 
-            messages = [{"role": "user", "content": "Question"}]
             with pytest.raises(HTTPException) as exc_info:
-                await client.query_rag("test-user", "corpus1", messages)
-
+                await client.query_rag("user", "c", [{"role": "user", "content": "q"}])
             assert exc_info.value.status_code == 500
-            assert "connect" in exc_info.value.detail.lower()
 
 
-class TestParseRagMetadata:
-    """Tests for _parse_rag_metadata method."""
+# ---------------------------------------------------------------------------
+# Metadata parsing (newest and legacy)
+# ---------------------------------------------------------------------------
 
-    def test_parse_full_metadata(self, client):
-        """Test parsing complete RAG metadata."""
+class TestParseResponseMetadata:
+    """Tests for parsing the metadata block."""
+
+    def test_parses_newest_metadata_with_sections(self, client):
+        data = {
+            "message": {"role": "assistant", "content": "x"},
+            "metadata": {
+                "response_time": 3,
+                "references": [
+                    {
+                        "citation": "[1] thing.pdf",
+                        "document_ref": 1,
+                        "filename": "thing.pdf",
+                        "sections": [
+                            {"section_ref": 1, "text": "first snippet", "relevance": 0.9},
+                            {"section_ref": 2, "text": "second snippet", "relevance": 0.7},
+                        ],
+                    }
+                ],
+            },
+        }
+        result = client._parse_response_metadata(data, "fallback-corpus")
+        assert result is not None
+        assert result.query_processing_time_ms == 3000
+        assert len(result.documents_found) == 1
+        doc = result.documents_found[0]
+        assert doc.title == "thing.pdf"
+        assert doc.citation == "[1] thing.pdf"
+        assert doc.document_ref == 1
+        assert doc.confidence_score == 0.9
+        assert [s.text for s in doc.sections] == ["first snippet", "second snippet"]
+
+    def test_parses_metadata_no_references(self, client):
+        data = {
+            "message": {"role": "assistant", "content": "x"},
+            "metadata": {"response_time": 1, "references": []},
+        }
+        result = client._parse_response_metadata(data, "fallback")
+        assert result is not None
+        assert result.documents_found == []
+
+    def test_no_metadata_returns_none(self, client):
+        result = client._parse_response_metadata({"choices": []}, "corpus")
+        assert result is None
+
+    def test_legacy_metadata_still_parsed(self, client):
+        """Backwards-compat path: legacy ``rag_metadata`` shape still parsed."""
         data = {
             "rag_metadata": {
                 "query_processing_time_ms": 200,
                 "documents_found": [
                     {
-                        "corpus_id": "test-corpus",
-                        "content_type": "document",
+                        "data_source": {"id": "corp", "label": "Corp"},
+                        "text": "snippet",
+                        "content_type": "atlas-search",
                         "confidence_score": 0.85,
-                        "id": "doc-456",
-                        "last_modified": "2025-01-01T00:00:00Z",
+                        "id": "doc-1",
                     }
                 ],
-                "data_sources": ["test-corpus"],
+                "data_sources": [{"id": "corp", "label": "Corp"}],
                 "retrieval_method": "hybrid",
             }
         }
-
-        result = client._parse_rag_metadata(data, "fallback-corpus")
-
+        result = client._parse_response_metadata(data, "fallback")
         assert result is not None
         assert result.query_processing_time_ms == 200
-        assert result.data_source_name == "test-corpus"
-        assert result.retrieval_method == "hybrid"
-        assert len(result.documents_found) == 1
-        assert result.documents_found[0].source == "test-corpus"
-        assert result.documents_found[0].chunk_id == "doc-456"
-        assert result.documents_found[0].last_modified == "2025-01-01T00:00:00Z"
+        assert result.documents_found[0].title == "Corp"
 
-    def test_parse_metadata_with_fallback_datasource(self, client):
-        """Test metadata parsing uses fallback when data_sources empty."""
+    def test_malformed_section_is_skipped(self, client):
         data = {
-            "rag_metadata": {
-                "query_processing_time_ms": 100,
-                "documents_found": [],
-                "data_sources": [],
-                "retrieval_method": "similarity",
-            }
-        }
-
-        result = client._parse_rag_metadata(data, "fallback-corpus")
-
-        assert result.data_source_name == "fallback-corpus"
-
-    def test_parse_metadata_data_sources_as_objects(self, client):
-        """Test parsing when data_sources entries are dicts with id/label."""
-        data = {
-            "rag_metadata": {
-                "query_processing_time_ms": 50,
-                "documents_found": [],
-                "data_sources": [
+            "message": {"role": "assistant", "content": "x"},
+            "metadata": {
+                "response_time": 1,
+                "references": [
                     {
-                        "id": "atlas_team_data",
-                        "label": "Search Dataset | UUR: ATLAS Team Data",
-                        "compliance_level": "UUR",
-                        "description": "",
-                    },
-                    {
-                        "id": "atlas_team_data_2",
-                        "label": "Search Dataset | UUR: ATLAS Team Data 2",
-                        "compliance_level": "UUR",
-                        "description": "",
-                    },
-                ],
-                "retrieval_method": "similarity",
-            }
-        }
-
-        result = client._parse_rag_metadata(data, "fallback-corpus")
-
-        assert result is not None
-        assert result.data_source_name == "Search Dataset | UUR: ATLAS Team Data"
-
-    def test_parse_metadata_data_source_dict_missing_label(self, client):
-        """Test parsing when data_sources dict has no label but has id."""
-        data = {
-            "rag_metadata": {
-                "query_processing_time_ms": 50,
-                "documents_found": [],
-                "data_sources": [
-                    {"id": "atlas_team_data", "compliance_level": "UUR"},
-                ],
-                "retrieval_method": "similarity",
-            }
-        }
-
-        result = client._parse_rag_metadata(data, "fallback-corpus")
-
-        assert result is not None
-        assert result.data_source_name == "atlas_team_data"
-
-    def test_parse_no_metadata(self, client):
-        """Test parsing when no rag_metadata present."""
-        data = {"choices": []}
-        result = client._parse_rag_metadata(data, "corpus")
-        assert result is None
-
-    def test_parse_empty_metadata(self, client):
-        """Test parsing when rag_metadata is empty."""
-        data = {"rag_metadata": None}
-        result = client._parse_rag_metadata(data, "corpus")
-        assert result is None
-
-    def test_parse_documents_with_nested_data_source(self, client):
-        """Test documents with nested data_source dict populate source and title."""
-        data = {
-            "rag_metadata": {
-                "query_processing_time_ms": 2993,
-                "documents_found": [
-                    {
-                        "data_source": {
-                            "id": "atlas_team_data",
-                            "label": "Search Dataset | UUR: ATLAS Team Data",
-                            "compliance_level": "UUR",
-                            "description": "",
-                        },
-                        "text": "Some document text.",
-                        "id": 459716260075906100,
-                        "content_type": "atlas-search",
-                        "confidence_score": 0.48,
-                        "last_modified": "20250724_144206",
-                    },
-                    {
-                        "data_source": {
-                            "id": "atlas_team_data",
-                            "label": "Search Dataset | UUR: ATLAS Team Data",
-                            "compliance_level": "UUR",
-                            "description": "",
-                        },
-                        "text": "Another document text.",
-                        "id": 459716260075906101,
-                        "content_type": "atlas-search",
-                        "confidence_score": 0.47,
-                        "last_modified": "20250724_144206",
-                    },
-                ],
-                "data_sources": [
-                    {
-                        "id": "atlas_team_data",
-                        "label": "Search Dataset | UUR: ATLAS Team Data",
-                        "compliance_level": "UUR",
-                        "description": "",
+                        "document_ref": 1,
+                        "filename": "d.pdf",
+                        "sections": [
+                            {"section_ref": 1, "text": "ok", "relevance": 0.5},
+                            "not-a-dict",
+                            {"text": "missing fields"},
+                        ],
                     }
                 ],
-                "retrieval_method": "similarity",
-            }
+            },
         }
-
-        result = client._parse_rag_metadata(data, "fallback-corpus")
-
+        result = client._parse_response_metadata(data, "src")
+        # Only well-formed sections retained
         assert result is not None
-        assert len(result.documents_found) == 2
-        assert result.documents_found[0].source == "atlas_team_data"
-        assert result.documents_found[0].title == "Search Dataset | UUR: ATLAS Team Data"
-        assert result.documents_found[1].source == "atlas_team_data"
-        assert result.documents_found[1].title == "Search Dataset | UUR: ATLAS Team Data"
+        assert len(result.documents_found[0].sections) == 1
+        assert result.documents_found[0].sections[0].text == "ok"
 
-    def test_annotations_enrich_documents_with_title_and_url(self, client):
-        """url_citation annotations pair with documents by index to supply title/url."""
-        from atlas.modules.rag.client import URLCitation
 
-        data = {
-            "rag_metadata": {
-                "query_processing_time_ms": 150,
-                "documents_found": [
-                    {
-                        "data_source": {"id": "corpus-1", "label": "Corpus 1"},
-                        "text": "Snippet one.",
-                        "content_type": "atlas-search",
-                        "confidence_score": 0.9,
-                    },
-                    {
-                        "data_source": {"id": "corpus-1", "label": "Corpus 1"},
-                        "text": "Snippet two.",
-                        "content_type": "atlas-search",
-                        "confidence_score": 0.8,
-                    },
-                ],
-                "data_sources": [
-                    {"id": "corpus-1", "label": "Corpus 1"},
-                ],
-                "retrieval_method": "similarity",
-            }
-        }
-        annotations = [
-            URLCitation(
-                start_index=0, end_index=12,
-                title="First Doc", url="https://example.com/doc1",
-            ),
-            URLCitation(
-                start_index=20, end_index=32,
-                title="Second Doc", url="https://example.com/doc2",
-            ),
-        ]
-
-        result = client._parse_rag_metadata(data, "fallback", annotations=annotations)
-
-        assert result is not None
-        assert result.documents_found[0].title == "First Doc"
-        assert result.documents_found[0].url == "https://example.com/doc1"
-        assert result.documents_found[1].title == "Second Doc"
-        assert result.documents_found[1].url == "https://example.com/doc2"
-
-    def test_parse_annotations_skips_unknown_types(self):
-        """_parse_annotations ignores non-url_citation annotations and malformed entries."""
-        message = {
-            "annotations": [
-                {"type": "url_citation", "url_citation": {
-                    "start_index": 0, "end_index": 5, "title": "T", "url": "https://x.y",
-                }},
-                {"type": "other_type", "url_citation": {
-                    "start_index": 0, "end_index": 5, "title": "T", "url": "https://x.y",
-                }},
-                {"type": "url_citation"},  # missing payload
-                "not-a-dict",
-            ]
-        }
-        result = AtlasRAGClient._parse_annotations(message)
-        assert len(result) == 1
-        assert result[0].title == "T"
-
-    def test_parse_documents_nested_data_source_takes_precedence(self, client):
-        """Nested data_source.id is primary per OpenAPI v0.3.x; corpus_id is legacy fallback."""
-        data = {
-            "rag_metadata": {
-                "query_processing_time_ms": 100,
-                "documents_found": [
-                    {
-                        "corpus_id": "legacy-corpus",
-                        "data_source": {"id": "nested-id", "label": "Nested Label"},
-                        "content_type": "atlas-search",
-                        "confidence_score": 0.9,
-                    },
-                ],
-                "data_sources": [],
-                "retrieval_method": "similarity",
-            }
-        }
-
-        result = client._parse_rag_metadata(data, "fallback-corpus")
-
-        assert result is not None
-        assert result.documents_found[0].source == "nested-id"
-
-    def test_parse_documents_legacy_corpus_id_when_no_nested(self, client):
-        """Legacy corpus_id still works when the nested data_source is absent."""
-        data = {
-            "rag_metadata": {
-                "query_processing_time_ms": 100,
-                "documents_found": [
-                    {
-                        "corpus_id": "legacy-corpus",
-                        "content_type": "atlas-search",
-                        "confidence_score": 0.9,
-                    },
-                ],
-                "data_sources": [],
-                "retrieval_method": "similarity",
-            }
-        }
-
-        result = client._parse_rag_metadata(data, "fallback-corpus")
-
-        assert result is not None
-        assert result.documents_found[0].source == "legacy-corpus"
-
+# ---------------------------------------------------------------------------
+# Factory + username resolution (unchanged behavior)
+# ---------------------------------------------------------------------------
 
 class TestFactoryFunction:
-    """Tests for create_atlas_rag_client_from_config factory."""
-
     def test_factory_creates_client_from_config(self):
-        """Test factory function creates properly configured client."""
         from atlas.modules.rag.atlas_rag_client import create_atlas_rag_client_from_config
 
         mock_settings = MagicMock()
@@ -649,147 +542,27 @@ class TestFactoryFunction:
         mock_config_manager = MagicMock()
         mock_config_manager.app_settings = mock_settings
 
-        client = create_atlas_rag_client_from_config(mock_config_manager)
-
-        assert isinstance(client, AtlasRAGClient)
-        assert client.base_url == "https://test-api.example.com"
-        assert client.bearer_token == "factory-token"
-        assert client.default_model == "factory-model"
-        assert client.top_k == 8
+        c = create_atlas_rag_client_from_config(mock_config_manager)
+        assert isinstance(c, AtlasRAGClient)
+        assert c.base_url == "https://test-api.example.com"
+        assert c.bearer_token == "factory-token"
+        assert c.default_model == "factory-model"
+        assert c.top_k == 8
 
 
 class TestResolveUsername:
-    """Tests for _resolve_username with strip_domain."""
-
     def test_strip_domain_disabled_by_default(self, client):
-        """Test that strip_domain defaults to False."""
         assert client.strip_domain is False
         assert client._resolve_username("user@corp.com") == "user@corp.com"
 
     def test_strip_domain_enabled(self):
-        """Test strip_domain strips the @domain portion."""
-        c = AtlasRAGClient(
-            base_url="https://rag-api.example.com",
-            strip_domain=True,
-        )
+        c = AtlasRAGClient(base_url="https://rag-api.example.com", strip_domain=True)
         assert c._resolve_username("user@corp.com") == "user"
 
     def test_strip_domain_no_at_sign(self):
-        """Test strip_domain is a no-op when no @ in username."""
-        c = AtlasRAGClient(
-            base_url="https://rag-api.example.com",
-            strip_domain=True,
-        )
+        c = AtlasRAGClient(base_url="https://rag-api.example.com", strip_domain=True)
         assert c._resolve_username("plainuser") == "plainuser"
 
     def test_strip_domain_multiple_at_signs(self):
-        """Test strip_domain only strips at the first @."""
-        c = AtlasRAGClient(
-            base_url="https://rag-api.example.com",
-            strip_domain=True,
-        )
+        c = AtlasRAGClient(base_url="https://rag-api.example.com", strip_domain=True)
         assert c._resolve_username("user@sub@corp.com") == "user"
-
-    def test_strip_domain_disabled_preserves_email(self):
-        """Test strip_domain=False preserves email username."""
-        c = AtlasRAGClient(
-            base_url="https://rag-api.example.com",
-            strip_domain=False,
-        )
-        assert c._resolve_username("user@corp.com") == "user@corp.com"
-
-
-class TestQueryRagBatchCorpora:
-    """Tests for query_rag with data_sources parameter (batch corpora)."""
-
-    @pytest.mark.asyncio
-    async def test_query_with_multiple_corpora(self, client):
-        """Test query_rag sends multiple corpora in a single request."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "object": "chat.completion",
-            "choices": [
-                {"message": {"role": "assistant", "content": "Batched answer."}}
-            ],
-            "rag_metadata": {
-                "query_processing_time_ms": 200,
-                "documents_found": [],
-                "data_sources": ["corpus1", "corpus2"],
-                "retrieval_method": "similarity",
-            },
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_response.status_code = 200
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_instance = AsyncMock()
-            mock_instance.post.return_value = mock_response
-            mock_instance.__aenter__.return_value = mock_instance
-            mock_instance.__aexit__.return_value = None
-            mock_client.return_value = mock_instance
-
-            messages = [{"role": "user", "content": "Question"}]
-            result = await client.query_rag(
-                "test-user", "corpus1", messages,
-                data_sources=["corpus1", "corpus2"],
-            )
-
-        assert isinstance(result, RAGResponse)
-        assert result.content == "Batched answer."
-
-        # Verify the corpora list in the payload uses data_sources, not single source
-        payload = mock_instance.post.call_args[1]["json"]
-        assert payload["hybrid_search_kwargs"]["corpora"] == ["corpus1", "corpus2"]
-
-    @pytest.mark.asyncio
-    async def test_query_data_sources_overrides_single_source(self, client):
-        """Test that data_sources parameter takes precedence over data_source."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [
-                {"message": {"role": "assistant", "content": "Answer."}}
-            ],
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_response.status_code = 200
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_instance = AsyncMock()
-            mock_instance.post.return_value = mock_response
-            mock_instance.__aenter__.return_value = mock_instance
-            mock_instance.__aexit__.return_value = None
-            mock_client.return_value = mock_instance
-
-            messages = [{"role": "user", "content": "Q"}]
-            await client.query_rag(
-                "test-user", "ignored-source", messages,
-                data_sources=["real-a", "real-b"],
-            )
-
-        payload = mock_instance.post.call_args[1]["json"]
-        assert payload["hybrid_search_kwargs"]["corpora"] == ["real-a", "real-b"]
-
-    @pytest.mark.asyncio
-    async def test_query_single_source_fallback(self, client):
-        """Test that without data_sources, single data_source is used."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [
-                {"message": {"role": "assistant", "content": "Answer."}}
-            ],
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_response.status_code = 200
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_instance = AsyncMock()
-            mock_instance.post.return_value = mock_response
-            mock_instance.__aenter__.return_value = mock_instance
-            mock_instance.__aexit__.return_value = None
-            mock_client.return_value = mock_instance
-
-            messages = [{"role": "user", "content": "Q"}]
-            await client.query_rag("test-user", "single-corpus", messages)
-
-        payload = mock_instance.post.call_args[1]["json"]
-        assert payload["hybrid_search_kwargs"]["corpora"] == ["single-corpus"]

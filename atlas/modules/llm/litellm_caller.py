@@ -1073,11 +1073,38 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         return "\n".join(lines)
 
     @staticmethod
+    def _sanitize_snippet(text: str, max_chars: int = 600) -> str:
+        """Make a section snippet safe for inclusion as nested markdown.
+
+        Strips control characters, neutralizes leading reference-list
+        patterns that would otherwise confuse the frontend extractor
+        (which scans for ``N.`` and ``<li>`` at the start of a line),
+        and truncates to ``max_chars``.
+        """
+        if not text:
+            return ""
+        cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+        # The frontend reference extractor anchors on ``N.\s`` at the start
+        # of a line; neutralize that pattern inside snippets so attacker-/
+        # data-controlled text can't masquerade as a new reference entry.
+        # We drop the trailing whitespace after the dot, so ``1. text``
+        # becomes ``1.text`` — visible but no longer a reference anchor.
+        cleaned = re.sub(r"(^|\n)\s*(\d{1,2})\.\s", r"\1\2.", cleaned)
+        cleaned = cleaned.strip()
+        if len(cleaned) > max_chars:
+            cleaned = cleaned[: max_chars - 1].rstrip() + "…"
+        return cleaned
+
+    @staticmethod
     def _format_rag_references(metadata) -> str:
         """Format RAG metadata into a numbered references section.
 
         Produces a Perplexity-style references block that pairs with the
-        inline [1], [2] citations the LLM was instructed to emit.
+        inline [1], [2] citations the LLM was instructed to emit. When
+        documents carry section snippets (newest ATLAS-RAG spec), the
+        snippets are rendered as a nested ``rag-ref-snippets`` list under
+        each reference so the frontend's expanded citation area shows
+        the underlying evidence text.
 
         Returns empty string when metadata is unusable.
         """
@@ -1113,6 +1140,28 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             entry += f" — {', '.join(detail_parts)}"
             lines.append(entry)
+
+            if doc.citation:
+                safe_citation = LiteLLMCaller._sanitize_label(doc.citation[:500])
+                if safe_citation:
+                    lines.append(f"   *{safe_citation}*")
+
+            for sec in doc.sections:
+                snippet = LiteLLMCaller._sanitize_snippet(sec.text)
+                if not snippet:
+                    continue
+                snippet_relevance = int(sec.relevance * 100)
+                # Render snippets as a blockquote with explicit class hook so
+                # the frontend can style them inside the expanded references
+                # <details> element. ``§N`` carries the section_ref through
+                # to the UI without needing extra schema.
+                snippet_oneline = snippet.replace("\n", " ")
+                lines.append(
+                    "   > "
+                    f'<span class="rag-ref-snippet" data-section-ref="{sec.section_ref}">'
+                    f"§{sec.section_ref} ({snippet_relevance}%): {snippet_oneline}"
+                    "</span>"
+                )
 
         lines.append(f"\n*{metadata.data_source_name} · {metadata.retrieval_method} · {metadata.query_processing_time_ms}ms*")
         return "\n".join(lines)

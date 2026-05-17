@@ -1,6 +1,6 @@
-# External ATLAS RAG API Mock
+# ATLAS RAG API Mock
 
-Mock service for testing the `AtlasRAGClient` integration without requiring access to the real ATLAS RAG API.
+Mock service for testing the `AtlasRAGClient` integration without requiring access to the real ATLAS RAG API. Matches the newest ATLAS RAG OpenAPI spec (v0.3.0.dev1+), including per-reference `sections` with `text` snippets.
 
 ## Quick Start
 
@@ -17,12 +17,13 @@ The service runs on `http://localhost:8002` by default.
 
 ## Endpoints
 
-### GET /discover/datasources
+### GET /api/v1/discover/datasources
 
 Discover data sources accessible by a user.
 
 **Parameters:**
-- `as_user` (query, required): Username to check access for
+- `as_user` (query, optional): User ID to impersonate
+- `role` (query, optional): `read` (default) or `write`
 
 **Headers:**
 - `Authorization: Bearer <token>` (required)
@@ -30,81 +31,82 @@ Discover data sources accessible by a user.
 **Example:**
 ```bash
 curl -H "Authorization: Bearer test-atlas-rag-token" \
-     "http://localhost:8002/discover/datasources?as_user=test@test.com"
+     "http://localhost:8002/api/v1/discover/datasources?role=read&as_user=test@test.com"
 ```
 
-**Response:**
+**Response:** bare list of `DataSource` per spec:
 ```json
-{
-  "data_sources": [
-    {"id": "company-policies", "label": "Company Policies", "compliance_level": "Internal", "description": "HR policies including remote work, expenses, PTO, and code of conduct"},
-    {"id": "technical-docs", "label": "Technical Documentation", "compliance_level": "Internal", "description": "Engineering docs covering API auth, database schema, deployment, and architecture"},
-    {"id": "product-knowledge", "label": "Product Knowledge Base", "compliance_level": "Public", "description": "Public product docs with getting started, troubleshooting, features, and API reference"}
-  ]
-}
+[
+  {"id": "company-policies", "label": "Company Policies", "compliance_level": "Internal", "description": "..."},
+  {"id": "technical-docs", "label": "Technical Documentation", "compliance_level": "Internal", "description": "..."},
+  {"id": "product-knowledge", "label": "Product Knowledge Base", "compliance_level": "Public", "description": "..."}
+]
 ```
 
-### POST /rag/completions
+### POST /api/v1/rag/completions
 
-Query RAG for completions.
+Query RAG for a response with structured references.
 
 **Parameters:**
-- `as_user` (query, required): Username making the request
+- `as_user` (query, optional): User ID to impersonate
 
 **Headers:**
 - `Authorization: Bearer <token>` (required)
 - `Content-Type: application/json` (required)
 
-**Request Body:**
+**Request Body** (`RagRequest`):
 ```json
 {
-  "messages": [{"role": "user", "content": "What is our deployment process?"}],
+  "messages": [{"role": "user", "content": "What is the API authentication?"}],
   "stream": false,
-  "model": "openai/gpt-oss-120b",
-  "top_k": 4,
-  "corpora": ["engineering-docs"],
-  "threshold": null,
-  "expanded_window": [0, 0]
+  "corpora": ["technical-docs"]
 }
 ```
+
+`corpora` may be a single string or a list of strings.
 
 **Example:**
 ```bash
 curl -X POST \
      -H "Authorization: Bearer test-atlas-rag-token" \
      -H "Content-Type: application/json" \
-     -d '{"messages":[{"role":"user","content":"Tell me about the API"}],"corpora":["engineering-docs"]}' \
-     "http://localhost:8002/rag/completions?as_user=test@test.com"
+     -d '{"messages":[{"role":"user","content":"Tell me about API authentication"}],"corpora":["technical-docs"]}' \
+     "http://localhost:8002/api/v1/rag/completions?as_user=test@test.com"
 ```
 
-**Response:**
+**Response** (`RagResponse`):
 ```json
 {
-  "id": "chatcmpl-abc123",
-  "object": "chat.completion",
-  "model": "openai/gpt-oss-120b",
-  "choices": [{
-    "index": 0,
-    "message": {
-      "role": "assistant",
-      "content": "Based on the retrieved information..."
-    },
-    "finish_reason": "stop"
-  }],
-  "rag_metadata": {
-    "query_processing_time_ms": 150,
-    "documents_found": [{
-      "id": "eng-001",
-      "corpus_id": "engineering-docs",
-      "text": "API Gateway handles authentication...",
-      "confidence_score": 0.95,
-      "content_type": "markdown"
-    }],
-    "data_sources": ["engineering-docs"],
-    "retrieval_method": "similarity"
+  "message": {
+    "role": "assistant",
+    "content": "Based on searching 1 data source(s), I found 1 relevant document(s)..."
+  },
+  "metadata": {
+    "response_time": 1,
+    "references": [
+      {
+        "citation": "[1] \"API Authentication Guide\", tech-001.txt available: https://docs.company.com/api/authentication",
+        "document_ref": 1,
+        "filename": "tech-001.txt",
+        "sections": [
+          {
+            "section_ref": 1,
+            "text": "API Authentication Guide ... Our API uses OAuth 2.0 with JWT tokens for authentication.",
+            "relevance": 1.0
+          },
+          {
+            "section_ref": 2,
+            "text": "USING ACCESS TOKENS Include the token in all API requests: Authorization: Bearer ...",
+            "relevance": 0.5
+          }
+        ]
+      }
+    ]
   }
 }
 ```
+
+The frontend consumes `metadata.references[].sections[].text` to display the underlying evidence snippets in the expanded citation area beneath each reference.
 
 ## Authentication
 
@@ -156,18 +158,21 @@ test-atlas-rag-token
    EXTERNAL_RAG_TOP_K=4
    ```
 
-2. Start the mock service:
+2. Build the frontend with the citations feature flag (the snippet
+   rendering is gated by the same flag as inline citations):
+   ```bash
+   VITE_FEATURE_RAG_CITATIONS=true bash agent_start.sh
+   ```
+
+3. Start the mock service:
    ```bash
    cd mocks/atlas-rag-api-mock
    python main.py
    ```
 
-3. Start Atlas UI:
-   ```bash
-   bash agent_start.sh
-   ```
-
-4. Open http://localhost:8000 and use the RAG panel with a test user.
+4. Open http://localhost:8000 and ask a question against the RAG panel.
+   In the expanded **References** section, each entry shows the underlying
+   `Section.text` snippet that produced the citation.
 
 ## API Docs
 
