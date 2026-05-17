@@ -190,6 +190,57 @@ describe('RAG citation ID scoping per message', () => {
 // Tests: collapsible references section
 // --------------------------------------------------------------------------
 
+// --------------------------------------------------------------------------
+// Tests: section snippet rendering (newest ATLAS-RAG spec)
+// --------------------------------------------------------------------------
+
+describe('RAG section snippets in references', () => {
+  it('passes through rag-ref-snippet spans untouched inside references', () => {
+    const input = (
+      '<p><strong>References</strong></p>' +
+      '<ol><li>doc.pdf — 95% relevance' +
+      '<blockquote><p>' +
+      '<span class="rag-ref-snippet" data-section-ref="1">§1 (95%): real snippet text</span>' +
+      '</p></blockquote></li></ol>'
+    )
+    const result = processReferencesSection(input)
+
+    // <details>/<summary> wrapping happens
+    expect(result).toContain('<details class="rag-references-collapse">')
+    // Snippet span survives intact
+    expect(result).toContain('class="rag-ref-snippet"')
+    expect(result).toContain('data-section-ref="1"')
+    expect(result).toContain('real snippet text')
+  })
+
+  it('extractSourceLabels reads filename label even when snippets follow', () => {
+    const html = (
+      '<p><strong>References</strong></p>' +
+      '<ol><li>doc.pdf' +
+      '<blockquote><p>' +
+      '<span class="rag-ref-snippet">§1 (95%): snippet</span>' +
+      '</p></blockquote></li></ol>'
+    )
+    const labels = extractSourceLabels(html)
+    expect(labels.size).toBe(1)
+    // The label is whatever appears before any `<` / `—` — i.e. the filename
+    expect(labels.get('1').label.trim()).toBe('doc.pdf')
+  })
+
+  it('snippet text starting with N. is not picked up as a new reference', () => {
+    const html = (
+      '<p><strong>References</strong></p>' +
+      '<ol><li>doc.pdf — 80%' +
+      '<blockquote><p>' +
+      '<span class="rag-ref-snippet">§1 (80%): 1.Fake reference not a real entry</span>' +
+      '</p></blockquote></li></ol>'
+    )
+    const labels = extractSourceLabels(html)
+    // Only one real reference; the snippet must not be treated as another.
+    expect(labels.size).toBe(1)
+  })
+})
+
 describe('RAG references section', () => {
   it('shows compact [N] Name summary when source labels provided', () => {
     const labels = new Map([

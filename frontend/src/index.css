@@ -507,6 +507,39 @@
   background-color: rgba(79, 70, 229, 0.15) !important;
 }
 
+/* ── RAG reference snippet (expanded citation evidence text) ── */
+/* Each Section.text from the newest ATLAS-RAG spec is rendered as one
+   .rag-ref-snippet inside a blockquote underneath its reference entry.
+   These show the underlying evidence the RAG pipeline matched, visible
+   when the user expands the references <details>. */
+.rag-ref-snippet {
+  display: block;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: rgb(165, 165, 180);
+  margin-top: 0.15rem;
+  line-height: 1.45;
+}
+
+.rag-ref-snippet[data-section-ref]::first-letter {
+  font-style: normal;
+}
+
+[data-theme="light"] .rag-ref-snippet {
+  color: rgb(75, 85, 99); /* gray-600 */
+}
+
+/* When inside the references <details> blockquote, tighten the quote bar */
+.rag-references-collapse blockquote {
+  border-left: 2px solid rgba(99, 102, 241, 0.35);
+  padding-left: 0.6rem;
+  margin: 0.3rem 0 0.4rem 0.5rem;
+}
+
+[data-theme="light"] .rag-references-collapse blockquote {
+  border-left-color: rgba(79, 70, 229, 0.45);
+}
+
 /* User message bubble: blue in dark mode, lighter blue in light mode */
 .user-message-bubble {
   background-color: #2563eb;

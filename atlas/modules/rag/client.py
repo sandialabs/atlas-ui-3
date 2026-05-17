@@ -20,8 +20,41 @@ class DataSource(BaseModel):
 logger = logging.getLogger(__name__)
 
 
+class Section(BaseModel):
+    """A relevant section/snippet from a source document.
+
+    Mirrors the ATLAS-RAG OpenAPI ``Section`` shape (v0.3.0.dev1+).
+    Each Section is a snippet of the source document the RAG pipeline
+    surfaced for the user query, with its own relevance score.
+    """
+    section_ref: int
+    text: str
+    relevance: float
+
+    @field_validator("relevance")
+    @classmethod
+    def clamp_relevance(cls, v: float) -> float:
+        return max(0.0, min(1.0, v))
+
+    @field_validator("text")
+    @classmethod
+    def sanitize_text(cls, v: str) -> str:
+        # Strip null/control bytes that can corrupt downstream markdown
+        # rendering. Keep tabs and newlines — snippets are often multi-line.
+        if v is None:
+            return ""
+        return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", v)
+
+
 class DocumentMetadata(BaseModel):
-    """Metadata about a source document."""
+    """Metadata about a source document.
+
+    Combines the legacy fields (``source``, ``title``, ``url``,
+    ``confidence_score``, ``last_modified``) with the newest-spec fields
+    (``citation``, ``document_ref``, ``sections``). ``sections`` carries
+    the actual snippet text the RAG backend matched to the user query,
+    so the UI can show real evidence in the expanded citation area.
+    """
     source: str
     content_type: str
     confidence_score: float
@@ -29,6 +62,9 @@ class DocumentMetadata(BaseModel):
     last_modified: Optional[str] = None
     title: Optional[str] = None
     url: Optional[str] = None
+    citation: Optional[str] = None
+    document_ref: Optional[int] = None
+    sections: List[Section] = Field(default_factory=list)
 
     @field_validator("confidence_score")
     @classmethod
@@ -43,6 +79,14 @@ class DocumentMetadata(BaseModel):
         # Strip control characters, collapse whitespace, cap length
         cleaned = re.sub(r"[\x00-\x1f\x7f-\x9f]+", "", v).strip()
         return cleaned[:200] if cleaned else None
+
+    @field_validator("citation")
+    @classmethod
+    def sanitize_citation(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", v).strip()
+        return cleaned[:500] if cleaned else None
 
     @field_validator("url")
     @classmethod

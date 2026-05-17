@@ -53,7 +53,7 @@ hljs.registerLanguage('sh', bash)
 // uses <svg>, <path>, and a handful of MathML elements for some symbols.
 export const DOMPURIFY_CONFIG = {
   ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext', 'details', 'summary'],
-  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'role', 'tabindex', 'aria-label'],
+  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'data-section-ref', 'role', 'tabindex', 'aria-label'],
 }
 
 const renderer = new marked.Renderer()
