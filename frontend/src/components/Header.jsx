@@ -481,6 +481,18 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
             </button>
           )}
 
+          {/* Agent Portal V3 (K8s) Button */}
+          {features?.agent_portal_v3 && (
+            <button
+              onClick={() => navigate('/agent-portal-v3')}
+              className="flex items-center gap-1 px-2 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 transition-colors"
+              title="Agent Portal V3 -- launch agents as Kubernetes Jobs"
+            >
+              <Terminal className="w-5 h-5" />
+              <span className="text-sm">K8s Portal</span>
+            </button>
+          )}
+
           {/* Tools Panel Toggle */}
           {(() => {
             if (features?.tools) {

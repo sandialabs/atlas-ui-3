@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Agent Portal V3 - 2026-05-20
+- **New**: Third iteration of the Agent Portal that launches each agent as a one-shot Kubernetes Job, fully feature-flagged (`FEATURE_AGENT_PORTAL_V3_ENABLED`) and independent of the v1/v2 host-process portal.
+- **Backend**: new module `atlas/modules/agent_portal_v3/` (models, store, k8s client, job/network-policy templates, watcher loop) and routes under `/api/agent-portal-v3/` for launch / list / cancel / delete / logs / events. Persists runs to a separate DuckDB file (`data/agent_portal_v3.db`, override via `AGENT_PORTAL_V3_DB_URL`).
+- **Frontend**: new page at `/agent-portal-v3` (`frontend/src/components/AgentPortalV3.jsx`) with MCP server multiselect (http/sse only), prompt editor, model picker, runs table, and a detail pane that polls events + pod logs. A separate Header button renders only when the v3 flag is on.
+- **Agent image**: `atlas/agent_runner_v3/` contains a Dockerfile and a minimal Python ReAct loop (Anthropic + OpenAI) that reads `ATLAS_PROMPT` / `ATLAS_MCP_CONFIG` from env, connects to MCP servers over Streamable HTTP, and emits structured JSON to stdout. `build_and_load.sh` builds with podman and imports into k3s containerd.
+- **Network isolation**: a per-run `NetworkPolicy` is applied alongside each Job, allowing DNS plus TCP/80/443 to public addresses and blocking RFC1918 / link-local ranges. See `docs/agent-portal-v3/README.md` for stricter (Cilium / envoy sidecar) postures.
+
 ## [0.2.0] - 2026-05-16
 
 ### PR #606 - 2026-05-16

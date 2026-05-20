@@ -647,6 +647,12 @@ class AppSettings(BaseSettings):
         description="Enable the Agent Portal UI for launching and streaming host processes",
         validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_ENABLED"),
     )
+    # Agent Portal V3 (k8s-Job-backed agent runs)
+    feature_agent_portal_v3_enabled: bool = Field(
+        False,
+        description="Enable Agent Portal V3 - launch agents as Kubernetes Jobs",
+        validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_V3_ENABLED"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
