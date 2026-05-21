@@ -11,6 +11,9 @@ ONLY_BACKEND=false
 START_MCP_MOCK=false
 CONTAINER_CMD=""
 COMPOSE_CMD=""
+# Path to the .env file to load. Defaults to ATLAS_ENV_FILE env var if set,
+# otherwise <project_root>/.env. Can be overridden with --env-file/-e.
+ENV_FILE="${ATLAS_ENV_FILE:-$PROJECT_ROOT/.env}"
 
 # =============================================================================
 # CLEANUP FUNCTIONS
@@ -88,17 +91,17 @@ setup_container_runtime() {
 
 setup_minio() {
     local use_mock_s3="${USE_MOCK_S3:-true}"
-    
-    # Read USE_MOCK_S3 from .env file if it exists
-    if [ -f "$PROJECT_ROOT/.env" ]; then
-        use_mock_s3=$(grep -E "^USE_MOCK_S3=" "$PROJECT_ROOT/.env" | cut -d '=' -f2)
+
+    # Read USE_MOCK_S3 from env file if it exists
+    if [ -f "$ENV_FILE" ]; then
+        use_mock_s3=$(grep -E "^USE_MOCK_S3=" "$ENV_FILE" | cut -d '=' -f2)
     fi
     
     if [ "$use_mock_s3" = "true" ]; then
         echo "Using Mock S3 (no Docker/Podman required)"
     else
         if [ -z "$CONTAINER_CMD" ]; then
-            echo "Error: Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in .env"
+            echo "Error: Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $ENV_FILE"
             exit 1
         fi
 
@@ -119,10 +122,10 @@ setup_chat_history_db() {
     local chat_history_enabled="false"
     local db_url=""
 
-    # Read settings from .env
-    if [ -f "$PROJECT_ROOT/.env" ]; then
-        chat_history_enabled=$(grep -E "^FEATURE_CHAT_HISTORY_ENABLED=" "$PROJECT_ROOT/.env" | cut -d '=' -f2)
-        db_url=$(grep -E "^CHAT_HISTORY_DB_URL=" "$PROJECT_ROOT/.env" | cut -d '=' -f2)
+    # Read settings from env file
+    if [ -f "$ENV_FILE" ]; then
+        chat_history_enabled=$(grep -E "^FEATURE_CHAT_HISTORY_ENABLED=" "$ENV_FILE" | cut -d '=' -f2)
+        db_url=$(grep -E "^CHAT_HISTORY_DB_URL=" "$ENV_FILE" | cut -d '=' -f2)
     fi
 
     if [ "$chat_history_enabled" != "true" ]; then
@@ -190,13 +193,23 @@ setup_environment() {
     fi
     
     . .venv/bin/activate
-    
-    # Load environment variables from .env if present
-    if [ -f "$PROJECT_ROOT/.env" ]; then
+
+    # Load environment variables from $ENV_FILE if present
+    if [ -f "$ENV_FILE" ]; then
+        echo "Loading environment variables from: $ENV_FILE"
         set -a
-        . "$PROJECT_ROOT/.env"
+        . "$ENV_FILE"
         set +a
+    elif [ -n "${ATLAS_ENV_FILE:-}" ] || [ "$ENV_FILE" != "$PROJECT_ROOT/.env" ]; then
+        # User explicitly pointed us at a file (via --env-file or ATLAS_ENV_FILE)
+        # that does not exist. Fail loudly so missing API keys are obvious.
+        echo "Error: env file not found: $ENV_FILE" >&2
+        exit 1
     fi
+
+    # Make the resolved env file path available to child processes (e.g. uvicorn
+    # / atlas-server) so they load the same file.
+    export ATLAS_ENV_FILE="$ENV_FILE"
     
     echo "Setting MCP_EXTERNAL_API_TOKEN for testing purposes."
     if [ -z "$MCP_EXTERNAL_API_TOKEN" ]; then
@@ -272,26 +285,62 @@ start_backend() {
 # =============================================================================
 
 parse_arguments() {
-    while getopts "fbm" opt; do
-        case $opt in
-            f)
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -f|--frontend-only)
                 ONLY_FRONTEND=true
+                shift
                 ;;
-            b)
+            -b|--backend-only)
                 ONLY_BACKEND=true
+                shift
                 ;;
-            m)
+            -m|--mcp-mock)
                 START_MCP_MOCK=true
+                shift
                 ;;
-            \?)
-                echo "Usage: $0 [-f] [-b] [-m]"
-                echo "  -f    Only rebuild frontend"
-                echo "  -b    Only start backend"
-                echo "  -m    Start MCP mock server"
+            -e|--env-file)
+                if [ -z "${2:-}" ]; then
+                    echo "Error: --env-file requires an argument" >&2
+                    exit 1
+                fi
+                ENV_FILE="$2"
+                shift 2
+                ;;
+            --env-file=*)
+                ENV_FILE="${1#--env-file=}"
+                shift
+                ;;
+            -h|--help)
+                cat <<EOF
+Usage: $0 [options]
+  -f, --frontend-only        Only rebuild frontend
+  -b, --backend-only         Only start backend
+  -m, --mcp-mock             Start MCP mock server
+  -e, --env-file <path>      Path to .env file to load
+                             (default: \$ATLAS_ENV_FILE or <project>/.env)
+  -h, --help                 Show this help message
+
+The env file location can also be set via the ATLAS_ENV_FILE environment
+variable, which is useful for shared installs where each user keeps API
+keys in a personal file such as ~/.atlasrc.
+EOF
+                exit 0
+                ;;
+            *)
+                echo "Unknown argument: $1" >&2
+                echo "Run '$0 --help' for usage." >&2
                 exit 1
                 ;;
         esac
     done
+
+    # Expand ~ in env file path if user provided one (POSIX-style)
+    case "$ENV_FILE" in
+        "~"|"~/"*)
+            ENV_FILE="${HOME}${ENV_FILE#\~}"
+            ;;
+    esac
 }
 
 main() {

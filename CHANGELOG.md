@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-05-21
+- **CLI**: Added support for specifying a custom `.env` file location. `atlas-init`, `atlas-server`, `atlas-chat`, and `agent_start.sh` now all honor a `--env-file`/`-e` flag and the `ATLAS_ENV_FILE` environment variable, so multiple users can share an Atlas install while keeping their own API keys in a personal file such as `~/.atlasrc`. Resolves the "Specifying location for .env configuration file" issue.
+
 ## [0.2.0] - 2026-05-16
 
 ### PR #606 - 2026-05-16

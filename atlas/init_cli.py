@@ -2,13 +2,19 @@
 Atlas Init CLI - Set up configuration files for Atlas.
 
 Usage:
-    atlas-init                    # Interactive setup in current directory
-    atlas-init --target ./myapp   # Setup in specific directory
-    atlas-init --minimal          # Create minimal .env only
-    atlas-init --force            # Overwrite existing files without prompting
+    atlas-init                              # Interactive setup in current directory
+    atlas-init --target ./myapp             # Setup in specific directory
+    atlas-init --minimal                    # Create minimal .env only
+    atlas-init --force                      # Overwrite existing files without prompting
+    atlas-init --env-file ~/.atlasrc        # Write env vars to a custom location
+    ATLAS_ENV_FILE=~/.atlasrc atlas-init    # Same, via environment variable
+
+Specifying a custom env-file location is useful when Atlas is installed in a
+shared directory and each user needs their own API keys (e.g. ``~/.atlasrc``).
 """
 
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -74,13 +80,15 @@ def copy_with_prompt(src: Path, dst: Path, force: bool = False) -> bool:
     return True
 
 
-def create_minimal_env(target_dir: Path, force: bool = False) -> bool:
-    """Create a minimal .env file with just API key placeholders."""
-    env_path = target_dir / ".env"
+def create_minimal_env(env_path: Path, force: bool = False) -> bool:
+    """Create a minimal .env file with just API key placeholders.
+
+    ``env_path`` is the full path to the .env file to create (not a directory).
+    """
 
     if env_path.exists() and not force:
         if not prompt_yes_no(f"  {env_path} already exists. Overwrite?"):
-            print(f"  Skipping {env_path.name}")
+            print(f"  Skipping {env_path}")
             return False
 
     minimal_env = """\
@@ -118,6 +126,19 @@ APP_CONFIG_DIR=./config
     return True
 
 
+def _resolve_env_file(args: argparse.Namespace, target_dir: Path) -> Path:
+    """Resolve the destination .env path.
+
+    Precedence: ``--env-file`` flag > ``ATLAS_ENV_FILE`` env var > ``<target>/.env``.
+    Relative paths are resolved against the current working directory (not
+    against ``target_dir``), matching how shells expand paths.
+    """
+    explicit = args.env_file if args.env_file is not None else os.environ.get("ATLAS_ENV_FILE")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    return (target_dir / ".env").resolve()
+
+
 def run_init(args: argparse.Namespace) -> int:
     """Run the atlas-init command."""
     target_dir = Path(args.target).resolve()
@@ -131,7 +152,12 @@ def run_init(args: argparse.Namespace) -> int:
         target_dir.mkdir(parents=True, exist_ok=True)
         print(f"Created directory: {target_dir}")
 
-    print(f"\nSetting up Atlas configuration in: {target_dir}\n")
+    env_path = _resolve_env_file(args, target_dir)
+    # Ensure parent of a custom env file exists (e.g. for ~/.config/atlas/.env)
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"\nSetting up Atlas configuration in: {target_dir}")
+    print(f"Environment file: {env_path}\n")
 
     package_config = get_config_dir()
     env_example = get_env_example_path()
@@ -139,7 +165,7 @@ def run_init(args: argparse.Namespace) -> int:
     if args.minimal:
         # Minimal mode: just create a simple .env
         print("Creating minimal configuration...")
-        create_minimal_env(target_dir, force=args.force)
+        create_minimal_env(env_path, force=args.force)
     else:
         # Full mode: copy config and .env
         print("Copying configuration files...")
@@ -155,23 +181,31 @@ def run_init(args: argparse.Namespace) -> int:
         else:
             print(f"  Warning: Package config not found at {package_config}")
 
-        # Copy .env.example to .env
+        # Copy .env.example to the resolved env path
         if env_example.exists():
-            target_env = target_dir / ".env"
-            if copy_with_prompt(env_example, target_env, force=args.force):
-                print("\n  Remember to edit .env and add your API keys!")
+            if copy_with_prompt(env_example, env_path, force=args.force):
+                print(f"\n  Remember to edit {env_path} and add your API keys!")
         else:
             # Fall back to creating minimal env
             print("  .env.example not found, creating minimal .env...")
-            create_minimal_env(target_dir, force=args.force)
+            create_minimal_env(env_path, force=args.force)
 
     print("\n" + "=" * 60)
     print("Setup complete!")
     print("=" * 60)
     print("\nNext steps:")
-    print(f"  1. Edit {target_dir / '.env'} and add your API keys")
-    print("  2. Run: atlas-chat 'Hello, world!'")
-    print("  3. Or start the server: atlas-server")
+    print(f"  1. Edit {env_path} and add your API keys")
+    # If the env file is not at the default location, remind users how to
+    # point downstream commands at it.
+    default_env = (target_dir / ".env").resolve()
+    if env_path != default_env:
+        print(f"  2. Point Atlas at it via: export ATLAS_ENV_FILE={env_path}")
+        print("     (or pass --env-file to atlas-server / atlas-chat)")
+        print("  3. Run: atlas-chat 'Hello, world!'")
+        print("  4. Or start the server: atlas-server")
+    else:
+        print("  2. Run: atlas-chat 'Hello, world!'")
+        print("  3. Or start the server: atlas-server")
 
     if not args.minimal:
         print(f"\nConfig files are in: {target_dir / 'config'}")
@@ -190,10 +224,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  atlas-init                    Set up config in current directory
-  atlas-init --target ./myapp   Set up config in ./myapp
-  atlas-init --minimal          Create only a minimal .env file
-  atlas-init --force            Overwrite existing files without prompting
+  atlas-init                              Set up config in current directory
+  atlas-init --target ./myapp             Set up config in ./myapp
+  atlas-init --minimal                    Create only a minimal .env file
+  atlas-init --force                      Overwrite existing files without prompting
+  atlas-init --env-file ~/.atlasrc        Write env vars to a custom location
+  ATLAS_ENV_FILE=~/.atlasrc atlas-init    Same, via environment variable
 
 After running atlas-init, edit the .env file to add your API keys.
 """,
@@ -215,6 +251,17 @@ After running atlas-init, edit the .env file to add your API keys.
         "-f",
         action="store_true",
         help="Overwrite existing files without prompting.",
+    )
+    parser.add_argument(
+        "--env-file",
+        "-e",
+        dest="env_file",
+        default=None,
+        help=(
+            "Path to write the .env file to (e.g. ~/.atlasrc). "
+            "Overrides the default of <target>/.env. "
+            "Falls back to the ATLAS_ENV_FILE environment variable if unset."
+        ),
     )
     parser.add_argument(
         "--version",
