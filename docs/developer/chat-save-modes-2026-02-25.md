@@ -12,7 +12,7 @@ Chat history supports three save modes that the user cycles through by clicking 
 | Saved Locally | HardDrive | Blue | Browser IndexedDB |
 | Saved to Server | Cloud | Green | Backend database |
 
-The selected mode persists across page refreshes via `usePersistentState` (localStorage key: `chatui-save-mode`).
+The default mode is **Incognito** (`none`); the cycle order is Incognito -> Saved Locally -> Saved to Server. The selected mode persists across page refreshes via `usePersistentState` (localStorage key: `chatui-save-mode`).
 
 ## Architecture
 
@@ -33,7 +33,8 @@ The selected mode persists across page refreshes via `usePersistentState` (local
 ### Data Flow
 
 ```
-User clicks save button -> cycles: server -> none -> local -> server
+User clicks save button -> cycles: none -> local -> server -> none
+  Default mode is 'none' (incognito)
   Mode persisted to localStorage
 
 When saveMode === 'local':
