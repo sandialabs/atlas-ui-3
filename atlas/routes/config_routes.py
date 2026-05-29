@@ -13,6 +13,28 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["config"])
 
+
+def _search_config_paths(config_manager, filename):
+    """Return candidate paths for a config file, mirroring ConfigManager search.
+
+    Falls back to a minimal hard-coded search list if the config manager does
+    not expose ``_search_paths``.
+    """
+    try:
+        return config_manager._search_paths(filename)  # type: ignore[attr-defined]
+    except AttributeError:
+        from pathlib import Path
+        atlas_root = Path(__file__).parent.parent
+        project_root = atlas_root.parent
+        return [
+            project_root / "config" / "overrides" / filename,
+            project_root / "config" / "defaults" / filename,
+            atlas_root / "configfilesadmin" / filename,
+            atlas_root / "configfiles" / filename,
+            atlas_root / filename,
+            project_root / filename,
+        ]
+
 # Canvas tool description constant
 CANVAS_TOOL_DESCRIPTION = (
     "Display final rendered content in a visual canvas panel. "
@@ -518,86 +540,77 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
 
 @router.get("/splash")
 async def get_splash_config(current_user: str = Depends(get_current_user)):
-    """Get splash screen configuration."""
+    """Get splash screen configuration.
+
+    The splash screen message body is defined in a markdown file (default
+    ``splash-screen.md``). Additional presentation settings (title,
+    dismissibility, etc.) come from the JSON config file. Whether the splash
+    screen is shown is controlled solely by the ``FEATURE_SPLASH_SCREEN_ENABLED``
+    environment variable; any ``enabled`` field in the config file is ignored.
+    """
     config_manager = app_factory.get_config_manager()
     app_settings = config_manager.app_settings
 
-    # Check if splash screen feature is enabled
-    if not app_settings.feature_splash_screen_enabled:
+    def _default_config(enabled: bool):
         return {
-            "enabled": False,
+            "enabled": enabled,
             "title": "",
-            "messages": [],
+            "markdown": "",
             "dismissible": True,
             "require_accept": False,
             "dismiss_duration_days": 30,
             "accept_button_text": "Accept",
             "dismiss_button_text": "Dismiss",
-            "show_on_every_visit": False
+            "show_on_every_visit": False,
         }
 
-    # Read splash screen configuration
-    splash_config = {}
+    # The env var is the single source of truth for whether the splash screen
+    # is shown. When disabled, return an inert default config.
+    if not app_settings.feature_splash_screen_enabled:
+        return _default_config(False)
+
+    splash_config = _default_config(True)
+
+    # Read additional presentation settings from the JSON config file.
     import json
     splash_config_filename = app_settings.splash_config_file
-    splash_paths = []
     try:
-        # Reuse config manager search logic
-        try:
-            splash_paths = config_manager._search_paths(splash_config_filename)  # type: ignore[attr-defined]
-        except AttributeError:
-            # Fallback minimal search if method renamed/removed
-            from pathlib import Path
-            atlas_root = Path(__file__).parent.parent
-            project_root = atlas_root.parent
-            splash_paths = [
-                project_root / "config" / "overrides" / splash_config_filename,
-                project_root / "config" / "defaults" / splash_config_filename,
-                atlas_root / "configfilesadmin" / splash_config_filename,
-                atlas_root / "configfiles" / splash_config_filename,
-                atlas_root / splash_config_filename,
-                project_root / splash_config_filename,
-            ]
-
-        found_path = None
-        for p in splash_paths:
-            if p.exists():
-                found_path = p
-                break
+        splash_paths = _search_config_paths(config_manager, splash_config_filename)
+        found_path = next((p for p in splash_paths if p.exists()), None)
         if found_path:
             with open(found_path, "r", encoding="utf-8") as f:
-                splash_config = json.load(f)
+                file_config = json.load(f)
+            # 'enabled' is intentionally ignored (env var is source of truth)
+            # and the legacy 'messages' field is replaced by the markdown file.
+            file_config.pop("enabled", None)
+            file_config.pop("messages", None)
+            splash_config.update(file_config)
+            splash_config["enabled"] = True
             logger.info(f"Loaded splash config from {found_path}")
         else:
             logger.info(
                 "Splash config not found in any of these locations: %s",
                 [str(p) for p in splash_paths]
             )
-            # Return default disabled config
-            splash_config = {
-                "enabled": False,
-                "title": "",
-                "messages": [],
-                "dismissible": True,
-                "require_accept": False,
-                "dismiss_duration_days": 30,
-                "accept_button_text": "Accept",
-                "dismiss_button_text": "Dismiss",
-                "show_on_every_visit": False
-            }
     except Exception as e:
         logger.warning(f"Error loading splash config: {e}")
-        splash_config = {
-            "enabled": False,
-            "title": "",
-            "messages": [],
-            "dismissible": True,
-            "require_accept": False,
-            "dismiss_duration_days": 30,
-            "accept_button_text": "Accept",
-            "dismiss_button_text": "Dismiss",
-            "show_on_every_visit": False
-        }
+
+    # Read the splash screen message body from the markdown file.
+    splash_markdown_filename = app_settings.splash_screen_file
+    try:
+        md_paths = _search_config_paths(config_manager, splash_markdown_filename)
+        md_path = next((p for p in md_paths if p.exists()), None)
+        if md_path:
+            with open(md_path, "r", encoding="utf-8") as f:
+                splash_config["markdown"] = f.read()
+            logger.info(f"Loaded splash markdown from {md_path}")
+        else:
+            logger.info(
+                "Splash markdown file not found in any of these locations: %s",
+                [str(p) for p in md_paths]
+            )
+    except Exception as e:
+        logger.warning(f"Error loading splash markdown: {e}")
 
     return splash_config
 
