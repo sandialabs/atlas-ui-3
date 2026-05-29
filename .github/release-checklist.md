@@ -62,8 +62,7 @@ See [docs/developer/release-process.md#smoke-test](../docs/developer/release-pro
 - [ ] `uv build --wheel` succeeds on `release/{{YEAR_MONTH}}`.
 - [ ] Fresh `atlas-init` + `atlas-chat` one-shot call works against
       a real LLM.
-- [ ] Tool-call path works (`atlas-chat --tools calculator_evaluate
-      --tool-choice-required`).
+- [ ] Tool-call path works (`atlas-chat --tools calculator_evaluate`).
 - [ ] `atlas-server` boots and `/api/health` returns `{{VERSION}}`.
 
 ### Publish

@@ -5,8 +5,7 @@ UUID PKs, Text JSON blobs, no DB-level FK constraints (DuckDB does not
 support CASCADE), and per-user scoping enforced in the repository layer.
 
 The PortalStore holds *configuration / UI state*, not running processes.
-Process state stays in the in-memory ``ProcessManager``. See
-``AGENT_PORTAL_ACTION_PLAN.md`` Phase 1.5.
+Process state stays in the in-memory ``ProcessManager``.
 """
 
 from __future__ import annotations

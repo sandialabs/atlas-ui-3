@@ -14,6 +14,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Defense in depth in `ProcessManager.launch`: if a caller sets `namespaces=True` but `probe_isolation_capabilities()` reports the host can't do unprivileged user namespaces (e.g. Ubuntu 24.04 with `apparmor_restrict_unprivileged_userns=1`), the manager strips the flag (and `isolate_network`), logs a warning, and launches with reduced isolation rather than failing with EPERM on `/proc/self/uid_map`. The frontend mirrors this by clearing the flags client-side when the capability probe reports the host unsupported.
 - Added per-user ownership graduation TODO for the new `/remove` endpoint and listed it in `docs/agentportal/threat-model.md`'s deferred-items section.
 
+## [0.2.0] - 2026-05-16
+
+### PR #606 - 2026-05-16
+- **RAG**: Aligned ATLAS-RAG mock and client with the newest OpenAPI spec (v0.3.0.dev1+). The client now sends a trimmed `{messages, stream, corpora}` payload (no `model`, no `hybrid_search_kwargs`) and parses `metadata.references[].sections[]` (each with `section_ref`, `text`, `relevance`) plus per-reference `citation` and `document_ref`. Legacy `rag_metadata` parsing is retained for rolling migration.
+- **Citations UI**: Reference expansion now renders each section snippet as a `.rag-ref-snippet` blockquote under its reference, with `section_ref` and a relevance label. Snippet styling added to `index.css`; `data-section-ref` is allowed through DOMPurify so spans survive sanitization. New vitest cases verify snippet pass-through and that the source-label extractor isn't fooled by them.
+- **Mock**: `mocks/atlas-rag-api-mock/main.py` rewritten to the new `RagResponse` shape (bare-list discovery endpoint, top-level `corpora` in the request, per-reference sections built from grep hits). README and screenshots updated.
+
+### PR #605 - 2026-05-13
+- **Packaging**: New focused `[pptx]` extras group (`pip install atlas-chat[pptx]`) pulls Pillow + python-pptx for the `pptx_generator` MCP server. Without it the server logged `ModuleNotFoundError: No module named 'PIL'` on a bare wheel install. Pillow stays in the broader `[mcp-demos]` extras as well.
+- **CLI**: `atlas-chat --version` now prints `atlas-chat version X.Y.Z` and exits, matching `atlas-init`. The release smoke test references this flag.
+- **Docs**: Removed `--tool-choice-required` from the smoke-test recipe in `docs/developer/release-process.md` and the release checklist; it is not (and was not) a real `atlas-chat` flag.
+
+### PR #602 - 2026-05-12
+- Docker runtime-only image now installs with `--ignore-requires-python` for LiteLLM compatibility on Chainguard Python 3.14, and CI now validates `Dockerfile.runtimeonly` builds.
+
+### PR #599 - 2026-05-12
+- **Dependency**: Bumped minimum LiteLLM version from 1.81.14 to 1.83.10.
+
+### PR #598 - 2026-05-12
+- Added an optional `Dockerfile.runtimeonly` that builds a slimmer deployed image using Chainguard bases (Node frontend stage + Python runtime stage), excludes top-level docs/test/scripts trees, and is documented in the README and installation guide.
+
 ### PR #565 - 2026-04-25
 - MCP sessions are now keyed by `(user, conversation, server)` and client-supplied `conversation_id` values owned by another user are rejected on chat and restore.
 - Hardened the new ownership boundary after multi-agent review:

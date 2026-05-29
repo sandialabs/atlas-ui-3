@@ -1,16 +1,35 @@
 #!/usr/bin/env python3
-"""
-ATLAS RAG API Mock Service (OpenAPI v0.3.x).
+"""ATLAS RAG API Mock Service (OpenAPI v0.3.0.dev1+).
 
-Implements the ATLAS RAG API shape described in the public OpenAPI spec:
+Implements the newest ATLAS RAG API shape:
 
   - GET  /api/v1/discover/datasources?role=read|write&as_user=<user>
   - POST /api/v1/rag/completions?as_user=<user>
 
-Responses follow the OpenAI chat.completion schema, with an extra
-``rag_metadata`` field and per-message ``annotations`` (url_citation)
-that link specific character ranges in the assistant content to the
-source documents they were derived from.
+Request body (RagRequest):
+
+    {"messages": [...], "stream": false, "corpora": "<id>" | ["<id>", ...]}
+
+Response body (RagResponse):
+
+    {
+      "message":  {"role": "assistant", "content": "..."},
+      "metadata": {
+        "response_time": <int seconds>,
+        "references": [
+          {
+            "citation": "IEEE format" | null,
+            "document_ref": 1,
+            "filename": "doc.pdf",
+            "sections": [
+              {"section_ref": 1, "text": "snippet...", "relevance": 0.92},
+              ...
+            ]
+          },
+          ...
+        ]
+      }
+    }
 
 Mock data is loaded from mock_data.json next to this file.
 """
@@ -20,10 +39,10 @@ import logging
 import os
 import re
 import time
-import uuid
+import uuid  # noqa: F401  (kept available for future seeded ids if needed)
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -100,9 +119,9 @@ verifier = StaticTokenVerifier(
 # ------------------------------------------------------------------------------
 
 app = FastAPI(
-    title="ATLAS RAG API Mock",
-    description="Mock aligned with the ATLAS RAG OpenAPI v0.3.x spec",
-    version="0.3.0",
+    title="ATLAS RAG API",
+    description="Generates RAG response based on user query",
+    version="0.3.0.dev1",
 )
 
 PUBLIC_PATHS = {"/", "/health", "/docs", "/redoc", "/openapi.json"}
@@ -128,7 +147,7 @@ async def verify_token_middleware(request, call_next):
 
 
 # ------------------------------------------------------------------------------
-# Pydantic Models (OpenAPI v0.3.x)
+# Pydantic Models (OpenAPI v0.3.0.dev1+)
 # ------------------------------------------------------------------------------
 
 class DataSource(BaseModel):
@@ -138,82 +157,45 @@ class DataSource(BaseModel):
     description: str = Field("", description="Description")
 
 
-class DiscoverDataSourcesResponse(BaseModel):
-    data_sources: List[DataSource]
+class MessageInput(BaseModel):
+    role: Literal["user", "system", "assistant", "tool", "developer"]
+    content: str
 
 
-class AnnotationURLCitation(BaseModel):
-    end_index: int
-    start_index: int
-    title: str
-    url: str
+class MessageOutput(BaseModel):
+    role: Literal["system", "user", "assistant", "tool", "developer"] = "assistant"
+    content: str
 
 
-class Annotation(BaseModel):
-    type: Literal["url_citation"] = "url_citation"
-    url_citation: AnnotationURLCitation
+class Section(BaseModel):
+    section_ref: int = Field(..., description="The section ID component of the in-text citation.")
+    text: str = Field(..., description="Relevant text snippet from source document.")
+    relevance: float = Field(..., description="Cosine similarity score of the snippet to the user query.")
 
 
-class ChatCompletionMessage(BaseModel):
-    role: Literal["assistant"] = "assistant"
-    content: Optional[str] = None
-    refusal: Optional[str] = None
-    annotations: Optional[List[Annotation]] = None
-
-
-class Choice(BaseModel):
-    finish_reason: Literal[
-        "stop", "length", "tool_calls", "content_filter", "function_call"
-    ] = "stop"
-    index: int = 0
-    message: ChatCompletionMessage
-
-
-class DocumentMetadata(BaseModel):
-    data_source: DataSource
-    text: str
-    id: Optional[int] = None
-    content_type: str = "atlas-search"
-    confidence_score: float
-    last_modified: Optional[str] = None
+class Reference(BaseModel):
+    citation: Optional[str] = Field(None, description="Citation in IEEE format.")
+    document_ref: int = Field(..., description="The document reference number for intext citations.")
+    filename: str = Field(..., description="Filename of the source document.")
+    sections: List[Section] = Field(..., description="Relevant sections from the source document.")
 
 
 class RagMetadata(BaseModel):
-    query_processing_time_ms: int
-    documents_found: List[DocumentMetadata]
-    data_sources: List[DataSource]
-    retrieval_method: str = "similarity"
-
-
-class CompletionUsage(BaseModel):
-    completion_tokens: int
-    prompt_tokens: int
-    total_tokens: int
+    response_time: int = Field(..., description="How long it took for the response to be generated, in seconds.")
+    references: Optional[List[Reference]] = Field(
+        ..., description="List of references used to generate response."
+    )
 
 
 class RagRequest(BaseModel):
-    messages: List[Dict[str, Any]] = Field(..., description="Message history")
+    messages: List[MessageInput] = Field(..., description="Message history")
     stream: bool = Field(False, description="Stream response")
-    model: str = Field("openai/gpt-oss-120b", description="LLM used to generate response")
-    hybrid_search_kwargs: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional arguments to be passed to HybridSearch",
-    )
-    shirty_api_key: Optional[str] = None
-    search_api_key: Optional[str] = None
-    as_user: Optional[str] = None
+    corpora: Union[str, List[str]] = Field(..., description="Corpora")
 
 
 class RagResponse(BaseModel):
-    id: str = Field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex[:12]}")
-    choices: List[Choice]
-    created: int = Field(default_factory=lambda: int(time.time()))
-    model: str
-    object: Literal["chat.completion"] = "chat.completion"
-    service_tier: Optional[str] = None
-    system_fingerprint: Optional[str] = None
-    usage: Optional[CompletionUsage] = None
-    rag_metadata: RagMetadata
+    message: MessageOutput
+    metadata: RagMetadata
 
 
 # ------------------------------------------------------------------------------
@@ -232,8 +214,12 @@ STOP_WORDS = {
 }
 
 
-def grep_search(query: str, text: str, context_chars: int = 200) -> List[Tuple[str, float]]:
-    """Return snippets in ``text`` that match any non-stopword token in ``query``."""
+def grep_search(query: str, text: str, context_chars: int = 240) -> List[Tuple[str, float]]:
+    """Return ``(snippet, score)`` tuples in ``text`` that match query tokens.
+
+    Score is the fraction of non-stopword query tokens that appear in the
+    snippet — used directly as the ``Section.relevance`` value in the mock.
+    """
     if not query or not text:
         return []
 
@@ -282,33 +268,73 @@ def _make_data_source(corpus_id: str) -> DataSource:
     )
 
 
-def search_corpus(
-    query: str, corpus_id: str, top_k: int
-) -> List[Tuple[DocumentMetadata, Optional[str], Optional[str]]]:
-    """Return ``(DocumentMetadata, title, url)`` tuples for top matches in ``corpus_id``."""
+def _ieee_citation(document_ref: int, title: str, filename: str, url: Optional[str]) -> str:
+    """Best-effort IEEE-style citation string for the mock.
+
+    Real backends will produce a properly-formatted citation; the mock
+    just composes something recognizable so the frontend has a non-empty
+    ``citation`` field to render.
+    """
+    parts = [f"[{document_ref}]"]
+    if title:
+        parts.append(f'"{title}",')
+    parts.append(filename)
+    if url:
+        parts.append(f"available: {url}")
+    return " ".join(parts)
+
+
+def search_corpus_for_references(
+    query: str,
+    corpus_id: str,
+    top_k: int,
+    start_doc_ref: int,
+) -> List[Reference]:
+    """Build Reference objects for matching documents in ``corpus_id``.
+
+    Each matching document yields one Reference; its grep hits become
+    Section snippets with ``section_ref`` numbering starting at 1.
+    """
     if corpus_id not in DATA_SOURCES:
         return []
 
     corpus = DATA_SOURCES[corpus_id]
-    data_source = _make_data_source(corpus_id)
+    references: List[Reference] = []
+    document_ref = start_doc_ref
 
-    scored: List[Tuple[DocumentMetadata, Optional[str], Optional[str], float]] = []
-    chunk_id = 1
+    scored_docs: List[Tuple[Dict[str, Any], List[Tuple[str, float]], float]] = []
     for doc in corpus["documents"]:
-        for snippet, score in grep_search(query, doc["content"]):
-            metadata = DocumentMetadata(
-                data_source=data_source,
-                text=snippet,
-                id=chunk_id,
-                content_type="atlas-search",
-                confidence_score=round(score, 4),
-                last_modified=doc.get("last_modified"),
-            )
-            scored.append((metadata, doc.get("title"), doc.get("url"), score))
-            chunk_id += 1
+        hits = grep_search(query, doc["content"])
+        if not hits:
+            continue
+        top_score = hits[0][1]
+        scored_docs.append((doc, hits, top_score))
 
-    scored.sort(key=lambda x: -x[3])
-    return [(m, t, u) for m, t, u, _ in scored[:top_k]]
+    scored_docs.sort(key=lambda t: -t[2])
+    scored_docs = scored_docs[:top_k]
+
+    for doc, hits, _top_score in scored_docs:
+        sections = [
+            Section(
+                section_ref=section_ref,
+                text=snippet,
+                relevance=round(score, 4),
+            )
+            for section_ref, (snippet, score) in enumerate(hits, start=1)
+        ]
+        title = doc.get("title") or doc.get("id") or corpus_id
+        filename = doc.get("filename") or f"{doc.get('id', 'doc')}.txt"
+        references.append(
+            Reference(
+                citation=_ieee_citation(document_ref, title, filename, doc.get("url")),
+                document_ref=document_ref,
+                filename=filename,
+                sections=sections,
+            )
+        )
+        document_ref += 1
+
+    return references
 
 
 # ------------------------------------------------------------------------------
@@ -342,87 +368,55 @@ def can_access_corpus(user_name: str, corpus_id: str) -> bool:
 # Response Composition
 # ------------------------------------------------------------------------------
 
-def _compose_answer_with_citations(
+def _compose_assistant_content(
     corpora_searched: List[str],
-    docs_with_meta: List[Tuple[DocumentMetadata, Optional[str], Optional[str]]],
+    references: List[Reference],
     user_query: str,
-) -> Tuple[str, List[Annotation]]:
-    """Build assistant content and url_citation annotations pointing into it.
+) -> str:
+    """Build a human-readable assistant message that cites each reference.
 
-    Each annotation's ``start_index``/``end_index`` bounds the exact characters
-    in the generated content that came from the referenced document.
+    Citations use the ``[document_ref]`` form (e.g., ``[1]``, ``[2]``) so
+    the existing frontend citation pipeline keeps working without changes.
     """
-    if not docs_with_meta:
-        content = (
+    if not references:
+        return (
             f"No results found for: \"{user_query}\"\n\n"
             f"Searched in: {', '.join(corpora_searched)}\n"
             "Try different keywords or check your data source access."
         )
-        return content, []
 
     parts: List[str] = []
-    annotations: List[Annotation] = []
-
-    intro = (
+    parts.append(
         f"Based on searching {len(corpora_searched)} data source(s), "
-        f"I found {len(docs_with_meta)} relevant result(s):\n\n"
+        f"I found {len(references)} relevant document(s):"
     )
-    parts.append(intro)
-    cursor = len(intro)
-
-    for idx, (doc, title, url) in enumerate(docs_with_meta, start=1):
-        title_str = title or doc.data_source.label
-        header = f"[{idx}] {title_str}\n"
-        body = doc.text
-        citation_marker = f" [{idx}]"
-
-        parts.append(header)
-        cursor += len(header)
-
-        body_start = cursor
-        parts.append(body)
-        cursor += len(body)
-        body_end = cursor
-
-        parts.append(citation_marker)
-        cursor += len(citation_marker)
-        parts.append("\n\n")
-        cursor += 2
-
-        annotations.append(
-            Annotation(
-                type="url_citation",
-                url_citation=AnnotationURLCitation(
-                    start_index=body_start,
-                    end_index=body_end,
-                    title=title_str,
-                    url=url or "",
-                ),
-            )
-        )
-
-    footer = (
-        f"These results are from: "
-        f"{', '.join(sorted({d.data_source.id for d, _, _ in docs_with_meta}))}"
+    parts.append("")
+    for ref in references:
+        # One paragraph per reference, with the lead snippet inline and a
+        # trailing citation marker so [N] flows naturally in the prose.
+        lead_snippet = ref.sections[0].text if ref.sections else ref.filename
+        parts.append(f"- {lead_snippet} [{ref.document_ref}]")
+    parts.append("")
+    parts.append(
+        "Sources: "
+        + ", ".join(sorted({c for c in corpora_searched}))
     )
-    parts.append(footer)
-
-    return "".join(parts), annotations
+    return "\n".join(parts)
 
 
 # ------------------------------------------------------------------------------
 # API Endpoints
 # ------------------------------------------------------------------------------
 
-@app.get("/api/v1/discover/datasources", response_model=DiscoverDataSourcesResponse)
+@app.get("/api/v1/discover/datasources", response_model=List[DataSource])
 async def discover_data_sources(
     role: Literal["read", "write"] = Query("read"),
     as_user: Optional[str] = Query(None, description="User ID to impersonate"),
 ):
     """Discover data sources accessible by a user.
 
-    The mock treats ``read`` and ``write`` identically; a production impl would
-    filter further by role.
+    Per spec, returns a bare list of ``DataSource`` objects. The mock
+    treats ``read`` and ``write`` identically.
     """
     user = as_user or ""
     logger.info("Discovery request: user=%s role=%s", user, role)
@@ -433,7 +427,7 @@ async def discover_data_sources(
         len(accessible),
         role,
     )
-    return DiscoverDataSourcesResponse(data_sources=accessible)
+    return accessible
 
 
 @app.post("/api/v1/rag/completions", response_model=RagResponse)
@@ -441,27 +435,23 @@ async def rag_completions(
     request: RagRequest,
     as_user: Optional[str] = Query(None, description="User ID to impersonate"),
 ):
-    """Query RAG with grep-based search."""
+    """Query RAG with grep-based search and return references with sections."""
     start_time = time.time()
 
-    user = as_user or request.as_user or ""
+    user = as_user or ""
     logger.info("---------- RAG query ----------")
     logger.info(
-        "RAG query user=%s model=%s hybrid_kwargs=%s",
+        "RAG query user=%s corpora=%s stream=%s message_count=%d",
         user,
-        request.model,
-        request.hybrid_search_kwargs,
+        request.corpora,
+        request.stream,
+        len(request.messages),
     )
 
-    top_k = int(request.hybrid_search_kwargs.get("top_k", 4))
-    requested_corpora = (
-        request.hybrid_search_kwargs.get("corpora")
-        or request.hybrid_search_kwargs.get("data_sources")
-    )
-    if requested_corpora is None:
-        corpora_to_search = [ds.id for ds in get_accessible_corpora(user)]
+    if isinstance(request.corpora, str):
+        corpora_to_search = [request.corpora]
     else:
-        corpora_to_search = list(requested_corpora)
+        corpora_to_search = list(request.corpora)
 
     for corpus in corpora_to_search:
         if corpus not in DATA_SOURCES:
@@ -471,52 +461,30 @@ async def rag_completions(
 
     user_query = ""
     for m in reversed(request.messages):
-        if m.get("role") == "user":
-            c = m.get("content", "")
-            if isinstance(c, list):
-                user_query = " ".join(
-                    p.get("text", "")
-                    for p in c
-                    if isinstance(p, dict) and p.get("type") == "text"
-                )
-            else:
-                user_query = c or ""
+        if m.role == "user":
+            user_query = m.content or ""
             break
     logger.info("RAG user query: %r", user_query)
 
-    docs_with_meta: List[Tuple[DocumentMetadata, Optional[str], Optional[str]]] = []
+    references: List[Reference] = []
+    next_doc_ref = 1
     for corpus in corpora_to_search:
-        docs_with_meta.extend(search_corpus(user_query, corpus, top_k))
+        corpus_refs = search_corpus_for_references(
+            user_query, corpus, top_k=4, start_doc_ref=next_doc_ref,
+        )
+        references.extend(corpus_refs)
+        next_doc_ref += len(corpus_refs)
 
-    docs_with_meta.sort(key=lambda x: -x[0].confidence_score)
-    docs_with_meta = docs_with_meta[:top_k]
+    content = _compose_assistant_content(corpora_to_search, references, user_query)
 
-    content, annotations = _compose_answer_with_citations(
-        corpora_to_search, docs_with_meta, user_query
-    )
-
-    processing_time = int((time.time() - start_time) * 1000) + 20
+    # Spec describes response_time as an integer number of seconds.
+    response_time_seconds = max(1, int(time.time() - start_time + 1))
 
     return RagResponse(
-        model=request.model,
-        choices=[
-            Choice(
-                index=0,
-                finish_reason="stop",
-                message=ChatCompletionMessage(
-                    role="assistant",
-                    content=content,
-                    annotations=annotations or None,
-                ),
-            )
-        ],
-        rag_metadata=RagMetadata(
-            query_processing_time_ms=processing_time,
-            documents_found=[m for m, _, _ in docs_with_meta],
-            data_sources=[
-                _make_data_source(c) for c in corpora_to_search if c in DATA_SOURCES
-            ],
-            retrieval_method="similarity",
+        message=MessageOutput(role="assistant", content=content),
+        metadata=RagMetadata(
+            response_time=response_time_seconds,
+            references=references or None,
         ),
     )
 
@@ -530,15 +498,15 @@ async def health_check():
 async def root():
     return {
         "service": "ATLAS RAG API Mock",
-        "version": "0.3.0",
-        "openapi": "v0.3.x",
+        "version": "0.3.0.dev1",
+        "openapi": "v0.3.0.dev1+",
         "data_sources": list(DATA_SOURCES.keys()),
         "test_users": list(USERS_GROUPS_DB.keys()),
         "endpoints": {
             "GET /api/v1/discover/datasources?role=read|write&as_user=<user>":
                 "List accessible data sources",
             "POST /api/v1/rag/completions?as_user=<user>":
-                "Search and query",
+                "Search and query (returns RagResponse with references/sections)",
             "GET /health": "Health check",
         },
     }

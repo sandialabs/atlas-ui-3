@@ -26,6 +26,14 @@ import os
 import sys
 from pathlib import Path
 
+# Short-circuit --version before any heavy imports so version reporting stays
+# instant. argparse still registers --version below for --help discoverability.
+if "--version" in sys.argv[1:]:
+    from atlas.version import VERSION
+
+    print(f"atlas-chat version {VERSION}")
+    sys.exit(0)
+
 # Suppress LiteLLM verbose stdout noise BEFORE any transitive import of litellm.
 # litellm._logging reads LITELLM_LOG at import time and defaults to DEBUG.
 if "LITELLM_LOG" not in os.environ:
@@ -211,6 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--file-extractors-config",
         default=None,
         help="Override file extractors config file (sets FILE_EXTRACTORS_CONFIG_FILE). Accepts a filename or path.",
+    )
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Print version and exit.",
     )
     return parser
 

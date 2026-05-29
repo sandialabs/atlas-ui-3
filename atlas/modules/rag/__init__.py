@@ -13,6 +13,7 @@ from .client import (
     RAGClient,
     RAGMetadata,
     RAGResponse,
+    Section,
     URLCitation,
 )
 
@@ -24,5 +25,6 @@ __all__ = [
     "DocumentMetadata",
     "RAGMetadata",
     "RAGResponse",
+    "Section",
     "URLCitation",
 ]

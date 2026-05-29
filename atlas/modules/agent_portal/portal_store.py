@@ -2,9 +2,8 @@
 
 Houses the per-user CRUD for launch history, launch configs, layouts,
 groups, bundles, and audit events. Presets continue to live in the
-existing JSON-file ``PresetStore``; that is intentional (see Phase 1.5
-in ``AGENT_PORTAL_ACTION_PLAN.md`` — co-existence is fine and avoids
-churn for a working store).
+existing JSON-file ``PresetStore``; that co-existence is intentional and
+avoids churn for a working store.
 
 Per-user scoping is enforced here on every read and write. Cross-user
 reads return empty / NotFound; cross-user writes are no-ops or raise.
