@@ -545,3 +545,104 @@ async def test_restore_without_user_returns_error_frame_does_not_raise():
     # Session must not have been (re)created with the supplied id
     session = sessions.get(session_id)
     assert session is None or session.context.get("conversation_id") != "someones-conv"
+
+
+# --- Incognito-by-default opt-in must not persist pre-opt-in turns (PR #619) ---
+
+
+@pytest.mark.asyncio
+async def test_optin_after_incognito_excludes_prior_turns():
+    """With Incognito the new default, turns taken while incognito must not be
+    persisted when the user later switches to a saving mode. Only messages
+    from the opt-in point onward should reach the repository."""
+    from atlas.domain.messages.models import Message, MessageRole
+
+    record = MagicMock()
+    repo = _RecordingRepository(save_returns=record)
+    service, sessions = _make_service()
+    service.conversation_repository = repo
+    session_id = uuid4()
+
+    def make_execute(user_text, assistant_text):
+        async def fake_execute(**kwargs):
+            session = sessions[session_id]
+            session.history.add_message(Message(role=MessageRole.USER, content=user_text))
+            session.history.add_message(Message(role=MessageRole.ASSISTANT, content=assistant_text))
+            return {"type": "done"}
+        return fake_execute
+
+    mock_orchestrator = MagicMock()
+
+    # Turn 1: incognito (save_mode='none') -> nothing persisted
+    mock_orchestrator.execute = AsyncMock(side_effect=make_execute("secret q", "secret a"))
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="secret q",
+            model="test-model",
+            user_email="user@test.com",
+            incognito=True,
+        )
+    assert repo.save_calls == []
+
+    # Turn 2: user opts in (save_mode='server') -> only this turn is saved
+    mock_orchestrator.execute = AsyncMock(side_effect=make_execute("public q", "public a"))
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="public q",
+            model="test-model",
+            user_email="user@test.com",
+            incognito=False,
+        )
+
+    assert len(repo.save_calls) == 1
+    saved_contents = [m["content"] for m in repo.save_calls[0]["messages"]]
+    assert saved_contents == ["public q", "public a"]
+    assert "secret q" not in saved_contents
+    # Title must come from the first savable (post-opt-in) message.
+    assert repo.save_calls[0]["title"] == "public q"
+
+
+@pytest.mark.asyncio
+async def test_optin_floor_frozen_across_later_turns():
+    """Once the user opts in, the incognito floor is frozen so later saved
+    turns are not dropped by a moving boundary."""
+    from atlas.domain.messages.models import Message, MessageRole
+
+    repo = _RecordingRepository(save_returns=MagicMock())
+    service, sessions = _make_service()
+    service.conversation_repository = repo
+    session_id = uuid4()
+
+    def make_execute(user_text):
+        async def fake_execute(**kwargs):
+            session = sessions[session_id]
+            session.history.add_message(Message(role=MessageRole.USER, content=user_text))
+            session.history.add_message(
+                Message(role=MessageRole.ASSISTANT, content=user_text + "-a")
+            )
+            return {"type": "done"}
+        return fake_execute
+
+    mock_orchestrator = MagicMock()
+
+    mock_orchestrator.execute = AsyncMock(side_effect=make_execute("incognito"))
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id, content="incognito", model="m",
+            user_email="user@test.com", incognito=True,
+        )
+
+    for text in ("first", "second"):
+        mock_orchestrator.execute = AsyncMock(side_effect=make_execute(text))
+        with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+            await service.handle_chat_message(
+                session_id=session_id, content=text, model="m",
+                user_email="user@test.com", incognito=False,
+            )
+
+    # Last save should contain both opted-in turns, never the incognito one.
+    last_contents = [m["content"] for m in repo.save_calls[-1]["messages"]]
+    assert last_contents == ["first", "first-a", "second", "second-a"]
+    assert "incognito" not in last_contents
