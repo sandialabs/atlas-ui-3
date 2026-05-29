@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { X, CheckCircle } from 'lucide-react'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 /**
  * SplashScreen component that displays important policies and information.
  * 
  * Features:
- * - Displays configurable messages (text and headings)
+ * - Displays a configurable message body defined in a markdown file
  * - Can be dismissed or require acceptance
  * - Tracks dismissal using localStorage for N days
  * - Fully configurable via backend API
@@ -80,7 +82,17 @@ const SplashScreen = ({ config, onClose }) => {
   if (!isVisible || !config || !config.enabled) {
     return null
   }
-  
+
+  const renderMarkdown = (content) => {
+    try {
+      const html = marked.parse(content || '')
+      return DOMPurify.sanitize(html)
+    } catch (e) {
+      console.error('Error rendering splash screen content:', e)
+      return ''
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75">
       <div className="bg-gray-800 rounded-lg shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
@@ -102,24 +114,10 @@ const SplashScreen = ({ config, onClose }) => {
         
         {/* Content */}
         <div className="px-6 py-4 overflow-y-auto flex-1">
-          <div className="space-y-4 text-gray-300">
-            {config.messages && config.messages.map((message, index) => {
-              if (message.type === 'heading') {
-                return (
-                  <h3 key={index} className="text-lg font-semibold text-gray-100 mt-4 first:mt-0">
-                    {message.content}
-                  </h3>
-                )
-              } else if (message.type === 'text') {
-                return (
-                  <p key={index} className="text-sm leading-relaxed">
-                    {message.content}
-                  </p>
-                )
-              }
-              return null
-            })}
-          </div>
+          <div
+            className="prose prose-invert max-w-none text-gray-300"
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(config.markdown) }}
+          />
         </div>
         
         {/* Footer */}

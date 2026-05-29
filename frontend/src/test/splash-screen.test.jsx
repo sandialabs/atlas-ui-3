@@ -22,7 +22,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: false,
       title: 'Test Title',
-      messages: [{ type: 'text', content: 'Test message' }]
+      markdown: 'Test message'
     }
     const { container } = render(<SplashScreen config={config} />)
     expect(container.firstChild).toBeNull()
@@ -32,7 +32,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Welcome',
-      messages: [{ type: 'text', content: 'Welcome to the app' }],
+      markdown: 'Welcome to the app',
       dismissible: true,
       require_accept: false,
       dismiss_button_text: 'Close'
@@ -48,12 +48,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Policies',
-      messages: [
-        { type: 'heading', content: 'Cookie Policy' },
-        { type: 'text', content: 'We use cookies.' },
-        { type: 'heading', content: 'Privacy Policy' },
-        { type: 'text', content: 'Your data is secure.' }
-      ],
+      markdown: '## Cookie Policy\n\nWe use cookies.\n\n## Privacy Policy\n\nYour data is secure.',
       dismissible: true
     }
     render(<SplashScreen config={config} />)
@@ -68,7 +63,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Terms',
-      messages: [{ type: 'text', content: 'Please accept the terms' }],
+      markdown: 'Please accept the terms',
       require_accept: true,
       accept_button_text: 'I Accept'
     }
@@ -81,7 +76,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Info',
-      messages: [{ type: 'text', content: 'Some info' }],
+      markdown: 'Some info',
       dismissible: true,
       require_accept: false,
       dismiss_button_text: 'Close'
@@ -96,7 +91,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Info',
-      messages: [{ type: 'text', content: 'Some info' }],
+      markdown: 'Some info',
       dismissible: true,
       require_accept: false,
       dismiss_button_text: 'Close',
@@ -114,7 +109,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Info',
-      messages: [{ type: 'text', content: 'Some info' }],
+      markdown: 'Some info',
       dismissible: true,
       require_accept: false,
       dismiss_button_text: 'Close',
@@ -137,7 +132,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Terms',
-      messages: [{ type: 'text', content: 'Accept terms' }],
+      markdown: 'Accept terms',
       require_accept: true,
       accept_button_text: 'I Accept',
       dismiss_duration_days: 30
@@ -166,7 +161,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Info',
-      messages: [{ type: 'text', content: 'Should not show' }],
+      markdown: 'Should not show',
       dismissible: true,
       dismiss_duration_days: 30,
       show_on_every_visit: false
@@ -189,7 +184,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Info',
-      messages: [{ type: 'text', content: 'Should show again' }],
+      markdown: 'Should show again',
       dismissible: true,
       dismiss_duration_days: 30,
       show_on_every_visit: false
@@ -210,7 +205,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Info',
-      messages: [{ type: 'text', content: 'Always show' }],
+      markdown: 'Always show',
       dismissible: true,
       dismiss_duration_days: 30,
       show_on_every_visit: true
@@ -224,7 +219,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Info',
-      messages: [{ type: 'text', content: 'Some info' }],
+      markdown: 'Some info',
       dismissible: true,
       require_accept: false
     }
@@ -239,7 +234,7 @@ describe('SplashScreen', () => {
     const config = {
       enabled: true,
       title: 'Terms',
-      messages: [{ type: 'text', content: 'Must accept' }],
+      markdown: 'Must accept',
       dismissible: true,
       require_accept: true
     }
