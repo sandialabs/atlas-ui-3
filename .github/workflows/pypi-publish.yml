@@ -24,6 +24,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Verify version agreement
+        shell: bash
+        run: |
+          set -euo pipefail
+          pyproject_version="$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)"
+          atlas_version="$(grep -m1 '^VERSION' atlas/version.py | cut -d'"' -f2)"
+          echo "pyproject.toml version: ${pyproject_version}"
+          echo "atlas/version.py VERSION: ${atlas_version}"
+          if [ "${pyproject_version}" != "${atlas_version}" ]; then
+            echo "::error::Version mismatch: pyproject.toml=${pyproject_version} but atlas/version.py=${atlas_version}. Both must agree before publishing."
+            exit 1
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -72,6 +85,9 @@ jobs:
     environment:
       name: testpypi
       url: https://test.pypi.org/p/atlas-chat
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v8
@@ -93,6 +109,9 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/p/atlas-chat
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v8
