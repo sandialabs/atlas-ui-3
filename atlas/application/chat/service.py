@@ -129,6 +129,14 @@ class ChatService:
         # Track incognito sessions
         self._incognito_sessions: set = set()
 
+        # Track, per session, the number of leading messages that were
+        # accumulated while the session was incognito. These pre-opt-in
+        # messages must never be persisted, even after the user later
+        # switches the save mode to 'local'/'server'. The floor is frozen
+        # once the user opts in so subsequent turns persist normally.
+        self._incognito_save_floor: dict = {}
+        self._save_floor_locked: set = set()
+
         # Initialize refactored services
         self.tool_authorization = ToolAuthorizationService(tool_manager=self.tool_manager)
         self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
@@ -324,6 +332,16 @@ class ChatService:
                     **kwargs
                 )
 
+            # Messages accumulated while the session was incognito must never
+            # be persisted, even after the user later opts in to saving. Track
+            # the high-water mark of the leading incognito messages and freeze
+            # it once the user opts in so later turns persist normally.
+            if session_id in self._incognito_sessions:
+                if session_id not in self._save_floor_locked:
+                    self._incognito_save_floor[session_id] = len(session.history.messages)
+            else:
+                self._save_floor_locked.add(session_id)
+
             # Persist conversation (if not incognito and feature enabled)
             if (
                 self.conversation_repository is not None
@@ -331,7 +349,12 @@ class ChatService:
                 and user_email
             ):
                 try:
-                    saved = self._save_conversation(session, user_email, model)
+                    saved = self._save_conversation(
+                        session,
+                        user_email,
+                        model,
+                        start_index=self._incognito_save_floor.get(session_id, 0),
+                    )
                     # Notify frontend only when persistence actually succeeded.
                     # When save_conversation returns None (the TOCTOU window
                     # between ownership validation and the upsert), surface
@@ -727,8 +750,15 @@ class ChatService:
         except Exception as e:
             logger.error(f"Failed to update session from tool results: {e}", exc_info=True)
 
-    def _save_conversation(self, session: Session, user_email: str, model: str) -> bool:
+    def _save_conversation(
+        self, session: Session, user_email: str, model: str, start_index: int = 0
+    ) -> bool:
         """Persist a session's conversation history to the database.
+
+        ``start_index`` excludes leading messages that were accumulated while
+        the session was incognito; only messages from that index onward are
+        persisted. This prevents pre-opt-in incognito turns from being saved
+        when the user later switches to a saving mode.
 
         Returns True on successful upsert, False when the repository
         rejected the write (e.g. another user owns the conversation_id —
@@ -740,8 +770,12 @@ class ChatService:
         if not session or not session.history.messages:
             return False
 
+        savable_messages = session.history.messages[start_index:]
+        if not savable_messages:
+            return False
+
         messages = []
-        for msg in session.history.messages:
+        for msg in savable_messages:
             msg_dict = msg.to_dict()
             # Preserve message_type from metadata if available
             msg_dict["message_type"] = msg.metadata.get("message_type", "chat")
@@ -753,7 +787,7 @@ class ChatService:
         # Only generate title for new conversations (not restored ones)
         title = None
         if not session.context.get("_restored"):
-            for msg in session.history.messages:
+            for msg in savable_messages:
                 if msg.role.value == "user" and msg.content:
                     title = msg.content[:200]
                     break
@@ -789,4 +823,6 @@ class ChatService:
         session.active = False
         await self.session_repository.update(session)
         self._incognito_sessions.discard(session_id)
+        self._incognito_save_floor.pop(session_id, None)
+        self._save_floor_locked.discard(session_id)
         logger.info(f"Ended session {sanitize_for_logging(str(session_id))}")

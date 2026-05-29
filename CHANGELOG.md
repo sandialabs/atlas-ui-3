@@ -6,8 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #607 - 2026-05-29
-- **Chat history**: Default save mode is now Incognito (`none`) instead of Server; the save button cycles Incognito -> Saved Locally -> Saved to Server.
+### PR #619 - 2026-05-29
+- **Chat history**: Default save mode is now Incognito (`none`) instead of Server; the save button cycles Incognito -> Saved Locally -> Saved to Server. Turns taken while incognito are excluded from server persistence even after the user later opts in to saving.
 
 ## [0.2.0] - 2026-05-16
 

@@ -1,6 +1,6 @@
 # 3-State Chat Save Mode
 
-Last updated: 2026-02-25
+Last updated: 2026-05-29
 
 ## Overview
 
@@ -29,6 +29,7 @@ The default mode is **Incognito** (`none`); the cycle order is Incognito -> Save
 
 - **`main.py`**: Treats `save_mode !== 'server'` as incognito (skips database persistence)
 - **`config_routes.py`**: Exposes `chat_history_save_modes: ['none', 'local', 'server']` in the features config
+- **`service.py`**: Tracks a per-session incognito "save floor". Messages exchanged while the session was incognito (including the default leading Incognito turns) are excluded from server persistence even after the user opts in to saving; the floor is frozen once the user opts in so later turns save normally.
 
 ### Data Flow
 
