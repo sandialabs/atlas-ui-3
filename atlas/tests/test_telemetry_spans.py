@@ -562,6 +562,8 @@ async def test_chat_turn_span_attributes(span_exporter):
     svc.session_repository.get = AsyncMock(return_value=None)
     svc.create_session = AsyncMock(return_value=MagicMock(context={}))
     svc._incognito_sessions = set()
+    svc._incognito_save_floor = {}
+    svc._save_floor_locked = set()
     svc.conversation_repository = None
     svc._get_orchestrator = MagicMock(
         return_value=MagicMock(execute=AsyncMock(return_value={"ok": True}))

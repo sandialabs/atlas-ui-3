@@ -201,6 +201,48 @@ class MCPSessionManager:
                 conversation_id,
             )
 
+    async def release_sessions_for_user_server(
+        self, user_email: str, server_name: str
+    ) -> None:
+        """Close all sessions for a user/server pair across all conversations.
+
+        Called from ``MCPToolManager._invalidate_user_client`` after evicting
+        client cache entries, to ensure that any live session which outlived
+        its cache entry (e.g. an LRU-evicted entry whose close-task was still
+        pending when the token was revoked) is also torn down.  The method is
+        idempotent: sessions already released by ``_close_user_client_entry``
+        will have been popped from ``_sessions``, so the pop here is a no-op.
+        """
+        user_scope = normalize_user_email(user_email)
+        to_close: list[ManagedSession] = []
+        async with self._lock:
+            # Session keys are (user_email, conversation_id, server_name).
+            keys_to_remove = [
+                k for k in self._sessions
+                if k[0] == user_scope and k[2] == server_name
+            ]
+            for k in keys_to_remove:
+                session = self._sessions.pop(k, None)
+                self._key_locks.pop(k, None)
+                conv_id = k[1]
+                conv_keys = self._conv_index.get(conv_id)
+                if conv_keys is not None:
+                    conv_keys.discard(k)
+                    if not conv_keys:
+                        del self._conv_index[conv_id]
+                if session is not None:
+                    to_close.append(session)
+
+        for session in to_close:
+            await session.close()
+
+        if to_close:
+            logger.info(
+                "Released %d orphaned MCP session(s) for server '%s' on token revocation",
+                len(to_close),
+                server_name,
+            )
+
     def _pop_release_keys_locked(
         self,
         conversation_id: str,
