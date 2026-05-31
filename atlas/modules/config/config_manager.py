@@ -647,6 +647,17 @@ class AppSettings(BaseSettings):
         description="Enable the Agent Portal UI for launching and streaming host processes",
         validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_ENABLED"),
     )
+    # Additional Origin header hosts (beyond loopback) allowed to open the
+    # agent_portal WebSocket stream. Comma-separated list of hostnames, e.g.
+    # "atlas-dev.example.com,atlas.internal". Loopback hosts are always allowed.
+    # Only set this when the deployment is fronted by an auth proxy (e.g.
+    # Cloudflare Access) — the WS upgrade bypasses CORS, so an attacker page
+    # on any listed origin can drive the socket if it can reach the backend.
+    agent_portal_allowed_origins: str = Field(
+        default="",
+        description="Comma-separated extra Origin hostnames allowed for agent_portal WS",
+        validation_alias=AliasChoices("AGENT_PORTAL_ALLOWED_ORIGINS"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""

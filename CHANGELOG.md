@@ -18,6 +18,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #607 - 2026-05-14
 - `MCPToolManager._invalidate_user_client` now calls a new `MCPSessionManager.release_sessions_for_user_server` method after evicting client cache entries, ensuring live sessions that outlived their cache entry (e.g. due to LRU eviction races) are also closed when a token is revoked.
 
+### PR #596 - 2026-05-11
+- Added `AGENT_PORTAL_ALLOWED_ORIGINS` to let the Agent Portal WebSocket stream accept Origin headers beyond loopback when the deployment is fronted by an authenticating reverse proxy (e.g. Cloudflare Access). Loopback hosts remain allowed by default; the env var is a comma-separated hostname allowlist and is empty by default, so the gate is unchanged for stock installs.
+- Renamed `_origin_is_loopback` to `_origin_is_allowed` in `atlas/routes/agent_portal_routes.py` and updated the rejection log message; updated `docs/agentportal/threat-model.md` to describe the expanded allowlist and its residual risks.
+- Added a Remove (stop + drop) affordance for Agent Portal sessions. `ProcessManager.remove()` drops a non-running record (wakes lingering stream subscribers and closes any orphaned PTY master fd); `ProcessManager.stop_and_remove()` cancels, waits a bounded grace window, and removes in one shot.
+- New `POST /api/agent-portal/processes/{id}/remove` route — pairs with the existing `DELETE` (which only sends SIGTERM and keeps the record). Writes a `"remove"` audit event with the final status; returns 404 for unknown ids and 409 if the child is still alive after the grace window. Frontend adds a Trash button in the left rail and pane header, with a confirm dialog when the target is still running, and clears the layout slot on success.
+- Defense in depth in `ProcessManager.launch`: if a caller sets `namespaces=True` but `probe_isolation_capabilities()` reports the host can't do unprivileged user namespaces (e.g. Ubuntu 24.04 with `apparmor_restrict_unprivileged_userns=1`), the manager strips the flag (and `isolate_network`), logs a warning, and launches with reduced isolation rather than failing with EPERM on `/proc/self/uid_map`. The frontend mirrors this by clearing the flags client-side when the capability probe reports the host unsupported.
+- Added per-user ownership graduation TODO for the new `/remove` endpoint and listed it in `docs/agentportal/threat-model.md`'s deferred-items section.
+
 ## [0.2.0] - 2026-05-16
 
 ### PR #606 - 2026-05-16
