@@ -57,12 +57,12 @@ def _get_env_file_from_args() -> tuple[Path, bool]:
     """
     for i, arg in enumerate(sys.argv[1:], start=1):
         if arg == "--env-file" and i + 1 < len(sys.argv):
-            return Path(sys.argv[i + 1]), True
+            return Path(sys.argv[i + 1]).expanduser(), True
         if arg.startswith("--env-file="):
-            return Path(arg.split("=", 1)[1]), True
+            return Path(arg.split("=", 1)[1]).expanduser(), True
     env_var = os.environ.get("ATLAS_ENV_FILE")
     if env_var:
-        return Path(env_var), True
+        return Path(env_var).expanduser(), True
     # Default: prefer .env in current working directory, then fall back to package root.
     cwd_env = Path.cwd() / ".env"
     if cwd_env.exists():

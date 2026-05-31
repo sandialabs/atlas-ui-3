@@ -200,16 +200,17 @@ setup_environment() {
         set -a
         . "$ENV_FILE"
         set +a
+        # Make the resolved env file path available to child processes that
+        # consult ATLAS_ENV_FILE so they load the same file. Only export when
+        # the file actually exists; pointing children at a missing path would
+        # make env-var-aware commands (e.g. atlas-chat) fail to start.
+        export ATLAS_ENV_FILE="$ENV_FILE"
     elif [ -n "${ATLAS_ENV_FILE:-}" ] || [ "$ENV_FILE" != "$PROJECT_ROOT/.env" ]; then
         # User explicitly pointed us at a file (via --env-file or ATLAS_ENV_FILE)
         # that does not exist. Fail loudly so missing API keys are obvious.
         echo "Error: env file not found: $ENV_FILE" >&2
         exit 1
     fi
-
-    # Make the resolved env file path available to child processes (e.g. uvicorn
-    # / atlas-server) so they load the same file.
-    export ATLAS_ENV_FILE="$ENV_FILE"
     
     echo "Setting MCP_EXTERNAL_API_TOKEN for testing purposes."
     if [ -z "$MCP_EXTERNAL_API_TOKEN" ]; then

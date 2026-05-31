@@ -296,20 +296,27 @@ class TestGetUserClient:
 class TestInvalidateUserClient:
     """Test _invalidate_user_client method."""
 
-    @pytest.mark.asyncio
-    async def test_removes_cached_client(self):
-        """Should remove client from cache."""
+    def _make_manager(self, clients: dict):
+        """Build a minimal MCPToolManager suitable for invalidation tests."""
         import asyncio
 
         from atlas.modules.mcp_tools.client import MCPToolManager
+        from atlas.modules.mcp_tools.session_manager import MCPSessionManager
 
         manager = MCPToolManager.__new__(MCPToolManager)
-        manager._user_clients = {
+        manager._user_clients = clients
+        manager._user_clients_lock = asyncio.Lock()
+        manager._session_manager = MCPSessionManager()
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_removes_cached_client(self):
+        """Should remove client from cache."""
+        manager = self._make_manager({
             ("user@example.com", "test-server", "conv-1"): MagicMock(),
             ("user@example.com", "test-server", "conv-2"): MagicMock(),
             ("other@example.com", "test-server", "conv-1"): MagicMock(),
-        }
-        manager._user_clients_lock = asyncio.Lock()
+        })
 
         await manager._invalidate_user_client("user@example.com", "test-server")
 
@@ -322,16 +329,47 @@ class TestInvalidateUserClient:
     @pytest.mark.asyncio
     async def test_handles_missing_cache_entry(self):
         """Should not error when cache entry doesn't exist."""
-        import asyncio
-
-        from atlas.modules.mcp_tools.client import MCPToolManager
-
-        manager = MCPToolManager.__new__(MCPToolManager)
-        manager._user_clients = {}
-        manager._user_clients_lock = asyncio.Lock()
-
+        manager = self._make_manager({})
         # Should not raise
         await manager._invalidate_user_client("user@example.com", "test-server")
+
+    @pytest.mark.asyncio
+    async def test_releases_orphaned_sessions_on_revocation(self):
+        """Sessions that outlived their cache entry must be closed on token revocation.
+
+        Scenario: the LRU sweeper already evicted the _user_clients cache entry
+        but its async close-task has not yet run, so MCPSessionManager still
+        holds a live session.  _invalidate_user_client must close it via
+        release_sessions_for_user_server even when _user_clients is empty.
+        """
+        from unittest.mock import AsyncMock
+
+        from atlas.modules.mcp_tools.session_manager import ManagedSession
+
+        manager = self._make_manager({})
+
+        # Manually inject a live session into the session manager to simulate
+        # the "orphaned session" scenario (cache entry already gone).
+        fake_client = MagicMock()
+        fake_client.is_connected = MagicMock(return_value=True)
+        fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+        fake_client.__aexit__ = AsyncMock(return_value=None)
+        session = ManagedSession(fake_client)
+        await session.open()
+
+        key = ("user@example.com", "conv-1", "test-server")
+        manager._session_manager._sessions[key] = session
+        manager._session_manager._conv_index.setdefault("conv-1", set()).add(key)
+
+        assert session.is_open
+
+        await manager._invalidate_user_client("user@example.com", "test-server")
+
+        # The orphaned session must have been closed.
+        assert session._closed
+        # Session index must be cleaned up.
+        assert key not in manager._session_manager._sessions
+        assert "conv-1" not in manager._session_manager._conv_index
 
 
 class TestGetPromptAuthRouting:

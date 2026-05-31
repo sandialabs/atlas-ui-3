@@ -54,7 +54,7 @@ export const ChatProvider = ({ children }) => {
 
 	// Chat history: 3-state save mode persists across refreshes via localStorage
 	// 'none' = incognito (nothing saved), 'local' = browser IndexedDB, 'server' = backend DB
-	const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'server')
+	const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'none')
 	const [activeConversationId, setActiveConversationId] = useState(null)
 	const localSaveTimerRef = useRef(null)
 
