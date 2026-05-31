@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #619 - 2026-05-29
 - **Chat history**: Default save mode is now Incognito (`none`) instead of Server; the save button cycles Incognito -> Saved Locally -> Saved to Server. Turns taken while incognito are excluded from server persistence even after the user later opts in to saving.
 
+### PR #607 - 2026-05-14
+- `MCPToolManager._invalidate_user_client` now calls a new `MCPSessionManager.release_sessions_for_user_server` method after evicting client cache entries, ensuring live sessions that outlived their cache entry (e.g. due to LRU eviction races) are also closed when a token is revoked.
+
 ## [0.2.0] - 2026-05-16
 
 ### PR #606 - 2026-05-16

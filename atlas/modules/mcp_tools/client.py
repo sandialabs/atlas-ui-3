@@ -1944,6 +1944,13 @@ class MCPToolManager:
 
         Removes every entry matching ``(user_email, server_name, *)`` across
         all conversations, since the cache key now includes conversation_id.
+
+        After evicting cache entries (and releasing their sessions via
+        ``_close_user_client_entries``), also calls
+        ``MCPSessionManager.release_sessions_for_user_server`` to close any
+        live sessions that outlived their cache entry — for example when the
+        LRU sweeper had already popped a cache entry but its async close-task
+        had not yet executed at revocation time.
         """
         user_lc = normalize_user_email(user_email)
         async with self._user_clients_lock:
@@ -1958,6 +1965,11 @@ class MCPToolManager:
                     len(keys_to_remove), server_name,
                 )
         await self._close_user_client_entries(removed)
+        # Belt-and-suspenders: release any sessions that are still alive in
+        # MCPSessionManager but have no corresponding _user_clients entry.
+        await self._session_manager.release_sessions_for_user_server(
+            user_lc, server_name
+        )
 
     async def _get_or_create_user_http_client(
         self,
