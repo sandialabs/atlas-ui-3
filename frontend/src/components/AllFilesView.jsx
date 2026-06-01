@@ -214,6 +214,49 @@ const AllFilesView = () => {
     }
   }
 
+  const handleDeleteAll = async () => {
+    if (filteredFiles.length === 0) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete all ${filteredFiles.length} file(s)? This action cannot be undone.`
+    )
+    if (!confirmed) {
+      return
+    }
+
+    const filesToDelete = [...filteredFiles]
+    let failures = 0
+
+    for (const file of filesToDelete) {
+      try {
+        const response = await fetch(`/api/files/${encodeFileKeyPath(file.key)}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+
+        if (!response.ok) {
+          throw new Error('Delete failed')
+        }
+      } catch (err) {
+        failures += 1
+        console.error(`Error deleting file ${file.filename}:`, err)
+      }
+    }
+
+    // Refresh the file list
+    fetchAllFiles()
+
+    if (failures === 0) {
+      showNotification(`Deleted ${filesToDelete.length} file(s) successfully`, 'success')
+    } else {
+      showNotification(`Failed to delete ${failures} of ${filesToDelete.length} file(s)`, 'error')
+    }
+  }
+
   const handleAddToSession = async (file) => {
     try {
       // Check if file is already attached
@@ -288,13 +331,25 @@ const AllFilesView = () => {
       )}
 
       {/* Section Header */}
-      <div className="mb-4">
-        <h3 className="text-lg font-semibold text-gray-50">
-          All Files ({filteredFiles.length})
-        </h3>
-        <p className="text-sm text-gray-400 mt-1">
-          All files across all your sessions
-        </p>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-50">
+            All Files ({filteredFiles.length})
+          </h3>
+          <p className="text-sm text-gray-400 mt-1">
+            All files across all your sessions
+          </p>
+        </div>
+        {filteredFiles.length > 0 && (
+          <button
+            onClick={handleDeleteAll}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm transition-colors flex-shrink-0"
+            title="Delete all files"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete All
+          </button>
+        )}
       </div>
 
       {/* Search and Filters */}
