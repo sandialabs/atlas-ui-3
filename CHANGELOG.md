@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #625 - 2026-06-02
+- **MCP**: Authenticated user injection now uses the namespaced `_atlas_user` argument, while legacy `username` injection remains temporarily supported with a deprecation warning.
+
 ### PR #624 - 2026-06-01
 - **File Library**: Added a bulk delete button to the File Manager's File Library tab that deletes the files currently shown after a confirmation prompt. The button is labeled "Delete All" when no filters are active and "Delete Filtered" when a search/type filter is narrowing the list, so the scope is explicit; it is disabled while a delete batch is in flight.
 

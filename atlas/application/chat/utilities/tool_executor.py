@@ -260,6 +260,32 @@ def tool_accepts_mcp_data(tool_name: str, tool_manager) -> bool:
         return False
 
 
+def tool_accepts_atlas_user(tool_name: str, tool_manager) -> bool:
+    """
+    Check if a tool accepts an _atlas_user parameter by examining its schema.
+
+    Returns True if the tool schema defines an '_atlas_user' parameter, False otherwise.
+    """
+    if not tool_name or not tool_manager:
+        return False
+
+    try:
+        tools_schema = tool_manager.get_tools_schema([tool_name])
+        if not tools_schema:
+            return False
+
+        for tool_schema in tools_schema:
+            if tool_schema.get("function", {}).get("name") == tool_name:
+                parameters = tool_schema.get("function", {}).get("parameters", {})
+                properties = parameters.get("properties", {})
+                return "_atlas_user" in properties
+
+        return False
+    except Exception as e:
+        logger.warning(f"Could not determine if tool {tool_name} accepts _atlas_user: {e}")
+        return False
+
+
 def build_mcp_data(tool_manager) -> Dict[str, Any]:
     """
     Build structured metadata about all available MCP tools for injection.
@@ -493,7 +519,7 @@ async def execute_single_tool(
                             logger.info(f"User edited arguments for tool {tool_call.function.name}")
 
                             # SECURITY: Re-apply security injections after user edits
-                            # This ensures username and other security-critical parameters cannot be tampered with
+                            # This ensures Atlas-owned and other security-critical parameters cannot be tampered with
                             re_injected_args = inject_context_into_args(
                                 edited_args,
                                 session_context,
@@ -553,7 +579,7 @@ async def execute_single_tool(
             if arguments_were_edited:
                 edit_note = (
                     f"[IMPORTANT: The user manually edited the tool arguments before execution. "
-                    f"Security-critical parameters (like username) were re-injected by the system and cannot be modified. "
+                    f"Security-critical parameters (like _atlas_user) were re-injected by the system and cannot be modified. "
                     f"The ACTUAL arguments executed were: {json.dumps(filtered_args)}. "
                     f"Your response must reflect these arguments as the user's true intent.]\\n\\n"
                 )
@@ -642,7 +668,7 @@ def _filter_args_to_schema(parsed_args: Dict[str, Any], tool_name: str, tool_man
 
     # Conservative fallback: drop common injected extras if schema unavailable
     drop_prefixes = ("original_",)
-    drop_keys = {"file_url", "file_urls"}
+    drop_keys = {"_atlas_user", "file_url", "file_urls"}
     return {k: v for k, v in (parsed_args or {}).items()
             if not any(k.startswith(p) for p in drop_prefixes) and k not in drop_keys}
 
@@ -713,16 +739,16 @@ def prepare_tool_arguments(tool_call, session_context: Dict[str, Any], tool_mana
                     )
                     parsed_args = {}
 
-    # Inject username and file URL mappings with schema awareness
+    # Inject Atlas-owned user context and file URL mappings with schema awareness
     return inject_context_into_args(parsed_args, session_context, tool_call.function.name, tool_manager)
 
 
 def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[str, Any], tool_name: str = None, tool_manager=None) -> Dict[str, Any]:
     """
-    Inject username and file URL mappings into tool arguments.
+    Inject Atlas-owned user context and file URL mappings into tool arguments.
 
     Pure function that adds context without side effects.
-    Only injects username if the tool schema defines a username parameter.
+    Only injects user context if the tool schema defines the relevant parameter.
 
     If BACKEND_PUBLIC_URL is configured, uses absolute URLs for file downloads.
     If INCLUDE_FILE_CONTENT_BASE64 is enabled, also injects base64 content as fallback.
@@ -731,11 +757,17 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
         return parsed_args
 
     try:
-        # Inject username. Prefer schema-aware injection; if schema unavailable,
-        # include username by default to support tools that expect it.
         user_email = session_context.get("user_email")
-        if user_email and (not tool_manager or tool_accepts_username(tool_name, tool_manager)):
-            parsed_args["username"] = user_email
+        if user_email and tool_manager:
+            accepts_atlas_user = tool_accepts_atlas_user(tool_name, tool_manager)
+            if accepts_atlas_user:
+                parsed_args["_atlas_user"] = user_email
+            elif tool_accepts_username(tool_name, tool_manager):
+                logger.warning(
+                    "Tool %s declares legacy username injection; use _atlas_user instead",
+                    tool_name,
+                )
+                parsed_args["username"] = user_email
 
         # Inject _mcp_data if the tool schema declares it
         if tool_manager and tool_accepts_mcp_data(tool_name, tool_manager):

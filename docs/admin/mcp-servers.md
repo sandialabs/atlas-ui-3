@@ -206,9 +206,9 @@ export MY_API_KEY="your-secret-api-key"
 
 You can restrict access to MCP servers based on user groups. This is a critical feature for controlling which users can access powerful or sensitive tools. If a user is not in the required group, the server will be completely invisible to them in the UI, and any attempt to call its functions will be blocked.
 
-## A Note on the `username` Argument
+## A Note on the `_atlas_user` Argument
 
-As a security measure, if a tool is designed to accept a `username` argument, the Atlas UI backend will **always** overwrite this argument with the authenticated user's identity before calling the tool. This ensures that a tool always runs with the correct user context and prevents the LLM from impersonating another user.
+As a security measure, if a tool is designed to accept an `_atlas_user` argument, the Atlas UI backend will **always** overwrite this argument with the authenticated user's identity before calling the tool. This ensures that a tool always runs with the correct user context and prevents the LLM from impersonating another user. Legacy `username` injection is temporarily supported for older tools, but new tools should use `_atlas_user` so ordinary `username` arguments remain under LLM control.
 
 
 ## Advanced MCP Features
@@ -224,4 +224,3 @@ MCP tools can request LLM text generation during tool execution, enabling agenti
 ### Progress Updates
 
 MCP tools can send real-time progress updates during long-running operations. See the [Progress Updates Documentation](../developer/progress-updates.md) for details.
-

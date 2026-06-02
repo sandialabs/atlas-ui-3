@@ -187,7 +187,7 @@ def test_injection_produces_tokenized_urls(client, monkeypatch):
     args = {"filename": "report.pdf"}
     injected = inject_context_into_args(args, session_context)
 
-    assert injected["username"] == "bob@example.com"
+    assert "username" not in injected
     assert injected["original_filename"] == "report.pdf"
     # URL should include /mcp/files/download/abc123 and a token query param
     assert injected["filename"].startswith("/mcp/files/download/abc123")

@@ -1,16 +1,64 @@
-"""Tests for username override security in tool approval flow."""
+"""Tests for Atlas-owned user context injection in tool approval flow."""
 
 
+import logging
 from unittest.mock import Mock
 
 from atlas.application.chat.utilities.tool_executor import _filter_args_to_schema, inject_context_into_args
 
 
 class TestUsernameOverrideInApproval:
-    """Test that username override cannot be bypassed through approval argument editing."""
+    """Test that Atlas-owned user injection cannot be bypassed through approval argument editing."""
 
-    def test_username_override_after_user_edit(self):
-        """Test that username is re-injected even after user edits it during approval."""
+    def test_atlas_user_injection_after_user_edit(self):
+        """Test that _atlas_user is re-injected even after user edits it during approval."""
+        session_context = {
+            "user_email": "alice@example.com",
+            "files": {}
+        }
+
+        user_edited_args = {
+            "_atlas_user": "malicious@example.com",
+            "username": "requested-user",
+            "data": "test data"
+        }
+
+        mock_tool_manager = Mock()
+        mock_tool_manager.get_tools_schema.return_value = [{
+            "function": {
+                "name": "create_record",
+                "parameters": {
+                    "properties": {
+                        "_atlas_user": {"type": "string"},
+                        "username": {"type": "string"},
+                        "data": {"type": "string"}
+                    }
+                }
+            }
+        }]
+
+        re_injected_args = inject_context_into_args(
+            user_edited_args,
+            session_context,
+            "create_record",
+            mock_tool_manager
+        )
+
+        assert re_injected_args["_atlas_user"] == "alice@example.com"
+        assert re_injected_args["username"] == "requested-user"
+        assert re_injected_args["data"] == "test data"
+
+        filtered_args = _filter_args_to_schema(
+            re_injected_args,
+            "create_record",
+            mock_tool_manager
+        )
+
+        assert filtered_args["_atlas_user"] == "alice@example.com"
+        assert filtered_args["username"] == "requested-user"
+
+    def test_legacy_username_override_after_user_edit(self, caplog):
+        """Test that legacy username is re-injected with a deprecation log."""
         # Setup session context with authenticated user
         session_context = {
             "user_email": "alice@example.com",
@@ -37,17 +85,19 @@ class TestUsernameOverrideInApproval:
             }
         }]
 
-        # Re-inject context (simulating what should happen after user approval)
-        re_injected_args = inject_context_into_args(
-            user_edited_args,
-            session_context,
-            "create_record",
-            mock_tool_manager
-        )
+        with caplog.at_level(logging.WARNING):
+            # Re-inject context (simulating what should happen after user approval)
+            re_injected_args = inject_context_into_args(
+                user_edited_args,
+                session_context,
+                "create_record",
+                mock_tool_manager
+            )
 
         # Verify username was overridden back to authenticated user
         assert re_injected_args["username"] == "alice@example.com"
         assert re_injected_args["data"] == "test data"
+        assert "declares legacy username injection" in caplog.text
 
         # Re-filter to schema to simulate complete flow
         filtered_args = _filter_args_to_schema(
@@ -95,8 +145,8 @@ class TestUsernameOverrideInApproval:
         assert "username" not in re_injected_args
         assert re_injected_args["query"] == "test query"
 
-    def test_username_override_with_no_tool_manager(self):
-        """Test username injection when no tool manager is available (fallback)."""
+    def test_username_left_alone_with_no_tool_manager(self):
+        """Test username is not injected when schema is unavailable."""
         session_context = {
             "user_email": "bob@example.com",
             "files": {}
@@ -106,7 +156,7 @@ class TestUsernameOverrideInApproval:
             "data": "some data"
         }
 
-        # Inject context with no tool manager (fallback mode)
+        # Inject context with no tool manager
         re_injected_args = inject_context_into_args(
             user_edited_args,
             session_context,
@@ -114,8 +164,8 @@ class TestUsernameOverrideInApproval:
             None  # No tool manager
         )
 
-        # Should still inject username in fallback mode
-        assert re_injected_args["username"] == "bob@example.com"
+        # Schema is required for Atlas-owned injections.
+        assert "username" not in re_injected_args
         assert re_injected_args["data"] == "some data"
 
     def test_multiple_security_injections_after_edit(self):

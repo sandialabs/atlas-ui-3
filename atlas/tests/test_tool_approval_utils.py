@@ -6,6 +6,7 @@ from atlas.application.chat.utilities.tool_executor import (
     _filter_args_to_schema,
     _sanitize_args_for_ui,
     requires_approval,
+    tool_accepts_atlas_user,
     tool_accepts_username,
 )
 
@@ -200,6 +201,49 @@ class TestToolAcceptsUsername:
         tool_manager.get_tools_schema.side_effect = Exception("Schema error")
 
         result = tool_accepts_username("test_tool", tool_manager)
+        assert result is False
+
+
+class TestToolAcceptsAtlasUser:
+    """Test the tool_accepts_atlas_user function."""
+
+    def test_tool_accepts_atlas_user_true(self):
+        """Test tool that accepts _atlas_user parameter."""
+        tool_manager = Mock()
+        tool_manager.get_tools_schema.return_value = [
+            {
+                "function": {
+                    "name": "test_tool",
+                    "parameters": {
+                        "properties": {
+                            "_atlas_user": {"type": "string"},
+                            "other_param": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        ]
+
+        result = tool_accepts_atlas_user("test_tool", tool_manager)
+        assert result is True
+
+    def test_tool_accepts_atlas_user_false(self):
+        """Test tool that does not accept _atlas_user parameter."""
+        tool_manager = Mock()
+        tool_manager.get_tools_schema.return_value = [
+            {
+                "function": {
+                    "name": "test_tool",
+                    "parameters": {
+                        "properties": {
+                            "username": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        ]
+
+        result = tool_accepts_atlas_user("test_tool", tool_manager)
         assert result is False
 
 
