@@ -36,7 +36,7 @@ def process_file_demo(
     - Uses artifacts array with base64 content
     - Includes MIME types and metadata
     - Provides display hints for canvas behavior
-    - Supports username injection for auditing
+    - Supports _atlas_user injection for auditing
 
     **File Processing:**
     - For text files: converts content to uppercase

@@ -113,7 +113,7 @@
     "groups": [
       "users"
     ],
-    "description": "Demonstrates the security feature where the backend automatically overrides the username parameter with the authenticated user's email",
+    "description": "Demonstrates the security feature where the backend automatically overrides the _atlas_user parameter with the authenticated user's email",
     "author": "Chat UI Team",
     "short_description": "Username override security demo",
     "help_email": "support@chatui.example.com",

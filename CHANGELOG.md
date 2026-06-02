@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #625 - 2026-06-02
+- **MCP tools**: Renamed Atlas-injected authenticated user argument from `username` to `_atlas_user`; ordinary `username` tool arguments are no longer overwritten.
+
 ### PR #624 - 2026-06-01
 - **File Library**: Added a bulk delete button to the File Manager's File Library tab that deletes the files currently shown after a confirmation prompt. The button is labeled "Delete All" when no filters are active and "Delete Filtered" when a search/type filter is narrowing the list, so the scope is explicit; it is disabled while a delete batch is in flight.
 

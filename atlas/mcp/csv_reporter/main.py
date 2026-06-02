@@ -6,9 +6,8 @@ Demonstrates two v2 behaviors described in v2_mcp_note.md:
 1) filename(s) to downloadable URLs: If the backend rewrites filename/file_names
    to /api/files/download/... URLs, this server will fetch and process them.
    It also accepts file_data_base64 as a fallback for content delivery.
-2) username injection: If a `username` parameter is defined in the tool schema,
-   the backend can inject the authenticated user's email/username. This server
-   trusts the provided username value and echoes it in outputs.
+2) _atlas_user injection: If an `_atlas_user` parameter is defined in the tool
+   schema, the backend can inject the authenticated user's email/username.
 
 Tools:
  - generate_csv_report: Build a summary report for a single CSV.

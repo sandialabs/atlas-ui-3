@@ -3,7 +3,7 @@ Tests for _mcp_data injection into MCP tool arguments.
 
 Validates that tools declaring an _mcp_data parameter in their schema
 receive structured metadata about all available MCP tools, following
-the same pattern as the username injection feature.
+the same pattern as the _atlas_user injection feature.
 """
 
 from unittest.mock import MagicMock

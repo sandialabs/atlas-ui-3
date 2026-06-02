@@ -165,9 +165,8 @@ def execute_python_code_with_file(
     1) filename to downloadable URLs: If the backend rewrites filename
        to /api/files/download/... URLs, this server will fetch and process them.
        It also accepts file_data_base64 as a fallback for content delivery.
-    2) username injection: If a `username` parameter is defined in the tool schema,
-       the backend can inject the authenticated user's email/username. This server
-       trusts the provided username value and echoes it in outputs.
+    2) _atlas_user injection: If an `_atlas_user` parameter is defined in the tool
+       schema, the backend can inject the authenticated user's email/username.
 
     This function allows you to execute Python code either standalone or with access
     to an uploaded file (e.g., CSV, JSON, TXT, etc.). If a file is provided, it will

@@ -172,7 +172,7 @@ def _build_artifact_response(
 async def plan_with_tools(
     task: str,
     _mcp_data: Optional[Dict[str, Any]] = None,
-    username: Optional[str] = None,
+    _atlas_user: Optional[str] = None,
     ctx: Context = None,
 ) -> Dict[str, Any]:
     """Plan how to accomplish a task by generating a bash script that uses the Atlas CLI.
@@ -186,7 +186,7 @@ async def plan_with_tools(
         task: Description of the task to accomplish.
         _mcp_data: Automatically injected by Atlas UI with available tool
                    metadata. Do not provide this manually.
-        username: The authenticated user (automatically injected by Atlas UI).
+        _atlas_user: The authenticated user (automatically injected by Atlas UI).
 
     Returns:
         Atlas artifact dict with the bash script as a downloadable file.
