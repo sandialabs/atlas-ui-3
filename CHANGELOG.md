@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #624 - 2026-06-01
+- **File Library**: Added a bulk delete button to the File Manager's File Library tab that deletes the files currently shown after a confirmation prompt. The button is labeled "Delete All" when no filters are active and "Delete Filtered" when a search/type filter is narrowing the list, so the scope is explicit; it is disabled while a delete batch is in flight.
+
 ### PR #621 - 2026-05-29
 - **Splash screen**: Message body is now defined in a markdown file (`splash-screen.md`, override via `SPLASH_SCREEN_FILE`) and rendered as markdown. The JSON config keeps presentation settings only; the redundant `enabled` field and `messages` array are dropped — `FEATURE_SPLASH_SCREEN_ENABLED` is the sole switch for showing the splash screen.
 
