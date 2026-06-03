@@ -545,3 +545,17 @@ class TestRequiresEncryptionKey:
             assert isinstance(storage, MCPTokenStorage)
         finally:
             config_manager._app_settings = previous
+
+    def test_refuses_shipped_placeholder_key(self, tmp_path):
+        """The repo-public .env.example placeholder is rejected like a missing key.
+
+        Copying .env.example to .env without editing it would otherwise encrypt
+        every user's tokens with a value anyone can read from the repository.
+        """
+        from atlas.modules.mcp_tools.token_storage import (
+            _PLACEHOLDER_ENCRYPTION_KEYS,
+        )
+
+        for placeholder in _PLACEHOLDER_ENCRYPTION_KEYS:
+            with pytest.raises(RuntimeError, match="MCP_TOKEN_ENCRYPTION_KEY"):
+                MCPTokenStorage(storage_dir=tmp_path, encryption_key=placeholder)

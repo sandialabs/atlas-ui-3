@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **MCP tools**: Renamed the Atlas-injected authenticated user argument from `username` to `_atlas_user`; ordinary `username` tool arguments are no longer overwritten. Bundled example tools that use the authenticated user for audit attribution (csv_reporter, code-executor, file_size_test) now declare `_atlas_user` so the value stays backend-injected and cannot be spoofed by the LLM.
 
 ### PR #629 - 2026-06-03
-- **MCP token storage**: `MCPTokenStorage` now refuses to start when `MCP_TOKEN_ENCRYPTION_KEY` is unset instead of silently generating an ephemeral key that made every previously encrypted token unreadable after each restart. Operators must configure a stable secret; docs and `.env.example` updated to mark the variable as required.
+- **MCP token storage**: `MCPTokenStorage` now refuses to start when `MCP_TOKEN_ENCRYPTION_KEY` is unset — or still set to the shipped `.env.example` placeholder — instead of silently generating an ephemeral key that made every previously encrypted token unreadable after each restart. The key is validated before any filesystem setup. Operators must configure a stable, unique secret; docs and `.env.example` updated to mark the variable as required.
 
 ### PR #624 - 2026-06-01
 - **File Library**: Added a bulk delete button to the File Manager's File Library tab that deletes the files currently shown after a confirmation prompt. The button is labeled "Delete All" when no filters are active and "Delete Filtered" when a search/type filter is narrowing the list, so the scope is explicit; it is disabled while a delete batch is in flight.

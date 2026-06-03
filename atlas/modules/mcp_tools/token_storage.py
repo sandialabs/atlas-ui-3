@@ -35,6 +35,14 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger(__name__)
 
+# Placeholder values that ship in the repository (e.g. in .env.example).
+# Accepting one would encrypt every user's tokens with a repo-public secret,
+# so they are rejected exactly like a missing key. Keep this in sync with the
+# placeholder written to .env.example.
+_PLACEHOLDER_ENCRYPTION_KEYS = frozenset({
+    "your-random-string-at-least-32-chars",
+})
+
 
 class AuthenticationRequiredException(Exception):
     """Exception raised when a user needs to authenticate with an MCP server.
@@ -167,25 +175,32 @@ class MCPTokenStorage:
         from atlas.modules.config.config_manager import get_app_settings
         app_settings = get_app_settings()
 
+        # Resolve and validate the encryption key BEFORE touching the
+        # filesystem, so a misconfigured deployment fails cleanly without
+        # leaving empty token directories behind. Prefer the passed arg,
+        # then the configured setting.
+        key_source = encryption_key or app_settings.mcp_token_encryption_key
+        if not key_source or key_source in _PLACEHOLDER_ENCRYPTION_KEYS:
+            # Refuse to operate without a real, operator-supplied key. A
+            # generated ephemeral key silently made previously-encrypted
+            # tokens unreadable after every restart, and the shipped
+            # placeholder would encrypt tokens with a repo-public secret —
+            # both are worse than failing loudly.
+            raise RuntimeError(
+                "MCP_TOKEN_ENCRYPTION_KEY is not set (or is still the shipped "
+                "placeholder). Atlas refuses to start MCP token storage "
+                "without an explicit, unique encryption key, because a "
+                "generated ephemeral key would make previously encrypted "
+                "tokens unreadable after every restart and the public "
+                "placeholder would leave stored tokens decryptable by anyone "
+                "with the repository. Set MCP_TOKEN_ENCRYPTION_KEY to a stable "
+                "secret of at least 32 characters and restart the application."
+            )
+
         self._storage_dir = storage_dir or self._get_storage_dir(app_settings)
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._storage_file = self._storage_dir / "mcp_tokens.enc"
 
-        # Get encryption key (prefer passed arg, then settings)
-        key_source = encryption_key or app_settings.mcp_token_encryption_key
-        if not key_source:
-            # Refuse to start without an explicit encryption key. Generating
-            # an ephemeral key silently caused data-loss bugs on restart
-            # (previously-encrypted tokens become unreadable) — see the
-            # "data key" issue. Operators must configure a stable key.
-            raise RuntimeError(
-                "MCP_TOKEN_ENCRYPTION_KEY is not set. Atlas refuses to start "
-                "without an explicit encryption key for MCP token storage, "
-                "because a generated ephemeral key would make all previously "
-                "encrypted tokens unreadable after every restart. Set the "
-                "MCP_TOKEN_ENCRYPTION_KEY environment variable to a stable "
-                "secret (at least 32 characters) and restart the application."
-            )
         self._fernet = self._derive_fernet(key_source)
         logger.info("Token storage initialized with configured encryption key")
 
