@@ -939,7 +939,10 @@ const ChatArea = ({ onOpenRagPanel }) => {
                   )
                 })()}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div
+                className="flex flex-wrap gap-2 max-h-28 overflow-y-auto pr-1"
+                data-testid="uploaded-files-list"
+              >
                 {Object.entries(uploadedFiles).map(([filename, fileData]) => {
                   const isImage = isImageFile(filename)
                   const showAsVisionImage = isImage && currentModelSupportsVision
