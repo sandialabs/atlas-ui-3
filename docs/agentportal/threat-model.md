@@ -109,11 +109,30 @@ body to attach them to.
 
 The stream endpoint
 (`/api/agent-portal/processes/{id}/stream`) therefore performs an
-explicit `Origin` header check before `websocket.accept()`. Only
-loopback origins (`http://localhost`, `http://127.0.0.1`,
-`http://[::1]`, any port) are allowed; anything else is rejected with
-close code `4403`. See
+explicit `Origin` header check before `websocket.accept()`. Loopback
+origins (`http://localhost`, `http://127.0.0.1`, `http://[::1]`, any
+port) are always allowed; anything else is rejected with close code
+`4403`. See
 `atlas/routes/agent_portal_routes.py::stream_process_output`.
+
+`AGENT_PORTAL_ALLOWED_ORIGINS` (added 2026-05-11) is a comma-separated
+allowlist of additional `Origin` hostnames. It exists for deployments
+that front the dev preview with an authenticating reverse proxy
+(e.g. Cloudflare Access, an SSO-gated ingress) and therefore see a
+non-loopback `Origin` on legitimate traffic. Compared values are
+hostnames only — scheme and port are not part of the comparison and
+loopback is independent of this list. Residual risks:
+
+- Any browser tab opened on an allowlisted origin can drive the
+  WebSocket if it can reach the backend. The control assumes the
+  fronting proxy actually requires login for that origin; misconfigure
+  the proxy and the origin allowlist is the only remaining barrier.
+- Comparison is exact-hostname only — `*` is not a wildcard and
+  matches nothing. The only way to weaken the gate is to list an
+  actual public hostname. Adding a public hostname without an auth
+  proxy in front of it effectively disables the Origin gate, so
+  treat this env var as a security-sensitive setting and review it
+  whenever deployment topology changes.
 
 ## Deferred items
 
@@ -122,11 +141,12 @@ and each is tracked with a `TODO(graduation)` comment in code that
 points back here.
 
 - **Per-user ownership checks on per-process endpoints.** `GET`,
-  `DELETE`, `PATCH`, and the WS stream on
-  `/api/agent-portal/processes/{id}` currently accept any authenticated
-  caller. In a multi-user deployment, user A could enumerate, cancel,
-  or rename user B's processes. Not material while the feature is
-  single-user dev-only. Must be implemented before graduation.
+  `DELETE`, `PATCH`, `POST /processes/{id}/remove`, and the WS stream
+  on `/api/agent-portal/processes/{id}` currently accept any
+  authenticated caller. In a multi-user deployment, user A could
+  enumerate, cancel, remove, or rename user B's processes. Not
+  material while the feature is single-user dev-only. Must be
+  implemented before graduation.
 - **Path-root validation for `cwd` and `extra_writable_paths`.** These
   are currently taken as arbitrary absolute paths. See
   design-considerations.

@@ -47,15 +47,22 @@ from dotenv import load_dotenv
 def _get_env_file_from_args() -> tuple[Path, bool]:
     """Extract --env-file from sys.argv without full parsing.
 
+    Precedence: ``--env-file`` flag > ``ATLAS_ENV_FILE`` env var > .env in
+    current working directory > .env in package root.
+
     Returns:
         Tuple of (env_path, is_custom) where is_custom is True if user
-        explicitly provided --env-file, False for default .env path.
+        explicitly provided --env-file or set ATLAS_ENV_FILE, False for
+        default .env path.
     """
     for i, arg in enumerate(sys.argv[1:], start=1):
         if arg == "--env-file" and i + 1 < len(sys.argv):
-            return Path(sys.argv[i + 1]), True
+            return Path(sys.argv[i + 1]).expanduser(), True
         if arg.startswith("--env-file="):
-            return Path(arg.split("=", 1)[1]), True
+            return Path(arg.split("=", 1)[1]).expanduser(), True
+    env_var = os.environ.get("ATLAS_ENV_FILE")
+    if env_var:
+        return Path(env_var).expanduser(), True
     # Default: prefer .env in current working directory, then fall back to package root.
     cwd_env = Path.cwd() / ".env"
     if cwd_env.exists():
@@ -171,7 +178,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--env-file",
         default=None,
-        help="Path to custom .env file (default: project root .env). Parsed early before other imports.",
+        help=(
+            "Path to custom .env file (default: ATLAS_ENV_FILE env var, then "
+            "project root .env). Parsed early before other imports."
+        ),
     )
 
     # Config directory flag (useful for testing and CI)

@@ -29,6 +29,7 @@ const AllFilesView = () => {
   const [sortBy, setSortBy] = useState('last_modified')
   const [sortOrder, setSortOrder] = useState('desc')
   const [typeFilter, setTypeFilter] = useState('all')
+  const [deletingAll, setDeletingAll] = useState(false)
 
   useEffect(() => {
     fetchAllFiles()
@@ -214,6 +215,60 @@ const AllFilesView = () => {
     }
   }
 
+  const handleDeleteAll = async () => {
+    // Guard against re-entry while a bulk delete is already in flight.
+    if (deletingAll || filteredFiles.length === 0) {
+      return
+    }
+
+    // The action targets the currently visible files, which honor active
+    // search/type filters rather than the entire library.
+    const scoped = searchQuery !== '' || typeFilter !== 'all'
+    const confirmed = window.confirm(
+      scoped
+        ? `Are you sure you want to delete the ${filteredFiles.length} file(s) matching your current filters? This action cannot be undone.`
+        : `Are you sure you want to delete all ${filteredFiles.length} file(s)? This action cannot be undone.`
+    )
+    if (!confirmed) {
+      return
+    }
+
+    const filesToDelete = [...filteredFiles]
+    let failures = 0
+
+    setDeletingAll(true)
+    try {
+      for (const file of filesToDelete) {
+        try {
+          const response = await fetch(`/api/files/${encodeFileKeyPath(file.key)}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          })
+
+          if (!response.ok) {
+            throw new Error('Delete failed')
+          }
+        } catch (err) {
+          failures += 1
+          console.error(`Error deleting file ${file.filename}:`, err)
+        }
+      }
+
+      // Refresh the file list
+      await fetchAllFiles()
+
+      if (failures === 0) {
+        showNotification(`Deleted ${filesToDelete.length} file(s) successfully`, 'success')
+      } else {
+        showNotification(`Failed to delete ${failures} of ${filesToDelete.length} file(s)`, 'error')
+      }
+    } finally {
+      setDeletingAll(false)
+    }
+  }
+
   const handleAddToSession = async (file) => {
     try {
       // Check if file is already attached
@@ -288,13 +343,34 @@ const AllFilesView = () => {
       )}
 
       {/* Section Header */}
-      <div className="mb-4">
-        <h3 className="text-lg font-semibold text-gray-50">
-          All Files ({filteredFiles.length})
-        </h3>
-        <p className="text-sm text-gray-400 mt-1">
-          All files across all your sessions
-        </p>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-50">
+            All Files ({filteredFiles.length})
+          </h3>
+          <p className="text-sm text-gray-400 mt-1">
+            All files across all your sessions
+          </p>
+        </div>
+        {filteredFiles.length > 0 && (() => {
+          const filtersActive = searchQuery !== '' || typeFilter !== 'all'
+          const label = filtersActive ? 'Delete Filtered' : 'Delete All'
+          return (
+            <button
+              onClick={handleDeleteAll}
+              disabled={deletingAll}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={filtersActive ? 'Delete the files matching the current filters' : 'Delete all files'}
+            >
+              {deletingAll ? (
+                <Loader className="w-4 h-4 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4" />
+              )}
+              {deletingAll ? 'Deleting…' : `${label} (${filteredFiles.length})`}
+            </button>
+          )
+        })()}
       </div>
 
       {/* Search and Filters */}

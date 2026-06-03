@@ -6,12 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #624 - 2026-06-01
+- **File Library**: Added a bulk delete button to the File Manager's File Library tab that deletes the files currently shown after a confirmation prompt. The button is labeled "Delete All" when no filters are active and "Delete Filtered" when a search/type filter is narrowing the list, so the scope is explicit; it is disabled while a delete batch is in flight.
+
+### PR #621 - 2026-05-29
+- **Splash screen**: Message body is now defined in a markdown file (`splash-screen.md`, override via `SPLASH_SCREEN_FILE`) and rendered as markdown. The JSON config keeps presentation settings only; the redundant `enabled` field and `messages` array are dropped — `FEATURE_SPLASH_SCREEN_ENABLED` is the sole switch for showing the splash screen.
+
+### PR #619 - 2026-05-29
+- **Chat history**: Default save mode is now Incognito (`none`) instead of Server; the save button cycles Incognito -> Saved Locally -> Saved to Server. Turns taken while incognito are excluded from server persistence even after the user later opts in to saving.
+
+### 2026-05-21
+- **CLI**: Added support for specifying a custom `.env` file location. `atlas-init`, `atlas-server`, `atlas-chat`, and `agent_start.sh` now all honor a `--env-file`/`-e` flag and the `ATLAS_ENV_FILE` environment variable, so multiple users can share an Atlas install while keeping their own API keys in a personal file such as `~/.atlasrc`. Resolves the "Specifying location for .env configuration file" issue.
+
 ### Agent Portal V3 - 2026-05-20
 - **New**: Third iteration of the Agent Portal that launches each agent as a one-shot Kubernetes Job, fully feature-flagged (`FEATURE_AGENT_PORTAL_V3_ENABLED`) and independent of the v1/v2 host-process portal.
 - **Backend**: new module `atlas/modules/agent_portal_v3/` (models, store, k8s client, job/network-policy templates, watcher loop) and routes under `/api/agent-portal-v3/` for launch / list / cancel / delete / logs / events. Persists runs to a separate DuckDB file (`data/agent_portal_v3.db`, override via `AGENT_PORTAL_V3_DB_URL`).
 - **Frontend**: new page at `/agent-portal-v3` (`frontend/src/components/AgentPortalV3.jsx`) with MCP server multiselect (http/sse only), prompt editor, model picker, runs table, and a detail pane that polls events + pod logs. A separate Header button renders only when the v3 flag is on.
 - **Agent image**: `atlas/agent_runner_v3/` contains a Dockerfile and a minimal Python ReAct loop (Anthropic + OpenAI) that reads `ATLAS_PROMPT` / `ATLAS_MCP_CONFIG` from env, connects to MCP servers over Streamable HTTP, and emits structured JSON to stdout. `build_and_load.sh` builds with podman and imports into k3s containerd.
 - **Network isolation**: a per-run `NetworkPolicy` is applied alongside each Job, allowing DNS plus TCP/80/443 to public addresses and blocking RFC1918 / link-local ranges. See `docs/agent-portal-v3/README.md` for stricter (Cilium / envoy sidecar) postures.
+
+### PR #607 - 2026-05-14
+- `MCPToolManager._invalidate_user_client` now calls a new `MCPSessionManager.release_sessions_for_user_server` method after evicting client cache entries, ensuring live sessions that outlived their cache entry (e.g. due to LRU eviction races) are also closed when a token is revoked.
+
+### PR #596 - 2026-05-11
+- Added `AGENT_PORTAL_ALLOWED_ORIGINS` to let the Agent Portal WebSocket stream accept Origin headers beyond loopback when the deployment is fronted by an authenticating reverse proxy (e.g. Cloudflare Access). Loopback hosts remain allowed by default; the env var is a comma-separated hostname allowlist and is empty by default, so the gate is unchanged for stock installs.
+- Renamed `_origin_is_loopback` to `_origin_is_allowed` in `atlas/routes/agent_portal_routes.py` and updated the rejection log message; updated `docs/agentportal/threat-model.md` to describe the expanded allowlist and its residual risks.
+- Added a Remove (stop + drop) affordance for Agent Portal sessions. `ProcessManager.remove()` drops a non-running record (wakes lingering stream subscribers and closes any orphaned PTY master fd); `ProcessManager.stop_and_remove()` cancels, waits a bounded grace window, and removes in one shot.
+- New `POST /api/agent-portal/processes/{id}/remove` route — pairs with the existing `DELETE` (which only sends SIGTERM and keeps the record). Writes a `"remove"` audit event with the final status; returns 404 for unknown ids and 409 if the child is still alive after the grace window. Frontend adds a Trash button in the left rail and pane header, with a confirm dialog when the target is still running, and clears the layout slot on success.
+- Defense in depth in `ProcessManager.launch`: if a caller sets `namespaces=True` but `probe_isolation_capabilities()` reports the host can't do unprivileged user namespaces (e.g. Ubuntu 24.04 with `apparmor_restrict_unprivileged_userns=1`), the manager strips the flag (and `isolate_network`), logs a warning, and launches with reduced isolation rather than failing with EPERM on `/proc/self/uid_map`. The frontend mirrors this by clearing the flags client-side when the capability probe reports the host unsupported.
+- Added per-user ownership graduation TODO for the new `/remove` endpoint and listed it in `docs/agentportal/threat-model.md`'s deferred-items section.
 
 ## [0.2.0] - 2026-05-16
 

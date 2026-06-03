@@ -1,8 +1,11 @@
 """Tests for atlas-init CLI startup performance and lazy imports."""
 
+import os
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 
 class TestInitCliStartup:
@@ -117,3 +120,93 @@ class TestInitCliStartup:
         assert result.returncode == 0, (
             f"Version access triggered heavy imports: {result.stderr}"
         )
+
+
+class TestInitCliEnvFile:
+    """Verify atlas-init honors --env-file flag and ATLAS_ENV_FILE env var.
+
+    These options let users keep their .env outside the install directory
+    (e.g. ~/.atlasrc) so multiple users can share one Atlas install while
+    each owning their own API keys. See issue: "Specifying location for
+    .env configuration file".
+    """
+
+    def _run(self, args, env=None):
+        return subprocess.run(
+            [sys.executable, "-m", "atlas.init_cli", *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+
+    def test_env_file_flag_writes_to_custom_path(self, tmp_path):
+        target = tmp_path / "project"
+        custom_env = tmp_path / "personal" / ".atlasrc"
+
+        result = self._run([
+            "--target", str(target),
+            "--env-file", str(custom_env),
+            "--minimal",
+            "--force",
+        ])
+
+        assert result.returncode == 0, result.stderr
+        assert custom_env.exists(), (
+            f"Expected env file at {custom_env}, output:\n{result.stdout}"
+        )
+        # The default location should NOT be created when a custom path is given.
+        assert not (target / ".env").exists()
+        assert "ATLAS_ENV_FILE" in result.stdout
+
+    def test_atlas_env_file_env_var_is_honored(self, tmp_path):
+        target = tmp_path / "project"
+        custom_env = tmp_path / "from-env" / ".atlasrc"
+
+        env = os.environ.copy()
+        env["ATLAS_ENV_FILE"] = str(custom_env)
+
+        result = self._run([
+            "--target", str(target),
+            "--minimal",
+            "--force",
+        ], env=env)
+
+        assert result.returncode == 0, result.stderr
+        assert custom_env.exists()
+        assert not (target / ".env").exists()
+
+    def test_flag_overrides_env_var(self, tmp_path):
+        target = tmp_path / "project"
+        flag_env = tmp_path / "from-flag" / ".atlasrc"
+        var_env = tmp_path / "from-var" / ".atlasrc"
+
+        env = os.environ.copy()
+        env["ATLAS_ENV_FILE"] = str(var_env)
+
+        result = self._run([
+            "--target", str(target),
+            "--env-file", str(flag_env),
+            "--minimal",
+            "--force",
+        ], env=env)
+
+        assert result.returncode == 0, result.stderr
+        assert flag_env.exists()
+        assert not var_env.exists()
+
+    def test_default_env_path_unchanged(self, tmp_path):
+        """Without --env-file or ATLAS_ENV_FILE, .env lands in target dir."""
+        target = tmp_path / "project"
+
+        # Make sure ATLAS_ENV_FILE is not inherited from the test runner.
+        env = {k: v for k, v in os.environ.items() if k != "ATLAS_ENV_FILE"}
+
+        result = self._run([
+            "--target", str(target),
+            "--minimal",
+            "--force",
+        ], env=env)
+
+        assert result.returncode == 0, result.stderr
+        assert (target / ".env").exists()
