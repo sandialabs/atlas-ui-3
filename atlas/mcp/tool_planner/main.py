@@ -8,7 +8,7 @@ accomplish a user's task by calling the Atlas CLI with the appropriate tools.
 Flow:
 1. User asks the LLM to plan a task (e.g., "create a powerpoint about dogs")
 2. LLM calls plan_with_tools, passing the user's request as `task`
-3. Atlas UI injects `_mcp_data` (all available tools metadata) and `username`
+3. Atlas UI injects `_mcp_data` (all available tools metadata) and `_atlas_user`
 4. Inside the tool:
    a. Convert `_mcp_data` into an LLM-friendly CLI tool reference
    b. Use ctx.sample() to ask the LLM to write a bash script using atlas_chat_cli.py

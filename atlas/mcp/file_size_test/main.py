@@ -21,7 +21,7 @@ mcp = create_stdio_server("File_Size_Test")
 @mcp.tool
 def process_file_demo(
     filename: Annotated[str, "The file to process (URL or base64)"],
-    username: Annotated[str, "Username for auditing"] = None
+    _atlas_user: Annotated[str, "Injected by backend. Trust this value."] = None
 ) -> Dict[str, Any]:
     """
     Demo tool that processes a file and returns a new transformed file.
@@ -51,13 +51,13 @@ def process_file_demo(
 
     Args:
         filename: File reference (URL or base64 data) to process
-        username: Injected user identity for auditing
+        _atlas_user: Injected authenticated user identity for auditing
 
     Returns:
         Dictionary with results, artifacts, and display hints per v2 contract
     """
     logger.debug(f"process_file_demo called with filename: {filename}")
-    logger.debug(f"username: {username}")
+    logger.debug(f"_atlas_user: {_atlas_user}")
     try:
         # Get the file content (reuse logic from get_file_size)
         is_url = (
@@ -126,7 +126,7 @@ def process_file_demo(
             "meta_data": {
                 "is_error": False,
                 "processed_by": "process_file_demo_v2",
-                "username": username,
+                "username": _atlas_user,
                 "mime_type": processed_mime
             },
             "artifacts": [
@@ -155,7 +155,7 @@ def process_file_demo(
             "meta_data": {
                 "is_error": True,
                 "error_type": type(e).__name__,
-                "username": username
+                "username": _atlas_user
             }
         }
         return error_result
