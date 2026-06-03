@@ -476,7 +476,7 @@ class AppSettings(BaseSettings):
     )
     mcp_token_encryption_key: Optional[str] = Field(
         default=None,
-        description="Encryption key for user tokens. If not set, tokens won't persist across restarts",
+        description="Encryption key for user tokens. Required: Atlas refuses to start without it",
         validation_alias="MCP_TOKEN_ENCRYPTION_KEY"
     )
 

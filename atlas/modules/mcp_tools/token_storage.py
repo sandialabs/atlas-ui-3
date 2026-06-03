@@ -140,8 +140,9 @@ class MCPTokenStorage:
     Tokens are stored in an encrypted JSON file on disk, keyed by the
     combination of user email and server name. The encryption key is
     derived from the MCP_TOKEN_ENCRYPTION_KEY environment variable using
-    PBKDF2. If no key is set, a random key is generated (tokens will not
-    persist across restarts in this case).
+    PBKDF2. The application refuses to start if no key is configured,
+    because an ephemeral key would make all previously encrypted tokens
+    unreadable after every restart.
 
     Storage location: {storage_dir}/mcp_tokens.enc
     """
@@ -170,19 +171,23 @@ class MCPTokenStorage:
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._storage_file = self._storage_dir / "mcp_tokens.enc"
 
-        # Get or generate encryption key (prefer passed arg, then settings)
+        # Get encryption key (prefer passed arg, then settings)
         key_source = encryption_key or app_settings.mcp_token_encryption_key
-        if key_source:
-            self._fernet = self._derive_fernet(key_source)
-            logger.info("Token storage initialized with configured encryption key")
-        else:
-            # Generate ephemeral key (tokens won't persist across restarts)
-            ephemeral_key = Fernet.generate_key()
-            self._fernet = Fernet(ephemeral_key)
-            logger.warning(
-                "No MCP_TOKEN_ENCRYPTION_KEY set. Using ephemeral key - "
-                "tokens will not persist across application restarts."
+        if not key_source:
+            # Refuse to start without an explicit encryption key. Generating
+            # an ephemeral key silently caused data-loss bugs on restart
+            # (previously-encrypted tokens become unreadable) — see the
+            # "data key" issue. Operators must configure a stable key.
+            raise RuntimeError(
+                "MCP_TOKEN_ENCRYPTION_KEY is not set. Atlas refuses to start "
+                "without an explicit encryption key for MCP token storage, "
+                "because a generated ephemeral key would make all previously "
+                "encrypted tokens unreadable after every restart. Set the "
+                "MCP_TOKEN_ENCRYPTION_KEY environment variable to a stable "
+                "secret (at least 32 characters) and restart the application."
             )
+        self._fernet = self._derive_fernet(key_source)
+        logger.info("Token storage initialized with configured encryption key")
 
         # Thread lock for concurrent access
         self._lock = threading.Lock()
