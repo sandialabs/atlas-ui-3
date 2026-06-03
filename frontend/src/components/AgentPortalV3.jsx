@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Play,
@@ -32,6 +32,46 @@ const fmtTime = (iso) => {
   } catch {
     return iso
   }
+}
+
+// Pod log timestamps are emitted as Unix epoch seconds (floats).
+const fmtEpoch = (ts) => {
+  if (ts == null) return '-'
+  try {
+    return new Date(ts * 1000).toLocaleTimeString()
+  } catch {
+    return String(ts)
+  }
+}
+
+// Color the log "kind" so warnings/errors/final answers stand out.
+const kindColor = (k) => {
+  if (k === 'warn' || k === 'stderr') return 'text-yellow-400'
+  if (k === 'error') return 'text-red-400'
+  if (k === 'final' || k === 'assistant') return 'text-green-300'
+  if (k === 'status' || k === 'turn' || k === 'tools') return 'text-indigo-300'
+  return 'text-gray-400'
+}
+
+// Pod logs arrive as newline-delimited JSON (one object per line) emitted by
+// the agent runner. Parse what we can into {ts, kind, msg, extra}; keep any
+// non-JSON line as raw text so nothing is silently dropped.
+const parseLogLines = (raw) => {
+  if (!raw) return []
+  return raw
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((line, i) => {
+      try {
+        const o = JSON.parse(line)
+        if (o && typeof o === 'object' && ('msg' in o || 'kind' in o)) {
+          return { i, parsed: true, ts: o.ts, kind: o.kind || '', msg: o.msg ?? '', extra: o.extra }
+        }
+      } catch {
+        // not JSON -- fall through to raw
+      }
+      return { i, parsed: false, raw: line }
+    })
 }
 
 const apiBase = '/api/agent-portal-v3'
@@ -261,7 +301,10 @@ function RunDetail({ runId }) {
   const [events, setEvents] = useState([])
   const [logs, setLogs] = useState('')
   const [tab, setTab] = useState('events')
+  const [logView, setLogView] = useState('table')
   const intervalRef = useRef(null)
+
+  const logRecords = useMemo(() => parseLogLines(logs), [logs])
 
   const refresh = useCallback(async () => {
     if (!runId) return
@@ -365,7 +408,69 @@ function RunDetail({ runId }) {
             ))
         )}
         {tab === 'logs' && (
-          logs ? logs : <span className="text-gray-500">No pod logs yet.</span>
+          logRecords.length === 0
+            ? <span className="text-gray-500">No pod logs yet.</span>
+            : (
+              <div>
+                <div className="flex gap-1 mb-2 sticky top-0 bg-black/40 py-1 -mt-1">
+                  {['table', 'text', 'raw'].map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setLogView(v)}
+                      className={`px-2 py-0.5 text-[11px] rounded capitalize ${logView === v ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+                {logView === 'raw' && (
+                  <pre className="whitespace-pre-wrap break-words">{logs}</pre>
+                )}
+                {logView === 'text' && (
+                  <div className="space-y-2">
+                    {logRecords.map((r) => (
+                      r.parsed ? (
+                        <div key={r.i}>
+                          <span className="text-gray-500">{fmtEpoch(r.ts)}</span>{' '}
+                          <span className={kindColor(r.kind)}>[{r.kind}]</span>{' '}
+                          <span className="whitespace-pre-wrap break-words">{r.msg}</span>
+                          {r.extra && Object.keys(r.extra).length > 0 && (
+                            <span className="text-gray-500"> {JSON.stringify(r.extra)}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <div key={r.i} className="text-gray-400 whitespace-pre-wrap break-words">{r.raw}</div>
+                      )
+                    ))}
+                  </div>
+                )}
+                {logView === 'table' && (
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="text-left text-gray-400 border-b border-gray-700">
+                        <th className="py-1 pr-3 font-medium whitespace-nowrap align-top">Time</th>
+                        <th className="py-1 pr-3 font-medium whitespace-nowrap align-top">Kind</th>
+                        <th className="py-1 font-medium align-top">Message</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {logRecords.map((r) => (
+                        <tr key={r.i} className="border-b border-gray-800/70">
+                          <td className="py-1 pr-3 text-gray-500 whitespace-nowrap align-top">{r.parsed ? fmtEpoch(r.ts) : ''}</td>
+                          <td className={`py-1 pr-3 whitespace-nowrap align-top ${r.parsed ? kindColor(r.kind) : 'text-gray-500'}`}>{r.parsed ? r.kind : 'raw'}</td>
+                          <td className="py-1 align-top">
+                            <span className="whitespace-pre-wrap break-words">{r.parsed ? r.msg : r.raw}</span>
+                            {r.parsed && r.extra && Object.keys(r.extra).length > 0 && (
+                              <div className="text-gray-500 mt-0.5">{JSON.stringify(r.extra)}</div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )
         )}
         {tab === 'prompt' && (run.prompt || <span className="text-gray-500">(no prompt)</span>)}
       </div>
