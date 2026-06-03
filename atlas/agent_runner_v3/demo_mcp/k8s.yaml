@@ -1,0 +1,84 @@
+# Demo HTTP MCP server for Agent Portal V3 end-to-end testing.
+#
+# Runs atlas/agent_runner_v3/demo_mcp/server.py on the agent-runner image
+# (no extra image to build) and exposes it as an in-cluster Service at
+#   http://mcp-tools.<namespace>.svc.cluster.local/mcp
+#
+# The ConfigMap holding server.py is created from the file by deploy.sh so the
+# source stays single-copy; apply this manifest *after* that ConfigMap exists.
+#
+# Bonus: because this Deployment keeps a pod referencing
+# localhost/atlas-agent-runner:dev running at all times, kubelet's image GC
+# treats the image as in-use and will not evict it -- which keeps agent Job
+# pods from falling into ImagePullBackOff on disk-pressured dev nodes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-tools
+  labels:
+    app: mcp-tools
+    atlas.component: agent-portal-v3-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-tools
+  template:
+    metadata:
+      labels:
+        app: mcp-tools
+        atlas.component: agent-portal-v3-demo
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: mcp
+          image: localhost/atlas-agent-runner:dev
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/srv/server.py"]
+          env:
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: src
+              mountPath: /srv
+              readOnly: true
+      volumes:
+        - name: src
+          configMap:
+            name: mcp-tools-src
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-tools
+  labels:
+    app: mcp-tools
+    atlas.component: agent-portal-v3-demo
+spec:
+  selector:
+    app: mcp-tools
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

@@ -186,6 +186,39 @@ def _extract_host(url: str) -> Optional[str]:
         return None
 
 
+def _is_in_cluster_host(host: Optional[str]) -> bool:
+    """Heuristic: does this MCP host resolve to something inside the cluster?
+
+    In-cluster Services are reached as bare names ("mcp-tools"), namespaced
+    names ("mcp-tools.atlas"), or fully-qualified cluster DNS
+    ("mcp-tools.atlas.svc.cluster.local"). Such names resolve to ClusterIP /
+    pod IPs in the cluster's private range, which the public-egress rule below
+    intentionally blocks -- so we need a dedicated allow rule for them.
+    """
+    if not host:
+        return False
+    h = host.strip().lower()
+    if not h:
+        return False
+    # IP literals are handled by the public/private egress rules, not here.
+    if all(part.isdigit() for part in h.split(".") if part):
+        return False
+    if h.endswith(".svc") or h.endswith(".svc.cluster.local") or h.endswith(".cluster.local"):
+        return True
+    # Bare service name (no dots) -- only resolvable via cluster DNS search.
+    if "." not in h:
+        return True
+    return False
+
+
+def _has_in_cluster_mcp(mcp_resolved: Optional[Dict[str, Any]]) -> bool:
+    for cfg in (mcp_resolved or {}).values():
+        url = cfg.get("url") if isinstance(cfg, dict) else None
+        if _is_in_cluster_host(_extract_host(url)):
+            return True
+    return False
+
+
 def _llm_provider_hosts(provider: str) -> List[str]:
     p = (provider or "").lower()
     if p == "anthropic":
@@ -259,6 +292,15 @@ def build_network_policy(
             "ports": allow_ports,
         },
     ]
+
+    # In-cluster MCP servers (e.g. a Service like mcp-tools.atlas.svc.cluster.local)
+    # resolve to ClusterIP / pod IPs in the cluster's private range, which the
+    # public-egress rule above intentionally blocks. When the run selects an
+    # in-cluster MCP server, allow egress to pods in this namespace so the agent
+    # can actually reach it. Same-namespace scope keeps the blast radius small;
+    # for cross-namespace MCP, widen this selector or front it with a proxy.
+    if _has_in_cluster_mcp(mcp_resolved):
+        egress.append({"to": [{"podSelector": {}}]})
 
     return {
         "apiVersion": "networking.k8s.io/v1",

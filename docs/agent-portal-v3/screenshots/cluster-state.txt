@@ -1,29 +1,73 @@
-=== K8s Jobs in atlas namespace ===
-NAME                          STATUS     COMPLETIONS   DURATION   AGE
-atlas-run-dev-4c6d9725-238    Complete   1/1           7s         4m39s
-atlas-run-test-216191e4-851   Failed     0/1           3m19s      3m19s
-atlas-run-test-a2460a67-5e2   Complete   1/1           4s         31s
-atlas-run-test-a6ecb1da-92c   Complete   1/1           7s         2m36s
+# Agent Portal V3 — cluster state (2026-06-03 07:28 MDT)
 
-=== Pods in atlas namespace (agent runners) ===
-NAME                                STATUS      READY   RESTARTS   AGE
-atlas-run-dev-4c6d9725-238-k4v5w    Succeeded   false   0          2026-05-20T07:55:34Z
-atlas-run-test-216191e4-851-s7zsn   Failed      false   0          2026-05-20T07:56:54Z
-atlas-run-test-a2460a67-5e2-ngktd   Succeeded   false   0          2026-05-20T07:59:42Z
-atlas-run-test-a6ecb1da-92c-kc8nk   Succeeded   false   0          2026-05-20T07:57:37Z
+## Demo MCP server (in-cluster)
+NAME                        READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/mcp-tools   1/1     1            1           9m48s
 
-=== NetworkPolicies for runs ===
-NAME                             POD-SELECTOR                                        AGE
-atlas-run-216191e4-8516-4d4b-9   atlas.run-id=216191e4-8516-4d4b-9a6e-e1b7dc10846a   3m19s
-atlas-run-4c6d9725-238b-4887-b   atlas.run-id=4c6d9725-238b-4887-b04b-90b5006dc4d0   4m39s
-atlas-run-a2460a67-5e23-4af4-9   atlas.run-id=a2460a67-5e23-4af4-94f7-19a09b7b6b1f   31s
-atlas-run-a6ecb1da-92c7-4b8e-9   atlas.run-id=a6ecb1da-92c7-4b8e-92d8-82820e9c4301   2m36s
+NAME                TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+service/mcp-tools   ClusterIP   10.43.88.173   <none>        80/TCP    9m48s
 
-=== Most recent pod logs (last completed run) ===
-pod: atlas-run-test-a2460a67-5e2-ngktd
-{"ts": 1779263983.602351, "run_id": "a2460a67-5e23-4af4-94f7-19a09b7b6b1f", "kind": "status", "msg": "starting", "extra": {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "max_iter": 10}}
-{"ts": 1779263983.602388, "run_id": "a2460a67-5e23-4af4-94f7-19a09b7b6b1f", "kind": "tools", "msg": "0 tools available", "extra": {"names": []}}
-{"ts": 1779263983.6852582, "run_id": "a2460a67-5e23-4af4-94f7-19a09b7b6b1f", "kind": "turn", "msg": "LLM turn 1/10"}
-{"ts": 1779263984.723393, "run_id": "a2460a67-5e23-4af4-94f7-19a09b7b6b1f", "kind": "assistant", "msg": "# Kubernetes Job Haiku\n\nPods spin up and work,\nTask completes, then silence falls\u2014\nSuccess, logged and done."}
-{"ts": 1779263984.7235103, "run_id": "a2460a67-5e23-4af4-94f7-19a09b7b6b1f", "kind": "status", "msg": "done -- model produced final text"}
-{"ts": 1779263984.7236018, "run_id": "a2460a67-5e23-4af4-94f7-19a09b7b6b1f", "kind": "final", "msg": "# Kubernetes Job Haiku\n\nPods spin up and work,\nTask completes, then silence falls\u2014\nSuccess, logged and done."}
+NAME                             READY   STATUS    RESTARTS   AGE
+pod/mcp-tools-57f447f7d4-hn9qh   1/1     Running   0          9m48s
+
+## Latest agent run pod (succeeded)
+NAME                                READY   STATUS      RESTARTS   AGE
+atlas-run-test-832dc7c7-229-cs5jc   0/1     Completed   0          5m39s
+atlas-run-test-c7e6e994-d5e-t995z   0/1     Completed   0          7m19s
+
+## NetworkPolicy egress for the E2E run (note the in-cluster podSelector rule)
+[
+    {
+        "ports": [
+            {
+                "port": 53,
+                "protocol": "UDP"
+            },
+            {
+                "port": 53,
+                "protocol": "TCP"
+            }
+        ],
+        "to": [
+            {
+                "namespaceSelector": {
+                    "matchLabels": {
+                        "kubernetes.io/metadata.name": "kube-system"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "ports": [
+            {
+                "port": 443,
+                "protocol": "TCP"
+            },
+            {
+                "port": 80,
+                "protocol": "TCP"
+            }
+        ],
+        "to": [
+            {
+                "ipBlock": {
+                    "cidr": "0.0.0.0/0",
+                    "except": [
+                        "10.0.0.0/8",
+                        "172.16.0.0/12",
+                        "192.168.0.0/16",
+                        "169.254.0.0/16"
+                    ]
+                }
+            }
+        ]
+    },
+    {
+        "to": [
+            {
+                "podSelector": {}
+            }
+        ]
+    }
+]
