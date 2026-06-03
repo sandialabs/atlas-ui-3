@@ -30,6 +30,16 @@ if str(project_root) not in sys.path:
 _TELEMETRY_TMPDIR = tempfile.mkdtemp(prefix="atlas-test-telemetry-")
 os.environ.setdefault("APP_LOG_DIR", _TELEMETRY_TMPDIR)
 
+# MCP token storage now refuses to start without an explicit encryption key
+# (previously a per-process ephemeral key was generated, which silently lost
+# every stored token on restart). Provide a deterministic test key so module
+# initialization and the get_token_storage() singleton work in the test
+# environment without leaking a real production secret.
+os.environ.setdefault(
+    "MCP_TOKEN_ENCRYPTION_KEY",
+    "atlas-test-suite-mcp-token-encryption-key-not-a-secret",
+)
+
 try:
     from opentelemetry import trace
     from opentelemetry.sdk.resources import Resource

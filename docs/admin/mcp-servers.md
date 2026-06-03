@@ -142,9 +142,9 @@ For MCP servers where each user needs their own credentials (e.g., external APIs
 Tokens are stored encrypted on disk:
 - **Location:** Set `MCP_TOKEN_STORAGE_DIR` env var, or defaults to `config/secure/mcp_tokens.enc`
 - **Encryption:** Fernet (AES-128-CBC)
-- **Key:** Set `MCP_TOKEN_ENCRYPTION_KEY` environment variable
+- **Key:** Set `MCP_TOKEN_ENCRYPTION_KEY` environment variable (required)
 
-If `MCP_TOKEN_ENCRYPTION_KEY` is not set, tokens use an ephemeral key and won't persist across restarts.
+`MCP_TOKEN_ENCRYPTION_KEY` must be set to a stable secret before starting Atlas. The application refuses to start without it, because a generated ephemeral key would make previously encrypted tokens unreadable after every restart.
 
 ### Per-User vs Server-Level Auth
 

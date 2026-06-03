@@ -55,6 +55,11 @@ else
     npx vite build
 fi
 
+# MCP token storage now refuses to start without an explicit encryption key.
+# Provide a deterministic test key for the E2E backend unless one is already set.
+: "${MCP_TOKEN_ENCRYPTION_KEY:=e2e-test-mcp-token-encryption-key-not-a-secret}"
+export MCP_TOKEN_ENCRYPTION_KEY
+
 # Start backend with startup validation
 echo "Starting backend server..."
 cd "$ATLAS_DIR"
