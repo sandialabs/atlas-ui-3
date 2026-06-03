@@ -6,7 +6,7 @@ from atlas.application.chat.utilities.tool_executor import (
     _filter_args_to_schema,
     _sanitize_args_for_ui,
     requires_approval,
-    tool_accepts_username,
+    tool_accepts_atlas_user,
 )
 
 
@@ -139,11 +139,50 @@ class TestRequiresApproval:
         assert admin_required is False
 
 
-class TestToolAcceptsUsername:
-    """Test the tool_accepts_username function."""
+class TestToolAcceptsAtlasUser:
+    """Test the tool_accepts_atlas_user function."""
 
-    def test_tool_accepts_username_true(self):
-        """Test tool that accepts username parameter."""
+    def test_tool_accepts_atlas_user_true(self):
+        """Test tool that accepts _atlas_user parameter."""
+        tool_manager = Mock()
+        tool_manager.get_tools_schema.return_value = [
+            {
+                "function": {
+                    "name": "test_tool",
+                    "parameters": {
+                        "properties": {
+                            "_atlas_user": {"type": "string"},
+                            "other_param": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        ]
+
+        result = tool_accepts_atlas_user("test_tool", tool_manager)
+        assert result is True
+
+    def test_tool_accepts_atlas_user_false(self):
+        """Test tool that does not accept _atlas_user parameter."""
+        tool_manager = Mock()
+        tool_manager.get_tools_schema.return_value = [
+            {
+                "function": {
+                    "name": "test_tool",
+                    "parameters": {
+                        "properties": {
+                            "other_param": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        ]
+
+        result = tool_accepts_atlas_user("test_tool", tool_manager)
+        assert result is False
+
+    def test_tool_accepts_atlas_user_ignores_username(self):
+        """Test that a plain username parameter is not treated as injected user context."""
         tool_manager = Mock()
         tool_manager.get_tools_schema.return_value = [
             {
@@ -159,47 +198,28 @@ class TestToolAcceptsUsername:
             }
         ]
 
-        result = tool_accepts_username("test_tool", tool_manager)
-        assert result is True
-
-    def test_tool_accepts_username_false(self):
-        """Test tool that does not accept username parameter."""
-        tool_manager = Mock()
-        tool_manager.get_tools_schema.return_value = [
-            {
-                "function": {
-                    "name": "test_tool",
-                    "parameters": {
-                        "properties": {
-                            "other_param": {"type": "string"}
-                        }
-                    }
-                }
-            }
-        ]
-
-        result = tool_accepts_username("test_tool", tool_manager)
+        result = tool_accepts_atlas_user("test_tool", tool_manager)
         assert result is False
 
-    def test_tool_accepts_username_no_tool_manager(self):
+    def test_tool_accepts_atlas_user_no_tool_manager(self):
         """Test with no tool manager."""
-        result = tool_accepts_username("test_tool", None)
+        result = tool_accepts_atlas_user("test_tool", None)
         assert result is False
 
-    def test_tool_accepts_username_no_schema(self):
+    def test_tool_accepts_atlas_user_no_schema(self):
         """Test when tool schema is not found."""
         tool_manager = Mock()
         tool_manager.get_tools_schema.return_value = []
 
-        result = tool_accepts_username("test_tool", tool_manager)
+        result = tool_accepts_atlas_user("test_tool", tool_manager)
         assert result is False
 
-    def test_tool_accepts_username_exception(self):
+    def test_tool_accepts_atlas_user_exception(self):
         """Test exception handling."""
         tool_manager = Mock()
         tool_manager.get_tools_schema.side_effect = Exception("Schema error")
 
-        result = tool_accepts_username("test_tool", tool_manager)
+        result = tool_accepts_atlas_user("test_tool", tool_manager)
         assert result is False
 
 
