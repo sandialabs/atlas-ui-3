@@ -243,55 +243,75 @@ def build_network_policy(
     llm_provider: str,
     mcp_resolved: Dict[str, Any],
     extra_allowed_hosts: Optional[List[str]] = None,
+    deny_by_default: bool = False,
+    allow_cidrs: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Egress NetworkPolicy: deny all by default, allow DNS + LLM + MCP hosts.
+    """Egress NetworkPolicy for an agent run.
 
-    Notes on enforcement:
-    - k3s ships with flannel + the kube-router NetworkPolicy controller by
-      default, which enforces L4 (port/IP). DNS-name egress *rules* are
-      L7 features; the simpler-and-portable approach is to allow all
-      egress to TCP/443 + UDP/53 to kube-dns and trust the agent image
-      to only call the configured hosts. For dev that's enough. For a
-      stricter prod posture, drop a Cilium L7 policy with FQDN allow-
-      list, or front each pod with an egress proxy and only allow egress
-      to the proxy.
+    Two postures:
+
+    - Legacy / open (deny_by_default=False): allow DNS + egress to public
+      TCP/80/443, blocking RFC1918 / link-local via ipBlock except-clauses.
+      Anything public is reachable; the agent is trusted to call only the
+      configured hosts.
+
+    - Allowlist (deny_by_default=True): deny everything except DNS, the
+      resolved allowlist CIDRs (``allow_cidrs``) on TCP/80/443, and (if an
+      in-cluster MCP is selected) same-namespace pods. This is the Phase 0
+      enforcement -- domains are resolved to IPs by the egress resolver and
+      pinned here. FQDN-accurate enforcement (rotating CDN IPs, wildcards)
+      is the job of the Phase 1 egress gateway, or an OpenShift
+      ``EgressFirewall`` with ``dnsName`` rules on OVN-Kubernetes.
+
+    Enforcement notes: k3s (flannel + kube-router) and OpenShift 4.x
+    (OVN-Kubernetes) both enforce L3/L4 NetworkPolicy egress incl. ipBlock.
+    Older OpenShiftSDN did not enforce egress NetworkPolicy -- there, use
+    ``EgressFirewall``/``EgressNetworkPolicy`` instead.
     """
     name = f"atlas-run-{run_id[:20]}"
     allow_ports = [{"protocol": "TCP", "port": 443}, {"protocol": "TCP", "port": 80}]
 
-    egress: List[Dict[str, Any]] = [
-        # DNS
-        {
-            "to": [
-                {
-                    "namespaceSelector": {
-                        "matchLabels": {"kubernetes.io/metadata.name": "kube-system"}
-                    }
+    # DNS is always required (resolving the LLM/MCP hosts, the gateway, etc.).
+    dns_rule = {
+        "to": [
+            {
+                "namespaceSelector": {
+                    "matchLabels": {"kubernetes.io/metadata.name": "kube-system"}
                 }
-            ],
-            "ports": [
-                {"protocol": "UDP", "port": 53},
-                {"protocol": "TCP", "port": 53},
-            ],
-        },
-        # External HTTPS/HTTP (LLM + MCP) - block private nets via except clauses
-        {
-            "to": [
-                {
-                    "ipBlock": {
-                        "cidr": "0.0.0.0/0",
-                        "except": [
-                            "10.0.0.0/8",
-                            "172.16.0.0/12",
-                            "192.168.0.0/16",
-                            "169.254.0.0/16",
-                        ],
+            }
+        ],
+        "ports": [
+            {"protocol": "UDP", "port": 53},
+            {"protocol": "TCP", "port": 53},
+        ],
+    }
+
+    if deny_by_default:
+        egress: List[Dict[str, Any]] = [dns_rule]
+        cidr_targets = [{"ipBlock": {"cidr": c}} for c in (allow_cidrs or [])]
+        if cidr_targets:
+            egress.append({"to": cidr_targets, "ports": allow_ports})
+    else:
+        egress = [
+            dns_rule,
+            # External HTTPS/HTTP (LLM + MCP) - block private nets via except clauses
+            {
+                "to": [
+                    {
+                        "ipBlock": {
+                            "cidr": "0.0.0.0/0",
+                            "except": [
+                                "10.0.0.0/8",
+                                "172.16.0.0/12",
+                                "192.168.0.0/16",
+                                "169.254.0.0/16",
+                            ],
+                        }
                     }
-                }
-            ],
-            "ports": allow_ports,
-        },
-    ]
+                ],
+                "ports": allow_ports,
+            },
+        ]
 
     # In-cluster MCP servers (e.g. a Service like mcp-tools.atlas.svc.cluster.local)
     # resolve to ClusterIP / pod IPs in the cluster's private range, which the

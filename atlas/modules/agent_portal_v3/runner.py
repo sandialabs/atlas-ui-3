@@ -19,18 +19,16 @@ from typing import Any, Dict, List, Optional
 
 from . import k8s_client
 from .job_template import (
-    LABEL_RUN_ID,
     build_job_manifest,
     build_network_policy,
-    job_name_for_run,
 )
 from .models import (
     ACTIVE_STATUSES,
+    RUN_STATUS_CANCELLED,
     RUN_STATUS_FAILED,
     RUN_STATUS_LAUNCHING,
     RUN_STATUS_RUNNING,
     RUN_STATUS_SUCCEEDED,
-    RUN_STATUS_CANCELLED,
     AgentRunRecord,
 )
 from .store import AgentRunStore, RunNotFoundError, get_agent_run_store
@@ -114,6 +112,7 @@ class AgentRunner:
         llm_model: str,
         display_name: str = "",
         extra_env: Optional[Dict[str, str]] = None,
+        egress: Optional[Any] = None,
     ) -> AgentRunRecord:
         record = self._store.create_run(
             user_email=user_email,
@@ -141,12 +140,26 @@ class AgentRunner:
                 extra_env=extra_env,
                 active_deadline_seconds=self._active_deadline_seconds,
             )
+            deny_by_default = bool(getattr(egress, "deny_by_default", False))
+            allow_cidrs = list(getattr(egress, "cidrs", []) or [])
             netpol = build_network_policy(
                 run_id=record.id,
                 namespace=self._namespace,
                 llm_provider=llm_provider,
                 mcp_resolved=mcp_resolved,
+                deny_by_default=deny_by_default,
+                allow_cidrs=allow_cidrs,
             )
+            if deny_by_default:
+                domains = getattr(egress, "domains", []) or []
+                unresolved = getattr(egress, "unresolved", []) or []
+                self._store.append_event(
+                    record.id,
+                    "system",
+                    f"Egress allowlist ({getattr(egress, 'mode', '')}): "
+                    f"{', '.join(domains) or '(none)'}"
+                    + (f"  [unenforceable in Phase 0: {', '.join(unresolved)}]" if unresolved else ""),
+                )
 
             # NetworkPolicy first (best-effort -- not all clusters enforce them).
             try:

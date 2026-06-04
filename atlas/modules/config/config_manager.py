@@ -653,6 +653,41 @@ class AppSettings(BaseSettings):
         description="Enable Agent Portal V3 - launch agents as Kubernetes Jobs",
         validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_V3_ENABLED"),
     )
+    # --- Agent Portal V3 egress allowlisting ---
+    # Master switch. When False (default) the per-run NetworkPolicy keeps the
+    # legacy posture (public 80/443 except RFC1918). When True, egress is
+    # denied by default and only the resolved allowlist is permitted.
+    feature_agent_portal_v3_egress_allowlist_enabled: bool = Field(
+        False,
+        description="Enable deny-by-default egress allowlisting for Agent Portal V3 runs",
+        validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_V3_EGRESS_ALLOWLIST_ENABLED"),
+    )
+    # Policy mode when the feature is on:
+    #   required_allowlist - admin allowlist is enforced; users cannot widen it
+    #   user_choice        - users may add domains from the user_allowlist_max set
+    #   open               - legacy public egress (escape hatch; not recommended)
+    agent_portal_v3_egress_mode: str = Field(
+        default="required_allowlist",
+        description="Egress policy mode: required_allowlist | user_choice | open",
+        validation_alias=AliasChoices("AGENT_PORTAL_V3_EGRESS_MODE"),
+    )
+    # Admin-approved domains the agent may reach (comma-separated). The run's
+    # LLM provider host and any selected MCP hosts are always added on top, so
+    # this only lists *extra* destinations. Wildcards like "*.mycorp.internal"
+    # are recorded but only enforceable by the gateway/EgressFirewall backend
+    # (Phase 1), not by the Phase 0 resolve-to-IP NetworkPolicy.
+    agent_portal_v3_egress_allowlist: str = Field(
+        default="",
+        description="Comma-separated admin-approved egress domains for V3 agents",
+        validation_alias=AliasChoices("AGENT_PORTAL_V3_EGRESS_ALLOWLIST"),
+    )
+    # In user_choice mode, the superset of domains users may pick from. Empty
+    # means users may not add anything beyond the admin/LLM/MCP defaults.
+    agent_portal_v3_egress_user_allowlist_max: str = Field(
+        default="",
+        description="Comma-separated domains users may add in user_choice mode",
+        validation_alias=AliasChoices("AGENT_PORTAL_V3_EGRESS_USER_ALLOWLIST_MAX"),
+    )
     # Additional Origin header hosts (beyond loopback) allowed to open the
     # agent_portal WebSocket stream. Comma-separated list of hostnames, e.g.
     # "atlas-dev.example.com,atlas.internal". Loopback hosts are always allowed.

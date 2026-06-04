@@ -95,7 +95,7 @@ function ConnInfo({ cap }) {
   )
 }
 
-function LaunchForm({ servers, models, onLaunch, busy }) {
+function LaunchForm({ servers, models, onLaunch, busy, egress }) {
   const [prompt, setPrompt] = useState('What is 17 * 23? Use a calculator if available, then explain.')
   const [displayName, setDisplayName] = useState('')
   const [selectedServers, setSelectedServers] = useState(new Set())
@@ -206,6 +206,20 @@ function LaunchForm({ servers, models, onLaunch, busy }) {
           className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-indigo-500 outline-none font-mono"
         />
       </div>
+      {egress?.enabled && egress?.deny_by_default && (
+        <div className="text-xs rounded border border-amber-700/60 bg-amber-900/20 text-amber-200 px-3 py-2">
+          <div className="font-medium flex items-center gap-1">
+            <Server className="w-3.5 h-3.5" /> Network egress restricted to an allowlist
+          </div>
+          <div className="text-amber-300/80 mt-0.5">
+            Outbound is denied by default. The agent may reach its LLM provider and any selected MCP server
+            {egress.admin_allowlist?.length ? `, plus: ${egress.admin_allowlist.join(', ')}` : ''}.
+            {egress.user_editable
+              ? ' You may add domains from the approved set below.'
+              : ' Enforced by the administrator.'}
+          </div>
+        </div>
+      )}
       <label className="flex items-start gap-2 text-xs text-gray-300" title="Probes allowed (public) vs blocked (private/link-local) destinations from inside the pod and logs the result.">
         <input
           type="checkbox"
@@ -629,6 +643,7 @@ export default function AgentPortalV3() {
           models={models}
           onLaunch={launchRun}
           busy={busy}
+          egress={cap?.egress}
         />
         <RunsTable
           runs={runs}

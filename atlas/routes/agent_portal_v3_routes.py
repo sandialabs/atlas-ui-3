@@ -71,6 +71,35 @@ def _runner():
     return r
 
 
+def _egress_settings():
+    s = app_factory.get_config_manager().app_settings
+    return {
+        "enabled": bool(getattr(s, "feature_agent_portal_v3_egress_allowlist_enabled", False)),
+        "mode": getattr(s, "agent_portal_v3_egress_mode", "required_allowlist"),
+        "admin_allowlist": getattr(s, "agent_portal_v3_egress_allowlist", "") or "",
+        "user_allowlist_max": getattr(s, "agent_portal_v3_egress_user_allowlist_max", "") or "",
+    }
+
+
+async def _resolve_egress_for_run(llm_provider: str, mcp_resolved: Dict[str, Any]):
+    """Resolve the effective egress allowlist for a run (off the event loop)."""
+    import asyncio
+
+    from atlas.modules.agent_portal_v3.egress import resolve_egress
+
+    cfg = _egress_settings()
+    return await asyncio.to_thread(
+        resolve_egress,
+        enabled=cfg["enabled"],
+        mode=cfg["mode"],
+        admin_allowlist=cfg["admin_allowlist"],
+        user_allowlist_max=cfg["user_allowlist_max"],
+        user_requested=None,
+        llm_provider=llm_provider,
+        mcp_resolved=mcp_resolved,
+    )
+
+
 # ---- request models ----
 
 class LaunchRequest(BaseModel):
@@ -103,11 +132,19 @@ async def capabilities(current_user: str = Depends(get_current_user)):
     from atlas.modules.agent_portal_v3 import k8s_client
     reachable = await k8s_client.cluster_reachable()
     runner = _runner()
+    from atlas.modules.agent_portal_v3.egress import egress_summary
+    cfg = _egress_settings()
     return {
         "cluster_reachable": reachable,
         "namespace": runner.namespace,
         "image": runner.image,
         "providers_configured": sorted(_llm_keys_from_settings().keys()),
+        "egress": egress_summary(
+            enabled=cfg["enabled"],
+            mode=cfg["mode"],
+            admin_allowlist=cfg["admin_allowlist"],
+            user_allowlist_max=cfg["user_allowlist_max"],
+        ),
     }
 
 
@@ -301,6 +338,9 @@ async def launch_run(
 
     extra_env = {"ATLAS_EGRESS_CHECK": "default"} if req.egress_check else None
 
+    # Resolve the per-run egress allowlist (DNS lookups run off the event loop).
+    egress_decision = await _resolve_egress_for_run(req.llm_provider, resolved)
+
     record = await runner.launch_run(
         user_email=current_user,
         prompt=req.prompt,
@@ -310,6 +350,7 @@ async def launch_run(
         llm_model=req.llm_model,
         display_name=req.display_name,
         extra_env=extra_env,
+        egress=egress_decision,
     )
     payload = serialize_run(record)
     payload["dropped_mcp_servers"] = rejected
