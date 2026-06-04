@@ -8,7 +8,7 @@ accomplish a user's task by calling the Atlas CLI with the appropriate tools.
 Flow:
 1. User asks the LLM to plan a task (e.g., "create a powerpoint about dogs")
 2. LLM calls plan_with_tools, passing the user's request as `task`
-3. Atlas UI injects `_mcp_data` (all available tools metadata) and `username`
+3. Atlas UI injects `_mcp_data` (all available tools metadata) and `_atlas_user`
 4. Inside the tool:
    a. Convert `_mcp_data` into an LLM-friendly CLI tool reference
    b. Use ctx.sample() to ask the LLM to write a bash script using atlas_chat_cli.py
@@ -172,7 +172,7 @@ def _build_artifact_response(
 async def plan_with_tools(
     task: str,
     _mcp_data: Optional[Dict[str, Any]] = None,
-    username: Optional[str] = None,
+    _atlas_user: Optional[str] = None,
     ctx: Context = None,
 ) -> Dict[str, Any]:
     """Plan how to accomplish a task by generating a bash script that uses the Atlas CLI.
@@ -186,7 +186,7 @@ async def plan_with_tools(
         task: Description of the task to accomplish.
         _mcp_data: Automatically injected by Atlas UI with available tool
                    metadata. Do not provide this manually.
-        username: The authenticated user (automatically injected by Atlas UI).
+        _atlas_user: The authenticated user (automatically injected by Atlas UI).
 
     Returns:
         Atlas artifact dict with the bash script as a downloadable file.

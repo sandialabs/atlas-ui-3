@@ -120,6 +120,6 @@ The `username-override-demo` MCP server includes a simpler `plan_with_tools` too
 
 ## Related
 
-- Username injection: same pattern, injects authenticated user email into tools declaring a `username` parameter
-- Tool approval: `_mcp_data` is re-injected after user edits, same as `username`
+- `_atlas_user` injection: same pattern, injects authenticated user email into tools declaring an `_atlas_user` parameter
+- Tool approval: `_mcp_data` is re-injected after user edits, same as `_atlas_user`
 - Implementation: `atlas/application/chat/utilities/tool_executor.py`

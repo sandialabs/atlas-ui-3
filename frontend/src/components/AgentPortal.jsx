@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Square, RefreshCw, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge, PanelLeftClose, PanelLeftOpen, Check, Plus, ChevronDown, ChevronRight, LayoutGrid, Edit2 } from 'lucide-react'
+import { ArrowLeft, Play, Square, RefreshCw, Shield, History, X, Bookmark, Save, MonitorDot, AlertTriangle, Boxes, Gauge, PanelLeftClose, PanelLeftOpen, Check, Plus, ChevronDown, ChevronRight, LayoutGrid, Edit2, Trash2 } from 'lucide-react'
 import { useToast, useDialog } from './ui/toastContext'
 import '@xterm/xterm/css/xterm.css'
 import PaneGrid from './agent-portal/PaneGrid'
@@ -195,7 +195,7 @@ const STREAM_COLORS = {
   system: 'text-blue-300 italic',
 }
 
-function ProcessListItem({ proc, isSelected, onSelect, onRename }) {
+function ProcessListItem({ proc, isSelected, onSelect, onRename, onRemove }) {
   const statusCls = STATUS_COLORS[proc.status] || STATUS_COLORS.exited
   const started = proc.started_at ? new Date(proc.started_at * 1000).toLocaleTimeString() : ''
   const [editing, setEditing] = useState(false)
@@ -264,6 +264,18 @@ function ProcessListItem({ proc, isSelected, onSelect, onRename }) {
           {editing ? <Check className="w-3 h-3" /> : <Edit2 className="w-3 h-3" />}
         </button>
         <span className={`text-xs px-2 py-0.5 rounded border ${statusCls}`}>{proc.status}</span>
+        {onRemove && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onRemove(proc) }}
+            className="p-1 text-gray-500 hover:text-red-400 flex-shrink-0"
+            title={proc.status === 'running'
+              ? 'Stop and remove from list'
+              : 'Remove from list'}
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        )}
       </div>
       <button
         type="button"
@@ -320,6 +332,12 @@ function AgentPortal() {
   // localStorage-only entries have cfg_* ids.
   const [launchConfigs, setLaunchConfigs] = useState(() => loadLaunchConfigs())
   const [loadedPresetId, setLoadedPresetId] = useState(null)
+  // Built-in starter templates (claude, cline, codex). Hard-coded on the
+  // server and fetched once; shown above the user's own presets so a
+  // fresh install has one-click launches with the right sandbox paths
+  // already filled in. Falls back to an empty list if the endpoint is
+  // unreachable so the rest of the UI still works.
+  const [presetTemplates, setPresetTemplates] = useState([])
   const [launchError, setLaunchError] = useState(null)
   const [launching, setLaunching] = useState(false)
   const [listError, setListError] = useState(null)
@@ -379,6 +397,36 @@ function AgentPortal() {
         }
       })
       .catch(() => {})
+
+  }, [])
+
+  // The namespace toggle is disabled when the host can't do unprivileged
+  // user namespaces, so the user can't uncheck it themselves. Drop the
+  // flag (and the dependent net-isolate flag) once we learn the host
+  // doesn't support it, otherwise a saved preset with namespaces=true
+  // sends the flag on launch and unshare(1) fails with EPERM on uid_map.
+  useEffect(() => {
+    if (namespacesSupported === false && (namespaces || isolateNetwork)) {
+      setNamespaces(false)
+      setIsolateNetwork(false)
+    }
+  }, [namespacesSupported, namespaces, isolateNetwork])
+
+  // Load the static "starter" templates once. Errors are non-fatal —
+  // a user with an old backend simply sees no templates section.
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/agent-portal/preset-templates', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data || !Array.isArray(data.templates)) return
+        setPresetTemplates(data.templates.map(serverPresetToUi))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
     fetch('/api/agent-portal/cwd', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
       .then((c) => {
@@ -1089,6 +1137,51 @@ function AgentPortal() {
     [focusedProcess]
   )
 
+  // Stop (if running) and drop from the registry. Also clears any
+  // layout slot still holding the removed process so the UI doesn't
+  // keep an orphan reference around.
+  const removeProcessById = useCallback(async (processId) => {
+    if (!processId) return
+    try {
+      const res = await fetch(`/api/agent-portal/processes/${processId}/remove`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null)
+        toast.error(detail?.detail || `Remove failed (${res.status})`)
+        return
+      }
+    } catch {
+      toast.error('Remove failed (network error)')
+      return
+    }
+    setProcesses((prev) => prev.filter((p) => p.id !== processId))
+    updateLayout((prev) => {
+      const idx = prev.slots.indexOf(processId)
+      if (idx < 0) return prev
+      return clearSlot(prev, idx)
+    })
+    await fetchProcesses()
+  }, [fetchProcesses, toast, updateLayout])
+
+  // Confirm-then-remove wrapper for the list trash button. Skips the
+  // dialog for already-finished processes since there's nothing to lose.
+  const handleRemoveFromList = useCallback(async (proc) => {
+    if (!proc) return
+    if (proc.status === 'running') {
+      const ok = await dialog.confirm({
+        title: 'Stop and remove?',
+        message: `"${proc.display_name?.trim() || proc.command}" is still running. It will be stopped (SIGTERM) and removed from the list.`,
+        okText: 'Stop and remove',
+        cancelText: 'Cancel',
+        destructive: true,
+      })
+      if (!ok) return
+    }
+    await removeProcessById(proc.id)
+  }, [dialog, removeProcessById])
+
   // ProcessListItem in the left rail still shows a "select" affordance.
   // For the multi-pane world that translates to "drop this process into
   // the focused slot" — easier than implementing drag-and-drop today.
@@ -1668,6 +1761,7 @@ function AgentPortal() {
                 isSelected={layout.slots.includes(p.id)}
                 onSelect={handleSelectFromList}
                 onRename={renameProcess}
+                onRemove={handleRemoveFromList}
               />
             ))}
           </div>
@@ -1970,6 +2064,66 @@ function AgentPortal() {
         </div>
         )}
 
+          {presetTemplates.length > 0 && (
+            <div className="p-3 border-b border-gray-700">
+              <div className="flex items-center justify-between gap-2 text-xs uppercase text-gray-400 mb-2">
+                <span className="flex items-center gap-2">
+                  <Bookmark className="w-3.5 h-3.5" /> Templates
+                </span>
+              </div>
+              <div
+                className="space-y-1"
+                data-testid="agent-portal-templates"
+              >
+                {presetTemplates.map((tmpl) => (
+                  <div
+                    key={tmpl.id}
+                    className="flex items-center gap-1 text-xs rounded px-2 py-1 border bg-gray-800 border-gray-700"
+                    data-testid={`agent-portal-template-${tmpl.command}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Apply the template to the form and open the
+                        // launch modal — but do NOT mark it as a "loaded
+                        // preset" because templates aren't owned and
+                        // saving should create a new one, not update.
+                        // Templates intentionally ship without a cwd
+                        // (it's user/host-specific); fall back to the
+                        // server's default cwd so a one-click launch
+                        // actually works without further editing.
+                        const filled = (!tmpl.cwd && defaultCwd)
+                          ? { ...tmpl, cwd: defaultCwd }
+                          : tmpl
+                        applyEntry(filled, { asPreset: false })
+                        setLoadedPresetId(null)
+                        setLaunchModalOpen(true)
+                      }}
+                      className="flex-1 min-w-0 text-left truncate hover:text-blue-300"
+                      title={
+                        (tmpl.description ? `${tmpl.description}\n\n` : '') +
+                        `${tmpl.command} ${tmpl.argsString || ''}`.trim() +
+                        (normalizeSandboxMode(tmpl) !== 'off'
+                          ? ` [${normalizeSandboxMode(tmpl)}]`
+                          : '')
+                      }
+                    >
+                      <span className="font-medium text-gray-100">
+                        {tmpl.name}
+                      </span>
+                      <span className="ml-2 text-[10px] text-blue-400/80 uppercase tracking-wide">
+                        template
+                      </span>
+                      <span className="block text-[10px] text-gray-500 font-mono truncate">
+                        {tmpl.command} {tmpl.argsString}
+                      </span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {launchConfigs.length > 0 && (
             <div className="p-3 border-b border-gray-700">
               <div className="flex items-center justify-between gap-2 text-xs uppercase text-gray-400 mb-2">
@@ -2120,6 +2274,7 @@ function AgentPortal() {
               onFocusSlot={setFocusedSlot}
               onCloseSlot={handleCloseSlot}
               onCancelProcess={cancelProcessById}
+              onRemoveProcess={handleRemoveFromList}
               onFullscreenSlot={handleFullscreenSlot}
               onRenameProcess={renameProcess}
               onProcessUpdate={handleProcessUpdate}

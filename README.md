@@ -45,8 +45,9 @@ After installation, three CLI tools are available:
 
 ```bash
 # Set up configuration (run this first!)
-atlas-init              # Creates .env and config/ in current directory
-atlas-init --minimal    # Creates just a minimal .env file
+atlas-init                          # Creates .env and config/ in current directory
+atlas-init --minimal                # Creates just a minimal .env file
+atlas-init --env-file ~/.atlasrc    # Write .env to a custom location (shared installs)
 
 # Chat with an LLM
 atlas-chat "Hello, how are you?"
@@ -56,7 +57,9 @@ atlas-chat --list-models
 
 # Start the web server
 atlas-server --port 8000
-atlas-server --env /path/to/.env --config-folder /path/to/config
+atlas-server --env-file /path/to/.env --config-folder /path/to/config
+# Or set ATLAS_ENV_FILE once and all Atlas commands pick it up:
+export ATLAS_ENV_FILE=~/.atlasrc
 ```
 
 ### Python API Usage

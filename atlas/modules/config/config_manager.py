@@ -476,7 +476,7 @@ class AppSettings(BaseSettings):
     )
     mcp_token_encryption_key: Optional[str] = Field(
         default=None,
-        description="Encryption key for user tokens. If not set, tokens won't persist across restarts",
+        description="Encryption key for user tokens. Required: Atlas refuses to start without it",
         validation_alias="MCP_TOKEN_ENCRYPTION_KEY"
     )
 
@@ -647,6 +647,17 @@ class AppSettings(BaseSettings):
         description="Enable the Agent Portal UI for launching and streaming host processes",
         validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_ENABLED"),
     )
+    # Additional Origin header hosts (beyond loopback) allowed to open the
+    # agent_portal WebSocket stream. Comma-separated list of hostnames, e.g.
+    # "atlas-dev.example.com,atlas.internal". Loopback hosts are always allowed.
+    # Only set this when the deployment is fronted by an auth proxy (e.g.
+    # Cloudflare Access) — the WS upgrade bypasses CORS, so an attacker page
+    # on any listed origin can drive the socket if it can reach the backend.
+    agent_portal_allowed_origins: str = Field(
+        default="",
+        description="Comma-separated extra Origin hostnames allowed for agent_portal WS",
+        validation_alias=AliasChoices("AGENT_PORTAL_ALLOWED_ORIGINS"),
+    )
 
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
@@ -704,6 +715,7 @@ class AppSettings(BaseSettings):
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
     tool_approvals_config_file: str = Field(default="tool-approvals.json", validation_alias="TOOL_APPROVALS_CONFIG_FILE")
     splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
+    splash_screen_file: str = Field(default="splash-screen.md", validation_alias="SPLASH_SCREEN_FILE")
     file_extractors_config_file: str = Field(default="file-extractors.json", validation_alias="FILE_EXTRACTORS_CONFIG_FILE")
 
     # Config directory path (user customizations; falls back to atlas/config/ for defaults)

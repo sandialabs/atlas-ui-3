@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image, Wrench } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image, Wrench, WifiOff } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
@@ -60,7 +60,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     followUpSuggestions,
     setFollowUpSuggestions,
   } = useChat()
-  const { isConnected } = useWS()
+  const { isConnected, connectionStatus } = useWS()
 
   // Whether the currently selected model supports vision (image) input
   const currentModelSupportsVision = models?.some(
@@ -185,7 +185,9 @@ const ChatArea = ({ onOpenRagPanel }) => {
       const processedFiles = await processFileReferences(message)
       const allFiles = { ...uploadedFiles, ...processedFiles }
 
-      sendChatMessage(message, allFiles, forceRag)
+      // Keep the user's text if the send was rejected (e.g. disconnected) so
+      // they don't lose their message.
+      if (!sendChatMessage(message, allFiles, forceRag)) return
       setInputValue('')
 
       // Reset textarea height
@@ -195,7 +197,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     } catch (error) {
       console.error('Error in handleSubmit:', error)
       // Still try to send the message without file processing
-      sendChatMessage(message, uploadedFiles, forceRag)
+      if (!sendChatMessage(message, uploadedFiles, forceRag)) return
       setInputValue('')
 
       // Reset textarea height
@@ -894,6 +896,20 @@ const ChatArea = ({ onOpenRagPanel }) => {
           {/* Enabled Tools Indicator */}
           <EnabledToolsIndicator />
 
+          {/* Warning: WebSocket disconnected - sending is blocked until reconnected */}
+          {!isConnected && (
+            <div
+              className="mb-2 px-3 py-2 bg-red-900/40 border border-red-600/50 rounded-lg flex items-center gap-2 text-red-300 text-sm"
+              role="status"
+              data-testid="ws-disconnected-banner"
+            >
+              <WifiOff className="w-4 h-4 flex-shrink-0" />
+              <span>
+                Disconnected from server{connectionStatus ? ` (${connectionStatus})` : ''}. Messages can't be sent until the connection is restored.
+              </span>
+            </div>
+          )}
+
           {/* Warning: tools selected but model doesn't support tools */}
           {selectedTools.size > 0 && !currentModelSupportsTools && (
             <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
@@ -939,7 +955,10 @@ const ChatArea = ({ onOpenRagPanel }) => {
                   )
                 })()}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div
+                className="flex flex-wrap gap-2 max-h-28 overflow-y-auto pr-1"
+                data-testid="uploaded-files-list"
+              >
                 {Object.entries(uploadedFiles).map(([filename, fileData]) => {
                   const isImage = isImageFile(filename)
                   const showAsVisionImage = isImage && currentModelSupportsVision

@@ -1,6 +1,7 @@
 // Slim ChatContext (clean refactor)
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { useWS } from './WSContext'
+import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
 import { useSelections, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
 import { useUserPrompts } from '../hooks/useUserPrompts'
@@ -57,7 +58,7 @@ export const ChatProvider = ({ children }) => {
 
 	// Chat history: 3-state save mode persists across refreshes via localStorage
 	// 'none' = incognito (nothing saved), 'local' = browser IndexedDB, 'server' = backend DB
-	const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'server')
+	const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'none')
 	const [activeConversationId, setActiveConversationId] = useState(null)
 	const localSaveTimerRef = useRef(null)
 
@@ -90,7 +91,8 @@ export const ChatProvider = ({ children }) => {
 		})
 	}, [mapMessages])
 
-		const { sendMessage, addMessageHandler } = useWS()
+		const { sendMessage, addMessageHandler, isConnected } = useWS()
+	const toast = useToast()
 	const { currentModel } = config
 	const { selectedTools, selectedPrompts, activePrompts, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
 
@@ -319,17 +321,13 @@ export const ChatProvider = ({ children }) => {
 	}, [config.ragServers])
 
 	const sendChatMessage = useCallback((content, extraFiles = {}, forceRag = false) => {
-		if (!content.trim() || !currentModel) return
-		if (isWelcomeVisible) setIsWelcomeVisible(false)
-		setFollowUpSuggestions([])
-		addMessage({
-			role: 'user',
-			content,
-			timestamp: new Date().toISOString(),
-			_activePromptKey: selections.activePromptKey || null,
-		})
-		setIsThinking(true)
-		setIsSynthesizing(false)
+		if (!content.trim() || !currentModel) return false
+		// Don't allow sending while the WebSocket is disconnected -- the message
+		// would never reach the backend and the UI would hang on "Thinking...".
+		if (!isConnected) {
+			toast.error('Not connected. Waiting to reconnect before sending.')
+			return false
+		}
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
@@ -353,7 +351,7 @@ export const ChatProvider = ({ children }) => {
 			? userPrompts.prompts.find(p => p.id === userPromptIdFromKey(activeKey))
 			: null
 
-		sendMessage({
+		const sent = sendMessage({
 			type: 'chat',
 			content,
 			model: currentModel,
@@ -374,7 +372,26 @@ export const ChatProvider = ({ children }) => {
 			incognito: saveMode !== 'server',
 			conversation_id: activeConversationId || undefined,
 		})
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, userPrompts.prompts])
+		// Guard against a stale isConnected: if the socket dropped between the
+		// check above and the send, bail out without mutating the UI so we don't
+		// hang on "Thinking...".
+		if (!sent) {
+			toast.error('Not connected. Waiting to reconnect before sending.')
+			return false
+		}
+		// Only mutate the UI once the message is actually on the wire.
+		if (isWelcomeVisible) setIsWelcomeVisible(false)
+		setFollowUpSuggestions([])
+		addMessage({
+			role: 'user',
+			content,
+			timestamp: new Date().toISOString(),
+			_activePromptKey: selections.activePromptKey || null,
+		})
+		setIsThinking(true)
+		setIsSynthesizing(false)
+		return true
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, userPrompts.prompts])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
 		// If there is any chat content or generation in progress, confirm before

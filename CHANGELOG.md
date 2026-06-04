@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #628 - 2026-06-03
+- **MCP tools**: Renamed the Atlas-injected authenticated user argument from `username` to `_atlas_user`; ordinary `username` tool arguments are no longer overwritten. Bundled example tools that use the authenticated user for audit attribution (csv_reporter, code-executor, file_size_test) now declare `_atlas_user` so the value stays backend-injected and cannot be spoofed by the LLM.
+
+### PR #629 - 2026-06-03
+- **MCP token storage**: `MCPTokenStorage` now refuses to start when `MCP_TOKEN_ENCRYPTION_KEY` is unset — or still set to the shipped `.env.example` placeholder — instead of silently generating an ephemeral key that made every previously encrypted token unreadable after each restart. The key is validated before any filesystem setup. Operators must configure a stable, unique secret; docs and `.env.example` updated to mark the variable as required.
+
+### PR #624 - 2026-06-01
+- **File Library**: Added a bulk delete button to the File Manager's File Library tab that deletes the files currently shown after a confirmation prompt. The button is labeled "Delete All" when no filters are active and "Delete Filtered" when a search/type filter is narrowing the list, so the scope is explicit; it is disabled while a delete batch is in flight.
+
+### PR #621 - 2026-05-29
+- **Splash screen**: Message body is now defined in a markdown file (`splash-screen.md`, override via `SPLASH_SCREEN_FILE`) and rendered as markdown. The JSON config keeps presentation settings only; the redundant `enabled` field and `messages` array are dropped — `FEATURE_SPLASH_SCREEN_ENABLED` is the sole switch for showing the splash screen.
+
+### PR #619 - 2026-05-29
+- **Chat history**: Default save mode is now Incognito (`none`) instead of Server; the save button cycles Incognito -> Saved Locally -> Saved to Server. Turns taken while incognito are excluded from server persistence even after the user later opts in to saving.
+
+### 2026-05-21
+- **CLI**: Added support for specifying a custom `.env` file location. `atlas-init`, `atlas-server`, `atlas-chat`, and `agent_start.sh` now all honor a `--env-file`/`-e` flag and the `ATLAS_ENV_FILE` environment variable, so multiple users can share an Atlas install while keeping their own API keys in a personal file such as `~/.atlasrc`. Resolves the "Specifying location for .env configuration file" issue.
+
+### PR #607 - 2026-05-14
+- `MCPToolManager._invalidate_user_client` now calls a new `MCPSessionManager.release_sessions_for_user_server` method after evicting client cache entries, ensuring live sessions that outlived their cache entry (e.g. due to LRU eviction races) are also closed when a token is revoked.
+
+### PR #596 - 2026-05-11
+- Added `AGENT_PORTAL_ALLOWED_ORIGINS` to let the Agent Portal WebSocket stream accept Origin headers beyond loopback when the deployment is fronted by an authenticating reverse proxy (e.g. Cloudflare Access). Loopback hosts remain allowed by default; the env var is a comma-separated hostname allowlist and is empty by default, so the gate is unchanged for stock installs.
+- Renamed `_origin_is_loopback` to `_origin_is_allowed` in `atlas/routes/agent_portal_routes.py` and updated the rejection log message; updated `docs/agentportal/threat-model.md` to describe the expanded allowlist and its residual risks.
+- Added a Remove (stop + drop) affordance for Agent Portal sessions. `ProcessManager.remove()` drops a non-running record (wakes lingering stream subscribers and closes any orphaned PTY master fd); `ProcessManager.stop_and_remove()` cancels, waits a bounded grace window, and removes in one shot.
+- New `POST /api/agent-portal/processes/{id}/remove` route — pairs with the existing `DELETE` (which only sends SIGTERM and keeps the record). Writes a `"remove"` audit event with the final status; returns 404 for unknown ids and 409 if the child is still alive after the grace window. Frontend adds a Trash button in the left rail and pane header, with a confirm dialog when the target is still running, and clears the layout slot on success.
+- Defense in depth in `ProcessManager.launch`: if a caller sets `namespaces=True` but `probe_isolation_capabilities()` reports the host can't do unprivileged user namespaces (e.g. Ubuntu 24.04 with `apparmor_restrict_unprivileged_userns=1`), the manager strips the flag (and `isolate_network`), logs a warning, and launches with reduced isolation rather than failing with EPERM on `/proc/self/uid_map`. The frontend mirrors this by clearing the flags client-side when the capability probe reports the host unsupported.
+- Added per-user ownership graduation TODO for the new `/remove` endpoint and listed it in `docs/agentportal/threat-model.md`'s deferred-items section.
+
 ## [0.2.0] - 2026-05-16
 
 ### PR #606 - 2026-05-16

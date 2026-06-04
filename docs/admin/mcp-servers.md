@@ -142,9 +142,9 @@ For MCP servers where each user needs their own credentials (e.g., external APIs
 Tokens are stored encrypted on disk:
 - **Location:** Set `MCP_TOKEN_STORAGE_DIR` env var, or defaults to `config/secure/mcp_tokens.enc`
 - **Encryption:** Fernet (AES-128-CBC)
-- **Key:** Set `MCP_TOKEN_ENCRYPTION_KEY` environment variable
+- **Key:** Set `MCP_TOKEN_ENCRYPTION_KEY` environment variable (required)
 
-If `MCP_TOKEN_ENCRYPTION_KEY` is not set, tokens use an ephemeral key and won't persist across restarts.
+`MCP_TOKEN_ENCRYPTION_KEY` must be set to a stable secret before starting Atlas. The application refuses to start without it, because a generated ephemeral key would make previously encrypted tokens unreadable after every restart.
 
 ### Per-User vs Server-Level Auth
 
@@ -206,9 +206,9 @@ export MY_API_KEY="your-secret-api-key"
 
 You can restrict access to MCP servers based on user groups. This is a critical feature for controlling which users can access powerful or sensitive tools. If a user is not in the required group, the server will be completely invisible to them in the UI, and any attempt to call its functions will be blocked.
 
-## A Note on the `username` Argument
+## A Note on the `_atlas_user` Argument
 
-As a security measure, if a tool is designed to accept a `username` argument, the Atlas UI backend will **always** overwrite this argument with the authenticated user's identity before calling the tool. This ensures that a tool always runs with the correct user context and prevents the LLM from impersonating another user.
+As a security measure, if a tool is designed to accept an `_atlas_user` argument, the Atlas UI backend will **always** overwrite this argument with the authenticated user's identity before calling the tool. Ordinary `username` arguments are left under LLM control. This ensures tools that opt in to Atlas user context run with the correct user and prevents the LLM from impersonating another user through the injected field.
 
 
 ## Advanced MCP Features
@@ -224,4 +224,3 @@ MCP tools can request LLM text generation during tool execution, enabling agenti
 ### Progress Updates
 
 MCP tools can send real-time progress updates during long-running operations. See the [Progress Updates Documentation](../developer/progress-updates.md) for details.
-

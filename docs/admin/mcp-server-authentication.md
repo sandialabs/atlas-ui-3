@@ -99,10 +99,10 @@ Configure MCP servers in `config/mcp.json`:
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `MCP_TOKEN_ENCRYPTION_KEY` | Key for encrypting stored tokens | Recommended |
+| `MCP_TOKEN_ENCRYPTION_KEY` | Key for encrypting stored tokens | **Required** |
 | `MCP_TOKEN_STORAGE_DIR` | Directory path for token storage file | Optional |
 
-**Encryption Key:** If `MCP_TOKEN_ENCRYPTION_KEY` is not set, an ephemeral key is generated. Tokens will not persist across application restarts in this case.
+**Encryption Key:** `MCP_TOKEN_ENCRYPTION_KEY` must be set to a stable secret (at least 32 characters) before starting Atlas. The application refuses to start without it, because a generated ephemeral key would make every previously encrypted token unreadable after each restart. Rotating the key invalidates all stored tokens, so choose a value you can keep stable across deployments (and back it up alongside other deployment secrets).
 
 **Storage Location:** If `MCP_TOKEN_STORAGE_DIR` is not set, tokens are stored in the first writable location from:
 1. `{project_root}/config/secure/`

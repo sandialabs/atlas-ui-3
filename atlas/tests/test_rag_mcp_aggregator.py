@@ -16,7 +16,7 @@ def patch_mcp(monkeypatch):
         def __init__(self, name, description="", inputSchema=None):
             self.name = name
             self.description = description
-            self.inputSchema = inputSchema or {"type": "object", "properties": {"username": {"type": "string"}}}
+            self.inputSchema = inputSchema or {"type": "object", "properties": {"_atlas_user": {"type": "string"}}}
 
     class FakeClient:
         def __init__(self, server_name):

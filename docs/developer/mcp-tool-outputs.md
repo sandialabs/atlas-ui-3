@@ -269,6 +269,6 @@ After creating your server, you must register it in `config/mcp.json`.
 
 To enhance security and simplify tool development, the backend can automatically inject certain arguments into your tool calls.
 
-*   **`username` Injection (Security Feature)**: If your tool's function signature includes a `username: str` parameter, the backend will **always overwrite** any value for it with the authenticated user's identity. This is a critical security feature to ensure a tool always runs with the correct user context.
+*   **`_atlas_user` Injection (Security Feature)**: If your tool's function signature includes an `_atlas_user: str` parameter, the backend will **always overwrite** any value for it with the authenticated user's identity. Ordinary `username` parameters are not injected or overwritten.
 
 *   **File URL Injection**: If your tool accepts a `filename: str` or `file_names: List[str]` parameter, the backend will automatically convert any session files passed by the LLM into secure, temporary URLs. Your tool can then fetch the file content from these URLs. See the [Working with Files](working-with-files.md) guide for more details.

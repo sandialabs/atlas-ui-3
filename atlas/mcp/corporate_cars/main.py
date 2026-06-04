@@ -6,7 +6,7 @@ Implements a simple RAG-style interface to discover data sources and retrieve
 locations and metadata for corporate cars employees are using.
 
 Tools implemented (per RAG_update.md contract):
- - rag_discover_resources(username)
+ - rag_discover_resources(_atlas_user)
  - rag_get_raw_results(username, query, sources, top_k=8, filters=None, ranking=None)
  - rag_get_synthesized_results(username, query, sources=None, top_k=None, synthesis_params=None, provided_context=None)
 
@@ -263,19 +263,19 @@ def _search_score(query: str, c: Car) -> Tuple[float, str]:
 
 # --- RAG tools ---------------------------------------------------------------
 @mcp.tool
-def rag_discover_resources(username: str) -> Dict[str, Any]:
+def rag_discover_resources(_atlas_user: str) -> Dict[str, Any]:
     """
     Discover available fleet data sources (resources) for this server.
 
     Args:
-        username: The current user's username (for ACL/defaults purposes)
+        _atlas_user: The current user's username (for ACL/defaults purposes)
 
     Returns:
         { results: { resources: [ {id, name, authRequired?, defaultSelected?} ] } }
     """
     start, meta = _start_meta()
     try:
-        default_sid = _user_default_resource(username)
+        default_sid = _user_default_resource(_atlas_user)
         resources_ui: List[Dict[str, Any]] = []
         for rid, info in RESOURCES.items():
             resources_ui.append({

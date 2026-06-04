@@ -155,7 +155,7 @@ mcp = create_stdio_server("SecureCodeExecutor")
 def execute_python_code_with_file(
     code: Annotated[str, "Python code to execute"],
     filename: Annotated[str, "Name of the file to make available to the code (optional - leave empty if not uploading a file)"] = "",
-    username: Annotated[str, "Injected by backend. Trust this value."] = "",
+    _atlas_user: Annotated[str, "Injected by backend. Trust this value."] = "",
     file_data_base64: Annotated[str, "Framework may supply Base64 content as fallback."] = ""
 ) -> Dict[str, Any]:
     """
@@ -165,9 +165,8 @@ def execute_python_code_with_file(
     1) filename to downloadable URLs: If the backend rewrites filename
        to /api/files/download/... URLs, this server will fetch and process them.
        It also accepts file_data_base64 as a fallback for content delivery.
-    2) username injection: If a `username` parameter is defined in the tool schema,
-       the backend can inject the authenticated user's email/username. This server
-       trusts the provided username value and echoes it in outputs.
+    2) _atlas_user injection: If an `_atlas_user` parameter is defined in the tool
+       schema, the backend can inject the authenticated user's email/username.
 
     This function allows you to execute Python code either standalone or with access
     to an uploaded file (e.g., CSV, JSON, TXT, etc.). If a file is provided, it will
@@ -215,7 +214,7 @@ def execute_python_code_with_file(
     Args:
         code: Python code to execute (string)
         filename: Name of the file to upload (Backend may rewrite to a downloadable URL)
-        username: Injected by backend. Trust this value.
+        _atlas_user: Injected by backend. Trust this value.
         file_data_base64: Framework may supply Base64 content as fallback.
 
         Returns (MCP Contract):
@@ -391,7 +390,7 @@ def execute_python_code_with_file(
                 "generated_file_count": len(artifacts),
                 "has_plots": bool(plots),
                 "is_error": False,
-                "generated_by": username
+                "generated_by": _atlas_user
             }
 
             # Determine primary file for display (prefer HTML visualization)
@@ -432,7 +431,7 @@ def execute_python_code_with_file(
                 "is_error": True,
                 "error_type": execution_result.get("error_type"),
                 "execution_time_sec": round(execution_time, 4),
-                "generated_by": username
+                "generated_by": _atlas_user
             }
             # Convert failure to v2 format
             artifacts = [{
@@ -478,7 +477,7 @@ def execute_python_code_with_file(
 
         return {
             "results": {"error": f"Code execution error: {str(ce)}"},
-            "meta_data": {"is_error": True, "error_type": "CodeExecutionError", "execution_time_sec": exec_time, "generated_by": username},
+            "meta_data": {"is_error": True, "error_type": "CodeExecutionError", "execution_time_sec": exec_time, "generated_by": _atlas_user},
             "artifacts": artifacts,
             "display": {
                 "open_canvas": False,  # Don't auto-open on error
@@ -510,7 +509,7 @@ def execute_python_code_with_file(
 
         return {
             "results": {"error": f"Server error: {str(e)}"},
-            "meta_data": {"is_error": True, "error_type": type(e).__name__, "execution_time_sec": exec_time, "generated_by": username},
+            "meta_data": {"is_error": True, "error_type": type(e).__name__, "execution_time_sec": exec_time, "generated_by": _atlas_user},
             "artifacts": artifacts,
             "display": {
                 "open_canvas": False,  # Don't auto-open on error

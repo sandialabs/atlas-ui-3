@@ -110,6 +110,9 @@ services:
       - MCP_CALL_TIMEOUT=120
       - MCP_TASK_TIMEOUT=10
       - MCP_STATE_BACKEND=memory
+      # Required: encryption key for per-user MCP token storage (>=32 chars).
+      # Override with a stable secret in production; rotating it invalidates stored tokens.
+      - MCP_TOKEN_ENCRYPTION_KEY=dev-only-mcp-token-encryption-key-change-me
       - FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=false
       - FEATURE_GLOBUS_AUTH_ENABLED=false
 

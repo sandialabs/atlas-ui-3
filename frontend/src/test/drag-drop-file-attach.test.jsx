@@ -177,6 +177,39 @@ describe('ChatArea - Drag and Drop File Attachment', () => {
     global.FileReader.mockRestore()
   })
 
+  it('should constrain the uploaded files list to a scrollable area', async () => {
+    const mockFileReader = {
+      readAsDataURL: vi.fn(),
+      result: 'data:text/plain;base64,dGVzdA==',
+      onload: null
+    }
+
+    vi.spyOn(global, 'FileReader').mockImplementation(() => mockFileReader)
+
+    render(
+      <BrowserRouter>
+        <ChatArea />
+      </BrowserRouter>
+    )
+
+    const chatArea = screen.getByRole('main').parentElement
+    const mockFile = createMockFile('scroll-test-file.txt', 'test content')
+
+    fireEvent.drop(chatArea, createDragEvent('drop', [mockFile]))
+
+    act(() => {
+      mockFileReader.onload({ target: { result: 'data:text/plain;base64,dGVzdA==' } })
+    })
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('scroll-test-file.txt')).toBeInTheDocument()
+    })
+
+    expect(screen.getByTestId('uploaded-files-list')).toHaveClass('max-h-28', 'overflow-y-auto')
+
+    global.FileReader.mockRestore()
+  })
+
   it('should handle multiple files dropped at once', async () => {
     const mockFileReader = {
       readAsDataURL: vi.fn(),
