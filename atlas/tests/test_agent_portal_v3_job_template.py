@@ -167,8 +167,8 @@ def test_egress_user_choice_caps_to_admin_superset():
         user_allowlist_max="pypi.org", user_requested=["pypi.org", "evil.com"],
         llm_provider="anthropic", mcp_resolved={}, resolver=_fake_resolver,
     )
-    assert "pypi.org" in d.domains
-    assert "evil.com" not in d.domains
+    assert any(dom == "pypi.org" for dom in d.domains)
+    assert all(dom != "evil.com" for dom in d.domains)
 
 
 def test_egress_summary_shape():

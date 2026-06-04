@@ -334,7 +334,10 @@ async def launch_run(
             "url": url,
         }
     if rejected:
-        logger.info("agent_portal_v3 launch: dropping non-remote MCPs: %s", rejected)
+        # Strip CR/LF from the user-provided server names before logging so a
+        # crafted name can't forge log lines (log injection).
+        safe = ", ".join(s.replace("\r", "").replace("\n", "") for s in rejected)
+        logger.info("agent_portal_v3 launch: dropping non-remote MCPs: %s", safe)
 
     extra_env = {"ATLAS_EGRESS_CHECK": "default"} if req.egress_check else None
 
