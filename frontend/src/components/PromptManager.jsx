@@ -63,9 +63,10 @@ const PromptManager = () => {
 
   const handleDelete = async (prompt) => {
     if (!window.confirm(`Delete prompt "${prompt.title}"? This cannot be undone.`)) return
-    // If the deleted prompt was active, fall back to the default prompt.
-    if (activeId === prompt.id && clearActivePrompt) clearActivePrompt()
-    await deleteUserPrompt(prompt.id)
+    const ok = await deleteUserPrompt(prompt.id)
+    // Only fall back to the default prompt once the delete actually succeeds —
+    // otherwise a failed request would silently drop the still-existing prompt.
+    if (ok && activeId === prompt.id && clearActivePrompt) clearActivePrompt()
   }
 
   const toggleActive = (prompt) => {

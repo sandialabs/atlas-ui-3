@@ -28,6 +28,36 @@ def repo(tmp_path):
     return UserPromptRepository(get_session_factory())
 
 
+def test_routes_reject_blank_content(monkeypatch):
+    """The REST layer rejects empty/whitespace content on create and update."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from atlas.core.log_sanitizer import get_current_user
+    from atlas.routes import user_prompt_routes
+
+    class FakeRepo:
+        def create_prompt(self, user_email, title, content):
+            return {"id": "1", "title": title, "content": content}
+
+        def update_prompt(self, prompt_id, user_email, title=None, content=None):
+            return {"id": prompt_id, "title": title or "t", "content": content or "c"}
+
+    monkeypatch.setattr(user_prompt_routes, "_get_repo", lambda: FakeRepo())
+
+    app = FastAPI()
+    app.include_router(user_prompt_routes.router)
+    app.dependency_overrides[get_current_user] = lambda: "alice@test.com"
+    client = TestClient(app)
+
+    # Blank content rejected on create...
+    assert client.post("/api/user-prompts", json={"title": "T", "content": "   "}).status_code == 400
+    # ...and on update.
+    assert client.put("/api/user-prompts/1", json={"content": "   "}).status_code == 400
+    # Valid content still works.
+    assert client.post("/api/user-prompts", json={"title": "T", "content": "hi"}).status_code == 200
+
+
 def test_create_and_list(repo):
     created = repo.create_prompt("alice@test.com", "Pirate", "You are a pirate.")
     assert created["id"]

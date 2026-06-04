@@ -274,8 +274,16 @@ export const ChatProvider = ({ children }) => {
 			selections.removePrompts(stalePromptKeys)
 		}
 
-		// Clear active prompt if it no longer exists in config
-		if (selections.activePromptKey && !validPromptKeys.has(selections.activePromptKey)) {
+		// Clear active prompt if it no longer exists in config. User-authored
+		// prompts (issue #153) live outside config.prompts (they're fetched
+		// separately), so they must be exempt here or a persisted active user
+		// prompt would be cleared on every config load — reverting to Default
+		// after a refresh.
+		if (
+			selections.activePromptKey &&
+			!isUserPromptKey(selections.activePromptKey) &&
+			!validPromptKeys.has(selections.activePromptKey)
+		) {
 			// Clear stale active prompt that no longer exists in config
 			selections.clearActivePrompt()
 		}

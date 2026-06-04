@@ -57,6 +57,8 @@ async def create_prompt(
         raise HTTPException(status_code=503, detail="Chat history is not enabled")
     if not body.title.strip():
         raise HTTPException(status_code=400, detail="Title cannot be empty")
+    if not body.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
     prompt = repo.create_prompt(
         user_email=current_user, title=body.title, content=body.content
     )
@@ -75,6 +77,10 @@ async def update_prompt(
         raise HTTPException(status_code=503, detail="Chat history is not enabled")
     if body.title is not None and not body.title.strip():
         raise HTTPException(status_code=400, detail="Title cannot be empty")
+    # Reject blank content on update too — create requires non-empty content, and
+    # a whitespace-only prompt would silently fall back to the default when used.
+    if body.content is not None and not body.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
     prompt = repo.update_prompt(
         prompt_id=prompt_id,
         user_email=current_user,
