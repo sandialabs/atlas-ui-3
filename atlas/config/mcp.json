@@ -1,4 +1,15 @@
 {
+  "mcp_tools_demo": {
+    "url": "http://mcp-tools.atlas.svc.cluster.local/mcp",
+    "transport": "http",
+    "groups": [
+      "users"
+    ],
+    "description": "Demo HTTP MCP server (secret code + multiply) for Agent Portal V3 end-to-end testing. Deployed in-cluster via atlas/agent_runner_v3/demo_mcp/.",
+    "author": "Atlas",
+    "short_description": "Demo HTTP tools (V3)",
+    "compliance_level": "Public"
+  },
   "calculator": {
     "command": [
       "python",

@@ -64,6 +64,7 @@ from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.routes.admin_routes import admin_router
 from atlas.routes.agent_portal_routes import router as agent_portal_router
+from atlas.routes.agent_portal_v3_routes import router as agent_portal_v3_router
 
 # Import essential routes
 from atlas.routes.config_routes import router as config_router
@@ -212,6 +213,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to start MCP user client cache sweeper: {e}", exc_info=True)
 
+    # Agent Portal V3 watcher (k8s job status reconciler)
+    if getattr(config.app_settings, "feature_agent_portal_v3_enabled", False):
+        try:
+            from atlas.modules.agent_portal_v3.database import init_database
+            from atlas.modules.agent_portal_v3.runner import get_agent_runner
+            init_database()
+            v3_runner = get_agent_runner()
+            v3_runner.start_watcher(interval_seconds=5)
+            logger.info("Agent Portal V3 watcher started")
+        except Exception as e:
+            logger.error(f"Agent Portal V3 startup failed: {e}", exc_info=True)
+
     yield
 
     logger.info("Shutting down Chat UI Backend")
@@ -219,6 +232,12 @@ async def lifespan(app: FastAPI):
     await mcp_manager.stop_auto_reconnect()
     # Cleanup MCP clients
     await mcp_manager.cleanup()
+    if getattr(config.app_settings, "feature_agent_portal_v3_enabled", False):
+        try:
+            from atlas.modules.agent_portal_v3.runner import get_agent_runner
+            await get_agent_runner().stop_watcher()
+        except Exception:
+            pass
 
 
 # Create FastAPI app with minimal setup
@@ -288,6 +307,7 @@ app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
 app.include_router(suggestion_router)
 app.include_router(agent_portal_router)
+app.include_router(agent_portal_v3_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
@@ -794,6 +814,7 @@ if static_dir.exists():
         "admin",
         "files",
         "agent-portal",
+        "agent-portal-v3",
     )
 
     @app.get("/{full_path:path}")

@@ -1,0 +1,73 @@
+# Agent Portal V3 — cluster state (2026-06-03 07:28 MDT)
+
+## Demo MCP server (in-cluster)
+NAME                        READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/mcp-tools   1/1     1            1           9m48s
+
+NAME                TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+service/mcp-tools   ClusterIP   10.43.88.173   <none>        80/TCP    9m48s
+
+NAME                             READY   STATUS    RESTARTS   AGE
+pod/mcp-tools-57f447f7d4-hn9qh   1/1     Running   0          9m48s
+
+## Latest agent run pod (succeeded)
+NAME                                READY   STATUS      RESTARTS   AGE
+atlas-run-test-832dc7c7-229-cs5jc   0/1     Completed   0          5m39s
+atlas-run-test-c7e6e994-d5e-t995z   0/1     Completed   0          7m19s
+
+## NetworkPolicy egress for the E2E run (note the in-cluster podSelector rule)
+[
+    {
+        "ports": [
+            {
+                "port": 53,
+                "protocol": "UDP"
+            },
+            {
+                "port": 53,
+                "protocol": "TCP"
+            }
+        ],
+        "to": [
+            {
+                "namespaceSelector": {
+                    "matchLabels": {
+                        "kubernetes.io/metadata.name": "kube-system"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "ports": [
+            {
+                "port": 443,
+                "protocol": "TCP"
+            },
+            {
+                "port": 80,
+                "protocol": "TCP"
+            }
+        ],
+        "to": [
+            {
+                "ipBlock": {
+                    "cidr": "0.0.0.0/0",
+                    "except": [
+                        "10.0.0.0/8",
+                        "172.16.0.0/12",
+                        "192.168.0.0/16",
+                        "169.254.0.0/16"
+                    ]
+                }
+            }
+        ]
+    },
+    {
+        "to": [
+            {
+                "podSelector": {}
+            }
+        ]
+    }
+]
