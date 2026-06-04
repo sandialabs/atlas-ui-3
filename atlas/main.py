@@ -78,6 +78,7 @@ from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.routes.suggestion_routes import suggestion_router
 from atlas.routes.telemetry_routes import telemetry_router
+from atlas.routes.user_prompt_routes import router as user_prompt_router
 from atlas.version import VERSION
 
 # Load environment variables from the parent directory
@@ -286,6 +287,7 @@ app.include_router(feedback_router)
 app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
+app.include_router(user_prompt_router)
 app.include_router(suggestion_router)
 app.include_router(agent_portal_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
@@ -521,6 +523,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             agent_max_steps=data.get("agent_max_steps", 10),
                             temperature=data.get("temperature", 0.7),
                             agent_loop_strategy=data.get("agent_loop_strategy"),
+                            custom_system_prompt=data.get("custom_system_prompt"),
                             update_callback=lambda message: websocket_update_callback(websocket, message),
                             files=data.get("files"),
                             incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),

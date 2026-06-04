@@ -143,6 +143,110 @@ async def test_message_builder_without_system_prompt(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_message_builder_custom_prompt_replaces_default(tmp_path):
+    """A custom system prompt (issue #153) replaces the default system prompt."""
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "system_prompt.md").write_text("Default assistant for {user_email}.")
+
+    config_manager = ConfigManager()
+    config_manager.app_settings.prompt_base_path = str(prompts_dir)
+    config_manager.app_settings.system_prompt_filename = "system_prompt.md"
+
+    message_builder = MessageBuilder(prompt_provider=PromptProvider(config_manager))
+
+    session = Session(user_email="test@example.com")
+    session.history.add_message(Message(role=MessageRole.USER, content="Hello"))
+
+    messages = await message_builder.build_messages(
+        session=session,
+        include_files_manifest=False,
+        include_system_prompt=True,
+        custom_system_prompt="You are a pirate. Arr.",
+    )
+
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"] == "You are a pirate. Arr."
+    # The default prompt must not appear at all.
+    assert "Default assistant" not in messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_message_builder_blank_custom_prompt_falls_back_to_default(tmp_path):
+    """A blank/whitespace custom prompt falls back to the default system prompt."""
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "system_prompt.md").write_text("Default assistant for {user_email}.")
+
+    config_manager = ConfigManager()
+    config_manager.app_settings.prompt_base_path = str(prompts_dir)
+    config_manager.app_settings.system_prompt_filename = "system_prompt.md"
+
+    message_builder = MessageBuilder(prompt_provider=PromptProvider(config_manager))
+
+    session = Session(user_email="test@example.com")
+    session.history.add_message(Message(role=MessageRole.USER, content="Hello"))
+
+    messages = await message_builder.build_messages(
+        session=session,
+        include_files_manifest=False,
+        include_system_prompt=True,
+        custom_system_prompt="   ",
+    )
+
+    assert messages[0]["role"] == "system"
+    assert "Default assistant" in messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_custom_system_prompt_sent_to_llm():
+    """End-to-end: custom_system_prompt threads through the chat service to the LLM."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        prompts_dir = Path(tmp_dir) / "prompts"
+        prompts_dir.mkdir()
+        (prompts_dir / "system_prompt.md").write_text("Default for {user_email}.")
+
+        config_manager = ConfigManager()
+        config_manager.app_settings.prompt_base_path = str(prompts_dir)
+        config_manager.app_settings.system_prompt_filename = "system_prompt.md"
+
+        captured = {}
+
+        class DummyLLM:
+            async def call_plain(self, model_name, messages, temperature=0.7, **kwargs):
+                captured["messages"] = messages
+                return "ok"
+
+            async def stream_plain(self, model_name, messages, temperature=0.7, **kwargs):
+                captured["messages"] = messages
+                yield "ok"
+
+        from atlas.application.chat.service import ChatService
+
+        chat_service = ChatService(
+            llm=DummyLLM(),
+            tool_manager=None,
+            connection=None,
+            config_manager=config_manager,
+            file_manager=None,
+        )
+
+        await chat_service.handle_chat_message(
+            session_id=uuid.uuid4(),
+            content="Hello",
+            model="test-model",
+            user_email="tester@example.com",
+            custom_system_prompt="You only speak in haiku.",
+        )
+
+        msgs = captured.get("messages")
+        assert msgs, "LLM was not called or messages not captured"
+        assert msgs[0]["role"] == "system"
+        assert msgs[0]["content"] == "You only speak in haiku."
+        assert "Default for" not in msgs[0]["content"]
+
+
+@pytest.mark.asyncio
 async def test_system_prompt_sent_to_llm():
     """Test that system prompt is sent to LLM in chat flow"""
     # Create a temporary directory for prompts

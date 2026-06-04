@@ -2,7 +2,8 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { useWS } from './WSContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
-import { useSelections } from '../hooks/chat/useSelections'
+import { useSelections, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import { useUserPrompts } from '../hooks/useUserPrompts'
 import { useAgentMode } from '../hooks/chat/useAgentMode'
 import { useMessages } from '../hooks/chat/useMessages'
 import { useFiles } from '../hooks/chat/useFiles'
@@ -35,6 +36,8 @@ export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
 	const selections = useSelections()
+	// User-authored custom prompt library (issue #153)
+	const userPrompts = useUserPrompts()
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
@@ -332,12 +335,23 @@ export const ChatProvider = ({ children }) => {
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []
 
+		// A user-authored custom prompt (issue #153) replaces the default system
+		// prompt and is sent as custom_system_prompt — never as an MCP prompt. Gate
+		// on the key type so a stale (deleted) user key can't leak into
+		// selected_prompts; if it no longer resolves we fall back to the default.
+		const activeKey = selections.activePromptKey
+		const isUserKey = isUserPromptKey(activeKey)
+		const activeUserPrompt = isUserKey
+			? userPrompts.prompts.find(p => p.id === userPromptIdFromKey(activeKey))
+			: null
+
 		sendMessage({
 			type: 'chat',
 			content,
 			model: currentModel,
 			selected_tools: [...selectedTools],
-			selected_prompts: activePrompts,
+			selected_prompts: isUserKey ? [] : activePrompts,
+			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			selected_data_sources: dataSourcesToSend,
 			tool_choice_required: selections.toolChoiceRequired,
 			user: config.user,
@@ -352,7 +366,7 @@ export const ChatProvider = ({ children }) => {
 			incognito: saveMode !== 'server',
 			conversation_id: activeConversationId || undefined,
 		})
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, userPrompts.prompts])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
 		// If there is any chat content or generation in progress, confirm before
@@ -679,6 +693,14 @@ export const ChatProvider = ({ children }) => {
 		makePromptActive: selections.makePromptActive,
 		clearActivePrompt: selections.clearActivePrompt,
 		activePromptKey: selections.activePromptKey,
+		// User-authored custom prompt library (issue #153)
+		userPrompts: userPrompts.prompts,
+		userPromptsLoading: userPrompts.loading,
+		userPromptsError: userPrompts.error,
+		fetchUserPrompts: userPrompts.fetchPrompts,
+		createUserPrompt: userPrompts.createPrompt,
+		updateUserPrompt: userPrompts.updatePrompt,
+		deleteUserPrompt: userPrompts.deletePrompt,
 		selectAllServerPrompts,
 		deselectAllServerPrompts,
 		selectedDataSources: selections.selectedDataSources,

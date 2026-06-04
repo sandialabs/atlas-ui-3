@@ -90,3 +90,25 @@ class TagRecord(Base):
     __table_args__ = (
         UniqueConstraint("name", "user_email", name="uq_tag_name_user"),
     )
+
+
+class UserPromptRecord(Base):
+    """A user-authored custom system prompt (prompt library entry).
+
+    Each row is one reusable prompt belonging to a single user. When selected
+    as the active prompt for a chat, its ``content`` replaces the default
+    system prompt for that turn (see issue #153).
+    """
+
+    __tablename__ = "user_prompts"
+
+    id = Column(String(36), primary_key=True, default=_uuid_default)
+    user_email = Column(String(255), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_now_utc, onupdate=_now_utc, nullable=False)
+
+    __table_args__ = (
+        Index("ix_user_prompts_user_updated", "user_email", "updated_at"),
+    )
