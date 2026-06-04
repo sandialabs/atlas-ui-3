@@ -100,6 +100,7 @@ function LaunchForm({ servers, models, onLaunch, busy }) {
   const [displayName, setDisplayName] = useState('')
   const [selectedServers, setSelectedServers] = useState(new Set())
   const [modelChoice, setModelChoice] = useState('')
+  const [egressCheck, setEgressCheck] = useState(false)
 
   useEffect(() => {
     if (!modelChoice && models.length > 0) {
@@ -126,6 +127,7 @@ function LaunchForm({ servers, models, onLaunch, busy }) {
       llm_model: m.model_id,
       llm_provider: m.provider,
       display_name: displayName,
+      egress_check: egressCheck,
     })
   }
 
@@ -204,6 +206,18 @@ function LaunchForm({ servers, models, onLaunch, busy }) {
           className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-indigo-500 outline-none font-mono"
         />
       </div>
+      <label className="flex items-start gap-2 text-xs text-gray-300" title="Probes allowed (public) vs blocked (private/link-local) destinations from inside the pod and logs the result.">
+        <input
+          type="checkbox"
+          checked={egressCheck}
+          onChange={(e) => setEgressCheck(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          Run network egress self-check
+          <span className="text-gray-500"> — verifies the NetworkPolicy (public allowed, private/link-local blocked)</span>
+        </span>
+      </label>
       <div className="flex justify-end">
         <button
           onClick={handleLaunch}

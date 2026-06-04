@@ -47,3 +47,23 @@ the agent image against kubelet image-GC on disk-pressured dev nodes.
 3. Launch. The pod logs should show a `tool_call` → `tool_result` for
    `mcp_tools_demo__get_project_secret_code` and a final answer containing
    `SKY-PENGUIN-42`.
+
+## Demonstrating the NetworkPolicy (egress self-check)
+
+Tick **Run network egress self-check** on the launch form (or POST
+`{"egress_check": true}` to `/api/agent-portal-v3/runs`) to have the agent
+probe a mix of destinations from inside the pod before it starts work and log
+the result as `egress` lines:
+
+```
+egress  ALLOWED https://www.google.com -> HTTP 200 in 0.23s
+egress  BLOCKED http://169.254.169.254/ -> connection error: All connection attempts failed
+egress  BLOCKED http://10.0.0.53/ -> connection error: All connection attempts failed
+```
+
+Public HTTP(S) is permitted; the cloud-metadata link-local address
+(`169.254.169.254`) and RFC1918 private ranges are blocked by the per-run
+NetworkPolicy. Note that `www.google.com:443` is *allowed* by design — the
+policy blocks private/link-local ranges and non-80/443 ports, not the public
+internet. To probe your own targets instead of the defaults, set
+`ATLAS_EGRESS_CHECK` to a comma-separated URL list on the agent container.

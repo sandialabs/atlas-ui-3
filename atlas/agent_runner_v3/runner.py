@@ -42,6 +42,74 @@ def log(kind: str, msg: str, **extra: Any) -> None:
     print(json.dumps(payload), flush=True)
 
 
+# ---------------- Egress self-check (NetworkPolicy demonstration) ----------------
+
+# Default probe set used when ATLAS_EGRESS_CHECK is "1"/"true"/"default". Mixes
+# targets the per-run NetworkPolicy ALLOWS (public HTTPS) with ones it BLOCKS
+# (link-local cloud-metadata + RFC1918 private ranges). Depending on the CNI,
+# a blocked target either fails fast (connection rejected) or hangs until the
+# short timeout below -- either way it never connects, which is the point.
+# Blocked targets are IPs so a failure is the network policy, not DNS.
+DEFAULT_EGRESS_TARGETS = [
+    "https://www.google.com",          # public 443  -> ALLOWED
+    "http://169.254.169.254/",         # cloud metadata (link-local) -> BLOCKED
+    "http://10.0.0.53/",               # RFC1918 private -> BLOCKED
+]
+
+
+async def _egress_check(targets: List[str], timeout_s: float = 6.0) -> None:
+    """Probe each URL from inside the pod and log whether egress is allowed.
+
+    This demonstrates the per-run NetworkPolicy: public HTTP(S) succeeds while
+    private/link-local destinations time out (the policy drops the packets).
+    """
+    log("status", "egress self-check starting", targets=targets, timeout_s=timeout_s)
+    timeout = httpx.Timeout(timeout_s, connect=timeout_s)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        for url in targets:
+            t0 = time.time()
+            try:
+                resp = await client.get(url)
+                dt = round(time.time() - t0, 2)
+                log(
+                    "egress",
+                    f"ALLOWED {url} -> HTTP {resp.status_code} in {dt}s",
+                    url=url, allowed=True, status=resp.status_code, seconds=dt,
+                )
+            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout):
+                dt = round(time.time() - t0, 2)
+                log(
+                    "egress",
+                    f"BLOCKED {url} -> timed out after {dt}s (NetworkPolicy dropped the packets)",
+                    url=url, allowed=False, reason="timeout", seconds=dt,
+                )
+            except httpx.ConnectError as e:
+                dt = round(time.time() - t0, 2)
+                log(
+                    "egress",
+                    f"BLOCKED {url} -> connection error after {dt}s: {e}",
+                    url=url, allowed=False, reason="connect-error", seconds=dt,
+                )
+            except Exception as e:  # noqa: BLE001
+                dt = round(time.time() - t0, 2)
+                log(
+                    "egress",
+                    f"error probing {url} after {dt}s: {e}",
+                    url=url, allowed=False, reason="error", seconds=dt,
+                )
+    log("status", "egress self-check done")
+
+
+def _egress_targets_from_env() -> List[str]:
+    """Resolve ATLAS_EGRESS_CHECK into a target list (empty = disabled)."""
+    raw = (os.environ.get("ATLAS_EGRESS_CHECK") or "").strip()
+    if not raw:
+        return []
+    if raw.lower() in ("1", "true", "yes", "default"):
+        return list(DEFAULT_EGRESS_TARGETS)
+    return [u.strip() for u in raw.split(",") if u.strip()]
+
+
 # ---------------- MCP Streamable HTTP client (minimal) ----------------
 
 class MCPHttpClient:
@@ -257,6 +325,12 @@ async def run_agent() -> int:
     max_iter = int(os.environ.get("ATLAS_MAX_ITERATIONS", "10"))
 
     log("status", "starting", provider=provider, model=model, max_iter=max_iter)
+
+    # Optional egress self-check -- demonstrates the per-run NetworkPolicy by
+    # probing allowed (public) vs blocked (private/link-local) destinations.
+    egress_targets = _egress_targets_from_env()
+    if egress_targets:
+        await _egress_check(egress_targets)
 
     mcp_config_raw = os.environ.get("ATLAS_MCP_CONFIG", "{}")
     try:

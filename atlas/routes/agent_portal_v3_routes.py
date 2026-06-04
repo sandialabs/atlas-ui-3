@@ -16,7 +16,7 @@ Endpoints (all under /api/agent-portal-v3):
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -85,6 +85,14 @@ class LaunchRequest(BaseModel):
         description="Provider key (anthropic, openai, google, ...).",
     )
     display_name: str = Field(default="", max_length=200)
+    egress_check: bool = Field(
+        default=False,
+        description=(
+            "Run a network egress self-check at startup that probes allowed "
+            "(public) vs blocked (private/link-local) destinations and logs "
+            "the result -- demonstrates the per-run NetworkPolicy."
+        ),
+    )
 
 
 # ---- read endpoints ----
@@ -291,6 +299,8 @@ async def launch_run(
     if rejected:
         logger.info("agent_portal_v3 launch: dropping non-remote MCPs: %s", rejected)
 
+    extra_env = {"ATLAS_EGRESS_CHECK": "default"} if req.egress_check else None
+
     record = await runner.launch_run(
         user_email=current_user,
         prompt=req.prompt,
@@ -299,6 +309,7 @@ async def launch_run(
         llm_provider=req.llm_provider,
         llm_model=req.llm_model,
         display_name=req.display_name,
+        extra_env=extra_env,
     )
     payload = serialize_run(record)
     payload["dropped_mcp_servers"] = rejected
