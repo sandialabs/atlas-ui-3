@@ -84,3 +84,16 @@ cd ../atlas && python main.py        # http://127.0.0.1:$PORT
 
 Requires `FEATURE_CHAT_HISTORY_ENABLED=true` (the prompt library shares the
 chat-history database).
+
+## Database / deployment
+
+The `user_prompts` table lives on the shared chat-history `Base`. In local/dev
+(DuckDB) it is created automatically by `init_database()`'s `create_all`. For
+production (PostgreSQL), apply the Alembic migration:
+
+```bash
+CHAT_HISTORY_DB_URL=postgresql://... alembic upgrade head   # adds revision 002
+```
+
+Migration `alembic/versions/002_add_user_prompts.py` creates the table and its
+`ix_user_prompts_user_updated` index; `downgrade` drops them.
