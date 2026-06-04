@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #632 - 2026-06-03
+- **Config**: Split the 1300-line `atlas/modules/config/config_manager.py` into focused modules — `models.py` (Pydantic config models + `resolve_env_var`), `settings.py` (`AppSettings`), and `config_loader.py` (`ConfigManager`). `config_manager.py` is now a thin entry point that re-exports every public symbol plus the singleton and getters, so existing `from atlas.modules.config.config_manager import ...` imports are unchanged. No behavior change; all four modules are now under 500 lines.
+
 ### PR #628 - 2026-06-03
 - **MCP tools**: Renamed the Atlas-injected authenticated user argument from `username` to `_atlas_user`; ordinary `username` tool arguments are no longer overwritten. Bundled example tools that use the authenticated user for audit attribution (csv_reporter, code-executor, file_size_test) now declare `_atlas_user` so the value stays backend-injected and cannot be spoofed by the LLM.
 
