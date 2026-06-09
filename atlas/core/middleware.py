@@ -171,5 +171,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Add user to request state
         request.state.user_email = user_email
 
+        # Capture the Wormhole subtoken (if present) so it can be forwarded to
+        # Wormhole-enabled MCP servers. No-ops when the feature is disabled.
+        try:
+            from atlas.modules.mcp_tools.wormhole_token_store import capture_subtoken_from_headers
+            capture_subtoken_from_headers(request.headers, user_email)
+        except Exception:  # pragma: no cover - never block a request on this
+            logger.debug("Failed to capture Wormhole subtoken from request headers", exc_info=True)
+
         response = await call_next(request)
         return response

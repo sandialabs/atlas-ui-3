@@ -178,6 +178,7 @@ class MCPServerConfig(BaseModel):
     auth_type: str = "none"  # Authentication type: "none", "api_key", "bearer", "jwt", "oauth"
     auth_token: Optional[str] = None     # Bearer token for MCP server authentication (supports ${ENV_VAR})
     oauth_config: Optional[OAuthConfig] = None  # OAuth 2.1 configuration (when auth_type="oauth")
+    wormhole: bool = False  # Forward the per-session Wormhole subtoken (X-Token header) when connecting
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
     require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
     allow_edit: List[str] = Field(default_factory=list)  # LEGACY. List of tool names (without server prefix) allowing argument editing
@@ -570,6 +571,26 @@ class AppSettings(BaseSettings):
         default="/auth",
         description="URL to redirect to when authentication fails",
         validation_alias="AUTH_REDIRECT_URL"
+    )
+
+    # Wormhole authentication settings.
+    # A Wormhole-wrapped Atlas receives a JWT carrying a unique subtoken header
+    # (default ``x-subtoken``) that must be forwarded to Wormhole-enabled MCP
+    # servers as the configured forward header (default ``X-Token``).
+    feature_wormhole_enabled: bool = Field(
+        default=False,
+        description="Enable Wormhole subtoken capture/forwarding for Wormhole-enabled MCP servers",
+        validation_alias="FEATURE_WORMHOLE_ENABLED",
+    )
+    wormhole_subtoken_header: str = Field(
+        default="x-subtoken",
+        description="Incoming request/WebSocket header carrying the Wormhole subtoken",
+        validation_alias="WORMHOLE_SUBTOKEN_HEADER",
+    )
+    wormhole_forward_header: str = Field(
+        default="X-Token",
+        description="Header used to forward the Wormhole subtoken to MCP servers",
+        validation_alias="WORMHOLE_FORWARD_HEADER",
     )
 
     # Globus OAuth settings
