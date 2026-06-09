@@ -53,10 +53,19 @@ def _scale_single_channel_to_8bit(image):
         return Image.new("L", image.size, 0)
 
     scale = 255.0 / (high - low)
-    return image.point(
-        lambda value: max(0, min(255, int((value - low) * scale))),
-        "L",
+    # Pillow's Image.point() cannot be used to downscale the I/I;16/F
+    # high-precision modes here: it probes the callable with an
+    # ImagePointTransform that only supports affine arithmetic (no
+    # int()/min()/max() clamping) and, even when given an arithmetic-only
+    # lambda, ignores the requested "L" target mode. Scale the pixels into
+    # an 8-bit band by hand instead.
+    source = (
+        image.get_flattened_data()
+        if hasattr(image, "get_flattened_data")
+        else image.getdata()
     )
+    scaled = bytes(max(0, min(255, int((value - low) * scale))) for value in source)
+    return Image.frombytes("L", image.size, scaled)
 
 
 def _prepare_image_for_png(image):
@@ -85,6 +94,24 @@ def _convert_tiff_to_png_b64(image_b64: str) -> str:
         output = BytesIO()
         prepared.save(output, format="PNG")
     return base64.b64encode(output.getvalue()).decode()
+
+
+async def _publish_warning(
+    message: str,
+    event_publisher: Optional["EventPublisher"],
+    update_callback: Optional[UpdateCallback],
+) -> None:
+    """Surface a user-facing warning via the event publisher or update callback."""
+    if event_publisher:
+        try:
+            await event_publisher.publish_warning(message=message)
+        except Exception:
+            logger.exception("Failed to send warning event")
+    elif update_callback:
+        try:
+            await update_callback({"type": "warning", "message": message})
+        except Exception:
+            logger.exception("Failed to send warning event")
 
 
 def _normalize_vision_image_for_llm(filename: str, image_b64: str, mime_type: str) -> Optional[tuple[str, str]]:
@@ -202,16 +229,7 @@ async def handle_session_files(
                         f"but cannot be visually analyzed. Switch to a vision-capable "
                         f"model to use image analysis."
                     )
-                    if event_publisher:
-                        try:
-                            await event_publisher.publish_warning(message=warning_msg)
-                        except Exception:
-                            logger.exception("Failed to send vision capability warning")
-                    elif update_callback:
-                        try:
-                            await update_callback({"type": "warning", "message": warning_msg})
-                        except Exception:
-                            logger.exception("Failed to send vision capability warning")
+                    await _publish_warning(warning_msg, event_publisher, update_callback)
                 if model_supports_vision and mime_type in _VISION_IMAGE_MIME_TYPES:
                     b64_len = len(b64)
                     if b64_len > _MAX_VISION_IMAGE_B64_BYTES:
@@ -222,7 +240,18 @@ async def handle_session_files(
                         )
                     else:
                         normalized = _normalize_vision_image_for_llm(filename, b64, mime_type)
-                        if normalized:
+                        if normalized is None:
+                            # Conversion failed (e.g. an unreadable or corrupt
+                            # TIFF). Surface a warning so the user knows the
+                            # image won't be analyzed, rather than silently
+                            # dropping it from the vision payload.
+                            warning_msg = (
+                                f"The image '{filename}' could not be prepared for "
+                                f"vision analysis and will be listed as a file "
+                                f"reference only."
+                            )
+                            await _publish_warning(warning_msg, event_publisher, update_callback)
+                        else:
                             normalized_b64, normalized_mime_type = normalized
                             normalized_b64_len = len(normalized_b64)
                             if normalized_b64_len > _MAX_VISION_IMAGE_B64_BYTES:

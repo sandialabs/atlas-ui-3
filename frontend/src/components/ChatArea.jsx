@@ -583,6 +583,11 @@ const ChatArea = ({ onOpenRagPanel }) => {
   const isImageFile = (filename) =>
     /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(filename)
 
+  // TIFF is accepted for vision (converted to PNG server-side) but browsers
+  // cannot render it in an <img>, so it gets a placeholder thumbnail instead.
+  const isBrowserRenderableImage = (filename) =>
+    /\.(jpe?g|png|gif|webp|bmp)$/i.test(filename)
+
   const getImageMimeType = (filename) => {
     const ext = filename.split('.').pop()?.toLowerCase()
     return IMAGE_MIME_TYPES[ext] || 'image/png'
@@ -968,18 +973,28 @@ const ChatArea = ({ onOpenRagPanel }) => {
                   if (showAsVisionImage) {
                     const mimeType = getImageMimeType(filename)
                     const dataUrl = `data:${mimeType};base64,${fileData.content}`
+                    const canRenderThumbnail = isBrowserRenderableImage(filename)
                     return (
                       <div
                         key={filename}
                         className="relative flex flex-col items-center bg-gray-800 border border-indigo-500/50 rounded-lg p-1 gap-1"
                         style={{ maxWidth: '80px' }}
                       >
-                        <img
-                          src={dataUrl}
-                          alt={filename}
-                          className="w-16 h-16 object-cover rounded"
-                          title={filename}
-                        />
+                        {canRenderThumbnail ? (
+                          <img
+                            src={dataUrl}
+                            alt={filename}
+                            className="w-16 h-16 object-cover rounded"
+                            title={filename}
+                          />
+                        ) : (
+                          <div
+                            className="w-16 h-16 flex items-center justify-center bg-gray-700 rounded"
+                            title={`${filename} (sent as image to vision model)`}
+                          >
+                            <Image className="w-6 h-6 text-indigo-400" />
+                          </div>
+                        )}
                         <div className="flex items-center gap-1 w-full justify-between px-1">
                           <Image className="w-3 h-3 text-indigo-400 flex-shrink-0" title="Sent as image to vision model" />
                           <span className="text-gray-300 text-xs truncate" title={filename} style={{ maxWidth: '44px' }}>{filename}</span>

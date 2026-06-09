@@ -177,6 +177,32 @@ class TestHandleSessionFilesVision:
         assert file_ref.get("image_mime_type") == "image/png"
         assert base64.b64decode(file_ref["image_b64"]).startswith(b"\x89PNG\r\n\x1a\n")
 
+    @pytest.mark.asyncio
+    async def test_tiff_conversion_failure_warns_and_skips_vision(self):
+        """A TIFF that cannot be decoded should warn the user and be dropped
+        from the vision payload rather than failing silently."""
+        fm = _make_file_manager()
+        # Valid base64, but the bytes are not a decodable TIFF image.
+        bad_tiff_b64 = base64.b64encode(b"II*\x00not-a-real-tiff").decode()
+        warnings: list = []
+
+        async def update_callback(event):
+            if event.get("type") == "warning":
+                warnings.append(event["message"])
+
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"broken.tiff": {"content": bad_tiff_b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_vision=True,
+            update_callback=update_callback,
+        )
+        file_ref = context["files"]["broken.tiff"]
+        assert "image_b64" not in file_ref, "Unconvertible TIFF must not be sent as a vision image"
+        assert "image_mime_type" not in file_ref
+        assert any("broken.tiff" in w for w in warnings), "User should be warned about the failed conversion"
+
 
 # ---------------------------------------------------------------------------
 # build_files_manifest tests
