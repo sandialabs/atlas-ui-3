@@ -112,6 +112,29 @@ Wormhole-enabled MCP server
   header; the Wormhole MCP server is then responsible for rejecting the
   unauthenticated call (`MCP session rejected (check authentication/token)`).
 
+## End-to-end validation
+
+A mock of the external Wormhole-enabled MCP server lives at
+[`mocks/wormhole-mcp-mock/`](../../mocks/wormhole-mcp-mock/). It is a
+streamable-HTTP MCP server that reads the forwarded `X-Token` header and records
+what it received, standing in for a real Wormhole MCP service.
+
+```bash
+cd mocks/wormhole-mcp-mock
+./run_e2e.sh      # starts the mock, drives the real Atlas capture->forward path
+```
+
+`e2e_wormhole_test.py` exercises the actual Atlas code
+(`capture_subtoken_from_headers` -> `WormholeTokenStore` ->
+`MCPToolManager.call_tool` -> `StreamableHttpTransport`) against the running mock
+and asserts, via the mock's `/log` endpoint, that:
+
+1. a captured subtoken is forwarded as `X-Token`;
+2. an absent subtoken forwards nothing and the call is rejected; and
+3. a rotated subtoken forwards the new value (the cached client is rebuilt).
+
+The mock also serves an HTML dashboard at `/status` summarising the run.
+
 ## Limitations
 
 - Forwarding requires per-user context, so it applies to user-initiated tool
