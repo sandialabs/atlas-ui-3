@@ -128,6 +128,53 @@ class TestConfigManager:
         assert cm.llm_config is not None
 
 
+class TestPublicImportSurface:
+    """Guard the historical ``config_manager`` import path.
+
+    config_manager.py was split into models/settings/config_loader submodules; it
+    now only re-exports their public symbols. These imports must keep resolving so
+    existing ``from atlas.modules.config.config_manager import ...`` callers (and
+    the alembic env, which imports ``build_db_url_from_parts``) do not break.
+    """
+
+    def test_public_symbols_importable(self):
+        # Import the submodule directly (not via attribute access on the package,
+        # which the package __init__ shadows with the ``config_manager`` singleton).
+        import importlib
+
+        cm = importlib.import_module("atlas.modules.config.config_manager")
+
+        expected = {
+            # Helpers
+            "resolve_env_var",
+            "build_db_url_from_parts",
+            # Models
+            "ModelConfig",
+            "LLMConfig",
+            "OAuthConfig",
+            "MCPServerConfig",
+            "MCPConfig",
+            "RAGSourceConfig",
+            "RAGSourcesConfig",
+            "ToolApprovalConfig",
+            "ToolApprovalsConfig",
+            "FileExtractorConfig",
+            "FileExtractorsConfig",
+            # Settings + loader
+            "AppSettings",
+            "ConfigManager",
+            # Singleton + getters
+            "config_manager",
+            "get_app_settings",
+            "get_llm_config",
+            "get_mcp_config",
+            "get_file_extractors_config",
+        }
+        missing = {name for name in expected if not hasattr(cm, name)}
+        assert not missing, f"config_manager re-export surface lost: {sorted(missing)}"
+        assert expected <= set(cm.__all__)
+
+
 class TestAppSettings:
     """Test AppSettings model."""
 
