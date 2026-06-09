@@ -110,11 +110,13 @@ def capture_subtoken_from_headers(
     """Extract and store the Wormhole subtoken from request/WebSocket headers.
 
     Reads the configured subtoken header (default ``x-subtoken``) from ``headers``
-    and, when the Wormhole feature is enabled, stores it for ``user_email``. Safe
-    to call unconditionally: it no-ops when the feature is disabled or the header
-    is absent.
+    and, when the Wormhole feature is enabled, writes it through to the store for
+    ``user_email``. The write is unconditional: if the header is absent or empty,
+    any previously stored subtoken for the user is cleared, so a stale value is
+    never forwarded on a later MCP call. Safe to call unconditionally: it no-ops
+    only when the feature is disabled or there is no authenticated user.
 
-    Returns the captured subtoken (or ``None``) to aid logging/testing.
+    Returns the captured subtoken (or ``None`` when absent) to aid logging/testing.
     """
     if not user_email:
         return None
@@ -137,6 +139,8 @@ def capture_subtoken_from_headers(
                 subtoken = value
                 break
 
-    if subtoken:
-        get_wormhole_store().set_subtoken(user_email, subtoken)
+    # Write through unconditionally: set_subtoken clears the stored value when
+    # ``subtoken`` is falsy, so a request that arrives without the header does
+    # not leave a previous session's subtoken behind to be forwarded later.
+    get_wormhole_store().set_subtoken(user_email, subtoken)
     return subtoken

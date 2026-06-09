@@ -178,7 +178,7 @@ class MCPServerConfig(BaseModel):
     auth_type: str = "none"  # Authentication type: "none", "api_key", "bearer", "jwt", "oauth"
     auth_token: Optional[str] = None     # Bearer token for MCP server authentication (supports ${ENV_VAR})
     oauth_config: Optional[OAuthConfig] = None  # OAuth 2.1 configuration (when auth_type="oauth")
-    wormhole: bool = False  # Forward the per-session Wormhole subtoken (X-Token header) when connecting
+    wormhole: bool = False  # Forward the per-session Wormhole subtoken (via WORMHOLE_FORWARD_HEADER) when connecting
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
     require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
     allow_edit: List[str] = Field(default_factory=list)  # LEGACY. List of tool names (without server prefix) allowing argument editing

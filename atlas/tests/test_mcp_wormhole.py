@@ -137,6 +137,17 @@ def test_capture_custom_header_name():
     assert result == "custom-header-value"
 
 
+def test_capture_clears_stale_subtoken_when_header_absent():
+    # A previously stored subtoken must be cleared (write-through) when a later
+    # request for the same user arrives without the header, so the stale value
+    # is never forwarded on a subsequent MCP call.
+    get_wormhole_store().set_subtoken("user6@x.com", "old-stored-value")
+    with _patch_settings():
+        result = capture_subtoken_from_headers({"unrelated": "x"}, "user6@x.com")
+    assert result is None
+    assert get_wormhole_store().get_subtoken("user6@x.com") is None
+
+
 # --------------------------------------------------------------------------
 # MCPToolManager helpers + client creation
 # --------------------------------------------------------------------------
@@ -271,3 +282,50 @@ async def test_http_client_rebuilt_on_subtoken_rotation(manager):
         c2 = await manager._get_or_create_user_http_client("wh", "alice@test.com", "conv-1")
         assert c2 is not c1
         assert MockClient.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_user_auth_client_rebuilt_on_subtoken_rotation(manager):
+    """A server with both auth_type and wormhole rebuilds its cached client when
+    the subtoken rotates, even though the primary auth token stays valid."""
+    manager.servers_config["wh_auth"] = {
+        "url": "http://127.0.0.1:8010/mcp",
+        "transport": "http",
+        "auth_type": "api_key",
+        "auth_header": "X-API-Key",
+        "wormhole": True,
+    }
+    get_wormhole_store().set_subtoken("alice@test.com", "sub-token-1")
+
+    stored = SimpleNamespace(token_value="api-key-value")
+    fake_storage = MagicMock()
+    fake_storage.get_valid_token.return_value = stored
+
+    with patch(
+        "atlas.modules.mcp_tools.token_storage.get_token_storage",
+        return_value=fake_storage,
+    ), patch("atlas.modules.mcp_tools.client.Client") as MockClient, patch(
+        "atlas.modules.mcp_tools.client.StreamableHttpTransport"
+    ) as MockTransport, patch.object(
+        manager, "_close_user_client_entries", AsyncMock(return_value=None)
+    ), patch.object(
+        manager, "_close_user_client_entry", AsyncMock(return_value=None)
+    ):
+        MockClient.side_effect = [MagicMock(name="c1"), MagicMock(name="c2")]
+
+        c1 = await manager._get_user_client("wh_auth", "alice@test.com", "conv-1")
+        # Same subtoken + valid token -> cached client reused.
+        c1b = await manager._get_user_client("wh_auth", "alice@test.com", "conv-1")
+        assert c1 is c1b
+        assert MockClient.call_count == 1
+        _, kwargs = MockTransport.call_args
+        assert kwargs["headers"]["X-API-Key"] == "api-key-value"
+        assert kwargs["headers"]["X-Token"] == "sub-token-1"
+
+        # Rotate subtoken while the API key stays valid -> client rebuilt.
+        get_wormhole_store().set_subtoken("alice@test.com", "sub-token-2")
+        c2 = await manager._get_user_client("wh_auth", "alice@test.com", "conv-1")
+        assert c2 is not c1
+        assert MockClient.call_count == 2
+        _, kwargs2 = MockTransport.call_args
+        assert kwargs2["headers"]["X-Token"] == "sub-token-2"

@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #640 - 2026-06-09
-- **Wormhole MCP auth**: Added support for Wormhole-authenticated MCP connections. When `FEATURE_WORMHOLE_ENABLED=true`, Atlas captures the per-session `x-subtoken` header (configurable via `WORMHOLE_SUBTOKEN_HEADER`) from each authenticated WebSocket handshake and HTTP request, stores it in a per-user, session-scoped in-memory store, and forwards it as an `X-Token` header (configurable via `WORMHOLE_FORWARD_HEADER`) when opening streamable-HTTP connections to MCP servers marked `wormhole: true` in `mcp.json`. Cached per-conversation clients are rebuilt when the subtoken rotates so stale tokens are never reused. The subtoken is never persisted to disk and is only logged masked.
+- **Wormhole MCP auth**: Added opt-in Wormhole support (`FEATURE_WORMHOLE_ENABLED`). Atlas captures the per-session `x-subtoken` request header and forwards it as `X-Token` to MCP servers marked `wormhole: true` in `mcp.json` (header names configurable via `WORMHOLE_SUBTOKEN_HEADER`/`WORMHOLE_FORWARD_HEADER`). The subtoken is held in memory only, logged masked, and cached clients are rebuilt when it rotates or clears. See `docs/admin/mcp-wormhole-authentication.md`.
 
 ### PR #637 - 2026-06-09
 - **Vision uploads**: TIFF files (`.tif`/`.tiff`) are accepted as image uploads and converted to PNG before being embedded in LLM vision requests, including high-precision grayscale TIFFs (`I`/`I;16`/`F` modes).

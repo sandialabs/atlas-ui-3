@@ -1898,21 +1898,37 @@ class MCPToolManager:
         token_storage = get_token_storage()
         cache_key = (normalize_user_email(user_email), server_name, conversation_id)
 
+        # Resolve the current Wormhole subtoken (None for non-Wormhole servers).
+        # A cached client whose baked-in subtoken differs is stale and must be
+        # rebuilt even when its primary auth token is still valid.
+        current_subtoken = self._current_wormhole_subtoken(server_name, user_email)
+
         # Check cache first, but validate token is still valid
         removed = []
         async with self._user_clients_lock:
+            self._ensure_user_client_cache_state()
             if cache_key in self._user_clients:
                 # Verify the token is still valid before returning cached client
                 stored_token = token_storage.get_valid_token(user_email, server_name)
-                if stored_token is not None:
+                subtoken_unchanged = (
+                    self._wormhole_client_subtokens.get(cache_key) == current_subtoken
+                )
+                if stored_token is not None and subtoken_unchanged:
                     self._touch_user_client_locked(cache_key)
                     return self._user_clients[cache_key]
                 else:
-                    # Token expired or removed, invalidate cached client
-                    logger.debug(
-                        f"Token expired for user on server '{server_name}', "
-                        f"invalidating cached client"
-                    )
+                    # Token expired/removed, or the Wormhole subtoken rotated;
+                    # invalidate the cached client so it is rebuilt below.
+                    if stored_token is not None and not subtoken_unchanged:
+                        logger.debug(
+                            "Wormhole subtoken changed for server '%s'; rebuilding client",
+                            sanitize_for_logging(server_name),
+                        )
+                    else:
+                        logger.debug(
+                            f"Token expired for user on server '{server_name}', "
+                            f"invalidating cached client"
+                        )
                     removed = self._pop_user_client_entries_locked([cache_key])
 
         await self._close_user_client_entries(removed)
@@ -1996,6 +2012,8 @@ class MCPToolManager:
                     cached_client = self._user_clients[cache_key]
                 else:
                     self._user_clients[cache_key] = client
+                    if current_subtoken is not None:
+                        self._wormhole_client_subtokens[cache_key] = current_subtoken
                     self._touch_user_client_locked(cache_key)
                     evicted = self._enforce_user_client_cache_limit_locked()
                     cached_client = client
