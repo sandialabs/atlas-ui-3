@@ -113,3 +113,4 @@ backend/report.md
 screenshots/
 !docs/**/screenshots/
 docs/planning/improvements1.md
+scripts/_e2e_artifacts/

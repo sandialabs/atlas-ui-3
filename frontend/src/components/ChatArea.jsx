@@ -576,10 +576,16 @@ const ChatArea = ({ onOpenRagPanel }) => {
   // Raster formats only — SVG is vector XML, not useful for LLM vision.
   const IMAGE_MIME_TYPES = {
     jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp'
+    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+    tif: 'image/tiff', tiff: 'image/tiff'
   }
 
   const isImageFile = (filename) =>
+    /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(filename)
+
+  // TIFF is accepted for vision (converted to PNG server-side) but browsers
+  // cannot render it in an <img>, so it gets a placeholder thumbnail instead.
+  const isBrowserRenderableImage = (filename) =>
     /\.(jpe?g|png|gif|webp|bmp)$/i.test(filename)
 
   const getImageMimeType = (filename) => {
@@ -967,18 +973,28 @@ const ChatArea = ({ onOpenRagPanel }) => {
                   if (showAsVisionImage) {
                     const mimeType = getImageMimeType(filename)
                     const dataUrl = `data:${mimeType};base64,${fileData.content}`
+                    const canRenderThumbnail = isBrowserRenderableImage(filename)
                     return (
                       <div
                         key={filename}
                         className="relative flex flex-col items-center bg-gray-800 border border-indigo-500/50 rounded-lg p-1 gap-1"
                         style={{ maxWidth: '80px' }}
                       >
-                        <img
-                          src={dataUrl}
-                          alt={filename}
-                          className="w-16 h-16 object-cover rounded"
-                          title={filename}
-                        />
+                        {canRenderThumbnail ? (
+                          <img
+                            src={dataUrl}
+                            alt={filename}
+                            className="w-16 h-16 object-cover rounded"
+                            title={filename}
+                          />
+                        ) : (
+                          <div
+                            className="w-16 h-16 flex items-center justify-center bg-gray-700 rounded"
+                            title={`${filename} (sent as image to vision model)`}
+                          >
+                            <Image className="w-6 h-6 text-indigo-400" />
+                          </div>
+                        )}
                         <div className="flex items-center gap-1 w-full justify-between px-1">
                           <Image className="w-3 h-3 text-indigo-400 flex-shrink-0" title="Sent as image to vision model" />
                           <span className="text-gray-300 text-xs truncate" title={filename} style={{ maxWidth: '44px' }}>{filename}</span>
@@ -1191,7 +1207,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
             multiple
             onChange={handleFileUpload}
             className="hidden"
-            accept=".pdf,.txt,.doc,.docx,.jpg,.jpeg,.png,.gif,.csv,.xlsx,.xls,.json,.md,.log"
+            accept=".pdf,.txt,.doc,.docx,.jpg,.jpeg,.png,.gif,.tif,.tiff,.csv,.xlsx,.xls,.json,.md,.log"
           />
           
           <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
