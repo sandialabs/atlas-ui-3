@@ -7,13 +7,18 @@
 ## Overview
 
 A *Wormhole*-wrapped Atlas instance runs behind a Wormhole proxy that
-authenticates the user and issues a JWT carrying a unique per-session
-`x-subtoken` header. Downstream MCP servers that are themselves Wormhole-enabled
-require that subtoken in order to authorize calls made on the user's behalf.
+authenticates the user. The subtoken originates as a field in the JWT the
+Wormhole wrapper receives, but the wrapper **unpacks it into the incoming HTTP
+request as the `x-subtoken` header** before the request reaches Atlas. Atlas
+therefore reads it as a plain request header and does **not** decode the JWT
+itself. Downstream MCP servers that are themselves Wormhole-enabled require that
+subtoken in order to authorize calls made on the user's behalf.
 
-This feature captures the `x-subtoken` from each authenticated request and
+This feature captures the `x-subtoken` header from each authenticated request and
 forwards it to the MCP servers that opt in, as an `X-Token` header, when Atlas
-opens a streamable-HTTP connection.
+opens a streamable-HTTP connection. (Reading from the header and forwarding as
+`X-Token` were both confirmed by the issue author in
+[#640](https://github.com/sandialabs/atlas-ui-3/issues/640).)
 
 The subtoken is:
 
