@@ -24,18 +24,25 @@ import logging
 import threading
 from typing import Dict, Mapping, Optional
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
 
 def _mask(token: Optional[str]) -> str:
-    """Return a log-safe representation of a subtoken (first/last chars only)."""
+    """Return a log-safe representation of a subtoken (first/last chars only).
+
+    The token is user-controlled, so it is run through ``sanitize_for_logging``
+    (which strips newlines and control characters) before any characters are
+    revealed, preventing log-injection/forging via a crafted subtoken.
+    """
     if not token:
         return "<none>"
-    if len(token) <= 8:
-        return "*" * len(token)
-    return f"{token[:4]}...{token[-4:]}"
+    safe = sanitize_for_logging(token)
+    if len(safe) <= 8:
+        return "*" * len(safe)
+    return f"{safe[:4]}...{safe[-4:]}"
 
 
 class WormholeTokenStore:

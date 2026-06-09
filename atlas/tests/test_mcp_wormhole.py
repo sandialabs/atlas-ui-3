@@ -67,6 +67,16 @@ def test_get_wormhole_store_is_singleton():
     assert get_wormhole_store() is get_wormhole_store()
 
 
+def test_mask_strips_log_injection_characters():
+    from atlas.modules.mcp_tools.wormhole_token_store import _mask
+
+    masked = _mask("ab\r\ncd-FAKE LOG ENTRY-\nwxyz")
+    # No newline/CR can survive into the log line.
+    assert "\n" not in masked and "\r" not in masked
+    # Still a masked snippet, not the full value.
+    assert "FAKE LOG ENTRY" not in masked
+
+
 # --------------------------------------------------------------------------
 # capture_subtoken_from_headers
 # --------------------------------------------------------------------------
