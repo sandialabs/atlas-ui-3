@@ -2,13 +2,13 @@
 End-to-end proof for PR #637: high-precision TIFF -> vision LLM.
 
 Builds a 16-bit grayscale (I;16) TIFF — the exact Pillow mode whose
-conversion was broken — containing a hard-to-guess secret string, runs it
+conversion was broken — containing a hard-to-guess marker string, runs it
 through the *real* Atlas production code path
 (handle_session_files -> _normalize_vision_image_for_llm ->
 _convert_tiff_to_png_b64 -> _build_vision_user_message), then sends the
 resulting vision message to a real vision-capable model (OpenAI gpt-4o).
 
-If the model reads back the secret string, the whole pipeline works on a
+If the model reads back the marker string, the whole pipeline works on a
 genuine high-precision TIFF, end to end.
 
 Run from repo root:  python scripts/_tiff_vision_e2e_proof.py
@@ -27,7 +27,7 @@ from atlas.application.chat.utilities.file_processor import handle_session_files
 from atlas.modules.file_storage.manager import FileManager
 from atlas.modules.file_storage.mock_s3_client import MockS3StorageClient
 
-SECRET = "ATLAS-TIFF-7391"
+MARKER_TEXT = "ATLAS-TIFF-7391"
 PROMPT = (
     "This image is a scanned document. Read the text exactly as it appears "
     "and report it verbatim. Then describe the shape drawn below the text."
@@ -47,7 +47,7 @@ def build_high_precision_tiff(path_png_preview: str) -> bytes:
     except OSError:
         font = ImageFont.load_default()
         small = ImageFont.load_default()
-    draw.text((40, 40), SECRET, fill=255, font=font)          # white text
+    draw.text((40, 40), MARKER_TEXT, fill=255, font=font)          # white text
     draw.text((40, 110), "high-precision tiff", fill=200, font=small)
     # A distinctive shape below the text: a hollow triangle.
     draw.polygon([(320, 180), (250, 230), (390, 230)], outline=255, width=4)
@@ -128,22 +128,22 @@ async def main() -> int:
     answer = resp.choices[0].message.content
     print(f"[4] {model} response:\n{answer}\n")
 
-    passed = SECRET in (answer or "")
+    passed = MARKER_TEXT in (answer or "")
     result = {
         "model": model,
         "source_tiff_pil_mode": src_mode,
         "source_tiff_bytes": len(tiff_bytes),
         "converted_png_bytes": len(converted_png),
         "converted_mime": img_mime,
-        "secret_in_image": SECRET,
+        "marker_in_image": MARKER_TEXT,
         "model_response": answer,
-        "secret_read_back_by_model": passed,
+        "marker_read_back_by_model": passed,
     }
     with open(f"{OUT_DIR}/result.json", "w") as fh:
         json.dump(result, fh, indent=2)
 
     print(f"[5] PASS={passed} (model {'READ' if passed else 'did NOT read'} "
-          f"the secret {SECRET!r})")
+          f"the marker {MARKER_TEXT!r})")
     return 0 if passed else 1
 
 
