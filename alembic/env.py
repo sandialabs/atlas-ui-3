@@ -12,8 +12,8 @@ from alembic import context
 # Add project root to path so we can import atlas modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from atlas.modules.config.config_manager import build_db_url_from_parts
 from atlas.modules.chat_history.models import Base
+from atlas.modules.config.config_manager import build_db_url_from_parts
 
 config = context.config
 
