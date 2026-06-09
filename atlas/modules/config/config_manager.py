@@ -8,8 +8,8 @@ This module provides a unified configuration system that:
 - Supports both .env files and direct environment variables
 
 The implementation is split across three submodules:
-- ``models``        - Pydantic config models (LLM, MCP, RAG, etc.)
-- ``settings``      - ``AppSettings`` + ``resolve_env_var`` helper
+- ``models``        - Pydantic config models (LLM, MCP, RAG, etc.) + ``resolve_env_var`` helper
+- ``settings``      - ``AppSettings`` + ``build_db_url_from_parts`` helper
 - ``config_loader`` - ``ConfigManager`` lazy file loaders
 
 This module re-exports those symbols so the historical import path
@@ -32,11 +32,12 @@ from .models import (
     ToolApprovalsConfig,
     resolve_env_var,
 )
-from .settings import AppSettings
+from .settings import AppSettings, build_db_url_from_parts
 
 __all__ = [
     # Helpers
     "resolve_env_var",
+    "build_db_url_from_parts",
     # Models
     "ModelConfig",
     "LLMConfig",

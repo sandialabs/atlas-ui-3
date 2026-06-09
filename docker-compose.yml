@@ -96,6 +96,8 @@ services:
       - FEATURE_MARKETPLACE_ENABLED=true
       - FEATURE_FILES_PANEL_ENABLED=true
       - FEATURE_CHAT_HISTORY_ENABLED=true
+      # Per-user custom prompt library (requires chat history)
+      - FEATURE_CUSTOM_PROMPTS_ENABLED=false
       # Chat history DB (choose one):
       # DuckDB (default, no extra services required):
       - CHAT_HISTORY_DB_URL=duckdb:///data/chat_history.db

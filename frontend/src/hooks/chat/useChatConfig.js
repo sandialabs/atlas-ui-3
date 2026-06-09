@@ -7,6 +7,7 @@ const DEFAULT_FEATURES = {
   marketplace: false,
   files_panel: false,
   chat_history: false,
+  custom_prompts: false,
   compliance_levels: false,
   file_content_extraction: false
 }

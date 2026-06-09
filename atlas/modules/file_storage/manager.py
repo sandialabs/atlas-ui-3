@@ -50,6 +50,8 @@ class FileManager:
             'jpg': 'image/jpeg',
             'jpeg': 'image/jpeg',
             'gif': 'image/gif',
+            'tif': 'image/tiff',
+            'tiff': 'image/tiff',
             'py': 'text/x-python',
             'js': 'application/javascript',
             'html': 'text/html',
@@ -63,7 +65,7 @@ class FileManager:
         extension = filename.lower().split('.')[-1] if '.' in filename else ''
 
         code_extensions = {'py', 'js', 'jsx', 'ts', 'tsx', 'html', 'css', 'java', 'cpp', 'c', 'rs', 'go', 'php', 'rb', 'swift'}
-        image_extensions = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg', 'webp'}
+        image_extensions = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg', 'webp', 'tif', 'tiff'}
         data_extensions = {'csv', 'json', 'xlsx', 'xls', 'xml'}
         document_extensions = {'pdf', 'doc', 'docx', 'txt', 'md', 'rtf'}
 

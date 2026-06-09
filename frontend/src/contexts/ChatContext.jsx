@@ -3,7 +3,8 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef } f
 import { useWS } from './WSContext'
 import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
-import { useSelections } from '../hooks/chat/useSelections'
+import { useSelections, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import { useUserPrompts } from '../hooks/useUserPrompts'
 import { useAgentMode } from '../hooks/chat/useAgentMode'
 import { useMessages } from '../hooks/chat/useMessages'
 import { useFiles } from '../hooks/chat/useFiles'
@@ -36,6 +37,9 @@ export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
 	const selections = useSelections()
+	const customPromptsEnabled = !!config.features?.custom_prompts
+	// User-authored custom prompt library (issue #153)
+	const userPrompts = useUserPrompts(customPromptsEnabled)
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
@@ -91,7 +95,14 @@ export const ChatProvider = ({ children }) => {
 		const { sendMessage, addMessageHandler, isConnected } = useWS()
 	const toast = useToast()
 	const { currentModel } = config
-	const { selectedTools, selectedPrompts, activePrompts, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
+	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
+
+	useEffect(() => {
+		if (!config.configReady || customPromptsEnabled) return
+		if (isUserPromptKey(activePromptKey)) {
+			clearActivePrompt()
+		}
+	}, [config.configReady, customPromptsEnabled, activePromptKey, clearActivePrompt])
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -273,8 +284,16 @@ export const ChatProvider = ({ children }) => {
 			selections.removePrompts(stalePromptKeys)
 		}
 
-		// Clear active prompt if it no longer exists in config
-		if (selections.activePromptKey && !validPromptKeys.has(selections.activePromptKey)) {
+		// Clear active prompt if it no longer exists in config. User-authored
+		// prompts (issue #153) live outside config.prompts (they're fetched
+		// separately), so they must be exempt here or a persisted active user
+		// prompt would be cleared on every config load — reverting to Default
+		// after a refresh.
+		if (
+			selections.activePromptKey &&
+			!isUserPromptKey(selections.activePromptKey) &&
+			!validPromptKeys.has(selections.activePromptKey)
+		) {
 			// Clear stale active prompt that no longer exists in config
 			selections.clearActivePrompt()
 		}
@@ -330,12 +349,28 @@ export const ChatProvider = ({ children }) => {
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []
 
+		// A user-authored custom prompt (issue #153) replaces the default system
+		// prompt and is sent as custom_system_prompt — never as an MCP prompt.
+		// The selected_prompts exclusion is gated purely on the key type and stays
+		// unconditional even when the feature is disabled: a stale userprompt:* key
+		// persisted from when the feature was on must never leak into the MCP
+		// selected_prompts payload (the clear-stale-key effect runs after render, so
+		// a send could otherwise race ahead of it). Resolving the prompt content is
+		// the part gated on the feature flag; if it no longer resolves we fall back
+		// to the default system prompt.
+		const activeKey = selections.activePromptKey
+		const activeKeyIsUserPrompt = isUserPromptKey(activeKey)
+		const activeUserPrompt = (customPromptsEnabled && activeKeyIsUserPrompt)
+			? userPrompts.prompts.find(p => p.id === userPromptIdFromKey(activeKey))
+			: null
+
 		const sent = sendMessage({
 			type: 'chat',
 			content,
 			model: currentModel,
 			selected_tools: [...selectedTools],
-			selected_prompts: activePrompts,
+			selected_prompts: activeKeyIsUserPrompt ? [] : activePrompts,
+			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			selected_data_sources: dataSourcesToSend,
 			tool_choice_required: selections.toolChoiceRequired,
 			user: config.user,
@@ -369,7 +404,7 @@ export const ChatProvider = ({ children }) => {
 		setIsThinking(true)
 		setIsSynthesizing(false)
 		return true
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
 		// If there is any chat content or generation in progress, confirm before
@@ -696,6 +731,14 @@ export const ChatProvider = ({ children }) => {
 		makePromptActive: selections.makePromptActive,
 		clearActivePrompt: selections.clearActivePrompt,
 		activePromptKey: selections.activePromptKey,
+		// User-authored custom prompt library (issue #153)
+		userPrompts: userPrompts.prompts,
+		userPromptsLoading: userPrompts.loading,
+		userPromptsError: userPrompts.error,
+		fetchUserPrompts: userPrompts.fetchPrompts,
+		createUserPrompt: userPrompts.createPrompt,
+		updateUserPrompt: userPrompts.updatePrompt,
+		deleteUserPrompt: userPrompts.deletePrompt,
 		selectAllServerPrompts,
 		deselectAllServerPrompts,
 		selectedDataSources: selections.selectedDataSources,

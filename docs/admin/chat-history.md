@@ -84,6 +84,9 @@ cd /path/to/atlas-ui-3   # project root, same directory as alembic.ini
 # Set the database URL (or have it in your .env)
 export CHAT_HISTORY_DB_URL=postgresql://atlas:atlas@localhost:5432/atlas_chat_history
 
+# Alternatively, leave CHAT_HISTORY_DB_URL unset and provide DB_HOST, DB_PORT,
+# DB_NAME, DB_USER, DB_PASSWORD, and optional DB_DRIVER; Alembic assembles the URL.
+
 # Apply all migrations to bring the database up to date
 alembic upgrade head
 

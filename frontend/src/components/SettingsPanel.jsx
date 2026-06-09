@@ -1,9 +1,19 @@
-import { X, RotateCcw, LogIn, LogOut, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
+import { X, RotateCcw, LogIn, LogOut, RefreshCw, CheckCircle, AlertCircle, Sparkles, SlidersHorizontal, UserCircle } from 'lucide-react'
 import { useState, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useGlobusAuth } from '../hooks/useGlobusAuth'
+import PromptManager from './PromptManager'
+
+const TABS = [
+  { id: 'prompts', label: 'Prompts', icon: Sparkles },
+  { id: 'general', label: 'General', icon: SlidersHorizontal },
+  { id: 'userInfo', label: 'User Info', icon: UserCircle },
+]
 
 const SettingsPanel = ({ isOpen, onClose }) => {
+  // Active settings tab. Prompt manager is first since it is the most-used
+  // surface (issue #153); General holds the legacy settings.
+  const [activeTab, setActiveTab] = useState('prompts')
   // Default settings
   const defaultSettings = {
     llmTemperature: 0.7,
@@ -16,7 +26,11 @@ const SettingsPanel = ({ isOpen, onClose }) => {
   const [hasChanges, setHasChanges] = useState(false)
 
   // Also get live settings from ChatContext for always-in-sync fields
-  const { settings: ctxSettings, updateSettings: updateCtxSettings, features } = useChat()
+  const { settings: ctxSettings, updateSettings: updateCtxSettings, features, agentModeAvailable } = useChat()
+  const customPromptsEnabled = !!features?.custom_prompts
+  const visibleTabs = customPromptsEnabled
+    ? TABS
+    : TABS.filter(tab => tab.id !== 'prompts')
 
   // Globus auth state
   const {
@@ -39,6 +53,12 @@ const SettingsPanel = ({ isOpen, onClose }) => {
   useEffect(() => {
     fetchGlobusIfEnabled()
   }, [fetchGlobusIfEnabled])
+
+  useEffect(() => {
+    if (!customPromptsEnabled && activeTab === 'prompts') {
+      setActiveTab('general')
+    }
+  }, [activeTab, customPromptsEnabled])
 
   // Check for Globus auth callback params in URL
   useEffect(() => {
@@ -120,8 +140,8 @@ const SettingsPanel = ({ isOpen, onClose }) => {
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
       onClick={onClose}
     >
-      <div 
-        className="bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] mx-4 flex flex-col"
+      <div
+        className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[85vh] mx-4 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -135,7 +155,50 @@ const SettingsPanel = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        {/* Settings Content */}
+        {/* Tab navigation */}
+        <div className="flex items-center gap-1 px-4 border-b border-gray-700 flex-shrink-0">
+          {visibleTabs.map((tab) => {
+            const Icon = tab.icon
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-blue-500 text-gray-50'
+                    : 'border-transparent text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Prompts tab (issue #153) */}
+        {customPromptsEnabled && activeTab === 'prompts' && (
+          <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6">
+            <PromptManager />
+          </div>
+        )}
+
+        {/* User Info tab (placeholder for issue #595) */}
+        {activeTab === 'userInfo' && (
+          <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6">
+            <div className="p-6 bg-gray-700 rounded-lg text-center">
+              <UserCircle className="w-10 h-10 text-gray-500 mx-auto mb-3" />
+              <h3 className="text-gray-200 font-medium">User Info — Coming Soon</h3>
+              <p className="text-sm text-gray-400 mt-2 max-w-md mx-auto">
+                A persistent profile (admin defaults plus AI-injected knowledge) that
+                can be supplied to RAG and tool calls. Tracked in issue #595.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* General settings tab */}
+        {activeTab === 'general' && (
         <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6 space-y-6">
           {/* LLM Temperature Setting */}
           <div className="space-y-3">
@@ -167,73 +230,77 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             </div>
           </div>
 
-          {/* Max Iterations Setting */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-gray-50 font-medium">Max Agent Iterations</label>
-              <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
-                {settings.maxIterations}
-              </span>
-            </div>
-            <div className="space-y-2">
-              <input
-                type="range"
-                min="1"
-                max="50"
-                step="1"
-                value={settings.maxIterations}
-                onChange={(e) => handleSettingChange('maxIterations', parseInt(e.target.value))}
-                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
-              />
-              <div className="flex justify-between text-xs text-gray-400">
-                <span>1</span>
-                <span>25</span>
-                <span>50</span>
+          {agentModeAvailable && (
+            <>
+              {/* Max Iterations Setting */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-gray-50 font-medium">Max Agent Iterations</label>
+                  <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
+                    {settings.maxIterations}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <input
+                    type="range"
+                    min="1"
+                    max="50"
+                    step="1"
+                    value={settings.maxIterations}
+                    onChange={(e) => handleSettingChange('maxIterations', parseInt(e.target.value))}
+                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
+                  />
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>1</span>
+                    <span>25</span>
+                    <span>50</span>
+                  </div>
+                  <p className="text-sm text-gray-400">
+                    Maximum number of iterations an agent can perform when solving complex tasks. 
+                    Higher values allow for more thorough problem solving but may take longer.
+                  </p>
+                </div>
               </div>
-              <p className="text-sm text-gray-400">
-                Maximum number of iterations an agent can perform when solving complex tasks. 
-                Higher values allow for more thorough problem solving but may take longer.
-              </p>
-            </div>
-          </div>
 
-          {/* Agent Loop Strategy Setting */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-gray-50 font-medium">Agent Loop Strategy</label>
-              <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
-                {settings.agentLoopStrategy === 'agentic' ? 'Agentic' : settings.agentLoopStrategy === 'react' ? 'ReAct' : settings.agentLoopStrategy === 'act' ? 'Act' : 'Think-Act'}
-              </span>
-            </div>
-            <div className="space-y-2">
-              <select
-                value={settings.agentLoopStrategy}
-                onChange={(e) => handleSettingChange('agentLoopStrategy', e.target.value)}
-                className="w-full px-3 py-2 bg-gray-700 text-gray-50 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-              >
-                <option value="agentic">Agentic (Recommended)</option>
-                <option value="think-act">Think-Act</option>
-                <option value="react">ReAct</option>
-                <option value="act">Act</option>
-              </select>
-              <p className="text-sm text-gray-400">
-                <strong className="text-gray-300">Agentic:</strong> Native agentic loop with no control tools and tool_choice=auto.
-                The model decides when to call tools and when to respond. Best for models with strong native tool-use training.
-              </p>
-              <p className="text-sm text-gray-400">
-                <strong className="text-gray-300">Think-Act:</strong> Concise, unified reasoning approach.
-                Faster iterations with fewer LLM calls. Better for most workflows and quick tasks.
-              </p>
-              <p className="text-sm text-gray-400">
-                <strong className="text-gray-300">ReAct:</strong> Structured reasoning with Reason-Act-Observe phases.
-                Better for complex tasks requiring multiple tools and detailed planning. Slower but more thorough.
-              </p>
-              <p className="text-sm text-gray-400">
-                <strong className="text-gray-300">Act:</strong> Pure action loop without explicit reasoning steps.
-                Fastest strategy with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool.
-              </p>
-            </div>
-          </div>
+              {/* Agent Loop Strategy Setting */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-gray-50 font-medium">Agent Loop Strategy</label>
+                  <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
+                    {settings.agentLoopStrategy === 'agentic' ? 'Agentic' : settings.agentLoopStrategy === 'react' ? 'ReAct' : settings.agentLoopStrategy === 'act' ? 'Act' : 'Think-Act'}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <select
+                    value={settings.agentLoopStrategy}
+                    onChange={(e) => handleSettingChange('agentLoopStrategy', e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700 text-gray-50 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <option value="agentic">Agentic (Recommended)</option>
+                    <option value="think-act">Think-Act</option>
+                    <option value="react">ReAct</option>
+                    <option value="act">Act</option>
+                  </select>
+                  <p className="text-sm text-gray-400">
+                    <strong className="text-gray-300">Agentic:</strong> Native agentic loop with no control tools and tool_choice=auto.
+                    The model decides when to call tools and when to respond. Best for models with strong native tool-use training.
+                  </p>
+                  <p className="text-sm text-gray-400">
+                    <strong className="text-gray-300">Think-Act:</strong> Concise, unified reasoning approach.
+                    Faster iterations with fewer LLM calls. Better for most workflows and quick tasks.
+                  </p>
+                  <p className="text-sm text-gray-400">
+                    <strong className="text-gray-300">ReAct:</strong> Structured reasoning with Reason-Act-Observe phases.
+                    Better for complex tasks requiring multiple tools and detailed planning. Slower but more thorough.
+                  </p>
+                  <p className="text-sm text-gray-400">
+                    <strong className="text-gray-300">Act:</strong> Pure action loop without explicit reasoning steps.
+                    Fastest strategy with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool.
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Auto-Approve Tools Setting (always in sync via context) */}
           <div className="bg-gray-700 rounded-lg p-4">
@@ -372,18 +439,11 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             </div>
           )}
 
-          {/* Future Settings Placeholder */}
-          <div className="pt-4 border-t border-gray-700">
-            <h3 className="text-lg font-medium text-gray-300 mb-3">Coming Soon</h3>
-            <div className="space-y-3 opacity-50">
-              <div className="p-3 bg-gray-700 rounded-lg">
-                <div className="text-sm text-gray-400">More customization options will be added here</div>
-              </div>
-            </div>
-          </div>
         </div>
+        )}
 
-        {/* Footer Actions */}
+        {/* Footer Actions (General settings only) */}
+        {activeTab === 'general' && (
         <div className="flex items-center justify-between p-6 border-t border-gray-700 flex-shrink-0">
           <button
             onClick={handleReset}
@@ -392,7 +452,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             <RotateCcw className="w-4 h-4" />
             Reset to Defaults
           </button>
-          
+
           <div className="flex items-center gap-3">
             <button
               onClick={handleCancel}
@@ -413,6 +473,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             </button>
           </div>
         </div>
+        )}
       </div>
     </div>
   )

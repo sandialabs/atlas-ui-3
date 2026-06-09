@@ -128,6 +128,53 @@ class TestConfigManager:
         assert cm.llm_config is not None
 
 
+class TestPublicImportSurface:
+    """Guard the historical ``config_manager`` import path.
+
+    config_manager.py was split into models/settings/config_loader submodules; it
+    now only re-exports their public symbols. These imports must keep resolving so
+    existing ``from atlas.modules.config.config_manager import ...`` callers (and
+    the alembic env, which imports ``build_db_url_from_parts``) do not break.
+    """
+
+    def test_public_symbols_importable(self):
+        # Import the submodule directly (not via attribute access on the package,
+        # which the package __init__ shadows with the ``config_manager`` singleton).
+        import importlib
+
+        cm = importlib.import_module("atlas.modules.config.config_manager")
+
+        expected = {
+            # Helpers
+            "resolve_env_var",
+            "build_db_url_from_parts",
+            # Models
+            "ModelConfig",
+            "LLMConfig",
+            "OAuthConfig",
+            "MCPServerConfig",
+            "MCPConfig",
+            "RAGSourceConfig",
+            "RAGSourcesConfig",
+            "ToolApprovalConfig",
+            "ToolApprovalsConfig",
+            "FileExtractorConfig",
+            "FileExtractorsConfig",
+            # Settings + loader
+            "AppSettings",
+            "ConfigManager",
+            # Singleton + getters
+            "config_manager",
+            "get_app_settings",
+            "get_llm_config",
+            "get_mcp_config",
+            "get_file_extractors_config",
+        }
+        missing = {name for name in expected if not hasattr(cm, name)}
+        assert not missing, f"config_manager re-export surface lost: {sorted(missing)}"
+        assert expected <= set(cm.__all__)
+
+
 class TestAppSettings:
     """Test AppSettings model."""
 
@@ -145,6 +192,7 @@ class TestAppSettings:
         assert hasattr(settings, "feature_rag_enabled")
         assert hasattr(settings, "feature_tools_enabled")
         assert hasattr(settings, "feature_marketplace_enabled")
+        assert hasattr(settings, "feature_custom_prompts_enabled")
 
         # S3 settings
         assert hasattr(settings, "s3_endpoint")
@@ -614,3 +662,55 @@ class TestRAGSourcesConfig:
         assert config.sources["test_source"].display_name == "Test Source"
 
 
+
+class TestCustomPromptsEffective:
+    """Tests for the derived custom_prompts_effective gate.
+
+    Custom prompts persist as per-user library entries, so the feature is only
+    effective when chat history is also enabled. ``custom_prompts_effective`` is
+    the single authoritative flag shared by the config payload, the prompt CRUD
+    routes, and the chat WebSocket path.
+    """
+
+    def test_effective_when_both_enabled(self, monkeypatch):
+        """Both flags on => custom prompts effective."""
+        monkeypatch.setenv("FEATURE_CUSTOM_PROMPTS_ENABLED", "true")
+        monkeypatch.setenv("FEATURE_CHAT_HISTORY_ENABLED", "true")
+        settings = AppSettings()
+        assert settings.custom_prompts_effective is True
+
+    def test_not_effective_when_chat_history_disabled(self, monkeypatch):
+        """Custom prompts on but chat history off => not effective.
+
+        This is the branch that protects the per-user prompt library, which
+        cannot persist without chat history.
+        """
+        monkeypatch.setenv("FEATURE_CUSTOM_PROMPTS_ENABLED", "true")
+        monkeypatch.setenv("FEATURE_CHAT_HISTORY_ENABLED", "false")
+        settings = AppSettings()
+        assert settings.custom_prompts_effective is False
+
+    def test_not_effective_when_custom_prompts_disabled(self, monkeypatch):
+        """Chat history on but custom prompts off => not effective."""
+        monkeypatch.setenv("FEATURE_CUSTOM_PROMPTS_ENABLED", "false")
+        monkeypatch.setenv("FEATURE_CHAT_HISTORY_ENABLED", "true")
+        settings = AppSettings()
+        assert settings.custom_prompts_effective is False
+
+    def test_not_effective_when_both_disabled(self, monkeypatch):
+        """Both flags off => not effective."""
+        monkeypatch.setenv("FEATURE_CUSTOM_PROMPTS_ENABLED", "false")
+        monkeypatch.setenv("FEATURE_CHAT_HISTORY_ENABLED", "false")
+        settings = AppSettings()
+        assert settings.custom_prompts_effective is False
+
+    def test_effective_default_is_false(self, monkeypatch):
+        """With neither flag set, the feature defaults to not effective."""
+        monkeypatch.delenv("FEATURE_CUSTOM_PROMPTS_ENABLED", raising=False)
+        monkeypatch.delenv("FEATURE_CHAT_HISTORY_ENABLED", raising=False)
+        settings = AppSettings(_env_file=None)
+        assert settings.custom_prompts_effective is False
+
+    def test_effective_is_derived_not_stored(self):
+        """custom_prompts_effective should be a property, not a settings field."""
+        assert "custom_prompts_effective" not in AppSettings.model_fields

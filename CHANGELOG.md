@@ -7,7 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #632 - 2026-06-03
-- **Config**: Split the 1300-line `atlas/modules/config/config_manager.py` into focused modules — `models.py` (Pydantic config models + `resolve_env_var`), `settings.py` (`AppSettings`), and `config_loader.py` (`ConfigManager`). `config_manager.py` is now a thin entry point that re-exports every public symbol plus the singleton and getters, so existing `from atlas.modules.config.config_manager import ...` imports are unchanged. No behavior change; all four modules are now under 500 lines.
+- **Config**: Split the 1300-line `atlas/modules/config/config_manager.py` into focused modules — `models.py` (Pydantic config models + `resolve_env_var`), `settings.py` (`AppSettings` + `build_db_url_from_parts`), and `config_loader.py` (`ConfigManager`). `config_manager.py` is now a thin entry point that re-exports every public symbol plus the singleton and getters, so existing `from atlas.modules.config.config_manager import ...` imports are unchanged. No behavior change; all four modules are now under 500 lines.
+
+### PR #637 - 2026-06-09
+- **Vision uploads**: TIFF files (`.tif`/`.tiff`) are accepted as image uploads and converted to PNG before being embedded in LLM vision requests, including high-precision grayscale TIFFs (`I`/`I;16`/`F` modes).
+- **Vision uploads**: When a TIFF cannot be converted for vision input, the user is now warned and the file is listed as a reference instead of being silently dropped.
+- **Vision uploads**: TIFF attachments show a placeholder thumbnail in the composer instead of a broken `<img>` preview (browsers cannot render TIFF inline).
+
+### PR #635 - 2026-06-09
+- **Custom prompts**: Added `FEATURE_CUSTOM_PROMPTS_ENABLED` to hide/disable the per-user prompt library independently, and let Alembic build its database URL from `DB_*` parts when `CHAT_HISTORY_DB_URL` is unset. The flag is now enforced authoritatively on the chat WebSocket path — a custom system prompt sent inline is ignored unless the feature (and its chat-history prerequisite) is enabled — via a single `custom_prompts_effective` derived setting shared by the config payload, the prompt CRUD routes, and the chat handler.
 
 ### PR #628 - 2026-06-03
 - **MCP tools**: Renamed the Atlas-injected authenticated user argument from `username` to `_atlas_user`; ordinary `username` tool arguments are no longer overwritten. Bundled example tools that use the authenticated user for audit attribution (csv_reporter, code-executor, file_size_test) now declare `_atlas_user` so the value stays backend-injected and cannot be spoofed by the LLM.
