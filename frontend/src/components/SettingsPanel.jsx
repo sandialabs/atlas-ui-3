@@ -26,7 +26,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
   const [hasChanges, setHasChanges] = useState(false)
 
   // Also get live settings from ChatContext for always-in-sync fields
-  const { settings: ctxSettings, updateSettings: updateCtxSettings, features } = useChat()
+  const { settings: ctxSettings, updateSettings: updateCtxSettings, features, agentModeAvailable } = useChat()
   const customPromptsEnabled = !!features?.custom_prompts
   const visibleTabs = customPromptsEnabled
     ? TABS
@@ -230,73 +230,77 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             </div>
           </div>
 
-          {/* Max Iterations Setting */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-gray-50 font-medium">Max Agent Iterations</label>
-              <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
-                {settings.maxIterations}
-              </span>
-            </div>
-            <div className="space-y-2">
-              <input
-                type="range"
-                min="1"
-                max="50"
-                step="1"
-                value={settings.maxIterations}
-                onChange={(e) => handleSettingChange('maxIterations', parseInt(e.target.value))}
-                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
-              />
-              <div className="flex justify-between text-xs text-gray-400">
-                <span>1</span>
-                <span>25</span>
-                <span>50</span>
+          {agentModeAvailable && (
+            <>
+              {/* Max Iterations Setting */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-gray-50 font-medium">Max Agent Iterations</label>
+                  <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
+                    {settings.maxIterations}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <input
+                    type="range"
+                    min="1"
+                    max="50"
+                    step="1"
+                    value={settings.maxIterations}
+                    onChange={(e) => handleSettingChange('maxIterations', parseInt(e.target.value))}
+                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
+                  />
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>1</span>
+                    <span>25</span>
+                    <span>50</span>
+                  </div>
+                  <p className="text-sm text-gray-400">
+                    Maximum number of iterations an agent can perform when solving complex tasks. 
+                    Higher values allow for more thorough problem solving but may take longer.
+                  </p>
+                </div>
               </div>
-              <p className="text-sm text-gray-400">
-                Maximum number of iterations an agent can perform when solving complex tasks. 
-                Higher values allow for more thorough problem solving but may take longer.
-              </p>
-            </div>
-          </div>
 
-          {/* Agent Loop Strategy Setting */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-gray-50 font-medium">Agent Loop Strategy</label>
-              <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
-                {settings.agentLoopStrategy === 'agentic' ? 'Agentic' : settings.agentLoopStrategy === 'react' ? 'ReAct' : settings.agentLoopStrategy === 'act' ? 'Act' : 'Think-Act'}
-              </span>
-            </div>
-            <div className="space-y-2">
-              <select
-                value={settings.agentLoopStrategy}
-                onChange={(e) => handleSettingChange('agentLoopStrategy', e.target.value)}
-                className="w-full px-3 py-2 bg-gray-700 text-gray-50 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-              >
-                <option value="agentic">Agentic (Recommended)</option>
-                <option value="think-act">Think-Act</option>
-                <option value="react">ReAct</option>
-                <option value="act">Act</option>
-              </select>
-              <p className="text-sm text-gray-400">
-                <strong className="text-gray-300">Agentic:</strong> Native agentic loop with no control tools and tool_choice=auto.
-                The model decides when to call tools and when to respond. Best for models with strong native tool-use training.
-              </p>
-              <p className="text-sm text-gray-400">
-                <strong className="text-gray-300">Think-Act:</strong> Concise, unified reasoning approach.
-                Faster iterations with fewer LLM calls. Better for most workflows and quick tasks.
-              </p>
-              <p className="text-sm text-gray-400">
-                <strong className="text-gray-300">ReAct:</strong> Structured reasoning with Reason-Act-Observe phases.
-                Better for complex tasks requiring multiple tools and detailed planning. Slower but more thorough.
-              </p>
-              <p className="text-sm text-gray-400">
-                <strong className="text-gray-300">Act:</strong> Pure action loop without explicit reasoning steps.
-                Fastest strategy with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool.
-              </p>
-            </div>
-          </div>
+              {/* Agent Loop Strategy Setting */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-gray-50 font-medium">Agent Loop Strategy</label>
+                  <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
+                    {settings.agentLoopStrategy === 'agentic' ? 'Agentic' : settings.agentLoopStrategy === 'react' ? 'ReAct' : settings.agentLoopStrategy === 'act' ? 'Act' : 'Think-Act'}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <select
+                    value={settings.agentLoopStrategy}
+                    onChange={(e) => handleSettingChange('agentLoopStrategy', e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700 text-gray-50 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <option value="agentic">Agentic (Recommended)</option>
+                    <option value="think-act">Think-Act</option>
+                    <option value="react">ReAct</option>
+                    <option value="act">Act</option>
+                  </select>
+                  <p className="text-sm text-gray-400">
+                    <strong className="text-gray-300">Agentic:</strong> Native agentic loop with no control tools and tool_choice=auto.
+                    The model decides when to call tools and when to respond. Best for models with strong native tool-use training.
+                  </p>
+                  <p className="text-sm text-gray-400">
+                    <strong className="text-gray-300">Think-Act:</strong> Concise, unified reasoning approach.
+                    Faster iterations with fewer LLM calls. Better for most workflows and quick tasks.
+                  </p>
+                  <p className="text-sm text-gray-400">
+                    <strong className="text-gray-300">ReAct:</strong> Structured reasoning with Reason-Act-Observe phases.
+                    Better for complex tasks requiring multiple tools and detailed planning. Slower but more thorough.
+                  </p>
+                  <p className="text-sm text-gray-400">
+                    <strong className="text-gray-300">Act:</strong> Pure action loop without explicit reasoning steps.
+                    Fastest strategy with minimal overhead. LLM calls tools directly and signals completion via the "finished" tool.
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Auto-Approve Tools Setting (always in sync via context) */}
           <div className="bg-gray-700 rounded-lg p-4">
