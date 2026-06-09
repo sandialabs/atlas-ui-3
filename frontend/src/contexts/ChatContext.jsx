@@ -95,14 +95,14 @@ export const ChatProvider = ({ children }) => {
 		const { sendMessage, addMessageHandler, isConnected } = useWS()
 	const toast = useToast()
 	const { currentModel } = config
-	const { selectedTools, selectedPrompts, activePrompts, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
+	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
 
 	useEffect(() => {
 		if (!config.configReady || customPromptsEnabled) return
-		if (isUserPromptKey(selections.activePromptKey)) {
-			selections.clearActivePrompt()
+		if (isUserPromptKey(activePromptKey)) {
+			clearActivePrompt()
 		}
-	}, [config.configReady, customPromptsEnabled, selections])
+	}, [config.configReady, customPromptsEnabled, activePromptKey, clearActivePrompt])
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -350,12 +350,17 @@ export const ChatProvider = ({ children }) => {
 			: []
 
 		// A user-authored custom prompt (issue #153) replaces the default system
-		// prompt and is sent as custom_system_prompt — never as an MCP prompt. Gate
-		// on the key type so a stale (deleted) user key can't leak into
-		// selected_prompts; if it no longer resolves we fall back to the default.
+		// prompt and is sent as custom_system_prompt — never as an MCP prompt.
+		// The selected_prompts exclusion is gated purely on the key type and stays
+		// unconditional even when the feature is disabled: a stale userprompt:* key
+		// persisted from when the feature was on must never leak into the MCP
+		// selected_prompts payload (the clear-stale-key effect runs after render, so
+		// a send could otherwise race ahead of it). Resolving the prompt content is
+		// the part gated on the feature flag; if it no longer resolves we fall back
+		// to the default system prompt.
 		const activeKey = selections.activePromptKey
-		const isUserKey = customPromptsEnabled && isUserPromptKey(activeKey)
-		const activeUserPrompt = isUserKey
+		const activeKeyIsUserPrompt = isUserPromptKey(activeKey)
+		const activeUserPrompt = (customPromptsEnabled && activeKeyIsUserPrompt)
 			? userPrompts.prompts.find(p => p.id === userPromptIdFromKey(activeKey))
 			: null
 
@@ -364,7 +369,7 @@ export const ChatProvider = ({ children }) => {
 			content,
 			model: currentModel,
 			selected_tools: [...selectedTools],
-			selected_prompts: isUserKey ? [] : activePrompts,
+			selected_prompts: activeKeyIsUserPrompt ? [] : activePrompts,
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			selected_data_sources: dataSourcesToSend,
 			tool_choice_required: selections.toolChoiceRequired,

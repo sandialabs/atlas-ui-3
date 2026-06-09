@@ -631,6 +631,19 @@ class AppSettings(BaseSettings):
         description="Enable the per-user custom prompt library UI and API",
         validation_alias=AliasChoices("FEATURE_CUSTOM_PROMPTS_ENABLED"),
     )
+
+    @property
+    def custom_prompts_effective(self) -> bool:
+        """Whether the custom prompt library is actually usable.
+
+        Custom prompts persist as per-user library entries, so the feature is
+        only effective when chat history is also enabled. This single derived
+        flag is the authoritative gate used by the config payload, the prompt
+        CRUD routes, and the chat WebSocket path so they cannot drift apart.
+        """
+        return bool(
+            self.feature_custom_prompts_enabled and self.feature_chat_history_enabled
+        )
     chat_history_db_url: str = Field(
         default="duckdb:///data/chat_history.db",
         description="Database URL for chat history. Use duckdb:///path for local, postgresql://... for production",

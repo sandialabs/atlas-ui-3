@@ -41,7 +41,7 @@ def _custom_prompts_enabled() -> bool:
     """Return whether the custom prompt library feature is enabled."""
     from atlas.infrastructure.app_factory import app_factory
     settings = app_factory.get_config_manager().app_settings
-    return bool(settings.feature_custom_prompts_enabled and settings.feature_chat_history_enabled)
+    return settings.custom_prompts_effective
 
 
 def _require_enabled() -> None:

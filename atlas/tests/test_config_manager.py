@@ -614,3 +614,56 @@ class TestRAGSourcesConfig:
         assert config.sources["test_source"].url == "https://example.com"
         assert config.sources["test_source"].display_name == "Test Source"
 
+
+
+class TestCustomPromptsEffective:
+    """Tests for the derived custom_prompts_effective gate.
+
+    Custom prompts persist as per-user library entries, so the feature is only
+    effective when chat history is also enabled. ``custom_prompts_effective`` is
+    the single authoritative flag shared by the config payload, the prompt CRUD
+    routes, and the chat WebSocket path.
+    """
+
+    def test_effective_when_both_enabled(self, monkeypatch):
+        """Both flags on => custom prompts effective."""
+        monkeypatch.setenv("FEATURE_CUSTOM_PROMPTS_ENABLED", "true")
+        monkeypatch.setenv("FEATURE_CHAT_HISTORY_ENABLED", "true")
+        settings = AppSettings()
+        assert settings.custom_prompts_effective is True
+
+    def test_not_effective_when_chat_history_disabled(self, monkeypatch):
+        """Custom prompts on but chat history off => not effective.
+
+        This is the branch that protects the per-user prompt library, which
+        cannot persist without chat history.
+        """
+        monkeypatch.setenv("FEATURE_CUSTOM_PROMPTS_ENABLED", "true")
+        monkeypatch.setenv("FEATURE_CHAT_HISTORY_ENABLED", "false")
+        settings = AppSettings()
+        assert settings.custom_prompts_effective is False
+
+    def test_not_effective_when_custom_prompts_disabled(self, monkeypatch):
+        """Chat history on but custom prompts off => not effective."""
+        monkeypatch.setenv("FEATURE_CUSTOM_PROMPTS_ENABLED", "false")
+        monkeypatch.setenv("FEATURE_CHAT_HISTORY_ENABLED", "true")
+        settings = AppSettings()
+        assert settings.custom_prompts_effective is False
+
+    def test_not_effective_when_both_disabled(self, monkeypatch):
+        """Both flags off => not effective."""
+        monkeypatch.setenv("FEATURE_CUSTOM_PROMPTS_ENABLED", "false")
+        monkeypatch.setenv("FEATURE_CHAT_HISTORY_ENABLED", "false")
+        settings = AppSettings()
+        assert settings.custom_prompts_effective is False
+
+    def test_effective_default_is_false(self, monkeypatch):
+        """With neither flag set, the feature defaults to not effective."""
+        monkeypatch.delenv("FEATURE_CUSTOM_PROMPTS_ENABLED", raising=False)
+        monkeypatch.delenv("FEATURE_CHAT_HISTORY_ENABLED", raising=False)
+        settings = AppSettings(_env_file=None)
+        assert settings.custom_prompts_effective is False
+
+    def test_effective_is_derived_not_stored(self):
+        """custom_prompts_effective should be a property, not a settings field."""
+        assert "custom_prompts_effective" not in AppSettings.model_fields
