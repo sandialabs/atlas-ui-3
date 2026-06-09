@@ -55,6 +55,21 @@ def _png_b64() -> str:
     return base64.b64encode(raw).decode()
 
 
+def _tiff_b64(mode: str = "L") -> str:
+    """Tiny TIFF encoded with Pillow for conversion tests."""
+    Image = pytest.importorskip("PIL.Image")
+    from io import BytesIO
+
+    if mode == "I;16":
+        image = Image.new("I;16", (2, 1))
+        image.putdata([0, 65535])
+    else:
+        image = Image.new(mode, (1, 1), 255)
+    output = BytesIO()
+    image.save(output, format="TIFF")
+    return base64.b64encode(output.getvalue()).decode()
+
+
 # ---------------------------------------------------------------------------
 # ModelConfig tests
 # ---------------------------------------------------------------------------
@@ -128,6 +143,39 @@ class TestHandleSessionFilesVision:
         )
         file_ref = context["files"]["readme.txt"]
         assert "image_b64" not in file_ref
+
+    @pytest.mark.asyncio
+    async def test_tiff_converted_to_png_for_vision_model(self):
+        fm = _make_file_manager()
+        tiff_b64 = _tiff_b64()
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"scan.tiff": {"content": tiff_b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+        file_ref = context["files"]["scan.tiff"]
+        assert file_ref.get("content_type") == "image/tiff"
+        assert file_ref.get("image_mime_type") == "image/png"
+        assert base64.b64decode(file_ref["image_b64"]).startswith(b"\x89PNG\r\n\x1a\n")
+        assert file_ref["image_b64"] != tiff_b64
+
+    @pytest.mark.asyncio
+    async def test_high_precision_tiff_converted_to_png_for_vision_model(self):
+        fm = _make_file_manager()
+        tiff_b64 = _tiff_b64("I;16")
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"scan.tif": {"content": tiff_b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+        file_ref = context["files"]["scan.tif"]
+        assert file_ref.get("content_type") == "image/tiff"
+        assert file_ref.get("image_mime_type") == "image/png"
+        assert base64.b64decode(file_ref["image_b64"]).startswith(b"\x89PNG\r\n\x1a\n")
 
 
 # ---------------------------------------------------------------------------

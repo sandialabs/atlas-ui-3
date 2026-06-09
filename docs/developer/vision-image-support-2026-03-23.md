@@ -31,6 +31,7 @@ Only raster image formats are embedded as vision content:
 - `image/jpeg`
 - `image/gif`
 - `image/webp`
+- `image/tiff` (converted to PNG before sending to the LLM)
 
 SVG files (`image/svg+xml`) are excluded because they are XML text, not raster data, and most LLM vision APIs do not support them.
 
@@ -45,7 +46,7 @@ Images exceeding these limits fall back to the standard files manifest (text des
 
 1. **Config loading** (`config_manager.py`): `ModelConfig.supports_vision` is parsed from YAML.
 2. **API exposure** (`config_routes.py`): `/api/config` and `/api/config/shell` include `supports_vision` per model so the frontend can adapt.
-3. **File processing** (`file_processor.py`): When `model_supports_vision=True`, `handle_session_files` stores raw `image_b64` and `image_mime_type` on eligible file refs in the session context.
+3. **File processing** (`file_processor.py`): When `model_supports_vision=True`, `handle_session_files` stores raw `image_b64` and `image_mime_type` on eligible file refs in the session context. TIFF uploads are normalized to PNG first so the LLM receives a provider-supported image payload.
 4. **Message building** (`message_builder.py`): `build_messages(model_supports_vision=True)` finds stored image data and replaces the last user message with a multimodal content array containing `text` and `image_url` blocks (using data URIs). The files manifest excludes these images to avoid duplication.
 5. **Orchestrator** (`orchestrator.py`): `_model_supports_vision()` checks the config and threads the flag through to the message builder and file processor.
 6. **Frontend** (`ChatArea.jsx`): Checks `supports_vision` on the current model to conditionally show image upload UI elements.

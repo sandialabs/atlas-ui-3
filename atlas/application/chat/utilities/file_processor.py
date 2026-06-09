@@ -5,7 +5,9 @@ This module provides stateless utility functions for handling files within
 chat sessions, including user uploads and tool-generated artifacts.
 """
 
+import base64
 import logging
+from io import BytesIO
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.core.capabilities import create_download_url
@@ -19,13 +21,15 @@ logger = logging.getLogger(__name__)
 # Raster MIME types eligible for vision model input.
 # SVG is excluded — it's vector XML, not useful for LLM vision, and could
 # contain embedded scripts (though <img> tags neutralize them).
-_VISION_IMAGE_MIME_TYPES = frozenset({
+_LLM_READY_IMAGE_MIME_TYPES = frozenset({
     "image/png",
     "image/jpeg",
     "image/gif",
     "image/webp",
     "image/bmp",
 })
+_TIFF_IMAGE_MIME_TYPES = frozenset({"image/tiff"})
+_VISION_IMAGE_MIME_TYPES = _LLM_READY_IMAGE_MIME_TYPES | _TIFF_IMAGE_MIME_TYPES
 
 # Hard limits to prevent unbounded memory growth from vision images stored
 # in session context.  base64 ≈ 4/3 × raw, so 20 MB b64 ≈ 15 MB raw.
@@ -34,6 +38,70 @@ _MAX_VISION_IMAGES_PER_REQUEST = 10
 
 # Type hint for update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+
+
+def _scale_single_channel_to_8bit(image):
+    """Normalize high-precision grayscale image data into an 8-bit PNG band."""
+    from PIL import Image
+
+    extrema = image.getextrema()
+    if not extrema or isinstance(extrema[0], tuple):
+        return image.convert("RGB")
+
+    low, high = extrema
+    if high <= low:
+        return Image.new("L", image.size, 0)
+
+    scale = 255.0 / (high - low)
+    return image.point(
+        lambda value: max(0, min(255, int((value - low) * scale))),
+        "L",
+    )
+
+
+def _prepare_image_for_png(image):
+    """Convert TIFF frame modes, including high-bit-depth data, to PNG-safe modes."""
+    high_precision_modes = {"I;16", "I;16B", "I;16L", "I;16N", "I", "F"}
+    if image.mode in high_precision_modes:
+        return _scale_single_channel_to_8bit(image)
+    if image.mode == "P":
+        return image.convert("RGBA" if "transparency" in image.info else "RGB")
+    if image.mode in {"RGB", "RGBA", "L", "LA"}:
+        return image
+    return image.convert("RGB")
+
+
+def _convert_tiff_to_png_b64(image_b64: str) -> str:
+    """Convert a TIFF image payload to PNG base64 for LLM vision APIs."""
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("Pillow is required to convert TIFF images for vision input") from exc
+
+    raw = base64.b64decode(image_b64, validate=True)
+    with Image.open(BytesIO(raw)) as image:
+        image.seek(0)
+        prepared = _prepare_image_for_png(image.copy())
+        output = BytesIO()
+        prepared.save(output, format="PNG")
+    return base64.b64encode(output.getvalue()).decode()
+
+
+def _normalize_vision_image_for_llm(filename: str, image_b64: str, mime_type: str) -> Optional[tuple[str, str]]:
+    """
+    Return base64 data and MIME type that can be embedded in an LLM vision request.
+
+    TIFF uploads are accepted by the UI and storage layer, but common LLM vision
+    APIs expect PNG/JPEG/WebP/GIF-style payloads. Convert TIFFs to PNG while
+    preserving the user's original file reference in session storage.
+    """
+    if mime_type in _TIFF_IMAGE_MIME_TYPES:
+        try:
+            return _convert_tiff_to_png_b64(image_b64), "image/png"
+        except Exception:
+            logger.exception("Failed to convert TIFF image %s to PNG for vision input", filename)
+            return None
+    return image_b64, mime_type
 
 
 async def handle_session_files(
@@ -118,7 +186,7 @@ async def handle_session_files(
                 # Store the extraction mode for build_files_manifest
                 file_ref["extract_mode"] = extract_mode
 
-                # For vision-capable models, store raw image data so the message
+                # For vision-capable models, store LLM-ready image data so the message
                 # builder can embed it as an inline image content block.
                 # Warn the user if they uploaded an image but the model can't process it.
                 mime_type = meta.get("content_type", "")
@@ -153,14 +221,25 @@ async def handle_session_files(
                             filename, b64_len, _MAX_VISION_IMAGE_B64_BYTES,
                         )
                     else:
-                        file_ref["image_b64"] = b64
-                        file_ref["image_mime_type"] = mime_type
-                        logger.debug(
-                            "Stored vision image data for %s (%s, %d bytes base64)",
-                            filename,
-                            mime_type,
-                            b64_len,
-                        )
+                        normalized = _normalize_vision_image_for_llm(filename, b64, mime_type)
+                        if normalized:
+                            normalized_b64, normalized_mime_type = normalized
+                            normalized_b64_len = len(normalized_b64)
+                            if normalized_b64_len > _MAX_VISION_IMAGE_B64_BYTES:
+                                logger.warning(
+                                    "Vision image %s too large after normalization "
+                                    "(%d bytes b64, limit %d) — sending as text manifest entry instead",
+                                    filename, normalized_b64_len, _MAX_VISION_IMAGE_B64_BYTES,
+                                )
+                            else:
+                                file_ref["image_b64"] = normalized_b64
+                                file_ref["image_mime_type"] = normalized_mime_type
+                                logger.debug(
+                                    "Stored vision image data for %s (%s, %d bytes base64)",
+                                    filename,
+                                    normalized_mime_type,
+                                    normalized_b64_len,
+                                )
 
                 # Attempt content extraction if enabled and mode requests it
                 if extract_mode in ("full", "preview") and extractor.is_enabled():

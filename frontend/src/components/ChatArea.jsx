@@ -576,11 +576,12 @@ const ChatArea = ({ onOpenRagPanel }) => {
   // Raster formats only — SVG is vector XML, not useful for LLM vision.
   const IMAGE_MIME_TYPES = {
     jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp'
+    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+    tif: 'image/tiff', tiff: 'image/tiff'
   }
 
   const isImageFile = (filename) =>
-    /\.(jpe?g|png|gif|webp|bmp)$/i.test(filename)
+    /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(filename)
 
   const getImageMimeType = (filename) => {
     const ext = filename.split('.').pop()?.toLowerCase()
@@ -1191,7 +1192,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
             multiple
             onChange={handleFileUpload}
             className="hidden"
-            accept=".pdf,.txt,.doc,.docx,.jpg,.jpeg,.png,.gif,.csv,.xlsx,.xls,.json,.md,.log"
+            accept=".pdf,.txt,.doc,.docx,.jpg,.jpeg,.png,.gif,.tif,.tiff,.csv,.xlsx,.xls,.json,.md,.log"
           />
           
           <div className="flex items-center justify-between mt-2 text-xs text-gray-400">

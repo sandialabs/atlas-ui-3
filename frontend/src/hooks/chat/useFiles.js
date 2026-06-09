@@ -8,7 +8,7 @@ const initialSessionFiles = {
 
 function getFileType(filename) {
   const extension = filename.toLowerCase().split('.').pop()
-  if (['png', 'jpg', 'jpeg', 'gif', 'svg'].includes(extension)) return 'image'
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'tif', 'tiff'].includes(extension)) return 'image'
   if (extension === 'pdf') return 'pdf'
   if (extension === 'html') return 'html'
   return 'other'
