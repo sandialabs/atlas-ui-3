@@ -145,6 +145,7 @@ class TestAppSettings:
         assert hasattr(settings, "feature_rag_enabled")
         assert hasattr(settings, "feature_tools_enabled")
         assert hasattr(settings, "feature_marketplace_enabled")
+        assert hasattr(settings, "feature_custom_prompts_enabled")
 
         # S3 settings
         assert hasattr(settings, "s3_endpoint")
@@ -612,5 +613,4 @@ class TestRAGSourcesConfig:
         assert config.sources["test_source"].type == "http"
         assert config.sources["test_source"].url == "https://example.com"
         assert config.sources["test_source"].display_name == "Test Source"
-
 

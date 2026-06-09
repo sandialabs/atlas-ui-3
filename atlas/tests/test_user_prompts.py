@@ -44,6 +44,7 @@ def test_routes_reject_blank_content(monkeypatch):
             return {"id": prompt_id, "title": title or "t", "content": content or "c"}
 
     monkeypatch.setattr(user_prompt_routes, "_get_repo", lambda: FakeRepo())
+    monkeypatch.setattr(user_prompt_routes, "_custom_prompts_enabled", lambda: True)
 
     app = FastAPI()
     app.include_router(user_prompt_routes.router)
@@ -56,6 +57,25 @@ def test_routes_reject_blank_content(monkeypatch):
     assert client.put("/api/user-prompts/1", json={"content": "   "}).status_code == 400
     # Valid content still works.
     assert client.post("/api/user-prompts", json={"title": "T", "content": "hi"}).status_code == 200
+
+
+def test_routes_404_when_feature_disabled(monkeypatch):
+    """The custom prompts API is hidden when the feature flag is off."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from atlas.core.log_sanitizer import get_current_user
+    from atlas.routes import user_prompt_routes
+
+    monkeypatch.setattr(user_prompt_routes, "_custom_prompts_enabled", lambda: False)
+
+    app = FastAPI()
+    app.include_router(user_prompt_routes.router)
+    app.dependency_overrides[get_current_user] = lambda: "alice@test.com"
+    client = TestClient(app)
+
+    assert client.get("/api/user-prompts").status_code == 404
+    assert client.post("/api/user-prompts", json={"title": "T", "content": "hi"}).status_code == 404
 
 
 def test_create_and_list(repo):

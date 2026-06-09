@@ -37,8 +37,9 @@ export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
 	const selections = useSelections()
+	const customPromptsEnabled = !!config.features?.custom_prompts
 	// User-authored custom prompt library (issue #153)
-	const userPrompts = useUserPrompts()
+	const userPrompts = useUserPrompts(customPromptsEnabled)
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
@@ -95,6 +96,13 @@ export const ChatProvider = ({ children }) => {
 	const toast = useToast()
 	const { currentModel } = config
 	const { selectedTools, selectedPrompts, activePrompts, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
+
+	useEffect(() => {
+		if (!config.configReady || customPromptsEnabled) return
+		if (isUserPromptKey(selections.activePromptKey)) {
+			selections.clearActivePrompt()
+		}
+	}, [config.configReady, customPromptsEnabled, selections])
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -346,7 +354,7 @@ export const ChatProvider = ({ children }) => {
 		// on the key type so a stale (deleted) user key can't leak into
 		// selected_prompts; if it no longer resolves we fall back to the default.
 		const activeKey = selections.activePromptKey
-		const isUserKey = isUserPromptKey(activeKey)
+		const isUserKey = customPromptsEnabled && isUserPromptKey(activeKey)
 		const activeUserPrompt = isUserKey
 			? userPrompts.prompts.find(p => p.id === userPromptIdFromKey(activeKey))
 			: null
@@ -391,7 +399,7 @@ export const ChatProvider = ({ children }) => {
 		setIsThinking(true)
 		setIsSynthesizing(false)
 		return true
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, userPrompts.prompts])
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
 		// If there is any chat content or generation in progress, confirm before

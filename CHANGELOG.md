@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-06-09
+- **Custom prompts**: Added `FEATURE_CUSTOM_PROMPTS_ENABLED` to hide/disable the per-user prompt library independently, and let Alembic build its database URL from `DB_*` parts when `CHAT_HISTORY_DB_URL` is unset.
+
 ### PR #628 - 2026-06-03
 - **MCP tools**: Renamed the Atlas-injected authenticated user argument from `username` to `_atlas_user`; ordinary `username` tool arguments are no longer overwritten. Bundled example tools that use the authenticated user for audit attribution (csv_reporter, code-executor, file_size_test) now declare `_atlas_user` so the value stays backend-injected and cannot be spoofed by the LLM.
 

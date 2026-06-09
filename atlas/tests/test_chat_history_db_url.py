@@ -6,7 +6,7 @@ DB_USER, DB_PASSWORD, DB_DRIVER as an alternative to a full CHAT_HISTORY_DB_URL.
 
 import pytest
 
-from atlas.modules.config.config_manager import AppSettings
+from atlas.modules.config.config_manager import AppSettings, build_db_url_from_parts
 
 
 @pytest.fixture(autouse=True)
@@ -116,6 +116,20 @@ class TestChatHistoryDbUrlAssembly:
         monkeypatch.setenv("DB_NAME", "atlas")
         settings = _settings()
         assert settings.chat_history_db_url == "postgresql://localhost/atlas"
+
+    def test_shared_builder_for_alembic_env(self):
+        expected_password = "p%40ss%3Aw%2Frd"
+        assert (
+            build_db_url_from_parts(
+                db_driver="postgresql",
+                db_host="db.example.com",
+                db_port="5432",
+                db_name="atlas",
+                db_user="user@domain",
+                db_password="p@ss:w/rd",
+            )
+            == f"postgresql://user%40domain:{expected_password}@db.example.com:5432/atlas"
+        )
 
 
 class TestChatHistoryDbUrlPrecedenceFromAllSources:
