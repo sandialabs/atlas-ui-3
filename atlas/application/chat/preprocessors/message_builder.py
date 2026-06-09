@@ -78,6 +78,7 @@ class MessageBuilder:
         include_files_manifest: bool = True,
         include_system_prompt: bool = True,
         model_supports_vision: bool = False,
+        custom_system_prompt: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Build messages array from session history and context.
@@ -98,11 +99,19 @@ class MessageBuilder:
         """
         messages = []
 
-        # Optionally add system prompt at the beginning
-        if include_system_prompt and self.prompt_provider:
-            system_prompt = self.prompt_provider.get_system_prompt(
-                user_email=session.user_email
-            )
+        # Optionally add system prompt at the beginning. A user-supplied custom
+        # prompt (issue #153) fully replaces the default system prompt.
+        if include_system_prompt:
+            system_prompt = None
+            if custom_system_prompt and custom_system_prompt.strip():
+                system_prompt = custom_system_prompt
+                logger.debug(
+                    f"Using custom system prompt (len={len(system_prompt)})"
+                )
+            elif self.prompt_provider:
+                system_prompt = self.prompt_provider.get_system_prompt(
+                    user_email=session.user_email
+                )
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
                 logger.debug(f"Added system prompt (len={len(system_prompt)})")

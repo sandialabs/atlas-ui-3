@@ -4,6 +4,17 @@ import { usePersistentState } from './usePersistentState'
 const toSet = arr => new Set(arr)
 const toArray = set => Array.from(set)
 
+// Prefix that marks an active-prompt key as a user-authored custom prompt
+// (issue #153) rather than an MCP-server prompt. The colon cannot appear in an
+// MCP key (format "server_promptname"), so the namespaces never collide. User
+// prompts replace the system prompt client-side and are never sent as
+// selected_prompts (which are MCP prompts prepended server-side).
+export const USER_PROMPT_PREFIX = 'userprompt:'
+
+export const isUserPromptKey = key => typeof key === 'string' && key.startsWith(USER_PROMPT_PREFIX)
+export const userPromptKey = id => `${USER_PROMPT_PREFIX}${id}`
+export const userPromptIdFromKey = key => (isUserPromptKey(key) ? key.slice(USER_PROMPT_PREFIX.length) : null)
+
 export function useSelections() {
   // Auto-select canvas tool if empty
   const [toolsRaw, setToolsRaw] = usePersistentState('chatui-selected-tools', ['canvas_canvas'])
@@ -101,8 +112,10 @@ export function useSelections() {
   const makePromptActive = useCallback(promptKey => {
     // Set the active prompt key (null for default)
     setActivePromptKey(promptKey)
-    // Ensure the prompt is in the selectedPrompts set if it's not null
-    if (promptKey && !promptsRaw.includes(promptKey)) {
+    // Ensure MCP prompts are in the selectedPrompts set so they get loaded.
+    // User-authored prompts (issue #153) are resolved client-side and must NOT
+    // be added here, or they'd leak into the MCP selected_prompts payload.
+    if (promptKey && !isUserPromptKey(promptKey) && !promptsRaw.includes(promptKey)) {
       setPromptsRaw(prev => [...prev, promptKey])
     }
   }, [setActivePromptKey, promptsRaw, setPromptsRaw])
