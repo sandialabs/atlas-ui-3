@@ -82,8 +82,10 @@ cd frontend && npm run build
 cd ../atlas && python main.py        # http://127.0.0.1:$PORT
 ```
 
-Requires `FEATURE_CHAT_HISTORY_ENABLED=true` (the prompt library shares the
-chat-history database).
+Requires both `FEATURE_CUSTOM_PROMPTS_ENABLED=true` and
+`FEATURE_CHAT_HISTORY_ENABLED=true` (the prompt library shares the chat-history
+database). When the custom prompt flag is off, the Settings prompt tab and
+"My Prompts" selector section are hidden.
 
 ## Database / deployment
 
@@ -93,6 +95,8 @@ production (PostgreSQL), apply the Alembic migration:
 
 ```bash
 CHAT_HISTORY_DB_URL=postgresql://... alembic upgrade head   # adds revision 002
+# Or omit CHAT_HISTORY_DB_URL and let Alembic assemble it from DB_HOST,
+# DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, and optional DB_DRIVER.
 ```
 
 Migration `alembic/versions/002_add_user_prompts.py` creates the table and its

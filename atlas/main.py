@@ -506,6 +506,17 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
             if message_type == "chat":
+                # Authoritative server-side gate for custom system prompts. The
+                # frontend already withholds custom_system_prompt when the feature
+                # is disabled, but a stale or hand-crafted client could still send
+                # one inline -- ignore it here so the flag is the single source of
+                # truth for whether a user-supplied prompt replaces the default.
+                custom_system_prompt = (
+                    data.get("custom_system_prompt")
+                    if config_manager.app_settings.custom_prompts_effective
+                    else None
+                )
+
                 # Handle chat message in background so we can still receive approval responses
                 async def handle_chat():
                     try:
@@ -523,7 +534,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             agent_max_steps=data.get("agent_max_steps", 10),
                             temperature=data.get("temperature", 0.7),
                             agent_loop_strategy=data.get("agent_loop_strategy"),
-                            custom_system_prompt=data.get("custom_system_prompt"),
+                            custom_system_prompt=custom_system_prompt,
                             update_callback=lambda message: websocket_update_callback(websocket, message),
                             files=data.get("files"),
                             incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),

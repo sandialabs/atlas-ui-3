@@ -37,9 +37,22 @@ def _get_repo():
     return getattr(app_factory, "user_prompt_repository", None)
 
 
+def _custom_prompts_enabled() -> bool:
+    """Return whether the custom prompt library feature is enabled."""
+    from atlas.infrastructure.app_factory import app_factory
+    settings = app_factory.get_config_manager().app_settings
+    return settings.custom_prompts_effective
+
+
+def _require_enabled() -> None:
+    if not _custom_prompts_enabled():
+        raise HTTPException(status_code=404, detail="Feature not enabled")
+
+
 @router.get("")
 async def list_prompts(current_user: str = Depends(get_current_user)):
     """List all custom prompts for the authenticated user."""
+    _require_enabled()
     repo = _get_repo()
     if repo is None:
         return {"prompts": [], "error": "Chat history is not enabled"}
@@ -52,6 +65,7 @@ async def create_prompt(
     current_user: str = Depends(get_current_user),
 ):
     """Create a new custom prompt."""
+    _require_enabled()
     repo = _get_repo()
     if repo is None:
         raise HTTPException(status_code=503, detail="Chat history is not enabled")
@@ -72,6 +86,7 @@ async def update_prompt(
     current_user: str = Depends(get_current_user),
 ):
     """Update an existing custom prompt owned by the user."""
+    _require_enabled()
     repo = _get_repo()
     if repo is None:
         raise HTTPException(status_code=503, detail="Chat history is not enabled")
@@ -98,6 +113,7 @@ async def delete_prompt(
     current_user: str = Depends(get_current_user),
 ):
     """Delete a custom prompt owned by the user."""
+    _require_enabled()
     repo = _get_repo()
     if repo is None:
         raise HTTPException(status_code=503, detail="Chat history is not enabled")

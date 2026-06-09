@@ -82,7 +82,7 @@ def test_config_shell_includes_feature_flags():
 
     expected_keys = [
         "workspaces", "rag", "tools", "marketplace", "files_panel",
-        "chat_history", "compliance_levels", "splash_screen",
+        "chat_history", "custom_prompts", "compliance_levels", "splash_screen",
         "file_content_extraction", "globus_auth"
     ]
     for key in expected_keys:

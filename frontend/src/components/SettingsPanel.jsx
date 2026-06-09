@@ -27,6 +27,10 @@ const SettingsPanel = ({ isOpen, onClose }) => {
 
   // Also get live settings from ChatContext for always-in-sync fields
   const { settings: ctxSettings, updateSettings: updateCtxSettings, features } = useChat()
+  const customPromptsEnabled = !!features?.custom_prompts
+  const visibleTabs = customPromptsEnabled
+    ? TABS
+    : TABS.filter(tab => tab.id !== 'prompts')
 
   // Globus auth state
   const {
@@ -49,6 +53,12 @@ const SettingsPanel = ({ isOpen, onClose }) => {
   useEffect(() => {
     fetchGlobusIfEnabled()
   }, [fetchGlobusIfEnabled])
+
+  useEffect(() => {
+    if (!customPromptsEnabled && activeTab === 'prompts') {
+      setActiveTab('general')
+    }
+  }, [activeTab, customPromptsEnabled])
 
   // Check for Globus auth callback params in URL
   useEffect(() => {
@@ -147,7 +157,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
 
         {/* Tab navigation */}
         <div className="flex items-center gap-1 px-4 border-b border-gray-700 flex-shrink-0">
-          {TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const Icon = tab.icon
             return (
               <button
@@ -167,7 +177,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
         </div>
 
         {/* Prompts tab (issue #153) */}
-        {activeTab === 'prompts' && (
+        {customPromptsEnabled && activeTab === 'prompts' && (
           <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6">
             <PromptManager />
           </div>
