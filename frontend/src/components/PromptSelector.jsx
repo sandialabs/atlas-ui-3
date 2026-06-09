@@ -7,7 +7,9 @@ const PromptSelector = () => {
   const {
     prompts, selectedPrompts, activePromptKey, makePromptActive, clearActivePrompt, removePrompts,
     userPrompts = [],
+    features = {},
   } = useChat()
+  const customPromptsEnabled = !!features.custom_prompts
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef(null)
 
@@ -64,6 +66,7 @@ const PromptSelector = () => {
   const getButtonText = () => {
     if (!activePromptKey) return 'Default Prompt'
     if (isUserPromptKey(activePromptKey)) {
+      if (!customPromptsEnabled) return 'Default Prompt'
       const id = userPromptIdFromKey(activePromptKey)
       const match = userPrompts.find(p => p.id === id)
       return match ? match.title : 'Custom Prompt'
@@ -177,7 +180,7 @@ const PromptSelector = () => {
           })}
 
           {/* User-authored custom prompts (issue #153) */}
-          {userPrompts.length > 0 && (
+          {customPromptsEnabled && userPrompts.length > 0 && (
             <>
               <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
                 <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">

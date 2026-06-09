@@ -7,12 +7,18 @@ import { useState, useCallback, useEffect } from 'react'
  * can be selected as the active prompt for a chat, replacing the default system
  * prompt. CRUD here keeps the local list in sync without re-fetching.
  */
-export function useUserPrompts() {
+export function useUserPrompts(enabled = true) {
   const [prompts, setPrompts] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
   const fetchPrompts = useCallback(async () => {
+    if (!enabled) {
+      setPrompts([])
+      setLoading(false)
+      setError(null)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -25,9 +31,10 @@ export function useUserPrompts() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [enabled])
 
   const createPrompt = useCallback(async (title, content) => {
+    if (!enabled) return null
     setError(null)
     try {
       const res = await fetch('/api/user-prompts', {
@@ -43,9 +50,10 @@ export function useUserPrompts() {
       setError(e.message)
       return null
     }
-  }, [])
+  }, [enabled])
 
   const updatePrompt = useCallback(async (id, title, content) => {
+    if (!enabled) return null
     setError(null)
     try {
       const res = await fetch(`/api/user-prompts/${id}`, {
@@ -61,9 +69,10 @@ export function useUserPrompts() {
       setError(e.message)
       return null
     }
-  }, [])
+  }, [enabled])
 
   const deletePrompt = useCallback(async (id) => {
+    if (!enabled) return false
     setError(null)
     try {
       const res = await fetch(`/api/user-prompts/${id}`, { method: 'DELETE' })
@@ -74,7 +83,7 @@ export function useUserPrompts() {
       setError(e.message)
       return false
     }
-  }, [])
+  }, [enabled])
 
   useEffect(() => {
     fetchPrompts()

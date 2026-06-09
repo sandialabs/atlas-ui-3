@@ -22,6 +22,34 @@ from pydantic_settings import BaseSettings
 logger = logging.getLogger(__name__)
 
 
+def build_db_url_from_parts(
+    db_driver: str = "postgresql",
+    db_host: Optional[str] = None,
+    db_port: Optional[int | str] = None,
+    db_name: Optional[str] = None,
+    db_user: Optional[str] = None,
+    db_password: Optional[str] = None,
+) -> Optional[str]:
+    """Build a SQLAlchemy database URL from DB_* components, if any are set."""
+    if not (db_host or db_name or db_user):
+        return None
+
+    from urllib.parse import quote
+
+    user_part = ""
+    if db_user:
+        user_part = quote(db_user, safe="")
+        if db_password is not None:
+            user_part += ":" + quote(db_password, safe="")
+        user_part += "@"
+
+    host_part = db_host or "localhost"
+    port_part = f":{db_port}" if db_port else ""
+    name_part = f"/{db_name}" if db_name else ""
+
+    return f"{db_driver}://{user_part}{host_part}{port_part}{name_part}"
+
+
 def resolve_env_var(value: Optional[str], required: bool = True) -> Optional[str]:
     """
     Resolve environment variables in config values.
@@ -598,6 +626,24 @@ class AppSettings(BaseSettings):
         description="Enable conversation history persistence (DuckDB local, PostgreSQL production)",
         validation_alias=AliasChoices("FEATURE_CHAT_HISTORY_ENABLED"),
     )
+    feature_custom_prompts_enabled: bool = Field(
+        False,
+        description="Enable the per-user custom prompt library UI and API",
+        validation_alias=AliasChoices("FEATURE_CUSTOM_PROMPTS_ENABLED"),
+    )
+
+    @property
+    def custom_prompts_effective(self) -> bool:
+        """Whether the custom prompt library is actually usable.
+
+        Custom prompts persist as per-user library entries, so the feature is
+        only effective when chat history is also enabled. This single derived
+        flag is the authoritative gate used by the config payload, the prompt
+        CRUD routes, and the chat WebSocket path so they cannot drift apart.
+        """
+        return bool(
+            self.feature_custom_prompts_enabled and self.feature_chat_history_enabled
+        )
     chat_history_db_url: str = Field(
         default="duckdb:///data/chat_history.db",
         description="Database URL for chat history. Use duckdb:///path for local, postgresql://... for production",
@@ -753,21 +799,13 @@ class AppSettings(BaseSettings):
         if not (self.db_host or self.db_name or self.db_user):
             return self
 
-        from urllib.parse import quote
-
-        user_part = ""
-        if self.db_user:
-            user_part = quote(self.db_user, safe="")
-            if self.db_password is not None:
-                user_part += ":" + quote(self.db_password, safe="")
-            user_part += "@"
-
-        host_part = self.db_host or "localhost"
-        port_part = f":{self.db_port}" if self.db_port else ""
-        name_part = f"/{self.db_name}" if self.db_name else ""
-
-        self.chat_history_db_url = (
-            f"{self.db_driver}://{user_part}{host_part}{port_part}{name_part}"
+        self.chat_history_db_url = build_db_url_from_parts(
+            db_driver=self.db_driver,
+            db_host=self.db_host,
+            db_port=self.db_port,
+            db_name=self.db_name,
+            db_user=self.db_user,
+            db_password=self.db_password,
         )
         return self
 
