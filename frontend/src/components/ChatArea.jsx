@@ -169,16 +169,8 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    let message = inputValue.trim()
+    const message = inputValue.trim()
     if (!message || !currentModel || !isConnected) return
-
-    // Check for /search command - strip prefix and force RAG
-    let forceRag = false
-    if (message.toLowerCase().startsWith('/search ')) {
-      message = message.substring(8).trim() // Remove '/search ' prefix
-      forceRag = true
-      if (!message) return
-    }
 
     try {
       // Process @file references in the message
@@ -187,7 +179,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
       // Keep the user's text if the send was rejected (e.g. disconnected) so
       // they don't lose their message.
-      if (!sendChatMessage(message, allFiles, forceRag)) return
+      if (!sendChatMessage(message, allFiles)) return
       setInputValue('')
 
       // Reset textarea height
@@ -197,7 +189,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     } catch (error) {
       console.error('Error in handleSubmit:', error)
       // Still try to send the message without file processing
-      if (!sendChatMessage(message, uploadedFiles, forceRag)) return
+      if (!sendChatMessage(message, uploadedFiles)) return
       setInputValue('')
 
       // Reset textarea height
@@ -319,20 +311,9 @@ const ChatArea = ({ onOpenRagPanel }) => {
     handleAutoComplete(value)
   }
 
-  // Get all available tools as flat list (including special commands)
+  // Get all available tools as flat list
   const getAllAvailableTools = () => {
     const allTools = []
-
-    // Add /search command if RAG is enabled
-    if (features?.rag) {
-      allTools.push({
-        key: '_special_search',
-        name: 'search',
-        server: 'RAG',
-        description: 'Search across all RAG data sources',
-        isSpecialCommand: true
-      })
-    }
 
     tools.forEach(toolServer => {
       toolServer.tools.forEach(toolName => {
@@ -474,28 +455,14 @@ const ChatArea = ({ onOpenRagPanel }) => {
     setShowToolAutocomplete(false)
   }
 
-  // Check if input contains a slash command (but not /search)
-  const hasSlashCommand = inputValue.startsWith('/') && inputValue.includes(' ') && !inputValue.toLowerCase().startsWith('/search ')
-
-  // Check if input is a /search command
-  const hasSearchCommand = inputValue.toLowerCase().startsWith('/search ')
+  // Check if input contains a slash command
+  const hasSlashCommand = inputValue.startsWith('/') && inputValue.includes(' ')
 
   // Check if input contains @file references
   const hasFileReference = inputValue.includes('@file ')
 
   // Handle tool selection from autocomplete
   const selectTool = (tool) => {
-    // Handle special commands differently
-    if (tool.isSpecialCommand) {
-      // For special commands like /search, just set the input value
-      setInputValue(`/${tool.name} `)
-      setShowToolAutocomplete(false)
-      if (textareaRef.current) {
-        textareaRef.current.focus()
-      }
-      return
-    }
-
     // Enable the tool if not already selected
     if (!selectedTools.has(tool.key)) {
       toggleTool(tool.key)
@@ -1079,7 +1046,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                     }
                   }}
                   className={`px-3 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
-                    ragEnabled || hasSearchCommand || selectedDataSources?.size > 0
+                    ragEnabled || selectedDataSources?.size > 0
                       ? 'bg-green-600 hover:bg-green-700 text-white'
                       : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                   }`}
@@ -1108,9 +1075,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                 placeholder={isMobile ? "Type a message..." : "Type a message... (/ or @ for help)"}
                 rows={1}
                 className={`w-full px-4 py-3 bg-gray-800 rounded-lg text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:border-transparent ${
-                  hasSearchCommand
-                    ? 'border-2 border-green-500 focus:ring-green-500 bg-green-900/10'
-                    : hasSlashCommand
+                  hasSlashCommand
                     ? 'border-2 border-yellow-500 focus:ring-yellow-500 bg-yellow-900/10'
                     : hasFileReference
                     ? 'border-2 border-green-500 focus:ring-green-500 bg-green-900/10'
