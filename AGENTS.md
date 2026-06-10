@@ -187,7 +187,7 @@ frontend/src/
 
 **RAG+Tools**: When both RAG and tools are active, RAG `is_completion=True` responses must NOT short-circuit the LLM call; inject as context so tools remain available.
 
-**RAG Activation vs Selection**: Data sources are only sent to backend when RAG is explicitly activated (`ragEnabled` or `/search`). Selecting sources only marks availability.
+**RAG Activation vs Selection**: Data sources are only sent to backend when RAG is explicitly activated (`ragEnabled` toggle or one or more selected sources). Selecting sources only marks availability.
 
 ## Configuration
 
