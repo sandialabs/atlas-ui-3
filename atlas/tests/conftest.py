@@ -30,6 +30,24 @@ if str(project_root) not in sys.path:
 _TELEMETRY_TMPDIR = tempfile.mkdtemp(prefix="atlas-test-telemetry-")
 os.environ.setdefault("APP_LOG_DIR", _TELEMETRY_TMPDIR)
 
+# --- .env isolation ------------------------------------------------------
+# ``AppSettings`` is configured to load ``../.env`` (see
+# ``atlas/modules/config/settings.py``). During tests that file is the
+# *developer's* local .env, whose contents must never influence the suite —
+# otherwise results depend on each contributor's machine. The concrete bug
+# this guards against: a developer with ``MCP_TOKEN_ENCRYPTION_KEY`` set in
+# their .env made ``test_refuses_to_start_without_encryption_key`` (which
+# deletes the env var, then expects construction to fail) pass locally for
+# CI but fail on their machine, because pydantic-settings re-read the key
+# from .env after monkeypatch cleared it from ``os.environ``.
+#
+# Disable env-file loading for the whole test session so AppSettings reads
+# only the process environment, which tests fully control via monkeypatch /
+# os.environ. This is a test-isolation guard, not a product behavior change.
+from atlas.modules.config.settings import AppSettings  # noqa: E402
+
+AppSettings.model_config["env_file"] = None
+
 # MCP token storage now refuses to start without an explicit encryption key
 # (previously a per-process ephemeral key was generated, which silently lost
 # every stored token on restart). Provide a deterministic test key so module
