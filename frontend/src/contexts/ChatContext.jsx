@@ -328,7 +328,7 @@ export const ChatProvider = ({ children }) => {
 		)
 	}, [config.ragServers])
 
-	const sendChatMessage = useCallback((content, extraFiles = {}, forceRag = false) => {
+	const sendChatMessage = useCallback((content, extraFiles = {}) => {
 		if (!content.trim() || !currentModel) return false
 		// Don't allow sending while the WebSocket is disconnected -- the message
 		// would never reach the backend and the UI would hang on "Thinking...".
@@ -339,12 +339,11 @@ export const ChatProvider = ({ children }) => {
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
-		// RAG is activated when any of these are true:
+		// RAG is activated when either of these are true:
 		//   1. The RAG toggle is on (ragEnabled)
-		//   2. The /search command was used (forceRag)
-		//   3. One or more data sources are selected (hasSelectedSources)
+		//   2. One or more data sources are selected (hasSelectedSources)
 		const hasSelectedSources = selectedDataSources.size > 0
-		const ragActivated = forceRag || ragEnabled || hasSelectedSources
+		const ragActivated = ragEnabled || hasSelectedSources
 		const dataSourcesToSend = ragActivated
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []
