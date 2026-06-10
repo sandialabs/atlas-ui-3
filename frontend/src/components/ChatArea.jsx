@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image, Wrench } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image, Wrench, WifiOff } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
@@ -60,7 +60,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     followUpSuggestions,
     setFollowUpSuggestions,
   } = useChat()
-  const { isConnected } = useWS()
+  const { isConnected, connectionStatus } = useWS()
 
   // Whether the currently selected model supports vision (image) input
   const currentModelSupportsVision = models?.some(
@@ -169,23 +169,17 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    let message = inputValue.trim()
+    const message = inputValue.trim()
     if (!message || !currentModel || !isConnected) return
-
-    // Check for /search command - strip prefix and force RAG
-    let forceRag = false
-    if (message.toLowerCase().startsWith('/search ')) {
-      message = message.substring(8).trim() // Remove '/search ' prefix
-      forceRag = true
-      if (!message) return
-    }
 
     try {
       // Process @file references in the message
       const processedFiles = await processFileReferences(message)
       const allFiles = { ...uploadedFiles, ...processedFiles }
 
-      sendChatMessage(message, allFiles, forceRag)
+      // Keep the user's text if the send was rejected (e.g. disconnected) so
+      // they don't lose their message.
+      if (!sendChatMessage(message, allFiles)) return
       setInputValue('')
 
       // Reset textarea height
@@ -195,7 +189,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     } catch (error) {
       console.error('Error in handleSubmit:', error)
       // Still try to send the message without file processing
-      sendChatMessage(message, uploadedFiles, forceRag)
+      if (!sendChatMessage(message, uploadedFiles)) return
       setInputValue('')
 
       // Reset textarea height
@@ -317,20 +311,9 @@ const ChatArea = ({ onOpenRagPanel }) => {
     handleAutoComplete(value)
   }
 
-  // Get all available tools as flat list (including special commands)
+  // Get all available tools as flat list
   const getAllAvailableTools = () => {
     const allTools = []
-
-    // Add /search command if RAG is enabled
-    if (features?.rag) {
-      allTools.push({
-        key: '_special_search',
-        name: 'search',
-        server: 'RAG',
-        description: 'Search across all RAG data sources',
-        isSpecialCommand: true
-      })
-    }
 
     tools.forEach(toolServer => {
       toolServer.tools.forEach(toolName => {
@@ -472,28 +455,14 @@ const ChatArea = ({ onOpenRagPanel }) => {
     setShowToolAutocomplete(false)
   }
 
-  // Check if input contains a slash command (but not /search)
-  const hasSlashCommand = inputValue.startsWith('/') && inputValue.includes(' ') && !inputValue.toLowerCase().startsWith('/search ')
-
-  // Check if input is a /search command
-  const hasSearchCommand = inputValue.toLowerCase().startsWith('/search ')
+  // Check if input contains a slash command
+  const hasSlashCommand = inputValue.startsWith('/') && inputValue.includes(' ')
 
   // Check if input contains @file references
   const hasFileReference = inputValue.includes('@file ')
 
   // Handle tool selection from autocomplete
   const selectTool = (tool) => {
-    // Handle special commands differently
-    if (tool.isSpecialCommand) {
-      // For special commands like /search, just set the input value
-      setInputValue(`/${tool.name} `)
-      setShowToolAutocomplete(false)
-      if (textareaRef.current) {
-        textareaRef.current.focus()
-      }
-      return
-    }
-
     // Enable the tool if not already selected
     if (!selectedTools.has(tool.key)) {
       toggleTool(tool.key)
@@ -574,10 +543,16 @@ const ChatArea = ({ onOpenRagPanel }) => {
   // Raster formats only — SVG is vector XML, not useful for LLM vision.
   const IMAGE_MIME_TYPES = {
     jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp'
+    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+    tif: 'image/tiff', tiff: 'image/tiff'
   }
 
   const isImageFile = (filename) =>
+    /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(filename)
+
+  // TIFF is accepted for vision (converted to PNG server-side) but browsers
+  // cannot render it in an <img>, so it gets a placeholder thumbnail instead.
+  const isBrowserRenderableImage = (filename) =>
     /\.(jpe?g|png|gif|webp|bmp)$/i.test(filename)
 
   const getImageMimeType = (filename) => {
@@ -894,6 +869,20 @@ const ChatArea = ({ onOpenRagPanel }) => {
           {/* Enabled Tools Indicator */}
           <EnabledToolsIndicator />
 
+          {/* Warning: WebSocket disconnected - sending is blocked until reconnected */}
+          {!isConnected && (
+            <div
+              className="mb-2 px-3 py-2 bg-red-900/40 border border-red-600/50 rounded-lg flex items-center gap-2 text-red-300 text-sm"
+              role="status"
+              data-testid="ws-disconnected-banner"
+            >
+              <WifiOff className="w-4 h-4 flex-shrink-0" />
+              <span>
+                Disconnected from server{connectionStatus ? ` (${connectionStatus})` : ''}. Messages can't be sent until the connection is restored.
+              </span>
+            </div>
+          )}
+
           {/* Warning: tools selected but model doesn't support tools */}
           {selectedTools.size > 0 && !currentModelSupportsTools && (
             <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
@@ -939,7 +928,10 @@ const ChatArea = ({ onOpenRagPanel }) => {
                   )
                 })()}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div
+                className="flex flex-wrap gap-2 max-h-28 overflow-y-auto pr-1"
+                data-testid="uploaded-files-list"
+              >
                 {Object.entries(uploadedFiles).map(([filename, fileData]) => {
                   const isImage = isImageFile(filename)
                   const showAsVisionImage = isImage && currentModelSupportsVision
@@ -948,18 +940,28 @@ const ChatArea = ({ onOpenRagPanel }) => {
                   if (showAsVisionImage) {
                     const mimeType = getImageMimeType(filename)
                     const dataUrl = `data:${mimeType};base64,${fileData.content}`
+                    const canRenderThumbnail = isBrowserRenderableImage(filename)
                     return (
                       <div
                         key={filename}
                         className="relative flex flex-col items-center bg-gray-800 border border-indigo-500/50 rounded-lg p-1 gap-1"
                         style={{ maxWidth: '80px' }}
                       >
-                        <img
-                          src={dataUrl}
-                          alt={filename}
-                          className="w-16 h-16 object-cover rounded"
-                          title={filename}
-                        />
+                        {canRenderThumbnail ? (
+                          <img
+                            src={dataUrl}
+                            alt={filename}
+                            className="w-16 h-16 object-cover rounded"
+                            title={filename}
+                          />
+                        ) : (
+                          <div
+                            className="w-16 h-16 flex items-center justify-center bg-gray-700 rounded"
+                            title={`${filename} (sent as image to vision model)`}
+                          >
+                            <Image className="w-6 h-6 text-indigo-400" />
+                          </div>
+                        )}
                         <div className="flex items-center gap-1 w-full justify-between px-1">
                           <Image className="w-3 h-3 text-indigo-400 flex-shrink-0" title="Sent as image to vision model" />
                           <span className="text-gray-300 text-xs truncate" title={filename} style={{ maxWidth: '44px' }}>{filename}</span>
@@ -1044,7 +1046,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                     }
                   }}
                   className={`px-3 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
-                    ragEnabled || hasSearchCommand || selectedDataSources?.size > 0
+                    ragEnabled || selectedDataSources?.size > 0
                       ? 'bg-green-600 hover:bg-green-700 text-white'
                       : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                   }`}
@@ -1073,9 +1075,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                 placeholder={isMobile ? "Type a message..." : "Type a message... (/ or @ for help)"}
                 rows={1}
                 className={`w-full px-4 py-3 bg-gray-800 rounded-lg text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:border-transparent ${
-                  hasSearchCommand
-                    ? 'border-2 border-green-500 focus:ring-green-500 bg-green-900/10'
-                    : hasSlashCommand
+                  hasSlashCommand
                     ? 'border-2 border-yellow-500 focus:ring-yellow-500 bg-yellow-900/10'
                     : hasFileReference
                     ? 'border-2 border-green-500 focus:ring-green-500 bg-green-900/10'
@@ -1172,7 +1172,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
             multiple
             onChange={handleFileUpload}
             className="hidden"
-            accept=".pdf,.txt,.doc,.docx,.jpg,.jpeg,.png,.gif,.csv,.xlsx,.xls,.json,.md,.log"
+            accept=".pdf,.txt,.doc,.docx,.jpg,.jpeg,.png,.gif,.tif,.tiff,.csv,.xlsx,.xls,.json,.md,.log"
           />
           
           <div className="flex items-center justify-between mt-2 text-xs text-gray-400">

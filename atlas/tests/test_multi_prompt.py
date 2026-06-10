@@ -83,6 +83,8 @@ class TestMultiPromptSupport:
         mock_tool_manager.get_prompt.assert_called_once_with(
             "server", "wizard",
             meta={"user_email": "alice@example.com", "conversation_id": "conv-123"},
+            user_email="alice@example.com",
+            conversation_id="conv-123",
         )
 
     @pytest.mark.asyncio

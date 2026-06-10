@@ -16,3 +16,6 @@ This guide provides technical details for developers contributing to the Atlas U
 
 ### Documentation
 - [Documentation Bundling](documentation-bundling.md) - Automated documentation bundling for CI/CD
+
+### Releases
+- [Release Process](release-process.md) - Monthly release cadence, versioning, hotfix flow, rollback

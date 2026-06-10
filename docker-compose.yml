@@ -96,6 +96,8 @@ services:
       - FEATURE_MARKETPLACE_ENABLED=true
       - FEATURE_FILES_PANEL_ENABLED=true
       - FEATURE_CHAT_HISTORY_ENABLED=true
+      # Per-user custom prompt library (requires chat history)
+      - FEATURE_CUSTOM_PROMPTS_ENABLED=false
       # Chat history DB (choose one):
       # DuckDB (default, no extra services required):
       - CHAT_HISTORY_DB_URL=duckdb:///data/chat_history.db
@@ -110,6 +112,9 @@ services:
       - MCP_CALL_TIMEOUT=120
       - MCP_TASK_TIMEOUT=10
       - MCP_STATE_BACKEND=memory
+      # Required: encryption key for per-user MCP token storage (>=32 chars).
+      # Override with a stable secret in production; rotating it invalidates stored tokens.
+      - MCP_TOKEN_ENCRYPTION_KEY=dev-only-mcp-token-encryption-key-change-me
       - FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=false
       - FEATURE_GLOBUS_AUTH_ENABLED=false
 

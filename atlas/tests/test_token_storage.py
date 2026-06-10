@@ -503,3 +503,59 @@ class TestGetMCPTokenStorageSingleton:
         storage1 = get_token_storage()
         storage2 = get_token_storage()
         assert storage1 is storage2
+
+
+class TestRequiresEncryptionKey:
+    """Atlas must refuse to construct token storage without an explicit key.
+
+    Generating an ephemeral key would silently make all previously encrypted
+    tokens unreadable after every restart (a data-loss bug masquerading as a
+    security feature).
+    """
+
+    def test_refuses_to_start_without_encryption_key(self, tmp_path, monkeypatch):
+        """MCPTokenStorage() must raise when no key is configured."""
+        # Clear both the explicit setting and the env var so the constructor
+        # sees no key at all.
+        monkeypatch.delenv("MCP_TOKEN_ENCRYPTION_KEY", raising=False)
+
+        from atlas.modules.config.config_manager import config_manager
+
+        # Force a fresh AppSettings read that reflects the cleared env var.
+        previous = config_manager._app_settings
+        config_manager._app_settings = None
+        try:
+            with pytest.raises(RuntimeError, match="MCP_TOKEN_ENCRYPTION_KEY"):
+                MCPTokenStorage(storage_dir=tmp_path)
+        finally:
+            config_manager._app_settings = previous
+
+    def test_accepts_explicit_encryption_key(self, tmp_path, monkeypatch):
+        """An explicit encryption_key argument satisfies the requirement."""
+        monkeypatch.delenv("MCP_TOKEN_ENCRYPTION_KEY", raising=False)
+
+        from atlas.modules.config.config_manager import config_manager
+        previous = config_manager._app_settings
+        config_manager._app_settings = None
+        try:
+            storage = MCPTokenStorage(
+                storage_dir=tmp_path,
+                encryption_key="explicit-test-key-1234567890abcdef",
+            )
+            assert isinstance(storage, MCPTokenStorage)
+        finally:
+            config_manager._app_settings = previous
+
+    def test_refuses_shipped_placeholder_key(self, tmp_path):
+        """The repo-public .env.example placeholder is rejected like a missing key.
+
+        Copying .env.example to .env without editing it would otherwise encrypt
+        every user's tokens with a value anyone can read from the repository.
+        """
+        from atlas.modules.mcp_tools.token_storage import (
+            _PLACEHOLDER_ENCRYPTION_KEYS,
+        )
+
+        for placeholder in _PLACEHOLDER_ENCRYPTION_KEYS:
+            with pytest.raises(RuntimeError, match="MCP_TOKEN_ENCRYPTION_KEY"):
+                MCPTokenStorage(storage_dir=tmp_path, encryption_key=placeholder)

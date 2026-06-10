@@ -182,11 +182,13 @@ class ChatOrchestrator:
             event_publisher=self.event_publisher,
         )
 
-        # Build messages with history and files manifest
+        # Build messages with history and files manifest. A user-selected custom
+        # prompt (issue #153) replaces the default system prompt for this turn.
         messages = await self.message_builder.build_messages(
             session=session,
             include_files_manifest=True,
             model_supports_vision=model_supports_vision,
+            custom_system_prompt=kwargs.get("custom_system_prompt"),
         )
 
         # Apply MCP prompt override

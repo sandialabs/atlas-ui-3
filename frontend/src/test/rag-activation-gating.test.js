@@ -3,8 +3,7 @@
  *
  * Verifies that RAG is activated when:
  *   1. The ragEnabled toggle is on
- *   2. The /search command is used (forceRag)
- *   3. One or more data sources are selected
+ *   2. One or more data sources are selected
  */
 
 import { describe, it, expect } from 'vitest'
@@ -14,9 +13,9 @@ import { describe, it, expect } from 'vitest'
  * This mirrors the logic in ChatContext.jsx without needing to render the full
  * React context tree.
  */
-function computeDataSourcesToSend({ forceRag, ragEnabled, selectedDataSources, allRagSourceIds }) {
+function computeDataSourcesToSend({ ragEnabled, selectedDataSources, allRagSourceIds }) {
   const hasSelectedSources = selectedDataSources.size > 0
-  const ragActivated = forceRag || ragEnabled || hasSelectedSources
+  const ragActivated = ragEnabled || hasSelectedSources
   return ragActivated
     ? (hasSelectedSources ? [...selectedDataSources] : allRagSourceIds)
     : []
@@ -27,7 +26,6 @@ describe('RAG activation gating', () => {
 
   it('sends selected data sources when sources are selected (even without ragEnabled toggle)', () => {
     const result = computeDataSourcesToSend({
-      forceRag: false,
       ragEnabled: false,
       selectedDataSources: new Set(['server:source1', 'server:source2']),
       allRagSourceIds: allSources,
@@ -37,7 +35,6 @@ describe('RAG activation gating', () => {
 
   it('sends selected data sources when ragEnabled toggle is on', () => {
     const result = computeDataSourcesToSend({
-      forceRag: false,
       ragEnabled: true,
       selectedDataSources: new Set(['server:source1']),
       allRagSourceIds: allSources,
@@ -45,29 +42,8 @@ describe('RAG activation gating', () => {
     expect(result).toEqual(['server:source1'])
   })
 
-  it('sends selected data sources when forceRag (/search) is true', () => {
-    const result = computeDataSourcesToSend({
-      forceRag: true,
-      ragEnabled: false,
-      selectedDataSources: new Set(['server:source2']),
-      allRagSourceIds: allSources,
-    })
-    expect(result).toEqual(['server:source2'])
-  })
-
-  it('falls back to all sources when forceRag is true and none are selected', () => {
-    const result = computeDataSourcesToSend({
-      forceRag: true,
-      ragEnabled: false,
-      selectedDataSources: new Set(),
-      allRagSourceIds: allSources,
-    })
-    expect(result).toEqual(allSources)
-  })
-
   it('falls back to all sources when ragEnabled is true and none are selected', () => {
     const result = computeDataSourcesToSend({
-      forceRag: false,
       ragEnabled: true,
       selectedDataSources: new Set(),
       allRagSourceIds: allSources,
@@ -77,21 +53,10 @@ describe('RAG activation gating', () => {
 
   it('returns empty when nothing is selected and RAG is not activated', () => {
     const result = computeDataSourcesToSend({
-      forceRag: false,
       ragEnabled: false,
       selectedDataSources: new Set(),
       allRagSourceIds: allSources,
     })
     expect(result).toEqual([])
-  })
-
-  it('sends selected sources when both ragEnabled and forceRag are true', () => {
-    const result = computeDataSourcesToSend({
-      forceRag: true,
-      ragEnabled: true,
-      selectedDataSources: new Set(['server:source1', 'server:source3']),
-      allRagSourceIds: allSources,
-    })
-    expect(result).toEqual(['server:source1', 'server:source3'])
   })
 })

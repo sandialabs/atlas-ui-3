@@ -4,8 +4,12 @@ Atlas Server CLI - Start the Atlas backend server.
 Usage:
     atlas-server                              # Start with defaults
     atlas-server --port 8000                  # Custom port
-    atlas-server --env /path/to/.env          # Custom env file
+    atlas-server --env-file /path/to/.env     # Custom env file (also: --env)
     atlas-server --config-folder /path/to/config  # Custom config folder
+
+The env file may also be set via the ATLAS_ENV_FILE environment variable,
+which is useful for shared installs where each user keeps API keys in a
+personal file such as ``~/.atlasrc``.
 """
 
 import argparse
@@ -52,10 +56,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Host to bind to (default: 127.0.0.1 or ATLAS_HOST env var).",
     )
     parser.add_argument(
+        "--env-file",
         "--env",
         dest="env_file",
         default=None,
-        help="Path to .env file (default: .env in current directory or package root).",
+        help=(
+            "Path to .env file (default: ATLAS_ENV_FILE env var, then "
+            ".env in current directory or package root)."
+        ),
     )
     parser.add_argument(
         "--config-folder",
@@ -92,8 +100,10 @@ def run_server(args: argparse.Namespace) -> int:
 
     # Import the FastAPI app
     from atlas.main import app
+    from atlas.modules.config import config_manager
 
     print(f"Starting Atlas server on {host}:{port}")
+    ws_keepalive_interval = config_manager.app_settings.websocket_keepalive_interval_seconds
 
     if args.reload:
         print("Warning: --reload is enabled. This is not recommended for production.")
@@ -103,6 +113,8 @@ def run_server(args: argparse.Namespace) -> int:
             port=port,
             reload=True,
             workers=1,  # reload doesn't support multiple workers
+            ws_ping_interval=ws_keepalive_interval,
+            ws_ping_timeout=ws_keepalive_interval,
         )
     else:
         uvicorn.run(
@@ -110,6 +122,8 @@ def run_server(args: argparse.Namespace) -> int:
             host=host,
             port=port,
             workers=args.workers,
+            ws_ping_interval=ws_keepalive_interval,
+            ws_ping_timeout=ws_keepalive_interval,
         )
 
     return 0
@@ -125,10 +139,13 @@ def main() -> None:
         print(f"atlas-server version {VERSION}")
         sys.exit(0)
 
-    # Apply env file first (before any other imports that might use env vars)
+    # Apply env file first (before any other imports that might use env vars).
+    # Precedence: --env-file/--env flag > ATLAS_ENV_FILE env var > .env in
+    # current directory > .env in package root.
     env_dir = None
-    if args.env_file:
-        env_path = Path(args.env_file).expanduser()
+    env_file = args.env_file or os.environ.get("ATLAS_ENV_FILE")
+    if env_file:
+        env_path = Path(env_file).expanduser()
         _apply_env_file(env_path)
         env_dir = env_path.resolve().parent
     else:

@@ -134,7 +134,7 @@ class RAGMCPService:
                     raw = await self.mcp_manager.call_tool(
                         server_name=server,
                         tool_name="rag_discover_resources",
-                        arguments={"username": username},
+                        arguments={"_atlas_user": username},
                     )
 
                     structured = self._extract_structured_result(raw)
@@ -238,7 +238,7 @@ class RAGMCPService:
                     raw = await self.mcp_manager.call_tool(
                         server_name=server,
                         tool_name="rag_discover_resources",
-                        arguments={"username": username},
+                        arguments={"_atlas_user": username},
                     )
                     structured = self._extract_structured_result(raw)
                     resources = self._extract_resources(structured)

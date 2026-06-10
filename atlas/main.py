@@ -50,6 +50,7 @@ from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
 
 # Import domain errors
 from atlas.domain.errors import (
+    AuthorizationError,
     ContextWindowExceededError,
     DomainError,
     LLMAuthenticationError,
@@ -62,6 +63,7 @@ from atlas.domain.errors import (
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.routes.admin_routes import admin_router
+from atlas.routes.agent_portal_routes import router as agent_portal_router
 
 # Import essential routes
 from atlas.routes.config_routes import router as config_router
@@ -75,6 +77,8 @@ from atlas.routes.health_routes import router as health_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.routes.suggestion_routes import suggestion_router
+from atlas.routes.telemetry_routes import telemetry_router
+from atlas.routes.user_prompt_routes import router as user_prompt_router
 from atlas.version import VERSION
 
 # Load environment variables from the parent directory
@@ -197,6 +201,18 @@ async def lifespan(app: FastAPI):
         # Continue startup even if MCP fails
         logger.warning("Continuing startup without MCP tools")
 
+    # The user-client cache sweeper must run even when MCP discovery
+    # failed above: any per-user HTTP clients created later (e.g. on
+    # reconnect or partial init) still need bounded eviction, otherwise
+    # the leak guard this PR adds is silently disabled in degraded
+    # startup.
+    try:
+        logger.info("Step 5: Starting MCP user client cache sweeper...")
+        await mcp_manager.start_user_client_cache_sweeper()
+        logger.info("Step 5 complete: User client cache sweeper started")
+    except Exception as e:
+        logger.error(f"Failed to start MCP user client cache sweeper: {e}", exc_info=True)
+
     yield
 
     logger.info("Shutting down Chat UI Backend")
@@ -263,6 +279,7 @@ app.add_middleware(
 # Include essential routes (add files API)
 app.include_router(config_router)
 app.include_router(admin_router)
+app.include_router(telemetry_router)
 app.include_router(files_router)
 app.include_router(mcp_files_router)
 app.include_router(health_router)
@@ -270,7 +287,9 @@ app.include_router(feedback_router)
 app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
+app.include_router(user_prompt_router)
 app.include_router(suggestion_router)
+app.include_router(agent_portal_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
@@ -487,6 +506,17 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
             if message_type == "chat":
+                # Authoritative server-side gate for custom system prompts. The
+                # frontend already withholds custom_system_prompt when the feature
+                # is disabled, but a stale or hand-crafted client could still send
+                # one inline -- ignore it here so the flag is the single source of
+                # truth for whether a user-supplied prompt replaces the default.
+                custom_system_prompt = (
+                    data.get("custom_system_prompt")
+                    if config_manager.app_settings.custom_prompts_effective
+                    else None
+                )
+
                 # Handle chat message in background so we can still receive approval responses
                 async def handle_chat():
                     try:
@@ -504,6 +534,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             agent_max_steps=data.get("agent_max_steps", 10),
                             temperature=data.get("temperature", 0.7),
                             agent_loop_strategy=data.get("agent_loop_strategy"),
+                            custom_system_prompt=custom_system_prompt,
                             update_callback=lambda message: websocket_update_callback(websocket, message),
                             files=data.get("files"),
                             incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
@@ -548,6 +579,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "validation"
+                        })
+                    except AuthorizationError as e:
+                        logger.warning(f"Authorization error in chat handler: {e}")
+                        log_metric("error", user_email, error_type="authorization")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "authorization"
                         })
                     except asyncio.CancelledError:
                         logger.info("Chat task cancelled by user (stop_streaming)")
@@ -605,17 +644,48 @@ async def websocket_endpoint(websocket: WebSocket):
                         except Exception as e:
                             logger.debug("Error releasing MCP sessions on restore: %s", e)
 
-                # Restore a saved conversation into the current session
-                response = await chat_service.handle_restore_conversation(
-                    session_id=session_id,
-                    conversation_id=data.get("conversation_id", ""),
-                    messages=data.get("messages", []),
-                    user_email=user_email
-                )
+                # Restore a saved conversation into the current session.
+                # The handler returns an error frame on access denied, but a
+                # DomainError still propagates as a transport invariant
+                # safety net so a future raise cannot tear down the
+                # WebSocket here (matches the chat-handler contract).
+                try:
+                    response = await chat_service.handle_restore_conversation(
+                        session_id=session_id,
+                        conversation_id=data.get("conversation_id", ""),
+                        messages=data.get("messages", []),
+                        user_email=user_email
+                    )
+                except DomainError as e:
+                    logger.warning(
+                        "Domain error in restore_conversation: %s", e
+                    )
+                    log_metric("error", user_email, error_type="domain")
+                    response = {
+                        "type": "error",
+                        "message": str(e.message if hasattr(e, "message") else e),
+                        "error_type": (
+                            "authorization"
+                            if isinstance(e, AuthorizationError)
+                            else "domain"
+                        ),
+                    }
                 await websocket.send_json(response)
 
             elif message_type == "reset_session":
-                # Handle session reset (use authenticated user from connection)
+                # If a chat is still generating when the user starts a new chat,
+                # cancel it first so tokens don't keep streaming into the fresh
+                # session (defense-in-depth; the frontend also sends
+                # stop_streaming before reset_session when it knows generation
+                # is in progress).
+                task = active_chat_task.get("task")
+                if task and not task.done():
+                    logger.info("Cancelling active chat task (reset_session)")
+                    task.cancel()
+
+                # Handle session reset (use authenticated user from connection).
+                # handle_reset_session itself releases the old conversation's
+                # MCP sessions before generating a new conversation_id.
                 response = await chat_service.handle_reset_session(
                     session_id=session_id,
                     user_email=user_email
@@ -668,6 +738,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     logger.info("Cancelling active chat task (stop_streaming)")
                     task.cancel()
 
+            elif message_type == "agent_control":
+                # `agent_control` is normally consumed by the agent loop's
+                # internal receive_json poll while it's waiting on user input
+                # (react_loop._poll_control_message). If the main endpoint
+                # sees it here, the agent isn't in the input-wait branch, so
+                # treat action="stop" as a plain cancel of the chat task.
+                action = data.get("action")
+                if action == "stop":
+                    task = active_chat_task.get("task")
+                    if task and not task.done():
+                        logger.info("Cancelling active chat task (agent_control stop)")
+                        task.cancel()
+
             elif message_type == "elicitation_response":
                 # Handle elicitation response
                 from atlas.application.chat.elicitation_manager import get_elicitation_manager
@@ -707,9 +790,34 @@ async def websocket_endpoint(websocket: WebSocket):
                 from atlas.modules.mcp_tools import mcp_tool_manager
                 await mcp_tool_manager.release_sessions(conv_id, user_email=user_email)
             except Exception as e:
-                logger.debug("Error releasing MCP sessions on disconnect: %s", e)
+                logger.warning("Error releasing MCP sessions on disconnect: %s", e)
         await chat_service.end_session(session_id)
         logger.info(f"WebSocket connection closed for session {session_id}")
+
+
+if static_dir.exists():
+    # Known SPA frontend routes from frontend/src/App.jsx. F5 on any of
+    # these (or a deeper React Router subroute) should serve index.html.
+    # Anything else falls through to a real 404 instead of being silently
+    # masked by the SPA — important because `/help-images/...`, `/admin/
+    # telemetry/turn/{id}`, etc. have legitimate non-SPA handlers whose
+    # 404 / validation responses must not be hidden.
+    _SPA_ROUTE_PREFIXES = (
+        "marketplace",
+        "help",
+        "admin",
+        "files",
+        "agent-portal",
+    )
+
+    @app.get("/{full_path:path}")
+    async def spa_catchall(full_path: str):
+        if ".." in full_path.split("/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        first = full_path.split("/", 1)[0]
+        if first not in _SPA_ROUTE_PREFIXES:
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(str(static_dir / "index.html"))
 
 
 if __name__ == "__main__":
@@ -722,4 +830,10 @@ if __name__ == "__main__":
     host = os.getenv("ATLAS_HOST", "127.0.0.1")
     port = int(os.getenv("PORT", 8000))
 
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        ws_ping_interval=config.app_settings.websocket_keepalive_interval_seconds,
+        ws_ping_timeout=config.app_settings.websocket_keepalive_interval_seconds,
+    )

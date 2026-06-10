@@ -1,9 +1,15 @@
 import { useChat } from '../contexts/ChatContext'
-import { ChevronDown, Sparkles } from 'lucide-react'
+import { ChevronDown, Sparkles, User } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
+import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
 
 const PromptSelector = () => {
-  const { prompts, selectedPrompts, activePromptKey, makePromptActive, clearActivePrompt, removePrompts } = useChat()
+  const {
+    prompts, selectedPrompts, activePromptKey, makePromptActive, clearActivePrompt, removePrompts,
+    userPrompts = [],
+    features = {},
+  } = useChat()
+  const customPromptsEnabled = !!features.custom_prompts
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef(null)
 
@@ -59,6 +65,12 @@ const PromptSelector = () => {
   // Get display text for the button - show the active prompt name or "Default Prompt"
   const getButtonText = () => {
     if (!activePromptKey) return 'Default Prompt'
+    if (isUserPromptKey(activePromptKey)) {
+      if (!customPromptsEnabled) return 'Default Prompt'
+      const id = userPromptIdFromKey(activePromptKey)
+      const match = userPrompts.find(p => p.id === id)
+      return match ? match.title : 'Custom Prompt'
+    }
     // Extract prompt name from the key (format: "server_promptname")
     const idx = activePromptKey.indexOf('_')
     return idx === -1 ? activePromptKey : activePromptKey.slice(idx + 1)
@@ -166,6 +178,47 @@ const PromptSelector = () => {
               </button>
             )
           })}
+
+          {/* User-authored custom prompts (issue #153) */}
+          {customPromptsEnabled && userPrompts.length > 0 && (
+            <>
+              <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
+                <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                  <User className="w-3 h-3 text-emerald-400" />
+                  My Prompts
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Your saved prompts (manage in Settings)
+                </div>
+              </div>
+              {userPrompts.map((p) => {
+                const key = userPromptKey(p.id)
+                const isActive = key === activePromptKey
+                return (
+                  <button
+                    key={key}
+                    onClick={() => handlePromptSelect(key)}
+                    className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 last:border-b-0 ${
+                      isActive ? 'bg-blue-900/30' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-gray-200 flex items-center gap-2">
+                          {isActive && <span className="text-blue-400">✓</span>}
+                          <span className="truncate">{p.title}</span>
+                          {isActive && <span className="text-xs text-blue-400">(active)</span>}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1 line-clamp-2">
+                          {p.content}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </>
+          )}
         </div>
       )}
     </div>

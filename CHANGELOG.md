@@ -6,6 +6,363 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #643 - 2026-06-10
+- **Config**: Changed the default application name from "Chat UI" to "ATLAS".
+
+### 2026-06-09
+- **RAG**: Removed the `/search` chat quick command, which silently forced RAG on from the message input and was a confusing entry point. RAG is still activated explicitly via the search-button toggle or by selecting one or more data sources; the `/search` autocomplete entry, its green input highlighting, and the `forceRag` send path are gone.
+
+### PR #632 - 2026-06-03
+- **Config**: Split the 1300-line `atlas/modules/config/config_manager.py` into focused modules — `models.py` (Pydantic config models + `resolve_env_var`), `settings.py` (`AppSettings` + `build_db_url_from_parts`), and `config_loader.py` (`ConfigManager`). `config_manager.py` is now a thin entry point that re-exports every public symbol plus the singleton and getters, so existing `from atlas.modules.config.config_manager import ...` imports are unchanged. No behavior change; all four modules are now under 500 lines.
+
+### PR #637 - 2026-06-09
+- **Vision uploads**: TIFF files (`.tif`/`.tiff`) are accepted as image uploads and converted to PNG before being embedded in LLM vision requests, including high-precision grayscale TIFFs (`I`/`I;16`/`F` modes).
+- **Vision uploads**: When a TIFF cannot be converted for vision input, the user is now warned and the file is listed as a reference instead of being silently dropped.
+- **Vision uploads**: TIFF attachments show a placeholder thumbnail in the composer instead of a broken `<img>` preview (browsers cannot render TIFF inline).
+
+### PR #635 - 2026-06-09
+- **Custom prompts**: Added `FEATURE_CUSTOM_PROMPTS_ENABLED` to hide/disable the per-user prompt library independently, and let Alembic build its database URL from `DB_*` parts when `CHAT_HISTORY_DB_URL` is unset. The flag is now enforced authoritatively on the chat WebSocket path — a custom system prompt sent inline is ignored unless the feature (and its chat-history prerequisite) is enabled — via a single `custom_prompts_effective` derived setting shared by the config payload, the prompt CRUD routes, and the chat handler.
+
+### PR #628 - 2026-06-03
+- **MCP tools**: Renamed the Atlas-injected authenticated user argument from `username` to `_atlas_user`; ordinary `username` tool arguments are no longer overwritten. Bundled example tools that use the authenticated user for audit attribution (csv_reporter, code-executor, file_size_test) now declare `_atlas_user` so the value stays backend-injected and cannot be spoofed by the LLM.
+
+### PR #629 - 2026-06-03
+- **MCP token storage**: `MCPTokenStorage` now refuses to start when `MCP_TOKEN_ENCRYPTION_KEY` is unset — or still set to the shipped `.env.example` placeholder — instead of silently generating an ephemeral key that made every previously encrypted token unreadable after each restart. The key is validated before any filesystem setup. Operators must configure a stable, unique secret; docs and `.env.example` updated to mark the variable as required.
+
+### PR #624 - 2026-06-01
+- **File Library**: Added a bulk delete button to the File Manager's File Library tab that deletes the files currently shown after a confirmation prompt. The button is labeled "Delete All" when no filters are active and "Delete Filtered" when a search/type filter is narrowing the list, so the scope is explicit; it is disabled while a delete batch is in flight.
+
+### PR #621 - 2026-05-29
+- **Splash screen**: Message body is now defined in a markdown file (`splash-screen.md`, override via `SPLASH_SCREEN_FILE`) and rendered as markdown. The JSON config keeps presentation settings only; the redundant `enabled` field and `messages` array are dropped — `FEATURE_SPLASH_SCREEN_ENABLED` is the sole switch for showing the splash screen.
+
+### PR #619 - 2026-05-29
+- **Chat history**: Default save mode is now Incognito (`none`) instead of Server; the save button cycles Incognito -> Saved Locally -> Saved to Server. Turns taken while incognito are excluded from server persistence even after the user later opts in to saving.
+
+### 2026-05-21
+- **CLI**: Added support for specifying a custom `.env` file location. `atlas-init`, `atlas-server`, `atlas-chat`, and `agent_start.sh` now all honor a `--env-file`/`-e` flag and the `ATLAS_ENV_FILE` environment variable, so multiple users can share an Atlas install while keeping their own API keys in a personal file such as `~/.atlasrc`. Resolves the "Specifying location for .env configuration file" issue.
+
+### PR #607 - 2026-05-14
+- `MCPToolManager._invalidate_user_client` now calls a new `MCPSessionManager.release_sessions_for_user_server` method after evicting client cache entries, ensuring live sessions that outlived their cache entry (e.g. due to LRU eviction races) are also closed when a token is revoked.
+
+### PR #596 - 2026-05-11
+- Added `AGENT_PORTAL_ALLOWED_ORIGINS` to let the Agent Portal WebSocket stream accept Origin headers beyond loopback when the deployment is fronted by an authenticating reverse proxy (e.g. Cloudflare Access). Loopback hosts remain allowed by default; the env var is a comma-separated hostname allowlist and is empty by default, so the gate is unchanged for stock installs.
+- Renamed `_origin_is_loopback` to `_origin_is_allowed` in `atlas/routes/agent_portal_routes.py` and updated the rejection log message; updated `docs/agentportal/threat-model.md` to describe the expanded allowlist and its residual risks.
+- Added a Remove (stop + drop) affordance for Agent Portal sessions. `ProcessManager.remove()` drops a non-running record (wakes lingering stream subscribers and closes any orphaned PTY master fd); `ProcessManager.stop_and_remove()` cancels, waits a bounded grace window, and removes in one shot.
+- New `POST /api/agent-portal/processes/{id}/remove` route — pairs with the existing `DELETE` (which only sends SIGTERM and keeps the record). Writes a `"remove"` audit event with the final status; returns 404 for unknown ids and 409 if the child is still alive after the grace window. Frontend adds a Trash button in the left rail and pane header, with a confirm dialog when the target is still running, and clears the layout slot on success.
+- Defense in depth in `ProcessManager.launch`: if a caller sets `namespaces=True` but `probe_isolation_capabilities()` reports the host can't do unprivileged user namespaces (e.g. Ubuntu 24.04 with `apparmor_restrict_unprivileged_userns=1`), the manager strips the flag (and `isolate_network`), logs a warning, and launches with reduced isolation rather than failing with EPERM on `/proc/self/uid_map`. The frontend mirrors this by clearing the flags client-side when the capability probe reports the host unsupported.
+- Added per-user ownership graduation TODO for the new `/remove` endpoint and listed it in `docs/agentportal/threat-model.md`'s deferred-items section.
+
+## [0.2.0] - 2026-05-16
+
+### PR #606 - 2026-05-16
+- **RAG**: Aligned ATLAS-RAG mock and client with the newest OpenAPI spec (v0.3.0.dev1+). The client now sends a trimmed `{messages, stream, corpora}` payload (no `model`, no `hybrid_search_kwargs`) and parses `metadata.references[].sections[]` (each with `section_ref`, `text`, `relevance`) plus per-reference `citation` and `document_ref`. Legacy `rag_metadata` parsing is retained for rolling migration.
+- **Citations UI**: Reference expansion now renders each section snippet as a `.rag-ref-snippet` blockquote under its reference, with `section_ref` and a relevance label. Snippet styling added to `index.css`; `data-section-ref` is allowed through DOMPurify so spans survive sanitization. New vitest cases verify snippet pass-through and that the source-label extractor isn't fooled by them.
+- **Mock**: `mocks/atlas-rag-api-mock/main.py` rewritten to the new `RagResponse` shape (bare-list discovery endpoint, top-level `corpora` in the request, per-reference sections built from grep hits). README and screenshots updated.
+
+### PR #605 - 2026-05-13
+- **Packaging**: New focused `[pptx]` extras group (`pip install atlas-chat[pptx]`) pulls Pillow + python-pptx for the `pptx_generator` MCP server. Without it the server logged `ModuleNotFoundError: No module named 'PIL'` on a bare wheel install. Pillow stays in the broader `[mcp-demos]` extras as well.
+- **CLI**: `atlas-chat --version` now prints `atlas-chat version X.Y.Z` and exits, matching `atlas-init`. The release smoke test references this flag.
+- **Docs**: Removed `--tool-choice-required` from the smoke-test recipe in `docs/developer/release-process.md` and the release checklist; it is not (and was not) a real `atlas-chat` flag.
+
+### PR #602 - 2026-05-12
+- Docker runtime-only image now installs with `--ignore-requires-python` for LiteLLM compatibility on Chainguard Python 3.14, and CI now validates `Dockerfile.runtimeonly` builds.
+
+### PR #599 - 2026-05-12
+- **Dependency**: Bumped minimum LiteLLM version from 1.81.14 to 1.83.10.
+
+### PR #598 - 2026-05-12
+- Added an optional `Dockerfile.runtimeonly` that builds a slimmer deployed image using Chainguard bases (Node frontend stage + Python runtime stage), excludes top-level docs/test/scripts trees, and is documented in the README and installation guide.
+
+### PR #565 - 2026-04-25
+- MCP sessions are now keyed by `(user, conversation, server)` and client-supplied `conversation_id` values owned by another user are rejected on chat and restore.
+- Hardened the new ownership boundary after multi-agent review:
+  - Per-turn ownership check now fails closed when the configured `conversation_repository` does not implement `get_conversation_owner` (previously fell through to "always allow" with only a startup warning).
+  - `handle_restore_conversation` returns the canonical message list from the DB instead of replaying the client-supplied payload, so a tampered client cannot inject forged history into the LLM context and have it re-persisted.
+  - `_save_conversation` honours the repository's `None` return (TOCTOU rejection): the frontend now receives a `conversation_save_rejected` error frame instead of a false `conversation_saved` notification.
+  - `save_conversation` and `get_conversation` normalize `user_email` so mixed-case identities (proxy / OAuth normalization differences) cannot silently drop saves.
+  - Whitespace-only / non-string `conversation_id` is treated as "not provided" and falls back to the session-id default.
+  - WebSocket dispatch now has explicit `AuthorizationError` arms for both chat and restore so a denied request returns a structured `error_type: "authorization"` frame instead of falling through to the generic domain-error arm or, in the restore case, tearing down the connection.
+- Post-merge review fixes:
+  - `_close_user_client_entry` now passes `user_email` when releasing the underlying MCP session. Without it the cache evicted the per-user HTTP client but called `MCPSessionManager.release` with an empty user scope, leaving the original `(user, conversation, server)` `ManagedSession` orphaned in `_sessions` — defeating the bound the cache exists to enforce. Tests previously mocked the session manager and missed it; a regression test now exercises the real session manager.
+  - Email normalization is now applied at every public `ConversationRepository` entry (list / search / export / delete / delete_conversations / delete_all / add_tag / remove_tag / list_tags / update_title) and `get_conversation_owner` returns its result normalized. Earlier the chokepoint was partial — only `save_conversation` and `get_conversation` normalized — so a deployment with mixed-case historical rows would see inconsistent results across operations.
+
+### PR #564 - 2026-04-28
+- Bounded the per-user MCP HTTP client cache with LRU/idle eviction, explicit FastMCP client close on cleanup, and enabled Uvicorn WebSocket ping keepalives so dropped connections are detected and MCP session cleanup runs sooner.
+- Hardened cache lifecycle after multi-agent review:
+  - LRU eviction now skips cached clients touched within `MCP_USER_CLIENT_CACHE_IN_USE_WINDOW_SECONDS` (default 60s) so an in-flight tool call cannot have its connection torn down; cache temporarily exceeds bound rather than evict an active client.
+  - `client.__aexit__` is bounded by `MCP_USER_CLIENT_CLOSE_TIMEOUT_SECONDS` (default 5s) so a stuck upstream cannot hang the sweeper or shutdown.
+  - Cache sweeper now starts even if MCP discovery fails during lifespan, so the leak guard is not silently disabled in degraded startup.
+  - Sweeper close batches are tracked and drained on shutdown, eliminating a cancellation race that could orphan FastMCP clients between pop and close.
+
+### PR #559 - 2026-04-25
+- MCP cross-conversation isolation: cache FastMCP HTTP `Client` instances by
+  `(user_email, server_name, conversation_id)` so each conversation gets its
+  own MCP session ID and FastMCP nesting counter. Fixes the
+  "nesting counter should be 0" reconnect failure that surfaced after a
+  shared client's session task died, and isolates stateful HTTP servers
+  (e.g. the per-session `PrinterService`) across the same user's conversations.
+- `handle_reset_session` now releases the previous conversation's MCP
+  sessions and per-conversation HTTP clients before generating a new
+  `conversation_id` — previously each "New chat" click orphaned the old
+  `(user, server, old_conv_id)` cache entries and `MCPSessionManager` sessions.
+- `get_prompt` now mirrors `call_tool`'s auth routing on HTTP MCP servers
+  with `auth_type` of oauth/jwt/bearer/api_key: requests go through the
+  user's stored token instead of the admin/server-default token, and missing
+  tokens raise `AuthenticationRequiredException` with the OAuth start URL.
+- `_get_or_create_user_http_client` now requires a non-empty
+  `conversation_id` (a `None` value would alias every caller into one
+  shared cache slot, recreating the bug this cache exists to prevent).
+- Added integration-style tests using a faithful `FakeFastMCPClient` that
+  drives the real `MCPSessionManager` and reproduces the pre-fix nesting
+  counter failure mode, plus unit coverage for `release_sessions`'s
+  per-conversation eviction.
+
+### PR #558 - 2026-04-24
+- Fix: nvm/venv/uv-installed CLIs (e.g. `cline`) no longer fail with
+  a misleading exit 127. The launched binary's own directory is now
+  prepended to the child `PATH` so the shebang interpreter
+  (`/usr/bin/env node`, `/usr/bin/env python`, …) can be resolved
+  alongside the binary. Smallest path extension that fixes the
+  common shebang-interpreter case without re-introducing the full
+  server `PATH`.
+- Fix: PTY-mode race where `output_raw` chunks arrived during
+  history replay before XtermView mounted, dropping early stdout/
+  stderr silently. The WS handler now buffers raw chunks in a ref
+  and XtermView flushes them on mount.
+- Non-zero process exits now surface as a toast with the exit code,
+  with a hint pointing at the PATH issue when the code is 127.
+- Agent Portal UX refresh: launch form moves from the cramped left
+  panel into a roomy modal popup opened by a "New launch" button.
+  Left panel now shows only active sessions and the presets library,
+  plus a Recent launches section collapsed by default. Replace every
+  `window.prompt` / `window.alert` / `window.confirm` in the portal
+  with a toast system and a custom prompt/confirm dialog component;
+  preset save/update/delete and launch all emit a toast instead of
+  silent state updates or inline banners.
+- New `atlas-portal` CLI (`atlas.portal_cli`) lets developers launch,
+  list, get, cancel, inspect processes and manage presets from the
+  terminal — useful for debugging launch failures that are awkward to
+  reproduce through the UI, and for e2e automation.
+- Eleven integration tests walk the full launch → list → get → cancel
+  flow through the real FastAPI router plus the CLI parser, covering
+  env isolation, bare-command resolution, preset round-trip, and the
+  feature-flag kill switch.
+- Fix: bare command names like `claude` or `uvx` installed under
+  `~/.local/bin`, a venv, or a Nix profile no longer fail to launch
+  with `[Errno 2] No such file or directory`. `ProcessManager.launch`
+  resolves non-absolute commands against the server's own `PATH` via
+  `shutil.which()` before spawning (a one-shot parent-side lookup that
+  does not leak the server's search path into the child) and raises a
+  clear `FileNotFoundError` naming the command when the lookup fails.
+- Server-side preset library at `/api/agent-portal/presets` (CRUD)
+  with atomic writes + `fcntl.flock`; filtered by `user_email` at the
+  storage layer. Frontend migrates legacy `localStorage` entries on
+  first mount and adds an **Update** button for round-trip preset edits.
+- Env isolation: child processes no longer inherit `os.environ.copy()`.
+  Allow-list of benign keys + pinned `PATH` + deny-list for secret-
+  shaped keys prevents backend secrets leaking to launched commands.
+- Dev-only hardening: startup guard refuses to enable the feature
+  unless `DEBUG_MODE=true`; WebSocket stream endpoint rejects non-
+  loopback Origin headers to block drive-by CSRF from untrusted tabs.
+
+### Agent Portal preset library - 2026-04-24
+- Server-side preset CRUD at `/api/agent-portal/presets` (list/create/get/
+  update/delete). Each preset captures the full launch-form payload
+  (command, args, cwd, sandbox settings, resource limits) plus a name and
+  optional description. Stored at `<APP_CONFIG_DIR>/agent_portal_presets.json`
+  with atomic writes and a `fcntl.flock`-backed lock file; filtered by
+  `user_email` at the storage layer on every read and write.
+- Frontend migrates any legacy `localStorage`-backed launch configs to the
+  server on first mount, renames the "Saved configs" panel to "Presets
+  library", and adds an **Update** button that appears when a preset is
+  loaded so the form can be saved back in place instead of spawning a
+  duplicate. **Save as…** now also prompts for an optional description.
+- Docs: `docs/agentportal/presets.md` covers the storage layout, HTTP API,
+  and migration behavior.
+
+### Agent Portal (initial) - 2026-04-23
+- New `/agent-portal` page (behind `FEATURE_AGENT_PORTAL_ENABLED`, off by default)
+  lets a user launch a host subprocess (command + args + optional cwd), view the
+  list of their running / finished processes, stream stdout/stderr live over a
+  dedicated WebSocket, and cancel a running process (SIGTERM, SIGKILL after 3s).
+  Backend: `atlas/modules/process_manager/` + `atlas/routes/agent_portal_routes.py`.
+  Dev preview only — no allow-list, quotas, or audit trail yet; governance layer
+  will be added in follow-up work.
+- Optional Landlock sandbox: a "Restrict to working directory" checkbox confines
+  the child's filesystem writes to cwd via Linux Landlock (set up from
+  `preexec_fn` between fork and exec, with `PR_SET_NO_NEW_PRIVS`). Capability
+  probed via `GET /api/agent-portal/capabilities` so the checkbox is disabled
+  when the kernel lacks support. Writes outside cwd return `EACCES`; reads and
+  `exec` on system roots (`/usr`, `/lib`, `/etc`, ...) are still permitted so
+  normal binaries run.
+- Frontend persists recent launches (command, args, cwd, sandbox mode) to
+  `localStorage` (`atlas.agentPortal.launchHistory.v1`, up to 15 entries) and
+  prepopulates the form from the most recent entry on load. A "Recent launches"
+  list lets the user click to reapply or remove past entries.
+- Third sandbox mode `workspace-write`: reads are allowed across the entire
+  filesystem (so tools like `cline` can find `node` / configs / caches under
+  `~/.local`, `~/.nvm`, `/nix`, etc.) but writes are still confined to cwd.
+  The `strict` mode remains for tighter isolation. Both modes allow read +
+  write on `/dev` so `/dev/null`, `/dev/tty`, and shell redirections keep
+  working. The UI exposes the choice as a dropdown; the request body now
+  carries `sandbox_mode` (`off` | `strict` | `workspace-write`) with backward
+  compatibility for the earlier `restrict_to_cwd` flag.
+- Extra writable paths: a new textarea lets the user whitelist additional
+  directories for write access alongside cwd (e.g. `~/.cline`,
+  `~/.cache/<tool>`). Backend field `extra_writable_paths` is passed to the
+  Landlock wrapper via the `ATLAS_SANDBOX_EXTRA_WRITE_PATHS` env var; each
+  directory gets the same access set as the workspace and is created on
+  demand.
+- Named launch configs: the user can save the current form (command, args,
+  cwd, sandbox mode, extra writable paths) as a named preset. Presets are
+  stored in `localStorage` under `atlas.agentPortal.launchConfigs.v1` and
+  shown in a "Saved configs" panel separate from the auto-history; each
+  config can be reapplied to the form with one click or deleted.
+
+### PR #557 - 2026-04-22
+- MCP task-augmented execution fixes: discovery-time seeding of task-forbidden
+  cache from per-tool execution.taskSupport metadata (SEP-1686), and runtime
+  fallback detection for immediate error results that don't raise exceptions.
+
+### PR #555 - 2026-04-23
+- Monthly release process + cron automation: `docs/developer/release-process.md`
+  runbook, `.github/workflows/release-cut.yml` scheduled cut (day 22, 14:00
+  UTC) that creates `release/YYYY.MM`, bumps versions, reshapes CHANGELOG,
+  and opens a draft release PR from `.github/release-checklist.md`. Workflow
+  uses an optional `RELEASE_PAT` secret so the PR triggers `CI/CD Pipeline`
+  and `Security Checks`, falls back to `GITHUB_TOKEN` with a visible
+  kick-CI banner, and includes a recovery path that opens a PR when a prior
+  run stranded a pushed branch without one. No publish paths change.
+
+### PR #552 - 2026-04-20
+- New Chat stops in-flight generation: clicking "New Chat" while a reply is
+  streaming no longer lets orphaned tokens bleed into the fresh session.
+  `clearChat` now cancels the active task (`stop_streaming` +
+  `agent_control: stop` when in agent mode) before requesting a new session,
+  fully resets local thinking / synthesizing / agent-step state, and asks
+  for confirmation before discarding an existing conversation or
+  interrupting generation. Backend `reset_session` also cancels any running
+  chat task as defense-in-depth, and a new `agent_control` server handler
+  replaces the prior "Unknown message type" echo.
+- Sidebar "Delete Conversation" (of the active conversation) now bypasses the
+  New-Chat confirm prompt via `clearChat({ skipConfirm: true })` so users
+  don't see a second "Start a new chat?" dialog right after deleting.
+- Header "New Chat" button and `Ctrl+Alt+N` hotkey now gate their follow-up
+  side-effects (close canvas, focus input) on the confirm result — if the
+  user clicks Cancel, the chat stays intact.
+
+### PR #551 - 2026-04-20 - Pause banner/config polling when user is idle
+- Added `useUserActivity` hook that tracks mouse/keyboard/touch/scroll activity.
+- `BannerPanel` now pauses `/api/config` and `/api/banners` polling after 5
+  minutes of no user activity and resumes automatically (with an immediate
+  refresh) on the next user event.
+
+### PR #550 - 2026-04-20
+- **Admin telemetry dashboard (issue #546)**: New `/admin/telemetry` page with
+  five read-only views backed by the OpenTelemetry span audit trail: Overview
+  (turn / tool / LLM / RAG rollups over 1h–30d), Tool health (per-tool call
+  count, success rate, p95 duration, click-through to recent failures), LLM
+  performance (per-model p50/p95/p99 latency, token totals, retry rate), RAG
+  effectiveness (per-source retrieval-to-use ratio, top-score distribution),
+  and Session drill-down (span tree waterfall by `session_id` or `turn_id`).
+  Data source is pluggable via a `SpanReader` protocol; the default
+  `FileSpanReader` streams `logs/spans.jsonl` and an OTLP/Jaeger/Tempo backend
+  can be swapped in without UI changes. All endpoints require admin authz and
+  defensively whitelist the span attributes they echo — no raw prompts, tool
+  outputs, or RAG document text ever reach the dashboard.
+
+### PR #549 - 2026-04-20 - OpenTelemetry spans for S3 / file-storage operations
+- Emit `file.upload`, `file.download`, `storage.list`, and `storage.delete`
+  spans from `S3StorageClient` and `MockS3StorageClient`. Contract uses
+  HMAC-SHA256 hashes for user/key, `safe_label` for filenames, and
+  `preview(..., max_chars=300)` for error messages — never raw keys,
+  bucket names, filenames (beyond the sanitized label), or user emails.
+- Cross-user access attempts set `access_denied=true` before the exception
+  is raised so the event survives in `spans.jsonl` even on failure.
+- `docs/telemetry/README.md` gains attribute tables for the four new span
+  types; `docs/telemetry/analysis_example.py` gains
+  `upload_volume_by_user` and `storage_success_rate_by_backend`
+  aggregations.
+
+### PR #549 review follow-up - 2026-04-21
+- **Security**: `S3StorageClient` no longer embeds the raw boto
+  `Error.Message` in the raised `Exception` string. Those messages can
+  carry tokens, caller args, or user content and previously leaked up to
+  API responses / upstream logs. The sanitized preview still goes on the
+  span; the exception message is now generic (`"S3 upload failed"` etc.)
+  and the underlying cause is chained via `raise ... from e`.
+- **Correctness**: upload-failure spans now populate `file_size`,
+  `category`, and `key_hash` from the values computed before the failure
+  (when available) instead of writing `0` / `"other"` unconditionally,
+  so `upload_volume_by_user` and category breakdowns include failed
+  attempts.
+- **Contract consistency**: the `NoSuchKey` / 404 branches on download
+  and delete now also set `error_type` (`"NoSuchKey"` for real S3,
+  `"NotFound"` for the mock) so failure-mode aggregation groups them
+  alongside raised errors. `error_message` rows added to the
+  `storage.list` / `storage.delete` attribute tables to match emission.
+- **Analysis hygiene**: `file_type=None` on `storage.list` now surfaces
+  as the string sentinel `"null"` so the attribute is always present
+  (OTel drops `None` attrs). Duplicate `attr_num_results` removed from
+  `_NUMERIC_ATTRS`.
+
+### PR #544 - 2026-04-19
+- **Fix**: MCP client tore down the streamable-HTTP session (POST → DELETE) after every tool call on stateful servers, so state written by one tool was invisible to the next. Root cause: `ChatService.handle_chat_message` only set `session.context["conversation_id"]` when the client sent one, but the frontend doesn't send a conversation id on the first message of a new conversation. That left `conversation_id=None` for tool execution, which forced `MCPToolManager.call_tool` into its per-call `async with client:` fallback instead of reusing the persistent session held by `MCPSessionManager`. Fix: default `session.context["conversation_id"]` to `str(session_id)` when the client doesn't send one (matches the fallback already used by `_save_conversation` and the `conversation_saved` notification, so the stable id round-trips to the client). Stateful MCP servers (e.g. FastMCP 3.x streamable-HTTP servers that key per-tool state on `Context.session_id`) now see a reused `Mcp-Session-Id` across tool calls within a conversation, as required by the MCP spec.
+
+### PR #547 hardening pass - 2026-04-19 (issue #545 follow-up, same PR)
+- **Security / privacy**:
+  - `tool.call.error_message` is now routed through `preview()` (sanitized,
+    CR/LF stripped, capped at 300 chars). Upstream exception strings from
+    DB drivers / HTTP clients / MCP tools routinely embed caller args,
+    URLs with tokens, and user content; the prior contract allowed those
+    to reach span attributes and OTLP exporters verbatim.
+  - RAG `doc_ids` now sanitize + length-cap each element (≤200 chars,
+    control chars stripped), preferring `chunk_id` and only falling back
+    to `title`/`source` after sanitization — external RAG backends can
+    return untrusted strings with injection payloads.
+  - `hash_short` switched from truncated SHA-256 to HMAC-SHA256 keyed by
+    `ATLAS_TELEMETRY_HMAC_SECRET` (falls back to `CAPABILITY_TOKEN_SECRET`,
+    then to a per-process random key with a startup warning). Prevents
+    rainbow-table reversal of short identifiers in small populations.
+    Docs updated to describe this as pseudonymization, not anonymization.
+  - `write_tool_output_sidecar` creates files with `0600` and the
+    `tool_outputs/` directory with `0700`. `spans.jsonl` and `app.jsonl`
+    are likewise tightened to `0600` on POSIX filesystems.
+  - `_coerce_attr` gained a 4000-char hard cap on all string attribute
+    values (including list elements) as defense-in-depth against a future
+    call site forgetting to use `preview()` or `safe_label()`.
+- **Reliability**: `JSONLSpanExporter` now holds a long-lived file handle
+  guarded by a lock; `force_flush` issues `fsync` and `shutdown` closes
+  the handle. `OpenTelemetryConfig.shutdown()` flushes processors and
+  tears them down cleanly. Previous behavior returned `True` from
+  `force_flush` without touching disk and did nothing on shutdown.
+- **OpenShift manifest**: Grafana anonymous-admin is now **off** by
+  default — replaced with a `grafana-admin` Secret and
+  `GF_SECURITY_ADMIN_*` env wiring. A commented `ANONYMOUS_DEV_ONLY`
+  block preserves the laptop-only shortcut. In-cluster
+  `tls: insecure: true` is documented as namespace-scoped only.
+- **Tests**: Added 9 new test cases covering sanitized `error_message`,
+  HMAC keying and secret dependence, sanitized RAG `doc_ids`,
+  `_coerce_attr` hard-capping, sidecar/spans file permissions, and
+  `JSONLSpanExporter` flush/shutdown semantics. PR-validation script
+  extended with a failing-tool negative control and file-mode assertion.
+
+### PR #547 - 2026-04-19 (issue #545)
+- **Feature**: OpenTelemetry audit trail. ATLAS now emits structured spans for every high-value event in a chat turn: `chat.turn` (per user message), `llm.call` (per LiteLLM call, including streaming), `tool.call` (per tool invocation), and `rag.query` (per RAG query, including batched multi-source queries). Spans are written as one JSON line per span to `logs/spans.jsonl` via a `BatchSpanProcessor`; optional OTLP export is enabled via `OTEL_EXPORTER_OTLP_ENDPOINT`. Attribute contract is frozen and documented in `docs/telemetry/README.md`: sanitized previews, hashes, sizes, token counts, retry counts, RAG document IDs/scores, and tool success/duration — never raw prompts, raw tool outputs, or raw RAG document text. Full tool outputs are opt-in only via `ATLAS_LOG_TOOL_OUTPUTS=true` (written to `logs/tool_outputs/{span_id}.txt`). A reference pandas analysis script lives at `docs/telemetry/analysis_example.py` and computes per-tool success rates, per-model p95 latency, RAG retrieval/use ratios, and retries per turn. An optional Grafana Tempo / Grafana stack recipe is included in the telemetry README for interactive trace exploration. 19 unit tests cover span emission, sensitive-data containment, and the JSONL exporter contract.
+- **Review fixes** (addressed on the same PR):
+  - Fixed `tool.call` **output leak** when `args_edited=true`: the LLM-facing edit note containing executed arguments was being captured into `output_preview`/`output_sha256`/`output_size`. Telemetry now reads the pre-edit-note content; a new `args_edited` boolean attribute records whether the edit happened. Regression test added.
+  - Fixed `tool_source` attribution for MCP servers whose names contain underscores (e.g. `pptx_generator`). Previously split the tool name on the first `_`, which mis-attributed tools like `pptx_generator_create` to `pptx`. Now uses `MCPToolManager.get_server_for_tool(name)` (authoritative tool index). Falls back to `null` when unavailable so analysis code never sees a fabricated prefix. Regression test added.
+  - Fixed `rag.query.content_size` to report UTF-8 byte size (via `telemetry.size_bytes`) instead of character count, matching the documented contract.
+  - Replaced `span.record_exception(exc)` with an `error_type` attribute only — avoids forwarding full exception messages (which can contain user/tool content) via OTLP.
+  - `set_attrs` now preserves empty lists so list-typed contract fields (`doc_ids`, `doc_scores`, `docs_used_in_context`) appear as explicit `[]` rather than silently vanishing.
+  - Renamed streaming `llm.call.output_tokens` to `output_tokens_estimate` (it's computed from `output_chars // 4`, not from real usage metadata) so aggregations don't silently mix estimates with authoritative token counts.
+  - Broke the `litellm_streaming` → `litellm_caller` cyclic import: `split_provider` moved to `atlas/modules/llm/models.py`.
+  - `set_attrs` debug-log now sanitizes attribute key/exception strings via `sanitize_for_logging`.
+  - `docs/telemetry/analysis_example.py::retries_per_turn` uses `df.reindex` so partial span files (e.g. only `tool.call` spans) no longer raise `KeyError`.
+
+### PR #541 - 2026-04-19
+- **Fix**: MCP tool calls kept failing with `Session terminated` until a backend restart when a stateful MCP server's backing process invalidated its session ID while the HTTP transport still reported connected. `MCPToolManager.execute_tool` now detects session-termination errors (`"session terminated"`, `"session not found"`, `"invalid session id"`) — including when wrapped via `__cause__` / `__context__` — and calls `_session_manager.release(conversation_id, server_name)` so the next tool call transparently opens a fresh session. Also promoted the on-disconnect `release_sessions` failure log from `debug` to `warning` so silent failures are visible. Added three regression tests covering the direct, chained-exception, and negative (unrelated error) paths.
+
 ### Frontend maintainability - 2026-04-18
 - **Refactor**: Decomposed `frontend/src/components/Message.jsx` from 1,396 lines to 524 lines by extracting cohesive helpers into sibling modules. New modules: `utils/markdownRenderer.js` (marked + highlight.js + DOMPurify config), `utils/ragCitations.js` (source-label extraction, inline citation badges, collapsible References section), `utils/messageContent.js` (content shaping), `utils/clipboard.js` (code-block and message copy helpers), `utils/toolResultUtils.js` (argument filtering, tool-result sanitization, file download). The `ToolApprovalMessage` and `ToolElapsedTime` sub-components moved to their own files under `components/`. `rag-citation-rendering.test.js` now imports from `utils/ragCitations.js` instead of duplicating the helpers, eliminating drift risk. Addressed review feedback: sanitize hljs language tag before HTML interpolation, null-guard artifact/base64 lengths in `processToolResult`, scope the code-block copy delegator to each message's container ref (was `document`, which multiplied listeners by message count), and render RAG citation chips as real `<button>` elements for native keyboard activation. No behavior changes.
 

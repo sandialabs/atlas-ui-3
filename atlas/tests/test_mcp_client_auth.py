@@ -280,52 +280,246 @@ class TestGetUserClient:
 
             # First call - token valid
             mock_token_storage.get_valid_token.return_value = mock_token
-            result1 = await manager._get_user_client("test-server", "user@example.com")
+            result1 = await manager._get_user_client("test-server", "user@example.com", "conv-1")
             assert result1 is mock_client
 
             # Second call - token expired (returns None)
             mock_token_storage.get_valid_token.return_value = None
-            result2 = await manager._get_user_client("test-server", "user@example.com")
+            result2 = await manager._get_user_client("test-server", "user@example.com", "conv-1")
 
             # Should return None and cache should be invalidated
             assert result2 is None
-            cache_key = ("user@example.com", "test-server")
+            cache_key = ("user@example.com", "test-server", "conv-1")
             assert cache_key not in manager._user_clients
 
 
 class TestInvalidateUserClient:
     """Test _invalidate_user_client method."""
 
-    @pytest.mark.asyncio
-    async def test_removes_cached_client(self):
-        """Should remove client from cache."""
+    def _make_manager(self, clients: dict):
+        """Build a minimal MCPToolManager suitable for invalidation tests."""
         import asyncio
 
         from atlas.modules.mcp_tools.client import MCPToolManager
+        from atlas.modules.mcp_tools.session_manager import MCPSessionManager
 
         manager = MCPToolManager.__new__(MCPToolManager)
-        manager._user_clients = {
-            ("user@example.com", "test-server"): MagicMock(),
-            ("other@example.com", "test-server"): MagicMock(),
-        }
+        manager._user_clients = clients
         manager._user_clients_lock = asyncio.Lock()
+        manager._session_manager = MCPSessionManager()
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_removes_cached_client(self):
+        """Should remove client from cache."""
+        manager = self._make_manager({
+            ("user@example.com", "test-server", "conv-1"): MagicMock(),
+            ("user@example.com", "test-server", "conv-2"): MagicMock(),
+            ("other@example.com", "test-server", "conv-1"): MagicMock(),
+        })
 
         await manager._invalidate_user_client("user@example.com", "test-server")
 
-        assert ("user@example.com", "test-server") not in manager._user_clients
+        # All conversation entries for the target user/server are removed
+        assert ("user@example.com", "test-server", "conv-1") not in manager._user_clients
+        assert ("user@example.com", "test-server", "conv-2") not in manager._user_clients
         # Other user's client should remain
-        assert ("other@example.com", "test-server") in manager._user_clients
+        assert ("other@example.com", "test-server", "conv-1") in manager._user_clients
 
     @pytest.mark.asyncio
     async def test_handles_missing_cache_entry(self):
         """Should not error when cache entry doesn't exist."""
+        manager = self._make_manager({})
+        # Should not raise
+        await manager._invalidate_user_client("user@example.com", "test-server")
+
+    @pytest.mark.asyncio
+    async def test_releases_orphaned_sessions_on_revocation(self):
+        """Sessions that outlived their cache entry must be closed on token revocation.
+
+        Scenario: the LRU sweeper already evicted the _user_clients cache entry
+        but its async close-task has not yet run, so MCPSessionManager still
+        holds a live session.  _invalidate_user_client must close it via
+        release_sessions_for_user_server even when _user_clients is empty.
+        """
+        from unittest.mock import AsyncMock
+
+        from atlas.modules.mcp_tools.session_manager import ManagedSession
+
+        manager = self._make_manager({})
+
+        # Manually inject a live session into the session manager to simulate
+        # the "orphaned session" scenario (cache entry already gone).
+        fake_client = MagicMock()
+        fake_client.is_connected = MagicMock(return_value=True)
+        fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+        fake_client.__aexit__ = AsyncMock(return_value=None)
+        session = ManagedSession(fake_client)
+        await session.open()
+
+        key = ("user@example.com", "conv-1", "test-server")
+        manager._session_manager._sessions[key] = session
+        manager._session_manager._conv_index.setdefault("conv-1", set()).add(key)
+
+        assert session.is_open
+
+        await manager._invalidate_user_client("user@example.com", "test-server")
+
+        # The orphaned session must have been closed.
+        assert session._closed
+        # Session index must be cleaned up.
+        assert key not in manager._session_manager._sessions
+        assert "conv-1" not in manager._session_manager._conv_index
+
+
+class TestGetPromptAuthRouting:
+    """Tests that get_prompt mirrors call_tool's auth routing.
+
+    Pre-fix, get_prompt only checked _is_http_server and routed every HTTP
+    server through _get_or_create_user_http_client (admin/server-default
+    token). For servers with auth_type=oauth/jwt/bearer/api_key this caused
+    prompt fetches to run unauthenticated even though tool calls on the
+    same server ran as the user.
+    """
+
+    def _make_manager_for_auth_server(self, auth_type: str = "bearer"):
         import asyncio
 
         from atlas.modules.mcp_tools.client import MCPToolManager
 
         manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {
+            "auth-server": {
+                "auth_type": auth_type,
+                "url": "http://auth-server.local",
+            },
+        }
+        manager.clients = {}
         manager._user_clients = {}
         manager._user_clients_lock = asyncio.Lock()
+        manager._create_log_handler = MagicMock(return_value=None)
+        manager._create_elicitation_handler = MagicMock(return_value=None)
+        manager._create_sampling_handler = MagicMock(return_value=None)
+        return manager
 
-        # Should not raise
-        await manager._invalidate_user_client("user@example.com", "test-server")
+    @pytest.mark.asyncio
+    async def test_get_prompt_uses_user_client_for_auth_server(self):
+        """get_prompt on an auth-required HTTP server must go through
+        _get_user_client, not _get_or_create_user_http_client.
+        """
+        from unittest.mock import AsyncMock
+
+        manager = self._make_manager_for_auth_server("bearer")
+
+        user_client = MagicMock()
+        user_client.__aenter__ = AsyncMock(return_value=user_client)
+        user_client.__aexit__ = AsyncMock(return_value=None)
+        user_client.get_prompt = AsyncMock(return_value="prompt-text")
+
+        manager._get_user_client = AsyncMock(return_value=user_client)
+        manager._get_or_create_user_http_client = AsyncMock(
+            side_effect=AssertionError(
+                "auth-required server must not fall through to admin-token client"
+            )
+        )
+
+        result = await manager.get_prompt(
+            "auth-server",
+            "my_prompt",
+            user_email="alice@example.com",
+            conversation_id="conv-1",
+        )
+
+        assert result == "prompt-text"
+        manager._get_user_client.assert_awaited_once_with(
+            "auth-server", "alice@example.com", "conv-1",
+        )
+        manager._get_or_create_user_http_client.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_raises_when_no_user_token(self):
+        """Auth-required server with no stored token must raise
+        AuthenticationRequiredException, not silently fall back to admin auth.
+        """
+        from unittest.mock import AsyncMock
+
+        from atlas.modules.mcp_tools.token_storage import (
+            AuthenticationRequiredException,
+        )
+
+        manager = self._make_manager_for_auth_server("oauth")
+        manager._get_user_client = AsyncMock(return_value=None)
+        manager._get_or_create_user_http_client = AsyncMock(
+            side_effect=AssertionError("must not fall through on missing token")
+        )
+
+        with pytest.raises(AuthenticationRequiredException) as exc_info:
+            await manager.get_prompt(
+                "auth-server",
+                "my_prompt",
+                user_email="bob@example.com",
+                conversation_id="conv-2",
+            )
+
+        assert exc_info.value.server_name == "auth-server"
+        assert exc_info.value.auth_type == "oauth"
+        assert "/api/mcp/auth/auth-server/oauth/start" in (
+            exc_info.value.oauth_start_url or ""
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_raises_when_no_user_email(self):
+        """Auth-required server invoked without user_email must raise."""
+        from atlas.modules.mcp_tools.token_storage import (
+            AuthenticationRequiredException,
+        )
+
+        manager = self._make_manager_for_auth_server("jwt")
+
+        with pytest.raises(AuthenticationRequiredException):
+            await manager.get_prompt(
+                "auth-server",
+                "my_prompt",
+                user_email=None,
+                conversation_id="conv-3",
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_uses_http_client_for_unauthed_server(self):
+        """Plain HTTP server (no auth_type) with a user_email still routes
+        through the per-conversation HTTP client — unchanged behavior.
+        """
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from atlas.modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {
+            "plain-http": {"url": "http://plain.local"},
+        }
+        manager.clients = {}
+        manager._user_clients = {}
+        manager._user_clients_lock = asyncio.Lock()
+        manager._create_log_handler = MagicMock(return_value=None)
+        manager._create_elicitation_handler = MagicMock(return_value=None)
+        manager._create_sampling_handler = MagicMock(return_value=None)
+
+        plain_client = MagicMock()
+        plain_client.__aenter__ = AsyncMock(return_value=plain_client)
+        plain_client.__aexit__ = AsyncMock(return_value=None)
+        plain_client.get_prompt = AsyncMock(return_value="ok")
+
+        manager._get_or_create_user_http_client = AsyncMock(return_value=plain_client)
+        manager._get_user_client = AsyncMock(
+            side_effect=AssertionError("non-auth server must not call _get_user_client")
+        )
+
+        result = await manager.get_prompt(
+            "plain-http",
+            "p",
+            user_email="alice@example.com",
+            conversation_id="conv-x",
+        )
+        assert result == "ok"
+        manager._get_or_create_user_http_client.assert_awaited_once()

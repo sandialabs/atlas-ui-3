@@ -32,6 +32,15 @@ docker run -p 8000:8000 quay.io/agarlan-snl/atlas-ui-3:latest
 3.  **Access the Application:**
     Open your web browser and navigate to [http://localhost:8000](http://localhost:8000).
 
+### Option 3: Build a Runtime-only Image
+
+Use the runtime-only Dockerfile when you want a slimmer deployed image with only runtime dependencies:
+
+```bash
+docker build -f Dockerfile.runtimeonly -t atlas-ui-3-runtime .
+docker run -p 8000:8000 atlas-ui-3-runtime
+```
+
 ## Local Development Setup
 
 For those who want to contribute to the code or run the application natively, follow these steps.

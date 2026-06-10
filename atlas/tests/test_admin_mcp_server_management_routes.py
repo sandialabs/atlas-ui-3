@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from main import app
+from atlas.modules.config import config_manager
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
@@ -28,7 +29,7 @@ def test_admin_mcp_available_servers_returns_inventory(monkeypatch, tmp_path):
     client = TestClient(app)
     response = client.get(
         "/admin/mcp/available-servers",
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
     )
     assert response.status_code == 200
 
@@ -56,7 +57,7 @@ def test_admin_mcp_active_servers_empty_when_no_override_file(monkeypatch, tmp_p
     client = TestClient(app)
     response = client.get(
         "/admin/mcp/active-servers",
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
     )
     assert response.status_code == 200
     data = response.json()
@@ -72,14 +73,14 @@ def test_admin_mcp_add_server_persists_to_overrides(monkeypatch, tmp_path):
 
     available = client.get(
         "/admin/mcp/available-servers",
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
     ).json()["available_servers"]
 
     server_name = next(iter(available.keys()))
 
     add_response = client.post(
         "/admin/mcp/add-server",
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
         json={"server_name": server_name},
     )
     assert add_response.status_code == 200
@@ -89,7 +90,7 @@ def test_admin_mcp_add_server_persists_to_overrides(monkeypatch, tmp_path):
     # Active endpoint should reflect the new server.
     active = client.get(
         "/admin/mcp/active-servers",
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
     ).json()["active_servers"]
     assert server_name in active
 
@@ -102,7 +103,7 @@ def test_admin_mcp_add_server_persists_to_overrides(monkeypatch, tmp_path):
     # Re-adding returns the already_active response.
     add_again = client.post(
         "/admin/mcp/add-server",
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
         json={"server_name": server_name},
     )
     assert add_again.status_code == 200
@@ -117,7 +118,7 @@ def test_admin_mcp_remove_server_updates_overrides(monkeypatch, tmp_path):
 
     available = client.get(
         "/admin/mcp/available-servers",
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
     ).json()["available_servers"]
 
     server_name = next(iter(available.keys()))
@@ -125,14 +126,14 @@ def test_admin_mcp_remove_server_updates_overrides(monkeypatch, tmp_path):
     # Add then remove.
     add_response = client.post(
         "/admin/mcp/add-server",
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
         json={"server_name": server_name},
     )
     assert add_response.status_code == 200
 
     remove_response = client.post(
         "/admin/mcp/remove-server",
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
         json={"server_name": server_name},
     )
     assert remove_response.status_code == 200
@@ -142,7 +143,7 @@ def test_admin_mcp_remove_server_updates_overrides(monkeypatch, tmp_path):
 
     active = client.get(
         "/admin/mcp/active-servers",
-        headers={"X-User-Email": "admin@example.com"},
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
     ).json()["active_servers"]
     assert server_name not in active
 
@@ -155,7 +156,7 @@ def test_admin_mcp_routes_reject_mock_users_in_production():
     """In production mode, mock admin users must be denied access."""
     client = TestClient(app)
     for path in ["/admin/mcp/available-servers", "/admin/mcp/active-servers"]:
-        response = client.get(path, headers={"X-User-Email": "admin@example.com"})
+        response = client.get(path, headers={"X-User-Email": config_manager.app_settings.admin_test_user})
         # 403 = admin auth correctly denied; 503 = proxy secret also blocks (both are correct)
         assert response.status_code in (403, 503), (
             f"{path} should deny access in production mode, got {response.status_code}"

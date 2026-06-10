@@ -16,7 +16,8 @@ vi.mock('../contexts/ChatContext', () => ({
 // Mock lucide-react icons
 vi.mock('lucide-react', () => ({
   ChevronDown: () => <span data-testid="chevron-down">v</span>,
-  Sparkles: () => <span data-testid="sparkles">*</span>
+  Sparkles: () => <span data-testid="sparkles">*</span>,
+  User: () => <span data-testid="user">u</span>
 }))
 
 describe('PromptSelector', () => {
@@ -74,6 +75,39 @@ describe('PromptSelector', () => {
 
       expect(screen.getByText('✓')).toBeInTheDocument()
       expect(screen.getByText('(active)')).toBeInTheDocument()
+    })
+  })
+
+  describe('User prompt feature flag', () => {
+    const userPromptContext = {
+      ...defaultChatContext,
+      userPrompts: [{ id: 'p1', title: 'Saved Prompt', content: 'Use my style.' }]
+    }
+
+    it('should hide saved user prompts when custom prompts are disabled', () => {
+      useChat.mockReturnValue({
+        ...userPromptContext,
+        features: { custom_prompts: false }
+      })
+
+      render(<PromptSelector />)
+      fireEvent.click(screen.getByRole('button'))
+
+      expect(screen.queryByText('My Prompts')).not.toBeInTheDocument()
+      expect(screen.queryByText('Saved Prompt')).not.toBeInTheDocument()
+    })
+
+    it('should show saved user prompts when custom prompts are enabled', () => {
+      useChat.mockReturnValue({
+        ...userPromptContext,
+        features: { custom_prompts: true }
+      })
+
+      render(<PromptSelector />)
+      fireEvent.click(screen.getByRole('button'))
+
+      expect(screen.getByText('My Prompts')).toBeInTheDocument()
+      expect(screen.getByText('Saved Prompt')).toBeInTheDocument()
     })
   })
 

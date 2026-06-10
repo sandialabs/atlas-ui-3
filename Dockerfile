@@ -108,6 +108,7 @@ COPY --chown=appuser:appuser atlas/ ./atlas/
 COPY --chown=appuser:appuser docs/ ./docs/
 COPY --chown=appuser:appuser test/ ./test/
 COPY --chown=appuser:appuser prompts/ ./prompts/
+COPY --chown=appuser:appuser scripts/ ./scripts/
 
 # Seed config from package defaults
 RUN cp -n /app/atlas/config/*.json /app/atlas/config/*.yml /app/config/ 2>/dev/null || true

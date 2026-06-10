@@ -225,6 +225,36 @@ jobs:
       with:
         sarif_file: 'scout-results.sarif'
 
+    # SBOM generation with Syft (Anchore) — bundled into the container scan artifact
+    - name: Generate SBOM (Syft)
+      uses: anchore/sbom-action@v0
+      with:
+        image: security-scan:latest
+        format: spdx-json
+        output-file: sbom.spdx.json
+        upload-artifact: false
+
+    # Grype for image vulnerability scanning. Report-first defaults: fail-build=false,
+    # only-fixed=true so signal stays focused on actionable, fixable CVEs.
+    - name: Run Grype vulnerability scanner
+      id: grype
+      uses: anchore/scan-action@v7
+      continue-on-error: true
+      with:
+        image: security-scan:latest
+        fail-build: false
+        severity-cutoff: high
+        only-fixed: true
+        output-format: sarif
+        output-file: grype-results.sarif
+
+    - name: Upload Grype scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always() && hashFiles('grype-results.sarif') != ''
+      with:
+        sarif_file: grype-results.sarif
+        category: grype
+
     # Upload container scan artifacts
     - name: Upload container scan reports
       uses: actions/upload-artifact@v7
@@ -234,6 +264,8 @@ jobs:
         path: |
           trivy-results.sarif
           scout-results.sarif
+          grype-results.sarif
+          sbom.spdx.json
         if-no-files-found: ignore
 
   security-summary:

@@ -95,6 +95,18 @@ class TestSaveAndGet:
         assert result["messages"][0]["role"] == "user"
         assert result["messages"][1]["role"] == "assistant"
 
+    def test_get_conversation_owner(self, repo):
+        repo.save_conversation(
+            conversation_id="conv-owner",
+            user_email="owner@test.com",
+            title="Owner Test",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+
+        assert repo.get_conversation_owner("conv-owner") == "owner@test.com"
+        assert repo.get_conversation_owner("missing-conv") is None
+
     def test_get_nonexistent_returns_none(self, repo):
         assert repo.get_conversation("nope", "user@test.com") is None
 
@@ -552,6 +564,134 @@ class TestSaveConversationSecurity:
         assert repo.get_conversation("bd-bob", "bob@test.com") is not None
 
 
+class TestUserEmailNormalization:
+    """All repository entry points must normalize user_email so callers
+    that arrive with mixed case (different SSO/proxy paths sometimes
+    deliver ``Alice@Test.com`` vs ``alice@test.com``) still hit the same
+    row. The normalization is centralized at the repository chokepoint —
+    these tests assert that every public method honors that contract.
+    """
+
+    MIXED = "Alice@Test.COM"
+    LOWER = "alice@test.com"
+
+    def test_save_then_get_with_different_case_matches(self, repo):
+        repo.save_conversation(
+            conversation_id="case-1",
+            user_email=self.MIXED,
+            title="Hello",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        assert repo.get_conversation("case-1", self.LOWER) is not None
+        assert repo.get_conversation("case-1", self.MIXED.upper()) is not None
+
+    def test_list_is_case_insensitive(self, repo):
+        repo.save_conversation(
+            conversation_id="list-case",
+            user_email=self.LOWER,
+            title="Listed",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        results = repo.list_conversations(self.MIXED)
+        assert len(results) == 1
+        assert results[0]["id"] == "list-case"
+
+    def test_search_is_case_insensitive(self, repo):
+        repo.save_conversation(
+            conversation_id="search-case",
+            user_email=self.LOWER,
+            title="Searchable Topic",
+            model="gpt-4",
+            messages=[{"role": "user", "content": "needle"}],
+        )
+        results = repo.search_conversations(self.MIXED, "needle")
+        assert len(results) == 1
+        assert results[0]["id"] == "search-case"
+
+    def test_delete_is_case_insensitive(self, repo):
+        repo.save_conversation(
+            conversation_id="del-case",
+            user_email=self.LOWER,
+            title="To Delete",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        assert repo.delete_conversation("del-case", self.MIXED) is True
+        assert repo.get_conversation("del-case", self.LOWER) is None
+
+    def test_bulk_delete_is_case_insensitive(self, repo):
+        for cid in ("bd-1", "bd-2"):
+            repo.save_conversation(
+                conversation_id=cid,
+                user_email=self.LOWER,
+                title=cid,
+                model="gpt-4",
+                messages=_make_messages(1),
+            )
+        count = repo.delete_conversations(["bd-1", "bd-2"], self.MIXED)
+        assert count == 2
+
+    def test_delete_all_is_case_insensitive(self, repo):
+        repo.save_conversation(
+            conversation_id="da-1",
+            user_email=self.LOWER,
+            title="A",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        assert repo.delete_all_conversations(self.MIXED) == 1
+
+    def test_export_is_case_insensitive(self, repo):
+        repo.save_conversation(
+            conversation_id="exp-case",
+            user_email=self.LOWER,
+            title="Export Me",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        results = repo.export_all_conversations(self.MIXED)
+        assert len(results) == 1
+
+    def test_update_title_is_case_insensitive(self, repo):
+        repo.save_conversation(
+            conversation_id="ut-case",
+            user_email=self.LOWER,
+            title="Old",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        assert repo.update_title("ut-case", "New", self.MIXED) is True
+        assert repo.get_conversation("ut-case", self.LOWER)["title"] == "New"
+
+    def test_tags_are_case_insensitive(self, repo):
+        repo.save_conversation(
+            conversation_id="tag-case",
+            user_email=self.LOWER,
+            title="Tagged",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        tag_id = repo.add_tag("tag-case", "important", self.MIXED)
+        assert tag_id is not None
+        tags = repo.list_tags(self.MIXED.upper())
+        assert any(t["name"] == "important" for t in tags)
+        assert repo.remove_tag("tag-case", tag_id, self.MIXED.lower()) is True
+
+    def test_get_conversation_owner_returns_normalized(self, repo):
+        repo.save_conversation(
+            conversation_id="owner-case",
+            user_email=self.MIXED,
+            title="Owned",
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+        # Owner returned as normalized form so chat-service equality
+        # against the authenticated identity is consistent.
+        assert repo.get_conversation_owner("owner-case") == self.LOWER
+
+
 class TestExportAll:
     """Tests for exporting all conversations with full messages."""
 
@@ -879,6 +1019,76 @@ class TestConversationSavedEvent:
         saved = repo.get_conversation(conv_id, "user@test.com")
         assert saved is not None
         assert len(saved["messages"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_reset_releases_old_conversation_mcp_sessions(self, repo):
+        """Reset must release the OLD conversation_id's MCP sessions before
+        generating a new one. With per-conversation cache keys, skipping this
+        leaks (user, server, old_conv_id) entries on every "new chat" click.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+        from uuid import uuid4
+
+        from atlas.application.chat.service import ChatService
+
+        tool_manager = MagicMock()
+        tool_manager.release_sessions = AsyncMock()
+
+        service = ChatService(
+            llm=MagicMock(),
+            tool_manager=tool_manager,
+            conversation_repository=repo,
+        )
+
+        session_id = uuid4()
+        await service.create_session(session_id, "user@test.com")
+        session = await service.session_repository.get(session_id)
+        conv_id_before = session.context.get("conversation_id")
+        if not conv_id_before:
+            conv_id_before = "seeded-conv-1"
+            session.context["conversation_id"] = conv_id_before
+            await service.session_repository.update(session)
+
+        await service.handle_reset_session(session_id, "user@test.com")
+
+        tool_manager.release_sessions.assert_awaited_once_with(
+            conv_id_before, user_email="user@test.com"
+        )
+
+        # And the new session should have a fresh conversation_id distinct
+        # from the old one we just released.
+        session_after = await service.session_repository.get(session_id)
+        assert session_after.context.get("conversation_id") != conv_id_before
+
+    @pytest.mark.asyncio
+    async def test_reset_swallows_release_sessions_errors(self, repo):
+        """If release_sessions raises, reset still proceeds — cleanup is
+        best-effort, and a leak is preferable to a broken reset.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+        from uuid import uuid4
+
+        from atlas.application.chat.service import ChatService
+
+        tool_manager = MagicMock()
+        tool_manager.release_sessions = AsyncMock(side_effect=RuntimeError("boom"))
+
+        service = ChatService(
+            llm=MagicMock(),
+            tool_manager=tool_manager,
+            conversation_repository=repo,
+        )
+
+        session_id = uuid4()
+        await service.create_session(session_id, "user@test.com")
+        session = await service.session_repository.get(session_id)
+        if not session.context.get("conversation_id"):
+            session.context["conversation_id"] = "seeded-conv-2"
+            await service.session_repository.update(session)
+
+        # Must not raise even though release_sessions did.
+        result = await service.handle_reset_session(session_id, "user@test.com")
+        assert result["type"] == "session_reset"
 
 
 class TestConversationRoutes:

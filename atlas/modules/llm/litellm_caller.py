@@ -16,6 +16,7 @@ import logging
 import os
 import random
 import re
+import time
 import warnings
 from collections import defaultdict
 from typing import Any, Dict, List, NoReturn, Optional, Tuple
@@ -35,6 +36,7 @@ import litellm
 from litellm import acompletion
 
 from atlas.core.metrics_logger import log_metric
+from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
     ContextWindowExceededError,
@@ -46,7 +48,7 @@ from atlas.domain.errors import (
 from atlas.modules.config.config_manager import resolve_env_var
 
 from .litellm_streaming import LiteLLMStreamingMixin
-from .models import LLMResponse
+from .models import LLMResponse, split_provider
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +142,27 @@ litellm.modify_params = True
 # Retry configuration for transient LLM errors
 MAX_LLM_RETRIES = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
+
+
+def _llm_response_attrs(response: Any, attempt: int) -> Dict[str, Any]:
+    """Extract per-response attributes from a litellm ModelResponse.
+
+    Returns empty dict when usage/finish_reason are unavailable.
+    """
+    attrs: Dict[str, Any] = {"retry_count": attempt}
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        attrs["input_tokens"] = getattr(usage, "prompt_tokens", None)
+        attrs["output_tokens"] = getattr(usage, "completion_tokens", None)
+        attrs["total_tokens"] = getattr(usage, "total_tokens", None)
+    choices = getattr(response, "choices", None) or []
+    if choices:
+        attrs["finish_reason"] = getattr(choices[0], "finish_reason", None)
+        msg = getattr(choices[0], "message", None)
+        tool_calls = getattr(msg, "tool_calls", None) if msg else None
+        if tool_calls:
+            attrs["tool_calls_count"] = len(tool_calls)
+    return attrs
 
 
 class LiteLLMCaller(LiteLLMStreamingMixin):
@@ -266,25 +289,51 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         Retries up to MAX_LLM_RETRIES times with exponential backoff and jitter.
         Auth errors are raised immediately without retry.
         """
+        litellm_model = kwargs.get("model", "")
+        provider, model_suffix = split_provider(litellm_model)
+        initial_attrs = {
+            "model": litellm_model,
+            "provider": provider,
+            "model_version": model_suffix,
+            "temperature": kwargs.get("temperature"),
+            "max_tokens": kwargs.get("max_tokens"),
+            "streaming": False,
+            "has_tools": bool(kwargs.get("tools")),
+            "tool_choice": kwargs.get("tool_choice"),
+            "message_count": len(kwargs.get("messages") or []),
+        }
+
         last_exc = None
-        for attempt in range(MAX_LLM_RETRIES + 1):
-            try:
-                return await acompletion(**kwargs)
-            except Exception as exc:
-                last_exc = exc
-                remaining = MAX_LLM_RETRIES - attempt
-                if remaining > 0 and self._is_retryable_error(exc):
-                    delay = RETRY_BASE_DELAY_SECONDS * (2 ** attempt) + random.uniform(0, 0.5)
-                    logger.warning(
-                        "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
-                        attempt + 1,
-                        MAX_LLM_RETRIES + 1,
-                        delay,
-                        exc,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    raise
+        with start_span("llm.call", initial_attrs) as span:
+            start_ns = time.monotonic_ns()
+            for attempt in range(MAX_LLM_RETRIES + 1):
+                try:
+                    response = await acompletion(**kwargs)
+                    set_attrs(span, _llm_response_attrs(response, attempt))
+                    set_attrs(span, {
+                        "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                    })
+                    return response
+                except Exception as exc:
+                    last_exc = exc
+                    remaining = MAX_LLM_RETRIES - attempt
+                    if remaining > 0 and self._is_retryable_error(exc):
+                        delay = RETRY_BASE_DELAY_SECONDS * (2 ** attempt) + random.uniform(0, 0.5)
+                        logger.warning(
+                            "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                            attempt + 1,
+                            MAX_LLM_RETRIES + 1,
+                            delay,
+                            exc,
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        set_attrs(span, {
+                            "retry_count": attempt,
+                            "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                            "error_type": type(exc).__name__,
+                        })
+                        raise
         raise last_exc  # pragma: no cover – loop always raises or returns
 
     @staticmethod
@@ -1107,11 +1156,38 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         return "\n".join(lines)
 
     @staticmethod
+    def _sanitize_snippet(text: str, max_chars: int = 600) -> str:
+        """Make a section snippet safe for inclusion as nested markdown.
+
+        Strips control characters, neutralizes leading reference-list
+        patterns that would otherwise confuse the frontend extractor
+        (which scans for ``N.`` and ``<li>`` at the start of a line),
+        and truncates to ``max_chars``.
+        """
+        if not text:
+            return ""
+        cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+        # The frontend reference extractor anchors on ``N.\s`` at the start
+        # of a line; neutralize that pattern inside snippets so attacker-/
+        # data-controlled text can't masquerade as a new reference entry.
+        # We drop the trailing whitespace after the dot, so ``1. text``
+        # becomes ``1.text`` — visible but no longer a reference anchor.
+        cleaned = re.sub(r"(^|\n)\s*(\d{1,2})\.\s", r"\1\2.", cleaned)
+        cleaned = cleaned.strip()
+        if len(cleaned) > max_chars:
+            cleaned = cleaned[: max_chars - 1].rstrip() + "…"
+        return cleaned
+
+    @staticmethod
     def _format_rag_references(metadata) -> str:
         """Format RAG metadata into a numbered references section.
 
         Produces a Perplexity-style references block that pairs with the
-        inline [1], [2] citations the LLM was instructed to emit.
+        inline [1], [2] citations the LLM was instructed to emit. When
+        documents carry section snippets (newest ATLAS-RAG spec), the
+        snippets are rendered as a nested ``rag-ref-snippets`` list under
+        each reference so the frontend's expanded citation area shows
+        the underlying evidence text.
 
         Returns empty string when metadata is unusable.
         """
@@ -1147,6 +1223,28 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             entry += f" — {', '.join(detail_parts)}"
             lines.append(entry)
+
+            if doc.citation:
+                safe_citation = LiteLLMCaller._sanitize_label(doc.citation[:500])
+                if safe_citation:
+                    lines.append(f"   *{safe_citation}*")
+
+            for sec in doc.sections:
+                snippet = LiteLLMCaller._sanitize_snippet(sec.text)
+                if not snippet:
+                    continue
+                snippet_relevance = int(sec.relevance * 100)
+                # Render snippets as a blockquote with explicit class hook so
+                # the frontend can style them inside the expanded references
+                # <details> element. ``§N`` carries the section_ref through
+                # to the UI without needing extra schema.
+                snippet_oneline = snippet.replace("\n", " ")
+                lines.append(
+                    "   > "
+                    f'<span class="rag-ref-snippet" data-section-ref="{sec.section_ref}">'
+                    f"§{sec.section_ref} ({snippet_relevance}%): {snippet_oneline}"
+                    "</span>"
+                )
 
         lines.append(f"\n*{metadata.data_source_name} · {metadata.retrieval_method} · {metadata.query_processing_time_ms}ms*")
         return "\n".join(lines)

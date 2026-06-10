@@ -1,11 +1,22 @@
 """Chat service - core business logic for chat operations."""
 
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    runtime_checkable,
+)
 from uuid import UUID, uuid4
 
 from atlas.core.log_sanitizer import sanitize_for_logging
-from atlas.domain.errors import DomainError
+from atlas.core.telemetry import hash_short, start_span
+from atlas.core.user_identity import normalize_user_email
+from atlas.domain.errors import AuthorizationError, DomainError
 from atlas.domain.messages.models import Message, MessageRole, MessageType, ToolResult
 from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
@@ -34,6 +45,15 @@ logger = logging.getLogger(__name__)
 
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+
+
+@runtime_checkable
+class ConversationOwnerRepository(Protocol):
+    """Repository capability required for conversation ownership checks."""
+
+    def get_conversation_owner(self, conversation_id: str) -> Optional[str]:
+        """Return the owner email for a conversation, if it exists."""
+        ...
 
 
 class ChatService:
@@ -94,9 +114,28 @@ class ChatService:
 
         # Chat history persistence (None when feature disabled)
         self.conversation_repository = conversation_repository
+        if self.conversation_repository is not None and not callable(
+            getattr(self.conversation_repository, "get_conversation_owner", None)
+        ):
+            # Without get_conversation_owner the per-turn ownership check
+            # cannot be evaluated; the runtime path now fails closed but
+            # surfacing the misconfiguration here makes it findable in logs
+            # before the first chat hits the rejection.
+            logger.warning(
+                "conversation_repository does not implement get_conversation_owner; "
+                "client-supplied conversation_ids will be rejected at runtime"
+            )
 
         # Track incognito sessions
         self._incognito_sessions: set = set()
+
+        # Track, per session, the number of leading messages that were
+        # accumulated while the session was incognito. These pre-opt-in
+        # messages must never be persisted, even after the user later
+        # switches the save mode to 'local'/'server'. The floor is frozen
+        # once the user opts in so subsequent turns persist normally.
+        self._incognito_save_floor: dict = {}
+        self._save_floor_locked: set = set()
 
         # Initialize refactored services
         self.tool_authorization = ToolAuthorizationService(tool_manager=self.tool_manager)
@@ -242,29 +281,66 @@ class ChatService:
         elif incognito is False:
             self._incognito_sessions.discard(session_id)
 
-        # Track conversation_id for continuing saved conversations
+        # Default to session_id so MCP tool calls share a persistent session (see MCPSessionManager).
         conversation_id = kwargs.pop("conversation_id", None)
+        if isinstance(conversation_id, str):
+            conversation_id = conversation_id.strip()
+        else:
+            conversation_id = None
         if conversation_id:
+            self._validate_conversation_id_owner(conversation_id, user_email)
             session.context["conversation_id"] = conversation_id
+        elif "conversation_id" not in session.context:
+            session.context["conversation_id"] = str(session_id)
+
+        turn_id = str(uuid4())
+        turn_attrs = {
+            "turn_id": turn_id,
+            "session_id": str(session_id),
+            "user_hash": hash_short(user_email),
+            "prompt_hash": hash_short(content),
+            "prompt_chars": len(content) if content else 0,
+            "prompt_tokens": (len(content) // 4) if content else 0,
+            "model": model,
+            "agent_mode": bool(agent_mode),
+            "only_rag": bool(only_rag),
+            "tool_choice_required": bool(tool_choice_required),
+            "selected_tools_count": len(selected_tools) if selected_tools else 0,
+            "selected_prompts_count": len(selected_prompts) if selected_prompts else 0,
+            "selected_data_sources_count": (
+                len(selected_data_sources) if selected_data_sources else 0
+            ),
+        }
 
         try:
-            # Delegate to orchestrator
-            orchestrator = self._get_orchestrator()
-            result = await orchestrator.execute(
-                session_id=session_id,
-                content=content,
-                model=model,
-                user_email=user_email,
-                selected_tools=selected_tools,
-                selected_prompts=selected_prompts,
-                selected_data_sources=selected_data_sources,
-                only_rag=only_rag,
-                tool_choice_required=tool_choice_required,
-                agent_mode=agent_mode,
-                temperature=temperature,
-                update_callback=update_callback,
-                **kwargs
-            )
+            with start_span("chat.turn", turn_attrs):
+                # Delegate to orchestrator
+                orchestrator = self._get_orchestrator()
+                result = await orchestrator.execute(
+                    session_id=session_id,
+                    content=content,
+                    model=model,
+                    user_email=user_email,
+                    selected_tools=selected_tools,
+                    selected_prompts=selected_prompts,
+                    selected_data_sources=selected_data_sources,
+                    only_rag=only_rag,
+                    tool_choice_required=tool_choice_required,
+                    agent_mode=agent_mode,
+                    temperature=temperature,
+                    update_callback=update_callback,
+                    **kwargs
+                )
+
+            # Messages accumulated while the session was incognito must never
+            # be persisted, even after the user later opts in to saving. Track
+            # the high-water mark of the leading incognito messages and freeze
+            # it once the user opts in so later turns persist normally.
+            if session_id in self._incognito_sessions:
+                if session_id not in self._save_floor_locked:
+                    self._incognito_save_floor[session_id] = len(session.history.messages)
+            else:
+                self._save_floor_locked.add(session_id)
 
             # Persist conversation (if not incognito and feature enabled)
             if (
@@ -273,14 +349,30 @@ class ChatService:
                 and user_email
             ):
                 try:
-                    self._save_conversation(session, user_email, model)
-                    # Notify frontend of the conversation_id so it can track the active conversation
+                    saved = self._save_conversation(
+                        session,
+                        user_email,
+                        model,
+                        start_index=self._incognito_save_floor.get(session_id, 0),
+                    )
+                    # Notify frontend only when persistence actually succeeded.
+                    # When save_conversation returns None (the TOCTOU window
+                    # between ownership validation and the upsert), surface
+                    # an error frame instead of falsely confirming the save.
                     conv_id = session.context.get("conversation_id", str(session_id))
                     if update_callback:
-                        await update_callback({
-                            "type": "conversation_saved",
-                            "conversation_id": conv_id,
-                        })
+                        if saved:
+                            await update_callback({
+                                "type": "conversation_saved",
+                                "conversation_id": conv_id,
+                            })
+                        else:
+                            await update_callback({
+                                "type": "error",
+                                "message": "Conversation could not be saved",
+                                "error_type": "conversation_save_rejected",
+                                "conversation_id": conv_id,
+                            })
                 except Exception as e:
                     logger.error("Failed to persist conversation: %s", e, exc_info=True)
 
@@ -293,6 +385,63 @@ class ChatService:
             # Fallback for unexpected errors in HTTP-style callers
             return error_handler.handle_chat_message_error(e, "chat message handling")
 
+    def _validate_conversation_id_owner(
+        self,
+        conversation_id: str,
+        user_email: Optional[str],
+    ) -> None:
+        """Reject client-supplied conversation IDs owned by another user.
+
+        Fails closed when a conversation repository is configured but does
+        not expose ``get_conversation_owner``: a repo that cannot answer
+        ownership questions cannot be trusted to enforce cross-user
+        isolation, so we refuse the client-supplied id rather than letting
+        it through.
+        """
+        if not user_email:
+            logger.warning(
+                "Rejected chat for conversation %s: missing authenticated user",
+                sanitize_for_logging(conversation_id),
+            )
+            raise AuthorizationError(
+                "Conversation not found or access denied",
+                code="CONVERSATION_ACCESS_DENIED",
+            )
+
+        if self.conversation_repository is None:
+            # No persistence layer configured at all. Without it there is
+            # nothing to leak through and nothing to validate against.
+            return
+
+        owner_lookup = getattr(
+            self.conversation_repository, "get_conversation_owner", None
+        )
+        if not callable(owner_lookup):
+            logger.warning(
+                "Rejected chat for conversation %s: repository lacks "
+                "get_conversation_owner; refusing client-supplied id rather "
+                "than allowing cross-user routing",
+                sanitize_for_logging(conversation_id),
+            )
+            raise AuthorizationError(
+                "Conversation not found or access denied",
+                code="CONVERSATION_ACCESS_DENIED",
+            )
+
+        owner = owner_lookup(conversation_id)
+        if owner is not None and normalize_user_email(owner) != normalize_user_email(
+            user_email
+        ):
+            logger.warning(
+                "Rejected chat for conversation %s: not owned by user %s",
+                sanitize_for_logging(conversation_id),
+                sanitize_for_logging(user_email),
+            )
+            raise AuthorizationError(
+                "Conversation not found or access denied",
+                code="CONVERSATION_ACCESS_DENIED",
+            )
+
     async def handle_restore_conversation(
         self,
         session_id: UUID,
@@ -304,10 +453,42 @@ class ChatService:
 
         Resets the session, loads previous messages into history,
         and maps the session to the original conversation_id so
-        subsequent saves update the same conversation.
+        subsequent saves update the same conversation. When a
+        conversation_repository is configured, the canonical message list
+        comes from the DB (not the client payload) so a tampered client
+        cannot replay forged history into the LLM context and have it
+        re-persisted.
         """
-        # Validate conversation ownership before restoring
-        if user_email and getattr(self, "conversation_repository", None) is not None:
+        if isinstance(conversation_id, str):
+            conversation_id = conversation_id.strip()
+        else:
+            conversation_id = ""
+
+        # Mirror handle_chat_message: refuse client-supplied conversation_ids
+        # without an authenticated user, so the restore path cannot be used to
+        # bypass the cross-user check the chat path enforces. Returns an
+        # error frame (rather than raising) so the WebSocket receive loop
+        # does not need a separate try/except — keeps the transport-layer
+        # contract consistent with the not-found case below.
+        if not user_email or not conversation_id:
+            logger.warning(
+                "Rejected restore for conversation %s: missing authenticated user "
+                "or empty conversation_id",
+                sanitize_for_logging(conversation_id),
+            )
+            return {
+                "type": "error",
+                "error": "Conversation not found",
+                "message": "Conversation not found or access denied",
+                "error_type": "authorization",
+            }
+
+        # Validate conversation ownership before restoring. When a
+        # repository is configured, prefer its message list as the canonical
+        # source — the client-supplied ``messages`` arg is treated as
+        # display-only fallback and is NOT persisted back.
+        canonical_messages = messages
+        if getattr(self, "conversation_repository", None) is not None:
             conv = self.conversation_repository.get_conversation(conversation_id, user_email)
             if conv is None:
                 logger.warning(
@@ -315,7 +496,14 @@ class ChatService:
                     sanitize_for_logging(conversation_id),
                     sanitize_for_logging(user_email),
                 )
-                return {"type": "error", "error": "Conversation not found"}
+                return {
+                    "type": "error",
+                    "error": "Conversation not found",
+                    "message": "Conversation not found",
+                }
+            db_messages = conv.get("messages")
+            if isinstance(db_messages, list):
+                canonical_messages = db_messages
 
         # Reset the session
         await self.end_session(session_id)
@@ -325,8 +513,9 @@ class ChatService:
         session.context["conversation_id"] = conversation_id
         session.context["_restored"] = True
 
-        # Load previous messages into session history for LLM context
-        for msg_data in messages:
+        # Load previous messages into session history for LLM context.
+        loaded = 0
+        for msg_data in canonical_messages:
             role_value = msg_data.get("role", "user") or "user"
             content = msg_data.get("content", "")
             try:
@@ -343,19 +532,20 @@ class ChatService:
                 content=content,
             )
             session.history.add_message(msg)
+            loaded += 1
 
         logger.info(
             "Restored conversation %s into session %s for user %s (%d messages)",
             sanitize_for_logging(conversation_id),
             sanitize_for_logging(str(session_id)),
             sanitize_for_logging(user_email),
-            len(messages),
+            loaded,
         )
 
         return {
             "type": "conversation_restored",
             "conversation_id": conversation_id,
-            "message_count": len(messages),
+            "message_count": loaded,
         }
 
     async def handle_reset_session(
@@ -369,8 +559,25 @@ class ChatService:
         does not overwrite the previous one (session_id stays the
         same for the lifetime of the WebSocket connection).
         """
+        # Capture the old conversation_id before tearing down the session
+        # so we can release any MCP sessions/clients scoped to it.
+        old_session = await self.session_repository.get(session_id)
+        old_conv_id = old_session.context.get("conversation_id") if old_session else None
+
         # End the current session
         await self.end_session(session_id)
+
+        # Release MCP sessions and per-conversation clients for the old
+        # conversation. Without this, each reset orphans the
+        # (user, server, old_conv_id) entries in MCPSessionManager and
+        # MCPToolManager._user_clients (cache keys are per-conversation).
+        if old_conv_id:
+            release_sessions = getattr(self.tool_manager, "release_sessions", None)
+            if release_sessions is not None:
+                try:
+                    await release_sessions(old_conv_id, user_email=user_email)
+                except Exception as e:
+                    logger.debug("Error releasing MCP sessions on reset: %s", e)
 
         # Create a new session with a fresh conversation_id
         session = await self.create_session(session_id, user_email)
@@ -543,13 +750,32 @@ class ChatService:
         except Exception as e:
             logger.error(f"Failed to update session from tool results: {e}", exc_info=True)
 
-    def _save_conversation(self, session: Session, user_email: str, model: str) -> None:
-        """Persist a session's conversation history to the database."""
+    def _save_conversation(
+        self, session: Session, user_email: str, model: str, start_index: int = 0
+    ) -> bool:
+        """Persist a session's conversation history to the database.
+
+        ``start_index`` excludes leading messages that were accumulated while
+        the session was incognito; only messages from that index onward are
+        persisted. This prevents pre-opt-in incognito turns from being saved
+        when the user later switches to a saving mode.
+
+        Returns True on successful upsert, False when the repository
+        rejected the write (e.g. another user owns the conversation_id —
+        the validator's TOCTOU window). Callers must not announce
+        ``conversation_saved`` when this returns False, otherwise the
+        client believes a turn was persisted under an id the DB does not
+        own.
+        """
         if not session or not session.history.messages:
-            return
+            return False
+
+        savable_messages = session.history.messages[start_index:]
+        if not savable_messages:
+            return False
 
         messages = []
-        for msg in session.history.messages:
+        for msg in savable_messages:
             msg_dict = msg.to_dict()
             # Preserve message_type from metadata if available
             msg_dict["message_type"] = msg.metadata.get("message_type", "chat")
@@ -561,14 +787,14 @@ class ChatService:
         # Only generate title for new conversations (not restored ones)
         title = None
         if not session.context.get("_restored"):
-            for msg in session.history.messages:
+            for msg in savable_messages:
                 if msg.role.value == "user" and msg.content:
                     title = msg.content[:200]
                     break
 
-        self.conversation_repository.save_conversation(
+        record = self.conversation_repository.save_conversation(
             conversation_id=conv_id,
-            user_email=user_email,
+            user_email=normalize_user_email(user_email),
             title=title,
             model=model,
             messages=messages,
@@ -576,6 +802,14 @@ class ChatService:
                 "agent_mode": bool(session.context.get("agent_mode")),
             },
         )
+        if record is None:
+            logger.warning(
+                "Conversation %s save rejected by repository (likely owned by "
+                "another user); not emitting conversation_saved",
+                sanitize_for_logging(conv_id),
+            )
+            return False
+        return True
 
     async def get_session(self, session_id: UUID) -> Optional[Session]:
         """Get session by ID."""
@@ -589,4 +823,6 @@ class ChatService:
         session.active = False
         await self.session_repository.update(session)
         self._incognito_sessions.discard(session_id)
+        self._incognito_save_floor.pop(session_id, None)
+        self._save_floor_locked.discard(session_id)
         logger.info(f"Ended session {sanitize_for_logging(str(session_id))}")

@@ -1,4 +1,4 @@
-"""Tests for username override security in tool approval flow."""
+"""Tests for _atlas_user override security in tool approval flow."""
 
 
 from unittest.mock import Mock
@@ -6,31 +6,31 @@ from unittest.mock import Mock
 from atlas.application.chat.utilities.tool_executor import _filter_args_to_schema, inject_context_into_args
 
 
-class TestUsernameOverrideInApproval:
-    """Test that username override cannot be bypassed through approval argument editing."""
+class TestAtlasUserOverrideInApproval:
+    """Test that _atlas_user override cannot be bypassed through approval argument editing."""
 
-    def test_username_override_after_user_edit(self):
-        """Test that username is re-injected even after user edits it during approval."""
+    def test_atlas_user_override_after_user_edit(self):
+        """Test that _atlas_user is re-injected even after user edits it during approval."""
         # Setup session context with authenticated user
         session_context = {
             "user_email": "alice@example.com",
             "files": {}
         }
 
-        # Simulate user editing username to a different value during approval
+        # Simulate user editing _atlas_user to a different value during approval
         user_edited_args = {
-            "username": "malicious@example.com",  # User tried to change this
+            "_atlas_user": "malicious@example.com",  # User tried to change this
             "data": "test data"
         }
 
-        # Mock tool manager that indicates tool accepts username
+        # Mock tool manager that indicates tool accepts _atlas_user
         mock_tool_manager = Mock()
         mock_tool_manager.get_tools_schema.return_value = [{
             "function": {
                 "name": "create_record",
                 "parameters": {
                     "properties": {
-                        "username": {"type": "string"},
+                        "_atlas_user": {"type": "string"},
                         "data": {"type": "string"}
                     }
                 }
@@ -45,8 +45,8 @@ class TestUsernameOverrideInApproval:
             mock_tool_manager
         )
 
-        # Verify username was overridden back to authenticated user
-        assert re_injected_args["username"] == "alice@example.com"
+        # Verify _atlas_user was overridden back to authenticated user
+        assert re_injected_args["_atlas_user"] == "alice@example.com"
         assert re_injected_args["data"] == "test data"
 
         # Re-filter to schema to simulate complete flow
@@ -56,11 +56,11 @@ class TestUsernameOverrideInApproval:
             mock_tool_manager
         )
 
-        # Final result should have correct username
-        assert filtered_args["username"] == "alice@example.com"
+        # Final result should have correct _atlas_user
+        assert filtered_args["_atlas_user"] == "alice@example.com"
 
-    def test_username_override_with_tool_that_doesnt_accept_username(self):
-        """Test that username is not injected for tools that don't accept it."""
+    def test_atlas_user_override_with_tool_that_doesnt_accept_atlas_user(self):
+        """Test that _atlas_user is not injected for tools that don't accept it."""
         session_context = {
             "user_email": "alice@example.com",
             "files": {}
@@ -70,7 +70,7 @@ class TestUsernameOverrideInApproval:
             "query": "test query"
         }
 
-        # Mock tool manager that indicates tool does NOT accept username
+        # Mock tool manager that indicates tool does NOT accept _atlas_user
         mock_tool_manager = Mock()
         mock_tool_manager.get_tools_schema.return_value = [{
             "function": {
@@ -91,12 +91,12 @@ class TestUsernameOverrideInApproval:
             mock_tool_manager
         )
 
-        # Verify username was NOT injected
-        assert "username" not in re_injected_args
+        # Verify _atlas_user was NOT injected
+        assert "_atlas_user" not in re_injected_args
         assert re_injected_args["query"] == "test query"
 
-    def test_username_override_with_no_tool_manager(self):
-        """Test username injection when no tool manager is available (fallback)."""
+    def test_atlas_user_not_injected_with_no_tool_manager(self):
+        """Test _atlas_user injection is schema-aware and requires a tool manager."""
         session_context = {
             "user_email": "bob@example.com",
             "files": {}
@@ -106,7 +106,7 @@ class TestUsernameOverrideInApproval:
             "data": "some data"
         }
 
-        # Inject context with no tool manager (fallback mode)
+        # Inject context with no tool manager
         re_injected_args = inject_context_into_args(
             user_edited_args,
             session_context,
@@ -114,8 +114,8 @@ class TestUsernameOverrideInApproval:
             None  # No tool manager
         )
 
-        # Should still inject username in fallback mode
-        assert re_injected_args["username"] == "bob@example.com"
+        # Should not inject without a schema declaring _atlas_user
+        assert "_atlas_user" not in re_injected_args
         assert re_injected_args["data"] == "some data"
 
     def test_multiple_security_injections_after_edit(self):
@@ -127,9 +127,9 @@ class TestUsernameOverrideInApproval:
             }
         }
 
-        # User tries to edit both username and filename details
+        # User tries to edit both _atlas_user and filename details
         user_edited_args = {
-            "username": "hacked@example.com",  # Should be overridden
+            "_atlas_user": "hacked@example.com",  # Should be overridden
             "filename": "test.pdf",  # Valid filename
             "data": "edited data"
         }
@@ -140,7 +140,7 @@ class TestUsernameOverrideInApproval:
                 "name": "process_file",
                 "parameters": {
                     "properties": {
-                        "username": {"type": "string"},
+                        "_atlas_user": {"type": "string"},
                         "filename": {"type": "string"},
                         "data": {"type": "string"}
                     }
@@ -155,8 +155,8 @@ class TestUsernameOverrideInApproval:
             mock_tool_manager
         )
 
-        # Username should be corrected
-        assert re_injected_args["username"] == "secure_user@example.com"
+        # _atlas_user should be corrected
+        assert re_injected_args["_atlas_user"] == "secure_user@example.com"
         # File handling should work normally
         assert "original_filename" in re_injected_args
         assert re_injected_args["original_filename"] == "test.pdf"
@@ -172,7 +172,7 @@ class TestUsernameOverrideInApproval:
 
         # User (alice) tries to impersonate admin via approval dialog
         user_edited_args = {
-            "username": "admin@example.com",  # Impersonation attempt
+            "_atlas_user": "admin@example.com",  # Impersonation attempt
             "action": "delete_all_data"
         }
 
@@ -182,7 +182,7 @@ class TestUsernameOverrideInApproval:
                 "name": "admin_action",
                 "parameters": {
                     "properties": {
-                        "username": {"type": "string"},
+                        "_atlas_user": {"type": "string"},
                         "action": {"type": "string"}
                     }
                 }
@@ -205,7 +205,7 @@ class TestUsernameOverrideInApproval:
         )
 
         # Security enforced: attack prevented
-        assert filtered_args["username"] == "alice@example.com"  # Not admin
+        assert filtered_args["_atlas_user"] == "alice@example.com"  # Not admin
         assert filtered_args["action"] == "delete_all_data"  # Non-security param unchanged
 
     def test_schema_filtering_preserves_security_injection(self):
@@ -217,7 +217,7 @@ class TestUsernameOverrideInApproval:
 
         # User tries to add schema-violating parameters
         user_edited_args = {
-            "username": "hacked@example.com",
+            "_atlas_user": "hacked@example.com",
             "data": "legitimate data",
             "extra_param": "should_be_removed"  # Not in schema
         }
@@ -228,7 +228,7 @@ class TestUsernameOverrideInApproval:
                 "name": "limited_tool",
                 "parameters": {
                     "properties": {
-                        "username": {"type": "string"},
+                        "_atlas_user": {"type": "string"},
                         "data": {"type": "string"}
                         # extra_param is NOT in schema
                     }
@@ -250,9 +250,44 @@ class TestUsernameOverrideInApproval:
             mock_tool_manager
         )
 
-        # Correct username enforced
-        assert filtered_args["username"] == "secure@example.com"
+        # Correct _atlas_user enforced
+        assert filtered_args["_atlas_user"] == "secure@example.com"
         # Legitimate data preserved
         assert filtered_args["data"] == "legitimate data"
         # Schema violation removed
         assert "extra_param" not in filtered_args
+
+    def test_username_argument_is_left_alone(self):
+        """Test that ordinary username arguments are not overwritten by Atlas context."""
+        session_context = {
+            "user_email": "alice@example.com",
+            "files": {}
+        }
+
+        user_edited_args = {
+            "username": "chosen-by-llm@example.com",
+            "data": "test data"
+        }
+
+        mock_tool_manager = Mock()
+        mock_tool_manager.get_tools_schema.return_value = [{
+            "function": {
+                "name": "create_record",
+                "parameters": {
+                    "properties": {
+                        "username": {"type": "string"},
+                        "data": {"type": "string"}
+                    }
+                }
+            }
+        }]
+
+        re_injected_args = inject_context_into_args(
+            user_edited_args,
+            session_context,
+            "create_record",
+            mock_tool_manager
+        )
+
+        assert re_injected_args["username"] == "chosen-by-llm@example.com"
+        assert "_atlas_user" not in re_injected_args

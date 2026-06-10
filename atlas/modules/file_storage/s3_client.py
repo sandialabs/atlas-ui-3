@@ -19,8 +19,30 @@ from botocore.exceptions import ClientError
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
+from atlas.core.telemetry import (
+    ERROR_MESSAGE_MAX_CHARS,
+    hash_short,
+    preview,
+    safe_label,
+    set_attrs,
+    start_span,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _category_from_key(key: str) -> str:
+    """Derive the ``category`` span attribute from an S3 key."""
+    if not key:
+        return "other"
+    if "/generated/" in key:
+        return "generated"
+    if "/uploads/" in key:
+        return "uploads"
+    return "other"
+
+
+_STORAGE_BACKEND = "s3"
 
 
 class S3StorageClient:
@@ -129,74 +151,113 @@ class S3StorageClient:
         Returns:
             Dictionary containing file metadata including the S3 key
         """
-        try:
-            # Decode base64 content
-            content_bytes = base64.b64decode(content_base64)
+        start_ns = time.monotonic_ns()
+        span_attrs = {
+            "user_hash": hash_short(user_email),
+            "filename": safe_label(filename),
+            "content_type": content_type,
+            "source_type": source_type,
+            "storage_backend": _STORAGE_BACKEND,
+        }
+        content_bytes: bytes = b""
+        s3_key: Optional[str] = None
+        with start_span("file.upload", span_attrs) as span:
+            try:
+                # Decode base64 content
+                content_bytes = base64.b64decode(content_base64)
 
-            # Generate S3 key
-            s3_key = self._generate_s3_key(user_email, filename, source_type)
+                # Generate S3 key
+                s3_key = self._generate_s3_key(user_email, filename, source_type)
 
-            # Prepare tags
-            file_tags = tags or {}
-            file_tags["source"] = source_type
-            file_tags["user_email"] = user_email
-            file_tags["original_filename"] = filename
+                # Prepare tags
+                file_tags = tags or {}
+                file_tags["source"] = source_type
+                file_tags["user_email"] = user_email
+                file_tags["original_filename"] = filename
 
-            # Convert tags to S3 tag format (URL-encode values for safety)
-            tag_set = "&".join([f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in file_tags.items()])
+                # Convert tags to S3 tag format (URL-encode values for safety)
+                tag_set = "&".join([f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in file_tags.items()])
 
-            # Upload to S3
-            self.s3_client.put_object(
-                Bucket=self.bucket_name,
-                Key=s3_key,
-                Body=content_bytes,
-                ContentType=content_type,
-                Tagging=tag_set,
-                Metadata={
-                    "user_email": user_email,
-                    "original_filename": filename,
-                    "source_type": source_type
+                # Upload to S3
+                self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    Body=content_bytes,
+                    ContentType=content_type,
+                    Tagging=tag_set,
+                    Metadata={
+                        "user_email": user_email,
+                        "original_filename": filename,
+                        "source_type": source_type
+                    }
+                )
+
+                # Get object metadata for response
+                response = self.s3_client.head_object(
+                    Bucket=self.bucket_name,
+                    Key=s3_key
+                )
+
+                result = {
+                    "key": s3_key,
+                    "filename": filename,
+                    "size": len(content_bytes),
+                    "content_type": content_type,
+                    "last_modified": response['LastModified'],
+                    "etag": response['ETag'].strip('"'),
+                    "tags": file_tags,
+                    "user_email": user_email
                 }
-            )
 
-            # Get object metadata for response
-            response = self.s3_client.head_object(
-                Bucket=self.bucket_name,
-                Key=s3_key
-            )
+                category = _category_from_key(s3_key)
+                logger.info(
+                    "File uploaded successfully: category=%s, size=%d bytes, content_type=%s, user=%s",
+                    category,
+                    len(content_bytes),
+                    sanitize_for_logging(content_type),
+                    sanitize_for_logging(user_email),
+                )
+                logger.debug("Uploaded file key (sanitized): %s", sanitize_for_logging(s3_key))
 
-            result = {
-                "key": s3_key,
-                "filename": filename,
-                "size": len(content_bytes),
-                "content_type": content_type,
-                "last_modified": response['LastModified'],
-                "etag": response['ETag'].strip('"'),
-                "tags": file_tags,
-                "user_email": user_email
-            }
+                log_metric("file_stored", user_email, file_size=len(content_bytes), content_type=content_type, category=category)
 
-            category = "generated" if "/generated/" in s3_key else ("uploads" if "/uploads/" in s3_key else "other")
-            logger.info(
-                "File uploaded successfully: category=%s, size=%d bytes, content_type=%s, user=%s",
-                category,
-                len(content_bytes),
-                sanitize_for_logging(content_type),
-                sanitize_for_logging(user_email),
-            )
-            logger.debug("Uploaded file key (sanitized): %s", sanitize_for_logging(s3_key))
+                set_attrs(span, {
+                    "key_hash": hash_short(s3_key),
+                    "file_size": len(content_bytes),
+                    "category": category,
+                    "success": True,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                })
+                return result
 
-            log_metric("file_stored", user_email, file_size=len(content_bytes), content_type=content_type, category=category)
-
-            return result
-
-        except ClientError as e:
-            error_msg = f"S3 upload failed: {e.response['Error']['Message']}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-        except Exception as e:
-            logger.error(f"Error uploading file to S3: {str(e)}")
-            raise
+            except ClientError as e:
+                safe_error = preview(
+                    e.response.get('Error', {}).get('Message', str(e)),
+                    max_chars=ERROR_MESSAGE_MAX_CHARS,
+                )
+                set_attrs(span, {
+                    "key_hash": hash_short(s3_key) if s3_key else None,
+                    "file_size": len(content_bytes),
+                    "category": _category_from_key(s3_key) if s3_key else "other",
+                    "success": False,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                    "error_type": type(e).__name__,
+                    "error_message": safe_error,
+                })
+                logger.error("S3 upload failed: %s", sanitize_for_logging(safe_error or ""))
+                raise Exception("S3 upload failed") from e
+            except Exception as e:
+                set_attrs(span, {
+                    "key_hash": hash_short(s3_key) if s3_key else None,
+                    "file_size": len(content_bytes),
+                    "category": _category_from_key(s3_key) if s3_key else "other",
+                    "success": False,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                    "error_type": type(e).__name__,
+                    "error_message": preview(str(e), max_chars=ERROR_MESSAGE_MAX_CHARS),
+                })
+                logger.error("Error uploading file to S3: %s", sanitize_for_logging(str(e)))
+                raise
 
     async def get_file(self, user_email: str, file_key: str) -> Dict[str, Any]:
         """
@@ -209,73 +270,117 @@ class S3StorageClient:
         Returns:
             Dictionary containing file data and metadata
         """
-        try:
-            # Verify user has access to this file (check if key starts with user's prefix)
-            if not file_key.startswith(f"users/{user_email}/"):
-                logger.warning(
-                    "Access denied: user=%s attempted to access key=%s",
-                    sanitize_for_logging(user_email),
-                    sanitize_for_logging(file_key.split('/')[-1]),
-                )
-                raise Exception("Access denied to file")
-
-            # Get object from S3
-            response = self.s3_client.get_object(
-                Bucket=self.bucket_name,
-                Key=file_key
-            )
-
-            # Read file content
-            content_bytes = response['Body'].read()
-            content_base64 = base64.b64encode(content_bytes).decode()
-
-            # Get tags
+        start_ns = time.monotonic_ns()
+        span_attrs = {
+            "user_hash": hash_short(user_email),
+            "key_hash": hash_short(file_key),
+            "category": _category_from_key(file_key),
+            "storage_backend": _STORAGE_BACKEND,
+        }
+        with start_span("file.download", span_attrs) as span:
             try:
-                tags_response = self.s3_client.get_object_tagging(
+                # Verify user has access to this file (check if key starts with user's prefix)
+                if not file_key.startswith(f"users/{user_email}/"):
+                    logger.warning(
+                        "Access denied: user=%s attempted to access key=%s",
+                        sanitize_for_logging(user_email),
+                        sanitize_for_logging(file_key.split('/')[-1]),
+                    )
+                    # Persist the access-denied signal BEFORE raising so the
+                    # span survives in spans.jsonl even on failure.
+                    set_attrs(span, {
+                        "access_denied": True,
+                        "success": False,
+                        "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                    })
+                    raise Exception("Access denied to file")
+
+                # Get object from S3
+                response = self.s3_client.get_object(
                     Bucket=self.bucket_name,
                     Key=file_key
                 )
-                tags = {tag['Key']: tag['Value'] for tag in tags_response.get('TagSet', [])}
-            except Exception:
-                tags = {}
 
-            # Extract filename from metadata or key
-            metadata = response.get('Metadata', {})
-            filename = metadata.get('original_filename', file_key.split('/')[-1])
+                # Read file content
+                content_bytes = response['Body'].read()
+                content_base64 = base64.b64encode(content_bytes).decode()
 
-            result = {
-                "key": file_key,
-                "filename": filename,
-                "content_base64": content_base64,
-                "content_type": response['ContentType'],
-                "size": len(content_bytes),
-                "last_modified": response['LastModified'],
-                "etag": response['ETag'].strip('"'),
-                "tags": tags
-            }
+                # Get tags
+                try:
+                    tags_response = self.s3_client.get_object_tagging(
+                        Bucket=self.bucket_name,
+                        Key=file_key
+                    )
+                    tags = {tag['Key']: tag['Value'] for tag in tags_response.get('TagSet', [])}
+                except Exception:
+                    tags = {}
 
-            category = "generated" if "/generated/" in file_key else ("uploads" if "/uploads/" in file_key else "other")
-            logger.info(
-                "File retrieved successfully: category=%s, size=%d bytes, content_type=%s, user=%s",
-                category,
-                len(content_bytes),
-                sanitize_for_logging(response['ContentType']),
-                sanitize_for_logging(user_email),
-            )
-            logger.debug("Retrieved file key (sanitized): %s", sanitize_for_logging(file_key))
-            return result
+                # Extract filename from metadata or key
+                metadata = response.get('Metadata', {})
+                filename = metadata.get('original_filename', file_key.split('/')[-1])
 
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.warning(f"File not found: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
-                return None
-            else:
-                error_msg = f"S3 get failed: {e.response['Error']['Message']}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
-        except Exception as e:
-            logger.error(f"Error getting file from S3: {str(e)}")
-            raise
+                result = {
+                    "key": file_key,
+                    "filename": filename,
+                    "content_base64": content_base64,
+                    "content_type": response['ContentType'],
+                    "size": len(content_bytes),
+                    "last_modified": response['LastModified'],
+                    "etag": response['ETag'].strip('"'),
+                    "tags": tags
+                }
+
+                category = _category_from_key(file_key)
+                logger.info(
+                    "File retrieved successfully: category=%s, size=%d bytes, content_type=%s, user=%s",
+                    category,
+                    len(content_bytes),
+                    sanitize_for_logging(response['ContentType']),
+                    sanitize_for_logging(user_email),
+                )
+                logger.debug("Retrieved file key (sanitized): %s", sanitize_for_logging(file_key))
+
+                set_attrs(span, {
+                    "filename": safe_label(filename),
+                    "content_type": response.get('ContentType'),
+                    "file_size": len(content_bytes),
+                    "success": True,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                })
+                return result
+
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchKey':
+                    set_attrs(span, {
+                        "not_found": True,
+                        "success": False,
+                        "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                        "error_type": "NoSuchKey",
+                    })
+                    logger.warning(f"File not found: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
+                    return None
+                else:
+                    safe_error = preview(
+                        e.response.get('Error', {}).get('Message', str(e)),
+                        max_chars=ERROR_MESSAGE_MAX_CHARS,
+                    )
+                    set_attrs(span, {
+                        "success": False,
+                        "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                        "error_type": type(e).__name__,
+                        "error_message": safe_error,
+                    })
+                    logger.error("S3 get failed: %s", sanitize_for_logging(safe_error or ""))
+                    raise Exception("S3 get failed") from e
+            except Exception as e:
+                set_attrs(span, {
+                    "success": False,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                    "error_type": type(e).__name__,
+                    "error_message": preview(str(e), max_chars=ERROR_MESSAGE_MAX_CHARS),
+                })
+                logger.error("Error getting file from S3: %s", sanitize_for_logging(str(e)))
+                raise
 
     async def list_files(
         self,
@@ -294,69 +399,99 @@ class S3StorageClient:
         Returns:
             List of file metadata dictionaries
         """
-        try:
-            # List objects with user's prefix
-            prefix = f"users/{user_email}/"
-            if file_type == "tool":
-                prefix = f"users/{user_email}/generated/"
-            elif file_type == "user":
-                prefix = f"users/{user_email}/uploads/"
+        start_ns = time.monotonic_ns()
+        span_attrs = {
+            "user_hash": hash_short(user_email),
+            "file_type": file_type if file_type is not None else "null",
+            "limit": int(limit) if limit is not None else 0,
+            "storage_backend": _STORAGE_BACKEND,
+        }
+        with start_span("storage.list", span_attrs) as span:
+            try:
+                # List objects with user's prefix
+                prefix = f"users/{user_email}/"
+                if file_type == "tool":
+                    prefix = f"users/{user_email}/generated/"
+                elif file_type == "user":
+                    prefix = f"users/{user_email}/uploads/"
 
-            response = self.s3_client.list_objects_v2(
-                Bucket=self.bucket_name,
-                Prefix=prefix,
-                MaxKeys=limit
-            )
+                response = self.s3_client.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Prefix=prefix,
+                    MaxKeys=limit
+                )
 
-            files = []
-            for obj in response.get('Contents', []):
-                # Get tags for each object
-                try:
-                    tags_response = self.s3_client.get_object_tagging(
-                        Bucket=self.bucket_name,
-                        Key=obj['Key']
-                    )
-                    tags = {tag['Key']: tag['Value'] for tag in tags_response.get('TagSet', [])}
-                except Exception:
-                    tags = {}
+                files = []
+                for obj in response.get('Contents', []):
+                    # Get tags for each object
+                    try:
+                        tags_response = self.s3_client.get_object_tagging(
+                            Bucket=self.bucket_name,
+                            Key=obj['Key']
+                        )
+                        tags = {tag['Key']: tag['Value'] for tag in tags_response.get('TagSet', [])}
+                    except Exception:
+                        tags = {}
 
-                # Get metadata
-                try:
-                    head_response = self.s3_client.head_object(
-                        Bucket=self.bucket_name,
-                        Key=obj['Key']
-                    )
-                    metadata = head_response.get('Metadata', {})
-                    content_type = head_response.get('ContentType', 'application/octet-stream')
-                    filename = metadata.get('original_filename', obj['Key'].split('/')[-1])
-                except Exception:
-                    content_type = 'application/octet-stream'
-                    filename = obj['Key'].split('/')[-1]
+                    # Get metadata
+                    try:
+                        head_response = self.s3_client.head_object(
+                            Bucket=self.bucket_name,
+                            Key=obj['Key']
+                        )
+                        metadata = head_response.get('Metadata', {})
+                        content_type = head_response.get('ContentType', 'application/octet-stream')
+                        filename = metadata.get('original_filename', obj['Key'].split('/')[-1])
+                    except Exception:
+                        content_type = 'application/octet-stream'
+                        filename = obj['Key'].split('/')[-1]
 
-                files.append({
-                    "key": obj['Key'],
-                    "filename": filename,
-                    "size": obj['Size'],
-                    "content_type": content_type,
-                    "last_modified": obj['LastModified'],
-                    "etag": obj['ETag'].strip('"'),
-                    "tags": tags,
-                    "user_email": user_email
+                    files.append({
+                        "key": obj['Key'],
+                        "filename": filename,
+                        "size": obj['Size'],
+                        "content_type": content_type,
+                        "last_modified": obj['LastModified'],
+                        "etag": obj['ETag'].strip('"'),
+                        "tags": tags,
+                        "user_email": user_email
+                    })
+
+                # Sort by last modified, newest first
+                files.sort(key=lambda f: f['last_modified'], reverse=True)
+
+                logger.info(f"Listed {len(files)} files for user {sanitize_for_logging(user_email)}")
+
+                set_attrs(span, {
+                    "num_results": len(files),
+                    "total_bytes": sum(int(f.get('size', 0) or 0) for f in files),
+                    "success": True,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                 })
+                return files
 
-            # Sort by last modified, newest first
-            files.sort(key=lambda f: f['last_modified'], reverse=True)
-
-            logger.info(f"Listed {len(files)} files for user {sanitize_for_logging(user_email)}")
-            return files
-
-        except ClientError as e:
-            error_msg = f"S3 list failed: {e.response['Error']['Message']}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-        except Exception as e:
-            logger.error(f"Error listing files from S3: {str(e)}")
-            raise
+            except ClientError as e:
+                safe_error = preview(
+                    e.response.get('Error', {}).get('Message', str(e)),
+                    max_chars=ERROR_MESSAGE_MAX_CHARS,
+                )
+                set_attrs(span, {
+                    "success": False,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                    "error_type": type(e).__name__,
+                    "error_message": safe_error,
+                })
+                logger.error("S3 list failed: %s", sanitize_for_logging(safe_error or ""))
+                raise Exception("S3 list failed") from e
+            except Exception as e:
+                set_attrs(span, {
+                    "success": False,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                    "error_type": type(e).__name__,
+                    "error_message": preview(str(e), max_chars=ERROR_MESSAGE_MAX_CHARS),
+                })
+                logger.error("Error listing files from S3: %s", sanitize_for_logging(str(e)))
+                raise
 
     async def delete_file(self, user_email: str, file_key: str) -> bool:
         """
@@ -369,32 +504,72 @@ class S3StorageClient:
         Returns:
             True if deletion was successful
         """
-        try:
-            # Verify user has access to this file
-            if not file_key.startswith(f"users/{user_email}/"):
-                logger.warning(f"Access denied for deletion: {sanitize_for_logging(user_email)} attempted to delete {sanitize_for_logging(file_key)}")
-                raise Exception("Access denied to delete file")
+        start_ns = time.monotonic_ns()
+        span_attrs = {
+            "user_hash": hash_short(user_email),
+            "key_hash": hash_short(file_key),
+            "category": _category_from_key(file_key),
+            "storage_backend": _STORAGE_BACKEND,
+        }
+        with start_span("storage.delete", span_attrs) as span:
+            try:
+                # Verify user has access to this file
+                if not file_key.startswith(f"users/{user_email}/"):
+                    logger.warning(f"Access denied for deletion: {sanitize_for_logging(user_email)} attempted to delete {sanitize_for_logging(file_key)}")
+                    # Persist the access-denied signal BEFORE raising so the
+                    # span survives in spans.jsonl even on failure.
+                    set_attrs(span, {
+                        "access_denied": True,
+                        "success": False,
+                        "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                    })
+                    raise Exception("Access denied to delete file")
 
-            # Delete object from S3
-            self.s3_client.delete_object(
-                Bucket=self.bucket_name,
-                Key=file_key
-            )
+                # Delete object from S3
+                self.s3_client.delete_object(
+                    Bucket=self.bucket_name,
+                    Key=file_key
+                )
 
-            logger.info(f"File deleted successfully: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
-            return True
+                logger.info(f"File deleted successfully: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
+                set_attrs(span, {
+                    "success": True,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                })
+                return True
 
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.warning(f"File not found for deletion: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
-                return False
-            else:
-                error_msg = f"S3 delete failed: {e.response['Error']['Message']}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
-        except Exception as e:
-            logger.error(f"Error deleting file from S3: {str(e)}")
-            raise
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchKey':
+                    set_attrs(span, {
+                        "not_found": True,
+                        "success": False,
+                        "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                        "error_type": "NoSuchKey",
+                    })
+                    logger.warning(f"File not found for deletion: {sanitize_for_logging(file_key)} for user {sanitize_for_logging(user_email)}")
+                    return False
+                else:
+                    safe_error = preview(
+                        e.response.get('Error', {}).get('Message', str(e)),
+                        max_chars=ERROR_MESSAGE_MAX_CHARS,
+                    )
+                    set_attrs(span, {
+                        "success": False,
+                        "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                        "error_type": type(e).__name__,
+                        "error_message": safe_error,
+                    })
+                    logger.error("S3 delete failed: %s", sanitize_for_logging(safe_error or ""))
+                    raise Exception("S3 delete failed") from e
+            except Exception as e:
+                set_attrs(span, {
+                    "success": False,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                    "error_type": type(e).__name__,
+                    "error_message": preview(str(e), max_chars=ERROR_MESSAGE_MAX_CHARS),
+                })
+                logger.error("Error deleting file from S3: %s", sanitize_for_logging(str(e)))
+                raise
 
     async def get_user_stats(self, user_email: str) -> Dict[str, Any]:
         """

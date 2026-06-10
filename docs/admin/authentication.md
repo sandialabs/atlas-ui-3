@@ -53,6 +53,7 @@ WebSocket connections follow the same authentication model as HTTP requests:
 - Primary: Uses configured auth header if present
 - Fallback 1: Uses `?user=` query parameter if no header
 - Fallback 2: Uses `TEST_USER` from config (default: `test@test.com`)
+- Mock admin authorization uses `ADMIN_TEST_USER` (default: `admin@example.com`)
 
 **Security Note:** The WebSocket endpoint validates authentication **before** accepting the connection. This prevents unauthenticated users from establishing a connection that could receive error messages or timing information.
 

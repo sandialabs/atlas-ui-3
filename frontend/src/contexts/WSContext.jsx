@@ -71,12 +71,16 @@ export const WSProvider = ({ children }) => {
     }
   }
 
+  // Returns true if the message was handed to an open socket, false otherwise.
+  // Callers use the return value to avoid leaving the UI in a "waiting" state
+  // (e.g. an eternal "Thinking..." spinner) when the socket is disconnected.
   const sendMessage = (message) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message))
-    } else {
-      console.error('WebSocket is not connected, readyState:', wsRef.current?.readyState)
+      return true
     }
+    console.error('WebSocket is not connected, readyState:', wsRef.current?.readyState)
+    return false
   }
 
   const addMessageHandler = (handler) => {

@@ -6,9 +6,8 @@ Demonstrates two v2 behaviors described in v2_mcp_note.md:
 1) filename(s) to downloadable URLs: If the backend rewrites filename/file_names
    to /api/files/download/... URLs, this server will fetch and process them.
    It also accepts file_data_base64 as a fallback for content delivery.
-2) username injection: If a `username` parameter is defined in the tool schema,
-   the backend can inject the authenticated user's email/username. This server
-   trusts the provided username value and echoes it in outputs.
+2) _atlas_user injection: If an `_atlas_user` parameter is defined in the tool
+   schema, the backend can inject the authenticated user's email/username.
 
 Tools:
  - generate_csv_report: Build a summary report for a single CSV.
@@ -138,7 +137,7 @@ def _dataframe_report(df: pd.DataFrame, *, username: str, source_name: str) -> s
 def generate_csv_report(
     instructions: Annotated[str, "Instructions for the tool, not used for logic"],
     filename: Annotated[str, "CSV filename. Backend may rewrite to a downloadable URL."],
-    username: Annotated[str, "Injected by backend. Trust this value."] = "",
+    _atlas_user: Annotated[str, "Injected by backend. Trust this value."] = "",
     file_data_base64: Annotated[str, "Framework may supply Base64 content as fallback."] = "",
 ) -> Dict[str, Any]:
     """Generate comprehensive statistical analysis and summary report for CSV data files.
@@ -187,7 +186,7 @@ def generate_csv_report(
     Args:
         instructions: Optional analysis instructions (currently not used in processing logic)
         filename: Name/path of CSV file to analyze (supports various input methods)
-        username: User identity for report attribution (automatically injected by backend)
+        _atlas_user: Authenticated user identity for report attribution (automatically injected by backend)
         file_data_base64: Base64-encoded CSV content (alternative input method)
 
     Returns:
@@ -205,7 +204,7 @@ def generate_csv_report(
             return {"results": {"error": "CSV is empty."}}
 
         # Use the raw filename; let the chat UI handle any sanitization
-        report_text = _dataframe_report(df, username=username or "unknown", source_name=filename)
+        report_text = _dataframe_report(df, username=_atlas_user or "unknown", source_name=filename)
         report_b64 = base64.b64encode(report_text.encode("utf-8")).decode("utf-8")
 
         return {
@@ -228,7 +227,7 @@ def generate_csv_report(
                 "viewer_hint": "code",
             },
             "meta_data": {
-                "generated_by": username,
+                "generated_by": _atlas_user,
                 "rows": int(df.shape[0]),
                 "columns": int(df.shape[1]),
             },
@@ -249,7 +248,7 @@ def generate_csv_report(
 def summarize_multiple_csvs(
     instructions: Annotated[str, "Instructions for the tool, not used for logic"],
     file_names: Annotated[List[str], "Array of CSV filenames. Backend may rewrite to downloadable URLs."],
-    username: Annotated[str, "Injected by backend. Trust this value."] = "",
+    _atlas_user: Annotated[str, "Injected by backend. Trust this value."] = "",
 ) -> Dict[str, Any]:
     """Create comparative analysis and consolidated summary across multiple CSV datasets.
 
@@ -299,7 +298,7 @@ def summarize_multiple_csvs(
     Args:
         instructions: Optional processing instructions (currently not used in logic)
         file_names: List of CSV file names/paths to analyze (supports various input methods)
-        username: User identity for report attribution (automatically injected by backend)
+        _atlas_user: Authenticated user identity for report attribution (automatically injected by backend)
 
     Returns:
         Dictionary containing:
@@ -326,7 +325,7 @@ def summarize_multiple_csvs(
         except Exception as e:  # collect per-file error, continue
             errors.append(f"{name}: {e}")
 
-    report_lines = [f"Multi-CSV summary for {username or 'unknown'}:"]
+    report_lines = [f"Multi-CSV summary for {_atlas_user or 'unknown'}:"]
     report_lines.extend(summaries or ["No files processed."])
     if errors:
         report_lines.append("")
@@ -352,7 +351,7 @@ def summarize_multiple_csvs(
             "viewer_hint": "code",
         },
         "meta_data": {
-            "generated_by": username,
+            "generated_by": _atlas_user,
             "total_rows": total_rows,
             "unique_columns": sorted(list(total_cols_unique)),
             "errors": errors,
@@ -365,7 +364,7 @@ def plot_correlation_matrix(
     instructions: Annotated[str, "Instructions for the tool, not used for logic"],
     filename: Annotated[str, "CSV filename. Backend may rewrite to a downloadable URL."],
     columns: Annotated[Optional[List[str]], "Specific columns to plot. If None, plots all numeric columns."] = None,
-    username: Annotated[str, "Injected by backend. Trust this value."] = "",
+    _atlas_user: Annotated[str, "Injected by backend. Trust this value."] = "",
     file_data_base64: Annotated[str, "Framework may supply Base64 content as fallback."] = "",
 ) -> Dict[str, Any]:
     """Generate an N by N correlation matrix plot for numeric columns in a CSV file.
@@ -429,7 +428,7 @@ def plot_correlation_matrix(
                 "viewer_hint": "image",
             },
             "meta_data": {
-                "generated_by": username,
+                "generated_by": _atlas_user,
                 "correlation_shape": corr_matrix.shape,
                 "columns_used": list(numeric_df.columns),
             },
@@ -451,7 +450,7 @@ def plot_time_series(
     instructions: Annotated[str, "Instructions for the tool, not used for logic"],
     filename: Annotated[str, "CSV filename. Backend may rewrite to a downloadable URL."],
     columns: Annotated[List[str], "Columns to plot as time series with index as x-axis."],
-    username: Annotated[str, "Injected by backend. Trust this value."] = "",
+    _atlas_user: Annotated[str, "Injected by backend. Trust this value."] = "",
     file_data_base64: Annotated[str, "Framework may supply Base64 content as fallback."] = "",
 ) -> Dict[str, Any]:
     """Generate connected scatter plots for specified columns with index as x-axis.
@@ -527,7 +526,7 @@ def plot_time_series(
                 "viewer_hint": "image",
             },
             "meta_data": {
-                "generated_by": username,
+                "generated_by": _atlas_user,
                 "data_points": len(plot_df),
                 "columns_plotted": columns,
             },

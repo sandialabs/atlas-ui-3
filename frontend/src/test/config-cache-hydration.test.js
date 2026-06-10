@@ -34,6 +34,7 @@ const FULL_CONFIG = {
     marketplace: false,
     files_panel: true,
     chat_history: true,
+    custom_prompts: false,
     compliance_levels: false,
     file_content_extraction: false
   },
@@ -58,6 +59,7 @@ const SHELL_CONFIG = {
     marketplace: false,
     files_panel: true,
     chat_history: true,
+    custom_prompts: false,
     compliance_levels: false,
     file_content_extraction: false,
     splash_screen: false,
@@ -144,7 +146,7 @@ describe('Config Hydration Logic', () => {
   it('should use cached features for initial state', () => {
     const DEFAULT_FEATURES = {
       workspaces: false, rag: false, tools: false, marketplace: false,
-      files_panel: false, chat_history: false, compliance_levels: false,
+      files_panel: false, chat_history: false, custom_prompts: false, compliance_levels: false,
       file_content_extraction: false
     }
 
@@ -164,7 +166,7 @@ describe('Config Hydration Logic', () => {
   it('should use default features when no cache exists', () => {
     const DEFAULT_FEATURES = {
       workspaces: false, rag: false, tools: false, marketplace: false,
-      files_panel: false, chat_history: false, compliance_levels: false,
+      files_panel: false, chat_history: false, custom_prompts: false, compliance_levels: false,
       file_content_extraction: false
     }
 

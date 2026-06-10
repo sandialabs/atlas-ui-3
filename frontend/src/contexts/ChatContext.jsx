@@ -1,8 +1,10 @@
 // Slim ChatContext (clean refactor)
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { useWS } from './WSContext'
+import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
-import { useSelections } from '../hooks/chat/useSelections'
+import { useSelections, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import { useUserPrompts } from '../hooks/useUserPrompts'
 import { useAgentMode } from '../hooks/chat/useAgentMode'
 import { useMessages } from '../hooks/chat/useMessages'
 import { useFiles } from '../hooks/chat/useFiles'
@@ -10,6 +12,7 @@ import { useSettings } from '../hooks/useSettings'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
+import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation } from '../utils/chatExport'
 
 // Safety timeout for stuck thinking state (no backend response)
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
@@ -34,6 +37,9 @@ export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
 	const selections = useSelections()
+	const customPromptsEnabled = !!config.features?.custom_prompts
+	// User-authored custom prompt library (issue #153)
+	const userPrompts = useUserPrompts(customPromptsEnabled)
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
@@ -53,7 +59,7 @@ export const ChatProvider = ({ children }) => {
 
 	// Chat history: 3-state save mode persists across refreshes via localStorage
 	// 'none' = incognito (nothing saved), 'local' = browser IndexedDB, 'server' = backend DB
-	const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'server')
+	const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'none')
 	const [activeConversationId, setActiveConversationId] = useState(null)
 	const localSaveTimerRef = useRef(null)
 
@@ -86,9 +92,17 @@ export const ChatProvider = ({ children }) => {
 		})
 	}, [mapMessages])
 
-		const { sendMessage, addMessageHandler } = useWS()
+		const { sendMessage, addMessageHandler, isConnected } = useWS()
+	const toast = useToast()
 	const { currentModel } = config
-	const { selectedTools, selectedPrompts, activePrompts, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
+	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
+
+	useEffect(() => {
+		if (!config.configReady || customPromptsEnabled) return
+		if (isUserPromptKey(activePromptKey)) {
+			clearActivePrompt()
+		}
+	}, [config.configReady, customPromptsEnabled, activePromptKey, clearActivePrompt])
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -272,8 +286,16 @@ export const ChatProvider = ({ children }) => {
 			selections.removePrompts(stalePromptKeys)
 		}
 
-		// Clear active prompt if it no longer exists in config
-		if (selections.activePromptKey && !validPromptKeys.has(selections.activePromptKey)) {
+		// Clear active prompt if it no longer exists in config. User-authored
+		// prompts (issue #153) live outside config.prompts (they're fetched
+		// separately), so they must be exempt here or a persisted active user
+		// prompt would be cleared on every config load — reverting to Default
+		// after a refresh.
+		if (
+			selections.activePromptKey &&
+			!isUserPromptKey(selections.activePromptKey) &&
+			!validPromptKeys.has(selections.activePromptKey)
+		) {
 			// Clear stale active prompt that no longer exists in config
 			selections.clearActivePrompt()
 		}
@@ -308,32 +330,48 @@ export const ChatProvider = ({ children }) => {
 		)
 	}, [config.ragServers])
 
-	const sendChatMessage = useCallback((content, extraFiles = {}, forceRag = false) => {
-		if (!content.trim() || !currentModel) return
-		if (isWelcomeVisible) setIsWelcomeVisible(false)
-		setFollowUpSuggestions([])
-		addMessage({ role: 'user', content, timestamp: new Date().toISOString() })
-		setIsThinking(true)
-		setIsSynthesizing(false)
+	const sendChatMessage = useCallback((content, extraFiles = {}) => {
+		if (!content.trim() || !currentModel) return false
+		// Don't allow sending while the WebSocket is disconnected -- the message
+		// would never reach the backend and the UI would hang on "Thinking...".
+		if (!isConnected) {
+			toast.error('Not connected. Waiting to reconnect before sending.')
+			return false
+		}
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
-		// RAG is activated when any of these are true:
+		// RAG is activated when either of these are true:
 		//   1. The RAG toggle is on (ragEnabled)
-		//   2. The /search command was used (forceRag)
-		//   3. One or more data sources are selected (hasSelectedSources)
+		//   2. One or more data sources are selected (hasSelectedSources)
 		const hasSelectedSources = selectedDataSources.size > 0
-		const ragActivated = forceRag || ragEnabled || hasSelectedSources
+		const ragActivated = ragEnabled || hasSelectedSources
 		const dataSourcesToSend = ragActivated
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []
 
-		sendMessage({
+		// A user-authored custom prompt (issue #153) replaces the default system
+		// prompt and is sent as custom_system_prompt — never as an MCP prompt.
+		// The selected_prompts exclusion is gated purely on the key type and stays
+		// unconditional even when the feature is disabled: a stale userprompt:* key
+		// persisted from when the feature was on must never leak into the MCP
+		// selected_prompts payload (the clear-stale-key effect runs after render, so
+		// a send could otherwise race ahead of it). Resolving the prompt content is
+		// the part gated on the feature flag; if it no longer resolves we fall back
+		// to the default system prompt.
+		const activeKey = selections.activePromptKey
+		const activeKeyIsUserPrompt = isUserPromptKey(activeKey)
+		const activeUserPrompt = (customPromptsEnabled && activeKeyIsUserPrompt)
+			? userPrompts.prompts.find(p => p.id === userPromptIdFromKey(activeKey))
+			: null
+
+		const sent = sendMessage({
 			type: 'chat',
 			content,
 			model: currentModel,
 			selected_tools: [...selectedTools],
-			selected_prompts: activePrompts,
+			selected_prompts: activeKeyIsUserPrompt ? [] : activePrompts,
+			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			selected_data_sources: dataSourcesToSend,
 			tool_choice_required: selections.toolChoiceRequired,
 			user: config.user,
@@ -348,10 +386,65 @@ export const ChatProvider = ({ children }) => {
 			incognito: saveMode !== 'server',
 			conversation_id: activeConversationId || undefined,
 		})
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId])
+		// Guard against a stale isConnected: if the socket dropped between the
+		// check above and the send, bail out without mutating the UI so we don't
+		// hang on "Thinking...".
+		if (!sent) {
+			toast.error('Not connected. Waiting to reconnect before sending.')
+			return false
+		}
+		// Only mutate the UI once the message is actually on the wire.
+		if (isWelcomeVisible) setIsWelcomeVisible(false)
+		setFollowUpSuggestions([])
+		addMessage({
+			role: 'user',
+			content,
+			timestamp: new Date().toISOString(),
+			_activePromptKey: selections.activePromptKey || null,
+		})
+		setIsThinking(true)
+		setIsSynthesizing(false)
+		return true
+	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts])
 
-	const clearChat = useCallback(() => {
+	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
+		// If there is any chat content or generation in progress, confirm before
+		// discarding it -- "New Chat" should not silently throw away a reply the
+		// user is actively reading / waiting on (mistakes happen).
+		// Returns true if the chat was cleared, false if the user cancelled --
+		// callers (Header/Ctrl+Alt+N) gate follow-up side-effects on this so a
+		// cancelled confirm doesn't still close the canvas or steal focus.
+		const isGenerating = isThinking || isSynthesizing || isStreaming
+		const hasContent = messages.length > 0
+		if (!skipConfirm && (hasContent || isGenerating)) {
+			const prompt = isGenerating
+				? 'A response is still being generated. Start a new chat and stop the current response?'
+				: 'Start a new chat? This will clear the current conversation from view.'
+			if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+				if (!window.confirm(prompt)) return false
+			}
+		}
+
+		// If generation is in progress, tell the backend to cancel it *before* we
+		// ask for a new session. Otherwise the in-flight task keeps streaming
+		// tokens and they get appended to the fresh, empty chat (the bug users
+		// see where "the first amount of the output is removed from view").
+		if (sendMessage && isGenerating) {
+			if (agent?.agentModeEnabled) {
+				sendMessage({ type: 'agent_control', action: 'stop' })
+			}
+			sendMessage({ type: 'stop_streaming' })
+		}
+
+		// Fully reset local UI state so the centered logo reappears and no stale
+		// thinking / agent indicators linger.
+		cleanupStreamState()
+		streamEnd()
 		resetMessages()
+		setIsThinking(false)
+		setIsSynthesizing(false)
+		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
+		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		setIsWelcomeVisible(true)
 		setActiveConversationId(null)
 		setFollowUpSuggestions([])
@@ -363,7 +456,8 @@ export const ChatProvider = ({ children }) => {
 		if (sendMessage) {
 			sendMessage({ type: 'reset_session' })
 		}
-	}, [resetMessages, files, sendMessage])
+		return true
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData) => {
@@ -446,9 +540,17 @@ export const ChatProvider = ({ children }) => {
 		const ragSourcesDisplay = ragEnabled
 			? ([...selectedDataSources].join(', ') || 'None selected')
 			: 'None (RAG disabled)'
+
+		const promptInfoByKey = buildPromptInfoByKey(config.prompts)
+		const activePromptInfo = resolvePromptInfo(selections.activePromptKey, promptInfoByKey)
+		const exportConversation = buildExportConversation(messages, promptInfoByKey)
+
 		if (asText) {
-			let text = `Chat Export - ${config.appName}\nDate: ${new Date().toLocaleString()}\nUser: ${config.user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected RAG Sources: ${ragSourcesDisplay}\nAgent Mode: ${agent.agentModeEnabled ? 'Enabled' : 'Disabled'}\n\n${'='.repeat(50)}\n\n`
-			messages.forEach(m => { text += `${m.role.toUpperCase()}:\n${m.content}\n\n` })
+			const promptLine = activePromptInfo
+				? `Active Custom Prompt: ${activePromptInfo.name}${activePromptInfo.server ? ` (from ${activePromptInfo.server})` : ''}${activePromptInfo.description ? ` — ${activePromptInfo.description}` : ''}\n`
+				: 'Active Custom Prompt: Default\n'
+			let text = `Chat Export - ${config.appName}\nDate: ${new Date().toLocaleString()}\nUser: ${config.user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected RAG Sources: ${ragSourcesDisplay}\nAgent Mode: ${agent.agentModeEnabled ? 'Enabled' : 'Disabled'}\n${promptLine}\n${'='.repeat(50)}\n\n`
+			exportConversation.forEach(m => { text += `${m.role.toUpperCase()}:\n${m.content}\n\n` })
 			if (files.canvasContent) text += `${'='.repeat(50)}\nCANVAS CONTENT:\n${files.canvasContent}\n`
 			const blob = new Blob([text], { type: 'text/plain' })
 			const url = URL.createObjectURL(blob)
@@ -465,15 +567,16 @@ export const ChatProvider = ({ children }) => {
 					user: config.user,
 					model: currentModel,
 					selectedTools: [...selectedTools],
+					activePrompt: activePromptInfo,
 					ragEnabled: ragEnabled,
 					selectedRagSources: ragEnabled ? [...selectedDataSources] : null,
 					toolChoiceRequired: selections.toolChoiceRequired,
 					agentModeEnabled: agent.agentModeEnabled,
 					agentMaxSteps: agent.agentMaxSteps,
 					messageCount: messages.length,
-					exportVersion: '1.1'
+					exportVersion: '1.2'
 				},
-				conversation: messages,
+				conversation: exportConversation,
 				canvasContent: files.canvasContent || null
 			}
 			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -484,7 +587,7 @@ export const ChatProvider = ({ children }) => {
 			a.download = `chat-export-${ts}.json`
 			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 		}
-	}, [messages, config.appName, config.user, config.features, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, files.canvasContent])
+	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, selections.activePromptKey, files.canvasContent])
 
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
@@ -641,6 +744,14 @@ export const ChatProvider = ({ children }) => {
 		makePromptActive: selections.makePromptActive,
 		clearActivePrompt: selections.clearActivePrompt,
 		activePromptKey: selections.activePromptKey,
+		// User-authored custom prompt library (issue #153)
+		userPrompts: userPrompts.prompts,
+		userPromptsLoading: userPrompts.loading,
+		userPromptsError: userPrompts.error,
+		fetchUserPrompts: userPrompts.fetchPrompts,
+		createUserPrompt: userPrompts.createPrompt,
+		updateUserPrompt: userPrompts.updatePrompt,
+		deleteUserPrompt: userPrompts.deletePrompt,
 		selectAllServerPrompts,
 		deselectAllServerPrompts,
 		selectedDataSources: selections.selectedDataSources,

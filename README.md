@@ -45,8 +45,9 @@ After installation, three CLI tools are available:
 
 ```bash
 # Set up configuration (run this first!)
-atlas-init              # Creates .env and config/ in current directory
-atlas-init --minimal    # Creates just a minimal .env file
+atlas-init                          # Creates .env and config/ in current directory
+atlas-init --minimal                # Creates just a minimal .env file
+atlas-init --env-file ~/.atlasrc    # Write .env to a custom location (shared installs)
 
 # Chat with an LLM
 atlas-chat "Hello, how are you?"
@@ -56,7 +57,9 @@ atlas-chat --list-models
 
 # Start the web server
 atlas-server --port 8000
-atlas-server --env /path/to/.env --config-folder /path/to/config
+atlas-server --env-file /path/to/.env --config-folder /path/to/config
+# Or set ATLAS_ENV_FILE once and all Atlas commands pick it up:
+export ATLAS_ENV_FILE=~/.atlasrc
 ```
 
 ### Python API Usage
@@ -175,6 +178,12 @@ We have created a set of comprehensive guides to help you get the most out of At
 
 *   **[Developer's Guide](./docs/developer/README.md)**: For developers who want to contribute to the project. It provides an overview of the architecture and instructions for creating new MCP servers.
 
+## Releases
+
+Atlas UI 3 ships on a **monthly cadence**. During the last week of each calendar month the `release-cut` workflow opens a draft release PR from a new `release/YYYY.MM` branch, bumps `atlas/version.py` and `pyproject.toml`, and finalizes the `CHANGELOG.md` section for that release. A maintainer (the release captain) runs the smoke test, pushes a `vX.Y.Z` tag, and publishes — the `release-cut` workflow itself never tags or publishes.
+
+The full runbook — branch strategy, versioning (SemVer), stabilization window, hotfix flow, rollback — lives in **[docs/developer/release-process.md](./docs/developer/release-process.md)**. Published versions land on [PyPI](https://pypi.org/project/atlas-chat/) and as container images on Quay.io.
+
 ## Docker / Podman
 
 ### Quick Start
@@ -195,6 +204,19 @@ podman run -p 8000:8000 \
 ```
 
 The container seeds `/app/config` from package defaults at build time. Mounting your local `config/` folder overrides those defaults, so you can customize `llmconfig.yml`, `mcp.json`, etc. without rebuilding.
+
+### Runtime-only Image (smaller runtime footprint)
+
+Build the standard image (`Dockerfile`) when you need development-oriented files in the container.  
+Build the runtime-only recipe to keep Node.js, docs, and test trees out of the final image:
+
+```bash
+podman build -f Dockerfile.runtimeonly -t atlas-ui-3-runtime .
+podman run -p 8000:8000 \
+  -v $(pwd)/config:/app/config:Z \
+  --env-file .env \
+  atlas-ui-3-runtime
+```
 
 ### Container Images
 
@@ -228,4 +250,3 @@ BibTeX:
 Copyright 2025 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software
 
 MIT License
-

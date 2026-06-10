@@ -1,4 +1,5 @@
 from main import app
+from atlas.modules.config import config_manager
 from starlette.testclient import TestClient
 
 
@@ -11,8 +12,8 @@ def test_admin_routes_require_admin(monkeypatch):
     assert r.status_code in (302, 403)
 
     # Admin access when user is in admin group (mocked via config in core.auth)
-    r2 = client.get("/admin/", headers={"X-User-Email": "admin@example.com"})
-    # In debug mode off, should allow if auth module says admin@example.com is admin
+    r2 = client.get("/admin/", headers={"X-User-Email": config_manager.app_settings.admin_test_user})
+    # In debug mode off, should allow if auth module says admin test user is admin
     assert r2.status_code == 200
     data = r2.json()
     assert data.get("available_endpoints") is not None
@@ -23,7 +24,7 @@ def test_system_status_endpoint():
     client = TestClient(app)
 
     # Test with admin user
-    r = client.get("/admin/system-status", headers={"X-User-Email": "admin@example.com"})
+    r = client.get("/admin/system-status", headers={"X-User-Email": config_manager.app_settings.admin_test_user})
     assert r.status_code == 200
 
     data = r.json()

@@ -1,12 +1,5 @@
 {
-  "enabled": false,
   "title": "Welcome to Chat UI",
-  "messages": [
-    {
-      "type": "text",
-      "content": "Welcome! Please review our policies before continuing."
-    }
-  ],
   "dismissible": true,
   "require_accept": false,
   "dismiss_duration_days": 30,

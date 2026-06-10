@@ -106,7 +106,7 @@ async def test_tool_acl_filters_unauthorized(monkeypatch):
         def __init__(self, name):
             self.name = name
             self.description = ""
-            self.inputSchema = {"type": "object", "properties": {"username": {"type": "string"}}}
+            self.inputSchema = {"type": "object", "properties": {"_atlas_user": {"type": "string"}}}
 
     class FakeToolManager:
         def __init__(self):
@@ -121,7 +121,7 @@ async def test_tool_acl_filters_unauthorized(monkeypatch):
             # Minimal schema for selected tools
             out = []
             for n in names:
-                out.append({"type":"function","function":{"name":n,"parameters":{"type":"object","properties":{"username":{"type":"string"}}}}})
+                out.append({"type":"function","function":{"name":n,"parameters":{"type":"object","properties":{"_atlas_user":{"type":"string"}}}}})
             return out
 
     svc = ChatService(llm=DummyLLM(), tool_manager=FakeToolManager(), config_manager=None, file_manager=None)
