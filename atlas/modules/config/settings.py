@@ -41,7 +41,7 @@ class AppSettings(BaseSettings):
     """Main application settings loaded from environment variables."""
 
     # Application settings
-    app_name: str = "Chat UI"
+    app_name: str = "ATLAS"
     port: int = 8000
     debug_mode: bool = False
     # Logging settings
