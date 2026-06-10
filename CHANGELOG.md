@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #643 - 2026-06-10
+- **Config**: Changed the default application name from "Chat UI" to "ATLAS".
+
 ### 2026-06-09
 - **RAG**: Removed the `/search` chat quick command, which silently forced RAG on from the message input and was a confusing entry point. RAG is still activated explicitly via the search-button toggle or by selecting one or more data sources; the `/search` autocomplete entry, its green input highlighting, and the `forceRag` send path are gone.
 
