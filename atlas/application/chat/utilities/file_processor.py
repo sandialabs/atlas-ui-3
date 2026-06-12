@@ -36,6 +36,17 @@ _VISION_IMAGE_MIME_TYPES = _LLM_READY_IMAGE_MIME_TYPES | _TIFF_IMAGE_MIME_TYPES
 _MAX_VISION_IMAGE_B64_BYTES = 20 * 1024 * 1024  # 20 MB base64
 _MAX_VISION_IMAGES_PER_REQUEST = 10
 
+# Native PDF document input (LiteLLM "file" content block -> Bedrock document).
+_PDF_MIME_TYPE = "application/pdf"
+# base64 ≈ 4/3 × raw, so 20 MB b64 ≈ 15 MB raw.  This is the upper bound;
+# the real ceiling is Bedrock's 20 MB *total request payload* limit, so very
+# large PDFs may still be rejected once history/prompt are added.
+_MAX_PDF_B64_BYTES = 20 * 1024 * 1024  # 20 MB base64
+# Bedrock Converse accepts up to 5 documents per request.
+_MAX_PDF_DOCUMENTS_PER_REQUEST = 5
+# Claude on Bedrock caps PDFs at 100 pages per request (200k-context models).
+_MAX_PDF_PAGES = 100
+
 # Type hint for update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
@@ -96,6 +107,26 @@ def _convert_tiff_to_png_b64(image_b64: str) -> str:
     return base64.b64encode(output.getvalue()).decode()
 
 
+def _count_pdf_pages(pdf_b64: str) -> Optional[int]:
+    """Return the page count of a base64-encoded PDF, or None if undeterminable.
+
+    Best-effort: a parse failure or a missing pypdf dependency returns None so
+    the caller can fall back to sending the document without a page guard.
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        logger.debug("pypdf not installed; skipping PDF page count check")
+        return None
+    try:
+        raw = base64.b64decode(pdf_b64, validate=True)
+        reader = PdfReader(BytesIO(raw))
+        return len(reader.pages)
+    except Exception:
+        logger.debug("Could not count PDF pages; skipping page guard", exc_info=True)
+        return None
+
+
 async def _publish_warning(
     message: str,
     event_publisher: Optional["EventPublisher"],
@@ -138,6 +169,7 @@ async def handle_session_files(
     file_manager,
     update_callback: Optional[UpdateCallback] = None,
     model_supports_vision: bool = False,
+    model_supports_pdf: bool = False,
     event_publisher: Optional["EventPublisher"] = None,
 ) -> Dict[str, Any]:
     """
@@ -155,18 +187,22 @@ async def handle_session_files(
         update_callback: Optional callback for emitting updates
         model_supports_vision: When True, image files have their base64 data stored
             in the session context for direct inclusion in LLM vision messages.
+        model_supports_pdf: When True, PDF files have their base64 data stored
+            in the session context for direct inclusion as LLM document blocks.
 
     Returns:
         Updated session context with file references
     """
-    # Always clear stale vision image data from prior turns, even when no
-    # new files are being uploaded.  Without this, old images silently
+    # Always clear stale vision/PDF data from prior turns, even when no
+    # new files are being uploaded.  Without this, old attachments silently
     # reattach on every subsequent message in the session.
     updated_context = dict(session_context)
     session_files_ctx = updated_context.setdefault("files", {})
     for existing_ref in session_files_ctx.values():
         existing_ref.pop("image_b64", None)
         existing_ref.pop("image_mime_type", None)
+        existing_ref.pop("pdf_b64", None)
+        existing_ref.pop("pdf_mime_type", None)
 
     if not files_map or not file_manager or not user_email:
         return updated_context
@@ -270,8 +306,57 @@ async def handle_session_files(
                                     normalized_b64_len,
                                 )
 
-                # Attempt content extraction if enabled and mode requests it
-                if extract_mode in ("full", "preview") and extractor.is_enabled():
+                # For PDF-capable models, store the raw base64 so the message
+                # builder can embed it as an inline document content block.
+                # Warn if a PDF is uploaded to a model that can't process it.
+                if not model_supports_pdf and mime_type == _PDF_MIME_TYPE:
+                    logger.info(
+                        "PDF %s uploaded but model does not support native PDF input; "
+                        "falling back to text extraction / manifest only",
+                        filename,
+                    )
+                if model_supports_pdf and mime_type == _PDF_MIME_TYPE:
+                    b64_len = len(b64)
+                    page_count = _count_pdf_pages(b64)
+                    if b64_len > _MAX_PDF_B64_BYTES:
+                        logger.warning(
+                            "PDF %s too large (%d bytes b64, limit %d) — "
+                            "falling back to text extraction instead",
+                            filename, b64_len, _MAX_PDF_B64_BYTES,
+                        )
+                        warning_msg = (
+                            f"The PDF '{filename}' is too large to send to the model "
+                            f"directly and will be text-extracted instead."
+                        )
+                        await _publish_warning(warning_msg, event_publisher, update_callback)
+                    elif page_count is not None and page_count > _MAX_PDF_PAGES:
+                        logger.warning(
+                            "PDF %s has %d pages (limit %d) — falling back to text "
+                            "extraction instead",
+                            filename, page_count, _MAX_PDF_PAGES,
+                        )
+                        warning_msg = (
+                            f"The PDF '{filename}' has {page_count} pages, over the "
+                            f"{_MAX_PDF_PAGES}-page limit for direct analysis; it will "
+                            f"be text-extracted instead."
+                        )
+                        await _publish_warning(warning_msg, event_publisher, update_callback)
+                    else:
+                        file_ref["pdf_b64"] = b64
+                        file_ref["pdf_mime_type"] = _PDF_MIME_TYPE
+                        logger.debug(
+                            "Stored PDF document data for %s (%d bytes base64, %s pages)",
+                            filename, b64_len,
+                            page_count if page_count is not None else "unknown",
+                        )
+
+                # Attempt content extraction if enabled and mode requests it.
+                # Skip when the PDF is being sent natively as a document block —
+                # the model reads the file directly, so extracted text would only
+                # duplicate content and inflate tokens.
+                if file_ref.get("pdf_b64"):
+                    pass
+                elif extract_mode in ("full", "preview") and extractor.is_enabled():
                     extraction_result = await extractor.extract_content(
                         filename=filename,
                         content_base64=b64,
@@ -306,6 +391,22 @@ async def handle_session_files(
                         )
                         ref.pop("image_b64", None)
                         ref.pop("image_mime_type", None)
+
+        # Enforce per-request PDF document count limit (Bedrock allows up to 5).
+        # Demoted PDFs fall back to a name-only manifest entry.
+        if model_supports_pdf:
+            pdf_count = 0
+            for name, ref in session_files_ctx.items():
+                if ref.get("pdf_b64"):
+                    pdf_count += 1
+                    if pdf_count > _MAX_PDF_DOCUMENTS_PER_REQUEST:
+                        logger.warning(
+                            "PDF document count limit (%d) reached — "
+                            "demoting %s to text manifest entry",
+                            _MAX_PDF_DOCUMENTS_PER_REQUEST, name,
+                        )
+                        ref.pop("pdf_b64", None)
+                        ref.pop("pdf_mime_type", None)
 
         # Emit files update if successful uploads
         if uploaded_refs and update_callback:
@@ -743,6 +844,7 @@ async def notify_canvas_files_v2(
 def build_files_manifest(
     session_context: Dict[str, Any],
     exclude_vision_images: bool = False,
+    exclude_pdf_documents: bool = False,
 ) -> Optional[Dict[str, str]]:
     """
     Build ephemeral files manifest for LLM context.
@@ -754,6 +856,9 @@ def build_files_manifest(
         session_context: Session context containing files dict
         exclude_vision_images: When True, skip image files that already have
             ``image_b64`` stored (they will be sent as inline vision blocks
+            by the message builder instead).
+        exclude_pdf_documents: When True, skip PDF files that already have
+            ``pdf_b64`` stored (they will be sent as inline document blocks
             by the message builder instead).
     """
     files_ctx = session_context.get("files", {})
@@ -770,6 +875,10 @@ def build_files_manifest(
 
         # Skip image files handled as vision content blocks
         if exclude_vision_images and file_info.get("image_b64"):
+            continue
+
+        # Skip PDF files handled as inline document content blocks
+        if exclude_pdf_documents and file_info.get("pdf_b64"):
             continue
 
         entry = f"- {name}"

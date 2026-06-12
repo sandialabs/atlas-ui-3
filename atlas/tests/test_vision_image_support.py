@@ -14,7 +14,7 @@ import pytest
 
 from atlas.application.chat.preprocessors.message_builder import (
     MessageBuilder,
-    _build_vision_user_message,
+    _build_multimodal_user_message,
 )
 from atlas.application.chat.utilities.file_processor import (
     _MAX_VISION_IMAGE_B64_BYTES,
@@ -260,24 +260,27 @@ class TestBuildFilesManifestExcludeVisionImages:
 
 class TestBuildVisionUserMessage:
     def test_produces_multimodal_content(self):
-        msg = _build_vision_user_message(
+        msg = _build_multimodal_user_message(
             "What is in this image?",
             [{"image_b64": "abc", "image_mime_type": "image/jpeg"}],
+            [],
         )
         assert msg["role"] == "user"
         content = msg["content"]
         assert isinstance(content, list)
+        # With no PDFs, image-only layout is text first then images (unchanged)
         assert content[0] == {"type": "text", "text": "What is in this image?"}
         assert content[1]["type"] == "image_url"
         assert content[1]["image_url"]["url"] == "data:image/jpeg;base64,abc"
 
     def test_multiple_images(self):
-        msg = _build_vision_user_message(
+        msg = _build_multimodal_user_message(
             "Compare these.",
             [
                 {"image_b64": "aaa", "image_mime_type": "image/png"},
                 {"image_b64": "bbb", "image_mime_type": "image/png"},
             ],
+            [],
         )
         assert len(msg["content"]) == 3  # text + 2 images
 

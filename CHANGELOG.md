@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #648 - 2026-06-12
+- **PDF uploads**: Models can set `supports_pdf: true` in `llmconfig.yml` to receive uploaded PDFs as inline base64 document content blocks (LiteLLM `file` blocks, mapped to a Bedrock Converse document block for Claude) instead of having their text extracted into the files manifest. Mirrors the existing `supports_vision` plumbing: PDFs are stored on the session file ref, excluded from the text manifest, and skip text extraction to avoid duplicate tokens. Guards enforce a 20 MB base64 size cap, a 100-page limit, and a 5-document-per-request cap; PDFs exceeding any limit fall back to text extraction. Note: on Bedrock Converse, full visual PDF understanding (charts/scanned pages) requires citations, which the portable LiteLLM `file` block does not currently expose — without it Bedrock performs text extraction only.
+
 ### PR #647 - 2026-06-12
 - **Docs**: Documented the off-cycle release path and version-reconciliation guardrails in `AGENTS.md` and the release runbook — manual `release-cut` dispatch, deriving the next version from the highest *published* release (not `pyproject.toml` on `main`), closing superseded/no-op release PRs before cutting, and that the cut PR doubles as the back-merge PR.
 
