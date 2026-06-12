@@ -93,6 +93,10 @@ class ModelConfig(BaseModel):
     # When true, attached image files are sent as inline image content blocks
     # instead of being listed in the files manifest.
     supports_vision: bool = False
+    # Whether this model supports native PDF document input.
+    # When true, attached PDF files are sent as inline document content blocks
+    # (base64) instead of being text-extracted into the files manifest.
+    supports_pdf: bool = False
     # Whether this model supports tool/function calling.
     # When false, tools are stripped from requests and the user is warned.
     supports_tools: bool = True
