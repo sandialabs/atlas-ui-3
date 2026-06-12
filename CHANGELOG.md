@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-12
+
 ### PR #643 - 2026-06-10
 - **Config**: Changed the default application name from "Chat UI" to "ATLAS".
 
