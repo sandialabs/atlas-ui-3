@@ -3,9 +3,10 @@
 Verifies that:
 - ModelConfig recognizes supports_pdf
 - handle_session_files stores pdf_b64 for PDF-capable models only
-- Native PDFs are excluded from the text manifest and skip text extraction
+- Native PDFs are excluded from the text manifest but retain a text fallback
 - MessageBuilder embeds PDF document content blocks on the last user message
-- Size, page-count, and document-count limits are enforced
+- Size, page-count, document-count, and aggregate-payload limits are enforced
+- Demoted/second-turn PDFs keep their extracted-text fallback (not name-only)
 - Stale PDF data is cleared between turns
 """
 
@@ -19,6 +20,7 @@ from atlas.application.chat.preprocessors.message_builder import (
     MessageBuilder,
     _build_multimodal_user_message,
 )
+from atlas.application.chat.utilities import file_processor
 from atlas.application.chat.utilities.file_processor import (
     _MAX_PDF_B64_BYTES,
     _MAX_PDF_DOCUMENTS_PER_REQUEST,
@@ -26,6 +28,7 @@ from atlas.application.chat.utilities.file_processor import (
     build_files_manifest,
     handle_session_files,
 )
+from atlas.modules.file_storage.content_extractor import ExtractionResult
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.domain.sessions.models import Session
 from atlas.modules.config.config_manager import LLMConfig, ModelConfig
@@ -53,6 +56,43 @@ def _pdf_b64(pages: int = 1) -> str:
     buf = BytesIO()
     writer.write(buf)
     return base64.b64encode(buf.getvalue()).decode()
+
+
+class _FakeExtractor:
+    """Stand-in content extractor so tests can exercise the text fallback path.
+
+    Content extraction is globally disabled by default in the test environment
+    (``feature_file_content_extraction_enabled`` defaults to False), so the real
+    extractor never runs.  This fake lets us verify that natively-sent PDFs still
+    record a usable text fallback when extraction *is* available.
+    """
+
+    def __init__(self, enabled: bool = True, content: str = "EXTRACTED PDF TEXT"):
+        self._enabled = enabled
+        self._content = content
+        self.calls: list = []
+
+    def is_enabled(self) -> bool:
+        return self._enabled
+
+    def get_default_behavior(self) -> str:
+        return "full"
+
+    async def extract_content(self, filename, content_base64, mime_type=None):
+        self.calls.append(filename)
+        return ExtractionResult(
+            success=True,
+            content=self._content,
+            preview=self._content[:50],
+            metadata={"pages": 1},
+        )
+
+
+@pytest.fixture
+def fake_extractor(monkeypatch):
+    extractor = _FakeExtractor()
+    monkeypatch.setattr(file_processor, "get_content_extractor", lambda: extractor)
+    return extractor
 
 
 # ---------------------------------------------------------------------------
@@ -124,20 +164,66 @@ class TestHandleSessionFilesPdf:
         assert "pdf_b64" not in context["files"]["readme.txt"]
 
     @pytest.mark.asyncio
-    async def test_native_pdf_skips_text_extraction(self):
+    async def test_native_pdf_extracts_text_fallback(self, fake_extractor):
+        """A natively-sent PDF still records extracted text as a durable fallback.
+
+        The text is excluded from the manifest on the turn the PDF is sent
+        natively (so no token duplication), but it must exist so follow-up turns
+        and count/payload demotion keep usable content.
+        """
         fm = _make_file_manager()
         b64 = _pdf_b64()
         context = await handle_session_files(
             session_context={},
             user_email="u@example.com",
-            files_map={"doc.pdf": {"content": b64, "extractMode": "full"}},
+            # extractMode "none" must still produce a fallback for native PDFs.
+            files_map={"doc.pdf": {"content": b64, "extractMode": "none"}},
             file_manager=fm,
             model_supports_pdf=True,
         )
         ref = context["files"]["doc.pdf"]
         assert ref.get("pdf_b64") == b64
-        # No extracted content because the model reads the PDF directly
+        assert ref.get("extracted_content") == "EXTRACTED PDF TEXT"
+        # The forced fallback is surfaced by the manifest on later turns.
+        assert ref.get("extract_mode") == "full"
+        assert fake_extractor.calls == ["doc.pdf"]
+
+    @pytest.mark.asyncio
+    async def test_native_pdf_no_fallback_when_extraction_disabled(self, monkeypatch):
+        """With extraction disabled there is simply no text fallback (not an error)."""
+        monkeypatch.setattr(
+            file_processor, "get_content_extractor", lambda: _FakeExtractor(enabled=False)
+        )
+        fm = _make_file_manager()
+        b64 = _pdf_b64()
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"doc.pdf": {"content": b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_pdf=True,
+        )
+        ref = context["files"]["doc.pdf"]
+        assert ref.get("pdf_b64") == b64
         assert "extracted_content" not in ref
+
+    @pytest.mark.asyncio
+    async def test_native_pdf_manifest_excluded_on_upload_turn(self, fake_extractor):
+        """On the upload turn the native PDF (with fallback text) is still excluded
+        from the manifest so the extracted text does not duplicate the document block."""
+        fm = _make_file_manager()
+        b64 = _pdf_b64()
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"doc.pdf": {"content": b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_pdf=True,
+        )
+        manifest = build_files_manifest(context, exclude_pdf_documents=True)
+        # Either no manifest at all, or the native PDF is absent from it.
+        if manifest:
+            assert "doc.pdf" not in manifest["content"]
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +282,81 @@ class TestPdfLimits:
         )
         pdf_count = sum(1 for r in context["files"].values() if r.get("pdf_b64"))
         assert pdf_count == _MAX_PDF_DOCUMENTS_PER_REQUEST
+
+    @pytest.mark.asyncio
+    async def test_excess_pdf_demotion_preserves_extracted_content(self, fake_extractor):
+        """Count-demoted PDFs (#6+) must keep usable text, not become name-only."""
+        fm = _make_file_manager()
+        b64 = _pdf_b64()
+        n_extra = 2
+        files_map = {
+            f"doc_{i:02d}.pdf": {"content": b64, "extractMode": "none"}
+            for i in range(_MAX_PDF_DOCUMENTS_PER_REQUEST + n_extra)
+        }
+        warnings: list = []
+
+        async def update_callback(event):
+            if event.get("type") == "warning":
+                warnings.append(event["message"])
+
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map=files_map,
+            file_manager=fm,
+            model_supports_pdf=True,
+            update_callback=update_callback,
+        )
+        refs = context["files"]
+        native = [n for n, r in refs.items() if r.get("pdf_b64")]
+        demoted = [n for n, r in refs.items() if not r.get("pdf_b64")]
+        assert len(native) == _MAX_PDF_DOCUMENTS_PER_REQUEST
+        assert len(demoted) == n_extra
+        # Every demoted PDF retains extracted text (manifest is not name-only).
+        for name in demoted:
+            assert refs[name].get("extracted_content") == "EXTRACTED PDF TEXT"
+        # The user is warned about each demotion.
+        assert len(warnings) == n_extra
+        # Demoted PDFs surface their text in the manifest on this turn.
+        manifest = build_files_manifest(context, exclude_pdf_documents=True)
+        for name in demoted:
+            assert name in manifest["content"]
+
+    @pytest.mark.asyncio
+    async def test_aggregate_payload_demotes_excess_pdfs(self, fake_extractor, monkeypatch):
+        """Several individually-legal PDFs that sum past the payload budget get demoted."""
+        fm = _make_file_manager()
+        b64 = _pdf_b64()
+        # Force the aggregate budget just above two documents so the third trips it.
+        budget = len(b64) * 2 + len(b64) // 2
+        monkeypatch.setattr(file_processor, "_MAX_TOTAL_INLINE_B64_BYTES", budget)
+        warnings: list = []
+
+        async def update_callback(event):
+            if event.get("type") == "warning":
+                warnings.append(event["message"])
+
+        files_map = {
+            f"doc_{i:02d}.pdf": {"content": b64, "extractMode": "none"}
+            for i in range(4)
+        }
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map=files_map,
+            file_manager=fm,
+            model_supports_pdf=True,
+            update_callback=update_callback,
+        )
+        refs = context["files"]
+        native = [n for n, r in refs.items() if r.get("pdf_b64")]
+        # Only the first two fit under the aggregate budget.
+        assert len(native) == 2
+        # Demoted-by-payload PDFs keep their extracted text and warn the user.
+        for name, ref in refs.items():
+            if not ref.get("pdf_b64"):
+                assert ref.get("extracted_content") == "EXTRACTED PDF TEXT"
+        assert len(warnings) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -354,3 +515,37 @@ class TestStalePdfCleanup:
         old_ref = context["files"]["old.pdf"]
         assert "pdf_b64" not in old_ref
         assert "pdf_mime_type" not in old_ref
+
+    @pytest.mark.asyncio
+    async def test_followup_turn_retains_pdf_text_fallback(self, fake_extractor):
+        """After a PDF is sent natively on turn 1, turn 2 (a follow-up with no new
+        files) must still expose the PDF content via the manifest text fallback."""
+        fm = _make_file_manager()
+        b64 = _pdf_b64()
+
+        # Turn 1: upload a native PDF.
+        turn1 = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"doc.pdf": {"content": b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_pdf=True,
+        )
+        assert turn1["files"]["doc.pdf"].get("pdf_b64") == b64
+
+        # Turn 2: a follow-up question, no new uploads.
+        turn2 = await handle_session_files(
+            session_context=turn1,
+            user_email="u@example.com",
+            files_map=None,
+            file_manager=fm,
+            model_supports_pdf=True,
+        )
+        ref = turn2["files"]["doc.pdf"]
+        # Native block is gone (stale-cleared) ...
+        assert "pdf_b64" not in ref
+        # ... but the extracted text survives so the model still sees the content.
+        assert ref.get("extracted_content") == "EXTRACTED PDF TEXT"
+        manifest = build_files_manifest(turn2, exclude_pdf_documents=True)
+        assert "doc.pdf" in manifest["content"]
+        assert "EXTRACTED PDF TEXT" in manifest["content"]

@@ -5,6 +5,7 @@ This module provides stateless utility functions for handling files within
 chat sessions, including user uploads and tool-generated artifacts.
 """
 
+import asyncio
 import base64
 import logging
 from io import BytesIO
@@ -46,6 +47,13 @@ _MAX_PDF_B64_BYTES = 20 * 1024 * 1024  # 20 MB base64
 _MAX_PDF_DOCUMENTS_PER_REQUEST = 5
 # Claude on Bedrock caps PDFs at 100 pages per request (200k-context models).
 _MAX_PDF_PAGES = 100
+# Bedrock enforces a hard ~20 MB limit on the *entire* request payload (all
+# inline documents + images + system prompt + history).  The per-document caps
+# above do not protect against several mid-sized PDFs summing past that ceiling,
+# so cap the aggregate inline base64 payload conservatively below 20 MB to leave
+# headroom for the prompt and conversation history.  PDFs that would push the
+# request over this budget are demoted to their text-extraction fallback.
+_MAX_TOTAL_INLINE_B64_BYTES = 18 * 1024 * 1024  # 18 MB base64 aggregate
 
 # Type hint for update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
@@ -317,7 +325,8 @@ async def handle_session_files(
                     )
                 if model_supports_pdf and mime_type == _PDF_MIME_TYPE:
                     b64_len = len(b64)
-                    page_count = _count_pdf_pages(b64)
+                    # Cheap size check first — reject oversized PDFs before
+                    # spending a base64 decode + pypdf parse on the page count.
                     if b64_len > _MAX_PDF_B64_BYTES:
                         logger.warning(
                             "PDF %s too large (%d bytes b64, limit %d) — "
@@ -329,34 +338,52 @@ async def handle_session_files(
                             f"directly and will be text-extracted instead."
                         )
                         await _publish_warning(warning_msg, event_publisher, update_callback)
-                    elif page_count is not None and page_count > _MAX_PDF_PAGES:
-                        logger.warning(
-                            "PDF %s has %d pages (limit %d) — falling back to text "
-                            "extraction instead",
-                            filename, page_count, _MAX_PDF_PAGES,
-                        )
-                        warning_msg = (
-                            f"The PDF '{filename}' has {page_count} pages, over the "
-                            f"{_MAX_PDF_PAGES}-page limit for direct analysis; it will "
-                            f"be text-extracted instead."
-                        )
-                        await _publish_warning(warning_msg, event_publisher, update_callback)
                     else:
-                        file_ref["pdf_b64"] = b64
-                        file_ref["pdf_mime_type"] = _PDF_MIME_TYPE
-                        logger.debug(
-                            "Stored PDF document data for %s (%d bytes base64, %s pages)",
-                            filename, b64_len,
-                            page_count if page_count is not None else "unknown",
-                        )
+                        # Page counting decodes + parses with pypdf; run it off
+                        # the event loop so a large PDF doesn't block other I/O.
+                        page_count = await asyncio.to_thread(_count_pdf_pages, b64)
+                        if page_count is not None and page_count > _MAX_PDF_PAGES:
+                            logger.warning(
+                                "PDF %s has %d pages (limit %d) — falling back to text "
+                                "extraction instead",
+                                filename, page_count, _MAX_PDF_PAGES,
+                            )
+                            warning_msg = (
+                                f"The PDF '{filename}' has {page_count} pages, over the "
+                                f"{_MAX_PDF_PAGES}-page limit for direct analysis; it will "
+                                f"be text-extracted instead."
+                            )
+                            await _publish_warning(warning_msg, event_publisher, update_callback)
+                        else:
+                            file_ref["pdf_b64"] = b64
+                            file_ref["pdf_mime_type"] = _PDF_MIME_TYPE
+                            logger.debug(
+                                "Stored PDF document data for %s (%d bytes base64, %s pages)",
+                                filename, b64_len,
+                                page_count if page_count is not None else "unknown",
+                            )
 
                 # Attempt content extraction if enabled and mode requests it.
-                # Skip when the PDF is being sent natively as a document block —
-                # the model reads the file directly, so extracted text would only
-                # duplicate content and inflate tokens.
-                if file_ref.get("pdf_b64"):
-                    pass
-                elif extract_mode in ("full", "preview") and extractor.is_enabled():
+                #
+                # For natively-sent PDFs we STILL extract text (rather than
+                # skipping it).  The extracted text is excluded from the manifest
+                # on the turn the PDF is sent natively (the message builder sets
+                # exclude_pdf_documents), so it does not duplicate tokens, but it
+                # provides a durable fallback so the document content survives:
+                #   - follow-up turns, after pdf_b64 is cleared at the top of the
+                #     next turn, and
+                #   - count/payload demotion below, which drops pdf_b64.
+                # Without this, demoted or second-turn PDFs would collapse to a
+                # name-only manifest entry with zero content.
+                is_native_pdf = bool(file_ref.get("pdf_b64"))
+                effective_extract_mode = extract_mode
+                if is_native_pdf and extract_mode not in ("full", "preview"):
+                    # Force a full extraction purely as the fallback, even if the
+                    # user chose extractMode "none".  No-op when extraction is
+                    # globally disabled (handled by is_enabled() below), in which
+                    # case the PDF simply has no text fallback.
+                    effective_extract_mode = "full"
+                if effective_extract_mode in ("full", "preview") and extractor.is_enabled():
                     extraction_result = await extractor.extract_content(
                         filename=filename,
                         content_base64=b64,
@@ -367,6 +394,10 @@ async def handle_session_files(
                         file_ref["extracted_preview"] = extraction_result.preview
                         if extraction_result.metadata:
                             file_ref["extraction_metadata"] = extraction_result.metadata
+                        if is_native_pdf and file_ref.get("extract_mode") not in ("full", "preview"):
+                            # The manifest keys display off extract_mode; make sure
+                            # the forced fallback is actually surfaced on later turns.
+                            file_ref["extract_mode"] = effective_extract_mode
                         logger.info(f"Extracted content from {filename}: {len(extraction_result.preview or '')} chars preview")
                     else:
                         logger.debug(f"Content extraction skipped for {filename}: {extraction_result.error}")
@@ -392,21 +423,55 @@ async def handle_session_files(
                         ref.pop("image_b64", None)
                         ref.pop("image_mime_type", None)
 
-        # Enforce per-request PDF document count limit (Bedrock allows up to 5).
-        # Demoted PDFs fall back to a name-only manifest entry.
+        # Enforce per-request PDF limits now that every upload is processed.
+        # Two guards, oldest-first preserved (insertion order):
+        #   1. Bedrock allows at most 5 inline documents per request.
+        #   2. Bedrock caps the *entire* request payload at ~20 MB; several
+        #      mid-sized PDFs can blow that even when each is under the per-doc
+        #      cap, so we also bound the aggregate inline base64 payload.
+        # Demoted PDFs keep the text-extraction fallback stored above, so the
+        # manifest still carries their content (it is no longer name-only).
         if model_supports_pdf:
             pdf_count = 0
+            # Inline vision images share the same request payload budget.
+            total_inline_b64 = sum(
+                len(ref["image_b64"])
+                for ref in session_files_ctx.values()
+                if ref.get("image_b64")
+            )
             for name, ref in session_files_ctx.items():
-                if ref.get("pdf_b64"):
+                b64 = ref.get("pdf_b64")
+                if not b64:
+                    continue
+                demote_reason = None
+                if pdf_count >= _MAX_PDF_DOCUMENTS_PER_REQUEST:
+                    demote_reason = (
+                        f"more than {_MAX_PDF_DOCUMENTS_PER_REQUEST} PDFs were attached"
+                    )
+                elif total_inline_b64 + len(b64) > _MAX_TOTAL_INLINE_B64_BYTES:
+                    demote_reason = (
+                        "the combined size of attached documents exceeds the "
+                        "request payload budget"
+                    )
+                if demote_reason:
+                    logger.warning(
+                        "Demoting PDF %s from native document to text fallback: %s",
+                        name, demote_reason,
+                    )
+                    ref.pop("pdf_b64", None)
+                    ref.pop("pdf_mime_type", None)
+                    fallback = (
+                        "its extracted text" if ref.get("extracted_content")
+                        else "a file reference (no extractable text)"
+                    )
+                    await _publish_warning(
+                        f"The PDF '{name}' will be sent as {fallback} instead of "
+                        f"being read directly because {demote_reason}.",
+                        event_publisher, update_callback,
+                    )
+                else:
                     pdf_count += 1
-                    if pdf_count > _MAX_PDF_DOCUMENTS_PER_REQUEST:
-                        logger.warning(
-                            "PDF document count limit (%d) reached — "
-                            "demoting %s to text manifest entry",
-                            _MAX_PDF_DOCUMENTS_PER_REQUEST, name,
-                        )
-                        ref.pop("pdf_b64", None)
-                        ref.pop("pdf_mime_type", None)
+                    total_inline_b64 += len(b64)
 
         # Emit files update if successful uploads
         if uploaded_refs and update_callback:
