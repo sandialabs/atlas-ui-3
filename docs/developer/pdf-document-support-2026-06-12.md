@@ -34,8 +34,13 @@ The field defaults to `false` when omitted. `/api/config` and
 2. **API** (`routes/config_routes.py`): `supports_pdf` added to both config endpoints.
 3. **File processing** (`application/chat/utilities/file_processor.py`): when
    `model_supports_pdf=True`, `handle_session_files` stores the raw `pdf_b64` and
-   `pdf_mime_type` on eligible (`application/pdf`) file refs and **skips text
-   extraction** for them. Stale PDF data from prior turns is cleared each turn.
+   `pdf_mime_type` on eligible (`application/pdf`) file refs. It **also extracts
+   the PDF text as a durable fallback** (forcing a full extraction even when the
+   upload's `extractMode` is `none`). That extracted text is excluded from the
+   manifest on the turn the PDF is sent natively — so it does not duplicate
+   tokens — but it keeps the content reachable when the native document block is
+   later dropped (see *Text Fallback* below). Stale PDF data from prior turns is
+   cleared at the start of each turn.
 4. **Message building** (`preprocessors/message_builder.py`):
    `build_messages(model_supports_pdf=True)` attaches the PDFs as `file` content
    blocks on the last user message and excludes them from the files manifest.
@@ -67,17 +72,50 @@ for Claude). Documents are placed before the text per Anthropic's guidance:
 When a turn includes both images and PDFs, the content array is ordered
 documents, then text, then images.
 
-## Size, Page, and Count Limits
+## Size, Page, Count, and Payload Limits
 
 | Limit | Value | Constant |
 |-------|-------|----------|
-| Max PDF size | 20 MB base64 (≈15 MB raw) | `_MAX_PDF_B64_BYTES` |
+| Max PDF size (per document) | 20 MB base64 (≈15 MB raw) | `_MAX_PDF_B64_BYTES` |
 | Max pages per PDF | 100 | `_MAX_PDF_PAGES` |
 | Max PDFs per request | 5 | `_MAX_PDF_DOCUMENTS_PER_REQUEST` |
+| Max aggregate inline payload | 18 MB base64 | `_MAX_TOTAL_INLINE_B64_BYTES` |
 
-PDFs exceeding the size or page limit, or beyond the per-request count, fall
-back to the standard text-extraction / manifest path. Page count is determined
-best-effort with `pypdf`; if the count can't be read, the page guard is skipped.
+Guards are evaluated cheap-first: the per-document size check runs before the
+`pypdf` page count (which decodes and parses the file, so it runs off the asyncio
+event loop via `asyncio.to_thread`). Page count is best-effort; if it can't be
+read, the page guard is skipped.
+
+The **aggregate** guard exists because several mid-sized PDFs can each pass the
+per-document cap yet still sum past Bedrock's hard ~20 MB *total request* limit.
+After all uploads are processed, PDFs are kept oldest-first until either the
+5-document count or the 18 MB aggregate budget (inline PDFs **and** vision images)
+is reached; the rest are demoted to their text fallback with a user warning. The
+budget is set below 20 MB to leave headroom for the system prompt and history.
+
+PDFs over the per-document size or page limit are not sent natively either. What
+"fall back" means depends on configuration — see *Text Fallback* below; it is not
+unconditionally a full text extraction.
+
+## Text Fallback
+
+Because the native document block is dropped in three situations —
+
+1. a follow-up turn (stale `pdf_b64`/`pdf_mime_type` are cleared each turn),
+2. count demotion (PDF #6+), and
+3. aggregate-payload demotion —
+
+natively-eligible PDFs always have their text extracted up front so the content
+survives in the files manifest. The fallback's quality depends on configuration:
+
+- **Extraction enabled** (`FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=true` and a
+  PDF extractor configured): the manifest carries the extracted text.
+- **Extraction disabled or unavailable**: there is no text to fall back to, so a
+  dropped PDF becomes a **name-only** manifest entry. The user-facing warning
+  reflects this ("a file reference (no extractable text)").
+
+PDFs over the per-document size/page limit follow the same path: extracted text
+when extraction is available, name-only otherwise.
 
 ### Why 20 MB and not larger
 
