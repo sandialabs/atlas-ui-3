@@ -139,6 +139,18 @@ text-extraction-mode document reading. If guaranteed visual analysis is required
 the follow-up is to emit a provider-native document block with
 `citations: {enabled: true}` (or use the InvokeModel path).
 
+## End-to-End Verification
+
+Verified live against the real Anthropic API (`claude-sonnet-4` with
+`supports_pdf: true`) through the chat UI. A single-page PDF containing facts the
+model cannot guess (a secret code `MAGENTA-FALCON-4417`, a name, and a codeword)
+was uploaded with `extractMode: none` — so the document was sent **natively** as
+a `file` content block, not text-extracted (backend log: `Attached 0 image(s)
+and 1 PDF(s) to user message for model`). The model quoted all three facts back
+exactly, confirming it read the PDF directly:
+
+![Native PDF E2E: claude-sonnet-4 answering from an uploaded PDF](images/pdf-document-support-e2e.png)
+
 ## References
 
 - [Anthropic — PDF support](https://platform.claude.com/docs/en/build-with-claude/pdf-support)
