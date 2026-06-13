@@ -105,6 +105,16 @@ class ChatOrchestrator:
         except Exception:
             return False
 
+    def _model_supports_pdf(self, model: str) -> bool:
+        """Return True if the named model is configured with supports_pdf=True."""
+        if not self.config_manager:
+            return False
+        try:
+            model_config = self.config_manager.llm_config.models.get(model)
+            return bool(model_config and getattr(model_config, "supports_pdf", False))
+        except Exception:
+            return False
+
     def _model_supports_tools(self, model: str) -> bool:
         """Return True if the named model is configured with supports_tools=True."""
         if not self.config_manager:
@@ -172,6 +182,7 @@ class ChatOrchestrator:
         update_callback = kwargs.get("update_callback")
         logger.debug(f"Orchestrator.execute: update_callback present = {update_callback is not None}")
         model_supports_vision = self._model_supports_vision(model)
+        model_supports_pdf = self._model_supports_pdf(model)
         session.context = await file_processor.handle_session_files(
             session_context=session.context,
             user_email=user_email,
@@ -179,6 +190,7 @@ class ChatOrchestrator:
             file_manager=self.file_manager,
             update_callback=update_callback,
             model_supports_vision=model_supports_vision,
+            model_supports_pdf=model_supports_pdf,
             event_publisher=self.event_publisher,
         )
 
@@ -188,6 +200,7 @@ class ChatOrchestrator:
             session=session,
             include_files_manifest=True,
             model_supports_vision=model_supports_vision,
+            model_supports_pdf=model_supports_pdf,
             custom_system_prompt=kwargs.get("custom_system_prompt"),
         )
 
