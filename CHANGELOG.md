@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #650 - 2026-06-13
+- **Chat Export**: Exported conversations (both JSON and `.txt`) now show the active custom prompt's name plus the first few lines of its body when available. User-authored prompts (custom prompt library) include a preview of their content; MCP-server prompts continue to show name/description (body lives server-side).
+
 ## [0.3.0] - 2026-06-12
 
 ### PR #643 - 2026-06-10

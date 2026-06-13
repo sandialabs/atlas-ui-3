@@ -539,14 +539,20 @@ export const ChatProvider = ({ children }) => {
 			? ([...selectedDataSources].join(', ') || 'None selected')
 			: 'None (RAG disabled)'
 
-		const promptInfoByKey = buildPromptInfoByKey(config.prompts)
+		const promptInfoByKey = buildPromptInfoByKey(config.prompts, userPrompts.prompts)
 		const activePromptInfo = resolvePromptInfo(selections.activePromptKey, promptInfoByKey)
 		const exportConversation = buildExportConversation(messages, promptInfoByKey)
 
 		if (asText) {
-			const promptLine = activePromptInfo
-				? `Active Custom Prompt: ${activePromptInfo.name}${activePromptInfo.server ? ` (from ${activePromptInfo.server})` : ''}${activePromptInfo.description ? ` — ${activePromptInfo.description}` : ''}\n`
-				: 'Active Custom Prompt: Default\n'
+			let promptLine
+			if (activePromptInfo) {
+				const serverPart = activePromptInfo.server ? ` (from ${activePromptInfo.server})` : ''
+				const descPart = activePromptInfo.description ? ` — ${activePromptInfo.description}` : ''
+				const previewPart = activePromptInfo.preview ? `\nPrompt preview:\n${activePromptInfo.preview}` : ''
+				promptLine = `Active Custom Prompt: ${activePromptInfo.name}${serverPart}${descPart}${previewPart}\n`
+			} else {
+				promptLine = 'Active Custom Prompt: Default\n'
+			}
 			let text = `Chat Export - ${config.appName}\nDate: ${new Date().toLocaleString()}\nUser: ${config.user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected RAG Sources: ${ragSourcesDisplay}\nAgent Mode: ${agent.agentModeEnabled ? 'Enabled' : 'Disabled'}\n${promptLine}\n${'='.repeat(50)}\n\n`
 			exportConversation.forEach(m => { text += `${m.role.toUpperCase()}:\n${m.content}\n\n` })
 			if (files.canvasContent) text += `${'='.repeat(50)}\nCANVAS CONTENT:\n${files.canvasContent}\n`
@@ -572,7 +578,7 @@ export const ChatProvider = ({ children }) => {
 					agentModeEnabled: agent.agentModeEnabled,
 					agentMaxSteps: agent.agentMaxSteps,
 					messageCount: messages.length,
-					exportVersion: '1.2'
+					exportVersion: '1.3'
 				},
 				conversation: exportConversation,
 				canvasContent: files.canvasContent || null
@@ -585,7 +591,7 @@ export const ChatProvider = ({ children }) => {
 			a.download = `chat-export-${ts}.json`
 			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 		}
-	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, selections.activePromptKey, files.canvasContent])
+	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, selections.activePromptKey, files.canvasContent, userPrompts.prompts])
 
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
