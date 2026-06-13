@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #650 - 2026-06-13
+- **Chat Export**: Exported conversations (both JSON and `.txt`) now show the active custom prompt's name plus the first few lines of its body when available. User-authored prompts (custom prompt library) include a preview of their content; MCP-server prompts continue to show name/description (body lives server-side).
+
 ### PR #648 - 2026-06-12
 - **PDF uploads**: Models can set `supports_pdf: true` in `llmconfig.yml` to receive uploaded PDFs as inline base64 document content blocks (LiteLLM `file` blocks, mapped to a Bedrock Converse document block for Claude) instead of having their text extracted into the files manifest. Mirrors the existing `supports_vision` plumbing: PDFs are stored on the session file ref and excluded from the text manifest. Their text is still extracted up front as a durable fallback (kept out of the manifest on the turn the PDF is sent natively, so no token duplication) so the content survives follow-up turns and demotion. Guards enforce a 20 MB base64 per-document size cap, a 100-page limit, a 5-document-per-request cap, and an 18 MB aggregate inline-payload budget (to stay under Bedrock's ~20 MB total request limit). PDFs over a limit are sent as their extracted text where extraction is enabled, or as a name-only file reference otherwise, with a user warning. Note: on Bedrock Converse, full visual PDF understanding (charts/scanned pages) requires citations, which the portable LiteLLM `file` block does not currently expose — without it Bedrock performs text extraction only.
 
