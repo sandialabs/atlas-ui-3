@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #647 - 2026-06-12
+- **Docs**: Documented the off-cycle release path and version-reconciliation guardrails in `AGENTS.md` and the release runbook — manual `release-cut` dispatch, deriving the next version from the highest *published* release (not `pyproject.toml` on `main`), closing superseded/no-op release PRs before cutting, and that the cut PR doubles as the back-merge PR.
+
 ## [0.3.0] - 2026-06-12
 
 ### PR #643 - 2026-06-10

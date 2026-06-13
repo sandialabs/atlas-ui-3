@@ -118,6 +118,22 @@ draft PR against the existing branch without touching any files. The
 recovery PR body is flagged with a banner so the captain knows to
 verify the inferred metadata.
 
+> **Before you cut, reconcile the version state.** The cron is
+> idempotent only *within* a month — it does not reason about releases
+> that already shipped. Two failure modes to check for, especially
+> before an off-cycle cut:
+>
+> - **Determine the next version from the highest *published* release**
+>   (`gh release list`, git tags, or PyPI), **not** from
+>   `pyproject.toml` on `main`. After a release's back-merge, `main`
+>   already equals the last shipped version, so reading it yields the
+>   *current* version, not the next one.
+> - **Close any superseded release PR first.** A recovery-path PR from a
+>   prior month can linger open carrying a *no-op* bump (e.g.
+>   `0.2.0 → 0.2.0`) if its version had already shipped by another
+>   path. Do not adopt it as the release vehicle — close it and cut a
+>   fresh branch for the new version.
+
 #### 2. Release captain takes ownership
 
 A maintainer claims the draft PR (self-assign) and becomes the
