@@ -5,6 +5,7 @@ This module provides stateless utility functions for handling files within
 chat sessions, including user uploads and tool-generated artifacts.
 """
 
+import asyncio
 import base64
 import logging
 from io import BytesIO
@@ -35,6 +36,24 @@ _VISION_IMAGE_MIME_TYPES = _LLM_READY_IMAGE_MIME_TYPES | _TIFF_IMAGE_MIME_TYPES
 # in session context.  base64 ≈ 4/3 × raw, so 20 MB b64 ≈ 15 MB raw.
 _MAX_VISION_IMAGE_B64_BYTES = 20 * 1024 * 1024  # 20 MB base64
 _MAX_VISION_IMAGES_PER_REQUEST = 10
+
+# Native PDF document input (LiteLLM "file" content block -> Bedrock document).
+_PDF_MIME_TYPE = "application/pdf"
+# base64 ≈ 4/3 × raw, so 20 MB b64 ≈ 15 MB raw.  This is the upper bound;
+# the real ceiling is Bedrock's 20 MB *total request payload* limit, so very
+# large PDFs may still be rejected once history/prompt are added.
+_MAX_PDF_B64_BYTES = 20 * 1024 * 1024  # 20 MB base64
+# Bedrock Converse accepts up to 5 documents per request.
+_MAX_PDF_DOCUMENTS_PER_REQUEST = 5
+# Claude on Bedrock caps PDFs at 100 pages per request (200k-context models).
+_MAX_PDF_PAGES = 100
+# Bedrock enforces a hard ~20 MB limit on the *entire* request payload (all
+# inline documents + images + system prompt + history).  The per-document caps
+# above do not protect against several mid-sized PDFs summing past that ceiling,
+# so cap the aggregate inline base64 payload conservatively below 20 MB to leave
+# headroom for the prompt and conversation history.  PDFs that would push the
+# request over this budget are demoted to their text-extraction fallback.
+_MAX_TOTAL_INLINE_B64_BYTES = 18 * 1024 * 1024  # 18 MB base64 aggregate
 
 # Type hint for update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
@@ -96,6 +115,26 @@ def _convert_tiff_to_png_b64(image_b64: str) -> str:
     return base64.b64encode(output.getvalue()).decode()
 
 
+def _count_pdf_pages(pdf_b64: str) -> Optional[int]:
+    """Return the page count of a base64-encoded PDF, or None if undeterminable.
+
+    Best-effort: a parse failure or a missing pypdf dependency returns None so
+    the caller can fall back to sending the document without a page guard.
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        logger.debug("pypdf not installed; skipping PDF page count check")
+        return None
+    try:
+        raw = base64.b64decode(pdf_b64, validate=True)
+        reader = PdfReader(BytesIO(raw))
+        return len(reader.pages)
+    except Exception:
+        logger.debug("Could not count PDF pages; skipping page guard", exc_info=True)
+        return None
+
+
 async def _publish_warning(
     message: str,
     event_publisher: Optional["EventPublisher"],
@@ -138,6 +177,7 @@ async def handle_session_files(
     file_manager,
     update_callback: Optional[UpdateCallback] = None,
     model_supports_vision: bool = False,
+    model_supports_pdf: bool = False,
     event_publisher: Optional["EventPublisher"] = None,
 ) -> Dict[str, Any]:
     """
@@ -155,18 +195,22 @@ async def handle_session_files(
         update_callback: Optional callback for emitting updates
         model_supports_vision: When True, image files have their base64 data stored
             in the session context for direct inclusion in LLM vision messages.
+        model_supports_pdf: When True, PDF files have their base64 data stored
+            in the session context for direct inclusion as LLM document blocks.
 
     Returns:
         Updated session context with file references
     """
-    # Always clear stale vision image data from prior turns, even when no
-    # new files are being uploaded.  Without this, old images silently
+    # Always clear stale vision/PDF data from prior turns, even when no
+    # new files are being uploaded.  Without this, old attachments silently
     # reattach on every subsequent message in the session.
     updated_context = dict(session_context)
     session_files_ctx = updated_context.setdefault("files", {})
     for existing_ref in session_files_ctx.values():
         existing_ref.pop("image_b64", None)
         existing_ref.pop("image_mime_type", None)
+        existing_ref.pop("pdf_b64", None)
+        existing_ref.pop("pdf_mime_type", None)
 
     if not files_map or not file_manager or not user_email:
         return updated_context
@@ -270,8 +314,76 @@ async def handle_session_files(
                                     normalized_b64_len,
                                 )
 
-                # Attempt content extraction if enabled and mode requests it
-                if extract_mode in ("full", "preview") and extractor.is_enabled():
+                # For PDF-capable models, store the raw base64 so the message
+                # builder can embed it as an inline document content block.
+                # Warn if a PDF is uploaded to a model that can't process it.
+                if not model_supports_pdf and mime_type == _PDF_MIME_TYPE:
+                    logger.info(
+                        "PDF %s uploaded but model does not support native PDF input; "
+                        "falling back to text extraction / manifest only",
+                        filename,
+                    )
+                if model_supports_pdf and mime_type == _PDF_MIME_TYPE:
+                    b64_len = len(b64)
+                    # Cheap size check first — reject oversized PDFs before
+                    # spending a base64 decode + pypdf parse on the page count.
+                    if b64_len > _MAX_PDF_B64_BYTES:
+                        logger.warning(
+                            "PDF %s too large (%d bytes b64, limit %d) — "
+                            "falling back to text extraction instead",
+                            filename, b64_len, _MAX_PDF_B64_BYTES,
+                        )
+                        warning_msg = (
+                            f"The PDF '{filename}' is too large to send to the model "
+                            f"directly and will be text-extracted instead."
+                        )
+                        await _publish_warning(warning_msg, event_publisher, update_callback)
+                    else:
+                        # Page counting decodes + parses with pypdf; run it off
+                        # the event loop so a large PDF doesn't block other I/O.
+                        page_count = await asyncio.to_thread(_count_pdf_pages, b64)
+                        if page_count is not None and page_count > _MAX_PDF_PAGES:
+                            logger.warning(
+                                "PDF %s has %d pages (limit %d) — falling back to text "
+                                "extraction instead",
+                                filename, page_count, _MAX_PDF_PAGES,
+                            )
+                            warning_msg = (
+                                f"The PDF '{filename}' has {page_count} pages, over the "
+                                f"{_MAX_PDF_PAGES}-page limit for direct analysis; it will "
+                                f"be text-extracted instead."
+                            )
+                            await _publish_warning(warning_msg, event_publisher, update_callback)
+                        else:
+                            file_ref["pdf_b64"] = b64
+                            file_ref["pdf_mime_type"] = _PDF_MIME_TYPE
+                            logger.debug(
+                                "Stored PDF document data for %s (%d bytes base64, %s pages)",
+                                filename, b64_len,
+                                page_count if page_count is not None else "unknown",
+                            )
+
+                # Attempt content extraction if enabled and mode requests it.
+                #
+                # For natively-sent PDFs we STILL extract text (rather than
+                # skipping it).  The extracted text is excluded from the manifest
+                # on the turn the PDF is sent natively (the message builder sets
+                # exclude_pdf_documents), so it does not duplicate tokens, but it
+                # provides a durable fallback so the document content survives:
+                #   - follow-up turns, after pdf_b64 is cleared at the top of the
+                #     next turn, and
+                #   - count/payload demotion below, which drops pdf_b64.
+                # Without this, demoted or second-turn PDFs would collapse to a
+                # name-only manifest entry with zero content.
+                is_native_pdf = bool(file_ref.get("pdf_b64"))
+                effective_extract_mode = extract_mode
+                if is_native_pdf and extract_mode not in ("full", "preview"):
+                    # Force a full extraction purely as the fallback, even if the
+                    # user chose extractMode "none".  No-op when extraction is
+                    # globally disabled (handled by is_enabled() below), in which
+                    # case the PDF simply has no text fallback.
+                    effective_extract_mode = "full"
+                if effective_extract_mode in ("full", "preview") and extractor.is_enabled():
                     extraction_result = await extractor.extract_content(
                         filename=filename,
                         content_base64=b64,
@@ -282,6 +394,10 @@ async def handle_session_files(
                         file_ref["extracted_preview"] = extraction_result.preview
                         if extraction_result.metadata:
                             file_ref["extraction_metadata"] = extraction_result.metadata
+                        if is_native_pdf and file_ref.get("extract_mode") not in ("full", "preview"):
+                            # The manifest keys display off extract_mode; make sure
+                            # the forced fallback is actually surfaced on later turns.
+                            file_ref["extract_mode"] = effective_extract_mode
                         logger.info(f"Extracted content from {filename}: {len(extraction_result.preview or '')} chars preview")
                     else:
                         logger.debug(f"Content extraction skipped for {filename}: {extraction_result.error}")
@@ -306,6 +422,56 @@ async def handle_session_files(
                         )
                         ref.pop("image_b64", None)
                         ref.pop("image_mime_type", None)
+
+        # Enforce per-request PDF limits now that every upload is processed.
+        # Two guards, oldest-first preserved (insertion order):
+        #   1. Bedrock allows at most 5 inline documents per request.
+        #   2. Bedrock caps the *entire* request payload at ~20 MB; several
+        #      mid-sized PDFs can blow that even when each is under the per-doc
+        #      cap, so we also bound the aggregate inline base64 payload.
+        # Demoted PDFs keep the text-extraction fallback stored above, so the
+        # manifest still carries their content (it is no longer name-only).
+        if model_supports_pdf:
+            pdf_count = 0
+            # Inline vision images share the same request payload budget.
+            total_inline_b64 = sum(
+                len(ref["image_b64"])
+                for ref in session_files_ctx.values()
+                if ref.get("image_b64")
+            )
+            for name, ref in session_files_ctx.items():
+                b64 = ref.get("pdf_b64")
+                if not b64:
+                    continue
+                demote_reason = None
+                if pdf_count >= _MAX_PDF_DOCUMENTS_PER_REQUEST:
+                    demote_reason = (
+                        f"more than {_MAX_PDF_DOCUMENTS_PER_REQUEST} PDFs were attached"
+                    )
+                elif total_inline_b64 + len(b64) > _MAX_TOTAL_INLINE_B64_BYTES:
+                    demote_reason = (
+                        "the combined size of attached documents exceeds the "
+                        "request payload budget"
+                    )
+                if demote_reason:
+                    logger.warning(
+                        "Demoting PDF %s from native document to text fallback: %s",
+                        name, demote_reason,
+                    )
+                    ref.pop("pdf_b64", None)
+                    ref.pop("pdf_mime_type", None)
+                    fallback = (
+                        "its extracted text" if ref.get("extracted_content")
+                        else "a file reference (no extractable text)"
+                    )
+                    await _publish_warning(
+                        f"The PDF '{name}' will be sent as {fallback} instead of "
+                        f"being read directly because {demote_reason}.",
+                        event_publisher, update_callback,
+                    )
+                else:
+                    pdf_count += 1
+                    total_inline_b64 += len(b64)
 
         # Emit files update if successful uploads
         if uploaded_refs and update_callback:
@@ -743,6 +909,7 @@ async def notify_canvas_files_v2(
 def build_files_manifest(
     session_context: Dict[str, Any],
     exclude_vision_images: bool = False,
+    exclude_pdf_documents: bool = False,
 ) -> Optional[Dict[str, str]]:
     """
     Build ephemeral files manifest for LLM context.
@@ -754,6 +921,9 @@ def build_files_manifest(
         session_context: Session context containing files dict
         exclude_vision_images: When True, skip image files that already have
             ``image_b64`` stored (they will be sent as inline vision blocks
+            by the message builder instead).
+        exclude_pdf_documents: When True, skip PDF files that already have
+            ``pdf_b64`` stored (they will be sent as inline document blocks
             by the message builder instead).
     """
     files_ctx = session_context.get("files", {})
@@ -770,6 +940,10 @@ def build_files_manifest(
 
         # Skip image files handled as vision content blocks
         if exclude_vision_images and file_info.get("image_b64"):
+            continue
+
+        # Skip PDF files handled as inline document content blocks
+        if exclude_pdf_documents and file_info.get("pdf_b64"):
             continue
 
         entry = f"- {name}"

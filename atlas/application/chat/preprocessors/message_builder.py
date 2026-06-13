@@ -29,21 +29,43 @@ def build_session_context(session: Session) -> Dict[str, Any]:
     }
 
 
-def _build_vision_user_message(content: str, image_files: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_multimodal_user_message(
+    content: str,
+    image_files: List[Dict[str, Any]],
+    pdf_files: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     """
-    Build a multimodal user message with inline image content blocks.
+    Build a multimodal user message with inline image and/or PDF content blocks.
 
-    Uses the OpenAI image_url format (data URI), which LiteLLM translates
-    to the correct provider-specific format for each backend.
+    Images use the OpenAI ``image_url`` (data URI) format; PDFs use the
+    OpenAI-spec ``file`` block with ``file_data``. LiteLLM translates both to
+    the correct provider-specific format (for Bedrock, a Converse document
+    block for PDFs).
+
+    Block order is documents, then text, then images. Placing PDFs before the
+    text follows Anthropic's guidance to put documents first; keeping text
+    before images preserves the original vision message layout.
 
     Args:
         content: Text content of the message
-        image_files: List of dicts with keys "image_b64" and "image_mime_type"
+        image_files: Dicts with keys "image_b64" and "image_mime_type"
+        pdf_files: Dicts with keys "pdf_b64" and "pdf_mime_type"
 
     Returns:
-        Message dict with a content list containing text and image blocks
+        Message dict with a content list of document, text, and image blocks
     """
-    content_blocks: List[Dict[str, Any]] = [{"type": "text", "text": content}]
+    content_blocks: List[Dict[str, Any]] = []
+    for pdf in pdf_files:
+        b64 = pdf.get("pdf_b64", "")
+        mime = pdf.get("pdf_mime_type", "application/pdf")
+        content_blocks.append({
+            "type": "file",
+            "file": {
+                "file_data": f"data:{mime};base64,{b64}",
+                "format": mime,
+            },
+        })
+    content_blocks.append({"type": "text", "text": content})
     for img in image_files:
         b64 = img.get("image_b64", "")
         mime = img.get("image_mime_type", "image/png")
@@ -78,6 +100,7 @@ class MessageBuilder:
         include_files_manifest: bool = True,
         include_system_prompt: bool = True,
         model_supports_vision: bool = False,
+        model_supports_pdf: bool = False,
         custom_system_prompt: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -123,15 +146,20 @@ class MessageBuilder:
         # Build session context once for both vision and manifest handling.
         session_context = build_session_context(session)
 
-        # When the model supports vision, find image files in the session context
-        # and attach them as inline content blocks on the last user message.
-        if model_supports_vision:
+        # When the model supports vision and/or PDF input, find the relevant
+        # files in the session context and attach them as inline content blocks
+        # on the last user message.
+        if model_supports_vision or model_supports_pdf:
             files_ctx = session_context.get("files", {})
             image_files = [
                 info for info in files_ctx.values()
                 if info.get("image_b64") and info.get("image_mime_type")
-            ]
-            if image_files:
+            ] if model_supports_vision else []
+            pdf_files = [
+                info for info in files_ctx.values()
+                if info.get("pdf_b64") and info.get("pdf_mime_type")
+            ] if model_supports_pdf else []
+            if image_files or pdf_files:
                 # Replace the last user message with a multimodal version
                 last_user_idx = None
                 for i in range(len(messages) - 1, -1, -1):
@@ -143,12 +171,12 @@ class MessageBuilder:
                     text_content = original.get("content") or ""
                     # Only convert if the content is still a plain string
                     if isinstance(text_content, str):
-                        messages[last_user_idx] = _build_vision_user_message(
-                            text_content, image_files
+                        messages[last_user_idx] = _build_multimodal_user_message(
+                            text_content, image_files, pdf_files
                         )
                         logger.info(
-                            "Attached %d vision image(s) to user message for model",
-                            len(image_files),
+                            "Attached %d image(s) and %d PDF(s) to user message for model",
+                            len(image_files), len(pdf_files),
                         )
 
         # Optionally add files manifest (non-image files, or all files when not vision)
@@ -156,7 +184,9 @@ class MessageBuilder:
             files_in_context = session_context.get("files", {})
             logger.debug(f"Session has {len(files_in_context)} files: {list(files_in_context.keys())}")
             files_manifest = file_processor.build_files_manifest(
-                session_context, exclude_vision_images=model_supports_vision
+                session_context,
+                exclude_vision_images=model_supports_vision,
+                exclude_pdf_documents=model_supports_pdf,
             )
             if files_manifest:
                 logger.debug(f"Adding files manifest to messages: {files_manifest['content'][:100]}")
