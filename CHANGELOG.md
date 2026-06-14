@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #652 - 2026-06-14
+- **Rewind / edit a previous prompt**: Hovering over one of your own chat messages now shows a subtle pencil button (matching the existing copy button) that opens an inline editor. Editing and resubmitting rewinds the conversation to that prompt — dropping it and everything after it — and re-runs from there as a single linear thread (overwrite-in-place; submitting unchanged simply regenerates from that point). Addressed by user-message ordinal so the frontend transcript and backend history stay in sync; the new `ChatRequest.rewind_to_user_index` / `chat` WebSocket field drives `ConversationHistory.truncate_at_user_index`, which returns the removed turns so the issue #622 capture/forced-tool replay can build on the same primitive. Rewind is blocked while a response is streaming. See `docs/rewind-edit/README.md`.
+
 ### PR #650 - 2026-06-13
 - **Chat Export**: Exported conversations (both JSON and `.txt`) now show the active custom prompt's name plus the first few lines of its body when available. User-authored prompts (custom prompt library) include a preview of their content; MCP-server prompts continue to show name/description (body lives server-side).
 

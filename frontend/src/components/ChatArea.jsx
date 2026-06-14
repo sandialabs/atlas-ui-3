@@ -35,6 +35,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     isThinking,
     isSynthesizing,
     sendChatMessage,
+    rewindAndResubmit,
     currentModel,
     models,
     tools,
@@ -777,12 +778,23 @@ const ChatArea = ({ onOpenRagPanel }) => {
         ref={messagesRef}
         className={`overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
-        {messages.map((message, index) => (
-          <Message
-            key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
-            message={message}
-          />
-        ))}
+        {(() => {
+          // Track the 0-based ordinal of each user message so the rewind/edit
+          // affordance can address the matching prompt in the backend history
+          // (which counts user messages, not render rows). See issue #142.
+          let userSeq = -1
+          return messages.map((message, index) => {
+            const userIndex = message.role === 'user' ? ++userSeq : null
+            return (
+              <Message
+                key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
+                message={message}
+                userIndex={userIndex}
+                onRewind={message.role === 'user' ? rewindAndResubmit : null}
+              />
+            )
+          })
+        })()}
         {agentModeEnabled && agentPendingQuestion && (
           <div className="flex items-start gap-3 w-full">
             <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">

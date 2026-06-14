@@ -26,6 +26,9 @@ class ChatRequest:
     agent_max_steps: int = 30
     agent_loop_strategy: Optional[str] = None
     files: Optional[Dict[str, Any]] = None
+    # When set, rewind to this user message (0-based ordinal) before running the
+    # turn: history is truncated at that prompt and ``content`` replaces it.
+    rewind_to_user_index: Optional[int] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
 

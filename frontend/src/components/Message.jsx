@@ -3,7 +3,7 @@ import 'katex/dist/katex.min.css'
 import { preProcessLatex, restoreLatexPlaceholders } from '../utils/latexPreprocessor'
 import { useChat } from '../contexts/ChatContext'
 import { memo, useEffect, useId, useRef, useState } from 'react'
-import { Copy } from 'lucide-react'
+import { Copy, Pencil } from 'lucide-react'
 import { marked, DOMPURIFY_CONFIG } from '../utils/markdownRenderer'
 import {
   extractSourceLabels,
@@ -25,7 +25,7 @@ import ToolElapsedTime from './ToolElapsedTime'
 const ragCitationsEnabled =
   import.meta.env.VITE_FEATURE_RAG_CITATIONS === 'true'
 
-const Message = ({ message }) => {
+const Message = ({ message, userIndex = null, onRewind = null }) => {
   const { appName, downloadFile, isSynthesizing, settings } = useChat()
   const debugMode = settings?.debugMode || false
   // Stable per-message scope for citation anchor IDs — prevents collisions
@@ -61,6 +61,49 @@ const Message = ({ message }) => {
   const handleCopyMessage = (event) => {
     event.preventDefault()
     copyMessageContent(message.content, event.currentTarget)
+  }
+
+  // Edit-and-resubmit a previous user prompt (issue #142). The pencil affordance
+  // is only wired up for user messages and only when a rewind handler is passed.
+  const canRewind = isUser && typeof onRewind === 'function' && userIndex !== null && !message._streaming
+  const [isEditing, setIsEditing] = useState(false)
+  const [editValue, setEditValue] = useState('')
+  const editRef = useRef(null)
+
+  useEffect(() => {
+    if (isEditing && editRef.current) {
+      const el = editRef.current
+      el.focus()
+      // Place the caret at the end of the prefilled text.
+      el.setSelectionRange(el.value.length, el.value.length)
+    }
+  }, [isEditing])
+
+  const startEdit = () => {
+    setEditValue(message.content || '')
+    setIsEditing(true)
+  }
+
+  const cancelEdit = () => {
+    setIsEditing(false)
+    setEditValue('')
+  }
+
+  const submitEdit = () => {
+    const next = editValue.trim()
+    if (!next) return
+    setIsEditing(false)
+    onRewind(userIndex, next)
+  }
+
+  const handleEditKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      cancelEdit()
+    } else if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      submitEdit()
+    }
   }
 
   // Delegate code-block copy clicks on this message's own container rather
@@ -503,17 +546,62 @@ const Message = ({ message }) => {
             )}
           </div>
           {!isSystem && (
-            <button
-              onClick={handleCopyMessage}
-              className="copy-message-button opacity-0 group-hover:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
-              title="Copy message to clipboard"
-              type="button"
-            >
-              <Copy className="w-3 h-3" />
-            </button>
+            <div className="flex items-center gap-1">
+              {canRewind && !isEditing && (
+                <button
+                  onClick={startEdit}
+                  className="edit-message-button opacity-0 group-hover:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
+                  title="Edit and resubmit (replaces the rest of the conversation)"
+                  aria-label="Edit and resubmit message"
+                  type="button"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+              )}
+              <button
+                onClick={handleCopyMessage}
+                className="copy-message-button opacity-0 group-hover:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
+                title="Copy message to clipboard"
+                type="button"
+              >
+                <Copy className="w-3 h-3" />
+              </button>
+            </div>
           )}
         </div>
-        {renderContent()}
+        {isEditing ? (
+          <div className="space-y-2">
+            <textarea
+              ref={editRef}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleEditKeyDown}
+              rows={Math.min(10, Math.max(2, editValue.split('\n').length))}
+              className="w-full bg-gray-900 text-gray-100 border border-gray-600 rounded p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+              aria-label="Edit message"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <span className="mr-auto text-xs text-gray-400">
+                Resubmitting replaces the messages below.
+              </span>
+              <button
+                onClick={cancelEdit}
+                className="px-3 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitEdit}
+                disabled={!editValue.trim()}
+                className="px-3 py-1 rounded text-xs bg-blue-600 hover:bg-blue-500 text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                type="button"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        ) : renderContent()}
         {message._streaming && (
           <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" aria-label="Generating response..." />
         )}

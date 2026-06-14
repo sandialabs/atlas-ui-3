@@ -328,7 +328,7 @@ export const ChatProvider = ({ children }) => {
 		)
 	}, [config.ragServers])
 
-	const sendChatMessage = useCallback((content, extraFiles = {}) => {
+	const sendChatMessage = useCallback((content, extraFiles = {}, { rewindToUserIndex = null } = {}) => {
 		if (!content.trim() || !currentModel) return false
 		// Don't allow sending while the WebSocket is disconnected -- the message
 		// would never reach the backend and the UI would hang on "Thinking...".
@@ -383,6 +383,9 @@ export const ChatProvider = ({ children }) => {
 			// Backward compat: backend still checks incognito for older clients
 			incognito: saveMode !== 'server',
 			conversation_id: activeConversationId || undefined,
+			// Rewind/edit-and-resubmit (issue #142): when set, the backend drops
+			// this user prompt and everything after it before running the turn.
+			rewind_to_user_index: rewindToUserIndex ?? undefined,
 		})
 		// Guard against a stale isConnected: if the socket dropped between the
 		// check above and the send, bail out without mutating the UI so we don't
@@ -404,6 +407,35 @@ export const ChatProvider = ({ children }) => {
 		setIsSynthesizing(false)
 		return true
 	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts])
+
+	// Rewind to a previous user prompt and resubmit it (optionally edited).
+	// Overwrite-in-place: the targeted prompt and everything after it are dropped
+	// from the transcript, then the (edited) content is sent as a fresh turn.
+	// userIndex is the 0-based ordinal of the message among user messages, which
+	// the backend uses to truncate its own history (see truncate_at_user_index).
+	const rewindAndResubmit = useCallback((userIndex, newContent) => {
+		const content = (newContent ?? '').trim()
+		if (!content) return false
+		// Don't rewind while a response is streaming -- cancel first to avoid
+		// interleaving the in-flight reply with the new turn.
+		if (isThinking || isSynthesizing || isStreaming) {
+			toast.error('Wait for the current response to finish before editing.')
+			return false
+		}
+		// Drop the targeted user message and everything after it locally so the UI
+		// matches the truncated server history before the new prompt streams in.
+		mapMessages(msgs => {
+			let seen = 0
+			for (let i = 0; i < msgs.length; i++) {
+				if (msgs[i].role === 'user') {
+					if (seen === userIndex) return msgs.slice(0, i)
+					seen += 1
+				}
+			}
+			return msgs
+		})
+		return sendChatMessage(content, {}, { rewindToUserIndex: userIndex })
+	}, [mapMessages, sendChatMessage, isThinking, isSynthesizing, isStreaming, toast])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
 		// If there is any chat content or generation in progress, confirm before
@@ -772,6 +804,7 @@ export const ChatProvider = ({ children }) => {
 		isThinking,
 		isSynthesizing,
 		sendChatMessage,
+		rewindAndResubmit,
 		clearChat,
 		stopAgent,
 		stopStreaming,

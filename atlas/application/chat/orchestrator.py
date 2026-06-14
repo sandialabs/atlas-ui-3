@@ -141,6 +141,7 @@ class ChatOrchestrator:
         agent_mode: bool = False,
         temperature: float = 0.7,
         files: Optional[Dict[str, Any]] = None,
+        rewind_to_user_index: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -159,6 +160,9 @@ class ChatOrchestrator:
             agent_mode: Whether to use agent mode
             temperature: LLM temperature
             files: Optional files to attach
+            rewind_to_user_index: When set, rewind history to this user message
+                (0-based ordinal) before adding the new prompt, dropping that
+                prompt and everything after it (overwrite-in-place edit/resubmit)
             **kwargs: Additional parameters
 
         Returns:
@@ -168,6 +172,18 @@ class ChatOrchestrator:
         session = await self.session_repository.get(session_id)
         if not session:
             raise SessionNotFoundError(f"Session {session_id} not found")
+
+        # Rewind/edit-and-resubmit: drop the targeted prompt and everything after
+        # it so the new content takes its place in a single linear thread.
+        if rewind_to_user_index is not None:
+            removed = session.history.truncate_at_user_index(rewind_to_user_index)
+            logger.info(
+                "Rewind requested to user message %s: removed %d message(s), "
+                "%d remaining before new prompt",
+                rewind_to_user_index,
+                len(removed),
+                len(session.history.messages),
+            )
 
         # Add user message to history
         user_message = Message(

@@ -111,6 +111,45 @@ class ConversationHistory:
         """Add a message to the history."""
         self.messages.append(message)
 
+    def truncate_at_user_index(self, user_index: int) -> List[Message]:
+        """Truncate history at the Nth user message (0-based).
+
+        Removes the ``user_index``-th user message and every message after it,
+        leaving the conversation as it was just before that prompt was sent.
+        This powers the "rewind / edit a previous prompt" flow: the caller then
+        appends the new (edited) user message and re-runs the turn.
+
+        Addressing by user-message ordinal (rather than absolute list position)
+        keeps the frontend and backend in agreement even though the backend
+        history also contains assistant/tool messages the UI renders differently.
+
+        Args:
+            user_index: Zero-based ordinal of the user message to rewind to.
+
+        Returns:
+            The list of removed messages (the discarded trajectory). Returns an
+            empty list when ``user_index`` does not address an existing user
+            message, leaving history unchanged.
+        """
+        if user_index < 0:
+            return []
+
+        seen = 0
+        cut_at: Optional[int] = None
+        for i, msg in enumerate(self.messages):
+            if msg.role == MessageRole.USER:
+                if seen == user_index:
+                    cut_at = i
+                    break
+                seen += 1
+
+        if cut_at is None:
+            return []
+
+        removed = self.messages[cut_at:]
+        self.messages = self.messages[:cut_at]
+        return removed
+
     def get_messages_for_llm(self) -> List[Dict[str, str]]:
         """Get messages formatted for LLM API."""
         return [
