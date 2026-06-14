@@ -716,3 +716,12 @@
     size: A4;
   }
 }
+/* Touch / pointer-only devices have no hover, so hover-revealed message
+   affordances (edit & copy) would be unreachable. Keep them visible there so
+   the rewind/edit entry point is discoverable on mobile and tablets. (#142) */
+@media (hover: none) {
+  .edit-message-button,
+  .copy-message-button {
+    opacity: 1;
+  }
+}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image, Wrench, WifiOff } from 'lucide-react'
@@ -63,6 +63,10 @@ const ChatArea = ({ onOpenRagPanel }) => {
     setFollowUpSuggestions,
   } = useChat()
   const { isConnected, connectionStatus } = useWS()
+
+  // Pair each message with its rewind ordinal once per messages change, rather
+  // than re-running the two-pass scan on every render (incl. each streamed token).
+  const messagesWithOrdinals = useMemo(() => withUserOrdinals(messages), [messages])
 
   // Whether the currently selected model supports vision (image) input
   const currentModelSupportsVision = models?.some(
@@ -784,7 +788,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
             agent-loop answers that never enter ConversationHistory). The same
             implementation drives the truncation path so the two cannot drift.
             See utils/userMessageOrdinal and issue #142. */}
-        {withUserOrdinals(messages).map(({ message, userIndex }, index) => (
+        {messagesWithOrdinals.map(({ message, userIndex }, index) => (
           <Message
             key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
             message={message}
