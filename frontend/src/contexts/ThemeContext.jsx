@@ -2,19 +2,12 @@ import { createContext, useContext, useEffect, useState } from 'react'
 
 const ThemeContext = createContext()
 
-function getSystemTheme() {
-  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-    return 'light'
-  }
-  return 'dark'
-}
-
 function getInitialTheme() {
   try {
     const stored = localStorage.getItem('atlas-theme')
     if (stored === 'light' || stored === 'dark') return stored
   } catch { /* ignore */ }
-  return getSystemTheme()
+  return 'dark'
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

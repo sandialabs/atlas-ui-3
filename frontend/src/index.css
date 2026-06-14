@@ -260,6 +260,14 @@
     @apply text-red-500;
   }
 
+  .approval-warning-text {
+    @apply text-yellow-400;
+  }
+
+  [data-theme="light"] .approval-warning-text {
+    @apply text-amber-800;
+  }
+
   .status-dot {
     @apply w-2 h-2 rounded-full;
   }

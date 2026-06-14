@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #653 - 2026-06-14
+- **UI theme**: Defaulted first-time users to dark mode and improved the auto-approve tools warning contrast in light mode.
+
 ### PR #650 - 2026-06-13
 - **Chat Export**: Exported conversations (both JSON and `.txt`) now show the active custom prompt's name plus the first few lines of its body when available. User-authored prompts (custom prompt library) include a preview of their content; MCP-server prompts continue to show name/description (body lives server-side).
 
