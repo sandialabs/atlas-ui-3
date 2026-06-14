@@ -325,7 +325,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             </p>
             {!ctxSettings?.autoApproveTools && (
               <p className="text-sm approval-warning-text mt-2">
-                <strong>⚠ Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
+                <strong><span aria-hidden="true">⚠</span> Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
               </p>
             )}
           </div>
