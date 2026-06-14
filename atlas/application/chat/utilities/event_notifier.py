@@ -396,7 +396,8 @@ async def notify_token_stream(
 async def notify_chat_response(
     message: str,
     has_pending_tools: bool = False,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    reasoning_content: Optional[str] = None,
 ) -> None:
     """
     Send chat response notification.
@@ -406,11 +407,14 @@ async def notify_chat_response(
     if not update_callback:
         return
 
-    await safe_notify(update_callback, {
+    payload = {
         "type": "chat_response",
         "message": message,
-        "has_pending_tools": has_pending_tools
-    })
+        "has_pending_tools": has_pending_tools,
+    }
+    if reasoning_content:
+        payload["reasoning_content"] = reasoning_content
+    await safe_notify(update_callback, payload)
 
 
 async def notify_response_complete(update_callback: Optional[UpdateCallback]) -> None:

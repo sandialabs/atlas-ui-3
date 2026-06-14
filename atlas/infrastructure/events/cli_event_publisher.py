@@ -49,8 +49,11 @@ class CLIEventPublisher:
         self,
         message: str,
         has_pending_tools: bool = False,
+        reasoning_content: Optional[str] = None,
     ) -> None:
         self._collected.message += message
+        if reasoning_content:
+            self._collected.raw_events.append({"type": "reasoning_content", "content": reasoning_content})
         if self.streaming:
             sys.stdout.write(message)
             sys.stdout.flush()
