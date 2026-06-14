@@ -24,6 +24,22 @@ from .utilities import file_processor
 logger = logging.getLogger(__name__)
 
 
+def _coerce_user_index(value: Any) -> Optional[int]:
+    """Coerce an untrusted wire value to a user-message ordinal.
+
+    Returns the value as an ``int`` only when it is a genuine integer; ``None``
+    for anything else (str, float, list, dict, or ``bool`` -- which is an ``int``
+    subclass in Python but is never a valid ordinal). Callers ignore ``None`` so
+    a malformed client payload degrades to "no rewind" instead of crashing the
+    chat turn or matching the wrong prompt.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
 class ChatOrchestrator:
     """
     Orchestrates the full chat request flow.
@@ -141,6 +157,7 @@ class ChatOrchestrator:
         agent_mode: bool = False,
         temperature: float = 0.7,
         files: Optional[Dict[str, Any]] = None,
+        rewind_to_user_index: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -159,6 +176,9 @@ class ChatOrchestrator:
             agent_mode: Whether to use agent mode
             temperature: LLM temperature
             files: Optional files to attach
+            rewind_to_user_index: When set, rewind history to this user message
+                (0-based ordinal) before adding the new prompt, dropping that
+                prompt and everything after it (overwrite-in-place edit/resubmit)
             **kwargs: Additional parameters
 
         Returns:
@@ -168,6 +188,42 @@ class ChatOrchestrator:
         session = await self.session_repository.get(session_id)
         if not session:
             raise SessionNotFoundError(f"Session {session_id} not found")
+
+        # Rewind/edit-and-resubmit: drop the targeted prompt and everything after
+        # it so the new content takes its place in a single linear thread.
+        if rewind_to_user_index is not None:
+            # The index arrives straight off the WebSocket frame, so it may not be
+            # a real int (a crafted/buggy client could send a string, list, bool,
+            # or float). Coerce defensively: a bad value is ignored rather than
+            # crashing the turn on the ``user_index < 0`` comparison or silently
+            # matching the wrong prompt (``True`` would compare equal to 1).
+            rewind_index = _coerce_user_index(rewind_to_user_index)
+            if rewind_index is None:
+                logger.warning(
+                    "Ignoring rewind request with non-integer index %r",
+                    rewind_to_user_index,
+                )
+            else:
+                removed = session.history.truncate_at_user_index(rewind_index)
+                if removed:
+                    logger.info(
+                        "Rewind to user message %d: removed %d message(s), "
+                        "%d remaining before new prompt",
+                        rewind_index,
+                        len(removed),
+                        len(session.history.messages),
+                    )
+                else:
+                    # No user message at that ordinal: the new prompt will simply
+                    # be appended. In normal use the frontend and backend agree on
+                    # the user-message count, so this signals a FE/BE ordinal
+                    # desync rather than routine activity -- surface it at WARNING.
+                    logger.warning(
+                        "Rewind to user message %d removed nothing (index out of "
+                        "range); appending without truncation -- possible "
+                        "frontend/backend ordinal desync",
+                        rewind_index,
+                    )
 
         # Add user message to history
         user_message = Message(

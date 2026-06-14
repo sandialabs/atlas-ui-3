@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image, Wrench, WifiOff } from 'lucide-react'
@@ -7,6 +7,7 @@ import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
+import { withUserOrdinals } from '../utils/userMessageOrdinal'
 
 const ChatArea = ({ onOpenRagPanel }) => {
   const [inputValue, setInputValue] = useState('')
@@ -35,6 +36,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     isThinking,
     isSynthesizing,
     sendChatMessage,
+    rewindAndResubmit,
     currentModel,
     models,
     tools,
@@ -61,6 +63,10 @@ const ChatArea = ({ onOpenRagPanel }) => {
     setFollowUpSuggestions,
   } = useChat()
   const { isConnected, connectionStatus } = useWS()
+
+  // Pair each message with its rewind ordinal once per messages change, rather
+  // than re-running the two-pass scan on every render (incl. each streamed token).
+  const messagesWithOrdinals = useMemo(() => withUserOrdinals(messages), [messages])
 
   // Whether the currently selected model supports vision (image) input
   const currentModelSupportsVision = models?.some(
@@ -777,10 +783,17 @@ const ChatArea = ({ onOpenRagPanel }) => {
         ref={messagesRef}
         className={`overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
-        {messages.map((message, index) => (
+        {/* withUserOrdinals assigns each rewindable user message its 0-based
+            ordinal (null for non-rewindable rows -- assistant/tool/system and
+            agent-loop answers that never enter ConversationHistory). The same
+            implementation drives the truncation path so the two cannot drift.
+            See utils/userMessageOrdinal and issue #142. */}
+        {messagesWithOrdinals.map(({ message, userIndex }, index) => (
           <Message
             key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
             message={message}
+            userIndex={userIndex}
+            onRewind={userIndex !== null ? rewindAndResubmit : null}
           />
         ))}
         {agentModeEnabled && agentPendingQuestion && (
