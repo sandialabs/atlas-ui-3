@@ -27,19 +27,9 @@ export function ThemeProvider({ children }) {
     } catch { /* ignore */ }
   }, [theme])
 
-  // Listen for system preference changes
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: light)')
-    const handler = () => {
-      // Only follow system if user hasn't explicitly set a preference
-      const stored = localStorage.getItem('atlas-theme')
-      if (!stored) {
-        setTheme(mq.matches ? 'light' : 'dark')
-      }
-    }
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
-  }, [])
+  // Note: Atlas deliberately defaults first-run users to dark mode and does not
+  // follow the OS `prefers-color-scheme` setting. Explicit user choices (saved in
+  // localStorage) are always preserved.
 
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
 

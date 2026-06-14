@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #653 - 2026-06-14
+### PR #654 - 2026-06-14
 - **UI theme**: Defaulted first-time users to dark mode and improved the auto-approve tools warning contrast in light mode.
 
 ### PR #650 - 2026-06-13

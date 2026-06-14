@@ -77,6 +77,6 @@ describe('SettingsPanel agent mode settings', () => {
 
     const warning = await screen.findByText(/You will be prompted to approve all tool calls/)
     expect(warning.closest('p')).toHaveClass('approval-warning-text')
-    expect(screen.getByText('Currently:')).toBeInTheDocument()
+    expect(screen.getByText(/Currently:/)).toBeInTheDocument()
   })
 })
