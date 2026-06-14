@@ -260,6 +260,10 @@
     @apply text-red-500;
   }
 
+  .approval-warning-text {
+    @apply text-yellow-400;
+  }
+
   .status-dot {
     @apply w-2 h-2 rounded-full;
   }
@@ -422,6 +426,12 @@
 
 [data-theme="light"] .rag-source-chip-inner:hover {
   color: rgb(80, 80, 100);
+}
+
+/* Higher-contrast auto-approval warning in light mode (base is text-yellow-400
+   in @layer components; kept here with the other top-level theme overrides). */
+[data-theme="light"] .approval-warning-text {
+  @apply text-amber-800;
 }
 
 
