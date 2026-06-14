@@ -131,6 +131,11 @@ class ConversationHistory:
             empty list when ``user_index`` does not address an existing user
             message, leaving history unchanged.
         """
+        # Self-defending: this is an irreversible mutation, so reject anything
+        # that is not a genuine, non-negative ``int`` (``bool`` is an ``int``
+        # subclass but is never a valid ordinal) regardless of caller coercion.
+        if isinstance(user_index, bool) or not isinstance(user_index, int):
+            return []
         if user_index < 0:
             return []
 

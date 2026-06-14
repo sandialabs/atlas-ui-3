@@ -5,6 +5,8 @@ ordinal so the frontend (which renders extra system/tool rows) and the backend
 history stay in agreement. These tests pin that addressing down.
 """
 
+import pytest
+
 from atlas.domain.messages.models import (
     ConversationHistory,
     Message,
@@ -90,3 +92,21 @@ def test_truncate_negative_index_is_noop():
 
     assert removed == []
     assert len(history.messages) == 1
+
+
+@pytest.mark.parametrize("bad_index", ["1", 1.0, True, False, [0], {"n": 0}, None])
+def test_truncate_rejects_non_integer_index(bad_index):
+    """Defense-in-depth: the domain method is self-defending even if a future
+    caller forgets to coerce. Anything that is not a genuine non-bool int leaves
+    history untouched rather than raising or matching the wrong prompt (``True``
+    must not target ordinal 1)."""
+    history = _history(
+        (MessageRole.USER, "u0"),
+        (MessageRole.ASSISTANT, "a0"),
+        (MessageRole.USER, "u1"),
+    )
+
+    removed = history.truncate_at_user_index(bad_index)
+
+    assert removed == []
+    assert [m.content for m in history.messages] == ["u0", "a0", "u1"]

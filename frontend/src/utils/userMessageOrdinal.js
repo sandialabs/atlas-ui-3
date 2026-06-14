@@ -37,3 +37,15 @@ export function userMessageSliceIndex(messages, userIndex) {
   }
   return -1
 }
+
+// Pair each message with its rewind ordinal (or null for non-rewindable rows),
+// preserving transcript order. The render path (ChatArea) consumes this so the
+// ordinal it assigns is produced by the same implementation the truncation path
+// uses -- there is no second hand-coded counting loop to drift out of sync.
+export function withUserOrdinals(messages) {
+  let seen = -1
+  return messages.map(message => ({
+    message,
+    userIndex: isRewindableUserMessage(message) ? ++seen : null,
+  }))
+}

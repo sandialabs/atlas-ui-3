@@ -74,12 +74,23 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
   // trigger (rather than falling back to <body>) for keyboard/screen-reader users.
   const restoreFocusRef = useRef(false)
 
+  // Autosize the editor to its content (capped ~10 rows) so a long single-line
+  // prompt is readable -- sizing by '\n' count alone ignored wrapped lines and
+  // allocated a throwaway split array on every keystroke.
+  const autosizeEditor = (el) => {
+    if (!el) return
+    el.style.height = 'auto'
+    const maxPx = 10 * 24 // ~10 rows at a 24px line height
+    el.style.height = `${Math.min(el.scrollHeight, maxPx)}px`
+  }
+
   useEffect(() => {
     if (isEditing && editRef.current) {
       const el = editRef.current
       el.focus()
       // Place the caret at the end of the prefilled text.
       el.setSelectionRange(el.value.length, el.value.length)
+      autosizeEditor(el)
     } else if (!isEditing && restoreFocusRef.current) {
       restoreFocusRef.current = false
       // The pencil button re-mounts once isEditing flips false; focus it now.
@@ -576,7 +587,7 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
               )}
               <button
                 onClick={handleCopyMessage}
-                className="copy-message-button opacity-0 group-hover:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
+                className="copy-message-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
                 title="Copy message to clipboard"
                 type="button"
               >
@@ -590,9 +601,9 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
             <textarea
               ref={editRef}
               value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
+              onChange={(e) => { setEditValue(e.target.value); autosizeEditor(e.target) }}
               onKeyDown={handleEditKeyDown}
-              rows={Math.min(10, Math.max(2, editValue.split('\n').length))}
+              rows={2}
               className="w-full bg-gray-900 text-gray-100 border border-gray-600 rounded p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
               aria-label="Edit message"
             />

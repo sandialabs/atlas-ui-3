@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest'
 import {
   isRewindableUserMessage,
   userMessageSliceIndex,
+  withUserOrdinals,
 } from '../utils/userMessageOrdinal'
 
 const u = (content) => ({ role: 'user', content })
@@ -78,5 +79,26 @@ describe('userMessageSliceIndex', () => {
 
   it('returns -1 when there are no rewindable user messages', () => {
     expect(userMessageSliceIndex([a('a0'), agentAnswer('x')], 0)).toBe(-1)
+  })
+})
+
+describe('withUserOrdinals', () => {
+  it('assigns ordinals to rewindable user rows and null to the rest', () => {
+    const msgs = [sys('s'), u('u0'), a('a0'), agentAnswer('x'), u('u1')]
+    const out = withUserOrdinals(msgs)
+    expect(out.map(o => o.userIndex)).toEqual([null, 0, null, null, 1])
+    // Order and identity are preserved for the render path.
+    expect(out.map(o => o.message)).toEqual(msgs)
+  })
+
+  it('produces ordinals consistent with userMessageSliceIndex', () => {
+    // The render path (withUserOrdinals) and the truncation path
+    // (userMessageSliceIndex) must agree on which absolute row each ordinal maps
+    // to -- this is the invariant that keeps the UI and backend in lockstep.
+    const msgs = [u('u0'), a('a0'), tool('t'), u('u1'), a('a1'), u('u2')]
+    for (const { message, userIndex } of withUserOrdinals(msgs)) {
+      if (userIndex === null) continue
+      expect(msgs[userMessageSliceIndex(msgs, userIndex)]).toBe(message)
+    }
   })
 })

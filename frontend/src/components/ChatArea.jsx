@@ -7,7 +7,7 @@ import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
-import { isRewindableUserMessage } from '../utils/userMessageOrdinal'
+import { withUserOrdinals } from '../utils/userMessageOrdinal'
 
 const ChatArea = ({ onOpenRagPanel }) => {
   const [inputValue, setInputValue] = useState('')
@@ -779,26 +779,19 @@ const ChatArea = ({ onOpenRagPanel }) => {
         ref={messagesRef}
         className={`overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
-        {(() => {
-          // Track the 0-based ordinal of each rewindable user message so the
-          // edit affordance can address the matching prompt in the backend
-          // history (which counts persisted user messages, not render rows).
-          // isRewindableUserMessage skips agent-loop answer rows, which render
-          // as user messages but never enter ConversationHistory. See #142.
-          let userSeq = -1
-          return messages.map((message, index) => {
-            const rewindable = isRewindableUserMessage(message)
-            const userIndex = rewindable ? ++userSeq : null
-            return (
-              <Message
-                key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
-                message={message}
-                userIndex={userIndex}
-                onRewind={rewindable ? rewindAndResubmit : null}
-              />
-            )
-          })
-        })()}
+        {/* withUserOrdinals assigns each rewindable user message its 0-based
+            ordinal (null for non-rewindable rows -- assistant/tool/system and
+            agent-loop answers that never enter ConversationHistory). The same
+            implementation drives the truncation path so the two cannot drift.
+            See utils/userMessageOrdinal and issue #142. */}
+        {withUserOrdinals(messages).map(({ message, userIndex }, index) => (
+          <Message
+            key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
+            message={message}
+            userIndex={userIndex}
+            onRewind={userIndex !== null ? rewindAndResubmit : null}
+          />
+        ))}
         {agentModeEnabled && agentPendingQuestion && (
           <div className="flex items-start gap-3 w-full">
             <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">

@@ -5,10 +5,13 @@ session history at the targeted prior prompt before appending the new (edited)
 content, producing a single linear thread (overwrite-in-place).
 """
 
+import logging
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+_ORCH_LOGGER = "atlas.application.chat.orchestrator"
 
 from atlas.application.chat.orchestrator import ChatOrchestrator
 from atlas.domain.messages.models import Message, MessageRole
@@ -193,3 +196,58 @@ async def test_non_integer_rewind_index_is_ignored_not_fatal(bad_index):
     assert len(session.history.messages) == 5
     assert session.history.messages[-1].content == "resilient append"
     assert session.history.messages[-1].role == MessageRole.USER
+
+
+# --- Observability: the warning lines are the only operator signal that the
+# FE/BE ordinal contract drifted, so pin their level and the routine no-warn path.
+
+
+@pytest.mark.asyncio
+async def test_routine_rewind_does_not_warn(caplog):
+    orch, repo = _make_orchestrator()
+    sid, _ = await _seed_two_turn_session(repo)
+
+    with caplog.at_level(logging.WARNING, logger=_ORCH_LOGGER):
+        await orch.execute(
+            session_id=sid,
+            content="second edited",
+            model="test-model",
+            rewind_to_user_index=1,
+        )
+
+    warnings = [r for r in caplog.records if r.name == _ORCH_LOGGER and r.levelno >= logging.WARNING]
+    assert warnings == [], f"routine rewind should not warn, got: {[r.message for r in warnings]}"
+
+
+@pytest.mark.asyncio
+async def test_out_of_range_rewind_warns_desync(caplog):
+    orch, repo = _make_orchestrator()
+    sid, _ = await _seed_two_turn_session(repo)
+
+    with caplog.at_level(logging.WARNING, logger=_ORCH_LOGGER):
+        await orch.execute(
+            session_id=sid,
+            content="appended anyway",
+            model="test-model",
+            rewind_to_user_index=99,
+        )
+
+    msgs = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("removed nothing" in m and "desync" in m for m in msgs), msgs
+
+
+@pytest.mark.asyncio
+async def test_non_integer_rewind_warns(caplog):
+    orch, repo = _make_orchestrator()
+    sid, _ = await _seed_two_turn_session(repo)
+
+    with caplog.at_level(logging.WARNING, logger=_ORCH_LOGGER):
+        await orch.execute(
+            session_id=sid,
+            content="resilient append",
+            model="test-model",
+            rewind_to_user_index="not-an-int",
+        )
+
+    msgs = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("non-integer index" in m for m in msgs), msgs
