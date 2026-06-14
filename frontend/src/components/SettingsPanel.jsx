@@ -324,8 +324,8 @@ const SettingsPanel = ({ isOpen, onClose }) => {
               Tools that require admin approval will still prompt for confirmation.
             </p>
             {!ctxSettings?.autoApproveTools && (
-              <p className="text-sm text-yellow-400 mt-2">
-                <strong>⚠ Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
+              <p className="text-sm approval-warning-text mt-2">
+                <strong><span aria-hidden="true">⚠</span> Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
               </p>
             )}
           </div>

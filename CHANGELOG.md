@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #654 - 2026-06-14
+- **UI theme**: Defaulted first-time users to dark mode and improved the auto-approve tools warning contrast in light mode.
+
 ### PR #652 - 2026-06-14
 - **Rewind / edit a previous prompt**: A pencil affordance on your own chat messages opens an inline editor; resubmitting drops that prompt and everything after it and re-runs from there as a single linear thread (overwrite-in-place). Blocked while streaming; addressed by user-message ordinal so frontend and backend history stay in sync. See `docs/rewind-edit/README.md`.
 
