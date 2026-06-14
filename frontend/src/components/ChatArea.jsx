@@ -7,6 +7,7 @@ import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
+import { isRewindableUserMessage } from '../utils/userMessageOrdinal'
 
 const ChatArea = ({ onOpenRagPanel }) => {
   const [inputValue, setInputValue] = useState('')
@@ -779,18 +780,21 @@ const ChatArea = ({ onOpenRagPanel }) => {
         className={`overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
         {(() => {
-          // Track the 0-based ordinal of each user message so the rewind/edit
-          // affordance can address the matching prompt in the backend history
-          // (which counts user messages, not render rows). See issue #142.
+          // Track the 0-based ordinal of each rewindable user message so the
+          // edit affordance can address the matching prompt in the backend
+          // history (which counts persisted user messages, not render rows).
+          // isRewindableUserMessage skips agent-loop answer rows, which render
+          // as user messages but never enter ConversationHistory. See #142.
           let userSeq = -1
           return messages.map((message, index) => {
-            const userIndex = message.role === 'user' ? ++userSeq : null
+            const rewindable = isRewindableUserMessage(message)
+            const userIndex = rewindable ? ++userSeq : null
             return (
               <Message
                 key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
                 message={message}
                 userIndex={userIndex}
-                onRewind={message.role === 'user' ? rewindAndResubmit : null}
+                onRewind={rewindable ? rewindAndResubmit : null}
               />
             )
           })

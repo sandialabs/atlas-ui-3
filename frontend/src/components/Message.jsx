@@ -69,6 +69,10 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
   const editRef = useRef(null)
+  const editButtonRef = useRef(null)
+  // Set when the editor closes via Cancel/Esc so focus returns to the pencil
+  // trigger (rather than falling back to <body>) for keyboard/screen-reader users.
+  const restoreFocusRef = useRef(false)
 
   useEffect(() => {
     if (isEditing && editRef.current) {
@@ -76,6 +80,10 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
       el.focus()
       // Place the caret at the end of the prefilled text.
       el.setSelectionRange(el.value.length, el.value.length)
+    } else if (!isEditing && restoreFocusRef.current) {
+      restoreFocusRef.current = false
+      // The pencil button re-mounts once isEditing flips false; focus it now.
+      editButtonRef.current?.focus()
     }
   }, [isEditing])
 
@@ -85,6 +93,7 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
   }
 
   const cancelEdit = () => {
+    restoreFocusRef.current = true
     setIsEditing(false)
     setEditValue('')
   }
@@ -92,8 +101,14 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
   const submitEdit = () => {
     const next = editValue.trim()
     if (!next) return
-    setIsEditing(false)
-    onRewind(userIndex, next)
+    // Keep the editor open (and the edits intact) if the rewind is rejected --
+    // e.g. blocked while a response is still streaming, where onRewind returns
+    // false. Only close on success so the user never loses an edit to a toast.
+    const accepted = onRewind(userIndex, next)
+    if (accepted !== false) {
+      setIsEditing(false)
+      setEditValue('')
+    }
   }
 
   const handleEditKeyDown = (event) => {
@@ -549,8 +564,9 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
             <div className="flex items-center gap-1">
               {canRewind && !isEditing && (
                 <button
+                  ref={editButtonRef}
                   onClick={startEdit}
-                  className="edit-message-button opacity-0 group-hover:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
+                  className="edit-message-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
                   title="Edit and resubmit (replaces the rest of the conversation)"
                   aria-label="Edit and resubmit message"
                   type="button"
@@ -582,7 +598,7 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
             />
             <div className="flex items-center justify-end gap-2">
               <span className="mr-auto text-xs text-gray-400">
-                Resubmitting replaces the messages below.
+                Resubmitting replaces the messages below. <span className="text-gray-500">Enter to send, Shift+Enter for newline, Esc to cancel.</span>
               </span>
               <button
                 onClick={cancelEdit}

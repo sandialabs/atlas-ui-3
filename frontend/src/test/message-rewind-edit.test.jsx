@@ -86,4 +86,58 @@ describe('Message - edit and resubmit', () => {
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(onRewind).not.toHaveBeenCalled()
   })
+
+  it('hides the edit affordance while the message is streaming', () => {
+    const streaming = { role: 'user', content: 'streaming prompt', _streaming: true }
+    render(<Message message={streaming} userIndex={0} onRewind={vi.fn()} />)
+    expect(screen.queryByLabelText('Edit and resubmit message')).not.toBeInTheDocument()
+  })
+
+  it('submits a non-empty edit on Enter', () => {
+    const onRewind = vi.fn()
+    render(<Message message={userMessage} userIndex={1} onRewind={onRewind} />)
+    fireEvent.click(screen.getByLabelText('Edit and resubmit message'))
+    const textarea = screen.getByLabelText('Edit message')
+    fireEvent.change(textarea, { target: { value: 'edited via enter' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    expect(onRewind).toHaveBeenCalledWith(1, 'edited via enter')
+  })
+
+  it('does not submit on Shift+Enter (newline)', () => {
+    const onRewind = vi.fn()
+    render(<Message message={userMessage} userIndex={0} onRewind={onRewind} />)
+    fireEvent.click(screen.getByLabelText('Edit and resubmit message'))
+    const textarea = screen.getByLabelText('Edit message')
+    fireEvent.change(textarea, { target: { value: 'line one' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
+    expect(onRewind).not.toHaveBeenCalled()
+    // Editor stays open for the newline.
+    expect(screen.getByLabelText('Edit message')).toBeInTheDocument()
+  })
+
+  it('keeps the editor open and preserves edits when the rewind is rejected', () => {
+    // onRewind returns false when blocked (e.g. a response is still streaming).
+    // The editor must stay open with the user's text intact, not silently drop it.
+    const onRewind = vi.fn().mockReturnValue(false)
+    render(<Message message={userMessage} userIndex={0} onRewind={onRewind} />)
+    fireEvent.click(screen.getByLabelText('Edit and resubmit message'))
+    const textarea = screen.getByLabelText('Edit message')
+    fireEvent.change(textarea, { target: { value: 'precious edit' } })
+    fireEvent.click(screen.getByText('Send'))
+    expect(onRewind).toHaveBeenCalledWith(0, 'precious edit')
+    const stillOpen = screen.getByLabelText('Edit message')
+    expect(stillOpen).toBeInTheDocument()
+    expect(stillOpen.value).toBe('precious edit')
+  })
+
+  it('closes the editor when the rewind is accepted', () => {
+    const onRewind = vi.fn().mockReturnValue(true)
+    render(<Message message={userMessage} userIndex={0} onRewind={onRewind} />)
+    fireEvent.click(screen.getByLabelText('Edit and resubmit message'))
+    const textarea = screen.getByLabelText('Edit message')
+    fireEvent.change(textarea, { target: { value: 'accepted edit' } })
+    fireEvent.click(screen.getByText('Send'))
+    expect(onRewind).toHaveBeenCalledWith(0, 'accepted edit')
+    expect(screen.queryByLabelText('Edit message')).not.toBeInTheDocument()
+  })
 })

@@ -120,3 +120,76 @@ async def test_out_of_range_rewind_appends_without_truncation():
 
     assert len(session.history.messages) == 5
     assert session.history.messages[-1].content == "appended anyway"
+
+
+async def _seed_restored_session_with_tool_rows(repo):
+    """Simulate a conversation restored from saved history.
+
+    A real persisted thread interleaves tool/system rows the frontend renders
+    but does not count toward the user ordinal. This pins that a rewind to the
+    Nth *user* prompt still targets the right turn after restore/resume, matching
+    the frontend's user-message-ordinal counting (utils/userMessageOrdinal).
+    """
+    sid = uuid.uuid4()
+    session = Session(id=sid, user_email="test@example.com")
+    h = session.history
+    h.add_message(Message(role=MessageRole.SYSTEM, content="system preamble"))
+    h.add_message(Message(role=MessageRole.USER, content="u0"))          # ordinal 0
+    h.add_message(Message(role=MessageRole.ASSISTANT, content="a0"))
+    h.add_message(Message(role=MessageRole.TOOL, content="t0"))
+    h.add_message(Message(role=MessageRole.USER, content="u1"))          # ordinal 1
+    h.add_message(Message(role=MessageRole.ASSISTANT, content="a1"))
+    h.add_message(Message(role=MessageRole.USER, content="u2"))          # ordinal 2
+    h.add_message(Message(role=MessageRole.ASSISTANT, content="a2"))
+    await repo.create(session)
+    return sid, session
+
+
+@pytest.mark.asyncio
+async def test_rewind_after_restore_targets_right_user_ordinal():
+    orch, repo = _make_orchestrator()
+    sid, session = await _seed_restored_session_with_tool_rows(repo)
+
+    # Rewind to user ordinal 1 ("u1") -- everything from u1 on is dropped and the
+    # edited prompt replaces it; the system/tool rows before u1 are preserved.
+    await orch.execute(
+        session_id=sid,
+        content="u1 edited",
+        model="test-model",
+        rewind_to_user_index=1,
+    )
+
+    contents = [(m.role, m.content) for m in session.history.messages]
+    assert contents == [
+        (MessageRole.SYSTEM, "system preamble"),
+        (MessageRole.USER, "u0"),
+        (MessageRole.ASSISTANT, "a0"),
+        (MessageRole.TOOL, "t0"),
+        (MessageRole.USER, "u1 edited"),
+    ]
+
+
+@pytest.mark.parametrize("bad_index", ["1", 1.0, True, [1], {"n": 1}, object()])
+@pytest.mark.asyncio
+async def test_non_integer_rewind_index_is_ignored_not_fatal(bad_index):
+    """A malformed wire value must not crash the turn or match the wrong prompt.
+
+    The index is read straight off the WebSocket frame; a crafted/buggy client
+    could send a string, float, bool, list, dict, etc. None is a valid ordinal,
+    so the rewind is ignored and the prompt is appended normally (no truncation,
+    no ``TypeError`` from ``user_index < 0``, no ``True``-as-1 mismatch).
+    """
+    orch, repo = _make_orchestrator()
+    sid, session = await _seed_two_turn_session(repo)
+
+    await orch.execute(
+        session_id=sid,
+        content="resilient append",
+        model="test-model",
+        rewind_to_user_index=bad_index,
+    )
+
+    # Nothing truncated: all four prior messages remain and the prompt is appended.
+    assert len(session.history.messages) == 5
+    assert session.history.messages[-1].content == "resilient append"
+    assert session.history.messages[-1].role == MessageRole.USER

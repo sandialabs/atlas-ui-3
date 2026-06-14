@@ -13,6 +13,7 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation } from '../utils/chatExport'
+import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 
 // Safety timeout for stuck thinking state (no backend response)
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
@@ -397,6 +398,19 @@ export const ChatProvider = ({ children }) => {
 		// Only mutate the UI once the message is actually on the wire.
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		setFollowUpSuggestions([])
+		// Rewind/edit-and-resubmit (issue #142): now that the send is confirmed on
+		// the wire, drop the targeted prompt and everything after it so the new
+		// message takes its place. Done here -- after the early returns and the
+		// `sent` guard -- so a failed or disconnected send can never truncate the
+		// visible transcript while the backend history stays intact (which would
+		// desync the two and misaddress the next rewind). The dispatch order
+		// (truncate, then add) composes via the reducer's functional updates.
+		if (rewindToUserIndex != null) {
+			mapMessages(msgs => {
+				const cut = userMessageSliceIndex(msgs, rewindToUserIndex)
+				return cut === -1 ? msgs : msgs.slice(0, cut)
+			})
+		}
 		addMessage({
 			role: 'user',
 			content,
@@ -406,7 +420,7 @@ export const ChatProvider = ({ children }) => {
 		setIsThinking(true)
 		setIsSynthesizing(false)
 		return true
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -422,20 +436,11 @@ export const ChatProvider = ({ children }) => {
 			toast.error('Wait for the current response to finish before editing.')
 			return false
 		}
-		// Drop the targeted user message and everything after it locally so the UI
-		// matches the truncated server history before the new prompt streams in.
-		mapMessages(msgs => {
-			let seen = 0
-			for (let i = 0; i < msgs.length; i++) {
-				if (msgs[i].role === 'user') {
-					if (seen === userIndex) return msgs.slice(0, i)
-					seen += 1
-				}
-			}
-			return msgs
-		})
+		// The local transcript truncation happens inside sendChatMessage, but only
+		// after the send is confirmed on the wire, so a failed/disconnected send
+		// never drops the visible tail of the conversation.
 		return sendChatMessage(content, {}, { rewindToUserIndex: userIndex })
-	}, [mapMessages, sendChatMessage, isThinking, isSynthesizing, isStreaming, toast])
+	}, [sendChatMessage, isThinking, isSynthesizing, isStreaming, toast])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
 		// If there is any chat content or generation in progress, confirm before
@@ -549,8 +554,11 @@ export const ChatProvider = ({ children }) => {
 
 			const answerAgentQuestion = useCallback((content) => {
 			if (!content || !content.trim()) return
-				// Show immediately in UI
-				addMessage({ role: 'user', content, timestamp: new Date().toISOString() })
+				// Show immediately in UI. _agentInput marks this as an agent-loop
+				// answer: the backend consumes it inside the transient agent loop and
+				// never appends it to ConversationHistory, so it must NOT count toward
+				// the rewind ordinal (see utils/userMessageOrdinal). #142
+				addMessage({ role: 'user', content, timestamp: new Date().toISOString(), _agentInput: true })
 				if (sendMessage) sendMessage({ type: 'agent_user_input', content })
 			}, [sendMessage, addMessage])
 

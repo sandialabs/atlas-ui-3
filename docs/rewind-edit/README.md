@@ -63,17 +63,22 @@ The old turn is gone and the model answers the edited prompt
 Messages are addressed by their **user-message ordinal** (the 0-based position
 among `user` messages), not by absolute transcript position. The frontend
 renders extra system/tool rows that have no backend counterpart, so counting
-user messages is the one indexing scheme both sides agree on.
+user messages is the one indexing scheme both sides agree on. The counting rule
+lives in one place — `frontend/src/utils/userMessageOrdinal.js` — and is shared
+by the render and truncation paths so they cannot drift.
 
 ### Frontend
 
 - `Message.jsx` renders the pencil affordance on user messages and the inline
-  editor, calling `onRewind(userIndex, newContent)`.
-- `ChatArea.jsx` computes each user message's ordinal while mapping the
-  transcript and passes it down.
-- `ChatContext.jsx` `rewindAndResubmit(userIndex, newContent)` truncates the
-  local transcript at that prompt and calls `sendChatMessage`, which adds
-  `rewind_to_user_index` to the `chat` WebSocket payload.
+  editor, calling `onRewind(userIndex, newContent)`. The editor stays open if
+  the rewind is rejected (e.g. blocked mid-stream) so edits are never lost.
+- `ChatArea.jsx` computes each *rewindable* user message's ordinal while mapping
+  the transcript and passes it down.
+- `ChatContext.jsx` `rewindAndResubmit(userIndex, newContent)` delegates to
+  `sendChatMessage`, which adds `rewind_to_user_index` to the `chat` WebSocket
+  payload and truncates the local transcript **only after the send is confirmed
+  on the wire** — a failed or disconnected send never drops the visible
+  conversation tail while the backend keeps its full history.
 
 ### Backend
 
@@ -82,10 +87,26 @@ user messages is the one indexing scheme both sides agree on.
   after it, returning the removed messages.
 - `ChatOrchestrator.execute(..., rewind_to_user_index=...)`
   (`atlas/application/chat/orchestrator.py`) calls that truncation *before*
-  appending the new prompt. An out-of-range or negative index is a no-op, so the
-  turn simply appends as normal.
+  appending the new prompt. The index arrives untrusted off the WebSocket frame,
+  so it is coerced: a non-integer value is ignored, and an out-of-range index is
+  a no-op that logs a warning (a likely frontend/backend ordinal desync) rather
+  than crashing the turn.
 - `ChatRequest.rewind_to_user_index` (`atlas/domain/chat/dtos.py`) carries the
   field; `atlas/main.py` reads it off the `chat` message.
+
+## Known limitations / edge cases
+
+- **Agent mode follow-up answers.** When the agent loop asks a follow-up
+  question, the answer is rendered as a `user` row but sent as `agent_user_input`
+  and consumed inside the transient agent loop — it is never appended to
+  `ConversationHistory`. Those rows are marked `_agentInput` and excluded from
+  the rewind ordinal and affordance, so they neither receive an edit pencil nor
+  shift the ordinals of real prompts.
+- **Session files persist across a rewind.** Uploaded/generated files live in
+  `session.context["files"]` for the whole conversation by design and are not
+  per-turn scoped, so rewinding to before a file was added still leaves that file
+  available to the replayed turn. This matches existing session-file semantics;
+  per-turn file scoping is out of scope for this feature.
 
 ## Relationship to issue #622
 
