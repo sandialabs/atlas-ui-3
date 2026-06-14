@@ -31,22 +31,32 @@ current response first.
 ## Walkthrough
 
 The screenshots below were captured against a live server (`atlas/main.py`)
-driving the built frontend through a browser.
+driving the built frontend through a browser, with a real LLM
+(`groq-gpt-oss-120b`) answering.
 
-### 1. The edit affordance
+### 1. A real answer, with the edit affordance
 
-Hovering a user message reveals a subtle pencil button beside the existing copy
-button (both stay hidden until hover).
+After the model replies ("...red, blue, and yellow."), hovering the user
+message reveals a subtle pencil button beside the existing copy button (both
+stay hidden until hover).
 
 ![Edit affordance on hover](screenshots/142-01-edit-affordance.png)
 
-### 2. Inline editor
+### 2. Edit the prompt in place
 
 Clicking the pencil swaps the message for an inline editor prefilled with the
-original text. A helper line spells out that resubmitting replaces the messages
-below; **Send** resubmits, **Cancel** / **Esc** backs out.
+original text. Here the prompt is changed to ask about the *additive* primary
+colors of light. A helper line spells out that resubmitting replaces the
+messages below; **Send** resubmits, **Cancel** / **Esc** backs out.
 
-![Inline editor](screenshots/142-02-inline-editor.png)
+![Inline editor with an edited prompt](screenshots/142-02-inline-editor.png)
+
+### 3. Resubmitted — fresh answer in place of the old one
+
+The old turn is gone and the model answers the edited prompt
+("...red, green, and blue."), leaving a single linear thread.
+
+![New answer after rewind](screenshots/142-03-after-rewind.png)
 
 ## How it works
 
