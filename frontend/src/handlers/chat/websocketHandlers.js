@@ -10,6 +10,8 @@ const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
 let _tokenBuffer = ''
 let _tokenFlushTimer = null
 let _streamActive = false
+let _reasoningBuffer = ''
+let _reasoningFlushTimer = null
 const FLUSH_INTERVAL_MS = 30
 
 /**
@@ -19,9 +21,14 @@ const FLUSH_INTERVAL_MS = 30
 export function cleanupStreamState() {
   _streamActive = false
   _tokenBuffer = ''
+  _reasoningBuffer = ''
   if (_tokenFlushTimer) {
     clearTimeout(_tokenFlushTimer)
     _tokenFlushTimer = null
+  }
+  if (_reasoningFlushTimer) {
+    clearTimeout(_reasoningFlushTimer)
+    _reasoningFlushTimer = null
   }
 }
 
@@ -74,7 +81,17 @@ export function createWebSocketHandler(deps) {
     setActiveConversationId,
     streamToken,
     streamEnd,
+    streamReasoningToken,
+    streamReasoningEnd,
   } = deps
+
+  function flushReasoningBuffer() {
+    if (_reasoningBuffer && typeof streamReasoningToken === 'function') {
+      streamReasoningToken(_reasoningBuffer)
+      _reasoningBuffer = ''
+    }
+    _reasoningFlushTimer = null
+  }
 
   function flushTokenBuffer() {
     if (_tokenBuffer && typeof streamToken === 'function') {
@@ -90,6 +107,15 @@ export function createWebSocketHandler(deps) {
       clearTimeout(_tokenFlushTimer)
       _tokenFlushTimer = null
     }
+    // Flush and clear any pending reasoning buffer/timer too. Without this, a
+    // stream that ends (error, response_complete, final token) before a
+    // reasoning_content event could let the reasoning flush timer fire later
+    // and create an orphan reasoning-only message after the stream finished.
+    if (_reasoningFlushTimer) {
+      clearTimeout(_reasoningFlushTimer)
+      _reasoningFlushTimer = null
+    }
+    flushReasoningBuffer()
     flushTokenBuffer()
     if (typeof streamEnd === 'function') streamEnd()
   }
@@ -420,6 +446,31 @@ export function createWebSocketHandler(deps) {
           }
           break
         }
+        case 'reasoning_token':
+          // Stream reasoning tokens incrementally (arrives before content)
+          // Clear synthesizing indicator so reasoning message appears below tool result
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+          setIsThinking(false)
+          _reasoningBuffer += data.token
+          if (!_reasoningFlushTimer) {
+            _reasoningFlushTimer = setTimeout(() => {
+              flushReasoningBuffer()
+            }, FLUSH_INTERVAL_MS)
+          }
+          break
+        case 'reasoning_content':
+          // Final complete reasoning - flush any remaining buffer and mark end
+          if (_reasoningFlushTimer) {
+            clearTimeout(_reasoningFlushTimer)
+            _reasoningFlushTimer = null
+          }
+          if (_reasoningBuffer) {
+            flushReasoningBuffer()
+          }
+          // Pass the backend's authoritative full reasoning text so the reducer
+          // can reconcile any tokens that were coalesced/dropped while buffering.
+          if (typeof streamReasoningEnd === 'function') streamReasoningEnd(data.content)
+          break
         case 'response_complete': {
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
@@ -464,7 +515,12 @@ export function createWebSocketHandler(deps) {
         case 'chat_response':
           setIsThinking(false)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
-          addMessage({ role: 'assistant', content: data.message, timestamp: new Date().toISOString() })
+          addMessage({
+            role: 'assistant',
+            content: data.message,
+            timestamp: new Date().toISOString(),
+            ...(data.reasoning_content ? { reasoning_content: data.reasoning_content } : {}),
+          })
           break
         case 'warning':
           addMessage({ role: 'system', content: `Warning: ${data.message}`, type: 'warning', timestamp: new Date().toISOString() })

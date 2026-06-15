@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
+from atlas.modules.llm.models import ReasoningBlock, ReasoningToken
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
@@ -88,6 +89,7 @@ class AgenticLoop(AgentLoopProtocol):
 
         steps = 0
         final_answer: Optional[str] = None
+        last_reasoning: Optional[str] = None
         use_streaming = streaming and event_publisher
 
         while steps < max_steps:
@@ -110,12 +112,14 @@ class AgenticLoop(AgentLoopProtocol):
 
             if not llm_response.has_tool_calls():
                 final_answer = llm_response.content or ""
+                last_reasoning = getattr(llm_response, 'reasoning_content', None)
                 break
 
             # Model chose to call tools -- execute all in parallel, then loop
             tool_calls = [tc for tc in (llm_response.tool_calls or []) if tc is not None]
             if not tool_calls:
                 final_answer = llm_response.content or ""
+                last_reasoning = getattr(llm_response, 'reasoning_content', None)
                 break
 
             messages.append({
@@ -168,6 +172,7 @@ class AgenticLoop(AgentLoopProtocol):
             final_answer=final_answer,
             steps=steps,
             metadata={"agent_mode": True, "strategy": "agentic"},
+            reasoning_content=last_reasoning,
         )
 
     async def _call_llm(
@@ -229,10 +234,25 @@ class AgenticLoop(AgentLoopProtocol):
         accumulated_content = ""
         final_response: Optional[LLMResponse] = None
         is_first = True
+        sent_reasoning = False
 
         try:
             async for item in stream:
-                if isinstance(item, str):
+                if isinstance(item, ReasoningToken):
+                    # Stream reasoning tokens to frontend in real-time
+                    sent_reasoning = True
+                    await event_publisher.send_json({
+                        "type": "reasoning_token",
+                        "token": item.token,
+                    })
+                elif isinstance(item, ReasoningBlock):
+                    # Final complete reasoning block
+                    sent_reasoning = True
+                    await event_publisher.send_json({
+                        "type": "reasoning_content",
+                        "content": item.content,
+                    })
+                elif isinstance(item, str):
                     await event_publisher.publish_token_stream(
                         token=item, is_first=is_first, is_last=False,
                     )
@@ -250,8 +270,12 @@ class AgenticLoop(AgentLoopProtocol):
         if final_response is None:
             final_response = LLMResponse(content=accumulated_content)
 
-        # If the response is text-only (no tools), close the stream
-        if not final_response.has_tool_calls() and accumulated_content:
+        # Close the stream if we emitted any text or reasoning, so the frontend
+        # clears the _streaming flag before tool-call messages are added. This
+        # also covers the reasoning-only-then-tool-calls case: otherwise the
+        # reasoning message stays _streaming and the post-tool final answer
+        # appends to that stale pre-tool message instead of a fresh one.
+        if accumulated_content or sent_reasoning:
             await event_publisher.publish_token_stream(
                 token="", is_first=False, is_last=True,
             )

@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #655 - 2026-06-14
+- **Feature**: Real-time reasoning content streaming for reasoning-capable LLMs (o3, Qwen3, GPT-OSS via vLLM). Chain-of-thought reasoning tokens stream to the frontend live, displayed in a collapsible per-message section that auto-expands during streaming and persists in message metadata across page reloads. Includes a monkey-patch for LiteLLM issue [#20246](https://github.com/BerriAI/litellm/issues/20246) (vLLM `delta.reasoning` not mapped to `reasoning_content` in streaming mode); see `docs/developer/reasoning-content-streaming-2026-03-22.md` for removal instructions. Replaces PR #463.
+
 ### PR #654 - 2026-06-14
 - **UI theme**: Defaulted first-time users to dark mode and improved the auto-approve tools warning contrast in light mode.
 

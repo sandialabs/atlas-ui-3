@@ -20,15 +20,20 @@ class ChatResult:
     files: Dict[str, Any] = field(default_factory=dict)
     canvas_content: Optional[str] = None
     session_id: Optional[UUID] = None
+    reasoning_content: Optional[str] = None
+    raw_events: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "message": self.message,
             "tool_calls": self.tool_calls,
             "files": self.files,
             "canvas_content": self.canvas_content,
             "session_id": str(self.session_id) if self.session_id else None,
         }
+        if self.reasoning_content:
+            d["reasoning_content"] = self.reasoning_content
+        return d
 
 
 class AtlasClient:
@@ -151,12 +156,17 @@ class AtlasClient:
         )
 
         collected = event_publisher.get_result()
+        # Extract reasoning_content from raw events
+        reasoning_events = [e for e in collected.raw_events if e.get("type") == "reasoning_content"]
+        reasoning_content = reasoning_events[-1]["content"] if reasoning_events else None
         return ChatResult(
             message=collected.message,
             tool_calls=collected.tool_calls,
             files=collected.files,
             canvas_content=collected.canvas_content,
             session_id=session_id,
+            reasoning_content=reasoning_content,
+            raw_events=collected.raw_events,
         )
 
     def chat_sync(self, prompt: str, **kwargs) -> ChatResult:

@@ -21,6 +21,7 @@ class AgentResult:
     final_answer: str
     steps: int
     metadata: Dict[str, Any]
+    reasoning_content: Optional[str] = None
 
 
 @dataclass
