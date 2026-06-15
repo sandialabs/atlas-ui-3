@@ -260,6 +260,10 @@
     @apply text-red-500;
   }
 
+  .approval-warning-text {
+    @apply text-yellow-400;
+  }
+
   .status-dot {
     @apply w-2 h-2 rounded-full;
   }
@@ -422,6 +426,12 @@
 
 [data-theme="light"] .rag-source-chip-inner:hover {
   color: rgb(80, 80, 100);
+}
+
+/* Higher-contrast auto-approval warning in light mode (base is text-yellow-400
+   in @layer components; kept here with the other top-level theme overrides). */
+[data-theme="light"] .approval-warning-text {
+  @apply text-amber-800;
 }
 
 
@@ -704,5 +714,14 @@
   @page {
     margin: 1.5cm;
     size: A4;
+  }
+}
+/* Touch / pointer-only devices have no hover, so hover-revealed message
+   affordances (edit & copy) would be unreachable. Keep them visible there so
+   the rewind/edit entry point is discoverable on mobile and tablets. (#142) */
+@media (hover: none) {
+  .edit-message-button,
+  .copy-message-button {
+    opacity: 1;
   }
 }

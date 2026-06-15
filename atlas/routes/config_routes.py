@@ -111,6 +111,7 @@ async def get_config_shell(
             model_info["api_key_source"] = "globus"
             model_info["globus_scope"] = getattr(model_config, "globus_scope", None)
         model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
+        model_info["supports_pdf"] = bool(getattr(model_config, "supports_pdf", False))
         model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
         model_card = getattr(model_config, "model_card", None)
         if model_card:
@@ -390,6 +391,7 @@ async def get_config(
             else:
                 model_info["user_has_key"] = False
         model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
+        model_info["supports_pdf"] = bool(getattr(model_config, "supports_pdf", False))
         model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
         model_card = getattr(model_config, "model_card", None)
         if model_card:

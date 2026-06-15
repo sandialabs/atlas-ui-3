@@ -98,6 +98,6 @@ describe('ChatArea - blocks sending while WebSocket is disconnected (#448)', () 
 
     // handleSubmit awaits @file reference processing, so the send is async.
     await waitFor(() => expect(sendChatMessage).toHaveBeenCalledTimes(1))
-    expect(sendChatMessage).toHaveBeenCalledWith('hello online', expect.any(Object), false)
+    expect(sendChatMessage).toHaveBeenCalledWith('hello online', expect.any(Object))
   })
 })

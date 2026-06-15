@@ -210,6 +210,15 @@ class TestAppSettings:
         assert isinstance(settings.debug_mode, bool)
         assert isinstance(settings.banner_enabled, bool)
 
+    def test_default_app_name_is_atlas(self, monkeypatch):
+        """AppSettings should default to the ATLAS application name."""
+        monkeypatch.delenv("APP_NAME", raising=False)
+        monkeypatch.delenv("app_name", raising=False)
+
+        settings = AppSettings(_env_file=None)
+
+        assert settings.app_name == "ATLAS"
+
     def test_app_settings_agent_backward_compatibility(self):
         """Agent mode available should maintain backward compatibility."""
         settings = AppSettings()

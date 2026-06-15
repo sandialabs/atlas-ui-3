@@ -13,6 +13,7 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation } from '../utils/chatExport'
+import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 
 // Safety timeout for stuck thinking state (no backend response)
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
@@ -328,7 +329,7 @@ export const ChatProvider = ({ children }) => {
 		)
 	}, [config.ragServers])
 
-	const sendChatMessage = useCallback((content, extraFiles = {}, forceRag = false) => {
+	const sendChatMessage = useCallback((content, extraFiles = {}, { rewindToUserIndex = null } = {}) => {
 		if (!content.trim() || !currentModel) return false
 		// Don't allow sending while the WebSocket is disconnected -- the message
 		// would never reach the backend and the UI would hang on "Thinking...".
@@ -339,12 +340,11 @@ export const ChatProvider = ({ children }) => {
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
-		// RAG is activated when any of these are true:
+		// RAG is activated when either of these are true:
 		//   1. The RAG toggle is on (ragEnabled)
-		//   2. The /search command was used (forceRag)
-		//   3. One or more data sources are selected (hasSelectedSources)
+		//   2. One or more data sources are selected (hasSelectedSources)
 		const hasSelectedSources = selectedDataSources.size > 0
-		const ragActivated = forceRag || ragEnabled || hasSelectedSources
+		const ragActivated = ragEnabled || hasSelectedSources
 		const dataSourcesToSend = ragActivated
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []
@@ -384,6 +384,9 @@ export const ChatProvider = ({ children }) => {
 			// Backward compat: backend still checks incognito for older clients
 			incognito: saveMode !== 'server',
 			conversation_id: activeConversationId || undefined,
+			// Rewind/edit-and-resubmit (issue #142): when set, the backend drops
+			// this user prompt and everything after it before running the turn.
+			rewind_to_user_index: rewindToUserIndex ?? undefined,
 		})
 		// Guard against a stale isConnected: if the socket dropped between the
 		// check above and the send, bail out without mutating the UI so we don't
@@ -395,6 +398,19 @@ export const ChatProvider = ({ children }) => {
 		// Only mutate the UI once the message is actually on the wire.
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		setFollowUpSuggestions([])
+		// Rewind/edit-and-resubmit (issue #142): now that the send is confirmed on
+		// the wire, drop the targeted prompt and everything after it so the new
+		// message takes its place. Done here -- after the early returns and the
+		// `sent` guard -- so a failed or disconnected send can never truncate the
+		// visible transcript while the backend history stays intact (which would
+		// desync the two and misaddress the next rewind). The dispatch order
+		// (truncate, then add) composes via the reducer's functional updates.
+		if (rewindToUserIndex != null) {
+			mapMessages(msgs => {
+				const cut = userMessageSliceIndex(msgs, rewindToUserIndex)
+				return cut === -1 ? msgs : msgs.slice(0, cut)
+			})
+		}
 		addMessage({
 			role: 'user',
 			content,
@@ -404,7 +420,27 @@ export const ChatProvider = ({ children }) => {
 		setIsThinking(true)
 		setIsSynthesizing(false)
 		return true
-	}, [addMessage, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts])
+
+	// Rewind to a previous user prompt and resubmit it (optionally edited).
+	// Overwrite-in-place: the targeted prompt and everything after it are dropped
+	// from the transcript, then the (edited) content is sent as a fresh turn.
+	// userIndex is the 0-based ordinal of the message among user messages, which
+	// the backend uses to truncate its own history (see truncate_at_user_index).
+	const rewindAndResubmit = useCallback((userIndex, newContent) => {
+		const content = (newContent ?? '').trim()
+		if (!content) return false
+		// Don't rewind while a response is streaming -- cancel first to avoid
+		// interleaving the in-flight reply with the new turn.
+		if (isThinking || isSynthesizing || isStreaming) {
+			toast.error('Wait for the current response to finish before editing.')
+			return false
+		}
+		// The local transcript truncation happens inside sendChatMessage, but only
+		// after the send is confirmed on the wire, so a failed/disconnected send
+		// never drops the visible tail of the conversation.
+		return sendChatMessage(content, {}, { rewindToUserIndex: userIndex })
+	}, [sendChatMessage, isThinking, isSynthesizing, isStreaming, toast])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
 		// If there is any chat content or generation in progress, confirm before
@@ -518,8 +554,11 @@ export const ChatProvider = ({ children }) => {
 
 			const answerAgentQuestion = useCallback((content) => {
 			if (!content || !content.trim()) return
-				// Show immediately in UI
-				addMessage({ role: 'user', content, timestamp: new Date().toISOString() })
+				// Show immediately in UI. _agentInput marks this as an agent-loop
+				// answer: the backend consumes it inside the transient agent loop and
+				// never appends it to ConversationHistory, so it must NOT count toward
+				// the rewind ordinal (see utils/userMessageOrdinal). #142
+				addMessage({ role: 'user', content, timestamp: new Date().toISOString(), _agentInput: true })
 				if (sendMessage) sendMessage({ type: 'agent_user_input', content })
 			}, [sendMessage, addMessage])
 
@@ -540,14 +579,20 @@ export const ChatProvider = ({ children }) => {
 			? ([...selectedDataSources].join(', ') || 'None selected')
 			: 'None (RAG disabled)'
 
-		const promptInfoByKey = buildPromptInfoByKey(config.prompts)
+		const promptInfoByKey = buildPromptInfoByKey(config.prompts, userPrompts.prompts)
 		const activePromptInfo = resolvePromptInfo(selections.activePromptKey, promptInfoByKey)
 		const exportConversation = buildExportConversation(messages, promptInfoByKey)
 
 		if (asText) {
-			const promptLine = activePromptInfo
-				? `Active Custom Prompt: ${activePromptInfo.name}${activePromptInfo.server ? ` (from ${activePromptInfo.server})` : ''}${activePromptInfo.description ? ` — ${activePromptInfo.description}` : ''}\n`
-				: 'Active Custom Prompt: Default\n'
+			let promptLine
+			if (activePromptInfo) {
+				const serverPart = activePromptInfo.server ? ` (from ${activePromptInfo.server})` : ''
+				const descPart = activePromptInfo.description ? ` — ${activePromptInfo.description}` : ''
+				const previewPart = activePromptInfo.preview ? `\nPrompt preview:\n${activePromptInfo.preview}` : ''
+				promptLine = `Active Custom Prompt: ${activePromptInfo.name}${serverPart}${descPart}${previewPart}\n`
+			} else {
+				promptLine = 'Active Custom Prompt: Default\n'
+			}
 			let text = `Chat Export - ${config.appName}\nDate: ${new Date().toLocaleString()}\nUser: ${config.user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected RAG Sources: ${ragSourcesDisplay}\nAgent Mode: ${agent.agentModeEnabled ? 'Enabled' : 'Disabled'}\n${promptLine}\n${'='.repeat(50)}\n\n`
 			exportConversation.forEach(m => { text += `${m.role.toUpperCase()}:\n${m.content}\n\n` })
 			if (files.canvasContent) text += `${'='.repeat(50)}\nCANVAS CONTENT:\n${files.canvasContent}\n`
@@ -573,7 +618,7 @@ export const ChatProvider = ({ children }) => {
 					agentModeEnabled: agent.agentModeEnabled,
 					agentMaxSteps: agent.agentMaxSteps,
 					messageCount: messages.length,
-					exportVersion: '1.2'
+					exportVersion: '1.3'
 				},
 				conversation: exportConversation,
 				canvasContent: files.canvasContent || null
@@ -586,7 +631,7 @@ export const ChatProvider = ({ children }) => {
 			a.download = `chat-export-${ts}.json`
 			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 		}
-	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, selections.activePromptKey, files.canvasContent])
+	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, selections.activePromptKey, files.canvasContent, userPrompts.prompts])
 
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
@@ -767,6 +812,7 @@ export const ChatProvider = ({ children }) => {
 		isThinking,
 		isSynthesizing,
 		sendChatMessage,
+		rewindAndResubmit,
 		clearChat,
 		stopAgent,
 		stopStreaming,

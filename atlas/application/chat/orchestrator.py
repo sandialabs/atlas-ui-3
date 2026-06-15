@@ -24,6 +24,22 @@ from .utilities import file_processor
 logger = logging.getLogger(__name__)
 
 
+def _coerce_user_index(value: Any) -> Optional[int]:
+    """Coerce an untrusted wire value to a user-message ordinal.
+
+    Returns the value as an ``int`` only when it is a genuine integer; ``None``
+    for anything else (str, float, list, dict, or ``bool`` -- which is an ``int``
+    subclass in Python but is never a valid ordinal). Callers ignore ``None`` so
+    a malformed client payload degrades to "no rewind" instead of crashing the
+    chat turn or matching the wrong prompt.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
 class ChatOrchestrator:
     """
     Orchestrates the full chat request flow.
@@ -105,6 +121,16 @@ class ChatOrchestrator:
         except Exception:
             return False
 
+    def _model_supports_pdf(self, model: str) -> bool:
+        """Return True if the named model is configured with supports_pdf=True."""
+        if not self.config_manager:
+            return False
+        try:
+            model_config = self.config_manager.llm_config.models.get(model)
+            return bool(model_config and getattr(model_config, "supports_pdf", False))
+        except Exception:
+            return False
+
     def _model_supports_tools(self, model: str) -> bool:
         """Return True if the named model is configured with supports_tools=True."""
         if not self.config_manager:
@@ -131,6 +157,7 @@ class ChatOrchestrator:
         agent_mode: bool = False,
         temperature: float = 0.7,
         files: Optional[Dict[str, Any]] = None,
+        rewind_to_user_index: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -149,6 +176,9 @@ class ChatOrchestrator:
             agent_mode: Whether to use agent mode
             temperature: LLM temperature
             files: Optional files to attach
+            rewind_to_user_index: When set, rewind history to this user message
+                (0-based ordinal) before adding the new prompt, dropping that
+                prompt and everything after it (overwrite-in-place edit/resubmit)
             **kwargs: Additional parameters
 
         Returns:
@@ -158,6 +188,42 @@ class ChatOrchestrator:
         session = await self.session_repository.get(session_id)
         if not session:
             raise SessionNotFoundError(f"Session {session_id} not found")
+
+        # Rewind/edit-and-resubmit: drop the targeted prompt and everything after
+        # it so the new content takes its place in a single linear thread.
+        if rewind_to_user_index is not None:
+            # The index arrives straight off the WebSocket frame, so it may not be
+            # a real int (a crafted/buggy client could send a string, list, bool,
+            # or float). Coerce defensively: a bad value is ignored rather than
+            # crashing the turn on the ``user_index < 0`` comparison or silently
+            # matching the wrong prompt (``True`` would compare equal to 1).
+            rewind_index = _coerce_user_index(rewind_to_user_index)
+            if rewind_index is None:
+                logger.warning(
+                    "Ignoring rewind request with non-integer index %r",
+                    rewind_to_user_index,
+                )
+            else:
+                removed = session.history.truncate_at_user_index(rewind_index)
+                if removed:
+                    logger.info(
+                        "Rewind to user message %d: removed %d message(s), "
+                        "%d remaining before new prompt",
+                        rewind_index,
+                        len(removed),
+                        len(session.history.messages),
+                    )
+                else:
+                    # No user message at that ordinal: the new prompt will simply
+                    # be appended. In normal use the frontend and backend agree on
+                    # the user-message count, so this signals a FE/BE ordinal
+                    # desync rather than routine activity -- surface it at WARNING.
+                    logger.warning(
+                        "Rewind to user message %d removed nothing (index out of "
+                        "range); appending without truncation -- possible "
+                        "frontend/backend ordinal desync",
+                        rewind_index,
+                    )
 
         # Add user message to history
         user_message = Message(
@@ -172,6 +238,7 @@ class ChatOrchestrator:
         update_callback = kwargs.get("update_callback")
         logger.debug(f"Orchestrator.execute: update_callback present = {update_callback is not None}")
         model_supports_vision = self._model_supports_vision(model)
+        model_supports_pdf = self._model_supports_pdf(model)
         session.context = await file_processor.handle_session_files(
             session_context=session.context,
             user_email=user_email,
@@ -179,6 +246,7 @@ class ChatOrchestrator:
             file_manager=self.file_manager,
             update_callback=update_callback,
             model_supports_vision=model_supports_vision,
+            model_supports_pdf=model_supports_pdf,
             event_publisher=self.event_publisher,
         )
 
@@ -188,6 +256,7 @@ class ChatOrchestrator:
             session=session,
             include_files_manifest=True,
             model_supports_vision=model_supports_vision,
+            model_supports_pdf=model_supports_pdf,
             custom_system_prompt=kwargs.get("custom_system_prompt"),
         )
 

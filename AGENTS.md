@@ -74,7 +74,9 @@ cd atlas && python main.py  # don't use uvicorn --reload
 
 **Changelog**: Add a 1-2 line entry to `CHANGELOG.md` for every PR. Format: `### PR #<number> - YYYY-MM-DD`. Always add the entry under the `## [Unreleased]` section — the monthly release automation renames that heading at cut time, so anything above a prior release heading has already shipped.
 
-**Releases**: Atlas ships monthly. The `release-cut` workflow opens a draft release PR on the 22nd of each month. Full runbook at [docs/developer/release-process.md](./docs/developer/release-process.md). Do not push `v*.*.*` tags or create GitHub Releases outside that flow.
+**Releases**: Atlas ships monthly via the `release-cut` workflow (draft PR on the 22nd of each month). Full runbook at [docs/developer/release-process.md](./docs/developer/release-process.md). Do not push `v*.*.*` tags or create GitHub Releases outside that flow.
+
+For an **off-cycle release**: `gh workflow run release-cut.yml -f version=X.Y.Z`. First determine the next version from the **highest *published* release** (`gh release list` / git tags / PyPI), not from `pyproject.toml` on `main` — after a back-merge `main` already equals the last shipped version, so it is not a reliable "next version". Close any superseded/stale release PR before cutting. The cut PR already targets `main` and **doubles as the back-merge PR** after tagging — don't open a second one. CI on the cut PR is the gate; `pypi-publish.yml` builds and uploads the wheel on Release publish, so **don't build a wheel locally** — the only manual confidence step beyond CI is the optional real-LLM smoke test in the runbook.
 
 **Date Stamps**: Include `YYYY-MM-DD` dates in doc filenames or section headers to track staleness.
 
@@ -187,7 +189,7 @@ frontend/src/
 
 **RAG+Tools**: When both RAG and tools are active, RAG `is_completion=True` responses must NOT short-circuit the LLM call; inject as context so tools remain available.
 
-**RAG Activation vs Selection**: Data sources are only sent to backend when RAG is explicitly activated (`ragEnabled` or `/search`). Selecting sources only marks availability.
+**RAG Activation vs Selection**: Data sources are only sent to backend when RAG is explicitly activated (`ragEnabled` toggle or one or more selected sources). Selecting sources only marks availability.
 
 ## Configuration
 

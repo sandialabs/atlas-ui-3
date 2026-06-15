@@ -6,8 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #654 - 2026-06-14
+- **UI theme**: Defaulted first-time users to dark mode and improved the auto-approve tools warning contrast in light mode.
+
+### PR #652 - 2026-06-14
+- **Rewind / edit a previous prompt**: A pencil affordance on your own chat messages opens an inline editor; resubmitting drops that prompt and everything after it and re-runs from there as a single linear thread (overwrite-in-place). Blocked while streaming; addressed by user-message ordinal so frontend and backend history stay in sync. See `docs/rewind-edit/README.md`.
+
+### PR #650 - 2026-06-13
+- **Chat Export**: Exported conversations (both JSON and `.txt`) now show the active custom prompt's name plus the first few lines of its body when available. User-authored prompts (custom prompt library) include a preview of their content; MCP-server prompts continue to show name/description (body lives server-side).
+
+### PR #648 - 2026-06-12
+- **PDF uploads**: Models can set `supports_pdf: true` in `llmconfig.yml` to receive uploaded PDFs as inline base64 document content blocks (LiteLLM `file` blocks, mapped to a Bedrock Converse document block for Claude) instead of having their text extracted into the files manifest. Mirrors the existing `supports_vision` plumbing: PDFs are stored on the session file ref and excluded from the text manifest. Their text is still extracted up front as a durable fallback (kept out of the manifest on the turn the PDF is sent natively, so no token duplication) so the content survives follow-up turns and demotion. Guards enforce a 20 MB base64 per-document size cap, a 100-page limit, a 5-document-per-request cap, and an 18 MB aggregate inline-payload budget (to stay under Bedrock's ~20 MB total request limit). PDFs over a limit are sent as their extracted text where extraction is enabled, or as a name-only file reference otherwise, with a user warning. Note: on Bedrock Converse, full visual PDF understanding (charts/scanned pages) requires citations, which the portable LiteLLM `file` block does not currently expose — without it Bedrock performs text extraction only.
+
+### PR #647 - 2026-06-12
+- **Docs**: Documented the off-cycle release path and version-reconciliation guardrails in `AGENTS.md` and the release runbook — manual `release-cut` dispatch, deriving the next version from the highest *published* release (not `pyproject.toml` on `main`), closing superseded/no-op release PRs before cutting, and that the cut PR doubles as the back-merge PR.
+
 ### PR #640 - 2026-06-09
 - **Wormhole MCP auth**: Added opt-in Wormhole support (`FEATURE_WORMHOLE_ENABLED`). Atlas captures the per-session `x-subtoken` request header and forwards it as `X-Token` to MCP servers marked `wormhole: true` in `mcp.json` (header names configurable via `WORMHOLE_SUBTOKEN_HEADER`/`WORMHOLE_FORWARD_HEADER`). The subtoken is held in memory only, logged masked, and cached clients are rebuilt when it rotates or clears. See `docs/admin/mcp-wormhole-authentication.md`.
+
+## [0.3.0] - 2026-06-12
+
+### PR #643 - 2026-06-10
+- **Config**: Changed the default application name from "Chat UI" to "ATLAS".
+
+### 2026-06-09
+- **RAG**: Removed the `/search` chat quick command, which silently forced RAG on from the message input and was a confusing entry point. RAG is still activated explicitly via the search-button toggle or by selecting one or more data sources; the `/search` autocomplete entry, its green input highlighting, and the `forceRag` send path are gone.
 
 ### PR #632 - 2026-06-03
 - **Config**: Split the 1300-line `atlas/modules/config/config_manager.py` into focused modules — `models.py` (Pydantic config models + `resolve_env_var`), `settings.py` (`AppSettings` + `build_db_url_from_parts`), and `config_loader.py` (`ConfigManager`). `config_manager.py` is now a thin entry point that re-exports every public symbol plus the singleton and getters, so existing `from atlas.modules.config.config_manager import ...` imports are unchanged. No behavior change; all four modules are now under 500 lines.

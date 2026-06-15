@@ -71,4 +71,12 @@ describe('SettingsPanel agent mode settings', () => {
       expect(screen.queryByText('Agent Loop Strategy')).not.toBeInTheDocument()
     })
   })
+
+  it('uses the high-contrast approval warning style', async () => {
+    renderSettingsPanel({ settings: { autoApproveTools: false } })
+
+    const warning = await screen.findByText(/You will be prompted to approve all tool calls/)
+    expect(warning.closest('p')).toHaveClass('approval-warning-text')
+    expect(screen.getByText(/Currently:/)).toBeInTheDocument()
+  })
 })

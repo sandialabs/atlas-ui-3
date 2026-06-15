@@ -29,6 +29,7 @@ describe('chatExport.buildPromptInfoByKey', () => {
       name: 'intel_analyst',
       description: 'Acts as an intelligence analyst',
       server: 'prompts',
+      preview: '',
     })
     expect(lookup.work_helper_pirate_voice.server).toBe('work_helper')
     expect(lookup.prompts_plain_summary.description).toBe('')
@@ -38,6 +39,32 @@ describe('chatExport.buildPromptInfoByKey', () => {
     expect(buildPromptInfoByKey(undefined)).toEqual({})
     expect(buildPromptInfoByKey([])).toEqual({})
     expect(buildPromptInfoByKey([{ server: 'x' }])).toEqual({})
+  })
+
+  it('includes user-authored prompts keyed under userprompt: with a body preview', () => {
+    const lookup = buildPromptInfoByKey(PROMPTS_CONFIG, [
+      { id: 'abc', title: 'My Helper', content: 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7' },
+    ])
+    expect(lookup['userprompt:abc']).toBeDefined()
+    expect(lookup['userprompt:abc'].name).toBe('My Helper')
+    expect(lookup['userprompt:abc'].server).toBe('user library')
+    // First 5 lines + truncation marker, but not lines 6/7
+    expect(lookup['userprompt:abc'].preview).toContain('Line 1')
+    expect(lookup['userprompt:abc'].preview).toContain('Line 5')
+    expect(lookup['userprompt:abc'].preview).not.toContain('Line 6')
+    expect(lookup['userprompt:abc'].preview).toMatch(/…$/)
+  })
+
+  it('does not add a truncation marker when the body fits in the preview', () => {
+    const lookup = buildPromptInfoByKey([], [
+      { id: 'x', title: 'Short', content: 'just one line' },
+    ])
+    expect(lookup['userprompt:x'].preview).toBe('just one line')
+  })
+
+  it('skips user prompts without an id', () => {
+    const lookup = buildPromptInfoByKey([], [{ title: 'no id', content: 'hi' }])
+    expect(lookup).toEqual({})
   })
 })
 
@@ -59,6 +86,7 @@ describe('chatExport.resolvePromptInfo', () => {
       name: 'gone_server_gone_prompt',
       description: '',
       server: '',
+      preview: '',
     })
   })
 })
@@ -143,5 +171,22 @@ describe('chatExport.buildExportConversation', () => {
     const sys = out.find(m => m._promptChange)
     expect(sys.promptName).toBe('gone_server_gone_prompt')
     expect(sys.promptServer).toBe('')
+  })
+
+  it('includes name and body preview for user-authored prompts', () => {
+    const userLookup = buildPromptInfoByKey(PROMPTS_CONFIG, [
+      { id: 'u1', title: 'My Helper', content: 'You are a helpful assistant.\nAlways cite sources.\nNever invent URLs.' },
+    ])
+    const messages = [
+      { role: 'user', content: 'hi', timestamp: 't0', _activePromptKey: 'userprompt:u1' },
+    ]
+    const out = buildExportConversation(messages, userLookup)
+    const sys = out.find(m => m._promptChange)
+    expect(sys.promptName).toBe('My Helper')
+    expect(sys.promptServer).toBe('user library')
+    expect(sys.promptPreview).toContain('You are a helpful assistant.')
+    expect(sys.content).toContain('Custom prompt activated: My Helper')
+    expect(sys.content).toContain('Prompt preview:')
+    expect(sys.content).toContain('Always cite sources.')
   })
 })
