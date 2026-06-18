@@ -189,12 +189,6 @@ const STATUS_COLORS = {
   failed: 'bg-red-900 text-red-300 border-red-700',
 }
 
-const STREAM_COLORS = {
-  stdout: 'text-gray-200',
-  stderr: 'text-red-300',
-  system: 'text-blue-300 italic',
-}
-
 function ProcessListItem({ proc, isSelected, onSelect, onRename, onRemove }) {
   const statusCls = STATUS_COLORS[proc.status] || STATUS_COLORS.exited
   const started = proc.started_at ? new Date(proc.started_at * 1000).toLocaleTimeString() : ''
@@ -1562,9 +1556,9 @@ function AgentPortal() {
       if (e.ctrlKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
         const slots = layout.slots
         if (slots.length === 0) return
-        let next = focusedSlot
-        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (focusedSlot + 1) % slots.length
-        else next = (focusedSlot - 1 + slots.length) % slots.length
+        const next = (e.key === 'ArrowRight' || e.key === 'ArrowDown')
+          ? (focusedSlot + 1) % slots.length
+          : (focusedSlot - 1 + slots.length) % slots.length
         setFocusedSlot(next)
         e.preventDefault()
       }

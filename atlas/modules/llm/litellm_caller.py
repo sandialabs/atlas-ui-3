@@ -1044,11 +1044,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         lines = [
             "",
             "## Source documents (for inline citations)",
-            "When you use information from these sources, cite them inline using "
-            "bracketed numbers like [1], [2], etc. Place citations immediately after "
-            "the claim they support. You may cite multiple sources for the same "
-            "claim, e.g. [1][3]. Do not fabricate citations — only cite sources "
-            "listed below.",
+            (
+                "When you use information from these sources, cite them inline using "
+                + "bracketed numbers like [1], [2], etc. Place citations immediately after "
+                + "the claim they support. You may cite multiple sources for the same "
+                + "claim, e.g. [1][3]. Do not fabricate citations — only cite sources "
+                + "listed below."
+            ),
             "",
         ]
 
