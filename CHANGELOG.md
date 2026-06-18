@@ -21,7 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #647 - 2026-06-12
 - **Docs**: Documented the off-cycle release path and version-reconciliation guardrails in `AGENTS.md` and the release runbook — manual `release-cut` dispatch, deriving the next version from the highest *published* release (not `pyproject.toml` on `main`), closing superseded/no-op release PRs before cutting, and that the cut PR doubles as the back-merge PR.
 
-### PR #640 - 2026-06-09
+### PR #641 - 2026-06-09
 - **Wormhole MCP auth**: Added opt-in Wormhole support (`FEATURE_WORMHOLE_ENABLED`). Atlas captures the per-session `x-subtoken` request header and forwards it as `X-Token` to MCP servers marked `wormhole: true` in `mcp.json` (header names configurable via `WORMHOLE_SUBTOKEN_HEADER`/`WORMHOLE_FORWARD_HEADER`). The subtoken is held in memory only, logged masked, and cached clients are rebuilt when it rotates or clears. See `docs/admin/mcp-wormhole-authentication.md`.
 
 ## [0.3.0] - 2026-06-12

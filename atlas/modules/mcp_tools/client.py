@@ -11,6 +11,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -1641,12 +1642,47 @@ class MCPToolManager:
         forward_header = getattr(
             config_manager.app_settings, "wormhole_forward_header", "X-Token"
         )
+        # Defense-in-depth: the subtoken is a session credential. Warn (but do not
+        # block — internal/loopback HPC endpoints are legitimately plaintext) when
+        # it would be forwarded in cleartext to a remote host.
+        self._warn_if_insecure_wormhole_url(server_name)
         logger.debug(
             "Forwarding Wormhole subtoken to server '%s' via header '%s'",
             sanitize_for_logging(server_name),
             sanitize_for_logging(forward_header),
         )
         return {forward_header: subtoken}
+
+    @staticmethod
+    def _is_loopback_host(host: str) -> bool:
+        """Return True for localhost / IPv4 127.0.0.0/8 / IPv6 ::1."""
+        host = (host or "").lower().strip("[]")
+        return host in ("localhost", "::1") or host.startswith("127.")
+
+    def _warn_if_insecure_wormhole_url(self, server_name: str) -> None:
+        """Warn when the Wormhole subtoken would ride plaintext http:// to a
+        non-loopback host.
+
+        The subtoken is a short-lived session credential. Within a Wormhole/HPC
+        deployment the server is normally reached over https (its own Wormhole
+        endpoint) or on loopback, so this only fires for the genuinely risky
+        case — cleartext to a remote host — and never blocks the connection.
+        """
+        config = self.servers_config.get(server_name, {})
+        url = config.get("url", "") or ""
+        # Mirror the scheme-defaulting used when the transport is built.
+        parsed = urlsplit(url if "://" in url else f"http://{url}")
+        if parsed.scheme != "http":
+            return
+        if self._is_loopback_host(parsed.hostname or ""):
+            return
+        logger.warning(
+            "Forwarding Wormhole subtoken to server '%s' over plaintext http:// "
+            "to non-loopback host '%s'; the session credential is sent in the clear. "
+            "Use https:// (e.g. the server's Wormhole endpoint) or a loopback address.",
+            sanitize_for_logging(server_name),
+            sanitize_for_logging(parsed.hostname or ""),
+        )
 
     def _ensure_user_client_cache_state(self) -> None:
         """Initialize cache bookkeeping for tests that bypass __init__."""

@@ -1,7 +1,7 @@
 # Wormhole MCP Authentication
 
 **Created:** 2026-06-09
-**PR:** #640
+**PR:** #641
 **Related issue:** #640 (Genesis Mission Wormhole Support)
 
 ## Overview
@@ -31,6 +31,39 @@ This is distinct from the per-user API-key/JWT/bearer mechanism described in
 [mcp-server-authentication.md](./mcp-server-authentication.md), where each user
 manually supplies and stores a credential per server. Wormhole subtokens are
 captured automatically from the request and shared across all Wormhole servers.
+
+## Trust model
+
+**The Wormhole portal is the security boundary, and it owns the `x-subtoken`
+header.** In a Wormhole deployment the portal is the *only* ingress: the user
+authenticates to the portal, and the portal unpacks the JWT and sets the
+`x-subtoken` header on the request before it reaches Atlas. There is no separate
+reverse proxy in front of Atlas — a Wormhole-wrapped Atlas typically runs with
+`DEBUG_MODE=true` and trusts the portal for both the user's identity and the
+subtoken.
+
+This means:
+
+- **Atlas trusts `x-subtoken` exactly as it trusts the user-identity header.**
+  Both arrive from the same trusted ingress (the portal). Atlas does not, and
+  cannot, independently verify the subtoken — it forwards it to the downstream
+  Wormhole MCP server, whose *own* portal validates it. A forged or
+  client-injected value is therefore rejected at the MCP server's portal, not
+  silently honored.
+- **The portal must own the header.** It is the portal's responsibility to set
+  (and overwrite/strip any client-supplied) `x-subtoken`, just as it is
+  responsible for the user-identity header. If you deploy Atlas behind a
+  different trusted proxy instead of the portal, configure that proxy the same
+  way.
+- **Optional hardening:** if you *do* place Atlas behind a proxy that sets
+  `PROXY_SECRET_HEADER` (see `FEATURE_PROXY_SECRET_ENABLED`), that secret already
+  gates every request — including subtoken capture — at the middleware. Subtoken
+  capture is not separately gated and does not need to be: it shares the request's
+  trust boundary.
+- **Transport.** The subtoken is a session credential, so prefer `https://` MCP
+  URLs (each server's own Wormhole endpoint) or loopback. Atlas will still
+  forward over plaintext `http://` to a non-loopback host — legitimate for an
+  internal HPC fabric — but logs a `WARNING` so the cleartext hop is visible.
 
 ## Enabling
 
@@ -111,6 +144,9 @@ Wormhole-enabled MCP server
 - If no subtoken is available for a user, Atlas connects without the forward
   header; the Wormhole MCP server is then responsible for rejecting the
   unauthenticated call (`MCP session rejected (check authentication/token)`).
+- Forwarding the subtoken over plaintext `http://` to a non-loopback host emits a
+  `WARNING` (the credential is sent in the clear); loopback and `https://` URLs do
+  not warn. See **Trust model** above.
 
 ## End-to-end validation
 

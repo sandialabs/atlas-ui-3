@@ -9,6 +9,7 @@ Covers:
 """
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -339,3 +340,123 @@ async def test_user_auth_client_rebuilt_on_subtoken_rotation(manager):
         assert MockClient.call_count == 2
         _, kwargs2 = MockTransport.call_args
         assert kwargs2["headers"]["X-Token"] == "sub-token-2"
+
+
+@pytest.mark.asyncio
+async def test_user_auth_client_bearer_composes_subtoken(manager):
+    """A ``bearer`` server with ``wormhole: true`` forwards the subtoken as an
+    ``X-Token`` transport header while the bearer token rides ``Client(auth=...)``.
+
+    The bearer branch of ``_get_user_client`` (auth via ``auth=`` rather than a
+    custom header) was previously only covered indirectly; this asserts the
+    compose-with-bearer shape explicitly, plus rotation.
+    """
+    manager.servers_config["wh_bearer"] = {
+        "url": "http://127.0.0.1:8010/mcp",
+        "transport": "http",
+        "auth_type": "bearer",
+        "wormhole": True,
+    }
+    get_wormhole_store().set_subtoken("alice@test.com", "bearer-sub-1")
+
+    stored = SimpleNamespace(token_value="bearer-token-value")
+    fake_storage = MagicMock()
+    fake_storage.get_valid_token.return_value = stored
+
+    with patch(
+        "atlas.modules.mcp_tools.token_storage.get_token_storage",
+        return_value=fake_storage,
+    ), patch("atlas.modules.mcp_tools.client.Client") as MockClient, patch(
+        "atlas.modules.mcp_tools.client.StreamableHttpTransport"
+    ) as MockTransport, patch.object(
+        manager, "_close_user_client_entries", AsyncMock(return_value=None)
+    ), patch.object(
+        manager, "_close_user_client_entry", AsyncMock(return_value=None)
+    ):
+        MockClient.side_effect = [MagicMock(name="c1"), MagicMock(name="c2")]
+
+        c1 = await manager._get_user_client("wh_bearer", "alice@test.com", "conv-1")
+        # Subtoken rides as a transport header; the bearer token goes via auth=.
+        _, t_kwargs = MockTransport.call_args
+        assert t_kwargs["headers"] == {"X-Token": "bearer-sub-1"}
+        _, c_kwargs = MockClient.call_args
+        assert c_kwargs["auth"] == "bearer-token-value"
+        assert MockClient.call_count == 1
+
+        # Subtoken rotates while the bearer token stays valid -> client rebuilt.
+        get_wormhole_store().set_subtoken("alice@test.com", "bearer-sub-2")
+        c2 = await manager._get_user_client("wh_bearer", "alice@test.com", "conv-1")
+        assert c2 is not c1
+        assert MockClient.call_count == 2
+        _, t_kwargs2 = MockTransport.call_args
+        assert t_kwargs2["headers"] == {"X-Token": "bearer-sub-2"}
+        _, c_kwargs2 = MockClient.call_args
+        assert c_kwargs2["auth"] == "bearer-token-value"
+
+
+@pytest.mark.asyncio
+async def test_http_client_rebuilt_when_subtoken_cleared(manager):
+    """Clearing the subtoken (value -> None) rebuilds the cached client so a
+    withdrawn subtoken is never forwarded on a later call.
+
+    On the rebuild there is no subtoken, so no ``StreamableHttpTransport`` (and
+    therefore no ``X-Token`` header) is attached.
+    """
+    manager.servers_config["wh"] = {
+        "url": "http://127.0.0.1:8010/mcp",
+        "transport": "http",
+        "wormhole": True,
+    }
+    get_wormhole_store().set_subtoken("alice@test.com", "to-be-cleared")
+
+    with patch("atlas.modules.mcp_tools.client.Client") as MockClient, patch(
+        "atlas.modules.mcp_tools.client.StreamableHttpTransport"
+    ) as MockTransport, patch.object(
+        manager, "_close_user_client_entries", AsyncMock(return_value=None)
+    ):
+        MockClient.side_effect = [MagicMock(name="c1"), MagicMock(name="c2")]
+
+        c1 = await manager._get_or_create_user_http_client("wh", "alice@test.com", "conv-1")
+        assert MockTransport.call_count == 1  # built carrying the X-Token header
+
+        # Withdraw the subtoken -> stale cached client rebuilt without a header.
+        get_wormhole_store().set_subtoken("alice@test.com", None)
+        c2 = await manager._get_or_create_user_http_client("wh", "alice@test.com", "conv-1")
+        assert c2 is not c1
+        assert MockClient.call_count == 2
+        # No subtoken on the rebuild -> no transport headers attached.
+        assert MockTransport.call_count == 1
+
+
+def test_warns_when_forwarding_subtoken_over_remote_http(manager, caplog):
+    """Forwarding the subtoken over plaintext http:// to a non-loopback host
+    warns (defense-in-depth) but still returns the header."""
+    manager.servers_config["wh"] = {
+        "url": "http://remote.example.gov/mcp",
+        "transport": "http",
+        "wormhole": True,
+    }
+    get_wormhole_store().set_subtoken("alice@test.com", "sub")
+    with caplog.at_level(logging.WARNING):
+        headers = manager._build_wormhole_headers("wh", "alice@test.com")
+    assert headers == {"X-Token": "sub"}
+    assert "plaintext http" in caplog.text
+
+
+def test_no_insecure_warning_for_loopback_or_https(manager, caplog):
+    """No warning when the subtoken rides loopback http:// or any https:// URL."""
+    manager.servers_config["loop"] = {
+        "url": "http://127.0.0.1:9000/mcp",
+        "transport": "http",
+        "wormhole": True,
+    }
+    manager.servers_config["tls"] = {
+        "url": "https://remote.example.gov/mcp",
+        "transport": "http",
+        "wormhole": True,
+    }
+    get_wormhole_store().set_subtoken("alice@test.com", "sub")
+    with caplog.at_level(logging.WARNING):
+        manager._build_wormhole_headers("loop", "alice@test.com")
+        manager._build_wormhole_headers("tls", "alice@test.com")
+    assert "plaintext http" not in caplog.text
