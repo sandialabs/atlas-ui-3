@@ -6,6 +6,10 @@ The Agent Portal lets an authenticated user launch host subprocesses from the
 UI, stream their output over a WebSocket, and apply optional isolation
 (Landlock, Linux namespaces, cgroup limits).
 
+The Agent Portal is Linux/WSL-only. On Windows hosts, Atlas treats the
+feature as disabled even when `FEATURE_AGENT_PORTAL_ENABLED=true`, so the
+Linux-only process manager is not imported at startup.
+
 Because any authenticated user can run any command the backend process can
 run, the feature is gated behind `FEATURE_AGENT_PORTAL_ENABLED` and a startup
 guard that refuses to let it run outside debug mode.

@@ -63,7 +63,7 @@ from atlas.domain.errors import (
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.routes.admin_routes import admin_router
-from atlas.routes.agent_portal_routes import router as agent_portal_router
+from atlas.routes.agent_portal_availability import load_agent_portal_router
 
 # Import essential routes
 from atlas.routes.config_routes import router as config_router
@@ -289,7 +289,9 @@ app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
 app.include_router(user_prompt_router)
 app.include_router(suggestion_router)
-app.include_router(agent_portal_router)
+agent_portal_router = load_agent_portal_router()
+if agent_portal_router is not None:
+    app.include_router(agent_portal_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
