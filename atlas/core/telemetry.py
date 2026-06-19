@@ -316,8 +316,8 @@ def write_tool_output_sidecar(content: Any) -> Optional[str]:
         # network mounts).
         try:
             os.chmod(out_dir, 0o700)
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug("Could not restrict sidecar dir permissions on %s: %s", out_dir, e)
         out_path = out_dir / f"{span_id}.txt"
         # Create with restrictive mode from the start rather than chmod-after
         # so there's no window where the file is readable by other users.
@@ -332,14 +332,14 @@ def write_tool_output_sidecar(content: Any) -> Optional[str]:
         except Exception:
             try:
                 os.close(fd)
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug("Failed to close sidecar fd during error cleanup: %s", e)
             raise
         # On filesystems that honor umask over the open() mode, re-apply.
         try:
             os.chmod(out_path, 0o600)
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug("Could not restrict sidecar file permissions on %s: %s", out_path, e)
         return str(out_path)
     except Exception as e:  # noqa: BLE001
         logger.debug("Failed to write tool output sidecar: %s", e)

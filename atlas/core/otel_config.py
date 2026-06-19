@@ -101,8 +101,10 @@ class JSONLSpanExporter(SpanExporter):
             self._fh = self.file_path.open("a", encoding="utf-8")
         try:
             os.chmod(self.file_path, 0o600)
-        except OSError:
-            pass
+        except OSError as e:
+            logging.getLogger(__name__).debug(
+                "Could not restrict span file permissions on %s: %s", self.file_path, e
+            )
 
     def export(self, spans: list[ReadableSpan]) -> SpanExportResult:  # noqa: D401
         with self._lock:
@@ -145,8 +147,10 @@ class JSONLSpanExporter(SpanExporter):
                     self._fh.flush()
                     try:
                         os.fsync(self._fh.fileno())
-                    except (OSError, ValueError):
-                        pass
+                    except (OSError, ValueError) as e:
+                        logging.getLogger(__name__).debug(
+                            "fsync of span file failed during shutdown: %s", e
+                        )
                     self._fh.close()
                 except Exception as e:  # noqa: BLE001
                     logging.getLogger(__name__).debug(
@@ -281,8 +285,10 @@ class OpenTelemetryConfig:
         # filesystems without POSIX modes.
         try:
             os.chmod(self.log_file, 0o600)
-        except OSError:
-            pass
+        except OSError as e:
+            logging.getLogger(__name__).debug(
+                "Could not restrict log file permissions on %s: %s", self.log_file, e
+            )
         root.addHandler(file_handler)
         root.setLevel(self.log_level)
 

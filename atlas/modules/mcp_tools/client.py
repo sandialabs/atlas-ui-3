@@ -2129,8 +2129,8 @@ class MCPToolManager:
             if init_result and hasattr(init_result, 'capabilities'):
                 caps = init_result.capabilities
                 supports = getattr(caps, 'tasks', None) is not None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not determine task support for server '%s': %s", server_name, e)
 
         self._server_task_support[server_name] = supports
         return supports
@@ -2337,8 +2337,8 @@ class MCPToolManager:
                                         "type": "tool_task_completed",
                                         "tool_call_id": meta.get("tool_call_id") if meta else None,
                                     })
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("tool_task_completed update callback failed: %s", e)
                     except asyncio.CancelledError:
                         await tool_task.cancel()
                         raise
