@@ -477,6 +477,76 @@ async def test_tools_streaming_tool_call_dict_conversion():
         assert tc["function"]["arguments"] == '{"q":"test"}'
 
 
+# -- Streaming tool_calls survive the Bedrock follow-up transform ------------
+
+@pytest.mark.asyncio
+async def test_stream_with_tools_emits_bedrock_compatible_tool_calls():
+    """Tool calls accumulated by stream_with_tools must survive a Bedrock
+    follow-up request.
+
+    Regression for the Bedrock tool-calling follow-up bug: the streaming
+    caller used to emit ``SimpleNamespace`` tool_call objects, which support
+    only attribute access. The agentic/react/act loops append those objects
+    verbatim to the assistant message and re-send them on the next turn.
+    litellm's Bedrock Converse transformer reads tool calls with *dict* syntax
+    (``"function" in tool``, ``tool["id"]``), so SimpleNamespace raised
+    "Unable to convert openai tool calls to bedrock tool calls". The objects
+    must therefore support BOTH dict access (Bedrock transform) and attribute
+    access (the tool executor).
+    """
+    from types import SimpleNamespace
+
+    from litellm.litellm_core_utils.prompt_templates.factory import (
+        _convert_to_bedrock_tool_call_invoke,
+    )
+
+    from atlas.modules.llm.litellm_caller import LiteLLMCaller
+
+    # Build streaming chunks that deliver a single tool call in fragments,
+    # mirroring how providers stream tool_call deltas.
+    def _chunk(tool_id=None, name=None, args=None):
+        fn = SimpleNamespace(name=name, arguments=args)
+        tc = SimpleNamespace(index=0, id=tool_id, function=fn)
+        delta = SimpleNamespace(content=None, tool_calls=[tc])
+        return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+    async def _fake_acompletion(*args, **kwargs):
+        async def _gen():
+            yield _chunk(tool_id="call-xyz", name="search", args='{"q":')
+            yield _chunk(args='"hi"}')
+        return _gen()
+
+    mock_config = MagicMock()
+    mock_config.models = {}
+    caller = LiteLLMCaller(llm_config=mock_config)
+    caller._get_litellm_model_name = MagicMock(return_value="bedrock/claude")
+    caller._get_model_kwargs = MagicMock(return_value={"max_tokens": 100})
+    caller._prepare_messages = MagicMock(side_effect=lambda m, msgs: msgs)
+
+    final_response = None
+    with patch("atlas.modules.llm.litellm_streaming.acompletion", _fake_acompletion):
+        async for item in caller.stream_with_tools(
+            "test-model", [{"role": "user", "content": "hi"}], [{"type": "function"}],
+        ):
+            if not isinstance(item, str):
+                final_response = item
+
+    assert final_response is not None
+    assert final_response.tool_calls, "expected accumulated tool_calls"
+    tc = final_response.tool_calls[0]
+
+    # Attribute access (used by tool_executor).
+    assert tc.id == "call-xyz"
+    assert tc.function.name == "search"
+    assert tc.function.arguments == '{"q":"hi"}'
+
+    # Dict access via the Bedrock Converse transform (the follow-up request).
+    bedrock_blocks = _convert_to_bedrock_tool_call_invoke(final_response.tool_calls)
+    assert bedrock_blocks[0]["toolUse"]["toolUseId"] == "call-xyz"
+    assert bedrock_blocks[0]["toolUse"]["name"] == "search"
+    assert bedrock_blocks[0]["toolUse"]["input"] == {"q": "hi"}
+
+
 # -- CLI event publisher streaming -------------------------------------------
 
 @pytest.mark.asyncio
