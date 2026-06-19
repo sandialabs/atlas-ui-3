@@ -6,8 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #659 - 2026-06-18
-- **Agent Portal**: Disabled the Agent Portal automatically on Windows hosts so startup no longer imports Linux-only process management code.
+### PR #660 - 2026-06-19
+- **Agent Portal**: Disabled the Agent Portal automatically on Windows hosts so startup no longer imports Unix-only process management code (`fcntl`, `pty`, `termios`). The feature continues to run on Linux/WSL and macOS, where its Linux-only isolation (Landlock, namespaces, cgroups) degrades gracefully when unavailable.
 
 ### PR #654 - 2026-06-14
 - **UI theme**: Defaulted first-time users to dark mode and improved the auto-approve tools warning contrast in light mode.

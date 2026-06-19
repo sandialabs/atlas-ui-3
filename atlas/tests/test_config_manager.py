@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from atlas.modules.config import settings as settings_module
 from atlas.modules.config.config_manager import (
     AppSettings,
     ConfigManager,
@@ -227,6 +228,30 @@ class TestAppSettings:
         assert hasattr(settings, "feature_agent_mode_available")
         assert hasattr(settings, "agent_mode_available")
         assert settings.agent_mode_available == settings.feature_agent_mode_available
+
+    def test_agent_portal_disabled_on_windows(self, monkeypatch):
+        """On Windows, the validator forces feature_agent_portal_enabled False.
+
+        This runs before the dev-only guard, so enabling it on Windows must not
+        raise even when debug mode is off — it is silently treated as disabled.
+        """
+        monkeypatch.setattr(settings_module.sys, "platform", "win32")
+        monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "true")
+        monkeypatch.setenv("DEBUG_MODE", "false")
+
+        settings = AppSettings(_env_file=None)
+
+        assert settings.feature_agent_portal_enabled is False
+
+    def test_agent_portal_honored_on_non_windows(self, monkeypatch):
+        """Off Windows, the flag is left intact (debug mode required to enable)."""
+        monkeypatch.setattr(settings_module.sys, "platform", "linux")
+        monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "true")
+        monkeypatch.setenv("DEBUG_MODE", "true")
+
+        settings = AppSettings(_env_file=None)
+
+        assert settings.feature_agent_portal_enabled is True
 
 
 class TestConfigManagerCustomRoot:
