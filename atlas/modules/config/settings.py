@@ -1,6 +1,7 @@
 """Application settings: the ``AppSettings`` pydantic-settings model (loaded from env + ``.env``)."""
 
 import logging
+import sys
 from typing import Optional
 
 from pydantic import AliasChoices, Field, model_validator
@@ -505,6 +506,16 @@ class AppSettings(BaseSettings):
                     "auth_aws_expected_alb_arn must be set to a valid AWS ALB ARN when auth_user_header_type is 'aws-alb-jwt'. "
                     "Current value is empty or a placeholder. Set AUTH_AWS_EXPECTED_ALB_ARN environment variable."
                 )
+        return self
+
+    @model_validator(mode='after')
+    def disable_agent_portal_on_windows(self):
+        """Treat Agent Portal as unavailable on Windows hosts."""
+        if self.feature_agent_portal_enabled and sys.platform.startswith("win"):
+            logger.warning(
+                "FEATURE_AGENT_PORTAL_ENABLED=true ignored because Agent Portal is not supported on Windows."
+            )
+            self.feature_agent_portal_enabled = False
         return self
 
     @model_validator(mode='after')

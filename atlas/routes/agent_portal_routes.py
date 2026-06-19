@@ -39,6 +39,7 @@ from atlas.modules.process_manager.manager import (
     ensure_idle_sweeper_running,
     probe_isolation_capabilities,
 )
+from atlas.routes.agent_portal_availability import is_agent_portal_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,7 @@ def _validate_sandbox_mode(mode: Optional[str]) -> None:
 
 def _require_enabled():
     app_settings = app_factory.get_config_manager().app_settings
-    if not getattr(app_settings, "feature_agent_portal_enabled", False):
+    if not is_agent_portal_enabled(app_settings):
         raise HTTPException(status_code=404, detail="Agent portal is disabled")
 
 
@@ -1273,7 +1274,7 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
     """
     # TODO(graduation): add per-user ownership check — see docs/agentportal/threat-model.md
     app_settings = app_factory.get_config_manager().app_settings
-    if not getattr(app_settings, "feature_agent_portal_enabled", False):
+    if not is_agent_portal_enabled(app_settings):
         await websocket.close(code=1008, reason="Agent portal disabled")
         return
 
