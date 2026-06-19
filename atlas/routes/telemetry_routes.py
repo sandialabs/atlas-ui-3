@@ -18,7 +18,6 @@ counts, model names, tool names, data source IDs, status codes, and durations.
 from __future__ import annotations
 
 import json
-import logging
 import os
 import re
 import time
@@ -31,8 +30,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from atlas.modules.config import config_manager
 from atlas.routes.admin_routes import require_admin
-
-logger = logging.getLogger(__name__)
 
 telemetry_router = APIRouter(prefix="/admin/telemetry", tags=["admin", "telemetry"])
 
