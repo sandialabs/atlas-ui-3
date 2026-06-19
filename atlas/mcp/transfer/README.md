@@ -12,6 +12,12 @@ It is not intended for production use.
 
 Set `MCP_TRANSFER_BASE_DIR` to choose the directory the server can access. If unset, paths are limited to the MCP server working directory. Path traversal outside that directory is denied.
 
+> **Security note:** When `MCP_TRANSFER_BASE_DIR` is unset, the base directory defaults to the server's working directory (`atlas/` with the example config), which exposes the source tree to chat-driven reads and writes. Because this example grants disk read/write to the `users` group, always point `MCP_TRANSFER_BASE_DIR` at a dedicated, disposable folder before enabling it, and do not deploy it outside local development.
+
+## Read size limit
+
+`read_file_from_disk` rejects files larger than `MCP_TRANSFER_MAX_BYTES` (default 10 MiB) so a single read cannot pull unbounded content into chat context or server memory. Set `MCP_TRANSFER_MAX_BYTES` to raise or lower the cap.
+
 ## Configuration
 
-Use the example config at `atlas/config/mcp-example-configs/mcp-transfer.json` as a starting point and merge it into your local `config/mcp.json`.
+Use the example config at `atlas/config/mcp-example-configs/mcp-transfer.json` as a starting point and merge it into your local `config/mcp.json`. The `command` uses a relative path (`mcp/transfer/main.py`) resolved from `cwd: atlas`; adjust both if you run the server from a different working directory or an installed package layout.

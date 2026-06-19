@@ -15,11 +15,28 @@ from atlas.mcp_shared.server_factory import create_stdio_server
 
 mcp = create_stdio_server("MCP Transfer")
 
+# Default cap on how many bytes a single read may pull into the chat context.
+# Reads larger than this fail in-band so a stray large file cannot blow up
+# server memory or the model context. Override with MCP_TRANSFER_MAX_BYTES.
+DEFAULT_MAX_READ_BYTES = 10 * 1024 * 1024  # 10 MiB
+
 
 def _base_dir() -> Path:
     """Return the local directory this development server is allowed to access."""
     configured = os.getenv("MCP_TRANSFER_BASE_DIR")
     return Path(configured).expanduser().resolve() if configured else Path.cwd().resolve()
+
+
+def _max_read_bytes() -> int:
+    """Return the maximum number of bytes a single read may return."""
+    configured = os.getenv("MCP_TRANSFER_MAX_BYTES")
+    if not configured:
+        return DEFAULT_MAX_READ_BYTES
+    try:
+        value = int(configured)
+    except ValueError:
+        return DEFAULT_MAX_READ_BYTES
+    return value if value > 0 else DEFAULT_MAX_READ_BYTES
 
 
 def _resolve_path(path: str) -> Path:
@@ -65,6 +82,8 @@ def read_file_from_disk(path: str) -> Dict[str, Any]:
     This local-development helper reads a file below `MCP_TRANSFER_BASE_DIR`
     (or the server working directory when unset) and returns it as a base64
     artifact. UTF-8 text files also include decoded text in the tool result.
+    Files larger than `MCP_TRANSFER_MAX_BYTES` (default 10 MiB) are rejected so
+    a single read cannot load unbounded content into the chat context.
 
     Args:
         path: File path to read. Relative paths resolve below the configured base directory.
@@ -81,6 +100,14 @@ def read_file_from_disk(path: str) -> Dict[str, Any]:
             raise FileNotFoundError(f"File not found: {path}")
         if file_path.is_dir():
             raise IsADirectoryError(f"Path is a directory: {path}")
+
+        max_bytes = _max_read_bytes()
+        file_size = file_path.stat().st_size
+        if file_size > max_bytes:
+            raise ValueError(
+                f"File is too large to read: {file_size} bytes exceeds the "
+                f"{max_bytes}-byte limit (set MCP_TRANSFER_MAX_BYTES to change)"
+            )
 
         file_bytes = file_path.read_bytes()
         mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"

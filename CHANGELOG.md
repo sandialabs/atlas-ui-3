@@ -6,8 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #661 - 2026-06-19
-- **MCP examples**: Added a local-development transfer server with tools to read disk files into chat artifacts and write chat content back to disk.
+### PR #662 - 2026-06-19
+- **MCP examples**: Added a local-development transfer server with tools to read disk files into chat artifacts and write chat content back to disk. Reads are capped at a configurable maximum size to avoid loading unbounded content into chat context.
 
 ### PR #654 - 2026-06-14
 - **UI theme**: Defaulted first-time users to dark mode and improved the auto-approve tools warning contrast in light mode.

@@ -1,3 +1,11 @@
+"""Tests for the local-development MCP transfer example server.
+
+Lives under atlas/tests/ so it is collected by the CI suite
+(`pytest tests` run from the atlas/ directory). The transfer example is
+imported with a stubbed server factory so the FastMCP dependency is not
+required to exercise the tool functions.
+"""
+
 import base64
 import importlib
 import sys
@@ -57,3 +65,30 @@ def test_path_traversal_is_denied(monkeypatch, tmp_path):
     assert result["meta_data"]["is_error"] is True
     assert result["meta_data"]["error_type"] == "PermissionError"
     assert not (tmp_path.parent / "outside.txt").exists()
+
+
+def test_read_rejects_files_over_size_cap(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_MAX_BYTES", "16")
+
+    (tmp_path / "big.txt").write_text("this content is definitely longer than sixteen bytes")
+
+    result = transfer.read_file_from_disk("big.txt")
+
+    assert result["meta_data"]["is_error"] is True
+    assert result["meta_data"]["error_type"] == "ValueError"
+    assert "too large" in result["results"]["error"]
+
+
+def test_read_allows_files_within_size_cap(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_MAX_BYTES", "1024")
+
+    (tmp_path / "small.txt").write_text("ok")
+
+    result = transfer.read_file_from_disk("small.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["content"] == "ok"
