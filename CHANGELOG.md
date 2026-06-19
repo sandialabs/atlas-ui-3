@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #662 - 2026-06-19
+- **MCP examples**: Added a local-development transfer server with tools to read disk files into chat artifacts and write chat content back to disk. Reads are capped at a configurable maximum size to avoid loading unbounded content into chat context.
+
 ### PR #660 - 2026-06-19
 - **Agent Portal**: Disabled the Agent Portal automatically on Windows hosts so startup no longer imports Unix-only process management code (`fcntl`, `pty`, `termios`). The feature continues to run on Linux/WSL and macOS, where its Linux-only isolation (Landlock, namespaces, cgroups) degrades gracefully when unavailable.
 

@@ -1,0 +1,17 @@
+{
+  "transfer": {
+    "command": [
+      "python",
+      "mcp/transfer/main.py"
+    ],
+    "cwd": "atlas",
+    "groups": [
+      "users"
+    ],
+    "description": "Local-development MCP server for reading files from disk into a chat session and writing chat content back to disk. Not intended for production use.",
+    "author": "Atlas UI Team",
+    "short_description": "Local disk transfer tools",
+    "help_email": "support@example.com",
+    "compliance_level": "Public"
+  }
+}
