@@ -91,7 +91,6 @@ async def test():
     result = await client.chat(
         'Use the calculator tool to evaluate 2654687621*sqrt(2)',
         selected_tools=['calculator_evaluate'],
-        tool_choice_required=True,
     )
     await client.cleanup()
     assert len(result.tool_calls) > 0, 'No tool calls recorded'

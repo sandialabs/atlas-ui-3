@@ -7,7 +7,7 @@ Last updated: 2026-06-20
 > strategies (and their scaffolding "control tools" and forced
 > `tool_choice="required"`) were removed. Forcing tool choice was unsupported
 > by several providers and the control-tool/JSON parsing was fragile. The
-> `APP_AGENT_LOOP_STRATEGY` setting and the `agent_loop_strategy` request field
+> `AGENT_LOOP_STRATEGY` setting and the `agent_loop_strategy` request field
 > are still accepted for backward compatibility but always resolve to the
 > agentic loop. This matches the product direction in `AGENTS.md` ("the in-app
 > agent loop is not the focus").
@@ -22,7 +22,7 @@ It is the simplest and most token-efficient design: 1 LLM call per step, no scaf
 
 ```bash
 # In .env or environment
-APP_AGENT_LOOP_STRATEGY=agentic
+AGENT_LOOP_STRATEGY=agentic
 ```
 
 Or via the `AGENT_LOOP_STRATEGY` alias (both are accepted by Pydantic's `AliasChoices`).

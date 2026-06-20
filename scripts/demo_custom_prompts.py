@@ -34,7 +34,6 @@ async def demo_custom_prompting():
     mock_session.selected_tools = ["prompts_financial_tech_wizard"]
     mock_session.selected_data_sources = []
     mock_session.only_rag = False
-    mock_session.tool_choice_required = False
     mock_session.uploaded_files = {}
     mock_session.model_name = "demo-model"
     mock_session.websocket = Mock()
