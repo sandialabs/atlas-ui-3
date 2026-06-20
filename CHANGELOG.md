@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #664 - 2026-06-20
+- **Agent loop simplified to a single native loop**: Agent mode now always uses the `agentic` loop — the model gets the real tools with `tool_choice="auto"` and signals completion by returning text with no tool calls. Removed the `react`, `think-act`, and `act` strategies along with their scaffolding "control tools" (`finished`, `agent_decide_next`, `agent_observe_decide`) and the lossy 400-char observation truncation. Forced `tool_choice="required"` is gone everywhere (it was unsupported by several providers and forbade plain-text answers); the per-request `tool_choice_required` flag and the "Required Tool Usage" UI toggle were removed. `APP_AGENT_LOOP_STRATEGY` / `agent_loop_strategy` are still accepted for backward compatibility but resolve to the agentic loop. The agent step cap default is unified to 10. Aligns with the product direction in `AGENTS.md` (the in-app agent loop is not the focus; deeper agent work belongs in the Agent Portal). See `docs/developer/agentic-loop-2026-02-23.md`.
+
 ### PR #662 - 2026-06-19
 - **MCP examples**: Added a local-development transfer server with tools to read disk files into chat artifacts and write chat content back to disk. Reads are capped at a configurable maximum size to avoid loading unbounded content into chat context.
 

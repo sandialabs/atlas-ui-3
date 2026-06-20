@@ -40,7 +40,6 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'agentic',
         autoApproveTools: false,
         debugMode: false
       })
@@ -52,7 +51,6 @@ describe('useSettings', () => {
       const savedSettings = {
         llmTemperature: 0.5,
         maxIterations: 15,
-        agentLoopStrategy: 'act-only',
         autoApproveTools: true,
         debugMode: false
       }
@@ -76,7 +74,6 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.9,
         maxIterations: 20,
-        agentLoopStrategy: 'agentic', // default value
         autoApproveTools: false, // default value
         debugMode: false // default value
       })
@@ -90,7 +87,6 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'agentic',
         autoApproveTools: false,
         debugMode: false
       })
@@ -118,7 +114,6 @@ describe('useSettings', () => {
         expect(updatedSettings).toEqual({
           llmTemperature: 0.8,
           maxIterations: 12,
-          agentLoopStrategy: 'agentic',
           autoApproveTools: false,
           debugMode: false
         })
@@ -127,7 +122,6 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.8,
         maxIterations: 12,
-        agentLoopStrategy: 'agentic',
         autoApproveTools: false,
         debugMode: false
       })
@@ -137,7 +131,6 @@ describe('useSettings', () => {
         JSON.stringify({
           llmTemperature: 0.8,
           maxIterations: 12,
-          agentLoopStrategy: 'agentic',
           autoApproveTools: false,
           debugMode: false
         })
@@ -160,7 +153,6 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.8,
         maxIterations: 15,
-        agentLoopStrategy: 'agentic',
         autoApproveTools: false,
         debugMode: false
       })
@@ -176,7 +168,6 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'agentic',
         autoApproveTools: false,
         debugMode: false
       })
@@ -202,7 +193,6 @@ describe('useSettings', () => {
         result.current.updateSettings({
           llmTemperature: 0.9,
           maxIterations: 20,
-          agentLoopStrategy: 'act-only',
           autoApproveTools: true
         })
       })
@@ -214,7 +204,6 @@ describe('useSettings', () => {
         expect(resetSettings).toEqual({
           llmTemperature: 0.7,
           maxIterations: 10,
-          agentLoopStrategy: 'agentic',
           autoApproveTools: false,
           debugMode: false
         })
@@ -223,7 +212,6 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'agentic',
         autoApproveTools: false,
         debugMode: false
       })
@@ -233,7 +221,6 @@ describe('useSettings', () => {
         JSON.stringify({
           llmTemperature: 0.7,
           maxIterations: 10,
-          agentLoopStrategy: 'agentic',
           autoApproveTools: false,
           debugMode: false
         })
@@ -247,7 +234,6 @@ describe('useSettings', () => {
 
       expect(result.current.getSetting('llmTemperature')).toBe(0.7)
       expect(result.current.getSetting('maxIterations')).toBe(10)
-      expect(result.current.getSetting('agentLoopStrategy')).toBe('agentic')
       expect(result.current.getSetting('autoApproveTools')).toBe(false)
     })
 
@@ -290,7 +276,6 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'agentic',
         autoApproveTools: false,
         debugMode: false
       })
@@ -315,7 +300,6 @@ describe('useSettings', () => {
       const complexSettings = {
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'agentic',
         autoApproveTools: false,
         debugMode: false,
         customConfig: {
@@ -355,7 +339,6 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.8,
         maxIterations: 15,
-        agentLoopStrategy: 'agentic',
         autoApproveTools: true,
         debugMode: false
       })
@@ -368,7 +351,6 @@ describe('useSettings', () => {
       expect(result.current.settings).toEqual({
         llmTemperature: 0.7,
         maxIterations: 10,
-        agentLoopStrategy: 'agentic',
         autoApproveTools: false,
         debugMode: false
       })

@@ -530,7 +530,6 @@ async def websocket_endpoint(websocket: WebSocket):
                             selected_prompts=data.get("selected_prompts"),
                             selected_data_sources=data.get("selected_data_sources"),
                             only_rag=data.get("only_rag", False),
-                            tool_choice_required=data.get("tool_choice_required", False),
                             user_email=user_email,  # Use authenticated user from connection
                             agent_mode=data.get("agent_mode", False),
                             agent_max_steps=data.get("agent_max_steps", 10),
@@ -742,11 +741,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     task.cancel()
 
             elif message_type == "agent_control":
-                # `agent_control` is normally consumed by the agent loop's
-                # internal receive_json poll while it's waiting on user input
-                # (react_loop._poll_control_message). If the main endpoint
-                # sees it here, the agent isn't in the input-wait branch, so
-                # treat action="stop" as a plain cancel of the chat task.
+                # `agent_control` with action="stop" cancels the active agent
+                # run. The native agentic loop has no user-input-wait branch, so
+                # the message is always handled here as a plain task cancel.
                 action = data.get("action")
                 if action == "stop":
                     task = active_chat_task.get("task")

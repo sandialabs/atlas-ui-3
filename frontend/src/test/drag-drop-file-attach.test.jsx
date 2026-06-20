@@ -25,7 +25,6 @@ describe('ChatArea - Drag and Drop File Attachment', () => {
     selectedPrompts: new Set(),
     toggleTool: vi.fn(),
     togglePrompt: vi.fn(),
-    setToolChoiceRequired: vi.fn(),
     sessionFiles: { files: [], total_files: 0, categories: {} },
     agentModeEnabled: false,
     agentPendingQuestion: null,

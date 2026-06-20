@@ -20,10 +20,9 @@ class ChatRequest:
     selected_prompts: Optional[List[str]] = None
     selected_data_sources: Optional[List[str]] = None
     only_rag: bool = False
-    tool_choice_required: bool = False
     agent_mode: bool = False
     temperature: float = 0.7
-    agent_max_steps: int = 30
+    agent_max_steps: int = 10
     agent_loop_strategy: Optional[str] = None
     files: Optional[Dict[str, Any]] = None
     # When set, rewind to this user message (0-based ordinal) before running the

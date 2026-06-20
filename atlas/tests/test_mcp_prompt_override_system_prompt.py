@@ -91,7 +91,6 @@ async def test_selected_mcp_prompt_overrides_system_prompt(monkeypatch):
         selected_data_sources=None,
         user_email="tester@example.com",
         only_rag=False,
-        tool_choice_required=False,
         agent_mode=False,
         temperature=0.7,
     )

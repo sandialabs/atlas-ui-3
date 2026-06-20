@@ -30,7 +30,7 @@ class AgentModeRunner:
         agent_loop_factory: AgentLoopFactory,
         event_publisher: EventPublisher,
         artifact_processor: Optional[Callable[[Session, List[ToolResult], Optional[UpdateCallback]], Awaitable[None]]] = None,
-        default_strategy: str = "think-act",
+        default_strategy: str = "agentic",
     ):
         """
         Initialize agent mode runner.
@@ -68,7 +68,8 @@ class AgentModeRunner:
             selected_data_sources: Optional list of data sources
             max_steps: Maximum number of agent steps
             temperature: LLM temperature parameter
-            agent_loop_strategy: Strategy name (react, think-act). Falls back to default.
+            agent_loop_strategy: Accepted for backward compatibility; the
+                native agentic loop is always used.
 
         Returns:
             Response dictionary

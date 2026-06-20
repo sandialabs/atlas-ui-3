@@ -20,7 +20,6 @@ export function useSelections() {
   const [toolsRaw, setToolsRaw] = usePersistentState('chatui-selected-tools', ['canvas_canvas'])
   const [promptsRaw, setPromptsRaw] = usePersistentState('chatui-selected-prompts', [])
   const [dataSourcesRaw, setDataSourcesRaw] = usePersistentState('chatui-selected-data-sources', [])
-  const [toolChoiceRequired, setToolChoiceRequired] = usePersistentState('chatui-tool-choice-required', false)
   const [complianceLevelFilter, setComplianceLevelFilter] = usePersistentState('chatui-compliance-level-filter', null)
 
   // RAG toggle: persistent boolean for enabling/disabling RAG
@@ -154,8 +153,6 @@ export function useSelections() {
     clearActivePrompt,
     addDataSources,
     clearDataSources,
-    toolChoiceRequired,
-    setToolChoiceRequired,
     clearToolsAndPrompts,
     complianceLevelFilter,
     setComplianceLevelFilter,

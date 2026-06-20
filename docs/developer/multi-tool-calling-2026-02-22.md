@@ -57,11 +57,13 @@ async def execute_multiple_tools(
 
 | Component | File | Before | After |
 |-----------|------|--------|-------|
-| ReAct loop | `agent/react_loop.py` | First tool only | All tools in parallel |
-| Think-Act loop | `agent/think_act_loop.py` | First tool only | All tools in parallel |
-| Act loop | `agent/act_loop.py` | First non-finished tool only | All non-finished tools in parallel |
+| Agentic loop | `agent/agentic_loop.py` | First tool only | All tools in parallel |
 | Tools mode (non-streaming) | `utilities/tool_executor.py` | Sequential for loop | Parallel via `execute_multiple_tools` |
 | Tools mode (streaming) | `modes/tools.py` | Sequential for loop | Parallel via `execute_multiple_tools` |
+
+> Note (PR #664): the former `react`/`think-act`/`act` loops were removed; the
+> agentic loop is now the only agent loop. See
+> [agentic-loop-2026-02-23.md](./agentic-loop-2026-02-23.md).
 
 ## Error Handling
 
@@ -110,7 +112,7 @@ do so. Below are prompts and tool combinations that reliably trigger it.
 ### Calculator (default config, easiest)
 
 The `calculator` server is in the default `mcp.json`. Select it, enable agent
-mode (any strategy; `act` is fastest), and send:
+mode, and send:
 
 > "Calculate these three things: (1) 355/113, (2) sqrt(2), (3) e^pi"
 

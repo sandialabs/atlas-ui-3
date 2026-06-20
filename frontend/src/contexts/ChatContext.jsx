@@ -372,13 +372,11 @@ export const ChatProvider = ({ children }) => {
 			selected_prompts: activeKeyIsUserPrompt ? [] : activePrompts,
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			selected_data_sources: dataSourcesToSend,
-			tool_choice_required: selections.toolChoiceRequired,
 			user: config.user,
 			files: { ...extraFiles, ...tagged },
 			agent_mode: agent.agentModeEnabled,
 			agent_max_steps: settings.maxIterations || agent.agentMaxSteps,
 			temperature: settings.llmTemperature || 0.7,
-			agent_loop_strategy: settings.agentLoopStrategy || undefined,
 			compliance_level_filter: selections.complianceLevelFilter,
 			save_mode: saveMode,
 			// Backward compat: backend still checks incognito for older clients
@@ -614,7 +612,6 @@ export const ChatProvider = ({ children }) => {
 					activePrompt: activePromptInfo,
 					ragEnabled: ragEnabled,
 					selectedRagSources: ragEnabled ? [...selectedDataSources] : null,
-					toolChoiceRequired: selections.toolChoiceRequired,
 					agentModeEnabled: agent.agentModeEnabled,
 					agentMaxSteps: agent.agentMaxSteps,
 					messageCount: messages.length,
@@ -631,7 +628,7 @@ export const ChatProvider = ({ children }) => {
 			a.download = `chat-export-${ts}.json`
 			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 		}
-	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, selections.activePromptKey, files.canvasContent, userPrompts.prompts])
+	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.activePromptKey, files.canvasContent, userPrompts.prompts])
 
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
@@ -792,8 +789,6 @@ export const ChatProvider = ({ children }) => {
 		clearDataSources: selections.clearDataSources,
 		ragEnabled,
 		toggleRagEnabled,
-		toolChoiceRequired: selections.toolChoiceRequired,
-		setToolChoiceRequired: selections.setToolChoiceRequired,
 		clearToolsAndPrompts: selections.clearToolsAndPrompts,
 		complianceLevelFilter: selections.complianceLevelFilter,
 		setComplianceLevelFilter: setComplianceLevelFilterWithCleanup,

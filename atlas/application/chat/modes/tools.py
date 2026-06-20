@@ -70,7 +70,6 @@ class ToolsModeRunner:
         selected_tools: List[str],
         selected_data_sources: Optional[List[str]] = None,
         user_email: Optional[str] = None,
-        tool_choice_required: bool = False,
         update_callback: Optional[UpdateCallback] = None,
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
@@ -84,7 +83,6 @@ class ToolsModeRunner:
             selected_tools: List of tools to make available
             selected_data_sources: Optional list of data sources (for RAG+tools)
             user_email: Optional user email for authorization
-            tool_choice_required: Whether tool use is required
             update_callback: Optional callback for streaming updates
             temperature: LLM temperature parameter
 
@@ -102,7 +100,7 @@ class ToolsModeRunner:
             tools_schema=tools_schema,
             data_sources=selected_data_sources,
             user_email=user_email,
-            tool_choice=("required" if tool_choice_required else "auto"),
+            tool_choice="auto",
             temperature=temperature,
         )
 
@@ -178,14 +176,13 @@ class ToolsModeRunner:
         selected_tools: List[str],
         selected_data_sources: Optional[List[str]] = None,
         user_email: Optional[str] = None,
-        tool_choice_required: bool = False,
         update_callback: Optional[UpdateCallback] = None,
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
         """Execute tools mode with token streaming."""
         tools_schema = await error_handler.safe_get_tools_schema(self.tool_manager, selected_tools)
 
-        tool_choice = "required" if tool_choice_required else "auto"
+        tool_choice = "auto"
 
         # Stream initial LLM call with tools
         accumulated_content = ""

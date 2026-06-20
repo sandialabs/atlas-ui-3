@@ -825,9 +825,6 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
 
-        # Handle tool_choice parameter - try "required" first, fallback to "auto" if unsupported
-        final_tool_choice = tool_choice
-
         try:
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
             logger.info(f"LLM call with tools: {len(messages)} messages, {total_chars} chars, {len(tools_schema)} tools")
@@ -836,15 +833,11 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 model=litellm_model,
                 messages=self._prepare_messages(model_name, messages),
                 tools=tools_schema,
-                tool_choice=final_tool_choice,
+                tool_choice=tool_choice,
                 **model_kwargs
             )
 
             message = response.choices[0].message
-
-            if tool_choice == "required" and not getattr(message, 'tool_calls', None):
-                logger.error(f"LLM failed to return tool calls when tool_choice was 'required'. Full response: {response}")
-                raise ValueError("LLM failed to return tool calls when tool_choice was 'required'.")
 
             tool_calls = getattr(message, 'tool_calls', None)
             tool_count = len(tool_calls) if tool_calls else 0
@@ -857,28 +850,6 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
 
         except Exception as exc:
-            # If we used "required" and it failed, try again with "auto"
-            if tool_choice == "required" and final_tool_choice == "required":
-                logger.warning(f"Tool choice 'required' failed, retrying with 'auto': {exc}")
-                try:
-                    response = await self._acompletion_with_retry(
-                        model=litellm_model,
-                        messages=self._prepare_messages(model_name, messages),
-                        tools=tools_schema,
-                        tool_choice="auto",
-                        **model_kwargs
-                    )
-
-                    message = response.choices[0].message
-                    return LLMResponse(
-                        content=getattr(message, 'content', None) or "",
-                        tool_calls=getattr(message, 'tool_calls', None),
-                        model_used=model_name
-                    )
-                except Exception as retry_exc:
-                    logger.error("Retry with tool_choice='auto' also failed: %s", retry_exc, exc_info=True)
-                    self._raise_llm_domain_error(retry_exc)
-
             logger.error("Error calling LLM with tools: %s", exc, exc_info=True)
             self._raise_llm_domain_error(exc)
 

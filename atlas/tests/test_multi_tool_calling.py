@@ -177,9 +177,9 @@ class TestAgentLoopMultiToolMessages:
     """Test that agent loops correctly append multiple tool results to messages."""
 
     @pytest.mark.asyncio
-    async def test_act_loop_executes_all_non_finished_tools(self):
-        """Act loop should execute ALL non-finished tool calls, not just the first."""
-        from atlas.application.chat.agent.act_loop import ActAgentLoop
+    async def test_agentic_loop_executes_all_tools(self):
+        """Agentic loop should execute ALL tool calls in a turn, not just the first."""
+        from atlas.application.chat.agent.agentic_loop import AgenticLoop
         from atlas.interfaces.llm import LLMResponse
 
         call_count = 0
@@ -200,13 +200,8 @@ class TestAgentLoopMultiToolMessages:
                             {"id": "tc2", "type": "function", "function": {"name": "toolB", "arguments": "{}"}},
                         ],
                     )
-                # Second call: finish
-                return LLMResponse(
-                    content="",
-                    tool_calls=[
-                        {"id": "tc3", "type": "function", "function": {"name": "finished", "arguments": '{"final_answer": "done"}'}},
-                    ],
-                )
+                # Second call: text-only response signals completion
+                return LLMResponse(content="done")
 
             async def call_with_rag_and_tools(self, *a, **kw):
                 return LLMResponse(content="")
@@ -228,7 +223,7 @@ class TestAgentLoopMultiToolMessages:
         from atlas.application.chat.agent.protocols import AgentContext
         from atlas.domain.messages.models import ConversationHistory
 
-        loop = ActAgentLoop(
+        loop = AgenticLoop(
             llm=MultiToolLLM(),
             tool_manager=mgr,
             prompt_provider=None,
@@ -255,101 +250,3 @@ class TestAgentLoopMultiToolMessages:
         tool_results = first_tool_event["payload"]["results"]
         assert len(tool_results) == 2
 
-    @pytest.mark.asyncio
-    async def test_react_loop_executes_multiple_tools(self):
-        """ReAct loop should execute all tool calls in a single Act step."""
-        from atlas.application.chat.agent.react_loop import ReActAgentLoop
-        from atlas.interfaces.llm import LLMResponse
-
-        call_count = 0
-
-        class MultiToolLLM:
-            async def call_plain(self, *a, **kw):
-                return "fallback"
-
-            async def call_with_tools(self, model, messages, tools_schema, tool_choice, **kw):
-                nonlocal call_count
-                call_count += 1
-
-                # First call: Reason phase - plan to use tools
-                if call_count == 1:
-                    return LLMResponse(
-                        content="",
-                        tool_calls=[{
-                            "id": "r1",
-                            "type": "function",
-                            "function": {
-                                "name": "agent_decide_next",
-                                "arguments": '{"finish": false, "next_plan": "use tools"}',
-                            },
-                        }],
-                    )
-                # Second call: Act phase - return two tool calls
-                if call_count == 2:
-                    return LLMResponse(
-                        content="",
-                        tool_calls=[
-                            {"id": "tc1", "type": "function", "function": {"name": "toolA", "arguments": "{}"}},
-                            {"id": "tc2", "type": "function", "function": {"name": "toolB", "arguments": "{}"}},
-                        ],
-                    )
-                # Third call: Observe phase - done
-                if call_count == 3:
-                    return LLMResponse(
-                        content="observation",
-                        tool_calls=[{
-                            "id": "o1",
-                            "type": "function",
-                            "function": {
-                                "name": "agent_observe_decide",
-                                "arguments": '{"should_continue": false, "final_answer": "all done"}',
-                            },
-                        }],
-                    )
-                return LLMResponse(content="fallback")
-
-            async def call_with_rag_and_tools(self, *a, **kw):
-                return LLMResponse(content="")
-
-            async def stream_plain(self, *a, **kw):
-                yield "done"
-
-        mgr = _make_tool_manager({"toolA": "result-A", "toolB": "result-B"})
-        mgr.get_tools_schema = MagicMock(return_value=[
-            {"type": "function", "function": {"name": "toolA", "parameters": {"type": "object", "properties": {}}}},
-            {"type": "function", "function": {"name": "toolB", "parameters": {"type": "object", "properties": {}}}},
-        ])
-
-        events: List[Dict[str, Any]] = []
-
-        async def handler(event):
-            events.append({"type": event.type, "payload": event.payload})
-
-        from atlas.application.chat.agent.protocols import AgentContext
-        from atlas.domain.messages.models import ConversationHistory
-
-        loop = ReActAgentLoop(
-            llm=MultiToolLLM(),
-            tool_manager=mgr,
-            prompt_provider=None,
-        )
-        loop.skip_approval = True
-
-        result = await loop.run(
-            model="test",
-            messages=[{"role": "user", "content": "test"}],
-            context=AgentContext(session_id="s1", user_email="test@test.com", files={}, history=ConversationHistory()),
-            selected_tools=["toolA", "toolB"],
-            data_sources=None,
-            max_steps=5,
-            temperature=0.7,
-            event_handler=handler,
-        )
-
-        assert result.final_answer == "all done"
-
-        # Check that agent_tool_results event included both results
-        tool_events = [e for e in events if e["type"] == "agent_tool_results"]
-        assert len(tool_events) >= 1
-        tool_results = tool_events[0]["payload"]["results"]
-        assert len(tool_results) == 2

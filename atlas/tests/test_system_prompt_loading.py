@@ -296,7 +296,6 @@ async def test_system_prompt_sent_to_llm():
             selected_prompts=None,
             selected_data_sources=None,
             only_rag=False,
-            tool_choice_required=False,
             agent_mode=False,
             temperature=0.7,
         )

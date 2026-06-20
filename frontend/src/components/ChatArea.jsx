@@ -42,7 +42,6 @@ const ChatArea = ({ onOpenRagPanel }) => {
     tools,
     selectedTools,
     toggleTool,
-    setToolChoiceRequired,
     sessionFiles,
     agentModeEnabled,
     agentPendingQuestion,
@@ -473,9 +472,6 @@ const ChatArea = ({ onOpenRagPanel }) => {
     if (!selectedTools.has(tool.key)) {
       toggleTool(tool.key)
     }
-
-    // Enable required tool call
-    setToolChoiceRequired(true)
 
     // Replace the slash command with the tool name and add a space
     setInputValue(`/${tool.name} `)

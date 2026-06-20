@@ -75,11 +75,10 @@ async def main():
     result = await client.chat("Hello, how are you?")
     print(result.message)
 
-    # Use the calculator MCP tool (tool_choice_required forces tool use)
+    # Use the calculator MCP tool (the model calls it natively via tool_choice="auto")
     result = await client.chat(
         "What is 1234 * 5678?",
         selected_tools=["calculator_evaluate"],
-        tool_choice_required=True,
     )
     print(result.message)
 

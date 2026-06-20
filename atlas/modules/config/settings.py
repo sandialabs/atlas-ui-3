@@ -87,8 +87,11 @@ class AppSettings(BaseSettings):
     )  # Accept both old and new env var names
     agent_max_steps: int = 10
     agent_loop_strategy: str = Field(
-        default="think-act",
-        description="Agent loop strategy selector (react, think-act, act, agentic)",
+        default="agentic",
+        description=(
+            "Agent loop strategy. Only 'agentic' (native tool_choice=auto loop) "
+            "is supported; retained for backward compatibility."
+        ),
         validation_alias=AliasChoices("AGENT_LOOP_STRATEGY"),
     )
     # Backward compatibility: support old AGENT_MODE_AVAILABLE env if present

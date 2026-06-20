@@ -59,7 +59,6 @@ describe('SettingsPanel agent mode settings', () => {
 
     expect(await screen.findByText('LLM Temperature')).toBeInTheDocument()
     expect(screen.getByText('Max Agent Iterations')).toBeInTheDocument()
-    expect(screen.getByText('Agent Loop Strategy')).toBeInTheDocument()
   })
 
   it('hides agent-specific settings when agent mode is unavailable', async () => {
@@ -68,7 +67,6 @@ describe('SettingsPanel agent mode settings', () => {
     expect(await screen.findByText('LLM Temperature')).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.queryByText('Max Agent Iterations')).not.toBeInTheDocument()
-      expect(screen.queryByText('Agent Loop Strategy')).not.toBeInTheDocument()
     })
   })
 

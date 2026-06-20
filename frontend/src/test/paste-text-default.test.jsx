@@ -27,7 +27,6 @@ describe('ChatArea - Paste text vs image handling', () => {
     selectedPrompts: new Set(),
     toggleTool: vi.fn(),
     togglePrompt: vi.fn(),
-    setToolChoiceRequired: vi.fn(),
     sessionFiles: { files: [], total_files: 0, categories: {} },
     agentModeEnabled: false,
     agentPendingQuestion: null,
