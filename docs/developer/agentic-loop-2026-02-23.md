@@ -51,6 +51,25 @@ Key behaviors:
 - **Parallel tool execution**: When the model returns multiple tool calls in one response, all execute concurrently via `asyncio.gather` (shared `execute_multiple_tools` from PR #358). Each result is appended as a `role: "tool"` message keyed by `tool_call_id`, then the full message list is re-sent on the next step.
 - **Streaming support**: When streaming is enabled, text tokens are published to the UI as they arrive; tool-call responses are handled non-streaming.
 
+## End-to-end verification (PR #664)
+
+Captured against a local instance running this branch.
+
+The agent runs the only strategy (`agentic`) and executes multiple real MCP tool
+calls in one turn before answering — the prompt "compute 1234×5678, 98765/43, and
+2^16" drives three `calculator_evaluate` calls, then a text-only summary ends the
+loop:
+
+![Agent mode end-to-end calculator run](./images/pr664-agent-mode-e2e.png)
+
+The Settings panel keeps agent mode (Max Agent Iterations) but no longer exposes a
+loop-strategy selector, and the Tools panel no longer has a "Required Tool Usage"
+(forced `tool_choice`) toggle:
+
+| Settings (no strategy selector) | Tools (no forced-tool toggle) |
+|---|---|
+| ![Settings without strategy dropdown](./images/pr664-settings-no-strategy.png) | ![Tools without required-usage toggle](./images/pr664-tools-no-required-toggle.png) |
+
 ## Architecture
 
 The implementation lives in `atlas/application/chat/agent/agentic_loop.py`:
