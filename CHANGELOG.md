@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #665 - 2026-06-20
+- **MCP examples**: Added a `file_viewer` server with a `display_file` tool that reads a file from the local disk and shows it in the canvas, guessing/normalizing the MIME type (extension map, stdlib, magic-number sniffing, text heuristic) to pick the right viewer (image / PDF / HTML / code). Intended for local single-developer use, so it reads any path without sandboxing; size-capped to avoid loading unbounded content into chat.
+
 ### PR #662 - 2026-06-19
 - **MCP examples**: Added a local-development transfer server with tools to read disk files into chat artifacts and write chat content back to disk. Reads are capped at a configurable maximum size to avoid loading unbounded content into chat context.
 
