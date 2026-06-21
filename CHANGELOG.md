@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #665 - 2026-06-20
+- **MCP examples**: Added a `file_viewer` server with a `display_file` tool that reads a file from the local disk and shows it in the canvas, guessing/normalizing the MIME type (extension map, stdlib, magic-number sniffing, text heuristic) to pick the right viewer (image / PDF / HTML / code). Intended for local single-developer use, so it reads any path without sandboxing; size-capped to avoid loading unbounded content into chat.
+
 ### PR #664 - 2026-06-20
 - **Agent loop simplified to a single native loop**: Agent mode now always uses the `agentic` loop — the model gets the real tools with `tool_choice="auto"` and signals completion by returning text with no tool calls. Removed the `react`, `think-act`, and `act` strategies along with their scaffolding "control tools" (`finished`, `agent_decide_next`, `agent_observe_decide`) and the lossy 400-char observation truncation. Forced `tool_choice="required"` is gone everywhere (it was unsupported by several providers and forbade plain-text answers); the per-request `tool_choice_required` flag and the "Required Tool Usage" UI toggle were removed. `AGENT_LOOP_STRATEGY` / `agent_loop_strategy` are still accepted for backward compatibility but resolve to the agentic loop. The agent step cap default is unified to 10. Aligns with the product direction in `AGENTS.md` (the in-app agent loop is not the focus; deeper agent work belongs in the Agent Portal). See `docs/developer/agentic-loop-2026-02-23.md`.
 
