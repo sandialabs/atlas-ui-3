@@ -1,4 +1,18 @@
-"""Factory for creating agent loop instances based on strategy."""
+"""Factory for creating the agent loop instance.
+
+ATLAS uses a single native agent loop (``AgenticLoop``): the model receives
+the real user tools with ``tool_choice="auto"`` and decides for itself when to
+call tools and when to answer with text (text-only response = done). The older
+``react``/``think-act``/``act`` strategies -- which relied on scaffolding
+"control tools" and forced ``tool_choice="required"`` -- have been removed
+because the forced tool choice was unsupported by several providers and the
+control-tool parsing was fragile. See AGENTS.md ("Agent Loop Is Not the
+Focus") for the product direction.
+
+The factory is retained as a thin shim so that any persisted config or older
+client that still sends an ``agent_loop_strategy`` value continues to work: all
+values resolve to the agentic loop.
+"""
 
 import logging
 from typing import Optional
@@ -8,21 +22,20 @@ from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.interfaces.transport import ChatConnectionProtocol
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
-from .act_loop import ActAgentLoop
 from .agentic_loop import AgenticLoop
 from .protocols import AgentLoopProtocol
-from .react_loop import ReActAgentLoop
-from .think_act_loop import ThinkActAgentLoop
 
 logger = logging.getLogger(__name__)
 
+# The single supported strategy. Any requested strategy resolves to this.
+DEFAULT_STRATEGY = "agentic"
+
 
 class AgentLoopFactory:
-    """
-    Factory for creating agent loop instances.
+    """Creates the agent loop instance.
 
-    This factory pattern allows for easy addition of new agent loop strategies
-    without modifying existing code. Simply add a new strategy to the registry.
+    Only the native agentic loop is supported. The ``strategy`` argument is
+    accepted for backward compatibility but is always resolved to ``agentic``.
     """
 
     def __init__(
@@ -50,97 +63,41 @@ class AgentLoopFactory:
         self.config_manager = config_manager
         self.skip_approval = False
 
-        # Registry of available strategies
-        self._strategy_registry = {
-            "react": ReActAgentLoop,
-            "think-act": ThinkActAgentLoop,
-            "think_act": ThinkActAgentLoop,
-            "thinkact": ThinkActAgentLoop,
-            "act": ActAgentLoop,
-            "agentic": AgenticLoop,
-        }
+        # Cached loop instance (the loop is stateless across requests).
+        self._loop: Optional[AgentLoopProtocol] = None
 
-        # Cache of instantiated loops for performance
-        self._loop_cache: dict[str, AgentLoopProtocol] = {}
-
-    def create(self, strategy: str = "think-act") -> AgentLoopProtocol:
+    def create(self, strategy: str = DEFAULT_STRATEGY) -> AgentLoopProtocol:
         """
-        Create an agent loop instance for the given strategy.
+        Create the agent loop instance.
 
         Args:
-            strategy: Strategy name (react, think-act, act, etc.)
+            strategy: Accepted for backward compatibility. Any value resolves
+                to the native agentic loop.
 
         Returns:
             AgentLoopProtocol instance
-
-        Note:
-            If the strategy is not recognized, falls back to 'react' with a warning.
         """
-        strategy_normalized = strategy.lower().strip()
-
-        # Check cache first
-        if strategy_normalized in self._loop_cache:
-            logger.info(f"Using agent loop strategy: {strategy_normalized}")
-            return self._loop_cache[strategy_normalized]
-
-        # Look up strategy in registry
-        loop_class = self._strategy_registry.get(strategy_normalized)
-
-        if loop_class is None:
-            logger.warning(
-                f"Unknown agent loop strategy '{strategy}', falling back to 'react'"
+        requested = (strategy or DEFAULT_STRATEGY).lower().strip()
+        if requested != DEFAULT_STRATEGY:
+            logger.info(
+                "Agent loop strategy '%s' is deprecated; using '%s'",
+                strategy,
+                DEFAULT_STRATEGY,
             )
-            loop_class = self._strategy_registry["react"]
-            strategy_normalized = "react"
 
-        # Instantiate the loop
-        loop_instance = loop_class(
-            llm=self.llm,
-            tool_manager=self.tool_manager,
-            prompt_provider=self.prompt_provider,
-            connection=self.connection,
-            config_manager=self.config_manager,
-        )
+        if self._loop is None:
+            self._loop = AgenticLoop(
+                llm=self.llm,
+                tool_manager=self.tool_manager,
+                prompt_provider=self.prompt_provider,
+                connection=self.connection,
+                config_manager=self.config_manager,
+            )
+            logger.info("Created agent loop strategy: %s", DEFAULT_STRATEGY)
 
-        loop_instance.skip_approval = self.skip_approval
-
-        # Cache for future use
-        self._loop_cache[strategy_normalized] = loop_instance
-
-        logger.info(f"Created and using agent loop strategy: {strategy_normalized}")
-        return loop_instance
+        self._loop.skip_approval = self.skip_approval
+        return self._loop
 
     def get_available_strategies(self) -> list[str]:
-        """
-        Get list of available strategy names.
-
-        Returns:
-            List of strategy identifiers
-        """
-        # Return unique strategy names (deduplicated)
-        unique_strategies = set()
-        for strategy in self._strategy_registry.keys():
-            # Normalize to primary name
-            if strategy in ("react",):
-                unique_strategies.add("react")
-            elif strategy in ("think-act", "think_act", "thinkact"):
-                unique_strategies.add("think-act")
-            elif strategy in ("act",):
-                unique_strategies.add("act")
-            elif strategy in ("agentic",):
-                unique_strategies.add("agentic")
-        return sorted(unique_strategies)
-
-    def register_strategy(self, name: str, loop_class: type[AgentLoopProtocol]) -> None:
-        """
-        Register a new agent loop strategy.
-
-        This allows for dynamic extension of available strategies.
-
-        Args:
-            name: Strategy identifier
-            loop_class: Agent loop class to instantiate
-        """
-        name_normalized = name.lower().strip()
-        self._strategy_registry[name_normalized] = loop_class
-        logger.info(f"Registered new agent loop strategy: {name_normalized}")
+        """Return the list of available strategy names (just the agentic loop)."""
+        return [DEFAULT_STRATEGY]

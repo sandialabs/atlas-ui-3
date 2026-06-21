@@ -337,6 +337,15 @@ export const ChatProvider = ({ children }) => {
 			toast.error('Not connected. Waiting to reconnect before sending.')
 			return false
 		}
+		// Agent mode needs at least one tool to act on. Block the send (rather than
+		// silently degrading to a normal chat) so the user makes an explicit
+		// choice -- otherwise the agent loop has nothing to call and the model can
+		// emit tool calls the provider rejects. The backend enforces the same
+		// guard for non-UI clients.
+		if (agent.agentModeAvailable && agent.agentModeEnabled && selectedTools.size === 0) {
+			toast.error('Agent mode needs at least one tool selected. Choose a tool or turn off Agent mode.')
+			return false
+		}
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
@@ -372,13 +381,11 @@ export const ChatProvider = ({ children }) => {
 			selected_prompts: activeKeyIsUserPrompt ? [] : activePrompts,
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			selected_data_sources: dataSourcesToSend,
-			tool_choice_required: selections.toolChoiceRequired,
 			user: config.user,
 			files: { ...extraFiles, ...tagged },
 			agent_mode: agent.agentModeEnabled,
 			agent_max_steps: settings.maxIterations || agent.agentMaxSteps,
 			temperature: settings.llmTemperature || 0.7,
-			agent_loop_strategy: settings.agentLoopStrategy || undefined,
 			compliance_level_filter: selections.complianceLevelFilter,
 			save_mode: saveMode,
 			// Backward compat: backend still checks incognito for older clients
@@ -614,7 +621,6 @@ export const ChatProvider = ({ children }) => {
 					activePrompt: activePromptInfo,
 					ragEnabled: ragEnabled,
 					selectedRagSources: ragEnabled ? [...selectedDataSources] : null,
-					toolChoiceRequired: selections.toolChoiceRequired,
 					agentModeEnabled: agent.agentModeEnabled,
 					agentMaxSteps: agent.agentMaxSteps,
 					messageCount: messages.length,
@@ -631,7 +637,7 @@ export const ChatProvider = ({ children }) => {
 			a.download = `chat-export-${ts}.json`
 			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 		}
-	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.toolChoiceRequired, selections.activePromptKey, files.canvasContent, userPrompts.prompts])
+	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.activePromptKey, files.canvasContent, userPrompts.prompts])
 
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
@@ -792,8 +798,6 @@ export const ChatProvider = ({ children }) => {
 		clearDataSources: selections.clearDataSources,
 		ragEnabled,
 		toggleRagEnabled,
-		toolChoiceRequired: selections.toolChoiceRequired,
-		setToolChoiceRequired: selections.setToolChoiceRequired,
 		clearToolsAndPrompts: selections.clearToolsAndPrompts,
 		complianceLevelFilter: selections.complianceLevelFilter,
 		setComplianceLevelFilter: setComplianceLevelFilterWithCleanup,

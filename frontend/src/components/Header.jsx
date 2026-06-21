@@ -8,6 +8,7 @@ import TokenInputModal from './TokenInputModal'
 import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, Info, Terminal } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 import { useTheme } from '../contexts/ThemeContext'
+import { useToast } from './ui/toastContext'
 
 // Save mode display config: label, icon component, button classes, title text
 const SAVE_MODE_CONFIG = {
@@ -59,6 +60,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   const { isComplianceAccessible, complianceLevels } = useMarketplace()
   const { connectionStatus, isConnected } = useWS()
   const { theme, toggleTheme } = useTheme()
+  const toast = useToast()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -123,6 +125,24 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
     return () => document.removeEventListener('keydown', handleKeyDown, true)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearChat])
+
+  // Handle hotkey for toggling agent mode (Ctrl+Alt+A). Mirrors the Ctrl+Alt+N
+  // new-chat shortcut. Ctrl+Alt avoids the Ctrl+A "select all" collision, and
+  // works even while the message input is focused (capture phase + preventDefault).
+  useEffect(() => {
+    if (!agentModeAvailable) return
+    const handleKeyDown = (event) => {
+      if (event.ctrlKey && event.altKey && (event.key === 'A' || event.key === 'a')) {
+        event.preventDefault()
+        event.stopPropagation()
+        const next = !agentModeEnabled
+        setAgentModeEnabled(next)
+        toast.info(`Agent Mode ${next ? 'enabled' : 'disabled'}`)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown, true) // Use capture phase
+    return () => document.removeEventListener('keydown', handleKeyDown, true)
+  }, [agentModeAvailable, agentModeEnabled, setAgentModeEnabled, toast])
 
   return (
     <header className="flex items-center justify-between p-2 sm:p-4 bg-gray-800 border-b border-gray-700">
@@ -424,7 +444,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                   ? 'bg-blue-600 hover:bg-blue-700 text-white' 
                   : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
               }`}
-              title={agentModeEnabled ? "Agent Mode: ON (click to disable)" : "Agent Mode: OFF (click to enable)"}
+              title={agentModeEnabled ? "Agent Mode: ON (click or Ctrl+Alt+A to disable)" : "Agent Mode: OFF (click or Ctrl+Alt+A to enable)"}
             >
               <Bot className="w-5 h-5" />
             </button>
@@ -658,6 +678,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 >
                   <Bot className="w-5 h-5" />
                   <span>Agent Mode: {agentModeEnabled ? 'ON' : 'OFF'}</span>
+                  <span className="ml-auto text-xs opacity-60">Ctrl+Alt+A</span>
                 </button>
               )}
 

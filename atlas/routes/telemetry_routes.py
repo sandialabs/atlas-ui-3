@@ -49,7 +49,7 @@ SPAN_RAG_QUERY = "rag.query"
 _SAFE_ATTRIBUTE_KEYS = {
     # chat.turn
     "turn_id", "session_id", "user_hash", "prompt_hash", "prompt_chars",
-    "prompt_tokens", "model", "agent_mode", "only_rag", "tool_choice_required",
+    "prompt_tokens", "model", "agent_mode", "only_rag",
     "selected_tools_count", "selected_prompts_count", "selected_data_sources_count",
     # llm.call
     "provider", "model_version", "temperature", "max_tokens", "streaming",

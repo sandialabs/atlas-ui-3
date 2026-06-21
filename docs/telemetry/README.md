@@ -77,7 +77,6 @@ context propagation.
 | `model` | string | Model ID selected for the turn (ATLAS internal name) |
 | `agent_mode` | bool | Whether agent mode was active |
 | `only_rag` | bool | RAG-only mode flag |
-| `tool_choice_required` | bool | Tool choice forcing flag |
 | `selected_tools_count` | int | Number of tools enabled for the turn |
 | `selected_prompts_count` | int | Number of prompts enabled |
 | `selected_data_sources_count` | int | Number of RAG data sources enabled |

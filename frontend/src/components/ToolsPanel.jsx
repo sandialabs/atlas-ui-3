@@ -28,8 +28,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     removeTools: saveRemoveTools,
     addPrompts: saveAddPrompts,
     removePrompts: saveRemovePrompts,
-    toolChoiceRequired: savedToolChoiceRequired,
-    setToolChoiceRequired: saveSetToolChoiceRequired,
     clearToolsAndPrompts,
     complianceLevelFilter,
     tools: allTools,
@@ -41,7 +39,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   // Local state for pending changes
   const [pendingSelectedTools, setPendingSelectedTools] = useState(new Set())
   const [pendingSelectedPrompts, setPendingSelectedPrompts] = useState(new Set())
-  const [pendingToolChoiceRequired, setPendingToolChoiceRequired] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
 
@@ -58,11 +55,10 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     if (isOpen && !prevOpenRef.current) {
       setPendingSelectedTools(new Set(savedSelectedTools))
       setPendingSelectedPrompts(new Set(savedSelectedPrompts))
-      setPendingToolChoiceRequired(savedToolChoiceRequired)
       setHasChanges(false)
     }
     prevOpenRef.current = isOpen
-  }, [isOpen, savedSelectedTools, savedSelectedPrompts, savedToolChoiceRequired])
+  }, [isOpen, savedSelectedTools, savedSelectedPrompts])
 
   // Fetch auth status when panel opens
   useEffect(() => {
@@ -74,8 +70,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   // Use pending state while editing
   const selectedTools = pendingSelectedTools
   const selectedPrompts = pendingSelectedPrompts
-  const toolChoiceRequired = pendingToolChoiceRequired
-  
+
   // Toggle functions that work with pending state
   const toggleTool = (toolKey) => {
     setPendingSelectedTools(prev => {
@@ -139,11 +134,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     })
   }
   
-  const setToolChoiceRequired = (value) => {
-    setPendingToolChoiceRequired(value)
-    setHasChanges(true)
-  }
-  
   // Save handler - commits pending changes to context
   const handleSave = () => {
     // Determine what tools to add or remove
@@ -159,12 +149,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     
     if (promptsToAdd.length > 0) saveAddPrompts(promptsToAdd)
     if (promptsToRemove.length > 0) saveRemovePrompts(promptsToRemove)
-    
-    // Update tool choice required if changed
-    if (pendingToolChoiceRequired !== savedToolChoiceRequired) {
-      saveSetToolChoiceRequired(pendingToolChoiceRequired)
-    }
-    
+
     setHasChanges(false)
     onClose()
   }
@@ -173,7 +158,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const handleCancel = () => {
     setPendingSelectedTools(new Set(savedSelectedTools))
     setPendingSelectedPrompts(new Set(savedSelectedPrompts))
-    setPendingToolChoiceRequired(savedToolChoiceRequired)
     setHasChanges(false)
     onClose()
   }
@@ -528,26 +512,6 @@ const ToolsPanel = ({ isOpen, onClose }) => {
             >
               <Trash2 className="w-3 h-3" />
               Clear All
-            </button>
-          </div>
-          
-          {/* Required Tool Usage Toggle */}
-          <div className="flex items-center justify-between px-4 py-2 bg-gray-700 rounded-lg">
-            <div>
-              <h3 className="text-gray-50 text-sm font-medium">Required Tool Usage</h3>
-              <p className="text-xs text-gray-400">Model must use selected tools to respond</p>
-            </div>
-            <button
-              onClick={() => setToolChoiceRequired(!toolChoiceRequired)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 focus:ring-offset-gray-800 ${
-                toolChoiceRequired ? 'bg-blue-600' : 'bg-gray-600'
-              }`}
-            >
-              <span
-                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                  toolChoiceRequired ? 'translate-x-5' : 'translate-x-1'
-                }`}
-              />
             </button>
           </div>
         </div>

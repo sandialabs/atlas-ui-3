@@ -66,7 +66,6 @@ vi.mock('../hooks/chat/useSelections', async (importActual) => {
       selectedDataSources: new Set(),
       ragEnabled: false,
       toggleRagEnabled: vi.fn(),
-      toolChoiceRequired: false,
       complianceLevelFilter: '',
     }),
   }

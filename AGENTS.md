@@ -125,7 +125,7 @@ atlas/
    application/
       chat/
          service.py     # ChatService - main orchestrator and streaming
-         agent/         # ReAct, Think-Act, Act, and Agentic agent loops
+         agent/         # Native agentic loop (single tool_choice=auto strategy)
          utilities/     # Helper functions
    domain/
       messages/         # Message and conversation models
@@ -168,12 +168,7 @@ frontend/src/
 
 1. **Protocol-Based DI**: Uses Python `Protocol` (structural subtyping) instead of ABC for loose coupling
 
-2. **Agent Loop Strategy Pattern**: Four strategies via `APP_AGENT_LOOP_STRATEGY`:
-   - `agentic`: Claude-native loop, no control tools, `tool_choice="auto"` (best for Anthropic models)
-   - `react`: Reason-Act-Observe cycle (structured reasoning)
-   - `think-act`: Extended thinking (slower, complex reasoning)
-   - `act`: Pure action loop (fastest, minimal overhead)
-   The `agentic` strategy lets the model manage its own control flow (text-only = done); `react`/`think-act`/`act` use scaffolding tools like `finished` and `agent_decide_next`.
+2. **Single Native Agent Loop**: Agent mode uses one loop — the `agentic` strategy. The model receives the real user tools with `tool_choice="auto"` and manages its own control flow: it calls one or more tools (executed in parallel), sees the results, and decides again; a text-only response (no tool calls) signals completion. There are no scaffolding "control tools" (`finished`, `agent_decide_next`) and tool choice is never forced. The older `react`/`think-act`/`act` strategies were removed (PR #664) because forced `tool_choice="required"` was unsupported by several providers and the control-tool parsing was fragile. `AGENT_LOOP_STRATEGY` (and the `agent_loop_strategy` request field) are still accepted for backward compatibility but always resolve to the agentic loop.
 
 3. **MCP Transport Auto-Detection**: Detects stdio, HTTP, or SSE based on config
 

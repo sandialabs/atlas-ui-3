@@ -153,7 +153,6 @@ class ChatOrchestrator:
         selected_prompts: Optional[List[str]] = None,
         selected_data_sources: Optional[List[str]] = None,
         only_rag: bool = False,
-        tool_choice_required: bool = False,
         agent_mode: bool = False,
         temperature: float = 0.7,
         files: Optional[Dict[str, Any]] = None,
@@ -172,7 +171,6 @@ class ChatOrchestrator:
             selected_prompts: Optional list of MCP prompts
             selected_data_sources: Optional list of data sources
             only_rag: Whether to use only RAG (no tools)
-            tool_choice_required: Whether tool use is required
             agent_mode: Whether to use agent mode
             temperature: LLM temperature
             files: Optional files to attach
@@ -295,6 +293,23 @@ class ChatOrchestrator:
                     ),
                 )
 
+        # Agent mode needs at least one tool to act on. With no tools selected
+        # the agentic loop has nothing to call, and tool-seeking prompts can
+        # drive the model to emit a tool call the provider then rejects
+        # ("tool_choice is none, but model called a tool"), which surfaces as an
+        # empty/failed response. Fall back to a normal chat turn and tell the
+        # user instead of failing. The frontend guards this too, but enforcing
+        # it here covers API clients and older frontends.
+        if agent_mode and not selected_tools:
+            logger.info("Agent mode requested with no tools selected; running as a normal chat turn")
+            await self.event_publisher.publish_warning(
+                message=(
+                    "**Agent mode needs at least one tool.** No tools were selected, "
+                    "so this message ran as a normal chat. Select one or more tools to use agent mode."
+                ),
+            )
+            agent_mode = False
+
         # Route to appropriate mode (always streaming)
         if agent_mode and self.agent_mode:
             return await self.agent_mode.run(
@@ -303,7 +318,7 @@ class ChatOrchestrator:
                 messages=messages,
                 selected_tools=selected_tools,
                 selected_data_sources=selected_data_sources,
-                max_steps=kwargs.get("agent_max_steps", 30),
+                max_steps=kwargs.get("agent_max_steps", 10),
                 temperature=temperature,
                 agent_loop_strategy=kwargs.get("agent_loop_strategy"),
             )
@@ -320,7 +335,6 @@ class ChatOrchestrator:
                 selected_tools=selected_tools,
                 selected_data_sources=selected_data_sources,
                 user_email=user_email,
-                tool_choice_required=tool_choice_required,
                 update_callback=update_callback,
                 temperature=temperature,
             )

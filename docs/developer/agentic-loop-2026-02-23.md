@@ -1,18 +1,28 @@
-# Agentic Loop Strategy
+# Agentic Loop (the single agent loop)
 
-Last updated: 2026-02-23
+Last updated: 2026-06-20
+
+> **Update (PR #664):** ATLAS now has exactly one agent loop — the native
+> `agentic` loop described here. The former `react`, `think-act`, and `act`
+> strategies (and their scaffolding "control tools" and forced
+> `tool_choice="required"`) were removed. Forcing tool choice was unsupported
+> by several providers and the control-tool/JSON parsing was fragile. The
+> `AGENT_LOOP_STRATEGY` setting and the `agent_loop_strategy` request field
+> are still accepted for backward compatibility but always resolve to the
+> agentic loop. This matches the product direction in `AGENTS.md` ("the in-app
+> agent loop is not the focus").
 
 ## Overview
 
-The `agentic` agent loop strategy mirrors how Claude Code and Claude Desktop drive tool-use loops. It uses zero control tools and `tool_choice="auto"`, trusting the model to manage its own control flow. When the model responds with text only (no tool calls), the loop is done.
+The agentic agent loop mirrors how Claude Code and Claude Desktop drive tool-use loops. It uses zero control tools and `tool_choice="auto"`, trusting the model to manage its own control flow. When the model responds with text only (no tool calls), the loop is done.
 
-This is the simplest and most token-efficient strategy. It produces 1 LLM call per step, compared to 3 for the ReAct strategy (Reason + Act + Observe).
+It is the simplest and most token-efficient design: 1 LLM call per step, no scaffolding, and identical behavior across providers (OpenAI, Anthropic, Gemini, Bedrock) via LiteLLM.
 
 ## Configuration
 
 ```bash
 # In .env or environment
-APP_AGENT_LOOP_STRATEGY=agentic
+AGENT_LOOP_STRATEGY=agentic
 ```
 
 Or via the `AGENT_LOOP_STRATEGY` alias (both are accepted by Pydantic's `AliasChoices`).
@@ -35,34 +45,34 @@ while steps < max_steps:
 
 Key behaviors:
 
-- **No control tools**: Unlike `react` (`agent_decide_next`, `agent_observe_decide`), `think-act` (`agent_think`), and `act` (`finished`), the agentic loop injects no scaffolding tools into the schema. The model sees only the real user tools.
-- **`tool_choice="auto"`**: The model naturally decides between calling tools and responding with text. Other strategies use `tool_choice="required"` which forces a tool call even when the model wants to answer directly.
-- **Text-only response = done**: The simplest possible completion signal. No JSON parsing, no control tool extraction, no fallback heuristics.
-- **Parallel tool execution**: When the model returns multiple tool calls in one response, all execute concurrently via `asyncio.gather` (shared `execute_multiple_tools` from PR #358).
-- **Streaming support**: When streaming is enabled, text tokens are published to the UI as they arrive. Tool call responses are handled non-streaming (same as other loops).
+- **No control tools**: The loop injects no scaffolding tools (no `finished`, `agent_decide_next`, etc.) into the schema. The model sees only the real user tools.
+- **`tool_choice="auto"`**: The model naturally decides between calling tools and responding with text. Tool choice is never forced — forcing it (`"required"`) is unsupported by several providers and forbids the model from answering directly.
+- **Text-only response = done**: The simplest possible completion signal. No JSON parsing, no control-tool extraction, no fallback heuristics.
+- **Parallel tool execution**: When the model returns multiple tool calls in one response, all execute concurrently via `asyncio.gather` (shared `execute_multiple_tools` from PR #358). Each result is appended as a `role: "tool"` message keyed by `tool_call_id`, then the full message list is re-sent on the next step.
+- **Streaming support**: When streaming is enabled, text tokens are published to the UI as they arrive; tool-call responses are handled non-streaming.
 
-## When to Use Each Strategy
+## End-to-end verification (PR #664)
 
-| Strategy | Best For | LLM Calls/Step | Control Tools |
-|----------|----------|----------------|---------------|
-| `agentic` | Anthropic models (Claude), simple tool workflows | 1 | None |
-| `react` | OpenAI models, complex multi-step reasoning with explicit structure | 3 | `agent_decide_next`, `agent_observe_decide` |
-| `think-act` | Deep reasoning tasks, complex problem solving | 2 | `agent_think` |
-| `act` | Fast tool execution with minimal overhead | 1 | `finished` |
+Captured against a local instance running this branch.
 
-**Use `agentic` when:**
-- You are using Anthropic models (Claude 3.5/4/4.5) where native tool-use training makes external scaffolding counterproductive
-- You want the lowest latency and cost per agent step
-- You want the model to naturally integrate reasoning into its tool-use flow
+The agent runs the only strategy (`agentic`) and executes multiple real MCP tool
+calls in one turn before answering — the prompt "compute 1234×5678, 98765/43, and
+2^16" drives three `calculator_evaluate` calls, then a text-only summary ends the
+loop:
 
-**Use other strategies when:**
-- You need explicit structured reasoning visible in the UI (ReAct's Reason/Observe phases)
-- You are using models that benefit from forced tool calling (`tool_choice="required"`)
-- You need the model to call a specific control tool to signal completion (Act's `finished`)
+![Agent mode end-to-end calculator run](./images/pr664-agent-mode-e2e.png)
+
+The Settings panel keeps agent mode (Max Agent Iterations) but no longer exposes a
+loop-strategy selector, and the Tools panel no longer has a "Required Tool Usage"
+(forced `tool_choice`) toggle:
+
+| Settings (no strategy selector) | Tools (no forced-tool toggle) |
+|---|---|
+| ![Settings without strategy dropdown](./images/pr664-settings-no-strategy.png) | ![Tools without required-usage toggle](./images/pr664-tools-no-required-toggle.png) |
 
 ## Architecture
 
-The implementation lives in `atlas/application/chat/agent/agentic_loop.py` and follows the same patterns as the other loop strategies:
+The implementation lives in `atlas/application/chat/agent/agentic_loop.py`:
 
 - Implements `AgentLoopProtocol` from `atlas/application/chat/agent/protocols.py`
 - Registered in `AgentLoopFactory` at `atlas/application/chat/agent/factory.py`

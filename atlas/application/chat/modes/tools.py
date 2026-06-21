@@ -70,7 +70,6 @@ class ToolsModeRunner:
         selected_tools: List[str],
         selected_data_sources: Optional[List[str]] = None,
         user_email: Optional[str] = None,
-        tool_choice_required: bool = False,
         update_callback: Optional[UpdateCallback] = None,
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
@@ -84,7 +83,6 @@ class ToolsModeRunner:
             selected_tools: List of tools to make available
             selected_data_sources: Optional list of data sources (for RAG+tools)
             user_email: Optional user email for authorization
-            tool_choice_required: Whether tool use is required
             update_callback: Optional callback for streaming updates
             temperature: LLM temperature parameter
 
@@ -102,7 +100,7 @@ class ToolsModeRunner:
             tools_schema=tools_schema,
             data_sources=selected_data_sources,
             user_email=user_email,
-            tool_choice=("required" if tool_choice_required else "auto"),
+            tool_choice="auto",
             temperature=temperature,
         )
 
@@ -178,14 +176,13 @@ class ToolsModeRunner:
         selected_tools: List[str],
         selected_data_sources: Optional[List[str]] = None,
         user_email: Optional[str] = None,
-        tool_choice_required: bool = False,
         update_callback: Optional[UpdateCallback] = None,
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
         """Execute tools mode with token streaming."""
         tools_schema = await error_handler.safe_get_tools_schema(self.tool_manager, selected_tools)
 
-        tool_choice = "required" if tool_choice_required else "auto"
+        tool_choice = "auto"
 
         # Stream initial LLM call with tools
         accumulated_content = ""
@@ -258,54 +255,115 @@ class ToolsModeRunner:
                 token="", is_first=False, is_last=True,
             )
 
-        # Execute tool workflow (non-streaming tools, streaming synthesis)
         session_context = build_session_context(session)
         effective_callback = update_callback
         if effective_callback is None:
             effective_callback = self._get_send_json()
 
-        # Execute tools in parallel
-        # Convert tool_calls to plain dicts for API serialization
-        # (streaming yields SimpleNamespace objects for attribute access
-        # but litellm needs dicts when re-sending messages to the LLM)
-        tool_calls_dicts = [
-            {
-                "id": tc.id,
-                "type": tc.type,
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                },
-            }
-            for tc in final_llm_response.tool_calls
-        ]
-        messages.append({
-            "role": "assistant",
-            "content": final_llm_response.content,
-            "tool_calls": tool_calls_dicts,
-        })
-        tool_results = await tool_executor.execute_multiple_tools(
-            tool_calls=final_llm_response.tool_calls,
-            session_context=session_context,
-            tool_manager=self.tool_manager,
-            update_callback=effective_callback,
-            config_manager=self.config_manager,
-            skip_approval=self.skip_approval,
-        )
-        for result in tool_results:
+        # Bounded tool-calling loop. The initial response is round 0; the model
+        # may take up to ``max_extra_rounds`` further rounds to chain dependent
+        # tool calls (e.g. compute a value, then use it). An anti-loop guard
+        # refuses repeated identical calls so a model cannot spin on one tool.
+        # When the budget is exhausted (or the model keeps repeating), a final
+        # no-tools synthesis produces the closing text answer. ``max_extra_rounds
+        # == 0`` reproduces the classic single-round behavior.
+        max_extra_rounds = self._max_extra_rounds()
+        current_response = final_llm_response
+        executed_signatures: set = set()
+        extra_round = 0
+
+        while True:
+            tool_calls = [tc for tc in (current_response.tool_calls or []) if tc is not None]
+
+            # Append the assistant message with tool_calls as plain dicts so they
+            # round-trip to the next LLM call (streaming yields SimpleNamespace
+            # objects, which serialize to an empty array and get rejected).
             messages.append({
-                "role": "tool",
-                "content": result.content,
-                "tool_call_id": result.tool_call_id,
+                "role": "assistant",
+                "content": current_response.content,
+                "tool_calls": [self._tool_call_dict(tc) for tc in tool_calls],
             })
 
-        # Process artifacts
-        if self.artifact_processor:
-            await self.artifact_processor(session, tool_results, effective_callback)
+            repeated_ids = {
+                self._tool_call_id(tc)
+                for tc in tool_calls
+                if self._tool_call_signature(tc) in executed_signatures
+            }
+            fresh = [
+                tc for tc in tool_calls
+                if self._tool_call_signature(tc) not in executed_signatures
+            ]
 
-        # Stream synthesis
+            if not fresh:
+                # Anti-loop: the model is only repeating calls it already made.
+                # Satisfy the API (every tool_call_id needs a tool message) with
+                # cached-result notes, then stop and synthesize a final answer.
+                for tc in tool_calls:
+                    messages.append({
+                        "role": "tool",
+                        "content": "(skipped: identical tool call already executed this turn)",
+                        "tool_call_id": self._tool_call_id(tc),
+                    })
+                break
+
+            results = await tool_executor.execute_multiple_tools(
+                tool_calls=fresh,
+                session_context=session_context,
+                tool_manager=self.tool_manager,
+                update_callback=effective_callback,
+                config_manager=self.config_manager,
+                skip_approval=self.skip_approval,
+            )
+            for tc in fresh:
+                executed_signatures.add(self._tool_call_signature(tc))
+            result_by_id = {r.tool_call_id: r.content for r in results}
+            # Append tool results in the SAME order as the assistant tool_calls.
+            for tc in tool_calls:
+                tc_id = self._tool_call_id(tc)
+                if tc_id in repeated_ids:
+                    content = "(skipped: identical tool call already executed this turn)"
+                else:
+                    content = result_by_id.get(tc_id, "")
+                messages.append({
+                    "role": "tool",
+                    "content": content,
+                    "tool_call_id": tc_id,
+                })
+
+            if self.artifact_processor:
+                await self.artifact_processor(session, results, effective_callback)
+
+            # Budget check: stop chaining once the extra-round budget is spent.
+            if extra_round >= max_extra_rounds:
+                break
+            extra_round += 1
+
+            # Continue WITH tools so the model can chain another dependent call.
+            next_text, current_response, err = await self._stream_tools_round(
+                model, messages, tools_schema, selected_data_sources,
+                user_email, temperature,
+            )
+            if err is not None:
+                # Provider error mid-continuation (e.g. the tool-choice
+                # rejection) -- fall back to a graceful final synthesis.
+                if current_response is None:
+                    current_response = LLMResponse(content="")
+                break
+            if current_response is None or not current_response.has_tool_calls():
+                # Model produced its final text answer -- finalize and return.
+                final_text = next_text or (current_response.content if current_response else "")
+                return await self._finalize_text_response(
+                    session, final_text, bool(next_text),
+                    selected_tools, selected_data_sources,
+                )
+            # else: loop to execute the newly requested tools.
+
+        # Budget exhausted or anti-loop tripped while the model still wanted
+        # tools -> force a closing text answer via no-tools synthesis, hardened
+        # against another tool-call attempt with a graceful message if the model
+        # ignores that and the provider rejects.
         synthesis_content = await self._stream_synthesis(
-            final_llm_response, messages, model, session_context, user_email, effective_callback,
+            current_response, messages, model, session_context, user_email, effective_callback,
         )
 
         assistant_message = Message(
@@ -367,6 +425,20 @@ class ToolsModeRunner:
             if prompt_text:
                 synthesis_messages.append({"role": "system", "content": prompt_text})
 
+        # The synthesis call sends no tools, so if the model emits a tool call the
+        # provider rejects the whole stream ("tool_choice is none, but model called
+        # a tool"). Tell the model explicitly not to call tools here -- most models
+        # comply and just summarize; for those that don't, _synthesis_error_message
+        # turns the rejection into a clear, actionable reply instead of a crash.
+        synthesis_messages.append({
+            "role": "system",
+            "content": (
+                "You have already used all tools available for this turn. Do NOT "
+                "call any more tools. Reply to the user with a plain-text answer "
+                "that uses the tool results above."
+            ),
+        })
+
         return await stream_and_accumulate(
             token_generator=self.llm.stream_plain(
                 model, synthesis_messages, user_email=user_email,
@@ -376,7 +448,171 @@ class ToolsModeRunner:
                 model, synthesis_messages, user_email=user_email,
             ),
             context_label="synthesis",
+            on_error_message=self._synthesis_error_message,
         )
+
+    # -- Bounded tool-calling loop helpers ---------------------------------
+
+    def _max_extra_rounds(self) -> int:
+        """Configured number of additional tool-calling rounds (default 3)."""
+        try:
+            return max(0, int(self.config_manager.app_settings.tools_mode_max_extra_rounds))
+        except Exception:
+            return 3
+
+    def _agent_mode_available(self) -> bool:
+        """Whether Agent Mode is enabled for this deployment (admin flag)."""
+        try:
+            return bool(self.config_manager.app_settings.feature_agent_mode_available)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _tool_call_id(tc: Any) -> Optional[str]:
+        if isinstance(tc, dict):
+            return tc.get("id")
+        return getattr(tc, "id", None)
+
+    @staticmethod
+    def _tool_call_signature(tc: Any):
+        """Identity used by the anti-loop guard: (name, arguments)."""
+        if isinstance(tc, dict):
+            fn = tc.get("function") or {}
+            if isinstance(fn, dict):
+                return (fn.get("name", ""), fn.get("arguments", ""))
+            return (getattr(fn, "name", ""), getattr(fn, "arguments", ""))
+        fn = getattr(tc, "function", None)
+        return (getattr(fn, "name", "") or "", getattr(fn, "arguments", "") or "")
+
+    @staticmethod
+    def _tool_call_dict(tc: Any) -> Dict[str, Any]:
+        """Normalize a tool call to a plain OpenAI-format dict for re-sending."""
+        if isinstance(tc, dict):
+            fn = tc.get("function") or {}
+            if not isinstance(fn, dict):
+                fn = {"name": getattr(fn, "name", ""), "arguments": getattr(fn, "arguments", "")}
+            return {
+                "id": tc.get("id"),
+                "type": tc.get("type", "function") or "function",
+                "function": {"name": fn.get("name", ""), "arguments": fn.get("arguments", "")},
+            }
+        fn = getattr(tc, "function", None)
+        return {
+            "id": getattr(tc, "id", None),
+            "type": getattr(tc, "type", "function") or "function",
+            "function": {
+                "name": getattr(fn, "name", "") or "",
+                "arguments": getattr(fn, "arguments", "") or "",
+            },
+        }
+
+    def _synthesis_error_message(self, exc: Exception) -> str:
+        """User-facing message when the synthesis call fails.
+
+        The common failure here is the model trying to call yet another tool
+        while we offer none, which the provider rejects. Turn that into a clear,
+        actionable reply -- and only mention Agent Mode when it is actually
+        available (an admin may have disabled it).
+        """
+        text = str(exc).lower()
+        is_tool_choice_error = (
+            "tool choice is none" in text
+            or "model called a tool" in text
+            or "midstreamfallback" in type(exc).__name__.lower()
+        )
+        if is_tool_choice_error:
+            base = (
+                "I ran the tool(s) above, but the model then tried to call another "
+                "tool while finishing its answer, which standard tools mode can't do "
+                "after its tool rounds are used up."
+            )
+            if self._agent_mode_available():
+                return (
+                    base
+                    + " You can send a follow-up to continue, or turn on Agent Mode "
+                    "to let me chain multiple tools automatically."
+                )
+            return base + " Send a follow-up (e.g. \"now do the next step\") and I'll continue."
+        _err_class, user_msg, _log_msg = error_handler.classify_llm_error(exc)
+        return user_msg
+
+    async def _stream_tools_round(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        tools_schema: List[Dict[str, Any]],
+        selected_data_sources: Optional[List[str]],
+        user_email: Optional[str],
+        temperature: float,
+    ):
+        """Run one continuation LLM call WITH tools, streaming any text tokens.
+
+        Returns ``(accumulated_text, llm_response, error)``. On a streaming error
+        the stream is closed and ``error`` is the exception (caller falls back to
+        synthesis). Any streamed text is closed with an is_last token so the next
+        UI segment (tool execution or synthesis) starts cleanly.
+        """
+        accumulated = ""
+        response: Optional[LLMResponse] = None
+        is_first = True
+        try:
+            if selected_data_sources and user_email:
+                stream = self.llm.stream_with_rag_and_tools(
+                    model, messages, selected_data_sources, tools_schema,
+                    user_email, "auto", temperature=temperature,
+                )
+            else:
+                stream = self.llm.stream_with_tools(
+                    model, messages, tools_schema, "auto",
+                    temperature=temperature, user_email=user_email,
+                )
+            async for item in stream:
+                if isinstance(item, str):
+                    await self.event_publisher.publish_token_stream(
+                        token=item, is_first=is_first, is_last=False,
+                    )
+                    accumulated += item
+                    is_first = False
+                elif isinstance(item, LLMResponse):
+                    response = item
+        except Exception as exc:
+            logger.error("Streaming tools continuation error: %s", exc)
+            if accumulated:
+                await self.event_publisher.publish_token_stream(
+                    token="", is_first=False, is_last=True,
+                )
+            return accumulated, response, exc
+
+        if accumulated:
+            await self.event_publisher.publish_token_stream(
+                token="", is_first=False, is_last=True,
+            )
+        return accumulated, response, None
+
+    async def _finalize_text_response(
+        self,
+        session: Session,
+        content: str,
+        already_streamed: bool,
+        selected_tools: List[str],
+        selected_data_sources: Optional[List[str]],
+    ) -> Dict[str, Any]:
+        """Persist and emit a plain-text final answer produced mid-loop."""
+        if not already_streamed:
+            await self.event_publisher.publish_chat_response(
+                message=content, has_pending_tools=False,
+            )
+        assistant_message = Message(
+            role=MessageRole.ASSISTANT,
+            content=content,
+            metadata={
+                "tools": selected_tools,
+                **({"data_sources": selected_data_sources} if selected_data_sources else {}),
+            },
+        )
+        session.history.add_message(assistant_message)
+        await self.event_publisher.publish_response_complete()
+        return event_notifier.create_chat_response(content)
 
     def _get_send_json(self) -> Optional[UpdateCallback]:
         """Get send_json callback from event publisher if available."""

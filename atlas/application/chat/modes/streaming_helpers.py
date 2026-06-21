@@ -21,6 +21,7 @@ async def stream_and_accumulate(
     event_publisher: EventPublisher,
     fallback_fn=None,
     context_label: str = "LLM",
+    on_error_message=None,
 ) -> str:
     """Consume a token async generator, publishing each chunk and accumulating the result.
 
@@ -29,6 +30,9 @@ async def stream_and_accumulate(
         event_publisher: Publisher for token_stream events.
         fallback_fn: Optional async callable returning str if the stream yields nothing.
         context_label: Label for log messages (e.g. "plain", "RAG").
+        on_error_message: Optional callable ``(exc) -> str`` building the
+            user-facing message when both the stream and fallback fail. Defaults
+            to ``classify_llm_error``'s generic message when not provided.
 
     Returns:
         The accumulated response text.
@@ -76,15 +80,18 @@ async def stream_and_accumulate(
             token="", is_first=False, is_last=True,
         )
         if not accumulated:
+            def _error_message():
+                if on_error_message:
+                    return on_error_message(exc)
+                return classify_llm_error(exc)[1]
+
             if fallback_fn:
                 try:
                     accumulated = await fallback_fn()
                 except Exception:
-                    _err_class, user_msg, _log_msg = classify_llm_error(exc)
-                    accumulated = user_msg
+                    accumulated = _error_message()
             else:
-                _err_class, user_msg, _log_msg = classify_llm_error(exc)
-                accumulated = user_msg
+                accumulated = _error_message()
             await event_publisher.publish_chat_response(
                 message=accumulated, has_pending_tools=False,
             )

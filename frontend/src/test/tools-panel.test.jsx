@@ -31,7 +31,6 @@ describe('ToolsPanel - Tool Selection', () => {
   let mockTogglePrompt
   let mockRemovePrompts
   let mockClearToolsAndPrompts
-  let mockSetToolChoiceRequired
 
   const defaultChatContext = {
     selectedTools: new Set(),
@@ -42,8 +41,6 @@ describe('ToolsPanel - Tool Selection', () => {
     removeTools: vi.fn(),
     removePrompts: vi.fn(),
     clearToolsAndPrompts: vi.fn(),
-    toolChoiceRequired: false,
-    setToolChoiceRequired: vi.fn(),
     complianceLevelFilter: 'all',
     tools: [],
     prompts: [],
@@ -64,7 +61,6 @@ describe('ToolsPanel - Tool Selection', () => {
     mockTogglePrompt = vi.fn()
     mockRemovePrompts = vi.fn()
     mockClearToolsAndPrompts = vi.fn()
-    mockSetToolChoiceRequired = vi.fn()
 
     useChat.mockReturnValue({
       ...defaultChatContext,
@@ -74,8 +70,7 @@ describe('ToolsPanel - Tool Selection', () => {
       removeTools: mockRemoveTools,
       togglePrompt: mockTogglePrompt,
       removePrompts: mockRemovePrompts,
-      clearToolsAndPrompts: mockClearToolsAndPrompts,
-      setToolChoiceRequired: mockSetToolChoiceRequired
+      clearToolsAndPrompts: mockClearToolsAndPrompts
     })
 
     useMarketplace.mockReturnValue(defaultMarketplaceContext)
@@ -225,52 +220,6 @@ describe('ToolsPanel - Tool Selection', () => {
     // Verify removeTools and removePrompts were called with all selected items
     expect(mockRemoveTools).toHaveBeenCalledWith(['test_server_tool1', 'test_server_tool2'])
     expect(mockRemovePrompts).toHaveBeenCalledWith(['test_server_prompt1'])
-  })
-
-  it('should toggle Required Tool Usage setting', () => {
-    const testTools = [{
-      server: 'test_server',
-      description: 'Test server',
-      tools: ['tool1'],
-      tools_detailed: [],
-      tool_count: 1,
-      prompts: [],
-      prompt_count: 0
-    }]
-
-    useChat.mockReturnValue({
-      ...defaultChatContext,
-      tools: testTools,
-      toolChoiceRequired: false,
-      setToolChoiceRequired: mockSetToolChoiceRequired
-    })
-
-    useMarketplace.mockReturnValue({
-      ...defaultMarketplaceContext,
-      getFilteredTools: vi.fn(() => testTools)
-    })
-
-    render(
-      <BrowserRouter>
-        <ToolsPanel isOpen={true} onClose={vi.fn()} />
-      </BrowserRouter>
-    )
-
-    // Find the toggle switch in the Required Tool Usage section
-    const toggleButtons = screen.getAllByRole('button')
-    const toggleSwitch = toggleButtons.find(button =>
-      button.className.includes('relative inline-flex')
-    )
-
-    expect(toggleSwitch).toBeDefined()
-    fireEvent.click(toggleSwitch)
-
-    // Click save button to persist the change
-    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
-    fireEvent.click(saveButton)
-
-    // Verify setToolChoiceRequired was called with true
-    expect(mockSetToolChoiceRequired).toHaveBeenCalledWith(true)
   })
 
   it('should enable all tools and prompts when Enable All button is clicked', () => {
@@ -577,8 +526,6 @@ describe('ToolsPanel - Custom Information Display', () => {
     removeTools: vi.fn(),
     removePrompts: vi.fn(),
     clearToolsAndPrompts: vi.fn(),
-    toolChoiceRequired: false,
-    setToolChoiceRequired: vi.fn(),
     complianceLevelFilter: 'all',
     tools: [],
     prompts: [],

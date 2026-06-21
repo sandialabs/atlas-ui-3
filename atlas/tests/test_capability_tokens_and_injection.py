@@ -175,6 +175,15 @@ def test_download_without_auth_fails_in_production_mode(client):
 def test_injection_produces_tokenized_urls(client, monkeypatch):
     """Verify that tool argument injection replaces filename with tokenized URL."""
     from atlas.application.chat.utilities.tool_executor import inject_context_into_args  # type: ignore
+    from atlas.core import capabilities  # type: ignore
+
+    # Isolate from any local .env BACKEND_PUBLIC_URL: create_download_url returns
+    # an absolute URL when it is set, so without this the relative-URL assertions
+    # below leak the developer's personal config (e.g. http://localhost:8001) and
+    # fail. The absolute-URL behavior is covered explicitly at the end.
+    monkeypatch.setattr(
+        capabilities.config_manager.app_settings, "backend_public_url", None, raising=False,
+    )
 
     # Create a fake session context with a file mapping
     session_context = {
@@ -207,3 +216,28 @@ def test_injection_produces_tokenized_urls(client, monkeypatch):
     args3 = {"image_filename": "report.pdf", "markdown_content": "# Hello"}
     injected3 = inject_context_into_args(args3, session_context)
     assert injected3["image_filename"] == "report.pdf"  # unchanged
+
+
+def test_injection_uses_absolute_url_when_backend_public_url_set(client, monkeypatch):
+    """When BACKEND_PUBLIC_URL is configured, injected file URLs are absolute so
+    remote MCP servers (and browsers on a different host) can reach them."""
+    from atlas.application.chat.utilities.tool_executor import inject_context_into_args  # type: ignore
+    from atlas.core import capabilities  # type: ignore
+
+    monkeypatch.setattr(
+        capabilities.config_manager.app_settings,
+        "backend_public_url",
+        "https://atlas.example.com",
+        raising=False,
+    )
+
+    session_context = {
+        "user_email": "bob@example.com",
+        "files": {"report.pdf": {"key": "abc123", "content_type": "application/pdf"}},
+    }
+    injected = inject_context_into_args({"filename": "report.pdf"}, session_context)
+
+    assert injected["filename"].startswith("https://atlas.example.com/mcp/files/download/abc123")
+    assert "?token=" in injected["filename"]
+    # No double slash between the base and the path.
+    assert "example.com//mcp" not in injected["filename"]

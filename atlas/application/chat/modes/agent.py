@@ -30,7 +30,7 @@ class AgentModeRunner:
         agent_loop_factory: AgentLoopFactory,
         event_publisher: EventPublisher,
         artifact_processor: Optional[Callable[[Session, List[ToolResult], Optional[UpdateCallback]], Awaitable[None]]] = None,
-        default_strategy: str = "think-act",
+        default_strategy: str = "agentic",
     ):
         """
         Initialize agent mode runner.
@@ -45,6 +45,21 @@ class AgentModeRunner:
         self.event_publisher = event_publisher
         self.artifact_processor = artifact_processor
         self.default_strategy = default_strategy
+
+    def _get_send_json(self) -> Optional[UpdateCallback]:
+        """Get send_json callback from the event publisher if available.
+
+        Mirrors ToolsModeRunner so the artifact processor can emit
+        files_update / canvas_files events for generated files.
+        """
+        if hasattr(self.event_publisher, "send_json"):
+            return self.event_publisher.send_json
+        logger.warning(
+            "AgentModeRunner event_publisher has no send_json; canvas/file "
+            "updates for generated artifacts will be skipped. Type: %s",
+            type(self.event_publisher),
+        )
+        return None
 
     async def run(
         self,
@@ -68,7 +83,8 @@ class AgentModeRunner:
             selected_data_sources: Optional list of data sources
             max_steps: Maximum number of agent steps
             temperature: LLM temperature parameter
-            agent_loop_strategy: Strategy name (react, think-act). Falls back to default.
+            agent_loop_strategy: Accepted for backward compatibility; the
+                native agentic loop is always used.
 
         Returns:
             Response dictionary
@@ -85,10 +101,17 @@ class AgentModeRunner:
             history=session.history,
         )
 
-        # Artifact processor wrapper for handling tool results
+        # Artifact processor wrapper for handling tool results.
+        # The update callback must be a real send_json so the artifact processor
+        # can emit the files_update / canvas_files events that surface generated
+        # files (e.g. a pptx) into the session and canvas. Passing None here meant
+        # agent-mode artifacts were stored (visible in the File library) but never
+        # pushed to the canvas/session, unlike standard tools mode.
+        send_json = self._get_send_json()
+
         async def process_artifacts(results):
             if self.artifact_processor:
-                await self.artifact_processor(session, results, None)
+                await self.artifact_processor(session, results, send_json)
 
         # Create event relay to map AgentEvents to UI updates
         event_relay = AgentEventRelay(

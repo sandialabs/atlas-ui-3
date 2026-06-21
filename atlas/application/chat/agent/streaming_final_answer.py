@@ -19,8 +19,8 @@ async def stream_final_answer(
 ) -> str:
     """Stream the final answer token-by-token via event_publisher.
 
-    Used by all three agent loops (act, react, think-act) when the loop
-    exhausts its steps without a definitive final answer.
+    Used by the agentic loop when it exhausts ``max_steps`` without producing
+    a text-only response, to stream a closing answer.
 
     Returns the accumulated response text.
     """

@@ -271,7 +271,6 @@ describe('Issue #135 – Debug mode setting', () => {
       debugMode: true,
       llmTemperature: 0.7,
       maxIterations: 10,
-      agentLoopStrategy: 'agentic',
       autoApproveTools: false,
     })
 

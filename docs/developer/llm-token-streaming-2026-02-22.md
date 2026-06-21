@@ -52,7 +52,7 @@ Each mode runner has a `run_streaming()` method:
 ### Shared Helpers
 
 - **`stream_and_accumulate()`** in `streaming_helpers.py`: Iterates a token generator, publishes each token via `EventPublisher`, accumulates content, and falls back to a non-streaming call on error.
-- **`stream_final_answer()`** in `streaming_final_answer.py`: Used by agent loops (ReAct, Think-Act, Act) to stream the final answer after tool execution.
+- **`stream_final_answer()`** in `streaming_final_answer.py`: Used by the agentic loop to stream a closing answer when it exhausts `max_steps` without a text-only response.
 
 ### Error Handling
 

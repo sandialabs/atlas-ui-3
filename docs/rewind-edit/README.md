@@ -110,9 +110,11 @@ by the render and truncation paths so they cannot drift.
 
 ## Relationship to issue #622
 
-The same rewind primitive is what issue #622 (opt-in capture + forced-tool DPO
-replay) builds on: rewinding to a turn and replaying it with
-`selected_tools=[X]` and `tool_choice_required=True`. `truncate_at_user_index`
+The same rewind primitive is what issue #622 (opt-in capture + DPO replay)
+builds on: rewinding to a turn and replaying it with `selected_tools=[X]`.
+(The `tool_choice_required` flag the original #622 sketch referenced was
+removed in PR #664; replay relies on tool selection with `tool_choice="auto"`.)
+`truncate_at_user_index`
 deliberately **returns** the removed messages so a future capture layer can
 record the discarded ("rejected") trajectory without any further plumbing.
 Capture/consent itself is out of scope here.

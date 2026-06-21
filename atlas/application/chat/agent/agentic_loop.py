@@ -30,6 +30,38 @@ from .streaming_final_answer import stream_final_answer
 logger = logging.getLogger(__name__)
 
 
+def _to_tool_call_dict(tc: Any) -> Dict[str, Any]:
+    """Normalize a tool call to a plain OpenAI-format dict.
+
+    Tool calls reach the loop either as attribute-access objects (litellm
+    pydantic models from the non-streaming path, or ``SimpleNamespace`` from
+    the streaming accumulator) or already as dicts (e.g. from tests). Only
+    plain dicts serialize correctly when the assistant message is re-sent to
+    the provider on the next turn, so coerce everything to dicts here.
+    """
+    if isinstance(tc, dict):
+        fn = tc.get("function") or {}
+        if not isinstance(fn, dict):
+            fn = {"name": getattr(fn, "name", ""), "arguments": getattr(fn, "arguments", "")}
+        return {
+            "id": tc.get("id"),
+            "type": tc.get("type", "function"),
+            "function": {
+                "name": fn.get("name", ""),
+                "arguments": fn.get("arguments", ""),
+            },
+        }
+    function = getattr(tc, "function", None)
+    return {
+        "id": getattr(tc, "id", None),
+        "type": getattr(tc, "type", "function") or "function",
+        "function": {
+            "name": getattr(function, "name", "") or "",
+            "arguments": getattr(function, "arguments", "") or "",
+        },
+    }
+
+
 class AgenticLoop(AgentLoopProtocol):
     """Native agentic loop with no scaffolding overhead.
 
@@ -118,10 +150,16 @@ class AgenticLoop(AgentLoopProtocol):
                 final_answer = llm_response.content or ""
                 break
 
+            # Convert tool_calls to plain dicts for the assistant message so they
+            # round-trip to the next LLM call. The streaming path yields
+            # SimpleNamespace objects (for attribute access during execution),
+            # but litellm needs dicts when re-sending messages to the LLM --
+            # otherwise the tool_calls serialize to an empty array and providers
+            # like OpenAI reject the follow-up call (breaking multi-step chains).
             messages.append({
                 "role": "assistant",
                 "content": llm_response.content,
-                "tool_calls": tool_calls,
+                "tool_calls": [_to_tool_call_dict(tc) for tc in tool_calls],
             })
 
             results = await tool_executor.execute_multiple_tools(
@@ -243,9 +281,19 @@ class AgenticLoop(AgentLoopProtocol):
         except Exception:
             logger.exception("Error during streaming LLM call in agentic loop")
             if accumulated_content:
+                # Partial text already streamed to the UI -- close the stream and
+                # return what we have rather than discarding it.
                 await event_publisher.publish_token_stream(
                     token="", is_first=False, is_last=True,
                 )
+            else:
+                # Nothing was produced before the error. Surface it instead of
+                # returning an empty response that looks to the user like the
+                # model silently said nothing (e.g. the provider rejecting a
+                # mid-stream tool call with "tool_choice is none, but model
+                # called a tool"). The caller's error handling publishes a
+                # user-visible message.
+                raise
 
         if final_response is None:
             final_response = LLMResponse(content=accumulated_content)

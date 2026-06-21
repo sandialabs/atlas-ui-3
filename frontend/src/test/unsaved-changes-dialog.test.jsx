@@ -60,8 +60,6 @@ describe('ToolsPanel - Unsaved Changes Dialog', () => {
     addPrompts: vi.fn(),
     removePrompts: vi.fn(),
     clearToolsAndPrompts: vi.fn(),
-    toolChoiceRequired: false,
-    setToolChoiceRequired: vi.fn(),
     complianceLevelFilter: null,
     tools: mockTools,
     prompts: [],

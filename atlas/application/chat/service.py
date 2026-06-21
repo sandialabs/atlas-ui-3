@@ -174,8 +174,10 @@ class ChatService:
                 config_manager=self.config_manager,
             )
 
-        # Get default strategy from config
-        self.default_agent_strategy = "think-act"
+        # Get default strategy from config. Only the native agentic loop is
+        # supported; the config value is honored for backward compatibility but
+        # the factory resolves all values to the agentic loop.
+        self.default_agent_strategy = "agentic"
         try:
             if self.config_manager:
                 config_strategy = self.config_manager.app_settings.agent_loop_strategy
@@ -237,7 +239,6 @@ class ChatService:
         selected_prompts: Optional[List[str]] = None,
         selected_data_sources: Optional[List[str]] = None,
         only_rag: bool = False,
-        tool_choice_required: bool = False,
         user_email: Optional[str] = None,
         agent_mode: bool = False,
         temperature: float = 0.7,
@@ -255,7 +256,7 @@ class ChatService:
             f"handle_chat_message called - session_id: {session_id}, "
             f"model: {model}, content_length: {len(content)}, "
             f"selected_tools: {selected_tools}, selected_prompts: {selected_prompts}, selected_data_sources: {selected_data_sources}, "
-            f"only_rag: {only_rag}, tool_choice_required: {tool_choice_required}, "
+            f"only_rag: {only_rag}, "
             f"user_email: {sanitize_for_logging(user_email)}, agent_mode: {agent_mode}"
         )
 
@@ -304,7 +305,6 @@ class ChatService:
             "model": model,
             "agent_mode": bool(agent_mode),
             "only_rag": bool(only_rag),
-            "tool_choice_required": bool(tool_choice_required),
             "selected_tools_count": len(selected_tools) if selected_tools else 0,
             "selected_prompts_count": len(selected_prompts) if selected_prompts else 0,
             "selected_data_sources_count": (
@@ -325,7 +325,6 @@ class ChatService:
                     selected_prompts=selected_prompts,
                     selected_data_sources=selected_data_sources,
                     only_rag=only_rag,
-                    tool_choice_required=tool_choice_required,
                     agent_mode=agent_mode,
                     temperature=temperature,
                     update_callback=update_callback,
