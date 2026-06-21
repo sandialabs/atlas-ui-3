@@ -19,7 +19,7 @@ import base64
 import mimetypes
 import os
 from pathlib import Path
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, Dict
 
 import requests
 
@@ -133,24 +133,47 @@ def _viewer_hint(mime: str) -> str:
     return "code"
 
 
+def _too_large_error(size: int) -> ValueError:
+    return ValueError(
+        f"File is too large to display ({size} bytes, limit {MAX_BYTES} bytes)"
+    )
+
+
+def _fetch_url(url: str, name: str) -> tuple[bytes, str]:
+    """Stream a URL, enforcing MAX_BYTES before buffering the whole body."""
+    resp = requests.get(url, timeout=30, stream=True)
+    resp.raise_for_status()
+
+    # Trust an explicit Content-Length to fail fast when present.
+    declared = resp.headers.get("Content-Length")
+    if declared and declared.isdigit() and int(declared) > MAX_BYTES:
+        resp.close()
+        raise _too_large_error(int(declared))
+
+    buf = bytearray()
+    for chunk in resp.iter_content(chunk_size=65536):
+        buf.extend(chunk)
+        if len(buf) > MAX_BYTES:
+            resp.close()
+            raise _too_large_error(len(buf))
+    return bytes(buf), name
+
+
 def _read_bytes(source: str) -> tuple[bytes, str]:
     """Load file bytes from a local path or a (backend / http) URL.
 
-    Returns (data, display_name).
+    Enforces ``MAX_BYTES`` *before* buffering the full content: a ``stat`` check
+    for local files and a streamed read for URLs. Returns (data, display_name).
     """
     # Backend-injected relative download URL for a session file.
     if _is_backend_download_path(source):
         url = _backend_base_url().rstrip("/") + source
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
         # The real filename usually isn't in the tokenized URL; fall back to the
         # last path segment.
-        return resp.content, os.path.basename(source.split("?")[0]) or "file"
+        return _fetch_url(url, os.path.basename(source.split("?")[0]) or "file")
 
     if _is_url(source):
-        resp = requests.get(source, timeout=30)
-        resp.raise_for_status()
-        return resp.content, os.path.basename(source.split("?")[0]) or "file"
+        return _fetch_url(source, os.path.basename(source.split("?")[0]) or "file")
 
     # Local path on the developer's machine. Expand ~ and env vars for convenience.
     path = Path(os.path.expandvars(os.path.expanduser(source)))
@@ -158,6 +181,8 @@ def _read_bytes(source: str) -> tuple[bytes, str]:
         raise FileNotFoundError(f"File not found: {source}")
     if path.is_dir():
         raise IsADirectoryError(f"Path is a directory, not a file: {source}")
+    if path.stat().st_size > MAX_BYTES:
+        raise _too_large_error(path.stat().st_size)
     return path.read_bytes(), path.name
 
 
@@ -204,25 +229,20 @@ def display_file(
         return {"results": {"error": str(e)}}
     except IsADirectoryError as e:
         return {"results": {"error": str(e)}}
+    except ValueError as e:  # size cap exceeded
+        return {"results": {"error": f"{e}: {path}"}}
     except requests.HTTPError as e:
         return {"results": {"error": f"Download failed: {e}"}}
+    except requests.RequestException as e:
+        return {"results": {"error": f"Failed to fetch URL: {e}"}}
     except PermissionError as e:
         return {"results": {"error": f"Permission denied: {e}"}}
-    except Exception as e:  # noqa: BLE001
+    except OSError as e:
         return {"results": {"error": f"Failed to read file: {e}"}}
 
     size = len(data)
     if size == 0:
         return {"results": {"error": f"File is empty: {name}"}}
-    if size > MAX_BYTES:
-        return {
-            "results": {
-                "error": (
-                    f"File is too large to display ({size} bytes, limit "
-                    f"{MAX_BYTES} bytes): {name}"
-                )
-            }
-        }
 
     mime = _normalize_mime(name, data)
     viewer = _viewer_hint(mime)
@@ -242,6 +262,10 @@ def display_file(
                 "b64": b64,
                 "mime": mime,
                 "size": size,
+                # Explicit viewer so the streaming progress_artifacts path (which
+                # filters on art.viewer) renders files whose displayability comes
+                # from MIME sniffing rather than the filename extension.
+                "viewer": viewer,
                 "description": f"Contents of {name}",
             }
         ],
