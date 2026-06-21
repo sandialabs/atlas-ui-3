@@ -490,6 +490,57 @@ class TestAgenticLoopMessageAccumulation:
         assert messages[2]["role"] == "tool"
         assert messages[2]["content"] == "Found X."
 
+    @pytest.mark.asyncio
+    async def test_assistant_tool_calls_are_serializable_dicts(self):
+        """The assistant message's tool_calls must be plain JSON-serializable
+        dicts, not SimpleNamespace/objects.
+
+        Regression for multi-step chains: the streaming path yields
+        SimpleNamespace tool calls (good for attribute-access execution), but
+        when that assistant message is re-sent on the next turn, non-dict
+        tool_calls serialize to an empty array and providers like OpenAI
+        reject the follow-up call (``Invalid 'messages[N].tool_calls': empty
+        array``), breaking any task that needs more than one tool call.
+        """
+        import json
+
+        messages = [{"role": "user", "content": "Compute step by step"}]
+        # Two tool-call turns in a row, then a text answer -- the second call
+        # only succeeds if turn 1's assistant message round-tripped cleanly.
+        llm = FakeLLM([
+            LLMResponse(content="step 1", tool_calls=[_make_tool_call("c1", "calc", '{"e": "1+1"}')]),
+            LLMResponse(content="step 2", tool_calls=[_make_tool_call("c2", "calc", '{"e": "2+2"}')]),
+            LLMResponse(content="Done."),
+        ])
+        tool_mgr = _make_tool_manager({"calc": "ok"})
+        events, handler = _collect_events()
+
+        loop = _make_loop(llm, tool_mgr)
+        result = await loop.run(
+            model="test-model",
+            messages=messages,
+            context=_make_context(),
+            selected_tools=["calc"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+        )
+
+        assert result.final_answer == "Done."
+        assert result.steps == 3
+
+        assistant_msgs = [m for m in messages if m.get("role") == "assistant" and m.get("tool_calls")]
+        assert len(assistant_msgs) == 2
+        for msg in assistant_msgs:
+            for tc in msg["tool_calls"]:
+                # Must be a plain dict in OpenAI wire format, not an object.
+                assert isinstance(tc, dict), f"tool_call is {type(tc)}, not dict"
+                assert isinstance(tc["function"], dict)
+                assert tc["function"]["name"] == "calc"
+            # The whole message must JSON-serialize (objects would raise here).
+            json.dumps(msg)
+
 
 # -- Tests: factory integration -----------------------------------------
 
