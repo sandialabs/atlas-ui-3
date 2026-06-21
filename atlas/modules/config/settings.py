@@ -100,6 +100,20 @@ class AppSettings(BaseSettings):
         """Maintain backward compatibility for code still referencing agent_mode_available."""
         return self.feature_agent_mode_available
 
+    # Standard (non-agent) tools mode: how many ADDITIONAL tool-calling rounds
+    # the model may take after its first round before the turn is finalized.
+    # 0 keeps the classic single-round behavior. The default of 3 lets the model
+    # chain a few dependent tool calls (e.g. compute a value, then use it) without
+    # enabling full Agent Mode. An anti-loop guard refuses repeated identical tool
+    # calls, so this cannot spin on the same tool. Admins tune this with no code
+    # change via TOOLS_MODE_MAX_EXTRA_ROUNDS.
+    tools_mode_max_extra_rounds: int = Field(
+        default=3,
+        ge=0,
+        description="Max additional tool-calling rounds in standard tools mode (0 = single round).",
+        validation_alias=AliasChoices("TOOLS_MODE_MAX_EXTRA_ROUNDS"),
+    )
+
     # Tool approval settings
     require_tool_approval_by_default: bool = False
     # When true, all tools require approval (admin-enforced), overriding per-tool and default settings

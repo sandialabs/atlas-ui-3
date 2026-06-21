@@ -281,9 +281,19 @@ class AgenticLoop(AgentLoopProtocol):
         except Exception:
             logger.exception("Error during streaming LLM call in agentic loop")
             if accumulated_content:
+                # Partial text already streamed to the UI -- close the stream and
+                # return what we have rather than discarding it.
                 await event_publisher.publish_token_stream(
                     token="", is_first=False, is_last=True,
                 )
+            else:
+                # Nothing was produced before the error. Surface it instead of
+                # returning an empty response that looks to the user like the
+                # model silently said nothing (e.g. the provider rejecting a
+                # mid-stream tool call with "tool_choice is none, but model
+                # called a tool"). The caller's error handling publishes a
+                # user-visible message.
+                raise
 
         if final_response is None:
             final_response = LLMResponse(content=accumulated_content)

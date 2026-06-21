@@ -25,6 +25,7 @@ def _make_orchestrator(
     """Build a ChatOrchestrator with mocked mode runners."""
     llm = MagicMock()
     event_pub = MagicMock()
+    event_pub.publish_warning = AsyncMock()
     repo = InMemorySessionRepository()
 
     plain = plain_mock or AsyncMock(return_value={"mode": "plain"})
@@ -51,7 +52,10 @@ def _make_orchestrator(
         tools_mode=tools_runner,
         agent_mode=agent_runner,
     )
-    return orch, repo, {"plain": plain, "rag": rag, "tools": tools, "agent": agent}
+    return orch, repo, {
+        "plain": plain, "rag": rag, "tools": tools, "agent": agent,
+        "warning": event_pub.publish_warning,
+    }
 
 
 async def _seed_session(repo):
@@ -136,3 +140,49 @@ async def test_tools_with_no_data_sources_routes_to_tools():
     mocks["tools"].assert_awaited_once()
     mocks["rag"].assert_not_awaited()
     mocks["plain"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_with_tools_routes_to_agent():
+    """Agent mode with at least one tool routes to the agent runner."""
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    orch.tool_authorization = MagicMock()
+    orch.tool_authorization.filter_authorized_tools = AsyncMock(
+        return_value=["server_tool1"]
+    )
+
+    await orch.execute(
+        session_id=sid,
+        content="do a task",
+        model="test-model",
+        selected_tools=["server_tool1"],
+        agent_mode=True,
+    )
+
+    mocks["agent"].assert_awaited_once()
+    mocks["warning"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_with_no_tools_falls_back_to_plain_with_warning():
+    """Agent mode with no tools must not route to the agent loop -- the loop
+    has nothing to call and tool-seeking prompts can trigger a provider
+    rejection that surfaces as an empty/failed response. The orchestrator
+    instead warns the user and runs a normal chat turn.
+    """
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    await orch.execute(
+        session_id=sid,
+        content="hello",
+        model="test-model",
+        selected_tools=[],
+        agent_mode=True,
+    )
+
+    mocks["agent"].assert_not_awaited()
+    mocks["plain"].assert_awaited_once()
+    mocks["warning"].assert_awaited_once()

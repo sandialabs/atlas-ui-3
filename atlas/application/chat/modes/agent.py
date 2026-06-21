@@ -46,6 +46,21 @@ class AgentModeRunner:
         self.artifact_processor = artifact_processor
         self.default_strategy = default_strategy
 
+    def _get_send_json(self) -> Optional[UpdateCallback]:
+        """Get send_json callback from the event publisher if available.
+
+        Mirrors ToolsModeRunner so the artifact processor can emit
+        files_update / canvas_files events for generated files.
+        """
+        if hasattr(self.event_publisher, "send_json"):
+            return self.event_publisher.send_json
+        logger.warning(
+            "AgentModeRunner event_publisher has no send_json; canvas/file "
+            "updates for generated artifacts will be skipped. Type: %s",
+            type(self.event_publisher),
+        )
+        return None
+
     async def run(
         self,
         session: Session,
@@ -86,10 +101,17 @@ class AgentModeRunner:
             history=session.history,
         )
 
-        # Artifact processor wrapper for handling tool results
+        # Artifact processor wrapper for handling tool results.
+        # The update callback must be a real send_json so the artifact processor
+        # can emit the files_update / canvas_files events that surface generated
+        # files (e.g. a pptx) into the session and canvas. Passing None here meant
+        # agent-mode artifacts were stored (visible in the File library) but never
+        # pushed to the canvas/session, unlike standard tools mode.
+        send_json = self._get_send_json()
+
         async def process_artifacts(results):
             if self.artifact_processor:
-                await self.artifact_processor(session, results, None)
+                await self.artifact_processor(session, results, send_json)
 
         # Create event relay to map AgentEvents to UI updates
         event_relay = AgentEventRelay(

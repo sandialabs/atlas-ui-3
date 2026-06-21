@@ -293,6 +293,23 @@ class ChatOrchestrator:
                     ),
                 )
 
+        # Agent mode needs at least one tool to act on. With no tools selected
+        # the agentic loop has nothing to call, and tool-seeking prompts can
+        # drive the model to emit a tool call the provider then rejects
+        # ("tool_choice is none, but model called a tool"), which surfaces as an
+        # empty/failed response. Fall back to a normal chat turn and tell the
+        # user instead of failing. The frontend guards this too, but enforcing
+        # it here covers API clients and older frontends.
+        if agent_mode and not selected_tools:
+            logger.info("Agent mode requested with no tools selected; running as a normal chat turn")
+            await self.event_publisher.publish_warning(
+                message=(
+                    "**Agent mode needs at least one tool.** No tools were selected, "
+                    "so this message ran as a normal chat. Select one or more tools to use agent mode."
+                ),
+            )
+            agent_mode = False
+
         # Route to appropriate mode (always streaming)
         if agent_mode and self.agent_mode:
             return await self.agent_mode.run(

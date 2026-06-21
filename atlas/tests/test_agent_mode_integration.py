@@ -91,6 +91,9 @@ async def test_agent_mode_finishes_on_text_only_response():
         session_id=uuid4(),
         content="Hello",
         model="fake",
+        # Agent mode requires at least one selected tool; the model still
+        # answers with text-only here so nothing is actually executed.
+        selected_tools=["noop"],
         agent_mode=True,
         agent_max_steps=3,
     )
@@ -116,6 +119,7 @@ async def test_agent_mode_legacy_strategy_resolves_to_agentic():
         session_id=uuid4(),
         content="Process my data",
         model="fake",
+        selected_tools=["noop"],  # agent mode requires at least one tool
         agent_mode=True,
         agent_max_steps=5,
         agent_loop_strategy="think-act",  # deprecated; must not break

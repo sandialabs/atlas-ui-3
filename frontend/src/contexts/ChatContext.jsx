@@ -337,6 +337,15 @@ export const ChatProvider = ({ children }) => {
 			toast.error('Not connected. Waiting to reconnect before sending.')
 			return false
 		}
+		// Agent mode needs at least one tool to act on. Block the send (rather than
+		// silently degrading to a normal chat) so the user makes an explicit
+		// choice -- otherwise the agent loop has nothing to call and the model can
+		// emit tool calls the provider rejects. The backend enforces the same
+		// guard for non-UI clients.
+		if (agent.agentModeAvailable && agent.agentModeEnabled && selectedTools.size === 0) {
+			toast.error('Agent mode needs at least one tool selected. Choose a tool or turn off Agent mode.')
+			return false
+		}
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:

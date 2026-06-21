@@ -542,6 +542,82 @@ class TestAgenticLoopMessageAccumulation:
             json.dumps(msg)
 
 
+# -- Tests: streaming error surfacing -----------------------------------
+
+class _StreamErrorPublisher:
+    """Minimal event publisher recording published tokens."""
+
+    def __init__(self):
+        self.tokens: List[str] = []
+
+    async def publish_token_stream(self, token, is_first=False, is_last=False):
+        self.tokens.append(token)
+
+
+class TestAgenticLoopStreamingErrorSurfacing:
+    """A streaming LLM error with no accumulated content must propagate, not
+    silently return an empty response.
+
+    Regression: when the provider rejects a mid-stream tool call ("tool_choice
+    is none, but model called a tool") before any text streams, the loop used
+    to swallow the exception and return ``LLMResponse(content="")`` -- the UI
+    then showed nothing, looking like the model never responded.
+    """
+
+    @pytest.mark.asyncio
+    async def test_streaming_error_before_any_token_propagates(self):
+        class BoomLLM(FakeLLM):
+            async def stream_with_tools(self, *a, **k):
+                raise RuntimeError("tool_choice is none, but model called a tool")
+                yield  # pragma: no cover -- makes this an async generator
+
+        events, handler = _collect_events()
+        loop = _make_loop(BoomLLM())
+
+        with pytest.raises(RuntimeError, match="tool_choice is none"):
+            await loop.run(
+                model="test-model",
+                messages=[{"role": "user", "content": "Hi"}],
+                context=_make_context(),
+                selected_tools=["calc"],
+                data_sources=None,
+                max_steps=5,
+                temperature=0.7,
+                event_handler=handler,
+                streaming=True,
+                event_publisher=_StreamErrorPublisher(),
+            )
+
+    @pytest.mark.asyncio
+    async def test_streaming_error_after_partial_text_keeps_partial(self):
+        """If text already streamed before the error, keep the partial answer
+        and close the stream rather than raising."""
+        class PartialThenBoomLLM(FakeLLM):
+            async def stream_with_tools(self, *a, **k):
+                yield "partial "
+                yield "answer"
+                raise RuntimeError("connection reset mid-stream")
+
+        events, handler = _collect_events()
+        publisher = _StreamErrorPublisher()
+        loop = _make_loop(PartialThenBoomLLM())
+
+        result = await loop.run(
+            model="test-model",
+            messages=[{"role": "user", "content": "Hi"}],
+            context=_make_context(),
+            selected_tools=["calc"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+            streaming=True,
+            event_publisher=publisher,
+        )
+
+        assert result.final_answer == "partial answer"
+
+
 # -- Tests: factory integration -----------------------------------------
 
 class TestAgenticLoopFactory:

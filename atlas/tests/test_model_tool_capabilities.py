@@ -237,6 +237,9 @@ class TestAgentModeBlocking:
             session_id=sid,
             content="do something complex",
             model="gpt-4",
+            # Agent mode requires at least one tool to act on; supply one so this
+            # test exercises the model-capability path, not the no-tools guard.
+            selected_tools=["server_tool1"],
             agent_mode=True,
         )
 
