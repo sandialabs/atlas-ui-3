@@ -118,11 +118,12 @@ The solution maintains full backward compatibility:
 
 ## Future Enhancements
 
-Added `INCLUDE_FILE_CONTENT_BASE64` configuration option (experimental, disabled by default):
-- Would inject base64-encoded file content directly in tool arguments
-- Allows MCP servers to access files without network requests
-- Disabled by default due to message size concerns
-- Requires additional implementation for async context support
+A base64 content-injection fallback was scoped but never wired into argument
+injection (the helper was unreachable), so the unused `INCLUDE_FILE_CONTENT_BASE64`
+setting was removed. MCP tools access session files via the tokenized download
+URL the backend injects into `filename`/`file_names` arguments. If direct content
+injection is revisited, it needs real async-context support before being exposed
+as a setting.
 
 ## Usage Instructions
 

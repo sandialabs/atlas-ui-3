@@ -1,6 +1,6 @@
 # MCP Tool File I/O Guide
 
-Last updated: 2026-03-11
+Last updated: 2026-06-21
 
 This guide explains how to accept files as input and return files as output from MCP tools using FastMCP. It is self-contained and can be used independently.
 
@@ -97,6 +97,12 @@ def merge_documents(file_names: List[str]) -> Dict[str, Any]:
 ```
 
 ### Base64 Fallback
+
+> **Note:** The backend does **not** currently auto-inject base64 file content
+> into tool arguments — only the `filename`/`file_names` URL rewrite is wired up
+> (see "Accepting Files as Input"). Treat fetching the rewritten URL as the
+> primary path. Keep a `file_data_base64` parameter only if some other caller
+> supplies it directly; do not rely on the framework to populate it.
 
 Some integrations may provide base64-encoded file content directly. Handle both cases:
 
