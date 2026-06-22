@@ -14,6 +14,12 @@ class AgentContext:
     user_email: Optional[str]
     files: Dict[str, Any]
     history: ConversationHistory
+    # Conversation scope used to key persistent MCP sessions. Must mirror the
+    # value regular (non-agent) chat passes so stateful MCP servers keep a
+    # single reused session across the loop's sequential tool calls. When
+    # absent, MCP tool calls fall back to single-use sessions and stateful
+    # servers raise session errors. Defaults to None for backward compatibility.
+    conversation_id: Optional[str] = None
 
 
 @dataclass
