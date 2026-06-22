@@ -724,7 +724,6 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
     Only injects _atlas_user if the tool schema defines an _atlas_user parameter.
 
     If BACKEND_PUBLIC_URL is configured, uses absolute URLs for file downloads.
-    If INCLUDE_FILE_CONTENT_BASE64 is enabled, also injects base64 content as fallback.
     """
     if not isinstance(parsed_args, dict):
         return parsed_args
@@ -744,22 +743,6 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
         def to_url(key: str) -> str:
             # Use tokenized URL so tools can fetch without cookies
             return create_download_url(key, user_email)
-
-        async def get_file_base64(key: str) -> Optional[str]:
-            """Fetch base64 content for a file key."""
-            try:
-                # Get file manager from session context or use global
-                file_manager = session_context.get("file_manager")
-                if not file_manager:
-                    from atlas.infrastructure.app_factory import get_file_storage
-                    file_manager = get_file_storage()
-
-                if file_manager and user_email:
-                    file_data = await file_manager.get_file(user_email, key)
-                    return file_data.get("content_base64") if file_data else None
-            except Exception as e:
-                logger.warning(f"Failed to fetch base64 content for file key {key}: {e}")
-            return None
 
         # Handle single filename (strict: only "filename" key)
         if "filename" in parsed_args and isinstance(parsed_args["filename"], str):

@@ -423,15 +423,6 @@ class AppSettings(BaseSettings):
         validation_alias="BACKEND_PUBLIC_URL",
     )
 
-    # Whether to include base64 file content as fallback in tool arguments
-    # This allows MCP servers to access files even if they cannot reach the backend URL
-    # WARNING: Enabling this can significantly increase message sizes for large files
-    include_file_content_base64: bool = Field(
-        default=False,
-        description="Include base64 encoded file content in tool arguments as fallback",
-        validation_alias="INCLUDE_FILE_CONTENT_BASE64",
-    )
-
     # Rate limiting (global middleware)
     rate_limit_rpm: int = Field(default=600, validation_alias="RATE_LIMIT_RPM")
     rate_limit_window_seconds: int = Field(default=60, validation_alias="RATE_LIMIT_WINDOW_SECONDS")

@@ -92,3 +92,119 @@ def test_read_allows_files_within_size_cap(monkeypatch, tmp_path):
 
     assert result["meta_data"]["is_error"] is False
     assert result["results"]["content"] == "ok"
+
+
+class _FakeResponse:
+    """Minimal stand-in for a streamed ``requests`` response."""
+
+    def __init__(self, body: bytes, content_length=None):
+        self._body = body
+        self.headers = {}
+        if content_length is not None:
+            self.headers["Content-Length"] = str(content_length)
+
+    def raise_for_status(self):
+        return None
+
+    def iter_content(self, chunk_size=65536):
+        for i in range(0, len(self._body), chunk_size):
+            yield self._body[i:i + chunk_size]
+
+    def close(self):
+        return None
+
+
+def _stub_requests(monkeypatch, transfer, body: bytes, content_length=None, capture=None):
+    def fake_get(url, timeout=30, stream=True):
+        if capture is not None:
+            capture["url"] = url
+        return _FakeResponse(body, content_length=content_length)
+
+    monkeypatch.setattr(transfer.requests, "get", fake_get)
+
+
+def test_write_session_file_fetches_from_backend(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("BACKEND_URL", "http://localhost:8000")
+
+    capture = {}
+    payload = b"ISO-10303-21;\nSTEP DATA\nEND-ISO-10303-21;"
+    _stub_requests(monkeypatch, transfer, payload, capture=capture)
+
+    result = transfer.write_file_to_disk(
+        "exports/part.step",
+        filename="/mcp/files/download/abc123?token=xyz",
+    )
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["size_bytes"] == len(payload)
+    assert (tmp_path / "exports" / "part.step").read_bytes() == payload
+    # The relative backend path is resolved against BACKEND_URL before fetching.
+    assert capture["url"] == "http://localhost:8000/mcp/files/download/abc123?token=xyz"
+
+
+def test_write_session_file_to_directory_uses_original_filename(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+
+    dest_dir = tmp_path / "tests4"
+    dest_dir.mkdir()
+    payload = b"binary-step-bytes"
+    _stub_requests(monkeypatch, transfer, payload)
+
+    result = transfer.write_file_to_disk(
+        str(dest_dir),
+        filename="/mcp/files/download/key?token=t",
+        original_filename="solidworks_export_20260621_194547.step",
+    )
+
+    assert result["meta_data"]["is_error"] is False
+    written = dest_dir / "solidworks_export_20260621_194547.step"
+    assert written.read_bytes() == payload
+    assert result["results"]["path"].endswith("solidworks_export_20260621_194547.step")
+
+
+def test_write_session_file_rejected_when_over_size_cap(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_MAX_BYTES", "8")
+
+    # Declared Content-Length over the cap should fail before buffering.
+    _stub_requests(monkeypatch, transfer, b"x" * 64, content_length=64)
+
+    result = transfer.write_file_to_disk(
+        "big.bin",
+        filename="/mcp/files/download/key?token=t",
+    )
+
+    assert result["meta_data"]["is_error"] is True
+    assert result["meta_data"]["error_type"] == "ValueError"
+    assert "too large" in result["results"]["error"]
+    assert not (tmp_path / "big.bin").exists()
+
+
+def test_write_requires_content_or_filename(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+
+    result = transfer.write_file_to_disk("empty.txt")
+
+    assert result["meta_data"]["is_error"] is True
+    assert result["meta_data"]["error_type"] == "ValueError"
+    assert "Nothing to write" in result["results"]["error"]
+
+
+def test_write_unknown_filename_is_rejected(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+
+    # A bare name that the backend never rewrote to a URL is not a session file.
+    result = transfer.write_file_to_disk(
+        "out.step",
+        filename="solidworks_export_20260621_194547.step",
+    )
+
+    assert result["meta_data"]["is_error"] is True
+    assert result["meta_data"]["error_type"] == "ValueError"
+    assert "not a known session file" in result["results"]["error"]

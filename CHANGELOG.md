@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #666 - 2026-06-21
+- **Fixed transfer MCP `write_file_to_disk` for session files**: Writing a tool-produced session file (e.g. a SolidWorks STEP export) to local disk silently failed — the model would loop on `read_file_from_disk` and give up. The tool only accepted inline `content`, and the backend's session-file injection only rewrites a parameter named exactly `filename`/`file_names` to a tokenized download URL, which `write_file_to_disk` did not declare. So there was no path for the tool to obtain a session artifact's bytes. The tool now accepts a `filename` parameter (the backend rewrites it to a download URL), fetches the bytes over HTTP with the same `MCP_TRANSFER_MAX_BYTES` cap and `Content-Length` fast-fail as the reader, and writes them verbatim. A directory destination is supported — the source name (from the backend-supplied `original_filename`) is appended. Inline `content`/base64 still works; an unresolved bare name now returns a clear error instead of failing silently. Added tests for the backend-fetch path, directory naming, size-cap rejection, missing-source, and unresolved-name cases.
+- **Removed dead `INCLUDE_FILE_CONTENT_BASE64` setting**: The base64 content-injection fallback was never wired into argument injection (its helper was unreachable), so the setting did nothing. Removed the setting, the unused helper, the `.env.example` entry, and corrected the file-I/O developer guide to note that fetching the rewritten `filename` URL is the only supported mechanism.
+
 ### PR #665 - 2026-06-20
 - **MCP examples**: Added a `file_viewer` server with a `display_file` tool that reads a file from the local disk and shows it in the canvas, guessing/normalizing the MIME type (extension map, stdlib, magic-number sniffing, text heuristic) to pick the right viewer (image / PDF / HTML / code). Intended for local single-developer use, so it reads any path without sandboxing; size-capped to avoid loading unbounded content into chat.
 
