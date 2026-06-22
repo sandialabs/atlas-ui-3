@@ -56,15 +56,35 @@ def test_write_base64_file(monkeypatch, tmp_path):
     assert (tmp_path / "binary.dat").read_bytes() == b"\x00\x01binary"
 
 
-def test_path_traversal_is_denied(monkeypatch, tmp_path):
+def test_path_outside_base_dir_allowed_by_default(monkeypatch, tmp_path):
     transfer = _load_transfer_module(monkeypatch)
-    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    base = tmp_path / "base"
+    base.mkdir()
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(base))
+    monkeypatch.delenv("MCP_TRANSFER_RESTRICT_TO_BASE_DIR", raising=False)
+
+    # Default is unrestricted: a developer can write anywhere reachable.
+    outside = tmp_path / "elsewhere" / "out.txt"
+    result = transfer.write_file_to_disk(str(outside), "anywhere")
+
+    assert result["meta_data"]["is_error"] is False
+    assert outside.read_text(encoding="utf-8") == "anywhere"
+    # A path outside the base dir is reported as its absolute location.
+    assert result["results"]["path"] == str(outside)
+
+
+def test_path_outside_base_dir_denied_when_restricted(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    base = tmp_path / "base"
+    base.mkdir()
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(base))
+    monkeypatch.setenv("MCP_TRANSFER_RESTRICT_TO_BASE_DIR", "true")
 
     result = transfer.write_file_to_disk("../outside.txt", "blocked")
 
     assert result["meta_data"]["is_error"] is True
     assert result["meta_data"]["error_type"] == "PermissionError"
-    assert not (tmp_path.parent / "outside.txt").exists()
+    assert not (base.parent / "outside.txt").exists()
 
 
 def test_read_rejects_files_over_size_cap(monkeypatch, tmp_path):

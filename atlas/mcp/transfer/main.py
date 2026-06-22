@@ -24,10 +24,29 @@ mcp = create_stdio_server("MCP Transfer")
 DEFAULT_MAX_READ_BYTES = 10 * 1024 * 1024  # 10 MiB
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Interpret an environment variable as a boolean flag."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _base_dir() -> Path:
-    """Return the local directory this development server is allowed to access."""
+    """Return the directory that anchors relative paths for this server."""
     configured = os.getenv("MCP_TRANSFER_BASE_DIR")
     return Path(configured).expanduser().resolve() if configured else Path.cwd().resolve()
+
+
+def _restrict_to_base_dir() -> bool:
+    """Whether file access is confined to the base directory.
+
+    Off by default: this is a local single-developer helper, so it may read and
+    write anywhere the server process can reach (the developer's own machine).
+    Set `MCP_TRANSFER_RESTRICT_TO_BASE_DIR=true` to opt into sandboxing every
+    access below `MCP_TRANSFER_BASE_DIR` (or the working directory when unset).
+    """
+    return _env_flag("MCP_TRANSFER_RESTRICT_TO_BASE_DIR", default=False)
 
 
 def _max_read_bytes() -> int:
@@ -103,7 +122,13 @@ def _fetch_session_file(filename: str, max_bytes: int) -> Tuple[bytes, str]:
 
 
 def _resolve_path(path: str) -> Path:
-    """Resolve a requested file path and keep it inside the configured base directory."""
+    """Resolve a requested file path.
+
+    Relative paths resolve below the base directory. By default any resulting
+    location is allowed (local single-developer use); when
+    `MCP_TRANSFER_RESTRICT_TO_BASE_DIR` is set, paths that escape the base
+    directory are rejected.
+    """
     if not path or not path.strip():
         raise ValueError("Path is required")
 
@@ -111,16 +136,24 @@ def _resolve_path(path: str) -> Path:
     requested = Path(path).expanduser()
     resolved = (requested if requested.is_absolute() else base_dir / requested).resolve()
 
-    try:
-        resolved.relative_to(base_dir)
-    except ValueError as exc:
-        raise PermissionError(f"Access denied: path outside base directory ({base_dir})") from exc
+    if _restrict_to_base_dir():
+        try:
+            resolved.relative_to(base_dir)
+        except ValueError as exc:
+            raise PermissionError(
+                f"Access denied: path outside base directory ({base_dir}); "
+                "unset MCP_TRANSFER_RESTRICT_TO_BASE_DIR to allow it"
+            ) from exc
 
     return resolved
 
 
 def _relative_path(path: Path) -> str:
-    return str(path.relative_to(_base_dir()))
+    """Display path: relative to the base dir when inside it, else absolute."""
+    try:
+        return str(path.relative_to(_base_dir()))
+    except ValueError:
+        return str(path)
 
 
 def _error_result(operation: str, error: Exception, start: float) -> Dict[str, Any]:
@@ -142,11 +175,14 @@ def _error_result(operation: str, error: Exception, start: float) -> Dict[str, A
 def read_file_from_disk(path: str) -> Dict[str, Any]:
     """Read a local file into the chat session as an MCP artifact.
 
-    This local-development helper reads a file below `MCP_TRANSFER_BASE_DIR`
-    (or the server working directory when unset) and returns it as a base64
+    This local-development helper reads a file and returns it as a base64
     artifact. UTF-8 text files also include decoded text in the tool result.
-    Files larger than `MCP_TRANSFER_MAX_BYTES` (default 10 MiB) are rejected so
-    a single read cannot load unbounded content into the chat context.
+    Relative paths resolve below `MCP_TRANSFER_BASE_DIR` (or the server working
+    directory when unset); absolute paths are read as given. Access is
+    unrestricted by default for local single-developer use — set
+    `MCP_TRANSFER_RESTRICT_TO_BASE_DIR=true` to confine reads to the base
+    directory. Files larger than `MCP_TRANSFER_MAX_BYTES` (default 10 MiB) are
+    rejected so a single read cannot load unbounded content into the chat context.
 
     Args:
         path: File path to read. Relative paths resolve below the configured base directory.
@@ -227,9 +263,12 @@ def write_file_to_disk(
     2. **Inline content** via `content` -- UTF-8 text, or base64-encoded bytes
        when `content_is_base64` is true.
 
-    This local-development helper writes below `MCP_TRANSFER_BASE_DIR` (or the
-    server working directory when unset). Parent directories are created as
-    needed. If `path` names a directory, the source file name is appended.
+    Relative paths resolve below `MCP_TRANSFER_BASE_DIR` (or the server working
+    directory when unset); absolute paths are written as given. Access is
+    unrestricted by default for local single-developer use — set
+    `MCP_TRANSFER_RESTRICT_TO_BASE_DIR=true` to confine writes to the base
+    directory. Parent directories are created as needed. If `path` names a
+    directory, the source file name is appended.
 
     Args:
         path: Destination file path, or a destination directory (the source file
