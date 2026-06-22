@@ -746,3 +746,52 @@ class TestAgenticLoopConversationScope:
                 "agentic loop must forward conversation_id so stateful MCP "
                 "sessions are reused across tool calls"
             )
+
+    @pytest.mark.asyncio
+    async def test_conversation_id_falls_back_to_session_id(self):
+        """When AgentContext omits conversation_id, the loop falls back to the
+        session id so MCP calls still share one persistent session (never None,
+        matching ChatService's default scoping)."""
+        seen_contexts = []
+
+        async def capture_execute(tool_call_obj, context=None):
+            seen_contexts.append(context)
+            return ToolResult(
+                tool_call_id=getattr(tool_call_obj, "id", "unknown"),
+                content="ok",
+                success=True,
+            )
+
+        tool_mgr = MagicMock()
+        tool_mgr.execute_tool = AsyncMock(side_effect=capture_execute)
+        tool_mgr.get_tools_schema = MagicMock(return_value=[
+            {"type": "function", "function": {"name": "search", "parameters": {}}}
+        ])
+
+        llm = FakeLLM([
+            LLMResponse(
+                content="Calling tool.",
+                tool_calls=[_make_tool_call("call-1", "search", '{"q": "x"}')],
+            ),
+            LLMResponse(content="Done."),
+        ])
+        events, handler = _collect_events()
+
+        # _make_context() builds an AgentContext without conversation_id.
+        context = _make_context()
+
+        loop = _make_loop(llm, tool_mgr)
+        await loop.run(
+            model="test-model",
+            messages=[{"role": "user", "content": "search"}],
+            context=context,
+            selected_tools=["search"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+        )
+
+        assert seen_contexts, "tool manager was never invoked"
+        for ctx in seen_contexts:
+            assert ctx.get("conversation_id") == str(context.session_id)
