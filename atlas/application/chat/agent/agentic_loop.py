@@ -168,6 +168,11 @@ class AgenticLoop(AgentLoopProtocol):
                     "session_id": context.session_id,
                     "user_email": context.user_email,
                     "files": context.files,
+                    # Required so MCP tool calls reuse a persistent session via
+                    # MCPSessionManager. Without it, call_tool() falls back to a
+                    # single-use session per call and stateful MCP servers raise
+                    # session errors between sequential tool calls.
+                    "conversation_id": context.conversation_id,
                 },
                 tool_manager=self.tool_manager,
                 update_callback=(self.connection.send_json if self.connection else None),

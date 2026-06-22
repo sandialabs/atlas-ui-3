@@ -99,6 +99,10 @@ class AgentModeRunner:
             user_email=session.user_email,
             files=session.context.get("files", {}),
             history=session.history,
+            # Mirror the conversation scope regular chat uses so the agentic
+            # loop's sequential MCP tool calls reuse one persistent session
+            # (ChatService always populates this, falling back to str(session.id)).
+            conversation_id=session.context.get("conversation_id", str(session.id)),
         )
 
         # Artifact processor wrapper for handling tool results.

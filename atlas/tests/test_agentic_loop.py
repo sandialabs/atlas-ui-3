@@ -675,3 +675,74 @@ class TestAgenticLoopRAG:
 
         assert len(rag_called) == 1
         assert rag_called[0] == ["source1"]
+
+
+# -- Tests: persistent MCP session scope --------------------------------
+
+class TestAgenticLoopConversationScope:
+    """Regression tests for stateful MCP session reuse in agent mode.
+
+    The agentic loop must forward ``conversation_id`` to the tool manager so
+    ``MCPSessionManager`` reuses a single persistent session across sequential
+    tool calls. Before the fix the loop built ``session_context`` without
+    ``conversation_id``; ``MCPToolManager.call_tool`` then took the single-use
+    session branch and stateful MCP servers raised session errors -- a failure
+    that only manifested in agent mode (regular mode passes the value via
+    ``build_session_context``).
+    """
+
+    @pytest.mark.asyncio
+    async def test_conversation_id_forwarded_to_tool_manager(self):
+        """Every tool call in the loop receives the conversation_id in context."""
+        seen_contexts = []
+
+        async def capture_execute(tool_call_obj, context=None):
+            seen_contexts.append(context)
+            return ToolResult(
+                tool_call_id=getattr(tool_call_obj, "id", "unknown"),
+                content="ok",
+                success=True,
+            )
+
+        tool_mgr = MagicMock()
+        tool_mgr.execute_tool = AsyncMock(side_effect=capture_execute)
+        tool_mgr.get_tools_schema = MagicMock(return_value=[
+            {"type": "function", "function": {"name": "search", "parameters": {}}}
+        ])
+
+        llm = FakeLLM([
+            LLMResponse(
+                content="Calling tool.",
+                tool_calls=[_make_tool_call("call-1", "search", '{"q": "x"}')],
+            ),
+            LLMResponse(content="Done."),
+        ])
+        events, handler = _collect_events()
+
+        context = AgentContext(
+            session_id=uuid4(),
+            user_email="test@example.com",
+            files={},
+            history=ConversationHistory(),
+            conversation_id="conv-abc-123",
+        )
+
+        loop = _make_loop(llm, tool_mgr)
+        await loop.run(
+            model="test-model",
+            messages=[{"role": "user", "content": "search"}],
+            context=context,
+            selected_tools=["search"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+        )
+
+        assert seen_contexts, "tool manager was never invoked"
+        for ctx in seen_contexts:
+            assert ctx is not None
+            assert ctx.get("conversation_id") == "conv-abc-123", (
+                "agentic loop must forward conversation_id so stateful MCP "
+                "sessions are reused across tool calls"
+            )
