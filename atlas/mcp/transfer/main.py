@@ -33,20 +33,70 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 
 def _base_dir() -> Path:
-    """Return the directory that anchors relative paths for this server."""
-    configured = os.getenv("MCP_TRANSFER_BASE_DIR")
-    return Path(configured).expanduser().resolve() if configured else Path.cwd().resolve()
+    """Primary root: anchors relative paths, labels result paths, always allowed.
 
-
-def _restrict_to_base_dir() -> bool:
-    """Whether file access is confined to the base directory.
-
-    Off by default: this is a local single-developer helper, so it may read and
-    write anywhere the server process can reach (the developer's own machine).
-    Set `MCP_TRANSFER_RESTRICT_TO_BASE_DIR=true` to opt into sandboxing every
-    access below `MCP_TRANSFER_BASE_DIR` (or the working directory when unset).
+    Defaults to the user's home directory, which keeps normal project work
+    (under `~`) flowing while blocking writes to system locations. Override with
+    `MCP_TRANSFER_BASE_DIR`.
     """
-    return _env_flag("MCP_TRANSFER_RESTRICT_TO_BASE_DIR", default=False)
+    configured = os.getenv("MCP_TRANSFER_BASE_DIR")
+    return Path(configured).expanduser().resolve() if configured else Path.home().resolve()
+
+
+def _allowed_roots() -> list[Path]:
+    """Every directory file access may touch: the primary root plus extras.
+
+    Additional roots are whitelisted via `MCP_TRANSFER_ALLOWED_DIRS`, an
+    `os.pathsep`-separated list (':' on POSIX), so network mounts outside the
+    home directory can be opted in explicitly, e.g.
+    `MCP_TRANSFER_ALLOWED_DIRS=/projects:/mnt`.
+    """
+    roots = [_base_dir()]
+    extra = os.getenv("MCP_TRANSFER_ALLOWED_DIRS")
+    if extra:
+        for part in extra.split(os.pathsep):
+            if part.strip():
+                roots.append(Path(part).expanduser().resolve())
+    return roots
+
+
+def _check_access(resolved: Path) -> None:
+    """Enforce the default footgun guards on a resolved path.
+
+    By default access must stay within an allowed root and may not descend into
+    a hidden (dotfile / dot-directory) entry below that root — this protects
+    credentials and configs like `~/.ssh`, `~/.aws`, and `.env`. Both guards are
+    individually relaxable: `MCP_TRANSFER_ALLOW_HIDDEN=true` permits hidden
+    paths, and `MCP_TRANSFER_ALLOW_ANY_PATH=true` disables the guards entirely.
+    """
+    if _env_flag("MCP_TRANSFER_ALLOW_ANY_PATH"):
+        return
+
+    roots = _allowed_roots()
+    match = None
+    for root in roots:
+        try:
+            match = (root, resolved.relative_to(root))
+            break
+        except ValueError:
+            continue
+
+    if match is None:
+        allowed = ", ".join(str(r) for r in roots)
+        raise PermissionError(
+            f"Access denied: '{resolved}' is outside the allowed root(s) [{allowed}]; "
+            "whitelist it via MCP_TRANSFER_ALLOWED_DIRS (os.pathsep-separated) or set "
+            "MCP_TRANSFER_ALLOW_ANY_PATH=true to disable this check"
+        )
+
+    if not _env_flag("MCP_TRANSFER_ALLOW_HIDDEN"):
+        _, rel = match
+        hidden = next((part for part in rel.parts if part.startswith(".")), None)
+        if hidden:
+            raise PermissionError(
+                f"Access denied: '{resolved}' is under a hidden path ('{hidden}'); "
+                "set MCP_TRANSFER_ALLOW_HIDDEN=true to allow dotfiles/dot-directories"
+            )
 
 
 def _max_read_bytes() -> int:
@@ -122,29 +172,18 @@ def _fetch_session_file(filename: str, max_bytes: int) -> Tuple[bytes, str]:
 
 
 def _resolve_path(path: str) -> Path:
-    """Resolve a requested file path.
+    """Resolve a requested file path and apply the default access guards.
 
-    Relative paths resolve below the base directory. By default any resulting
-    location is allowed (local single-developer use); when
-    `MCP_TRANSFER_RESTRICT_TO_BASE_DIR` is set, paths that escape the base
-    directory are rejected.
+    Relative paths resolve below the primary root. Symlinks and `..` are
+    resolved before the guards run, so neither can escape an allowed root. See
+    `_check_access` for the boundary and hidden-path rules and how to relax them.
     """
     if not path or not path.strip():
         raise ValueError("Path is required")
 
-    base_dir = _base_dir()
     requested = Path(path).expanduser()
-    resolved = (requested if requested.is_absolute() else base_dir / requested).resolve()
-
-    if _restrict_to_base_dir():
-        try:
-            resolved.relative_to(base_dir)
-        except ValueError as exc:
-            raise PermissionError(
-                f"Access denied: path outside base directory ({base_dir}); "
-                "unset MCP_TRANSFER_RESTRICT_TO_BASE_DIR to allow it"
-            ) from exc
-
+    resolved = (requested if requested.is_absolute() else _base_dir() / requested).resolve()
+    _check_access(resolved)
     return resolved
 
 
@@ -177,12 +216,13 @@ def read_file_from_disk(path: str) -> Dict[str, Any]:
 
     This local-development helper reads a file and returns it as a base64
     artifact. UTF-8 text files also include decoded text in the tool result.
-    Relative paths resolve below `MCP_TRANSFER_BASE_DIR` (or the server working
-    directory when unset); absolute paths are read as given. Access is
-    unrestricted by default for local single-developer use — set
-    `MCP_TRANSFER_RESTRICT_TO_BASE_DIR=true` to confine reads to the base
-    directory. Files larger than `MCP_TRANSFER_MAX_BYTES` (default 10 MiB) are
-    rejected so a single read cannot load unbounded content into the chat context.
+    Relative paths resolve below the primary root (`MCP_TRANSFER_BASE_DIR`, or
+    the home directory when unset); absolute paths are read as given. By default
+    access is confined to that root (plus any `MCP_TRANSFER_ALLOWED_DIRS`) and
+    hidden dotfiles/dot-directories are blocked — see `_check_access` for the
+    `MCP_TRANSFER_ALLOW_HIDDEN` / `MCP_TRANSFER_ALLOW_ANY_PATH` escape hatches.
+    Files larger than `MCP_TRANSFER_MAX_BYTES` (default 10 MiB) are rejected so a
+    single read cannot load unbounded content into the chat context.
 
     Args:
         path: File path to read. Relative paths resolve below the configured base directory.
@@ -263,12 +303,13 @@ def write_file_to_disk(
     2. **Inline content** via `content` -- UTF-8 text, or base64-encoded bytes
        when `content_is_base64` is true.
 
-    Relative paths resolve below `MCP_TRANSFER_BASE_DIR` (or the server working
-    directory when unset); absolute paths are written as given. Access is
-    unrestricted by default for local single-developer use — set
-    `MCP_TRANSFER_RESTRICT_TO_BASE_DIR=true` to confine writes to the base
-    directory. Parent directories are created as needed. If `path` names a
-    directory, the source file name is appended.
+    Relative paths resolve below the primary root (`MCP_TRANSFER_BASE_DIR`, or
+    the home directory when unset); absolute paths are written as given. By
+    default access is confined to that root (plus any `MCP_TRANSFER_ALLOWED_DIRS`)
+    and hidden dotfiles/dot-directories are blocked — see `_check_access` for the
+    `MCP_TRANSFER_ALLOW_HIDDEN` / `MCP_TRANSFER_ALLOW_ANY_PATH` escape hatches.
+    Parent directories are created as needed. If `path` names a directory, the
+    source file name is appended.
 
     Args:
         path: Destination file path, or a destination directory (the source file

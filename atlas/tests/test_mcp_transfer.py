@@ -8,6 +8,7 @@ required to exercise the tool functions.
 
 import base64
 import importlib
+import os
 import sys
 import types
 
@@ -56,35 +57,108 @@ def test_write_base64_file(monkeypatch, tmp_path):
     assert (tmp_path / "binary.dat").read_bytes() == b"\x00\x01binary"
 
 
-def test_path_outside_base_dir_allowed_by_default(monkeypatch, tmp_path):
+def _clear_guard_env(monkeypatch):
+    for name in (
+        "MCP_TRANSFER_ALLOWED_DIRS",
+        "MCP_TRANSFER_ALLOW_HIDDEN",
+        "MCP_TRANSFER_ALLOW_ANY_PATH",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_path_outside_root_denied_by_default(monkeypatch, tmp_path):
     transfer = _load_transfer_module(monkeypatch)
     base = tmp_path / "base"
     base.mkdir()
     monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(base))
-    monkeypatch.delenv("MCP_TRANSFER_RESTRICT_TO_BASE_DIR", raising=False)
+    _clear_guard_env(monkeypatch)
 
-    # Default is unrestricted: a developer can write anywhere reachable.
+    outside = tmp_path / "elsewhere" / "out.txt"
+    result = transfer.write_file_to_disk(str(outside), "blocked")
+
+    assert result["meta_data"]["is_error"] is True
+    assert result["meta_data"]["error_type"] == "PermissionError"
+    assert "outside the allowed root" in result["results"]["error"]
+    assert not outside.exists()
+
+
+def test_allow_any_path_permits_outside_root(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    base = tmp_path / "base"
+    base.mkdir()
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(base))
+    _clear_guard_env(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_ALLOW_ANY_PATH", "true")
+
     outside = tmp_path / "elsewhere" / "out.txt"
     result = transfer.write_file_to_disk(str(outside), "anywhere")
 
     assert result["meta_data"]["is_error"] is False
     assert outside.read_text(encoding="utf-8") == "anywhere"
-    # A path outside the base dir is reported as its absolute location.
+    # Outside the primary root, the path is reported as its absolute location.
     assert result["results"]["path"] == str(outside)
 
 
-def test_path_outside_base_dir_denied_when_restricted(monkeypatch, tmp_path):
+def test_allowed_dirs_whitelists_extra_root(monkeypatch, tmp_path):
     transfer = _load_transfer_module(monkeypatch)
-    base = tmp_path / "base"
+    base = tmp_path / "home"
     base.mkdir()
+    mount = tmp_path / "mnt" / "projects"
     monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(base))
-    monkeypatch.setenv("MCP_TRANSFER_RESTRICT_TO_BASE_DIR", "true")
+    _clear_guard_env(monkeypatch)
+    # Mimic whitelisting a network mount outside home.
+    monkeypatch.setenv("MCP_TRANSFER_ALLOWED_DIRS", f"{tmp_path / 'mnt'}{os.pathsep}/nonexistent")
 
-    result = transfer.write_file_to_disk("../outside.txt", "blocked")
+    target = mount / "out.txt"
+    result = transfer.write_file_to_disk(str(target), "on the mount")
 
-    assert result["meta_data"]["is_error"] is True
-    assert result["meta_data"]["error_type"] == "PermissionError"
-    assert not (base.parent / "outside.txt").exists()
+    assert result["meta_data"]["is_error"] is False
+    assert target.read_text(encoding="utf-8") == "on the mount"
+
+
+def test_hidden_path_denied_by_default(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    _clear_guard_env(monkeypatch)
+
+    # A dotfile and a dot-directory below the root are both blocked.
+    for target in (".env", ".ssh/id_rsa"):
+        result = transfer.write_file_to_disk(target, "secret")
+        assert result["meta_data"]["is_error"] is True, target
+        assert result["meta_data"]["error_type"] == "PermissionError"
+        assert "hidden path" in result["results"]["error"]
+
+    assert not (tmp_path / ".env").exists()
+    assert not (tmp_path / ".ssh" / "id_rsa").exists()
+
+
+def test_allow_hidden_permits_dotfiles(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    _clear_guard_env(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_ALLOW_HIDDEN", "true")
+
+    result = transfer.write_file_to_disk(".env", "KEY=value")
+
+    assert result["meta_data"]["is_error"] is False
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == "KEY=value"
+
+
+def test_home_is_default_root(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.delenv("MCP_TRANSFER_BASE_DIR", raising=False)
+    _clear_guard_env(monkeypatch)
+    monkeypatch.setenv("HOME", str(home))
+
+    ok = transfer.write_file_to_disk(str(home / "notes.txt"), "in home")
+    assert ok["meta_data"]["is_error"] is False
+    assert (home / "notes.txt").read_text(encoding="utf-8") == "in home"
+
+    denied = transfer.write_file_to_disk(str(tmp_path / "outside.txt"), "nope")
+    assert denied["meta_data"]["is_error"] is True
+    assert denied["meta_data"]["error_type"] == "PermissionError"
 
 
 def test_read_rejects_files_over_size_cap(monkeypatch, tmp_path):
