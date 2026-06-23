@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14, FastMCP 3.1.0, asyncio, Pydantic, pytest, pykeyvalue (Redis optional)
 
-**Spec:** `docs/superpowers/specs/2026-03-13-fastmcp-3x-comprehensive-upgrade-design.md`
+**Spec:** `docs/archive/2026-03-13-fastmcp-3x-comprehensive-upgrade-design.md`
 
 ---
 

@@ -27,9 +27,11 @@ echo "Bundling recent documentation..."
 echo "Source: ${DOCS_DIR}"
 echo "Output: ${OUTPUT_FILE}"
 
-# Copy docs to temp directory, excluding archive folder
+# Copy docs to temp directory. The archive/ folder is intentionally excluded
+# (historical/superseded content); Python caches are dropped as noise.
 mkdir -p "${TEMP_DIR}/docs"
-rsync -av --exclude='archive' "${DOCS_DIR}/" "${TEMP_DIR}/docs/"
+rsync -av --exclude='archive' --exclude='__pycache__' --exclude='*.pyc' \
+    "${DOCS_DIR}/" "${TEMP_DIR}/docs/"
 
 # Create the zip file
 cd "${TEMP_DIR}"

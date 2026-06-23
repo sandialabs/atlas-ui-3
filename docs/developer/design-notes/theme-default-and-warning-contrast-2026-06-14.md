@@ -31,7 +31,7 @@ Two small, related UI changes:
 
 Light-theme settings panel surface (`#f3f4f6`), before vs after:
 
-![Light-mode tool-approval warning contrast: before (low-contrast yellow) vs after (high-contrast amber)](images/pr654-light-mode-warning-contrast.png)
+![Light-mode tool-approval warning contrast: before (low-contrast yellow) vs after (high-contrast amber)](../images/pr654-light-mode-warning-contrast.png)
 
 ## Tests
 

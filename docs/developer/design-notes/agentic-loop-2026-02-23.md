@@ -60,7 +60,7 @@ calls in one turn before answering — the prompt "compute 1234×5678, 98765/43,
 2^16" drives three `calculator_evaluate` calls, then a text-only summary ends the
 loop:
 
-![Agent mode end-to-end calculator run](./images/pr664-agent-mode-e2e.png)
+![Agent mode end-to-end calculator run](../images/pr664-agent-mode-e2e.png)
 
 The Settings panel keeps agent mode (Max Agent Iterations) but no longer exposes a
 loop-strategy selector, and the Tools panel no longer has a "Required Tool Usage"
@@ -68,7 +68,7 @@ loop-strategy selector, and the Tools panel no longer has a "Required Tool Usage
 
 | Settings (no strategy selector) | Tools (no forced-tool toggle) |
 |---|---|
-| ![Settings without strategy dropdown](./images/pr664-settings-no-strategy.png) | ![Tools without required-usage toggle](./images/pr664-tools-no-required-toggle.png) |
+| ![Settings without strategy dropdown](../images/pr664-settings-no-strategy.png) | ![Tools without required-usage toggle](../images/pr664-tools-no-required-toggle.png) |
 
 ## Architecture
 

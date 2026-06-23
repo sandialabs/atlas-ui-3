@@ -11,7 +11,7 @@ Atlas pod). It is **fully self-contained** — `main.py` imports only modules in
 this directory, and the container can be built from this directory alone
 without needing the rest of the Atlas monorepo.
 
-The design rationale lives in [`docs/planning/code-executor-v2-2026-04-30.md`](../../../docs/planning/code-executor-v2-2026-04-30.md).
+The design rationale lives in [`docs/developer/design-notes/code-executor-v2-2026-04-30.md`](../../../docs/developer/design-notes/code-executor-v2-2026-04-30.md).
 
 ## Tools
 
