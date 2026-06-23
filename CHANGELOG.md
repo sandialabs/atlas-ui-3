@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #672 - 2026-06-22
+- **Fixed missing Stop button in agent mode**: The agent-mode Stop button was gated on `isThinking`, which the native agentic loop clears the moment the first answer token streams. The button therefore flashed on send and then vanished for the rest of the run — through every tool call and the streamed final answer — leaving no way to interrupt a running agent (regressed in #664). It now hangs off a dedicated `isAgentRunning` flag set on an agent-mode send and cleared only on the terminal agent events (`agent_completion` / `agent_error` / `agent_max_steps`, plus `response_complete` / `chat_response` / `error`, and an explicit stop or the thinking-timeout safety net), so it stays visible for the whole run regardless of streaming sub-state. Normal-mode streaming/Stop behavior is unchanged. Added regression tests that token streaming does not clear the flag mid-run and that each terminal event does.
+
 ### PR #669 - 2026-06-22
 - **Fixed stateful MCP session errors in agent mode**: Agent mode didn't thread a `conversation_id` through the agentic loop, so each tool call opened a fresh single-use MCP session and stateful servers lost their session between sequential calls (regular chat was unaffected). `AgentContext` now carries `conversation_id` and the loop forwards it so `MCPSessionManager` reuses one persistent session per conversation. Added a regression test.
 
