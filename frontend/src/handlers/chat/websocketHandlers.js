@@ -32,6 +32,7 @@ export function cleanupStreamState() {
  * @param {Function} deps.addMessage - Add a message to the messages list.
  * @param {Function} deps.mapMessages - Transform the messages list via a mapper function.
  * @param {Function} deps.setIsThinking - Set the "thinking" indicator state.
+ * @param {Function} [deps.setIsAgentRunning] - Set the agent-run-in-flight state (drives the agent Stop button).
  * @param {Function} deps.setCurrentAgentStep - Set the current agent step number.
  * @param {Function} [deps.setAgentPendingQuestion] - Set pending agent question.
  * @param {Function} [deps.setCanvasContent] - Set canvas HTML/markdown content.
@@ -58,6 +59,7 @@ export function createWebSocketHandler(deps) {
     setIsThinking,
     setCurrentAgentStep,
   // Optional setters for extra UI state
+  setIsAgentRunning,
   setAgentPendingQuestion,
     setCanvasContent,
     setCanvasFiles,
@@ -75,6 +77,12 @@ export function createWebSocketHandler(deps) {
     streamToken,
     streamEnd,
   } = deps
+
+  // Clear the agent-run-in-flight flag on any terminal agent event. Optional so
+  // existing handler tests that don't inject the setter keep working.
+  function clearAgentRunning() {
+    if (typeof setIsAgentRunning === 'function') setIsAgentRunning(false)
+  }
 
   function flushTokenBuffer() {
     if (_tokenBuffer && typeof streamToken === 'function') {
@@ -142,6 +150,7 @@ export function createWebSocketHandler(deps) {
         case 'agent_completion':
           setCurrentAgentStep(0)
           setIsThinking(false)
+          clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
           // Note: Do NOT add a chat message here — the final answer already
@@ -151,12 +160,14 @@ export function createWebSocketHandler(deps) {
         case 'agent_error':
           addMessage({ role: 'system', content: `Agent Error (Step ${data.turn}): ${data.message}`, type: 'agent_error', timestamp: new Date().toISOString() })
           setIsThinking(false)
+          clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           setCurrentAgentStep(0)
           break
         case 'agent_max_steps':
           addMessage({ role: 'system', content: `Agent Max Steps Reached - ${data.message}`, type: 'agent_status', timestamp: new Date().toISOString() })
           setIsThinking(false)
+          clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           setCurrentAgentStep(0)
           break
@@ -422,6 +433,7 @@ export function createWebSocketHandler(deps) {
         }
         case 'response_complete': {
           setIsThinking(false)
+          clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           endTokenStream()
           break
@@ -463,6 +475,7 @@ export function createWebSocketHandler(deps) {
         }
         case 'chat_response':
           setIsThinking(false)
+          clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           addMessage({ role: 'assistant', content: data.message, timestamp: new Date().toISOString() })
           break
@@ -471,6 +484,7 @@ export function createWebSocketHandler(deps) {
           break
         case 'error':
           setIsThinking(false)
+          clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           setCurrentAgentStep(0)
           if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
@@ -482,6 +496,7 @@ export function createWebSocketHandler(deps) {
           break
         case 'agent_final_response':
           setIsThinking(false)
+          clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
             setCurrentAgentStep(0)
             addMessage({ role: 'assistant', content: `${data.message}\n\n*Agent completed in ${data.steps_taken} steps*`, timestamp: new Date().toISOString() })

@@ -34,6 +34,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     messages,
     isWelcomeVisible,
     isThinking,
+    isAgentRunning,
     isSynthesizing,
     sendChatMessage,
     rewindAndResubmit,
@@ -1064,7 +1065,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                   <Search className="w-5 h-5" />
                 </button>
               )}
-              {agentModeEnabled && (isThinking || agentPendingQuestion) && (
+              {agentModeEnabled && (isAgentRunning || isThinking || agentPendingQuestion) && (
                 <button
                   type="button"
                   onClick={stopAgent}

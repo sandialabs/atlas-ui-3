@@ -51,6 +51,13 @@ export const ChatProvider = ({ children }) => {
 
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
 	const [isThinking, setIsThinking] = useState(false)
+	// Tracks an in-flight agent-mode run end to end. Unlike isThinking (which the
+	// native agentic loop clears the moment token streaming begins) this stays
+	// true for the whole run -- tool calls, streamed segments, and the final
+	// answer -- so the agent Stop button remains visible until the run actually
+	// ends. Cleared on the terminal agent events (see websocketHandlers) and on
+	// an explicit stop.
+	const [isAgentRunning, setIsAgentRunning] = useState(false)
 	const [isSynthesizing, setIsSynthesizing] = useState(false)
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
@@ -122,6 +129,7 @@ export const ChatProvider = ({ children }) => {
 			addMessage,
 			mapMessages,
 			setIsThinking,
+			setIsAgentRunning,
 			setIsSynthesizing,
 				setCurrentAgentStep: agent.setCurrentAgentStep,
 					setAgentPendingQuestion: agent.setAgentPendingQuestion,
@@ -152,6 +160,7 @@ export const ChatProvider = ({ children }) => {
 		if (isThinking) {
 			thinkingTimeoutRef.current = setTimeout(() => {
 				setIsThinking(false)
+				setIsAgentRunning(false)
 				setIsSynthesizing(false)
 				agent.setCurrentAgentStep(0)
 				addMessage({
@@ -426,6 +435,11 @@ export const ChatProvider = ({ children }) => {
 		})
 		setIsThinking(true)
 		setIsSynthesizing(false)
+		// Drive the agent Stop button off a dedicated run flag rather than
+		// isThinking, which the native agentic loop clears as soon as the first
+		// token streams. Only true in agent mode; the terminal agent events clear
+		// it (websocketHandlers).
+		setIsAgentRunning(agent.agentModeEnabled)
 		return true
 	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts])
 
@@ -548,6 +562,9 @@ export const ChatProvider = ({ children }) => {
 
 		// Agent controls
 		const stopAgent = useCallback(() => {
+			// Hide the Stop button immediately; the backend stop is best-effort and
+			// the terminal agent_completion event will also clear this.
+			setIsAgentRunning(false)
 			if (sendMessage) sendMessage({ type: 'agent_control', action: 'stop' })
 		}, [sendMessage])
 
@@ -814,6 +831,7 @@ export const ChatProvider = ({ children }) => {
 		messages,
 		isWelcomeVisible,
 		isThinking,
+		isAgentRunning,
 		isSynthesizing,
 		sendChatMessage,
 		rewindAndResubmit,

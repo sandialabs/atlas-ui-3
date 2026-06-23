@@ -10,6 +10,7 @@ const makeDeps = () => {
       fn(sample)
     }),
     setIsThinking: vi.fn(),
+    setIsAgentRunning: vi.fn(),
     setCurrentAgentStep: vi.fn(),
     setAgentPendingQuestion: vi.fn(),
     setCanvasContent: vi.fn(),
@@ -185,10 +186,44 @@ describe('createWebSocketHandler – agent message handling', () => {
     // Should clear agent UI state
     expect(deps.setCurrentAgentStep).toHaveBeenCalledWith(0)
     expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+    expect(deps.setIsAgentRunning).toHaveBeenCalledWith(false)
     expect(deps.setIsSynthesizing).toHaveBeenCalledWith(false)
     expect(deps.setAgentPendingQuestion).toHaveBeenCalledWith(null)
     // Should NOT add a duplicate completion message
     expect(deps.addMessage).not.toHaveBeenCalled()
+  })
+
+  // Regression: the native agentic loop clears isThinking the moment the first
+  // token streams, so the agent Stop button must hang off the separate
+  // isAgentRunning flag instead. token_stream must NOT clear that flag mid-run;
+  // only the terminal agent_completion (or agent_error / agent_max_steps) may.
+  it('keeps isAgentRunning across token streaming and clears it only on completion', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    // First token of the (streamed) answer: clears isThinking but must leave
+    // the agent-run flag untouched so the Stop button stays visible.
+    handler({ type: 'token_stream', is_first: true, token: 'Hel' })
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+    expect(deps.setIsAgentRunning).not.toHaveBeenCalled()
+
+    // The run actually ends -> flag clears.
+    handler({ type: 'agent_update', update_type: 'agent_completion', steps: 2 })
+    expect(deps.setIsAgentRunning).toHaveBeenCalledWith(false)
+  })
+
+  it('clears isAgentRunning on agent_error and agent_max_steps', () => {
+    const errDeps = makeDeps()
+    createWebSocketHandler(errDeps)({
+      type: 'agent_update', update_type: 'agent_error', turn: 1, message: 'boom',
+    })
+    expect(errDeps.setIsAgentRunning).toHaveBeenCalledWith(false)
+
+    const maxDeps = makeDeps()
+    createWebSocketHandler(maxDeps)({
+      type: 'agent_update', update_type: 'agent_max_steps', message: 'hit cap',
+    })
+    expect(maxDeps.setIsAgentRunning).toHaveBeenCalledWith(false)
   })
 
   it('agent_start adds a status message', () => {
