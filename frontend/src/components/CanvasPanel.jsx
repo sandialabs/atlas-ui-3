@@ -281,7 +281,7 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
       switch (currentFileContent.type) {
         case 'image':
           return (
-            <div className="p-4">
+            <div className="p-4 flex items-center justify-center min-h-full">
               <img
                 src={currentFileContent.url}
                 alt={currentFileContent.file.filename}
