@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #671 - 2026-06-22
+- **Reorganized `/docs` by audience and lifecycle**: Split dated feature write-ups into `developer/design-notes/`, moved completed/superseded plans into a real `archive/` (already excluded from the doc bundle), promoted end-user feature docs into `user-guide/`, and folded the stray `summaries/`/`superpowers/` dirs in. Rewrote the top-level README and every per-directory index, added the missing ones, and renamed snake_case docs to kebab-case. Added `scripts/check-docs.sh` (fails on orphaned docs or broken relative links) wired into the Build Artifacts workflow, and updated `bundle-docs.sh`, `documentation-bundling.md`, and `AGENTS.md` to match. No application code changed.
+
 ### PR #669 - 2026-06-22
 - **Fixed stateful MCP session errors in agent mode**: Agent mode didn't thread a `conversation_id` through the agentic loop, so each tool call opened a fresh single-use MCP session and stateful servers lost their session between sequential calls (regular chat was unaffected). `AgentContext` now carries `conversation_id` and the loop forwards it so `MCPSessionManager` reuses one persistent session per conversation. Added a regression test.
 
