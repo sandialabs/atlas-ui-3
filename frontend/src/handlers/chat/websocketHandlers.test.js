@@ -201,15 +201,22 @@ describe('createWebSocketHandler – agent message handling', () => {
     const deps = makeDeps()
     const handler = createWebSocketHandler(deps)
 
-    // First token of the (streamed) answer: clears isThinking but must leave
-    // the agent-run flag untouched so the Stop button stays visible.
-    handler({ type: 'token_stream', is_first: true, token: 'Hel' })
-    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
-    expect(deps.setIsAgentRunning).not.toHaveBeenCalled()
+    try {
+      // First token of the (streamed) answer: clears isThinking but must leave
+      // the agent-run flag untouched so the Stop button stays visible.
+      handler({ type: 'token_stream', is_first: true, token: 'Hel' })
+      expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+      expect(deps.setIsAgentRunning).not.toHaveBeenCalled()
 
-    // The run actually ends -> flag clears.
-    handler({ type: 'agent_update', update_type: 'agent_completion', steps: 2 })
-    expect(deps.setIsAgentRunning).toHaveBeenCalledWith(false)
+      // The run actually ends -> flag clears.
+      handler({ type: 'agent_update', update_type: 'agent_completion', steps: 2 })
+      expect(deps.setIsAgentRunning).toHaveBeenCalledWith(false)
+    } finally {
+      // The first token schedules a module-level real setTimeout to flush the
+      // buffer. This test runs outside the fake-timers harness, so clear that
+      // state here to avoid leaking a timer into later (order-dependent) tests.
+      cleanupStreamState()
+    }
   })
 
   it('clears isAgentRunning on agent_error and agent_max_steps', () => {

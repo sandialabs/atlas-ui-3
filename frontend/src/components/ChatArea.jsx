@@ -1065,7 +1065,13 @@ const ChatArea = ({ onOpenRagPanel }) => {
                   <Search className="w-5 h-5" />
                 </button>
               )}
-              {agentModeEnabled && (isAgentRunning || isThinking || agentPendingQuestion) && (
+              {/* Gate on the run-in-flight signals, NOT the live agentModeEnabled
+                  toggle: agent mode can be flipped off mid-run (Ctrl+Alt+A / the
+                  toggle button), and the user must still be able to stop a
+                  running agent. isAgentRunning is only ever set on an agent-mode
+                  send and agentPendingQuestion is agent-specific, so neither
+                  fires during a normal chat turn. */}
+              {(isAgentRunning || agentPendingQuestion) && (
                 <button
                   type="button"
                   onClick={stopAgent}
@@ -1150,7 +1156,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                 </div>
               )}
             </div>
-            {(isThinking || isStreaming) && !agentModeEnabled ? (
+            {(isThinking || isStreaming) && !agentModeEnabled && !isAgentRunning ? (
               <button
                 type="button"
                 onClick={stopStreaming}
