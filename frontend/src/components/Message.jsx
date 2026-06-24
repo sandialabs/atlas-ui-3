@@ -38,12 +38,22 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
   // choice sticks across reloads. Debug mode always starts expanded.
   const [toolDetailsCollapsed, setToolDetailsCollapsed] = useState(() => {
     if (debugMode) return false
-    const saved = localStorage.getItem('toolDetailsCollapsed')
-    return saved !== null ? JSON.parse(saved) : true
+    // Guard storage access: blocked storage (privacy mode) or a corrupted value
+    // can throw, and this runs during render — an exception would break the message.
+    try {
+      const saved = localStorage.getItem('toolDetailsCollapsed')
+      return saved !== null ? JSON.parse(saved) : true
+    } catch {
+      return true
+    }
   })
 
   useEffect(() => {
-    localStorage.setItem('toolDetailsCollapsed', JSON.stringify(toolDetailsCollapsed))
+    try {
+      localStorage.setItem('toolDetailsCollapsed', JSON.stringify(toolDetailsCollapsed))
+    } catch {
+      /* ignore */
+    }
   }, [toolDetailsCollapsed])
 
   const isUser = message.role === 'user'

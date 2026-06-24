@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext'
+import { usePersistentState } from '../hooks/chat/usePersistentState'
 
 // Inline tool-approval prompt rendered as a chat message. Extracted from
 // Message.jsx. Behavior is unchanged from the inline version.
@@ -9,19 +10,16 @@ const ToolApprovalMessage = ({ message }) => {
   const [editedArgs, setEditedArgs] = useState(message.arguments)
   const [reason, setReason] = useState('')
   // The arguments panel collapses to a single header line; the choice is
-  // persisted to localStorage so it sticks across messages and reloads (F5).
-  // No saved preference: keep it expanded when the user must act on the call,
-  // but start auto-approved calls collapsed so the args box doesn't dwarf the
-  // tool-call output below it.
-  const [isExpanded, setIsExpanded] = useState(() => {
-    const saved = localStorage.getItem('toolApprovalArgsCollapsed')
-    if (saved !== null) return !JSON.parse(saved)
-    return !(settings?.autoApproveTools && !message.admin_required)
-  })
-
-  useEffect(() => {
-    localStorage.setItem('toolApprovalArgsCollapsed', JSON.stringify(!isExpanded))
-  }, [isExpanded])
+  // persisted to localStorage (via usePersistentState, which guards storage
+  // access) so it sticks across messages and reloads (F5). The default applies
+  // only when there's no saved preference: auto-approved calls start collapsed
+  // (informational — the args box would otherwise dwarf the tool-call output)
+  // while calls that need the user's action start expanded so they're reviewable.
+  const [argsCollapsed, setArgsCollapsed] = usePersistentState(
+    'toolApprovalArgsCollapsed',
+    Boolean(settings?.autoApproveTools && !message.admin_required)
+  )
+  const isExpanded = !argsCollapsed
 
   useEffect(() => {
     if (settings?.autoApproveTools && !message.admin_required && message.status === 'pending') {
@@ -86,7 +84,7 @@ const ToolApprovalMessage = ({ message }) => {
       <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
-          onClick={() => setIsExpanded(!isExpanded)}
+          onClick={() => setArgsCollapsed(!argsCollapsed)}
           className="flex items-center gap-2 text-left hover:text-white transition-colors cursor-pointer"
           aria-expanded={isExpanded}
         >
@@ -130,12 +128,16 @@ const ToolApprovalMessage = ({ message }) => {
         <div className="mt-2 ml-5 border-l-2 border-yellow-500 pl-3">
           <div className="flex items-center justify-between mb-1">
             <div className="text-xs font-semibold text-yellow-400">Input Arguments</div>
-            <button
-              onClick={() => setIsEditing(!isEditing)}
-              className="px-2 py-0.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-            >
-              {isEditing ? 'View' : 'Edit'}
-            </button>
+            {/* Hide the edit affordance when the server disallows edits — any
+                edits would be ignored server-side, so showing it is misleading. */}
+            {message.allow_edit !== false && (
+              <button
+                onClick={() => setIsEditing(!isEditing)}
+                className="px-2 py-0.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+              >
+                {isEditing ? 'View' : 'Edit'}
+              </button>
+            )}
           </div>
 
           {!isEditing ? (
