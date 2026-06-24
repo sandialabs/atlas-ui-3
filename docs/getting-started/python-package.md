@@ -541,6 +541,6 @@ atlas-server --port 8000
 
 ## Next Steps
 
-- [CLI Usage Guide](../developer/cli-usage-2026-01-27.md) - Detailed CLI documentation
+- [CLI Usage Guide](../developer/design-notes/cli-usage-2026-01-27.md) - Detailed CLI documentation
 - [Configuration Guide](../admin/configuration.md) - Configure models, tools, and features
 - [MCP Tools](../admin/mcp-servers.md) - Set up and configure MCP tool servers

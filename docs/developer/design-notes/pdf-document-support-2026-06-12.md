@@ -149,7 +149,7 @@ a `file` content block, not text-extracted (backend log: `Attached 0 image(s)
 and 1 PDF(s) to user message for model`). The model quoted all three facts back
 exactly, confirming it read the PDF directly:
 
-![Native PDF E2E: claude-sonnet-4 answering from an uploaded PDF](images/pdf-document-support-e2e.png)
+![Native PDF E2E: claude-sonnet-4 answering from an uploaded PDF](../images/pdf-document-support-e2e.png)
 
 ## References
 

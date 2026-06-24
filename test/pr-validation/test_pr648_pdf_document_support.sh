@@ -229,7 +229,7 @@ print_result $? "PDF and vision unit tests pass"
 # ==========================================
 print_header "Check 7: Documentation and changelog"
 
-test -f "$PROJECT_ROOT/docs/developer/pdf-document-support-2026-06-12.md"
+test -f "$PROJECT_ROOT/docs/developer/design-notes/pdf-document-support-2026-06-12.md"
 print_result $? "Developer doc for PDF support exists"
 
 grep -q "648" "$PROJECT_ROOT/CHANGELOG.md"

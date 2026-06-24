@@ -123,4 +123,4 @@ Ensure the backend is running (`bash agent_start.sh`) and check that the configu
 ## Related Documentation
 
 - [Authentication & Authorization](authentication.md) - Full authentication configuration guide
-- [Troubleshooting](../troubleshooting.md) - General troubleshooting guide
+- [Logging & Monitoring](logging-monitoring.md) - Logs and health checks for troubleshooting

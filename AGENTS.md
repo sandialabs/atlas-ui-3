@@ -70,7 +70,7 @@ cd atlas && python main.py  # don't use uvicorn --reload
 
 **File Size**: Prefer 400 lines or fewer.
 
-**Documentation**: PRs must update relevant docs in `/docs` (architecture, features, API, config, troubleshooting).
+**Documentation**: PRs must update relevant docs in `/docs` (architecture, features, API, config, troubleshooting). The docs tree is organized by audience and lifecycle — see [`docs/README.md`](./docs/README.md) for the area map and the "Where does a new doc go?" table. In short: operator guides → `admin/`; durable contributor reference → `developer/`; end-user feature how-tos → `user-guide/`; dated records of how a feature was built → `developer/design-notes/`; proposals for unstarted work → `planning/`; shipped/abandoned plans → `archive/` (excluded from the AI doc bundle). Add every new doc to its directory's `README.md` index — `scripts/check-docs.sh` (run in the Build Artifacts workflow) fails the build on orphaned docs or broken relative links. Filenames are `kebab-case`.
 
 **Changelog**: Add a 1-2 line entry to `CHANGELOG.md` for every PR. Format: `### PR #<number> - YYYY-MM-DD`. Always add the entry under the `## [Unreleased]` section — the monthly release automation renames that heading at cut time, so anything above a prior release heading has already shipped.
 
@@ -78,7 +78,7 @@ cd atlas && python main.py  # don't use uvicorn --reload
 
 For an **off-cycle release**: `gh workflow run release-cut.yml -f version=X.Y.Z`. First determine the next version from the **highest *published* release** (`gh release list` / git tags / PyPI), not from `pyproject.toml` on `main` — after a back-merge `main` already equals the last shipped version, so it is not a reliable "next version". Close any superseded/stale release PR before cutting. The cut PR already targets `main` and **doubles as the back-merge PR** after tagging — don't open a second one. CI on the cut PR is the gate; `pypi-publish.yml` builds and uploads the wheel on Release publish, so **don't build a wheel locally** — the only manual confidence step beyond CI is the optional real-LLM smoke test in the runbook.
 
-**Date Stamps**: Include `YYYY-MM-DD` dates in doc filenames or section headers to track staleness.
+**Date Stamps**: Point-in-time records (anything in `developer/design-notes/` or `archive/`) carry a `YYYY-MM-DD` date in the filename (`topic-YYYY-MM-DD.md`). Evergreen reference docs instead carry a `Last updated: YYYY-MM-DD` line near the top — don't date their filenames, so links stay stable as they're revised.
 
 ## Claude Code Agents
 

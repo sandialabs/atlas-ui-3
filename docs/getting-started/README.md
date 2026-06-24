@@ -8,7 +8,7 @@ Welcome to Atlas UI 3! This guide will help you get the application up and runni
 
 - [Installation Guide](installation.md) - How to install and run Atlas UI 3
 - [Python Package Guide](python-package.md) - Use Atlas as a Python library or CLI tool
-- [Interactive Tool Elicitation](elicitation.md) - Learn about tool elicitation features
+- [Interactive Tool Elicitation](../developer/elicitation.md) - Learn about tool elicitation features
 
 ## Next Steps
 

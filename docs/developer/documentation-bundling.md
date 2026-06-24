@@ -1,6 +1,6 @@
 # Documentation Bundling
 
-Last updated: 2026-01-19
+Last updated: 2026-06-22
 
 ## Overview
 
@@ -8,17 +8,12 @@ The Atlas UI 3 project includes an automated documentation bundling system that 
 
 ## What Gets Bundled
 
-The documentation bundle (`atlas-ui-3-docs.zip`) includes:
+The documentation bundle (`atlas-ui-3-docs.zip`) contains the **entire `/docs/` tree** as it exists at build time, with two exceptions:
 
-- `/docs/admin/` - Administrative and operational documentation
-- `/docs/developer/` - Developer guides and architecture documentation
-- `/docs/example/` - Example configurations and use cases
-- `/docs/getting-started/` - Installation and quick start guides
-- `/docs/planning/` - Planning and roadmap documents
-- `/docs/readme_img/` - Images and screenshots
-- `/docs/README.md` - Documentation overview
+- **`/docs/archive/`** is excluded - it holds completed/superseded plans and investigations that no longer describe how the system currently works.
+- Python caches (`__pycache__/`, `*.pyc`) are excluded as noise.
 
-**Note**: The `/docs/archive/` folder is intentionally excluded as it contains outdated or experimental documentation.
+Everything else - `getting-started/`, `user-guide/`, `admin/`, `developer/` (including `developer/design-notes/`), `agentportal/`, `telemetry/`, `planning/`, `testing/`, `example/`, image folders, and the top-level `README.md` - is included automatically. There is no per-directory allowlist to maintain: drop a new doc into the right category and it ships on the next build.
 
 ## Generating the Bundle Locally
 
@@ -62,7 +57,8 @@ The documentation bundle is particularly useful for:
 
 When adding new documentation:
 
-1. Place current/active documentation in the appropriate `/docs/` subdirectory
-2. Move outdated documentation to `/docs/archive/` to exclude it from the bundle
-3. Update `/docs/README.md` if adding a new documentation category
-4. The bundle will automatically include your changes on the next CI/CD run
+1. Place the doc in the appropriate `/docs/` subdirectory (see the "Where does a new doc go?" table in [`/docs/README.md`](../README.md)).
+2. Link it from that directory's `README.md` index. `scripts/check-docs.sh` (run in the Build Artifacts workflow) fails the build if a doc is orphaned or a relative link is broken.
+3. Move a doc to `/docs/archive/` once it stops describing how the system currently works - that excludes it from the bundle.
+4. Update the area map in `/docs/README.md` only when you add a brand-new top-level category.
+5. The bundle automatically includes your changes on the next CI/CD run.
