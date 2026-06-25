@@ -26,3 +26,4 @@ docs that describe how the system works today, see the
 - [Metrics Logging](metrics-logging.md) - Metrics logging feature
 - [Animated Logo](animated-logo-2026-02-27.md) - Animated logo feature flag and effects
 - [Theme Default and Warning Contrast](theme-default-and-warning-contrast-2026-06-14.md) - Dark default + light-mode warning contrast (PR #654)
+- [Opt-in Fine-tune Capture](finetune-capture-2026-06-25.md) - Consent-gated chat capture and rollback preference pairs (issue #622)

@@ -26,6 +26,10 @@ built live under [design-notes/](design-notes/README.md).
 - [Working with Files (S3 Storage)](working-with-files.md) - File storage model and remote MCP access
 - [File Content Extraction](file-content-extraction.md) - Extracting text from uploaded documents
 
+## Data Capture
+
+- [Fine-tune Capture](finetune-capture.md) - Opt-in capture of chat traffic for fine-tuning, with rollback-driven preference pairs
+
 ## Error Handling
 
 - [Error Handling Improvements](error-handling-improvements.md) - LLM error classification and surfacing
