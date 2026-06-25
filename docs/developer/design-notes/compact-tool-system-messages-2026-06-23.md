@@ -67,6 +67,16 @@ outer wrapper (`isCompact`) and the inner header/detail rendering;
 `ToolApprovalMessage` takes a `compact` prop and renders the classic full-bubble
 approval layout when it is false.
 
+The toggle in Settings → General:
+
+![Compact Tool Messages setting](../images/compact-toggle-setting.png)
+
+Same transcript with compact **on** (default) vs **off** (classic bubbles):
+
+![Compact on](../images/compact-toggle-on.png)
+
+![Compact off](../images/compact-toggle-off.png)
+
 ## Files
 
 - `frontend/src/components/ToolApprovalMessage.jsx` — compact layout + persisted collapse; `compact` prop for the classic fallback
