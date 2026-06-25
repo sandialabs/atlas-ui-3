@@ -87,6 +87,7 @@ atlas-chat = "atlas.atlas_chat_cli:main"
 atlas-server = "atlas.server_cli:main"
 atlas-init = "atlas.init_cli:main"
 atlas-portal = "atlas.portal_cli:main"
+atlas-finetune-export = "atlas.finetune_export_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/sandialabs/atlas"

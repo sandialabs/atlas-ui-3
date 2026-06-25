@@ -198,6 +198,16 @@ class ChatService:
         # Initialize orchestrator
         self.orchestrator = None  # Will be initialized lazily to avoid circular dependency
 
+        # Opt-in fine-tune capture service (lazy; only built when first needed)
+        self._capture_service = None
+
+    def _get_capture_service(self):
+        """Lazily build the fine-tune capture service when a config is present."""
+        if self._capture_service is None and self.config_manager is not None:
+            from atlas.application.chat.capture import CaptureService
+            self._capture_service = CaptureService(self.config_manager)
+        return self._capture_service
+
     def _get_orchestrator(self):
         """Lazy initialization of orchestrator."""
         if self.orchestrator is None:
@@ -294,6 +304,31 @@ class ChatService:
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
 
+        # Opt-in fine-tune capture: when both the system flag and this user's
+        # consent are on, activate a capture context for the turn so the LLM
+        # caller can record full I/O. ``capture_correction`` (set by the rollback
+        # flow) marks this turn as a (rejected, chosen) correction pair.
+        capture_correction = kwargs.pop("capture_correction", None)
+        capture_ctx = None
+        capture_service = None
+        try:
+            capture_service = self._get_capture_service()
+            if capture_service and capture_service.is_enabled_for(user_email):
+                capture_ctx = capture_service.build_context(
+                    user_email=user_email,
+                    conversation_id=session.context.get(
+                        "conversation_id", str(session_id)
+                    ),
+                    model=model,
+                    temperature=temperature,
+                    correction=capture_correction
+                    if isinstance(capture_correction, dict)
+                    else None,
+                )
+        except Exception as exc:  # pragma: no cover - capture must never break chat
+            logger.debug("Capture setup skipped: %s", exc)
+            capture_ctx = None
+
         turn_id = str(uuid4())
         turn_attrs = {
             "turn_id": turn_id,
@@ -314,22 +349,46 @@ class ChatService:
 
         try:
             with start_span("chat.turn", turn_attrs):
-                # Delegate to orchestrator
+                # Delegate to orchestrator. When capture is active, run the turn
+                # inside the capture context so the LLM caller records full I/O,
+                # then flush the accumulated record to storage afterwards.
                 orchestrator = self._get_orchestrator()
-                result = await orchestrator.execute(
-                    session_id=session_id,
-                    content=content,
-                    model=model,
-                    user_email=user_email,
-                    selected_tools=selected_tools,
-                    selected_prompts=selected_prompts,
-                    selected_data_sources=selected_data_sources,
-                    only_rag=only_rag,
-                    agent_mode=agent_mode,
-                    temperature=temperature,
-                    update_callback=update_callback,
-                    **kwargs
-                )
+                if capture_ctx is not None:
+                    from atlas.application.chat.capture import capture_turn
+                    with capture_turn(capture_ctx):
+                        result = await orchestrator.execute(
+                            session_id=session_id,
+                            content=content,
+                            model=model,
+                            user_email=user_email,
+                            selected_tools=selected_tools,
+                            selected_prompts=selected_prompts,
+                            selected_data_sources=selected_data_sources,
+                            only_rag=only_rag,
+                            agent_mode=agent_mode,
+                            temperature=temperature,
+                            update_callback=update_callback,
+                            **kwargs
+                        )
+                    try:
+                        capture_service.finish_turn(capture_ctx)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        logger.debug("Capture flush skipped: %s", exc)
+                else:
+                    result = await orchestrator.execute(
+                        session_id=session_id,
+                        content=content,
+                        model=model,
+                        user_email=user_email,
+                        selected_tools=selected_tools,
+                        selected_prompts=selected_prompts,
+                        selected_data_sources=selected_data_sources,
+                        only_rag=only_rag,
+                        agent_mode=agent_mode,
+                        temperature=temperature,
+                        update_callback=update_callback,
+                        **kwargs
+                    )
 
             # Messages accumulated while the session was incognito must never
             # be persisted, even after the user later opts in to saving. Track

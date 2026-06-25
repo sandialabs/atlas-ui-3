@@ -141,6 +141,7 @@ async def get_config_shell(
             "globus_auth": app_settings.feature_globus_auth_enabled,
             "followup_suggestions": app_settings.feature_followup_suggestions_enabled,
             "agent_portal": app_settings.feature_agent_portal_enabled,
+            "finetune_capture": app_settings.feature_finetune_capture_enabled,
         },
         "file_extraction": _get_file_extraction_config(config_manager),
     }
@@ -454,6 +455,7 @@ async def get_config(
             "globus_auth": app_settings.feature_globus_auth_enabled,
             "followup_suggestions": app_settings.feature_followup_suggestions_enabled,
             "agent_portal": app_settings.feature_agent_portal_enabled,
+            "finetune_capture": app_settings.feature_finetune_capture_enabled,
         },
         "file_extraction": _get_file_extraction_config(config_manager)
     }
