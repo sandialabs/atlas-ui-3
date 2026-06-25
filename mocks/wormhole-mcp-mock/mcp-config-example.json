@@ -1,0 +1,9 @@
+{
+  "wormhole_demo": {
+    "url": "http://127.0.0.1:8011/mcp",
+    "transport": "http",
+    "wormhole": true,
+    "description": "Wormhole-enabled demo MCP server (mock). Receives the X-Token subtoken.",
+    "groups": ["users"]
+  }
+}

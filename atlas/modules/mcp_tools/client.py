@@ -11,6 +11,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -230,6 +231,11 @@ class MCPToolManager:
         self._user_clients: Dict[tuple, Client] = {}
         self._user_client_last_used: Dict[tuple, float] = {}
         self._user_clients_lock = asyncio.Lock()
+
+        # Records the Wormhole subtoken baked into each cached per-user HTTP
+        # client (keyed by the same cache_key as _user_clients). Used to detect a
+        # rotated subtoken so the stale client is rebuilt rather than reused.
+        self._wormhole_client_subtokens: Dict[tuple, str] = {}
 
         # Dictionary-based routing for elicitation so a shared Client can still deliver
         # elicitation requests to the correct user's WebSocket.
@@ -1588,6 +1594,96 @@ class MCPToolManager:
         auth_type = config.get("auth_type", "none")
         return auth_type in ("oauth", "jwt", "bearer", "api_key")
 
+    def _is_wormhole_server(self, server_name: str) -> bool:
+        """Return True if a server is configured to receive the Wormhole subtoken."""
+        config = self.servers_config.get(server_name, {})
+        return bool(config.get("wormhole", False))
+
+    def _current_wormhole_subtoken(
+        self, server_name: str, user_email: Optional[str]
+    ) -> Optional[str]:
+        """Return the Wormhole subtoken to forward to a server, if applicable.
+
+        Returns the captured subtoken when the Wormhole feature is enabled, the
+        server opts in via ``wormhole: true``, and a subtoken exists for
+        ``user_email``. Returns ``None`` otherwise.
+        """
+        if not user_email or not self._is_wormhole_server(server_name):
+            return None
+
+        app_settings = config_manager.app_settings
+        if not getattr(app_settings, "feature_wormhole_enabled", False):
+            return None
+
+        from atlas.modules.mcp_tools.wormhole_token_store import get_wormhole_store
+
+        return get_wormhole_store().get_subtoken(user_email)
+
+    def _build_wormhole_headers(
+        self, server_name: str, user_email: Optional[str]
+    ) -> Dict[str, str]:
+        """Build the Wormhole subtoken header for a server, if applicable.
+
+        Returns ``{forward_header: subtoken}`` (default ``{"X-Token": ...}``) when
+        a subtoken should be forwarded (see :meth:`_current_wormhole_subtoken`),
+        otherwise an empty dict, so callers can unconditionally merge the result
+        into their transport headers.
+        """
+        subtoken = self._current_wormhole_subtoken(server_name, user_email)
+        if not subtoken:
+            if user_email and self._is_wormhole_server(server_name):
+                logger.debug(
+                    "Wormhole server '%s' has no subtoken for the current user; "
+                    "connecting without the forward header",
+                    sanitize_for_logging(server_name),
+                )
+            return {}
+
+        forward_header = getattr(
+            config_manager.app_settings, "wormhole_forward_header", "X-Token"
+        )
+        # Defense-in-depth: the subtoken is a session credential. Warn (but do not
+        # block — internal/loopback HPC endpoints are legitimately plaintext) when
+        # it would be forwarded in cleartext to a remote host.
+        self._warn_if_insecure_wormhole_url(server_name)
+        logger.debug(
+            "Forwarding Wormhole subtoken to server '%s' via header '%s'",
+            sanitize_for_logging(server_name),
+            sanitize_for_logging(forward_header),
+        )
+        return {forward_header: subtoken}
+
+    @staticmethod
+    def _is_loopback_host(host: str) -> bool:
+        """Return True for localhost / IPv4 127.0.0.0/8 / IPv6 ::1."""
+        host = (host or "").lower().strip("[]")
+        return host in ("localhost", "::1") or host.startswith("127.")
+
+    def _warn_if_insecure_wormhole_url(self, server_name: str) -> None:
+        """Warn when the Wormhole subtoken would ride plaintext http:// to a
+        non-loopback host.
+
+        The subtoken is a short-lived session credential. Within a Wormhole/HPC
+        deployment the server is normally reached over https (its own Wormhole
+        endpoint) or on loopback, so this only fires for the genuinely risky
+        case — cleartext to a remote host — and never blocks the connection.
+        """
+        config = self.servers_config.get(server_name, {})
+        url = config.get("url", "") or ""
+        # Mirror the scheme-defaulting used when the transport is built.
+        parsed = urlsplit(url if "://" in url else f"http://{url}")
+        if parsed.scheme != "http":
+            return
+        if self._is_loopback_host(parsed.hostname or ""):
+            return
+        logger.warning(
+            "Forwarding Wormhole subtoken to server '%s' over plaintext http:// "
+            "to non-loopback host '%s'; the session credential is sent in the clear. "
+            "Use https:// (e.g. the server's Wormhole endpoint) or a loopback address.",
+            sanitize_for_logging(server_name),
+            sanitize_for_logging(parsed.hostname or ""),
+        )
+
     def _ensure_user_client_cache_state(self) -> None:
         """Initialize cache bookkeeping for tests that bypass __init__."""
         if not hasattr(self, "_user_client_last_used"):
@@ -1606,6 +1702,8 @@ class MCPToolManager:
             self._user_client_sweeper_task = None
         if not hasattr(self, "_user_client_close_tasks"):
             self._user_client_close_tasks = set()
+        if not hasattr(self, "_wormhole_client_subtokens"):
+            self._wormhole_client_subtokens = {}
 
     def _touch_user_client_locked(self, cache_key: tuple) -> None:
         """Mark a cached per-user client as recently used.
@@ -1627,6 +1725,7 @@ class MCPToolManager:
         for key in keys:
             client = self._user_clients.pop(key, None)
             self._user_client_last_used.pop(key, None)
+            self._wormhole_client_subtokens.pop(key, None)
             if client is not None:
                 removed.append((key, client))
         return removed
@@ -1835,21 +1934,37 @@ class MCPToolManager:
         token_storage = get_token_storage()
         cache_key = (normalize_user_email(user_email), server_name, conversation_id)
 
+        # Resolve the current Wormhole subtoken (None for non-Wormhole servers).
+        # A cached client whose baked-in subtoken differs is stale and must be
+        # rebuilt even when its primary auth token is still valid.
+        current_subtoken = self._current_wormhole_subtoken(server_name, user_email)
+
         # Check cache first, but validate token is still valid
         removed = []
         async with self._user_clients_lock:
+            self._ensure_user_client_cache_state()
             if cache_key in self._user_clients:
                 # Verify the token is still valid before returning cached client
                 stored_token = token_storage.get_valid_token(user_email, server_name)
-                if stored_token is not None:
+                subtoken_unchanged = (
+                    self._wormhole_client_subtokens.get(cache_key) == current_subtoken
+                )
+                if stored_token is not None and subtoken_unchanged:
                     self._touch_user_client_locked(cache_key)
                     return self._user_clients[cache_key]
                 else:
-                    # Token expired or removed, invalidate cached client
-                    logger.debug(
-                        f"Token expired for user on server '{server_name}', "
-                        f"invalidating cached client"
-                    )
+                    # Token expired/removed, or the Wormhole subtoken rotated;
+                    # invalidate the cached client so it is rebuilt below.
+                    if stored_token is not None and not subtoken_unchanged:
+                        logger.debug(
+                            "Wormhole subtoken changed for server '%s'; rebuilding client",
+                            sanitize_for_logging(server_name),
+                        )
+                    else:
+                        logger.debug(
+                            f"Token expired for user on server '{server_name}', "
+                            f"invalidating cached client"
+                        )
                     removed = self._pop_user_client_entries_locked([cache_key])
 
         await self._close_user_client_entries(removed)
@@ -1882,6 +1997,11 @@ class MCPToolManager:
             log_handler = self._create_log_handler(server_name)
             auth_type = config.get("auth_type", "bearer")
 
+            # Forward the per-session Wormhole subtoken when this server opts in.
+            # This composes with the server's primary auth: the subtoken rides as
+            # an extra header alongside the API key / bearer token.
+            wormhole_headers = self._build_wormhole_headers(server_name, user_email)
+
             # For API key auth, use custom header; for bearer/jwt/oauth, use auth parameter
             if auth_type == "api_key":
                 # Use custom header for API key authentication
@@ -1889,12 +2009,20 @@ class MCPToolManager:
                 logger.debug(
                     f"Creating API key client for '{server_name}' with header '{auth_header}'"
                 )
-                transport = StreamableHttpTransport(
-                    url,
-                    headers={auth_header: stored_token.token_value},
-                )
+                headers = {auth_header: stored_token.token_value, **wormhole_headers}
+                transport = StreamableHttpTransport(url, headers=headers)
                 client = Client(
                     transport=transport,
+                    log_handler=log_handler,
+                    elicitation_handler=self._create_elicitation_handler(server_name),
+                    sampling_handler=self._create_sampling_handler(server_name),
+                )
+            elif wormhole_headers:
+                # Bearer/jwt/oauth token via auth=, plus the Wormhole subtoken header.
+                transport = StreamableHttpTransport(url, headers=wormhole_headers)
+                client = Client(
+                    transport=transport,
+                    auth=stored_token.token_value,
                     log_handler=log_handler,
                     elicitation_handler=self._create_elicitation_handler(server_name),
                     sampling_handler=self._create_sampling_handler(server_name),
@@ -1920,6 +2048,8 @@ class MCPToolManager:
                     cached_client = self._user_clients[cache_key]
                 else:
                     self._user_clients[cache_key] = client
+                    if current_subtoken is not None:
+                        self._wormhole_client_subtokens[cache_key] = current_subtoken
                     self._touch_user_client_locked(cache_key)
                     evicted = self._enforce_user_client_cache_limit_locked()
                     cached_client = client
@@ -2002,6 +2132,28 @@ class MCPToolManager:
             )
         cache_key = (normalize_user_email(user_email), server_name, conversation_id)
 
+        # Resolve the current Wormhole subtoken (None for non-Wormhole servers).
+        # If it differs from the one baked into a cached client, the cached client
+        # is stale (the subtoken rotated) and must be rebuilt.
+        current_subtoken = self._current_wormhole_subtoken(server_name, user_email)
+
+        stale_removed = []
+        async with self._user_clients_lock:
+            self._ensure_user_client_cache_state()
+            if cache_key in self._user_clients:
+                cached_subtoken = self._wormhole_client_subtokens.get(cache_key)
+                if cached_subtoken == current_subtoken:
+                    self._touch_user_client_locked(cache_key)
+                    return self._user_clients[cache_key]
+                # Subtoken rotated: drop the stale client and fall through to rebuild.
+                logger.debug(
+                    "Wormhole subtoken changed for server '%s'; rebuilding client",
+                    sanitize_for_logging(server_name),
+                )
+                stale_removed = self._pop_user_client_entries_locked([cache_key])
+
+        await self._close_user_client_entries(stale_removed)
+
         async with self._user_clients_lock:
             if cache_key in self._user_clients:
                 self._touch_user_client_locked(cache_key)
@@ -2020,15 +2172,30 @@ class MCPToolManager:
                 token = None
 
             log_handler = self._create_log_handler(server_name)
-            client = Client(
-                url,
-                auth=token,
-                log_handler=log_handler,
-                elicitation_handler=self._create_elicitation_handler(server_name),
-                sampling_handler=self._create_sampling_handler(server_name),
-            )
+
+            # Forward the per-session Wormhole subtoken when this server opts in.
+            wormhole_headers = self._build_wormhole_headers(server_name, user_email)
+            if wormhole_headers:
+                transport = StreamableHttpTransport(url, headers=wormhole_headers)
+                client = Client(
+                    transport=transport,
+                    auth=token,
+                    log_handler=log_handler,
+                    elicitation_handler=self._create_elicitation_handler(server_name),
+                    sampling_handler=self._create_sampling_handler(server_name),
+                )
+            else:
+                client = Client(
+                    url,
+                    auth=token,
+                    log_handler=log_handler,
+                    elicitation_handler=self._create_elicitation_handler(server_name),
+                    sampling_handler=self._create_sampling_handler(server_name),
+                )
 
             self._user_clients[cache_key] = client
+            if current_subtoken is not None:
+                self._wormhole_client_subtokens[cache_key] = current_subtoken
             self._touch_user_client_locked(cache_key)
             evicted = self._enforce_user_client_cache_limit_locked()
 
