@@ -51,8 +51,26 @@ assistant response:
 
 ![Compact tool-call success row](../images/compact-tool-call-success.png)
 
+## Opt-out toggle
+
+Some users prefer the previous, fuller layout. A **Compact Tool Messages**
+switch was added under Settings → General (on by default), persisted in
+`localStorage['chatui-settings'].compactMessages` like the other user settings.
+
+When turned **off**, the compact path is bypassed for every affected row type
+(tool calls, approval prompts, tool logs, agent meta, system notices): they
+render again inside the classic avatar / author-header / bubble layout, and the
+tool-call and approval rows show their arguments/output expanded by default —
+matching the pre-#673 experience. The flag is read in `Message.jsx`
+(`compactMessages = settings?.compactMessages !== false`) and gates both the
+outer wrapper (`isCompact`) and the inner header/detail rendering;
+`ToolApprovalMessage` takes a `compact` prop and renders the classic full-bubble
+approval layout when it is false.
+
 ## Files
 
-- `frontend/src/components/ToolApprovalMessage.jsx` — compact layout + persisted collapse
-- `frontend/src/components/Message.jsx` — route `tool_approval_request` through the compact path
+- `frontend/src/components/ToolApprovalMessage.jsx` — compact layout + persisted collapse; `compact` prop for the classic fallback
+- `frontend/src/components/Message.jsx` — route `tool_approval_request` through the compact path; gate compact rendering on the setting
+- `frontend/src/hooks/useSettings.js` — `compactMessages` default (true)
+- `frontend/src/components/SettingsPanel.jsx` — General-tab toggle
 - `frontend/src/components/ToolApprovalDialog.jsx` (removed) + its test

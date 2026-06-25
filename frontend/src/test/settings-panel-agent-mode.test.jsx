@@ -77,4 +77,28 @@ describe('SettingsPanel agent mode settings', () => {
     expect(warning.closest('p')).toHaveClass('approval-warning-text')
     expect(screen.getByText(/Currently:/)).toBeInTheDocument()
   })
+
+  it('exposes the Compact Tool Messages toggle and updates the setting when clicked', async () => {
+    const updateSettings = vi.fn()
+    renderSettingsPanel({ settings: { compactMessages: true }, updateSettings })
+
+    const label = await screen.findByText('Compact Tool Messages')
+    // The toggle button is the sibling control in the same row as the label.
+    const toggle = label.parentElement.querySelector('button')
+    toggle.click()
+
+    expect(updateSettings).toHaveBeenCalledWith({ compactMessages: false })
+  })
+
+  it('treats a missing compactMessages setting as enabled (default on)', async () => {
+    const updateSettings = vi.fn()
+    renderSettingsPanel({ settings: {}, updateSettings })
+
+    const label = await screen.findByText('Compact Tool Messages')
+    const toggle = label.parentElement.querySelector('button')
+    toggle.click()
+
+    // Undefined is treated as "on", so the first click turns it off.
+    expect(updateSettings).toHaveBeenCalledWith({ compactMessages: false })
+  })
 })

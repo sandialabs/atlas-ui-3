@@ -28,6 +28,10 @@ const ragCitationsEnabled =
 const Message = ({ message, userIndex = null, onRewind = null }) => {
   const { appName, downloadFile, isSynthesizing, settings } = useChat()
   const debugMode = settings?.debugMode || false
+  // Compact transcript (default on) renders tool/approval/system rows as dense,
+  // chrome-less lines. When the user turns it off in Settings, those rows fall
+  // back to the classic avatar + author-header bubble layout (#673).
+  const compactMessages = settings?.compactMessages !== false
   // Stable per-message scope for citation anchor IDs — prevents collisions
   // when multiple RAG responses exist in the same conversation.
   const rawId = useId()
@@ -62,8 +66,9 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
   // "Compact" rows are everything that isn't core user/assistant prose: tool
   // calls, tool logs, agent-loop meta, tool-approval prompts, and system
   // notices. They render without the avatar / author-header / bubble chrome to
-  // reclaim vertical space; the approval prompt stays fully interactive.
-  const isCompact =
+  // reclaim vertical space; the approval prompt stays fully interactive. The
+  // user can opt out (compactMessages off) to restore the classic bubble look.
+  const isCompactType =
     message.type === 'tool_call' ||
     message.type === 'tool_log' ||
     message.type === 'tool_approval_request' ||
@@ -71,6 +76,7 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
     message.type === 'agent_reason' ||
     message.type === 'agent_observe' ||
     isSystem
+  const isCompact = compactMessages && isCompactType
 
   const handleCopyMessage = (event) => {
     event.preventDefault()
@@ -174,7 +180,7 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
 
   const renderContent = () => {
     if (message.type === 'tool_approval_request') {
-      return <ToolApprovalMessage message={message} />
+      return <ToolApprovalMessage message={message} compact={compactMessages} />
     }
 
     // Handle tool call messages (both regular and agent mode use same UI).
@@ -191,36 +197,56 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
       const statusColor =
         isToolActive ? 'bg-blue-600' :
         message.status === 'completed' ? 'bg-green-600' : 'bg-red-600'
+      // In compact mode the row collapses to one clickable line; with compact
+      // off (classic bubble), details stay expanded like the pre-#673 layout.
+      const showDetails = compactMessages ? !toolDetailsCollapsed : true
       return (
         <div className="text-gray-200 selectable-markdown">
-          {/* Single-line summary; click to expand input + output */}
-          <button
-            onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
-            className={`w-full text-left flex items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
-            type="button"
-            aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
-          >
-            {hasDetails && (
-              <span className={`text-gray-500 text-xs transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
-                ▶
+          {/* Compact: single clickable summary line. Classic: static badge row. */}
+          {compactMessages ? (
+            <button
+              onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
+              className={`w-full text-left flex items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              type="button"
+              aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
+            >
+              {hasDetails && (
+                <span className={`text-gray-500 text-xs transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
+                  ▶
+                </span>
+              )}
+              {isToolActive && (
+                <svg className="w-3.5 h-3.5 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColor}`}>
+                {statusLabel}
               </span>
-            )}
-            {isToolActive && (
-              <svg className="w-3.5 h-3.5 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            )}
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColor}`}>
-              {statusLabel}
-            </span>
-            <span className="font-medium text-sm">{message.tool_name}</span>
-            <span className="text-gray-500 text-xs">({message.server_name})</span>
-            {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
-            {toolDetailsCollapsed && argCount > 0 && (
-              <span className="text-gray-500 text-xs">· {argCount} param{argCount !== 1 ? 's' : ''}</span>
-            )}
-          </button>
+              <span className="font-medium text-sm">{message.tool_name}</span>
+              <span className="text-gray-500 text-xs">({message.server_name})</span>
+              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
+              {toolDetailsCollapsed && argCount > 0 && (
+                <span className="text-gray-500 text-xs">· {argCount} param{argCount !== 1 ? 's' : ''}</span>
+              )}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 mb-3">
+              {isToolActive && (
+                <svg className="w-4 h-4 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
+              <span className={`px-2 py-1 rounded text-xs font-medium ${statusColor}`}>
+                {statusLabel}
+              </span>
+              <span className="font-medium">{message.tool_name}</span>
+              <span className="text-gray-400 text-sm">({message.server_name})</span>
+              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
+            </div>
+          )}
 
           {/* Progress Section (shows when in progress or progress data available) */}
           {(() => {
@@ -359,7 +385,7 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
           })()}
 
           {/* Expanded details: input arguments + output, revealed together */}
-          {!toolDetailsCollapsed && (
+          {showDetails && (
             <div className="mt-2 ml-5 space-y-3">
               {argCount > 0 && (
                 <div className="border-l-2 border-blue-500 pl-3">
