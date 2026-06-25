@@ -478,6 +478,15 @@ async def websocket_endpoint(websocket: WebSocket):
             reason="Authentication required. Please ensure you are accessing this application through the configured reverse proxy."
         )
 
+    # Capture the Wormhole subtoken (if present) from the handshake headers so
+    # it can be forwarded to Wormhole-enabled MCP servers for this user/session.
+    # No-ops when the Wormhole feature is disabled.
+    try:
+        from atlas.modules.mcp_tools.wormhole_token_store import capture_subtoken_from_headers
+        capture_subtoken_from_headers(websocket.headers, user_email)
+    except Exception:  # pragma: no cover - never block a connection on this
+        logger.debug("Failed to capture Wormhole subtoken from WebSocket headers", exc_info=True)
+
     # Now accept the connection (user is authenticated)
     await websocket.accept()
     logger.info(

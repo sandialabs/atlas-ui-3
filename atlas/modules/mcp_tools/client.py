@@ -37,14 +37,15 @@ from atlas.modules.mcp_tools.mcp_routing import (
     _ElicitationRoutingContext,
     _SamplingRoutingContext,
 )
-from atlas.modules.mcp_tools.mcp_user_clients import (
+from atlas.modules.mcp_tools.mcp_user_client_cache import (
     _DEFAULT_USER_CLIENT_CACHE_IDLE_TTL_SECONDS,
     _DEFAULT_USER_CLIENT_CACHE_IN_USE_WINDOW_SECONDS,
     _DEFAULT_USER_CLIENT_CACHE_MAX_ENTRIES,
     _DEFAULT_USER_CLIENT_CACHE_SWEEP_INTERVAL_SECONDS,
     _DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS,
-    UserClientMixin,
+    UserClientCacheMixin,
 )
+from atlas.modules.mcp_tools.mcp_user_clients import UserClientMixin
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class MCPToolManager(
     RoutingMixin,
     ConnectionMixin,
     UserClientMixin,
+    UserClientCacheMixin,
     DiscoveryMixin,
     ResultProcessorMixin,
     ExecutionMixin,
@@ -146,6 +148,11 @@ class MCPToolManager(
         self._user_clients: Dict[tuple, Client] = {}
         self._user_client_last_used: Dict[tuple, float] = {}
         self._user_clients_lock = asyncio.Lock()
+
+        # Records the Wormhole subtoken baked into each cached per-user HTTP
+        # client (keyed by the same cache_key as _user_clients). Used to detect a
+        # rotated subtoken so the stale client is rebuilt rather than reused.
+        self._wormhole_client_subtokens: Dict[tuple, str] = {}
 
         # Dictionary-based routing for elicitation so a shared Client can still deliver
         # elicitation requests to the correct user's WebSocket.
