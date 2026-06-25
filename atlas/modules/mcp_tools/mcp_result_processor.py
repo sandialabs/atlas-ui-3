@@ -155,6 +155,8 @@ class ResultProcessorMixin:
                                 try:
                                     structured = json.loads(first_text)
                                 except Exception:
+                                    # Not JSON-shaped after all; leave
+                                    # structured empty and fall through.
                                     pass
 
             if isinstance(structured, dict) and structured:

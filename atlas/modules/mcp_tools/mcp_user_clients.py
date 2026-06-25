@@ -17,7 +17,6 @@ from fastmcp import Client
 
 from atlas.core.user_identity import normalize_user_email
 from atlas.modules.config.config_manager import resolve_env_var
-from atlas.modules.mcp_tools import client as _mcp_client
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +25,18 @@ _DEFAULT_USER_CLIENT_CACHE_IDLE_TTL_SECONDS = 3600
 _DEFAULT_USER_CLIENT_CACHE_SWEEP_INTERVAL_SECONDS = 300
 _DEFAULT_USER_CLIENT_CACHE_IN_USE_WINDOW_SECONDS = 60
 _DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS = 5.0
+
+
+def _client():
+    """Lazily import the client module to avoid a module-level import cycle.
+
+    The patched globals (``config_manager`` / ``Client`` /
+    ``StreamableHttpTransport``) live on the client module; resolving them at
+    call time keeps ``@patch('atlas.modules.mcp_tools.client.<name>')`` working
+    regardless of which module the calling method now lives in.
+    """
+    from atlas.modules.mcp_tools import client
+    return client
 
 
 class UserClientMixin:
@@ -348,11 +359,11 @@ class UserClientMixin:
                 logger.debug(
                     f"Creating API key client for '{server_name}' with header '{auth_header}'"
                 )
-                transport = _mcp_client.StreamableHttpTransport(
+                transport = _client().StreamableHttpTransport(
                     url,
                     headers={auth_header: stored_token.token_value},
                 )
-                client = _mcp_client.Client(
+                client = _client().Client(
                     transport=transport,
                     log_handler=log_handler,
                     elicitation_handler=self._create_elicitation_handler(server_name),
@@ -360,7 +371,7 @@ class UserClientMixin:
                 )
             else:
                 # FastMCP Client accepts auth= as a string (bearer token)
-                client = _mcp_client.Client(
+                client = _client().Client(
                     url,
                     auth=stored_token.token_value,
                     log_handler=log_handler,
@@ -479,7 +490,7 @@ class UserClientMixin:
                 token = None
 
             log_handler = self._create_log_handler(server_name)
-            client = _mcp_client.Client(
+            client = _client().Client(
                 url,
                 auth=token,
                 log_handler=log_handler,

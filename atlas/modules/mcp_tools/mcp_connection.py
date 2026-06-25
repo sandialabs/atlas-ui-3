@@ -16,9 +16,20 @@ from fastmcp import Client
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.modules.config.config_manager import resolve_env_var
-from atlas.modules.mcp_tools import client as _mcp_client
 
 logger = logging.getLogger(__name__)
+
+
+def _client():
+    """Lazily import the client module to avoid a module-level import cycle.
+
+    The patched globals (``config_manager`` / ``Client`` /
+    ``StreamableHttpTransport``) live on the client module; resolving them at
+    call time keeps ``@patch('atlas.modules.mcp_tools.client.<name>')`` working
+    regardless of which module the calling method now lives in.
+    """
+    from atlas.modules.mcp_tools import client
+    return client
 
 
 class ConnectionMixin:
@@ -55,7 +66,7 @@ class ConnectionMixin:
 
         Uses settings from config_manager for base interval, max interval, and multiplier.
         """
-        app_settings = _mcp_client.config_manager.app_settings
+        app_settings = _client().config_manager.app_settings
         base_interval = app_settings.mcp_reconnect_interval
         max_interval = app_settings.mcp_reconnect_max_interval
         multiplier = app_settings.mcp_reconnect_backoff_multiplier
@@ -142,7 +153,7 @@ class ConnectionMixin:
                 if transport_type == "sse":
                     # Use explicit SSE transport
                     logger.debug(f"Creating SSE client for {server_name} at {url}")
-                    client = _mcp_client.Client(
+                    client = _client().Client(
                         url,
                         auth=token,
                         log_handler=log_handler,
@@ -152,7 +163,7 @@ class ConnectionMixin:
                 else:
                     # Use HTTP transport (StreamableHttp)
                     logger.debug(f"Creating HTTP client for {server_name} at {url}")
-                    client = _mcp_client.Client(
+                    client = _client().Client(
                         url,
                         auth=token,
                         log_handler=log_handler,
@@ -220,7 +231,7 @@ class ConnectionMixin:
                             logger.debug("Creating STDIO client for %s with command=%s cwd=%s", safe_server_name, command, cwd)
                             from fastmcp.client.transports import StdioTransport
                             transport = StdioTransport(command=command[0], args=command[1:], cwd=cwd, env=resolved_env)
-                            client = _mcp_client.Client(
+                            client = _client().Client(
                                 transport,
                                 log_handler=log_handler,
                                 elicitation_handler=self._create_elicitation_handler(server_name),
@@ -235,7 +246,7 @@ class ConnectionMixin:
                         logger.debug("No cwd specified for %s; creating STDIO client with command=%s", safe_server_name, command)
                         from fastmcp.client.transports import StdioTransport
                         transport = StdioTransport(command=command[0], args=command[1:], env=resolved_env)
-                        client = _mcp_client.Client(
+                        client = _client().Client(
                             transport,
                             log_handler=log_handler,
                             elicitation_handler=self._create_elicitation_handler(server_name),
@@ -250,7 +261,7 @@ class ConnectionMixin:
                     if os.path.exists(server_path):
                         logger.debug(f"Server script exists for {server_name}, creating client...")
                         log_handler = self._create_log_handler(server_name)
-                        client = _mcp_client.Client(
+                        client = _client().Client(
                             server_path,
                             log_handler=log_handler,
                             elicitation_handler=self._create_elicitation_handler(server_name),
@@ -472,7 +483,7 @@ class ConnectionMixin:
         This task periodically attempts to reconnect to failed MCP servers
         using exponential backoff. Only runs if FEATURE_MCP_AUTO_RECONNECT_ENABLED is true.
         """
-        app_settings = _mcp_client.config_manager.app_settings
+        app_settings = _client().config_manager.app_settings
         if not app_settings.feature_mcp_auto_reconnect_enabled:
             logger.info("MCP auto-reconnect is disabled (FEATURE_MCP_AUTO_RECONNECT_ENABLED=false)")
             return
@@ -493,13 +504,16 @@ class ConnectionMixin:
             try:
                 await self._reconnect_task
             except asyncio.CancelledError:
+                # Expected: we just cancelled the reconnect task; swallow the
+                # propagated cancellation so callers (e.g. shutdown) see a
+                # clean stop.
                 pass
             self._reconnect_task = None
         logger.info("Stopped MCP auto-reconnect background task")
 
     async def _auto_reconnect_loop(self) -> None:
         """Background loop that periodically attempts to reconnect failed servers."""
-        app_settings = _mcp_client.config_manager.app_settings
+        app_settings = _client().config_manager.app_settings
         base_interval = app_settings.mcp_reconnect_interval
 
         while self._reconnect_running:

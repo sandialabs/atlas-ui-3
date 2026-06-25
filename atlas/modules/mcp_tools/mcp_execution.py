@@ -13,7 +13,6 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
 from atlas.domain.messages.models import ToolCall, ToolResult
-from atlas.modules.mcp_tools import client as _mcp_client
 from atlas.modules.mcp_tools.mcp_errors import (
     _is_session_terminated_error,
     _is_task_forbidden_error,
@@ -22,6 +21,18 @@ from atlas.modules.mcp_tools.mcp_errors import (
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
 logger = logging.getLogger(__name__)
+
+
+def _client():
+    """Lazily import the client module to avoid a module-level import cycle.
+
+    The patched globals (``config_manager`` / ``Client`` /
+    ``StreamableHttpTransport``) live on the client module; resolving them at
+    call time keeps ``@patch('atlas.modules.mcp_tools.client.<name>')`` working
+    regardless of which module the calling method now lives in.
+    """
+    from atlas.modules.mcp_tools import client
+    return client
 
 
 class ExecutionMixin:
@@ -124,7 +135,7 @@ class ExecutionMixin:
                 raise ValueError(f"No client available for server: {server_name}")
             client = self.clients[server_name]
 
-        call_timeout = _mcp_client.config_manager.app_settings.mcp_call_timeout
+        call_timeout = _client().config_manager.app_settings.mcp_call_timeout
         try:
             # Set elicitation callback before opening the client context.
             # FastMCP negotiates supported capabilities during session init.

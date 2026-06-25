@@ -12,9 +12,20 @@ from typing import Any, Dict, List, Optional
 from fastmcp import Client
 
 from atlas.core.log_sanitizer import sanitize_for_logging
-from atlas.modules.mcp_tools import client as _mcp_client
 
 logger = logging.getLogger(__name__)
+
+
+def _client():
+    """Lazily import the client module to avoid a module-level import cycle.
+
+    The patched globals (``config_manager`` / ``Client`` /
+    ``StreamableHttpTransport``) live on the client module; resolving them at
+    call time keeps ``@patch('atlas.modules.mcp_tools.client.<name>')`` working
+    regardless of which module the calling method now lives in.
+    """
+    from atlas.modules.mcp_tools import client
+    return client
 
 
 class DiscoveryMixin:
@@ -25,7 +36,7 @@ class DiscoveryMixin:
         safe_server_name = sanitize_for_logging(server_name)
         server_config = self.servers_config.get(server_name, {})
         safe_config = sanitize_for_logging(str(server_config))
-        discovery_timeout = _mcp_client.config_manager.app_settings.mcp_discovery_timeout
+        discovery_timeout = _client().config_manager.app_settings.mcp_discovery_timeout
         logger.debug("Tool discovery: starting for server '%s'", safe_server_name)
         logger.debug("Server config (sanitized): %s", safe_config)
         try:
@@ -186,7 +197,7 @@ class DiscoveryMixin:
         """Discover prompts for a single server. Returns server prompts data."""
         safe_server_name = sanitize_for_logging(server_name)
         server_config = self.servers_config.get(server_name, {})
-        discovery_timeout = _mcp_client.config_manager.app_settings.mcp_discovery_timeout
+        discovery_timeout = _client().config_manager.app_settings.mcp_discovery_timeout
         logger.debug(f"Attempting to discover prompts from {safe_server_name}")
         try:
             logger.debug(f"Opening client connection for {safe_server_name}")

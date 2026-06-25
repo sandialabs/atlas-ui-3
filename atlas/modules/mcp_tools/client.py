@@ -20,13 +20,14 @@ from typing import Any, Dict, Optional
 from fastmcp import Client
 
 # Re-exported so ``@patch('atlas.modules.mcp_tools.client.StreamableHttpTransport')``
-# (and the mixins' ``_mcp_client.StreamableHttpTransport`` indirection) keep working
+# (and the mixins' ``_client().StreamableHttpTransport`` indirection) keep working
 # even though the only call site now lives in mcp_user_clients.
 from fastmcp.client.transports import StreamableHttpTransport  # noqa: F401
 
 from atlas.modules.config import config_manager
 from atlas.modules.mcp_tools.mcp_connection import ConnectionMixin
 from atlas.modules.mcp_tools.mcp_discovery import DiscoveryMixin
+from atlas.modules.mcp_tools.mcp_errors import _is_session_terminated_error
 from atlas.modules.mcp_tools.mcp_execution import ExecutionMixin
 from atlas.modules.mcp_tools.mcp_result_processor import ResultProcessorMixin
 from atlas.modules.mcp_tools.mcp_routing import (
@@ -51,7 +52,12 @@ logger = logging.getLogger(__name__)
 # split. Re-exported (and imported above) so existing imports/patches such as
 # ``from atlas.modules.mcp_tools.client import _ElicitationRoutingContext``
 # continue to resolve.
-__all__ = ["MCPToolManager", "MCP_TO_PYTHON_LOG_LEVEL", "_ElicitationRoutingContext"]
+__all__ = [
+    "MCPToolManager",
+    "MCP_TO_PYTHON_LOG_LEVEL",
+    "_ElicitationRoutingContext",
+    "_is_session_terminated_error",
+]
 
 
 class MCPToolManager(
