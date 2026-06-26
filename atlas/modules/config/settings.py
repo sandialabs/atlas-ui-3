@@ -276,6 +276,26 @@ class AppSettings(BaseSettings):
         validation_alias="AUTH_REDIRECT_URL"
     )
 
+    # Wormhole authentication settings.
+    # A Wormhole-wrapped Atlas receives a JWT carrying a unique subtoken header
+    # (default ``x-subtoken``) that must be forwarded to Wormhole-enabled MCP
+    # servers as the configured forward header (default ``X-Token``).
+    feature_wormhole_enabled: bool = Field(
+        default=False,
+        description="Enable Wormhole subtoken capture/forwarding for Wormhole-enabled MCP servers",
+        validation_alias="FEATURE_WORMHOLE_ENABLED",
+    )
+    wormhole_subtoken_header: str = Field(
+        default="x-subtoken",
+        description="Incoming request/WebSocket header carrying the Wormhole subtoken",
+        validation_alias="WORMHOLE_SUBTOKEN_HEADER",
+    )
+    wormhole_forward_header: str = Field(
+        default="X-Token",
+        description="Header used to forward the Wormhole subtoken to MCP servers",
+        validation_alias="WORMHOLE_FORWARD_HEADER",
+    )
+
     # Globus OAuth settings
     feature_globus_auth_enabled: bool = Field(
         default=False,

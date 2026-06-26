@@ -68,7 +68,7 @@ jobs:
           echo "::warning::The release captain must kick CI manually — see docs/developer/release-process.md."
 
       - name: Checkout main
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
