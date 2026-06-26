@@ -47,6 +47,7 @@ class TestLLMEnvExpansionIntegration:
 
     def test_litellm_caller_resolves_api_key_env_var(self, monkeypatch):
         """LiteLLMCaller should resolve environment variables in api_key."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.setenv("TEST_OPENAI_KEY", "sk-test-12345")
 
         # Create LLM config with env var in api_key
@@ -64,11 +65,12 @@ class TestLLMEnvExpansionIntegration:
         caller = LiteLLMCaller(llm_config, debug_mode=True)
 
         # Get model kwargs - this should resolve the env var
-        _ = caller._get_model_kwargs("test-model")
+        model_kwargs = caller._get_model_kwargs("test-model")
 
-        # Verify that the environment variable was set (LiteLLMCaller sets env vars for provider detection)
+        # Verify the configured key is passed per call without setting provider env vars
         import os
-        assert os.environ.get("OPENAI_API_KEY") == "sk-test-12345"
+        assert model_kwargs["api_key"] == "sk-test-12345"
+        assert os.environ.get("OPENAI_API_KEY") is None
 
         # Cleanup to avoid leaking into other tests
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -95,6 +97,7 @@ class TestLLMEnvExpansionIntegration:
 
     def test_litellm_caller_handles_literal_api_key(self, monkeypatch):
         """LiteLLMCaller should handle literal api_key values."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         # Create LLM config with literal api_key
         llm_config = LLMConfig(
             models={
@@ -110,11 +113,12 @@ class TestLLMEnvExpansionIntegration:
         caller = LiteLLMCaller(llm_config, debug_mode=True)
 
         # Get model kwargs - this should work without errors
-        _ = caller._get_model_kwargs("test-model")
+        model_kwargs = caller._get_model_kwargs("test-model")
 
-        # Verify that the environment variable was set
+        # Verify the literal key is passed per call without setting provider env vars
         import os
-        assert os.environ.get("OPENAI_API_KEY") == "sk-literal-key-12345"
+        assert model_kwargs["api_key"] == "sk-literal-key-12345"
+        assert os.environ.get("OPENAI_API_KEY") is None
 
         # Cleanup to avoid leaking into other tests
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -203,6 +207,7 @@ class TestLLMEnvExpansionIntegration:
 
     def test_custom_endpoint_with_env_var_api_key(self, monkeypatch):
         """Custom endpoint should pass api_key in kwargs when using env var."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.setenv("CUSTOM_LLM_KEY", "sk-custom-12345")
 
         # Create LLM config for custom endpoint with env var in api_key
@@ -230,9 +235,9 @@ class TestLLMEnvExpansionIntegration:
         assert "api_base" in model_kwargs
         assert model_kwargs["api_base"] == "https://custom-llm.example.com/v1"
 
-        # Verify fallback env var is set for OpenAI-compatible endpoints
+        # Verify fallback env vars are not set for OpenAI-compatible endpoints
         import os
-        assert os.environ.get("OPENAI_API_KEY") == "sk-custom-12345"
+        assert os.environ.get("OPENAI_API_KEY") is None
 
         # Cleanup to avoid leaking into other tests
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -264,7 +269,7 @@ class TestLLMEnvExpansionIntegration:
         assert "api_base" in model_kwargs
         assert model_kwargs["api_base"] == "https://custom-llm.example.com/v1"
 
-    def test_openai_env_not_overwritten_if_same_value(self, monkeypatch):
+    def test_openai_env_preserved_if_same_value(self, monkeypatch):
         """OPENAI_API_KEY is left as-is when value matches."""
         # Pre-set env to a specific value
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-same")
@@ -288,8 +293,8 @@ class TestLLMEnvExpansionIntegration:
         # Env var should remain the same
         assert os.environ.get("OPENAI_API_KEY") == "sk-openai-same"
 
-    def test_openai_env_overwritten_with_warning(self, monkeypatch, caplog):
-        """OPENAI_API_KEY overwrite should occur with a warning when value differs."""
+    def test_openai_env_not_overwritten_when_value_differs(self, monkeypatch, caplog):
+        """OPENAI_API_KEY is not overwritten when configured key differs."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-original")
 
         llm_config = LLMConfig(
@@ -310,13 +315,15 @@ class TestLLMEnvExpansionIntegration:
         import os
         # kwargs should use the new key
         assert model_kwargs["api_key"] == "sk-openai-new"
-        # Env var should be overwritten to the new value
-        assert os.environ.get("OPENAI_API_KEY") == "sk-openai-new"
-        # A warning about overwriting should be logged
-        assert any("Overwriting existing environment variable OPENAI_API_KEY" in rec.getMessage() for rec in caplog.records)
+        # Env var remains under admin control
+        assert os.environ.get("OPENAI_API_KEY") == "sk-openai-original"
+        # No warning about overwriting should be logged
+        assert not any(
+            "Overwriting existing environment variable OPENAI_API_KEY" in rec.getMessage() for rec in caplog.records
+        )
 
     def test_openai_and_custom_models_resolved_in_succession(self, monkeypatch):
-        """Sequence of OpenAI then custom endpoint should keep last key in env while kwargs stay correct."""
+        """Sequence of OpenAI then custom endpoint should keep env unchanged while kwargs stay correct."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-preexisting")
 
         llm_config = LLMConfig(
@@ -345,8 +352,8 @@ class TestLLMEnvExpansionIntegration:
         # kwargs should always reflect model-specific keys
         assert openai_kwargs["api_key"] == "sk-openai-1"
         assert custom_kwargs["api_key"] == "sk-custom-2"
-        # Env var ends up with the last key used (custom model)
-        assert os.environ.get("OPENAI_API_KEY") == "sk-custom-2"
+        # Env var remains under admin control
+        assert os.environ.get("OPENAI_API_KEY") == "sk-preexisting"
 
     def test_custom_endpoint_with_extra_headers(self, monkeypatch):
         """Custom endpoint should handle extra_headers correctly."""
@@ -454,8 +461,31 @@ class TestLLMEnvExpansionIntegration:
         import os
         assert os.environ.get("OPENAI_API_KEY") == "sk-from-dotenv-file"
 
+    def test_gateway_model_name_uses_configured_key_without_openai_env_coercion(self, monkeypatch):
+        """Gateway aliases that look like OpenAI models should use their configured key only."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-real-openai-should-not-be-used")
+        monkeypatch.setenv("GATEWAY_API_KEY", "sk-gateway-configured")
+
+        llm_config = LLMConfig(
+            models={
+                "gateway-gpt5": ModelConfig(
+                    model_name="gpt-5.X",
+                    model_url="https://gateway.example.com/v1",
+                    api_key="${GATEWAY_API_KEY}",
+                )
+            }
+        )
+
+        caller = LiteLLMCaller(llm_config, debug_mode=True)
+        model_kwargs = caller._get_model_kwargs("gateway-gpt5")
+
+        assert model_kwargs["api_key"] == "sk-gateway-configured"
+        assert model_kwargs["api_base"] == "https://gateway.example.com/v1"
+        assert os.environ.get("OPENAI_API_KEY") == "sk-real-openai-should-not-be-used"
+
     def test_multiple_custom_openai_compatible_endpoints_with_different_keys(self, monkeypatch):
         """Test multiple OpenAI-compatible custom endpoints each with their own API key."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.setenv("CUSTOM_LLM_A_KEY", "sk-custom-a-12345")
         monkeypatch.setenv("CUSTOM_LLM_B_KEY", "sk-custom-b-67890")
         monkeypatch.setenv("CUSTOM_LLM_C_KEY", "sk-custom-c-abcde")
@@ -497,15 +527,16 @@ class TestLLMEnvExpansionIntegration:
         assert kwargs_b["api_base"] == "https://llm-b.example.com/v1"
         assert kwargs_c["api_base"] == "https://llm-c.example.com/v1"
 
-        # OPENAI_API_KEY env var will be set to the last one resolved
+        # Custom endpoint calls should not coerce OPENAI_API_KEY
         import os
-        assert os.environ.get("OPENAI_API_KEY") == "sk-custom-c-abcde"
+        assert os.environ.get("OPENAI_API_KEY") is None
 
         # Cleanup
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     def test_custom_and_real_openai_endpoints_use_correct_keys(self, monkeypatch):
         """Test that custom endpoints and real OpenAI endpoints each use their correct API keys."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.setenv("REAL_OPENAI_KEY", "sk-real-openai-xyz")
         monkeypatch.setenv("CUSTOM_PROVIDER_KEY", "sk-custom-provider-abc")
 
@@ -537,10 +568,9 @@ class TestLLMEnvExpansionIntegration:
         assert custom_kwargs["api_key"] == "sk-custom-provider-abc"
         assert custom_kwargs["api_base"] == "https://custom-provider.example.com/v1"
 
-        # Both should be callable with correct keys
+        # Both should be callable with correct keys without coercing OPENAI_API_KEY
         import os
-        # Last one will be in OPENAI_API_KEY env var
-        assert os.environ.get("OPENAI_API_KEY") in ["sk-real-openai-xyz", "sk-custom-provider-abc"]
+        assert os.environ.get("OPENAI_API_KEY") is None
 
         # Cleanup
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -603,8 +633,9 @@ class TestLLMEnvExpansionIntegration:
         kwargs_custom_b = caller._get_model_kwargs("custom-literal")
         assert kwargs_custom_b["api_key"] == "sk-literal-hardcoded"
 
-        # Cleanup
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        # The .env-provided OPENAI_API_KEY remains under admin control
+        import os
+        assert os.environ.get("OPENAI_API_KEY") == "sk-from-dotenv"
 
     def test_empty_api_key_raises_appropriate_error(self):
         """Test that empty API key (after env var expansion) raises error."""
@@ -629,8 +660,9 @@ class TestLLMEnvExpansionIntegration:
         # Empty string is not passed through (falsy value)
         assert "api_key" not in kwargs
 
-    def test_switching_between_models_updates_env_correctly(self, monkeypatch):
-        """Test that switching between different model types updates environment correctly."""
+    def test_switching_between_models_preserves_env_correctly(self, monkeypatch):
+        """Test that switching between different model types preserves environment correctly."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-initial")
 
         llm_config = LLMConfig(
@@ -660,20 +692,20 @@ class TestLLMEnvExpansionIntegration:
         # Call Anthropic
         anthropic_kwargs = caller._get_model_kwargs("anthropic-model")
         assert anthropic_kwargs["api_key"] == "sk-ant-new"
-        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-new"
+        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-initial"
 
         # Call OpenAI
         openai_kwargs = caller._get_model_kwargs("openai-model")
         assert openai_kwargs["api_key"] == "sk-openai-new"
-        assert os.environ.get("OPENAI_API_KEY") == "sk-openai-new"
+        assert os.environ.get("OPENAI_API_KEY") is None
 
-        # Call custom (should also set OPENAI_API_KEY as fallback)
+        # Call custom (should not set OPENAI_API_KEY as fallback)
         custom_kwargs = caller._get_model_kwargs("custom-model")
         assert custom_kwargs["api_key"] == "sk-custom-new"
-        assert os.environ.get("OPENAI_API_KEY") == "sk-custom-new"
+        assert os.environ.get("OPENAI_API_KEY") is None
 
-        # Anthropic key should still be set
-        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-new"
+        # Anthropic key should remain the original admin-controlled value
+        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-initial"
 
         # Cleanup
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -786,10 +818,8 @@ class TestLLMEnvExpansionIntegration:
     def test_multiple_custom_endpoints_sequential_calls_preserve_keys(self, monkeypatch):
         """Test that calling multiple custom endpoints in sequence preserves correct API keys.
 
-        This is critical because the implementation sets OPENAI_API_KEY as a fallback
-        for custom endpoints. We need to ensure that when switching between custom
-        endpoints, each call still gets the correct API key in kwargs even though
-        the env var might have been overwritten.
+        This is critical because each call must get the configured API key in
+        kwargs without relying on global environment variable mutation.
         """
         monkeypatch.setenv("CUSTOM_1_KEY", "sk-custom-1")
         monkeypatch.setenv("CUSTOM_2_KEY", "sk-custom-2")
