@@ -16,6 +16,7 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 
 - [Authentication & Authorization](authentication.md) - User authentication and group-based access control
 - [MCP API Key Authentication](mcp-server-authentication.md) - Authenticating to protected MCP servers
+- [Wormhole MCP Authentication](mcp-wormhole-authentication.md) - Per-user bearer-token forwarding for Wormhole MCP servers
 - [WebSocket Auth Testing](websocket-auth-testing.md) - Testing WebSocket authentication with wscat
 - [Compliance & Data Security](compliance.md) - Compliance levels and data segregation
 - [Tool Approval System](tool-approval.md) - Managing tool execution permissions
