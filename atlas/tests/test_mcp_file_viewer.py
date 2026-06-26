@@ -121,3 +121,66 @@ def test_display_file_directory(monkeypatch, tmp_path):
     fv = _load_module(monkeypatch)
     result = fv.display_file(str(tmp_path))
     assert "directory" in result["results"]["error"].lower()
+
+
+# --- display_folder_files end-to-end ---------------------------------------
+
+def test_display_folder_files_default_level(monkeypatch, tmp_path):
+    fv = _load_module(monkeypatch)
+    root_file = tmp_path / "root.md"
+    root_file.write_text("# Root", encoding="utf-8")
+    child = tmp_path / "child"
+    child.mkdir()
+    (child / "nested.txt").write_text("nested", encoding="utf-8")
+
+    result = fv.display_folder_files(str(tmp_path))
+
+    assert "error" not in result["results"]
+    assert result["results"]["operation"] == "display_folder_files"
+    assert result["results"]["level"] == 1
+    assert result["results"]["file_count"] == 1
+    assert result["results"]["files"][0]["path"] == "root.md"
+    assert result["artifacts"][0]["name"] == "root.md"
+    assert base64.b64decode(result["artifacts"][0]["b64"]) == b"# Root"
+    assert result["display"]["primary_file"] == "root.md"
+
+
+def test_display_folder_files_level_includes_children(monkeypatch, tmp_path):
+    fv = _load_module(monkeypatch)
+    (tmp_path / "root.md").write_text("# Root", encoding="utf-8")
+    child = tmp_path / "child"
+    child.mkdir()
+    (child / "nested.json").write_text("{}", encoding="utf-8")
+    (child / "empty.txt").write_text("", encoding="utf-8")
+    grandchild = child / "grandchild"
+    grandchild.mkdir()
+    (grandchild / "too-deep.txt").write_text("too deep", encoding="utf-8")
+
+    result = fv.display_folder_files(str(tmp_path), level=2)
+
+    assert result["results"]["file_count"] == 2
+    assert result["results"]["skipped_count"] == 1
+    assert [file["path"] for file in result["results"]["files"]] == [
+        "root.md",
+        "child/nested.json",
+    ]
+    assert [artifact["name"] for artifact in result["artifacts"]] == [
+        "root.md",
+        "child_nested.json",
+    ]
+    assert "too-deep.txt" not in [file["path"] for file in result["results"]["files"]]
+    assert result["display"]["primary_file"] == "root.md"
+
+
+def test_display_folder_files_errors(monkeypatch, tmp_path):
+    fv = _load_module(monkeypatch)
+    file_path = tmp_path / "file.txt"
+    file_path.write_text("not a directory", encoding="utf-8")
+
+    missing = fv.display_folder_files(str(tmp_path / "missing"))
+    not_directory = fv.display_folder_files(str(file_path))
+    bad_level = fv.display_folder_files(str(tmp_path), level=0)
+
+    assert "not found" in missing["results"]["error"].lower()
+    assert "not a directory" in not_directory["results"]["error"].lower()
+    assert "at least 1" in bad_level["results"]["error"]
