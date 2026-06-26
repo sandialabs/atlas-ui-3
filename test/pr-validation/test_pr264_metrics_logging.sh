@@ -330,7 +330,7 @@ cd "$ATLAS_DIR"
 check_integration() {
     local file="$1"
     local description="$2"
-    if grep -q "log_metric" "$file" 2>/dev/null; then
+    if grep -rq "log_metric" "$file" 2>/dev/null; then
         echo -e "  ${GREEN}FOUND${NC}: log_metric in $file ($description)"
         return 0
     else
@@ -342,7 +342,7 @@ check_integration() {
 INTEGRATION_FAILURES=0
 
 check_integration "modules/llm/litellm_caller.py" "LLM call metrics" || INTEGRATION_FAILURES=$((INTEGRATION_FAILURES + 1))
-check_integration "modules/mcp_tools/client.py" "Tool call metrics" || INTEGRATION_FAILURES=$((INTEGRATION_FAILURES + 1))
+check_integration "modules/mcp_tools/" "Tool call metrics" || INTEGRATION_FAILURES=$((INTEGRATION_FAILURES + 1))
 check_integration "routes/files_routes.py" "File upload metrics" || INTEGRATION_FAILURES=$((INTEGRATION_FAILURES + 1))
 check_integration "modules/file_storage/s3_client.py" "S3 storage metrics" || INTEGRATION_FAILURES=$((INTEGRATION_FAILURES + 1))
 check_integration "modules/file_storage/mock_s3_client.py" "Mock S3 storage metrics" || INTEGRATION_FAILURES=$((INTEGRATION_FAILURES + 1))
