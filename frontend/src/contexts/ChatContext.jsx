@@ -44,7 +44,7 @@ export const ChatProvider = ({ children }) => {
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
-	const { messages, addMessage, bulkAdd, mapMessages, resetMessages, streamToken, streamEnd } = useMessages()
+	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
 	const isStreaming = messages.some(m => m._streaming === true)
@@ -829,6 +829,7 @@ export const ChatProvider = ({ children }) => {
 		isInAdminGroup: config.isInAdminGroup,
 		fileExtraction: config.fileExtraction,
 		messages,
+		updateToolResult,
 		isWelcomeVisible,
 		isThinking,
 		isAgentRunning,

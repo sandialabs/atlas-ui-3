@@ -7,7 +7,7 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 // in #673; when the user turns compact messages off it falls back to the
 // classic full-bubble approval layout.
 const ToolApprovalMessage = ({ message, compact = true }) => {
-  const { sendApprovalResponse, settings, updateSettings } = useChat()
+  const { sendApprovalResponse, settings, updateSettings, updateToolResult } = useChat()
   // The websocket handler defaults this to {}, but guard anyway so a malformed
   // payload can't crash the row on Object.keys/Object.entries.
   const args = message.arguments || {}
@@ -15,17 +15,28 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   const [editedArgs, setEditedArgs] = useState(args)
   const [reason, setReason] = useState('')
   // Once the user approves or rejects, the decision is final — there's no
-  // "undo" on the server side. The backend doesn't echo a status change back,
-  // so we record the choice locally and immediately collapse to the resolved
-  // badge, which removes the Approve/Reject controls.
+  // "undo" on the server side, and the backend doesn't echo a status change
+  // back. We record the choice on the message in the global store (keyed by the
+  // stable tool_call_id) so it survives this row remounting — the message list
+  // keys by array index, so an earlier message appearing/collapsing would
+  // otherwise reset local state and resurrect the Approve/Reject buttons. A
+  // local mirror gives an instant update before the dispatch propagates.
   const [decision, setDecision] = useState(null)
   const resolvedStatus = decision || message.status
   const resolvedReason = message.rejection_reason || (decision === 'rejected' ? reason : '')
   const autoApproved = Boolean(settings?.autoApproveTools && !message.admin_required)
+  // The backend reuses this tool_call_id for the execution lifecycle: once the
+  // call is approved and runs, tool_start/tool_complete overwrite this message's
+  // status to calling/in_progress/completed/failed. So anything that isn't
+  // 'pending' means the call already went through — it's resolved, and the
+  // Approve/Reject controls must stay gone (even if this row remounts and loses
+  // the local `decision` mirror). Only an explicit 'rejected' is a denial.
+  const isPending = resolvedStatus === 'pending'
+  const isRejected = resolvedStatus === 'rejected'
   // A call needs a human in the loop when it isn't going to be auto-approved and
   // is still awaiting a decision. Admin-required calls always land here because
   // autoApproveTools never auto-approves them.
-  const needsReview = !autoApproved && resolvedStatus === 'pending'
+  const needsReview = !autoApproved && isPending
   // The arguments panel collapses to a single header line; the choice is
   // persisted to localStorage (via usePersistentState, which guards storage
   // access) so it sticks across messages and reloads (F5). The default applies
@@ -63,8 +74,9 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   }, [settings?.autoApproveTools, message.admin_required, message.status, message.tool_call_id, message.arguments, sendApprovalResponse])
 
   const handleApprove = () => {
-    if (decision) return
+    if (resolvedStatus !== 'pending') return
     setDecision('approved')
+    updateToolResult?.(message.tool_call_id, { status: 'approved' })
     sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
@@ -74,13 +86,15 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   }
 
   const handleReject = () => {
-    if (decision) return
+    if (resolvedStatus !== 'pending') return
+    const rejectionReason = reason || 'User rejected the tool call'
     setDecision('rejected')
+    updateToolResult?.(message.tool_call_id, { status: 'rejected', rejection_reason: rejectionReason })
     sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: false,
-      reason: reason || 'User rejected the tool call',
+      reason: rejectionReason,
     })
   }
 
@@ -146,18 +160,18 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
 
   // ---- Classic (non-compact) layout: full bubble, pre-#673 styling ----
   if (!compact) {
-    if (resolvedStatus === 'approved' || resolvedStatus === 'rejected') {
+    if (!autoApproved && !isPending) {
       return (
         <div className="text-gray-200">
           <div className="flex items-center gap-2 mb-2">
             <span className={`px-2 py-1 rounded text-xs font-medium ${
-              resolvedStatus === 'approved' ? 'bg-green-600' : 'bg-red-600'
+              isRejected ? 'bg-red-600' : 'bg-green-600'
             }`}>
-              {resolvedStatus === 'approved' ? 'APPROVED' : 'REJECTED'}
+              {isRejected ? 'REJECTED' : 'APPROVED'}
             </span>
             <span className="font-medium">{message.tool_name}</span>
           </div>
-          {resolvedStatus === 'rejected' && resolvedReason && (
+          {isRejected && resolvedReason && (
             <div className="text-sm text-gray-400">Reason: {resolvedReason}</div>
           )}
         </div>
@@ -244,16 +258,16 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   }
 
   // ---- Compact (default) layout ----
-  if (resolvedStatus === 'approved' || resolvedStatus === 'rejected') {
+  if (!autoApproved && !isPending) {
     return (
       <div className="text-gray-200 flex items-center gap-2 flex-wrap">
         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-          resolvedStatus === 'approved' ? 'bg-green-600' : 'bg-red-600'
+          isRejected ? 'bg-red-600' : 'bg-green-600'
         }`}>
-          {resolvedStatus === 'approved' ? 'APPROVED' : 'REJECTED'}
+          {isRejected ? 'REJECTED' : 'APPROVED'}
         </span>
         <span className="font-medium text-sm">{message.tool_name}</span>
-        {resolvedStatus === 'rejected' && resolvedReason && (
+        {isRejected && resolvedReason && (
           <span className="text-sm text-gray-400">— {resolvedReason}</span>
         )}
       </div>

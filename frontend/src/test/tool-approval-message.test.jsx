@@ -35,16 +35,18 @@ const baseMessage = {
 const setChat = (overrides = {}) => {
   const sendApprovalResponse = overrides.sendApprovalResponse || vi.fn()
   const updateSettings = overrides.updateSettings || vi.fn()
+  const updateToolResult = overrides.updateToolResult || vi.fn()
   useChat.mockReturnValue({
     sendApprovalResponse,
     updateSettings,
+    updateToolResult,
     settings: overrides.settings || { autoApproveTools: false },
     // Fields read by Message (tool-call regression block):
     appName: 'Atlas',
     downloadFile: vi.fn(),
     isSynthesizing: false,
   })
-  return { sendApprovalResponse, updateSettings }
+  return { sendApprovalResponse, updateSettings, updateToolResult }
 }
 
 beforeEach(() => {
@@ -127,8 +129,43 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
   })
 
+  it('persists the decision to the global store so the controls stay gone after a remount', () => {
+    // The message list keys by array index, so an earlier message
+    // appearing/collapsing remounts this row and wipes local state. The
+    // decision must be written to the message (keyed by tool_call_id) so a
+    // remount renders the terminal badge, not a fresh Approve/Reject row.
+    const { updateToolResult } = setChat()
+    const { unmount } = render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+    expect(updateToolResult).toHaveBeenCalledWith('call_1', { status: 'approved' })
+
+    // Simulate the remount with the patched message the store now holds.
+    unmount()
+    render(<ToolApprovalMessage message={{ ...baseMessage, status: 'approved' }} compact={true} />)
+
+    expect(screen.getByText('APPROVED')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
+  })
+
+  it('stays resolved when the backend overwrites the row status to completed after the tool runs', () => {
+    // The execution lifecycle (tool_start/tool_complete) reuses the same
+    // tool_call_id, so it patches this approval row's status to 'completed'.
+    // That still means the call was approved — the controls must not reappear.
+    setChat()
+    const { rerender } = render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+
+    rerender(<ToolApprovalMessage message={{ ...baseMessage, status: 'completed' }} compact={true} />)
+
+    expect(screen.getByText('APPROVED')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
+  })
+
   it('records a rejection locally with the typed reason', () => {
-    const { sendApprovalResponse } = setChat()
+    const { sendApprovalResponse, updateToolResult } = setChat()
     render(<ToolApprovalMessage message={baseMessage} compact={true} />)
 
     fireEvent.change(screen.getByPlaceholderText(/Rejection reason/), {
@@ -139,6 +176,10 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     expect(sendApprovalResponse).toHaveBeenCalledWith(
       expect.objectContaining({ approved: false, reason: 'looks unsafe' })
     )
+    expect(updateToolResult).toHaveBeenCalledWith('call_1', {
+      status: 'rejected',
+      rejection_reason: 'looks unsafe',
+    })
     expect(screen.getByText('REJECTED')).toBeInTheDocument()
     expect(screen.getByText(/looks unsafe/)).toBeInTheDocument()
   })
