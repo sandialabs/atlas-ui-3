@@ -28,35 +28,55 @@ const ragCitationsEnabled =
 const Message = ({ message, userIndex = null, onRewind = null }) => {
   const { appName, downloadFile, isSynthesizing, settings } = useChat()
   const debugMode = settings?.debugMode || false
+  // Compact transcript (default on) renders tool/approval/system rows as dense,
+  // chrome-less lines. When the user turns it off in Settings, those rows fall
+  // back to the classic avatar + author-header bubble layout (#673).
+  const compactMessages = settings?.compactMessages !== false
   // Stable per-message scope for citation anchor IDs — prevents collisions
   // when multiple RAG responses exist in the same conversation.
   const rawId = useId()
   const messageScope = rawId.replace(/:/g, '')
 
-  // State for collapsible sections with localStorage persistence
-  // In debug mode, default to expanded
-  const [toolInputCollapsed, setToolInputCollapsed] = useState(() => {
+  // A tool call collapses to a single summary line by default; expanding reveals
+  // its input arguments and output together. Persisted to localStorage so the
+  // choice sticks across reloads. Debug mode always starts expanded.
+  const [toolDetailsCollapsed, setToolDetailsCollapsed] = useState(() => {
     if (debugMode) return false
-    const saved = localStorage.getItem('toolInputCollapsed')
-    return saved !== null ? JSON.parse(saved) : true
-  })
-
-  const [toolOutputCollapsed, setToolOutputCollapsed] = useState(() => {
-    if (debugMode) return false
-    const saved = localStorage.getItem('toolOutputCollapsed')
-    return saved !== null ? JSON.parse(saved) : true
+    // Guard storage access: blocked storage (privacy mode) or a corrupted value
+    // can throw, and this runs during render — an exception would break the message.
+    try {
+      const saved = localStorage.getItem('toolDetailsCollapsed')
+      return saved !== null ? JSON.parse(saved) : true
+    } catch {
+      return true
+    }
   })
 
   useEffect(() => {
-    localStorage.setItem('toolInputCollapsed', JSON.stringify(toolInputCollapsed))
-  }, [toolInputCollapsed])
-
-  useEffect(() => {
-    localStorage.setItem('toolOutputCollapsed', JSON.stringify(toolOutputCollapsed))
-  }, [toolOutputCollapsed])
+    try {
+      localStorage.setItem('toolDetailsCollapsed', JSON.stringify(toolDetailsCollapsed))
+    } catch {
+      /* ignore */
+    }
+  }, [toolDetailsCollapsed])
 
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
+
+  // "Compact" rows are everything that isn't core user/assistant prose: tool
+  // calls, tool logs, agent-loop meta, tool-approval prompts, and system
+  // notices. They render without the avatar / author-header / bubble chrome to
+  // reclaim vertical space; the approval prompt stays fully interactive. The
+  // user can opt out (compactMessages off) to restore the classic bubble look.
+  const isCompactType =
+    message.type === 'tool_call' ||
+    message.type === 'tool_log' ||
+    message.type === 'tool_approval_request' ||
+    message.type === 'agent_status' ||
+    message.type === 'agent_reason' ||
+    message.type === 'agent_observe' ||
+    isSystem
+  const isCompact = compactMessages && isCompactType
 
   const handleCopyMessage = (event) => {
     event.preventDefault()
@@ -160,33 +180,86 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
 
   const renderContent = () => {
     if (message.type === 'tool_approval_request') {
-      return <ToolApprovalMessage message={message} />
+      return <ToolApprovalMessage message={message} compact={compactMessages} />
     }
 
-    // Handle tool call messages (both regular and agent mode use same UI)
+    // Handle tool call messages (both regular and agent mode use same UI).
+    // Collapsed to a single summary line by default; expanding reveals the
+    // input arguments and output together.
     if (message.type === 'tool_call') {
       const isToolActive = message.status === 'calling' || message.status === 'in_progress'
+      const argCount = message.arguments ? Object.keys(message.arguments).length : 0
+      const hasDetails = argCount > 0 || message.result != null
+      const statusLabel =
+        message.status === 'calling' ? 'CALLING' :
+        message.status === 'in_progress' ? 'IN PROGRESS' :
+        message.status === 'completed' ? 'SUCCESS' : 'FAILED'
+      const statusColor =
+        isToolActive ? 'bg-blue-600' :
+        message.status === 'completed' ? 'bg-green-600' : 'bg-red-600'
+      // The compact toggle controls chrome only (avatar / author-header / bubble
+      // + badge sizing). The collapse behavior is shared across both modes, so
+      // details start collapsed and expand on click either way — matching the
+      // pre-#673 layout, where tool input/output were collapsible and defaulted
+      // collapsed. (Debug mode seeds toolDetailsCollapsed=false → expanded.)
+      const showDetails = !toolDetailsCollapsed
       return (
         <div className="text-gray-200 selectable-markdown">
-          <div className="flex items-center gap-2 mb-3">
-            {isToolActive && (
-              <svg className="w-4 h-4 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            )}
-            <span className={`px-2 py-1 rounded text-xs font-medium ${
-              isToolActive ? 'bg-blue-600' :
-              message.status === 'completed' ? 'bg-green-600' : 'bg-red-600'
-            }`}>
-              {message.status === 'calling' ? 'CALLING' :
-               message.status === 'in_progress' ? 'IN PROGRESS' :
-               message.status === 'completed' ? 'SUCCESS' : 'FAILED'}
-            </span>
-            <span className="font-medium">{message.tool_name}</span>
-            <span className="text-gray-400 text-sm">({message.server_name})</span>
-            {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
-          </div>
+          {/* Compact: single clickable summary line. Classic: static badge row. */}
+          {compactMessages ? (
+            <button
+              onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
+              className={`w-full text-left flex items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              type="button"
+              aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
+            >
+              {hasDetails && (
+                <span className={`text-gray-500 text-xs transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
+                  ▶
+                </span>
+              )}
+              {isToolActive && (
+                <svg className="w-3.5 h-3.5 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColor}`}>
+                {statusLabel}
+              </span>
+              <span className="font-medium text-sm">{message.tool_name}</span>
+              <span className="text-gray-500 text-xs">({message.server_name})</span>
+              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
+              {toolDetailsCollapsed && argCount > 0 && (
+                <span className="text-gray-500 text-xs">· {argCount} param{argCount !== 1 ? 's' : ''}</span>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
+              className={`w-full text-left flex items-center gap-2 mb-3 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              type="button"
+              aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
+            >
+              {hasDetails && (
+                <span className={`text-gray-400 text-sm transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
+                  ▶
+                </span>
+              )}
+              {isToolActive && (
+                <svg className="w-4 h-4 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
+              <span className={`px-2 py-1 rounded text-xs font-medium ${statusColor}`}>
+                {statusLabel}
+              </span>
+              <span className="font-medium">{message.tool_name}</span>
+              <span className="text-gray-400 text-sm">({message.server_name})</span>
+              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
+            </button>
+          )}
 
           {/* Progress Section (shows when in progress or progress data available) */}
           {(() => {
@@ -225,20 +298,111 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
             )
           })()}
 
-          {/* Input Arguments Section */}
-          {message.arguments && Object.keys(message.arguments).length > 0 && (
-            <div className="mb-4">
-              <div className="border-l-4 border-blue-500 pl-4">
-                <button
-                  onClick={() => setToolInputCollapsed(!toolInputCollapsed)}
-                  className="w-full text-left text-sm font-semibold text-blue-400 mb-2 flex items-center gap-2 hover:text-blue-300 transition-colors"
-                >
-                  <span className={`transform transition-transform duration-200 ${toolInputCollapsed ? 'rotate-0' : 'rotate-90'}`}>
-                    ▶
-                  </span>
-                  Input Arguments {toolInputCollapsed ? `(${Object.keys(message.arguments).length} params)` : ''}
-                </button>
-                {!toolInputCollapsed && (
+          {/* File download buttons - always visible, even when details are collapsed */}
+          {message.result && (() => {
+            let parsedResult = message.result
+            if (typeof message.result === 'string') {
+              try {
+                parsedResult = JSON.parse(message.result)
+              } catch {
+                parsedResult = message.result
+              }
+            }
+
+            // Check for meta_data.output_files (tool generated files)
+            const hasOutputFiles = parsedResult &&
+              typeof parsedResult === 'object' &&
+              parsedResult.meta_data &&
+              parsedResult.meta_data.output_files &&
+              Array.isArray(parsedResult.meta_data.output_files) &&
+              parsedResult.meta_data.output_files.length > 0
+
+            // Check for multiple files (legacy format)
+            const hasMultipleFiles = parsedResult &&
+              typeof parsedResult === 'object' &&
+              parsedResult.returned_files &&
+              Array.isArray(parsedResult.returned_files) &&
+              parsedResult.returned_file_names &&
+              parsedResult.returned_file_contents
+
+            // Check for single file (backward compatibility)
+            const hasSingleFile = parsedResult &&
+              typeof parsedResult === 'object' &&
+              parsedResult.returned_file_name &&
+              parsedResult.returned_file_base64
+
+            if (hasOutputFiles) {
+              return (
+                <div className="mt-2 ml-5">
+                  <div className="text-xs text-gray-400 mb-1">
+                    {parsedResult.meta_data.output_files.length} file(s) available for download:
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {parsedResult.meta_data.output_files.map((filename, index) => (
+                      <button
+                        key={index}
+                        onClick={() => downloadFile(filename)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors"
+                        title="Download file"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        {filename}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            } else if (hasMultipleFiles) {
+              return (
+                <div className="mt-2 ml-5">
+                  <div className="text-xs text-gray-400 mb-1">
+                    {parsedResult.returned_files.length} file(s) available for download:
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {parsedResult.returned_file_names.map((filename, index) => (
+                      <button
+                        key={index}
+                        onClick={() => downloadReturnedFile(filename, parsedResult.returned_file_contents[index])}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors"
+                        title="Download file"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        {filename}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            } else if (hasSingleFile) {
+              return (
+                <div className="mt-2 ml-5">
+                  <button
+                    onClick={() => downloadReturnedFile(parsedResult.returned_file_name, parsedResult.returned_file_base64)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors"
+                    title="Download file"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    {parsedResult.returned_file_name}
+                  </button>
+                </div>
+              )
+            }
+
+            return null
+          })()}
+
+          {/* Expanded details: input arguments + output, revealed together */}
+          {showDetails && (
+            <div className="mt-2 ml-5 space-y-3">
+              {argCount > 0 && (
+                <div className="border-l-2 border-blue-500 pl-3">
+                  <div className="text-xs font-semibold text-blue-400 mb-1">Input Arguments</div>
                   <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
                     {debugMode && (
                       <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Arguments</div>
@@ -247,139 +411,13 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
                       {JSON.stringify(debugMode ? message.arguments : filterArgumentsForDisplay(message.arguments), null, 2)}
                     </pre>
                   </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Separator Line */}
-          {message.arguments && Object.keys(message.arguments).length > 0 && message.result && (
-            <div className="my-4">
-              <hr className="border-gray-600" />
-            </div>
-          )}
-
-          {/* Result Section */}
-          {message.result && (
-            <div className="mb-2">
-              <div className={`border-l-4 pl-4 ${
-                message.status === 'failed' ? 'border-red-500' : 'border-green-500'
-              }`}>
-                <button
-                  onClick={() => setToolOutputCollapsed(!toolOutputCollapsed)}
-                  className={`w-full text-left text-sm font-semibold mb-2 flex items-center gap-2 transition-colors ${
-                    message.status === 'failed'
-                      ? 'text-red-400 hover:text-red-300'
-                      : 'text-green-400 hover:text-green-300'
-                  }`}
-                >
-                  <span className={`transform transition-transform duration-200 ${toolOutputCollapsed ? 'rotate-0' : 'rotate-90'}`}>
-                    ▶
-                  </span>
-                  {message.status === 'failed' ? 'Error Details' : 'Output Result'} {toolOutputCollapsed ? '(click to expand)' : ''}
-                </button>
-
-                {/* File download buttons - always visible even when output is collapsed */}
-                {(() => {
-                  let parsedResult = message.result
-                  if (typeof message.result === 'string') {
-                    try {
-                      parsedResult = JSON.parse(message.result)
-                    } catch {
-                      parsedResult = message.result
-                    }
-                  }
-
-                  // Check for meta_data.output_files (tool generated files)
-                  const hasOutputFiles = parsedResult &&
-                    typeof parsedResult === 'object' &&
-                    parsedResult.meta_data &&
-                    parsedResult.meta_data.output_files &&
-                    Array.isArray(parsedResult.meta_data.output_files) &&
-                    parsedResult.meta_data.output_files.length > 0
-
-                  // Check for multiple files (legacy format)
-                  const hasMultipleFiles = parsedResult &&
-                    typeof parsedResult === 'object' &&
-                    parsedResult.returned_files &&
-                    Array.isArray(parsedResult.returned_files) &&
-                    parsedResult.returned_file_names &&
-                    parsedResult.returned_file_contents
-
-                  // Check for single file (backward compatibility)
-                  const hasSingleFile = parsedResult &&
-                    typeof parsedResult === 'object' &&
-                    parsedResult.returned_file_name &&
-                    parsedResult.returned_file_base64
-
-                  if (hasOutputFiles) {
-                    return (
-                      <div className="mb-3">
-                        <div className="text-sm text-gray-300 mb-2">
-                          {parsedResult.meta_data.output_files.length} file(s) available for download:
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {parsedResult.meta_data.output_files.map((filename, index) => (
-                            <button
-                              key={index}
-                              onClick={() => downloadFile(filename)}
-                              className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors"
-                              title="Download file"
-                            >
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                              {filename}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  } else if (hasMultipleFiles) {
-                    return (
-                      <div className="mb-3">
-                        <div className="text-sm text-gray-300 mb-2">
-                          {parsedResult.returned_files.length} file(s) available for download:
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {parsedResult.returned_file_names.map((filename, index) => (
-                            <button
-                              key={index}
-                              onClick={() => downloadReturnedFile(filename, parsedResult.returned_file_contents[index])}
-                              className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors"
-                              title="Download file"
-                            >
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                              {filename}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  } else if (hasSingleFile) {
-                    return (
-                      <div className="mb-3">
-                        <button
-                          onClick={() => downloadReturnedFile(parsedResult.returned_file_name, parsedResult.returned_file_base64)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors"
-                          title="Download file"
-                        >
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                          {parsedResult.returned_file_name}
-                        </button>
-                      </div>
-                    )
-                  }
-
-                  return null
-                })()}
-
-                {/* Output content - collapsible */}
-                {!toolOutputCollapsed && (
+                </div>
+              )}
+              {message.result && (
+                <div className={`border-l-2 pl-3 ${message.status === 'failed' ? 'border-red-500' : 'border-green-500'}`}>
+                  <div className={`text-xs font-semibold mb-1 ${message.status === 'failed' ? 'text-red-400' : 'text-green-400'}`}>
+                    {message.status === 'failed' ? 'Error Details' : 'Output Result'}
+                  </div>
                   <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
                     {debugMode && (
                       <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Output</div>
@@ -394,8 +432,8 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
                       })()}
                     </pre>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -550,6 +588,17 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
         </div>
       )
     }
+  }
+
+  // Compact rows (tool calls, logs, agent meta, system notices) skip the avatar,
+  // author header, and bubble padding so the transcript stays dense. The left
+  // padding aligns their content under the assistant column (avatar w-8 + gap-3).
+  if (isCompact) {
+    return (
+      <div ref={containerRef} className="w-full pl-11 pr-2 text-sm">
+        {renderContent()}
+      </div>
+    )
   }
 
   return (

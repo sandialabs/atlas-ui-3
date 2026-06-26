@@ -4,7 +4,8 @@ const DEFAULT_SETTINGS = {
   llmTemperature: 0.7,
   maxIterations: 10,
   autoApproveTools: false,  // User-level auto-approval for non-admin-required tools
-  debugMode: false  // Show raw tool call input/output in chat (#135)
+  debugMode: false,  // Show raw tool call input/output in chat (#135)
+  compactMessages: true  // Compact tool/approval/system rows vs. classic avatar+header bubbles (#673)
 }
 
 export function useSettings() {
