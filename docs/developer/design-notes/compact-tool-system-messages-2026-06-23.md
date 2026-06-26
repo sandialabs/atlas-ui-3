@@ -26,8 +26,18 @@ page reload.
   it sticks across messages and survives a reload (F5).
 - **Smart default.** With no saved preference, auto-approved calls start
   collapsed (informational — the tool runs regardless) while calls that require
-  the user's action start expanded so the arguments are reviewable. Once the user
-  toggles it, their choice wins globally.
+  the user's action start expanded so the arguments are reviewable. Auto-approved
+  rows read/write the persisted `localStorage['toolApprovalArgsCollapsed']`
+  preference; review-required rows use per-message local state so they always
+  open expanded for the reviewer and never inherit a collapsed global default
+  (and collapsing one doesn't overwrite the auto-approved preference).
+- **Local decision state.** The backend never echoes a status change back for an
+  approval message — it just unblocks the waiting tool executor (see
+  `atlas/main.py` `tool_approval_response`). So once the user clicks
+  Approve/Reject, the component records the choice locally, immediately swaps the
+  Approve/Reject controls for a resolved `[APPROVED]` / `[REJECTED]` badge, and
+  guards the handlers against a second submit. Without this the buttons would
+  stay live (duplicate-submit) and the terminal badge would never appear.
 - **Matched styling.** The single-line summary is `▶ [STATUS] tool_name · N
   params`; the expanded panel uses the same `ml-5` / `border-l-2` /
   `Input Arguments` treatment as the tool-call row's Input/Output panels. The
@@ -59,11 +69,14 @@ switch was added under Settings → General (on by default), persisted in
 
 When turned **off**, the compact path is bypassed for every affected row type
 (tool calls, approval prompts, tool logs, agent meta, system notices): they
-render again inside the classic avatar / author-header / bubble layout, and the
-tool-call and approval rows show their arguments/output expanded by default —
-matching the pre-#673 experience. The flag is read in `Message.jsx`
-(`compactMessages = settings?.compactMessages !== false`) and gates both the
-outer wrapper (`isCompact`) and the inner header/detail rendering;
+render again inside the classic avatar / author-header / bubble layout. The
+toggle controls **chrome only** — collapse/expand behavior is shared across both
+modes, so a tool-call row still collapses to a clickable summary that defaults
+collapsed (and approval arguments still follow the smart default above),
+matching the pre-#673 layout where tool input/output were collapsible. The flag
+is read in `Message.jsx` (`compactMessages = settings?.compactMessages !== false`)
+and gates both the outer wrapper (`isCompact`) and the inner header chrome (badge
+sizing, avatar/header), not the `toolDetailsCollapsed` collapse state;
 `ToolApprovalMessage` takes a `compact` prop and renders the classic full-bubble
 approval layout when it is false.
 

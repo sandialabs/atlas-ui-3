@@ -197,9 +197,12 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
       const statusColor =
         isToolActive ? 'bg-blue-600' :
         message.status === 'completed' ? 'bg-green-600' : 'bg-red-600'
-      // In compact mode the row collapses to one clickable line; with compact
-      // off (classic bubble), details stay expanded like the pre-#673 layout.
-      const showDetails = compactMessages ? !toolDetailsCollapsed : true
+      // The compact toggle controls chrome only (avatar / author-header / bubble
+      // + badge sizing). The collapse behavior is shared across both modes, so
+      // details start collapsed and expand on click either way — matching the
+      // pre-#673 layout, where tool input/output were collapsible and defaulted
+      // collapsed. (Debug mode seeds toolDetailsCollapsed=false → expanded.)
+      const showDetails = !toolDetailsCollapsed
       return (
         <div className="text-gray-200 selectable-markdown">
           {/* Compact: single clickable summary line. Classic: static badge row. */}
@@ -232,7 +235,17 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
               )}
             </button>
           ) : (
-            <div className="flex items-center gap-2 mb-3">
+            <button
+              onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
+              className={`w-full text-left flex items-center gap-2 mb-3 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              type="button"
+              aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
+            >
+              {hasDetails && (
+                <span className={`text-gray-400 text-sm transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
+                  ▶
+                </span>
+              )}
               {isToolActive && (
                 <svg className="w-4 h-4 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -245,7 +258,7 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
               <span className="font-medium">{message.tool_name}</span>
               <span className="text-gray-400 text-sm">({message.server_name})</span>
               {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
-            </div>
+            </button>
           )}
 
           {/* Progress Section (shows when in progress or progress data available) */}

@@ -8,9 +8,24 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 // classic full-bubble approval layout.
 const ToolApprovalMessage = ({ message, compact = true }) => {
   const { sendApprovalResponse, settings, updateSettings } = useChat()
+  // The websocket handler defaults this to {}, but guard anyway so a malformed
+  // payload can't crash the row on Object.keys/Object.entries.
+  const args = message.arguments || {}
   const [isEditing, setIsEditing] = useState(false)
-  const [editedArgs, setEditedArgs] = useState(message.arguments)
+  const [editedArgs, setEditedArgs] = useState(args)
   const [reason, setReason] = useState('')
+  // Once the user approves or rejects, the decision is final — there's no
+  // "undo" on the server side. The backend doesn't echo a status change back,
+  // so we record the choice locally and immediately collapse to the resolved
+  // badge, which removes the Approve/Reject controls.
+  const [decision, setDecision] = useState(null)
+  const resolvedStatus = decision || message.status
+  const resolvedReason = message.rejection_reason || (decision === 'rejected' ? reason : '')
+  const autoApproved = Boolean(settings?.autoApproveTools && !message.admin_required)
+  // A call needs a human in the loop when it isn't going to be auto-approved and
+  // is still awaiting a decision. Admin-required calls always land here because
+  // autoApproveTools never auto-approves them.
+  const needsReview = !autoApproved && resolvedStatus === 'pending'
   // The arguments panel collapses to a single header line; the choice is
   // persisted to localStorage (via usePersistentState, which guards storage
   // access) so it sticks across messages and reloads (F5). The default applies
@@ -19,9 +34,19 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   // while calls that need the user's action start expanded so they're reviewable.
   const [argsCollapsed, setArgsCollapsed] = usePersistentState(
     'toolApprovalArgsCollapsed',
-    Boolean(settings?.autoApproveTools && !message.admin_required)
+    autoApproved
   )
-  const isExpanded = !argsCollapsed
+  // Calls that need human review always open expanded — a reviewer shouldn't
+  // have to expand to see what they're approving — even if the user previously
+  // collapsed an (informational) auto-approved call. This is per-message local
+  // state, so collapsing it here doesn't overwrite the persisted preference that
+  // auto-approved rows read.
+  const [reviewCollapsed, setReviewCollapsed] = useState(false)
+  const isExpanded = needsReview ? !reviewCollapsed : !argsCollapsed
+  const toggleCollapsed = () => {
+    if (needsReview) setReviewCollapsed(c => !c)
+    else setArgsCollapsed(!argsCollapsed)
+  }
 
   useEffect(() => {
     if (settings?.autoApproveTools && !message.admin_required && message.status === 'pending') {
@@ -38,6 +63,8 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   }, [settings?.autoApproveTools, message.admin_required, message.status, message.tool_call_id, message.arguments, sendApprovalResponse])
 
   const handleApprove = () => {
+    if (decision) return
+    setDecision('approved')
     sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
@@ -47,6 +74,8 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   }
 
   const handleReject = () => {
+    if (decision) return
+    setDecision('rejected')
     sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
@@ -61,8 +90,6 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
       [key]: value
     }))
   }
-
-  const autoApproved = Boolean(settings?.autoApproveTools && !message.admin_required)
 
   // Shared editor used in both layouts when "Edit" is active.
   const argsEditor = (
@@ -119,19 +146,19 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
 
   // ---- Classic (non-compact) layout: full bubble, pre-#673 styling ----
   if (!compact) {
-    if (message.status === 'approved' || message.status === 'rejected') {
+    if (resolvedStatus === 'approved' || resolvedStatus === 'rejected') {
       return (
         <div className="text-gray-200">
           <div className="flex items-center gap-2 mb-2">
             <span className={`px-2 py-1 rounded text-xs font-medium ${
-              message.status === 'approved' ? 'bg-green-600' : 'bg-red-600'
+              resolvedStatus === 'approved' ? 'bg-green-600' : 'bg-red-600'
             }`}>
-              {message.status === 'approved' ? 'APPROVED' : 'REJECTED'}
+              {resolvedStatus === 'approved' ? 'APPROVED' : 'REJECTED'}
             </span>
             <span className="font-medium">{message.tool_name}</span>
           </div>
-          {message.status === 'rejected' && message.rejection_reason && (
-            <div className="text-sm text-gray-400">Reason: {message.rejection_reason}</div>
+          {resolvedStatus === 'rejected' && resolvedReason && (
+            <div className="text-sm text-gray-400">Reason: {resolvedReason}</div>
           )}
         </div>
       )
@@ -153,14 +180,14 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
         <div className="mb-4">
           <div className="border-l-4 border-yellow-500 pl-4">
             <button
-              onClick={() => setArgsCollapsed(!argsCollapsed)}
+              onClick={toggleCollapsed}
               className="w-full text-left text-sm font-semibold text-yellow-400 mb-2 flex items-center gap-2 hover:text-yellow-300 transition-colors"
               aria-expanded={isExpanded}
             >
               <span className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
                 ▶
               </span>
-              Tool Arguments {!isExpanded ? `(${Object.keys(message.arguments).length} params)` : ''}
+              Tool Arguments {!isExpanded ? `(${Object.keys(args).length} params)` : ''}
             </button>
 
             {isExpanded && (
@@ -179,7 +206,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
                 {!isEditing ? (
                   <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-96 overflow-y-auto">
                     <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                      {JSON.stringify(message.arguments, null, 2)}
+                      {JSON.stringify(args, null, 2)}
                     </pre>
                   </div>
                 ) : argsEditor}
@@ -217,23 +244,23 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   }
 
   // ---- Compact (default) layout ----
-  if (message.status === 'approved' || message.status === 'rejected') {
+  if (resolvedStatus === 'approved' || resolvedStatus === 'rejected') {
     return (
       <div className="text-gray-200 flex items-center gap-2 flex-wrap">
         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-          message.status === 'approved' ? 'bg-green-600' : 'bg-red-600'
+          resolvedStatus === 'approved' ? 'bg-green-600' : 'bg-red-600'
         }`}>
-          {message.status === 'approved' ? 'APPROVED' : 'REJECTED'}
+          {resolvedStatus === 'approved' ? 'APPROVED' : 'REJECTED'}
         </span>
         <span className="font-medium text-sm">{message.tool_name}</span>
-        {message.status === 'rejected' && message.rejection_reason && (
-          <span className="text-sm text-gray-400">— {message.rejection_reason}</span>
+        {resolvedStatus === 'rejected' && resolvedReason && (
+          <span className="text-sm text-gray-400">— {resolvedReason}</span>
         )}
       </div>
     )
   }
 
-  const argCount = Object.keys(message.arguments).length
+  const argCount = Object.keys(args).length
 
   return (
     <div className="text-gray-200">
@@ -241,7 +268,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
       <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
-          onClick={() => setArgsCollapsed(!argsCollapsed)}
+          onClick={toggleCollapsed}
           className="flex items-center gap-2 text-left hover:text-white transition-colors cursor-pointer"
           aria-expanded={isExpanded}
         >
@@ -281,7 +308,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           {!isEditing ? (
             <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-64 overflow-y-auto">
               <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                {JSON.stringify(message.arguments, null, 2)}
+                {JSON.stringify(args, null, 2)}
               </pre>
             </div>
           ) : argsEditor}
