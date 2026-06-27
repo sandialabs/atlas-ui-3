@@ -6,8 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #677 - 2026-06-26
-- **Disabled API key inference from model names**: LLM calls now pass the configured per-model key directly to LiteLLM without rewriting provider-specific environment variables, preserving gateway/proxy aliases and admin-selected key sources.
+### PR #678 - 2026-06-26
+- **Disabled API key inference from model names**: LLM calls now pass the configured per-model key directly to LiteLLM without rewriting provider-specific environment variables, preserving gateway/proxy aliases and admin-selected key sources. Added an end-to-end proof under `mocks/llm-mock` (`e2e_llm_api_key_test.py` + `test/pr-validation/test_pr678_llm_api_key_no_env_coercion.sh`): an OpenAI-looking model (`openai/gpt5.4`) served by the mock gateway makes a real LiteLLM round trip and the mock confirms it received the configured key, not a conflicting `OPENAI_API_KEY`.
 
 ### PR #675 - 2026-06-25
 - **Refactored `mcp_tools/client.py` into focused modules**: The ~3000-line file held a single `MCPToolManager` class that coupled server lifecycle, elicitation/sampling routing, per-user/per-conversation client caching, tool/prompt discovery, execution, and result formatting. Split the class into cohesive mixins across new sibling modules — `mcp_errors`, `mcp_routing`, `mcp_connection`, `mcp_user_clients`, `mcp_user_client_cache`, `mcp_discovery`, `mcp_result_processor`, `mcp_execution` — each well under the 600-line guideline; `client.py` now just assembles the public class and keeps `__init__`/config reload. Pure structural change with no behavior difference: `from atlas.modules.mcp_tools.client import MCPToolManager` and existing `@patch('...client.config_manager'|'.Client'|'.StreamableHttpTransport')` targets all still resolve because the mixins reference those globals through the `client` module. Full backend suite stays green.

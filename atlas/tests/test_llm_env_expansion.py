@@ -1,6 +1,7 @@
 """Integration tests for LLM environment variable expansion."""
 
 import importlib
+import os
 import sys
 
 import pytest
