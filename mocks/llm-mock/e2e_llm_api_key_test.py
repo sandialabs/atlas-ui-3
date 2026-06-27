@@ -21,6 +21,10 @@ exact Authorization token and model name that reached the endpoint, so the
 assertions verify what the LLM provider actually saw rather than trusting the
 Atlas side.
 
+Note: this driver deliberately never prints API-key material (not even masked).
+The assertions below compare credentials internally and only emit booleans and
+non-sensitive descriptions, so no secret value ever reaches stdout.
+
 Requires the mock to be running; set MOCK_LLM_URL (default
 http://127.0.0.1:8002). Exits non-zero if any scenario fails.
 """
@@ -36,7 +40,7 @@ import urllib.request
 # --- Conflicting OPENAI_API_KEY must exist BEFORE atlas/litellm import --------
 # This is the key that must NOT be used: a real OpenAI key in the environment
 # (e.g. loaded from .env) should never override an explicitly configured
-# per-model gateway key.
+# per-model gateway key. (These are throwaway fixture values, not real keys.)
 CONFLICTING_OPENAI_KEY = "sk-real-openai-DO-NOT-USE-0000000000000000"
 GATEWAY_KEY = "sk-gateway-configured-WINS-1111111111111111"
 os.environ["OPENAI_API_KEY"] = CONFLICTING_OPENAI_KEY
@@ -63,10 +67,6 @@ def _http_post_json(path: str, payload: dict) -> dict:
         return json.loads(resp.read().decode())
 
 
-def _mask(token: str) -> str:
-    return f"{token[:4]}...{token[-4:]}" if token and len(token) > 8 else "*" * len(token or "")
-
-
 PASS = "\033[0;32mPASS\033[0m"
 FAIL = "\033[0;31mFAIL\033[0m"
 _failures: list[str] = []
@@ -86,16 +86,15 @@ async def main() -> int:
     from atlas.modules.config.config_manager import LLMConfig, ModelConfig
     from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
-    print(f"E2E: LLM configured-key wins over conflicting OPENAI_API_KEY")
+    print("E2E: LLM configured-key wins over conflicting OPENAI_API_KEY")
     print(f"  mock         : {MOCK_URL}")
     print(f"  model id     : {OPENAI_LOOKING_MODEL_ID} (looks like OpenAI, served by mock)")
-    print(f"  configured   : {_mask(GATEWAY_KEY)} (must be used)")
-    print(f"  OPENAI_API_KEY: {_mask(CONFLICTING_OPENAI_KEY)} (must be ignored)")
+    print("  configured key must be used; OPENAI_API_KEY must be ignored")
     print()
 
     # Confirm the mock is reachable.
     health = _http_get_json("/health")
-    check("mock is healthy", health.get("status") == "healthy", str(health))
+    check("mock is healthy", health.get("status") == "healthy", str(health.get("status")))
 
     # Start from a clean request log.
     _http_post_json("/test/reset-log", {})
@@ -116,27 +115,25 @@ async def main() -> int:
         INTERNAL_MODEL,
         messages=[{"role": "user", "content": "hello from the e2e gateway test"}],
     )
-    check("call_plain returned content", bool(content), f"{content[:60]!r}")
+    check("call_plain returned content", bool(content), f"{len(content or '')} chars")
 
     # --- Source of truth: what did the mock actually receive? -----------------
+    # NOTE: credential values are compared internally only; never printed.
     last = _http_get_json("/test/last-request")
-    check("mock received a request", last.get("received") is True, str(last))
+    check("mock received a request", last.get("received") is True)
 
     received_token = last.get("authorization_token")
     check(
         "request carried an Authorization bearer token",
         last.get("had_authorization") is True,
-        _mask(received_token),
     )
     check(
         "mock received the CONFIGURED gateway key",
         received_token == GATEWAY_KEY,
-        f"got {_mask(received_token)}",
     )
     check(
         "mock did NOT receive the conflicting OPENAI_API_KEY",
         received_token != CONFLICTING_OPENAI_KEY,
-        _mask(received_token),
     )
     check(
         "request reached the mock with the OpenAI-looking model name",
@@ -148,7 +145,6 @@ async def main() -> int:
     check(
         "OPENAI_API_KEY env var left unchanged (no coercion)",
         os.environ.get("OPENAI_API_KEY") == CONFLICTING_OPENAI_KEY,
-        _mask(os.environ.get("OPENAI_API_KEY")),
     )
 
     # --- Confirm the assembled kwargs point at the mock, not real OpenAI -----
