@@ -6,8 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #679 - 2026-06-26
-- **MCP file viewer folder display**: Added `display_folder_files`, a sibling file-viewer MCP tool that returns displayable artifacts for files in a local directory up to a requested depth, with skipped-file details for empty, oversized, or unreadable files.
+### PR #680 - 2026-06-26
+- **MCP file viewer folder display**: Added `display_folder_files`, a sibling file-viewer MCP tool that returns displayable artifacts for files in a local directory up to a requested depth, with skipped-file details for empty, oversized, hidden, or unreadable files. The output is bounded by aggregate file-count and total-byte caps (reporting `truncated`/`omitted_count` when reached), de-duplicates colliding artifact names, and skips hidden files plus common high-noise directories (`.git`, `node_modules`, virtualenvs, build output) by default.
 
 ### PR #675 - 2026-06-25
 - **Refactored `mcp_tools/client.py` into focused modules**: The ~3000-line file held a single `MCPToolManager` class that coupled server lifecycle, elicitation/sampling routing, per-user/per-conversation client caching, tool/prompt discovery, execution, and result formatting. Split the class into cohesive mixins across new sibling modules — `mcp_errors`, `mcp_routing`, `mcp_connection`, `mcp_user_clients`, `mcp_user_client_cache`, `mcp_discovery`, `mcp_result_processor`, `mcp_execution` — each well under the 600-line guideline; `client.py` now just assembles the public class and keeps `__init__`/config reload. Pure structural change with no behavior difference: `from atlas.modules.mcp_tools.client import MCPToolManager` and existing `@patch('...client.config_manager'|'.Client'|'.StreamableHttpTransport')` targets all still resolve because the mixins reference those globals through the `client` module. Full backend suite stays green.
