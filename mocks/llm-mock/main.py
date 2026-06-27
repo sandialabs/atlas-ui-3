@@ -41,6 +41,11 @@ app = FastAPI(title="Mock LLM Server", description="Mock LLM service for testing
 _forced_error_mode: Optional[str] = None
 _forced_error_count: int = 0  # How many requests should fail (0 = indefinite)
 
+# Request log: records exactly what the mock received on each chat completion.
+# This is the source of truth for E2E tests that need to verify which API key
+# and model name actually reached the LLM endpoint (see /test/last-request).
+_request_log: List[Dict[str, Any]] = []
+
 
 def _extract_bearer_token(request: Request) -> Optional[str]:
     """Extract Bearer token from Authorization header, or None."""
@@ -204,6 +209,26 @@ def _check_forced_error():
         )
 
 
+@app.get("/test/last-request")
+async def get_last_request():
+    """Return the most recent chat completion the mock received.
+
+    Source of truth for E2E tests: exposes the exact Authorization token and
+    model name that reached this endpoint so tests can prove the configured
+    per-model key (not a conflicting OPENAI_API_KEY env var) was used.
+    """
+    if not _request_log:
+        return {"received": False}
+    return {"received": True, **_request_log[-1]}
+
+
+@app.post("/test/reset-log")
+async def reset_request_log():
+    """Clear the recorded request log so a test starts from a clean slate."""
+    _request_log.clear()
+    return {"status": "cleared"}
+
+
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
@@ -211,6 +236,10 @@ async def chat_completions(request: Request):
 
     # Check forced error mode first
     _check_forced_error()
+
+    # Record exactly what reached the endpoint (independent of REQUIRE_AUTH) so
+    # E2E tests can verify the real forwarded credentials and model name.
+    received_token = _extract_bearer_token(request)
 
     # Validate auth if enabled
     api_key = _validate_auth(request)
@@ -222,6 +251,13 @@ async def chat_completions(request: Request):
     # Parse body
     body = await request.json()
     completion_request = ChatCompletionRequest(**body)
+
+    _request_log.append({
+        "timestamp": datetime.now().isoformat(),
+        "model": completion_request.model,
+        "had_authorization": received_token is not None,
+        "authorization_token": received_token,
+    })
 
     # Generate mock response
     response_content = generate_mock_response(completion_request.messages, api_key=api_key)
