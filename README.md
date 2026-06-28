@@ -8,22 +8,23 @@
 ![React 19](https://img.shields.io/badge/react-19.2-blue.svg)
 ![License MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-Atlas UI 3 is a secure chat application with MCP (Model Context Protocol) integration, developed by Sandia National Laboratories -- a U.S. Department of Energy national laboratory -- to support U.S. Government customers.
+Atlas UI 3 is an open-source platform for deploying AI assistants and agentic workflows in high-trust engineering environments. Developed by Sandia National Laboratories -- a U.S. Department of Energy national laboratory -- Atlas connects securely to leading LLMs, external tools, enterprise data sources, and MCP (Model Context Protocol) servers so teams can build AI applications that do more than answer questions.
 
-
+It is designed for regulated and security-conscious organizations that need more than a chatbot: configurable model access, group-based authorization, tool approval controls, compliance levels, RAG, auditable workflows, and containerized deployment options to help teams understand, govern, and operate the full AI application stack.
 
 ![Screenshot](docs/readme_img/screenshot-11-6-2025image.png)
 
 ## About the Project
 
-**Atlas UI 3** is a full-stack LLM chat interface that supports multiple AI models, including those from OpenAI, Anthropic, and Google. Its core feature is the integration with the Model Context Protocol (MCP), which allows the AI assistant to connect to external tools and data sources, enabling complex, real-time workflows.
+**Atlas UI 3** is a full-stack platform for AI assistants and agentic workflows with support for multiple models, including OpenAI, Anthropic, and Google. Its core integration with the Model Context Protocol (MCP) allows assistants to connect to external tools and data sources, enabling complex, real-time workflows in environments where control and traceability matter.
 
 ### Features
 
-*   **Multi-LLM Support**: Connect to various LLM providers.
-*   **MCP Integration**: Extend the AI's capabilities with custom tools.
+*   **Multi-LLM Support**: Connect to various LLM providers with configurable model access.
+*   **MCP Integration**: Connect assistants to MCP servers, custom tools, and external data sources.
 *   **RAG Support**: Enhance responses with Retrieval-Augmented Generation.
-*   **Secure and Configurable**: Features group-based access control, compliance levels, and a tool approval system.
+*   **Governance and Access Control**: Features group-based authorization, compliance levels, and a tool approval system.
+*   **Containerized Deployment**: Run Atlas in Docker or Podman-based environments.
 *   **Modern Stack**: Built with React 19, FastAPI, and WebSockets.
 *   **Python Package**: Install and use as a library or CLI tool.
 
