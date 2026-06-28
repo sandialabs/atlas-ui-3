@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #680 - 2026-06-26
+- **MCP file viewer folder display**: Added `display_folder_files`, a sibling file-viewer MCP tool that returns displayable artifacts for files in a local directory up to a requested depth, with skipped-file details for empty, oversized, hidden, or unreadable files. The output is bounded by aggregate file-count and total-byte caps (reporting `truncated`/`omitted_count` when reached), de-duplicates colliding artifact names, and skips hidden files plus common high-noise directories (`.git`, `node_modules`, virtualenvs, build output) by default.
+
 ### PR #678 - 2026-06-26
 - **Disabled API key inference from model names**: LLM calls now pass the configured per-model key directly to LiteLLM without rewriting provider-specific environment variables, preserving gateway/proxy aliases and admin-selected key sources. Added an end-to-end proof under `mocks/llm-mock` (`e2e_llm_api_key_test.py` + `test/pr-validation/test_pr678_llm_api_key_no_env_coercion.sh`): an OpenAI-looking model (`openai/gpt5.4`) served by the mock gateway makes a real LiteLLM round trip and the mock confirms it received the configured key, not a conflicting `OPENAI_API_KEY`.
 
