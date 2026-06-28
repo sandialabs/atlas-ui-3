@@ -15,6 +15,60 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
+_ATLAS_RAG_DISCOVER_TOOL = "atlas_rag_discover_data_sources"
+_ATLAS_RAG_QUERY_TOOL = "atlas_rag_query"
+_ATLAS_RAG_TOOL_SCHEMAS = {
+    _ATLAS_RAG_DISCOVER_TOOL: {
+        "type": "function",
+        "function": {
+            "name": _ATLAS_RAG_DISCOVER_TOOL,
+            "description": (
+                "Discover RAG data sources available to the current user. "
+                "Returns server-qualified source IDs in the format server:source_id."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "compliance_level": {
+                        "type": "string",
+                        "description": "Optional user compliance level for filtering accessible sources.",
+                    },
+                    "_atlas_user": {
+                        "type": "string",
+                        "description": "Injected by ATLAS. The authenticated user email.",
+                    },
+                },
+            },
+        },
+    },
+    _ATLAS_RAG_QUERY_TOOL: {
+        "type": "function",
+        "function": {
+            "name": _ATLAS_RAG_QUERY_TOOL,
+            "description": (
+                "Query selected RAG data sources and return retrieved/synthesized results. "
+                "If data_sources is omitted, uses currently selected UI RAG sources."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "User query to run against RAG."},
+                    "data_sources": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional server-qualified sources (server:source_id).",
+                    },
+                    "_atlas_user": {
+                        "type": "string",
+                        "description": "Injected by ATLAS. The authenticated user email.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+}
+
 
 def _client():
     """Lazily import the client module to avoid a module-level import cycle.
@@ -450,6 +504,8 @@ class DiscoveryMixin:
         fabricated prefix. Server names can contain underscores (e.g.
         ``pptx_generator``), so splitting on ``_`` is unsafe.
         """
+        if tool_name in (_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL):
+            return "atlas_rag"
         index = getattr(self, "_tool_index", None)
         if not index:
             try:
@@ -486,7 +542,6 @@ class DiscoveryMixin:
         returning an empty set. This method now directly matches fully-qualified tool
         names against the discovered inventory instead of guessing via string surgery.
         """
-
         if not tool_names:
             return []
 
@@ -548,6 +603,9 @@ class DiscoveryMixin:
                         "parameters": getattr(tool, 'inputSchema', {}) or {}
                     }
                 })
+        for requested in tool_names:
+            if requested in _ATLAS_RAG_TOOL_SCHEMAS:
+                matched.append(_ATLAS_RAG_TOOL_SCHEMAS[requested])
 
 
 

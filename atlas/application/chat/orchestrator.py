@@ -293,6 +293,15 @@ class ChatOrchestrator:
                     ),
                 )
 
+        # If RAG data sources are selected, inject Atlas RAG MCP-style tools so
+        # agent mode can discover/query those sources without requiring a
+        # separate tools-panel selection.
+        if agent_mode and selected_data_sources:
+            selected_tools = list(selected_tools or [])
+            for rag_tool in ("atlas_rag_discover_data_sources", "atlas_rag_query"):
+                if rag_tool not in selected_tools:
+                    selected_tools.append(rag_tool)
+
         # Agent mode needs at least one tool to act on. With no tools selected
         # the agentic loop has nothing to call, and tool-seeking prompts can
         # drive the model to emit a tool call the provider then rejects

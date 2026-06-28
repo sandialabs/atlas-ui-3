@@ -22,6 +22,9 @@ from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredExceptio
 
 logger = logging.getLogger(__name__)
 
+_ATLAS_RAG_DISCOVER_TOOL = "atlas_rag_discover_data_sources"
+_ATLAS_RAG_QUERY_TOOL = "atlas_rag_query"
+
 
 def _client():
     """Lazily import the client module to avoid a module-level import cycle.
@@ -366,6 +369,8 @@ class ExecutionMixin:
                 content=f"Canvas content displayed: {content[:100]}..." if len(content) > 100 else f"Canvas content displayed: {content}",
                 success=True
             )
+        if tool_call.name in (_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL):
+            return await self._execute_atlas_rag_tool(tool_call, context)
 
         # Use the tool index to get server and tool name (avoids parsing issues with dashes/underscores)
         if not hasattr(self, "_tool_index") or not getattr(self, "_tool_index"):
@@ -542,3 +547,150 @@ class ExecutionMixin:
             result = await self.execute_tool(tool_call, context)
             results.append(result)
         return results
+
+    async def _execute_atlas_rag_tool(
+        self,
+        tool_call: ToolCall,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> ToolResult:
+        """Execute Atlas RAG pseudo-tools exposed to agent mode."""
+        from atlas.infrastructure.app_factory import app_factory
+
+        args = tool_call.arguments or {}
+        user_email = None
+        selected_data_sources: List[str] = []
+        if isinstance(context, dict):
+            user_email = context.get("user_email")
+            selected_data_sources = list(context.get("selected_data_sources") or [])
+        if not user_email:
+            user_email = args.get("_atlas_user")
+
+        if not user_email:
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                content="Atlas RAG tool requires an authenticated user context.",
+                success=False,
+                error="Missing user context",
+            )
+
+        try:
+            rag_servers: List[Dict[str, Any]] = []
+            unified_rag = app_factory.get_unified_rag_service()
+            rag_mcp = app_factory.get_rag_mcp_service()
+
+            compliance_level = args.get("compliance_level")
+
+            if unified_rag:
+                rag_servers.extend(
+                    await unified_rag.discover_data_sources(
+                        user_email,
+                        user_compliance_level=compliance_level,
+                    )
+                )
+            if rag_mcp:
+                rag_servers.extend(
+                    await rag_mcp.discover_servers(
+                        user_email,
+                        user_compliance_level=compliance_level,
+                    )
+                )
+
+            discovered_sources: List[str] = []
+            for server in rag_servers:
+                server_name = server.get("server", "")
+                for source in server.get("sources", []):
+                    source_id = source.get("id", "")
+                    if server_name and source_id:
+                        discovered_sources.append(f"{server_name}:{source_id}")
+
+            # Preserve discovery order while de-duping
+            deduped_sources = list(dict.fromkeys(discovered_sources))
+
+            if tool_call.name == _ATLAS_RAG_DISCOVER_TOOL:
+                payload = {
+                    "results": {
+                        "sources": deduped_sources,
+                        "rag_servers": rag_servers,
+                    }
+                }
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content=json.dumps(payload, ensure_ascii=False),
+                    success=True,
+                )
+
+            query = args.get("query")
+            if not isinstance(query, str) or not query.strip():
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content="atlas_rag_query requires a non-empty 'query' string.",
+                    success=False,
+                    error="Missing query",
+                )
+
+            requested_sources = args.get("data_sources")
+            if isinstance(requested_sources, list):
+                sources = [s for s in requested_sources if isinstance(s, str) and ":" in s]
+            else:
+                sources = []
+            if not sources:
+                sources = [s for s in selected_data_sources if isinstance(s, str) and ":" in s]
+            if not sources:
+                sources = deduped_sources
+
+            if not sources:
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content="No RAG data sources are available for this user.",
+                    success=False,
+                    error="No RAG data sources",
+                )
+
+            if not unified_rag:
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content="Unified RAG service is not configured.",
+                    success=False,
+                    error="RAG service unavailable",
+                )
+
+            messages = [{"role": "user", "content": query}]
+            by_server: Dict[str, List[str]] = {}
+            for source in sources:
+                server_name = source.split(":", 1)[0]
+                by_server.setdefault(server_name, []).append(source)
+
+            answers: List[Dict[str, Any]] = []
+            for group_sources in by_server.values():
+                if len(group_sources) == 1:
+                    resp = await unified_rag.query_rag(user_email, group_sources[0], messages)
+                else:
+                    resp = await unified_rag.query_rag_batch(user_email, group_sources, messages)
+                answers.append({
+                    "data_sources": group_sources,
+                    "content": resp.content,
+                    "is_completion": bool(resp.is_completion),
+                })
+
+            payload = {
+                "results": {
+                    "query": query,
+                    "answers": answers,
+                    "combined_answer": "\n\n".join(
+                        answer["content"] for answer in answers if answer.get("content")
+                    ),
+                }
+            }
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                content=json.dumps(payload, ensure_ascii=False),
+                success=True,
+            )
+        except Exception as e:
+            logger.error("Error executing %s: %s", tool_call.name, e, exc_info=True)
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                content=f"Error executing tool: {str(e)}",
+                success=False,
+                error=str(e),
+            )

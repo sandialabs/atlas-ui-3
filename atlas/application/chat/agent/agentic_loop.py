@@ -168,6 +168,7 @@ class AgenticLoop(AgentLoopProtocol):
                     "session_id": context.session_id,
                     "user_email": context.user_email,
                     "files": context.files,
+                    "selected_data_sources": data_sources or [],
                     # Required so MCP tool calls reuse a persistent session via
                     # MCPSessionManager. Without it, call_tool() falls back to a
                     # single-use session per call and stateful MCP servers raise
