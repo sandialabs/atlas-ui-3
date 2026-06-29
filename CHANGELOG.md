@@ -7,10 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #682 - 2026-06-29
-- **Selectable Atlas RAG tools**: Exposed Atlas RAG discovery/query as tools-panel options and removed automatic agent-mode RAG tool injection so users explicitly control whether the model can call them.
-
-### PR #681 - 2026-06-28
-- **Agent-mode Atlas RAG MCP tools**: Added Atlas RAG pseudo MCP tools (`atlas_rag_discover_data_sources`, `atlas_rag_query`) so agent mode can discover/query RAG sources directly, and auto-inject these tools when agent mode runs with selected RAG data sources.
+- **Selectable Atlas RAG tools**: Added Atlas RAG pseudo MCP tools (`atlas_rag_discover_data_sources`, `atlas_rag_query`) and surfaced them as an `atlas_rag` pseudo-server in the tools panel (via `/api/config`) so users explicitly choose whether the model can discover/query RAG sources. RAG-source selection alone no longer auto-injects these tools. The tools work in both ordinary tools mode and agent mode, and `atlas_rag_query` only queries sources in the user's discovered/authorized set — a model- or client-supplied `data_sources` list cannot reach a configured source the user is not authorized for.
 
 ### PR #680 - 2026-06-26
 - **MCP file viewer folder display**: Added `display_folder_files`, a sibling file-viewer MCP tool that returns displayable artifacts for files in a local directory up to a requested depth, with skipped-file details for empty, oversized, hidden, or unreadable files. The output is bounded by aggregate file-count and total-byte caps (reporting `truncated`/`omitted_count` when reached), de-duplicates colliding artifact names, and skips hidden files plus common high-noise directories (`.git`, `node_modules`, virtualenvs, build output) by default.

@@ -18,12 +18,13 @@ from atlas.modules.mcp_tools.mcp_errors import (
     _is_task_forbidden_error,
     _is_task_forbidden_result,
 )
+from atlas.modules.mcp_tools.mcp_discovery import (
+    _ATLAS_RAG_DISCOVER_TOOL,
+    _ATLAS_RAG_QUERY_TOOL,
+)
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
 logger = logging.getLogger(__name__)
-
-_ATLAS_RAG_DISCOVER_TOOL = "atlas_rag_discover_data_sources"
-_ATLAS_RAG_QUERY_TOOL = "atlas_rag_query"
 
 
 def _client():
@@ -638,12 +639,32 @@ class ExecutionMixin:
             if not sources:
                 sources = deduped_sources
 
+            # Authorization gate: only query sources in the user's discovered
+            # (group/compliance-authorized) set. ``data_sources`` may be filled
+            # by the model or a crafted client, and ``selected_data_sources``
+            # arrives from the request context, so neither can be trusted to
+            # name a source the user is actually allowed to read. ``query_rag``
+            # itself only checks that a source is *configured*, not that this
+            # user is authorized for it, so without this intersection a caller
+            # could bypass the UI-filtered list by naming a configured source
+            # directly. ``deduped_sources`` is the authoritative allow-list.
+            authorized = set(deduped_sources)
+            unauthorized = [s for s in sources if s not in authorized]
+            if unauthorized:
+                logger.warning(
+                    "atlas_rag_query: ignoring %d requested source(s) outside the "
+                    "user's authorized set for user %s",
+                    len(unauthorized),
+                    sanitize_for_logging(user_email),
+                )
+            sources = [s for s in sources if s in authorized]
+
             if not sources:
                 return ToolResult(
                     tool_call_id=tool_call.id,
-                    content="No RAG data sources are available for this user.",
+                    content="No authorized RAG data sources are available for this query.",
                     success=False,
-                    error="No RAG data sources",
+                    error="No authorized RAG data sources",
                 )
 
             if not unified_rag:

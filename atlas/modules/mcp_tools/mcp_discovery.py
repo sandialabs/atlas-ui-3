@@ -47,7 +47,9 @@ _ATLAS_RAG_TOOL_SCHEMAS = {
             "name": _ATLAS_RAG_QUERY_TOOL,
             "description": (
                 "Query selected RAG data sources and return retrieved/synthesized results. "
-                "If data_sources is omitted, uses currently selected UI RAG sources."
+                "If data_sources is omitted, uses the currently selected UI RAG sources, "
+                "falling back to all sources the user can access if none are selected. "
+                "Sources outside the user's authorized set are ignored."
             ),
             "parameters": {
                 "type": "object",

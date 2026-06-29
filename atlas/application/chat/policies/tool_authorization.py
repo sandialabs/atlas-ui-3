@@ -53,8 +53,15 @@ class ToolAuthorizationService:
             # Filter tools by server prefix
             filtered_tools: List[str] = []
             for tool in selected_tools:
-                # Special case: canvas_canvas is always allowed
-                if tool == "canvas_canvas":
+                # Special case: canvas_canvas and the atlas_rag pseudo-tools are
+                # always allowed. These are pseudo-servers surfaced via
+                # /api/config (not entries in the MCP server config), so they
+                # never appear in `authorized_servers` below and would otherwise
+                # be stripped in ordinary tools mode. Access to the underlying
+                # RAG sources is still authorized per-user at execution time
+                # (group/compliance checks in discovery + the query gate), and
+                # the tools no-op when the RAG feature is disabled.
+                if tool == "canvas_canvas" or tool.startswith("atlas_rag_"):
                     filtered_tools.append(tool)
                     continue
 
