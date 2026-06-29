@@ -185,6 +185,7 @@ async def test_agent_mode_with_no_tools_falls_back_to_plain_with_warning():
 
     mocks["agent"].assert_not_awaited()
     mocks["plain"].assert_awaited_once()
+    mocks["rag"].assert_not_awaited()
     mocks["warning"].assert_awaited_once()
 
 
@@ -204,7 +205,8 @@ async def test_agent_mode_with_rag_sources_and_no_tools_falls_back_to_plain_with
     )
 
     mocks["agent"].assert_not_awaited()
-    mocks["plain"].assert_awaited_once()
+    mocks["rag"].assert_awaited_once()
+    mocks["plain"].assert_not_awaited()
     mocks["warning"].assert_awaited_once()
 
 
