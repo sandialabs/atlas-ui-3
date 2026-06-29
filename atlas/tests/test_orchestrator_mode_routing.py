@@ -189,10 +189,8 @@ async def test_agent_mode_with_no_tools_falls_back_to_plain_with_warning():
 
 
 @pytest.mark.asyncio
-async def test_agent_mode_with_rag_sources_routes_to_agent_with_atlas_rag_tools():
-    """Agent mode should stay enabled when RAG sources are selected, even
-    when the user did not manually select MCP tools.
-    """
+async def test_agent_mode_with_rag_sources_and_no_tools_falls_back_to_plain_with_warning():
+    """RAG source selection alone should not auto-enable agent tools."""
     orch, repo, mocks = _make_orchestrator()
     sid = await _seed_session(repo)
 
@@ -205,10 +203,28 @@ async def test_agent_mode_with_rag_sources_routes_to_agent_with_atlas_rag_tools(
         agent_mode=True,
     )
 
+    mocks["agent"].assert_not_awaited()
+    mocks["plain"].assert_awaited_once()
+    mocks["warning"].assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_with_selected_atlas_rag_tool_routes_to_agent():
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["atlas_rag_query"],
+        selected_data_sources=["atlas_rag:technical-docs"],
+        agent_mode=True,
+    )
+
     mocks["agent"].assert_awaited_once()
     mocks["plain"].assert_not_awaited()
     mocks["warning"].assert_not_awaited()
 
     called_kwargs = mocks["agent"].await_args.kwargs
-    assert "atlas_rag_discover_data_sources" in called_kwargs["selected_tools"]
-    assert "atlas_rag_query" in called_kwargs["selected_tools"]
+    assert called_kwargs["selected_tools"] == ["atlas_rag_query"]

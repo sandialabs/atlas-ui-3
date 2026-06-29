@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from atlas.modules.mcp_tools.client import MCPToolManager
+from atlas.routes.config_routes import _atlas_rag_tools_info
 
 
 class FakeTool:
@@ -106,3 +107,17 @@ def test_canvas_tool_has_detailed_info():
     assert len(canvas_tools_detailed[0]['description']) > 0
     assert 'inputSchema' in canvas_tools_detailed[0]
     assert 'content' in canvas_tools_detailed[0]['inputSchema']['properties']
+
+
+def test_atlas_rag_pseudo_server_has_tools_panel_info():
+    """Atlas RAG should appear as a selectable pseudo-server in the tools panel."""
+    tools_info = _atlas_rag_tools_info()
+
+    assert tools_info["server"] == "atlas_rag"
+    assert tools_info["tools"] == ["discover_data_sources", "query"]
+    assert tools_info["tool_count"] == 2
+
+    detailed = {tool["name"]: tool for tool in tools_info["tools_detailed"]}
+    assert "discover_data_sources" in detailed
+    assert "query" in detailed
+    assert detailed["query"]["inputSchema"]["required"] == ["query"]

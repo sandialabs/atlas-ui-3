@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #682 - 2026-06-29
+- **Selectable Atlas RAG tools**: Exposed Atlas RAG discovery/query as tools-panel options and removed automatic agent-mode RAG tool injection so users explicitly control whether the model can call them.
+
 ### PR #681 - 2026-06-28
 - **Agent-mode Atlas RAG MCP tools**: Added Atlas RAG pseudo MCP tools (`atlas_rag_discover_data_sources`, `atlas_rag_query`) so agent mode can discover/query RAG sources directly, and auto-inject these tools when agent mode runs with selected RAG data sources.
 
