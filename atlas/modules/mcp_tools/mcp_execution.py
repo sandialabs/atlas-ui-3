@@ -579,6 +579,15 @@ class ExecutionMixin:
             unified_rag = app_factory.get_unified_rag_service()
             rag_mcp = app_factory.get_rag_mcp_service()
 
+            # ``compliance_level`` is an advisory display filter only, not an
+            # authorization boundary. The system has no per-user server-side
+            # compliance level (it is a client-selected value everywhere,
+            # including the /api/config query param), and discovery treats an
+            # unset level as "all accessible". The real boundary is group
+            # membership, enforced inside discover_data_sources/discover_servers
+            # against the authenticated ``user_email`` regardless of this value.
+            # It is only present on the discover tool (not the query tool), so a
+            # query always authorizes against the full group-authorized set.
             compliance_level = args.get("compliance_level")
 
             if unified_rag:

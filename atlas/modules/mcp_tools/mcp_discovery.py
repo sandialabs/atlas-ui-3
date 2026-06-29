@@ -31,7 +31,13 @@ _ATLAS_RAG_TOOL_SCHEMAS = {
                 "properties": {
                     "compliance_level": {
                         "type": "string",
-                        "description": "Optional user compliance level for filtering accessible sources.",
+                        "description": (
+                            "Optional advisory compliance-level filter for the returned "
+                            "source list (UX only, mirrors the user's UI selection). It "
+                            "does not grant access: group membership keyed on the "
+                            "authenticated user is the authorization boundary, and "
+                            "omitting it returns all group-authorized sources."
+                        ),
                     },
                     "_atlas_user": {
                         "type": "string",
