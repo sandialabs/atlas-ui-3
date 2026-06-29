@@ -127,6 +127,67 @@ class TestToolCallRecorder:
         names = [m.metadata["tool_name"] for m in recorder.messages()]
         assert names == ["tool_1", "tool_2", "tool_3"]
 
+    def test_large_arguments_and_result_are_elided_for_storage(self):
+        # A base64 upload as input / a huge tool output must not be persisted
+        # verbatim (it would bloat the saved conversation / DB row). The live UI
+        # event is forwarded untouched; only what is written to history is capped.
+        from atlas.application.chat.utilities.tool_history import _MAX_STR_CHARS
+
+        big_in = "A" * (_MAX_STR_CHARS + 5000)
+        big_out = "B" * (_MAX_STR_CHARS + 9000)
+        forwarded = []
+
+        async def inner(payload):
+            forwarded.append(payload)
+
+        recorder = ToolCallRecorder(inner)
+
+        async def play():
+            await recorder({
+                "type": "tool_start", "tool_call_id": "tc1",
+                "tool_name": "upload", "server_name": "files",
+                "arguments": {"data": big_in, "name": "x.png"},
+            })
+            await recorder({
+                "type": "tool_complete", "tool_call_id": "tc1",
+                "tool_name": "upload", "success": True, "result": big_out,
+            })
+
+        _run(play())
+
+        meta = recorder.messages()[0].metadata
+        stored_in = meta["arguments"]["data"]
+        stored_out = meta["result"]
+        assert len(stored_in) < len(big_in)
+        assert stored_in.startswith("A" * 100)
+        assert "truncated" in stored_in
+        assert len(stored_out) < len(big_out)
+        assert "truncated" in stored_out
+        # Short sibling values are untouched.
+        assert meta["arguments"]["name"] == "x.png"
+        # The forwarded live event still carries the full, unredacted payload.
+        assert forwarded[0]["arguments"]["data"] == big_in
+        assert forwarded[1]["result"] == big_out
+
+    def test_short_payloads_are_not_modified(self):
+        recorder = ToolCallRecorder(None)
+
+        async def play():
+            await recorder({
+                "type": "tool_start", "tool_call_id": "tc1",
+                "tool_name": "calc", "server_name": "c",
+                "arguments": {"a": 1, "b": "two"},
+            })
+            await recorder({
+                "type": "tool_complete", "tool_call_id": "tc1",
+                "tool_name": "calc", "success": True, "result": "3",
+            })
+
+        _run(play())
+        meta = recorder.messages()[0].metadata
+        assert meta["arguments"] == {"a": 1, "b": "two"}
+        assert meta["result"] == "3"
+
     def test_skips_canvas_tool(self):
         # canvas_canvas renders into the canvas panel, not the transcript.
         recorder = ToolCallRecorder(None)
@@ -176,6 +237,90 @@ class TestToolCallRecorder:
         # Second flush is a no-op (idempotent within a turn).
         recorder.flush_to_history(sess)
         assert len(sess.history.messages) == 1
+
+
+class TestToolsModeRunnerWiring:
+    """End-to-end: prove ``run()`` actually installs the recorder, captures the
+    real streamed tool events, and flushes history as user -> tool_call -> assistant.
+
+    The unit tests above exercise the recorder in isolation; this one exercises
+    the seam in ``ToolsModeRunner`` where it is wired into the tool workflow.
+    """
+
+    def test_run_installs_recorder_and_persists_in_order(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from atlas.application.chat.modes.tools import ToolsModeRunner
+        from atlas.domain.sessions.models import Session
+        from atlas.interfaces.llm import LLMResponse
+
+        # Seed the turn's user message exactly as the chat service does before
+        # delegating to the runner.
+        session = Session()
+        session.history.add_message(Message(role=MessageRole.USER, content="add 1 and 2"))
+
+        llm_response = LLMResponse(
+            content="",
+            tool_calls=[{"id": "tc1", "type": "function",
+                         "function": {"name": "calc_add", "arguments": "{}"}}],
+        )
+
+        forwarded = []
+
+        async def inner_callback(payload):
+            forwarded.append(payload)
+
+        async def fake_workflow(**kwargs):
+            # The runner must hand the workflow the recorder (not the raw inner
+            # callback), so events emitted here get captured for persistence
+            # while still reaching the original callback.
+            cb = kwargs["update_callback"]
+            await cb({"type": "tool_start", "tool_call_id": "tc1",
+                      "tool_name": "calc_add", "server_name": "calc",
+                      "arguments": {"a": 1, "b": 2}})
+            await cb({"type": "tool_complete", "tool_call_id": "tc1",
+                      "tool_name": "calc_add", "success": True, "result": "3"})
+            return "The answer is 3", []
+
+        publisher = AsyncMock()
+        runner = ToolsModeRunner(
+            llm=MagicMock(),
+            tool_manager=MagicMock(),
+            event_publisher=publisher,
+        )
+
+        with patch("atlas.application.chat.modes.tools.error_handler.safe_get_tools_schema",
+                   new=AsyncMock(return_value=[])), \
+             patch("atlas.application.chat.modes.tools.error_handler.safe_call_llm_with_tools",
+                   new=AsyncMock(return_value=llm_response)), \
+             patch("atlas.application.chat.modes.tools.build_session_context",
+                   return_value={}), \
+             patch("atlas.application.chat.modes.tools.tool_executor.execute_tools_workflow",
+                   new=fake_workflow):
+            _run(runner.run(
+                session=session,
+                model="test-model",
+                messages=[{"role": "user", "content": "add 1 and 2"}],
+                selected_tools=["calc_add"],
+                update_callback=inner_callback,
+            ))
+
+        roles = [(m.role, m.metadata.get("message_type")) for m in session.history.messages]
+        assert roles == [
+            (MessageRole.USER, None),
+            (MessageRole.TOOL, "tool_call"),
+            (MessageRole.ASSISTANT, None),
+        ]
+        tool_msg = session.history.messages[1]
+        assert tool_msg.metadata["tool_name"] == "calc_add"
+        assert tool_msg.metadata["arguments"] == {"a": 1, "b": 2}
+        assert tool_msg.metadata["result"] == "3"
+        assert session.history.messages[2].content == "The answer is 3"
+        # The recorder forwarded the live events to the original callback.
+        assert [p["type"] for p in forwarded] == ["tool_start", "tool_complete"]
+        # The persisted tool row is excluded from the LLM context.
+        llm_msgs = session.history.get_messages_for_llm()
+        assert {m["role"] for m in llm_msgs} == {"user", "assistant"}
 
 
 class TestHistoryExcludesToolCalls:

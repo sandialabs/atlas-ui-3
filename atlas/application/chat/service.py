@@ -532,10 +532,18 @@ class ChatService:
             # messages the provider would reject. Also keeps tool input/output
             # intact if this restored turn is later re-saved.
             metadata = msg_data.get("metadata")
+            metadata = metadata if isinstance(metadata, dict) else {}
+            # Defense-in-depth: some persisted shapes carry ``message_type`` at
+            # the top level only (e.g. the local IndexedDB autosave, which keeps
+            # it as a sibling of ``metadata`` rather than inside it). Fold it in
+            # so display-only rows are reliably excluded from get_messages_for_llm
+            # instead of being replayed as orphan ``tool`` messages.
+            if "message_type" not in metadata and msg_data.get("message_type"):
+                metadata = {**metadata, "message_type": msg_data["message_type"]}
             msg = Message(
                 role=message_role,
                 content=content,
-                metadata=metadata if isinstance(metadata, dict) else {},
+                metadata=metadata,
             )
             session.history.add_message(msg)
             loaded += 1

@@ -164,6 +164,12 @@ transcript and are never replayed to the model. They are also included in the
 as a transcript row (it renders into the canvas panel). In-chat agent-loop tool
 steps are out of scope for this persistence path.
 
+To keep saved conversations from growing without bound, large string values in
+the persisted arguments/result (for example a base64 file upload sent as a tool
+input, or a very large tool output) are truncated with a `…[truncated N chars]`
+marker before being written to `metadata_json`. The live UI event the user sees
+is unaffected — only the stored copy is capped.
+
 ## User Isolation
 
 All database queries are scoped by `user_email`. Users cannot see, search, modify, or delete conversations belonging to other users.

@@ -19,13 +19,42 @@ metadata, so they are excluded from
 model.
 """
 
+import logging
 from collections import OrderedDict
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.domain.sessions.models import Session
 
+logger = logging.getLogger(__name__)
+
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+
+# Persisted tool I/O is stored in ``conversation_messages.metadata_json``. A tool
+# invocation can carry a base64 file upload as input or emit a very large output,
+# which would bloat the saved conversation / DB row indefinitely. Cap individual
+# string values so persistence stays bounded; the live UI event is forwarded
+# untouched, so only what is written to history is elided (matching the
+# display-side elision the frontend already applies on export).
+_MAX_STR_CHARS = 8000
+# Stop walking absurdly deep structures; anything past this is stored as-is.
+_MAX_DEPTH = 6
+
+
+def _elide_for_storage(value: Any, depth: int = 0) -> Any:
+    """Recursively cap large string values so persisted tool I/O stays bounded."""
+    if isinstance(value, str):
+        if len(value) > _MAX_STR_CHARS:
+            dropped = len(value) - _MAX_STR_CHARS
+            return value[:_MAX_STR_CHARS] + f"…[truncated {dropped} chars]"
+        return value
+    if depth >= _MAX_DEPTH:
+        return value
+    if isinstance(value, dict):
+        return {k: _elide_for_storage(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_elide_for_storage(v, depth + 1) for v in value]
+    return value
 
 
 class ToolCallRecorder:
@@ -44,7 +73,9 @@ class ToolCallRecorder:
             if isinstance(payload, dict):
                 self._record(payload)
         except Exception:  # pragma: no cover - belt and suspenders
-            pass
+            # Fail open so UI event delivery never breaks, but leave a trace so a
+            # silent persistence gap is diagnosable.
+            logger.debug("ToolCallRecorder failed to record a tool event", exc_info=True)
         if self._inner is not None:
             await self._inner(payload)
 
@@ -86,8 +117,8 @@ class ToolCallRecorder:
                 "tool_call_id": entry.get("tool_call_id"),
                 "tool_name": tool_name,
                 "server_name": entry.get("server_name") or "tool",
-                "arguments": entry.get("arguments") or {},
-                "result": entry.get("result"),
+                "arguments": _elide_for_storage(entry.get("arguments") or {}),
+                "result": _elide_for_storage(entry.get("result")),
                 "status": entry.get("status") or "completed",
             }
             out.append(Message(

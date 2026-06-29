@@ -576,6 +576,45 @@ async def test_restore_preserves_tool_call_metadata_and_excludes_from_llm():
 
 
 @pytest.mark.asyncio
+async def test_restore_folds_top_level_message_type_into_metadata():
+    """Defense-in-depth (issue #684): some persisted shapes carry
+    ``message_type`` only at the top level (e.g. the local IndexedDB autosave,
+    which keeps tool fields in ``metadata`` but ``message_type`` as a sibling).
+    Restore must still treat such a row as display-only and keep it out of the
+    LLM context rather than replaying it as an orphan tool message."""
+    db_messages = [
+        {"role": "user", "content": "add 1 and 2"},
+        {
+            "role": "tool",
+            "content": "Tool call: calc_add",
+            # message_type at the top level only; NOT inside metadata.
+            "message_type": "tool_call",
+            "metadata": {"tool_name": "calc_add", "result": "3"},
+        },
+        {"role": "assistant", "content": "The answer is 3"},
+    ]
+    service, sessions = _make_service()
+    service.conversation_repository = _RestoreRepository({
+        "conv-fold": {"user_email": "user@test.com", "messages": db_messages},
+    })
+    session_id = uuid4()
+
+    await service.handle_restore_conversation(
+        session_id=session_id,
+        conversation_id="conv-fold",
+        messages=[],
+        user_email="user@test.com",
+    )
+
+    session = sessions[session_id]
+    tool_msg = session.history.messages[1]
+    assert tool_msg.metadata["message_type"] == "tool_call"
+    # The orphan tool row is excluded from the LLM context.
+    llm_messages = session.history.get_messages_for_llm()
+    assert all(m["role"] != "tool" for m in llm_messages)
+
+
+@pytest.mark.asyncio
 async def test_restore_without_user_returns_error_frame_does_not_raise():
     """Restore now returns an error frame for missing user instead of
     raising AuthorizationError, so the WebSocket receive loop cannot be
