@@ -526,6 +526,56 @@ async def test_restore_uses_db_messages_not_client_payload():
 
 
 @pytest.mark.asyncio
+async def test_restore_preserves_tool_call_metadata_and_excludes_from_llm():
+    """Restored display-only tool_call rows (issue #684) must keep their
+    metadata so they re-render, yet stay out of the LLM message list rather
+    than becoming orphan tool messages a provider would reject."""
+    db_messages = [
+        {"role": "user", "content": "add 1 and 2", "metadata": {}},
+        {
+            "role": "tool",
+            "content": "Tool call: calc_add",
+            "metadata": {
+                "message_type": "tool_call",
+                "tool_call_id": "tc1",
+                "tool_name": "calc_add",
+                "server_name": "calc",
+                "arguments": {"a": 1, "b": 2},
+                "result": "3",
+                "status": "completed",
+            },
+        },
+        {"role": "assistant", "content": "The answer is 3", "metadata": {}},
+    ]
+    service, sessions = _make_service()
+    service.conversation_repository = _RestoreRepository({
+        "conv-684": {"user_email": "user@test.com", "messages": db_messages},
+    })
+    session_id = uuid4()
+
+    response = await service.handle_restore_conversation(
+        session_id=session_id,
+        conversation_id="conv-684",
+        messages=[],
+        user_email="user@test.com",
+    )
+
+    assert response["type"] == "conversation_restored"
+    session = sessions[session_id]
+
+    # Metadata survives so the UI/reload pipeline can re-render the tool call.
+    tool_msgs = [m for m in session.history.messages if m.metadata.get("message_type") == "tool_call"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0].metadata["tool_name"] == "calc_add"
+    assert tool_msgs[0].metadata["arguments"] == {"a": 1, "b": 2}
+
+    # ...but it is excluded from what the model sees.
+    llm_messages = session.history.get_messages_for_llm()
+    assert {m["role"] for m in llm_messages} == {"user", "assistant"}
+    assert all(m["role"] != "tool" for m in llm_messages)
+
+
+@pytest.mark.asyncio
 async def test_restore_without_user_returns_error_frame_does_not_raise():
     """Restore now returns an error frame for missing user instead of
     raising AuthorizationError, so the WebSocket receive loop cannot be

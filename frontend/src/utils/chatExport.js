@@ -6,6 +6,7 @@
 // so we also include the first few lines as a preview in the export.
 
 import { USER_PROMPT_PREFIX } from '../hooks/chat/useSelections'
+import { filterArgumentsForDisplay, processToolResult } from './toolResultUtils'
 
 // Number of leading lines of the prompt body to include in the export preview.
 const PROMPT_PREVIEW_LINES = 5
@@ -22,6 +23,69 @@ export function buildPromptPreview(content) {
     preview = preview + '\n…'
   }
   return preview
+}
+
+// Tool-call message fields that the renderer reads off the top-level message
+// object (Message.jsx). They live as loose props on the in-memory message but
+// must be tucked into `metadata` to survive a save/reload round-trip, because
+// the restore path (loadSavedConversation) spreads `msg.metadata` back onto the
+// message. Without this, reloaded conversations lost all tool input/output
+// (issue #684).
+const TOOL_CALL_PERSISTED_FIELDS = [
+  'tool_call_id',
+  'tool_name',
+  'server_name',
+  'arguments',
+  'result',
+  'status',
+]
+
+// Serialize a live message into the shape persisted to history (local IndexedDB
+// or the server schema): role / content / timestamp / message_type plus a
+// `metadata` blob carrying any tool-call detail. Keeping tool I/O here means a
+// reloaded conversation re-renders the tool calls exactly as the live one did.
+export function buildPersistedMessage(m) {
+  const persisted = {
+    role: m.role,
+    content: m.content || '',
+    timestamp: m.timestamp,
+    message_type: m.type || 'chat',
+  }
+  if (m.type === 'tool_call') {
+    const metadata = {}
+    for (const field of TOOL_CALL_PERSISTED_FIELDS) {
+      if (m[field] !== undefined) metadata[field] = m[field]
+    }
+    persisted.metadata = metadata
+  }
+  return persisted
+}
+
+// Render a tool-call message as a plain-text block for the .txt export. Mirrors
+// what the UI shows when a tool row is expanded: the tool name, its input
+// arguments, and its output result -- with large base64/file payloads elided by
+// the same display filters used in-app (issue #684). Returns null for messages
+// that are not tool calls so callers can fall back to default formatting.
+export function formatToolCallForText(m) {
+  if (!m || m.type !== 'tool_call') return null
+  const serverPart = m.server_name ? ` (${m.server_name})` : ''
+  const lines = [`TOOL CALL: ${m.tool_name || 'unknown'}${serverPart}`]
+  if (m.status) lines.push(`Status: ${m.status}`)
+
+  const argCount = m.arguments && typeof m.arguments === 'object'
+    ? Object.keys(m.arguments).length
+    : 0
+  if (argCount > 0) {
+    lines.push('Input Arguments:')
+    lines.push(JSON.stringify(filterArgumentsForDisplay(m.arguments), null, 2))
+  }
+
+  if (m.result != null && m.result !== '') {
+    const processed = processToolResult(m.result)
+    lines.push('Output Result:')
+    lines.push(typeof processed === 'string' ? processed : JSON.stringify(processed, null, 2))
+  }
+  return lines.join('\n')
 }
 
 export function buildPromptInfoByKey(promptsConfig, userPrompts) {

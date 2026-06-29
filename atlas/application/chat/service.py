@@ -526,9 +526,16 @@ class ChatService:
                     sanitize_for_logging(conversation_id),
                 )
                 continue
+            # Preserve metadata so display-only rows (e.g. persisted tool_call
+            # messages, issue #684) keep their ``message_type`` and are excluded
+            # from get_messages_for_llm rather than replayed as orphan tool
+            # messages the provider would reject. Also keeps tool input/output
+            # intact if this restored turn is later re-saved.
+            metadata = msg_data.get("metadata")
             msg = Message(
                 role=message_role,
                 content=content,
+                metadata=metadata if isinstance(metadata, dict) else {},
             )
             session.history.add_message(msg)
             loaded += 1
