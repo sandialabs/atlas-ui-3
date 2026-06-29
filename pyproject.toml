@@ -43,7 +43,7 @@ dependencies = [
     "python-multipart>=0.0.6,<1.0.0",
     "pyyaml>=6.0.0,<7.0.0",
     "requests>=2.31.0,<3.0.0",
-    "sqlalchemy>=2.0.0,<3.0.0",
+    "sqlalchemy>=2.0.51,<3.0.0",
     "uvicorn[standard]>=0.30.0,<1.0.0",
     "websockets>=13.0,<17.0.0",
 ]
