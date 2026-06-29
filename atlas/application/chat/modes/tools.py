@@ -12,6 +12,7 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..preprocessors.message_builder import build_session_context
 from ..utilities import error_handler, event_notifier, tool_executor
+from ..utilities.tool_history import ToolCallRecorder
 from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
@@ -130,6 +131,11 @@ class ToolsModeRunner:
         if effective_callback is None:
             logger.warning("Tools mode: No update callback available - elicitation will not work!")
 
+        # Record tool input/output as they stream to the UI so they persist in
+        # the saved conversation and re-render on reload (issue #684).
+        recorder = ToolCallRecorder(effective_callback)
+        effective_callback = recorder
+
         final_response, tool_results = await tool_executor.execute_tools_workflow(
             llm_response=llm_response,
             messages=messages,
@@ -147,6 +153,10 @@ class ToolsModeRunner:
         # Process artifacts if handler provided
         if self.artifact_processor:
             await self.artifact_processor(session, tool_results, effective_callback)
+
+        # Persist the tool calls before the final answer so reloaded history
+        # reads user -> tool_call(s) -> assistant.
+        recorder.flush_to_history(session)
 
         # Add final assistant message to history
         assistant_message = Message(
@@ -260,6 +270,11 @@ class ToolsModeRunner:
         if effective_callback is None:
             effective_callback = self._get_send_json()
 
+        # Record tool input/output across every round so they persist in the
+        # saved conversation and re-render on reload (issue #684).
+        recorder = ToolCallRecorder(effective_callback)
+        effective_callback = recorder
+
         # Bounded tool-calling loop. The initial response is round 0; the model
         # may take up to ``max_extra_rounds`` further rounds to chain dependent
         # tool calls (e.g. compute a value, then use it). An anti-loop guard
@@ -354,7 +369,7 @@ class ToolsModeRunner:
                 final_text = next_text or (current_response.content if current_response else "")
                 return await self._finalize_text_response(
                     session, final_text, bool(next_text),
-                    selected_tools, selected_data_sources,
+                    selected_tools, selected_data_sources, recorder,
                 )
             # else: loop to execute the newly requested tools.
 
@@ -365,6 +380,9 @@ class ToolsModeRunner:
         synthesis_content = await self._stream_synthesis(
             current_response, messages, model, session_context, user_email, effective_callback,
         )
+
+        # Persist tool calls before the closing answer (issue #684).
+        recorder.flush_to_history(session)
 
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
@@ -596,12 +614,17 @@ class ToolsModeRunner:
         already_streamed: bool,
         selected_tools: List[str],
         selected_data_sources: Optional[List[str]],
+        recorder: Optional[ToolCallRecorder] = None,
     ) -> Dict[str, Any]:
         """Persist and emit a plain-text final answer produced mid-loop."""
         if not already_streamed:
             await self.event_publisher.publish_chat_response(
                 message=content, has_pending_tools=False,
             )
+        # Persist tool calls before the final answer so reloaded history reads
+        # user -> tool_call(s) -> assistant (issue #684).
+        if recorder is not None:
+            recorder.flush_to_history(session)
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
             content=content,
