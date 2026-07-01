@@ -71,7 +71,13 @@ def _atlas_rag_tools_info() -> dict:
         "author": "Atlas",
         "short_description": "Discover and query RAG sources",
         "help_email": "",
-        "compliance_level": None,
+        # The tools-panel compliance filter hides any server with a falsy
+        # compliance_level once a compliance level is selected (strict mode).
+        # Mark the pseudo-server "Public" (as canvas does) so the RAG tools stay
+        # selectable under compliance filtering; the individual RAG *sources* are
+        # still compliance-filtered independently in the RAG panel and at query
+        # time, so this does not widen data access.
+        "compliance_level": "Public",
         "auth_type": "none",
         "auth_required": False,
     }

@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 
 _ATLAS_RAG_DISCOVER_TOOL = "atlas_rag_discover_data_sources"
 _ATLAS_RAG_QUERY_TOOL = "atlas_rag_query"
+# NOTE: these schemas are deliberately model-facing only. User identity and the
+# compliance level are NOT model inputs — they must never appear here. The
+# authenticated user is taken from the server-side execution context, and the
+# authorization allow-list is always the user's full group-authorized set
+# (discovery is run with no client-supplied compliance level), so a model
+# cannot spoof identity or widen its own access via tool arguments.
 _ATLAS_RAG_TOOL_SCHEMAS = {
     _ATLAS_RAG_DISCOVER_TOOL: {
         "type": "function",
@@ -24,26 +30,12 @@ _ATLAS_RAG_TOOL_SCHEMAS = {
             "name": _ATLAS_RAG_DISCOVER_TOOL,
             "description": (
                 "Discover RAG data sources available to the current user. "
-                "Returns server-qualified source IDs in the format server:source_id."
+                "Returns server-qualified source IDs in the format server:source_id. "
+                "Takes no arguments; the authenticated user is supplied by ATLAS."
             ),
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "compliance_level": {
-                        "type": "string",
-                        "description": (
-                            "Optional advisory compliance-level filter for the returned "
-                            "source list (UX only, mirrors the user's UI selection). It "
-                            "does not grant access: group membership keyed on the "
-                            "authenticated user is the authorization boundary, and "
-                            "omitting it returns all group-authorized sources."
-                        ),
-                    },
-                    "_atlas_user": {
-                        "type": "string",
-                        "description": "Injected by ATLAS. The authenticated user email.",
-                    },
-                },
+                "properties": {},
             },
         },
     },
@@ -65,10 +57,6 @@ _ATLAS_RAG_TOOL_SCHEMAS = {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Optional server-qualified sources (server:source_id).",
-                    },
-                    "_atlas_user": {
-                        "type": "string",
-                        "description": "Injected by ATLAS. The authenticated user email.",
                     },
                 },
                 "required": ["query"],

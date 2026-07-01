@@ -4,8 +4,20 @@ import logging
 from typing import Any, List, Optional
 
 from atlas.core.auth import is_user_in_group
+from atlas.modules.mcp_tools.mcp_discovery import (
+    _ATLAS_RAG_DISCOVER_TOOL,
+    _ATLAS_RAG_QUERY_TOOL,
+)
 
 logger = logging.getLogger(__name__)
+
+# Pseudo-tools that are surfaced via /api/config rather than the MCP server
+# config, so they never appear in ``authorized_servers``. They are allowed by
+# EXACT name (not an ``atlas_rag_`` prefix) so unknown/unroutable names in that
+# namespace are still dropped, matching the executor's exact-match dispatch.
+_ALWAYS_ALLOWED_PSEUDO_TOOLS = frozenset(
+    {"canvas_canvas", _ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL}
+)
 
 
 class ToolAuthorizationService:
@@ -57,11 +69,12 @@ class ToolAuthorizationService:
                 # always allowed. These are pseudo-servers surfaced via
                 # /api/config (not entries in the MCP server config), so they
                 # never appear in `authorized_servers` below and would otherwise
-                # be stripped in ordinary tools mode. Access to the underlying
-                # RAG sources is still authorized per-user at execution time
-                # (group/compliance checks in discovery + the query gate), and
-                # the tools no-op when the RAG feature is disabled.
-                if tool == "canvas_canvas" or tool.startswith("atlas_rag_"):
+                # be stripped in ordinary tools mode. Gated by EXACT name so
+                # unknown atlas_rag_* names are still dropped. Access to the
+                # underlying RAG sources is still authorized per-user at
+                # execution time (group checks in discovery + the query gate),
+                # and the tools no-op when the RAG feature is disabled.
+                if tool in _ALWAYS_ALLOWED_PSEUDO_TOOLS:
                     filtered_tools.append(tool)
                     continue
 

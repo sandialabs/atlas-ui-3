@@ -121,3 +121,11 @@ def test_atlas_rag_pseudo_server_has_tools_panel_info():
     assert "discover_data_sources" in detailed
     assert "query" in detailed
     assert detailed["query"]["inputSchema"]["required"] == ["query"]
+
+    # The pseudo-server must carry a non-falsy compliance level so it is not
+    # hidden by the tools-panel strict compliance filter when a level is active.
+    assert tools_info["compliance_level"] == "Public"
+
+    # User identity must never be advertised as a model-facing parameter.
+    for tool in tools_info["tools_detailed"]:
+        assert "_atlas_user" not in tool["inputSchema"].get("properties", {})

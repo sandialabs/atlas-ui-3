@@ -218,6 +218,10 @@ async def test_execute_atlas_rag_query_intersects_mixed_sources(monkeypatch):
     assert result.success is True
     assert unified.query_calls == ["atlas_rag:technical-docs"]
     assert unified.batch_calls == []
+    # Dropped unauthorized sources must be surfaced so the model can disclose
+    # partial coverage rather than summarizing a narrowed corpus as complete.
+    payload = json.loads(result.content)
+    assert payload["results"]["ignored_sources"] == ["atlas_rag:secret-docs"]
 
 
 @pytest.mark.asyncio
@@ -247,6 +251,144 @@ async def test_execute_atlas_rag_tool_requires_user_context(monkeypatch):
 
     assert result.success is False
     assert result.error == "Missing user context"
+
+
+@pytest.mark.asyncio
+async def test_execute_atlas_rag_tool_ignores_model_supplied_identity(monkeypatch):
+    """A model-supplied _atlas_user must never authenticate the caller: with no
+    trusted context user_email, the tool fails closed and never queries."""
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="call-spoof",
+            name="atlas_rag_query",
+            arguments={"query": "hi", "_atlas_user": "attacker@example.com"},
+        ),
+        context={},  # no trusted user identity
+    )
+
+    assert result.success is False
+    assert result.error == "Missing user context"
+    assert unified.query_calls == []
+    assert unified.batch_calls == []
+
+
+class FakeRagMCP:
+    """Fake rag_mcp service exposing MCP-only RAG servers."""
+
+    def __init__(self, discovered_servers=None):
+        # e.g. {"docsRag": ["handbook"]}
+        self.discovered_servers = discovered_servers or {"docsRag": ["handbook"]}
+        self.synthesize_calls = []
+
+    async def discover_servers(self, username, user_compliance_level=None):
+        return [
+            {"server": srv, "sources": [{"id": sid} for sid in sids]}
+            for srv, sids in self.discovered_servers.items()
+        ]
+
+    async def synthesize(self, username, query, sources, **kwargs):
+        self.synthesize_calls.append(list(sources))
+        return {"results": {"answer": f"MCP answer for {','.join(sources)}"}}
+
+
+@pytest.mark.asyncio
+async def test_execute_atlas_rag_query_routes_mcp_sources_through_rag_mcp(monkeypatch):
+    """MCP-discovered sources must route through rag_mcp.synthesize, not
+    unified_rag.query_rag (which cannot resolve them and would 'not found')."""
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs"])  # HTTP source
+    rag_mcp = FakeRagMCP({"docsRag": ["handbook"]})           # MCP source
+    _patch_app_factory(monkeypatch, unified_rag=unified, rag_mcp=rag_mcp)
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="call-mcp",
+            name="atlas_rag_query",
+            arguments={
+                "query": "handbook policy",
+                "data_sources": ["atlas_rag:technical-docs", "docsRag:handbook"],
+            },
+        ),
+        context={"user_email": "test@example.com"},
+    )
+
+    assert result.success is True
+    # HTTP source routed through unified_rag; MCP source through rag_mcp.
+    assert unified.query_calls == ["atlas_rag:technical-docs"]
+    assert rag_mcp.synthesize_calls == [["docsRag:handbook"]]
+    payload = json.loads(result.content)
+    contents = {a["content"] for a in payload["results"]["answers"]}
+    assert "MCP answer for docsRag:handbook" in contents
+
+
+@pytest.mark.asyncio
+async def test_execute_atlas_rag_query_isolates_partial_failures(monkeypatch):
+    """One backend error must not discard another server's answer. Failures are
+    isolated per server-group (each server is queried independently)."""
+    manager = _manager()
+
+    class TwoServerRAG:
+        # Two distinct HTTP servers so each is queried on its own.
+        async def discover_data_sources(self, username, user_compliance_level=None):
+            return [
+                {"server": "srvA", "sources": [{"id": "docs"}]},
+                {"server": "srvB", "sources": [{"id": "broken"}]},
+            ]
+
+        async def query_rag(self, username, qualified_data_source, messages):
+            if qualified_data_source == "srvB:broken":
+                raise RuntimeError("backend down")
+            return SimpleNamespace(content=f"ok {qualified_data_source}", is_completion=False)
+
+        async def query_rag_batch(self, username, qualified_data_sources, messages):
+            raise AssertionError("each server has a single source; batch not expected")
+
+    _patch_app_factory(monkeypatch, unified_rag=TwoServerRAG())
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="call-partial",
+            name="atlas_rag_query",
+            arguments={
+                "query": "policy",
+                "data_sources": ["srvA:docs", "srvB:broken"],
+            },
+        ),
+        context={"user_email": "test@example.com"},
+    )
+
+    assert result.success is True  # partial success
+    payload = json.loads(result.content)
+    answers = payload["results"]["answers"]
+    assert [a["data_sources"] for a in answers] == [["srvA:docs"]]
+    errors = payload["results"]["errors"]
+    assert errors[0]["data_sources"] == ["srvB:broken"]
+    assert "backend down" in errors[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_atlas_rag_query_all_failures_reports_failure(monkeypatch):
+    """If every source query fails, the tool result is unsuccessful."""
+    manager = _manager()
+
+    class BrokenUnifiedRAG(FakeUnifiedRAG):
+        async def query_rag(self, username, qualified_data_source, messages):
+            raise RuntimeError("total outage")
+
+    unified = BrokenUnifiedRAG(discovered=["technical-docs"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(id="call-allfail", name="atlas_rag_query", arguments={"query": "x"}),
+        context={"user_email": "test@example.com", "selected_data_sources": ["atlas_rag:technical-docs"]},
+    )
+
+    assert result.success is False
+    assert result.error == "All RAG source queries failed"
 
 
 @pytest.mark.asyncio

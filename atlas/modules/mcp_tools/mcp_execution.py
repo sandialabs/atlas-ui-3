@@ -557,14 +557,17 @@ class ExecutionMixin:
         """Execute Atlas RAG pseudo-tools exposed to agent mode."""
         from atlas.infrastructure.app_factory import app_factory
 
-        args = tool_call.arguments or {}
+        args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
+        # Never trust a model-supplied identity. The authenticated user must come
+        # from the server-side execution context only; strip any _atlas_user the
+        # model may have set so it cannot reach an authorization decision, and
+        # fail closed if the trusted context has no user.
+        args.pop("_atlas_user", None)
         user_email = None
         selected_data_sources: List[str] = []
         if isinstance(context, dict):
             user_email = context.get("user_email")
             selected_data_sources = list(context.get("selected_data_sources") or [])
-        if not user_email:
-            user_email = args.get("_atlas_user")
 
         if not user_email:
             return ToolResult(
@@ -575,46 +578,46 @@ class ExecutionMixin:
             )
 
         try:
-            rag_servers: List[Dict[str, Any]] = []
             unified_rag = app_factory.get_unified_rag_service()
             rag_mcp = app_factory.get_rag_mcp_service()
 
-            # ``compliance_level`` is an advisory display filter only, not an
-            # authorization boundary. The system has no per-user server-side
-            # compliance level (it is a client-selected value everywhere,
-            # including the /api/config query param), and discovery treats an
-            # unset level as "all accessible". The real boundary is group
-            # membership, enforced inside discover_data_sources/discover_servers
-            # against the authenticated ``user_email`` regardless of this value.
-            # It is only present on the discover tool (not the query tool), so a
-            # query always authorizes against the full group-authorized set.
-            compliance_level = args.get("compliance_level")
-
+            # The authorization allow-list is always the user's FULL
+            # group-authorized set: discovery is run with NO compliance level so
+            # a model/client value can never *widen* what the user may reach.
+            # compliance_level is deliberately not a tool argument (see the
+            # schemas) and is not a server-enforced boundary in this system --
+            # group membership, checked against the authenticated ``user_email``
+            # inside discovery, is the real boundary. HTTP sources come from
+            # ``unified_rag`` and MCP sources from ``rag_mcp``; each must be
+            # queried through the matching service, so track each source's origin.
+            http_servers: List[Dict[str, Any]] = []
+            mcp_servers: List[Dict[str, Any]] = []
             if unified_rag:
-                rag_servers.extend(
-                    await unified_rag.discover_data_sources(
-                        user_email,
-                        user_compliance_level=compliance_level,
-                    )
-                )
+                http_servers = await unified_rag.discover_data_sources(user_email)
             if rag_mcp:
-                rag_servers.extend(
-                    await rag_mcp.discover_servers(
-                        user_email,
-                        user_compliance_level=compliance_level,
-                    )
-                )
+                mcp_servers = await rag_mcp.discover_servers(user_email)
 
-            discovered_sources: List[str] = []
-            for server in rag_servers:
-                server_name = server.get("server", "")
-                for source in server.get("sources", []):
-                    source_id = source.get("id", "")
-                    if server_name and source_id:
-                        discovered_sources.append(f"{server_name}:{source_id}")
+            def _flatten(servers: List[Dict[str, Any]]) -> List[str]:
+                out: List[str] = []
+                for server in servers:
+                    server_name = server.get("server", "")
+                    for source in server.get("sources", []):
+                        source_id = source.get("id", "")
+                        if server_name and source_id:
+                            out.append(f"{server_name}:{source_id}")
+                return out
 
+            http_sources = _flatten(http_servers)
+            mcp_sources = _flatten(mcp_servers)
+            source_origin: Dict[str, str] = {}
+            for s in http_sources:
+                source_origin.setdefault(s, "http")
+            for s in mcp_sources:
+                source_origin.setdefault(s, "mcp")
+
+            rag_servers = http_servers + mcp_servers
             # Preserve discovery order while de-duping
-            deduped_sources = list(dict.fromkeys(discovered_sources))
+            deduped_sources = list(dict.fromkeys(http_sources + mcp_sources))
 
             if tool_call.name == _ATLAS_RAG_DISCOVER_TOOL:
                 payload = {
@@ -658,12 +661,12 @@ class ExecutionMixin:
             # could bypass the UI-filtered list by naming a configured source
             # directly. ``deduped_sources`` is the authoritative allow-list.
             authorized = set(deduped_sources)
-            unauthorized = [s for s in sources if s not in authorized]
-            if unauthorized:
+            ignored_sources = sorted(s for s in sources if s not in authorized)
+            if ignored_sources:
                 logger.warning(
                     "atlas_rag_query: ignoring %d requested source(s) outside the "
                     "user's authorized set for user %s",
-                    len(unauthorized),
+                    len(ignored_sources),
                     sanitize_for_logging(user_email),
                 )
             sources = [s for s in sources if s in authorized]
@@ -676,45 +679,90 @@ class ExecutionMixin:
                     error="No authorized RAG data sources",
                 )
 
-            if not unified_rag:
-                return ToolResult(
-                    tool_call_id=tool_call.id,
-                    content="Unified RAG service is not configured.",
-                    success=False,
-                    error="RAG service unavailable",
-                )
-
             messages = [{"role": "user", "content": query}]
-            by_server: Dict[str, List[str]] = {}
+
+            # Group by server AND by origin so each source is queried through the
+            # service that can actually resolve it: HTTP sources via unified_rag,
+            # MCP sources via rag_mcp.synthesize. Without this split, MCP sources
+            # (which live in rag_mcp_config, not rag_sources_config) pass the auth
+            # gate but fail unified_rag.query_rag with "RAG source not found".
+            http_groups: Dict[str, List[str]] = {}
+            mcp_groups: Dict[str, List[str]] = {}
             for source in sources:
                 server_name = source.split(":", 1)[0]
-                by_server.setdefault(server_name, []).append(source)
-
-            answers: List[Dict[str, Any]] = []
-            for group_sources in by_server.values():
-                if len(group_sources) == 1:
-                    resp = await unified_rag.query_rag(user_email, group_sources[0], messages)
+                if source_origin.get(source) == "mcp":
+                    mcp_groups.setdefault(server_name, []).append(source)
                 else:
-                    resp = await unified_rag.query_rag_batch(user_email, group_sources, messages)
-                answers.append({
-                    "data_sources": group_sources,
+                    http_groups.setdefault(server_name, []).append(source)
+
+            async def _query_http(group: List[str]) -> Dict[str, Any]:
+                if not unified_rag:
+                    raise RuntimeError("Unified RAG service is not configured")
+                if len(group) == 1:
+                    resp = await unified_rag.query_rag(user_email, group[0], messages)
+                else:
+                    resp = await unified_rag.query_rag_batch(user_email, group, messages)
+                return {
+                    "data_sources": group,
                     "content": resp.content,
                     "is_completion": bool(resp.is_completion),
-                })
-
-            payload = {
-                "results": {
-                    "query": query,
-                    "answers": answers,
-                    "combined_answer": "\n\n".join(
-                        answer["content"] for answer in answers if answer.get("content")
-                    ),
                 }
+
+            async def _query_mcp(group: List[str]) -> Dict[str, Any]:
+                if not rag_mcp:
+                    raise RuntimeError("RAG MCP service is not configured")
+                mcp_response = await rag_mcp.synthesize(
+                    username=user_email, query=query, sources=group
+                )
+                results = mcp_response.get("results", {}) if isinstance(mcp_response, dict) else {}
+                return {
+                    "data_sources": group,
+                    "content": results.get("answer", ""),
+                    "is_completion": False,
+                }
+
+            # Run per-server queries concurrently; isolate failures so one backend
+            # error does not discard every other source's answer.
+            group_lists = list(http_groups.values()) + list(mcp_groups.values())
+            coros = [_query_http(g) for g in http_groups.values()]
+            coros += [_query_mcp(g) for g in mcp_groups.values()]
+            settled = await asyncio.gather(*coros, return_exceptions=True)
+
+            answers: List[Dict[str, Any]] = []
+            errors: List[Dict[str, Any]] = []
+            for group_sources, outcome in zip(group_lists, settled):
+                if isinstance(outcome, Exception):
+                    logger.error(
+                        "atlas_rag_query: source group %s failed: %s",
+                        sanitize_for_logging(", ".join(group_sources)),
+                        outcome,
+                        exc_info=True,
+                    )
+                    errors.append({"data_sources": group_sources, "error": str(outcome)})
+                else:
+                    answers.append(outcome)
+
+            results_payload: Dict[str, Any] = {
+                "query": query,
+                "answers": answers,
+                "combined_answer": "\n\n".join(
+                    answer["content"] for answer in answers if answer.get("content")
+                ),
             }
+            # Surface partial coverage so the model does not summarize a silently
+            # narrowed corpus as complete.
+            if ignored_sources:
+                results_payload["ignored_sources"] = ignored_sources
+            if errors:
+                results_payload["errors"] = errors
+
+            payload = {"results": results_payload}
+            succeeded = bool(answers)
             return ToolResult(
                 tool_call_id=tool_call.id,
                 content=json.dumps(payload, ensure_ascii=False),
-                success=True,
+                success=succeeded,
+                error=None if succeeded else "All RAG source queries failed",
             )
         except Exception as e:
             logger.error("Error executing %s: %s", tool_call.name, e, exc_info=True)

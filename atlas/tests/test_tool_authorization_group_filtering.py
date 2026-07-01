@@ -122,6 +122,7 @@ async def test_tool_authorization_allows_atlas_rag_pseudo_tools():
     selected_tools = [
         "atlas_rag_query",
         "atlas_rag_discover_data_sources",
+        "atlas_rag_bogus",  # unknown name in the namespace -> must be dropped
         "canvas_canvas",
         "unknown_server_tool",
     ]
@@ -138,6 +139,9 @@ async def test_tool_authorization_allows_atlas_rag_pseudo_tools():
     assert "atlas_rag_query" in filtered_tools
     assert "atlas_rag_discover_data_sources" in filtered_tools
     assert "canvas_canvas" in filtered_tools
+    # Exact-name gating: an unknown atlas_rag_* name the executor cannot route
+    # must NOT be admitted just because of the prefix.
+    assert "atlas_rag_bogus" not in filtered_tools
     # A tool from an unconfigured/unauthorized real server is still dropped.
     assert "unknown_server_tool" not in filtered_tools
 
