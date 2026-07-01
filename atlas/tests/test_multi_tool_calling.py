@@ -78,6 +78,37 @@ class TestExecuteMultipleTools:
         assert results[0].tool_call_id == "id-1"
 
     @pytest.mark.asyncio
+    async def test_selected_data_sources_forwarded_to_execute_tool_context(self):
+        """The per-tool execution context must carry selected_data_sources so
+        atlas_rag_query honors the UI selection. execute_single_tool rebuilds a
+        minimal context, so this is the single forwarding point for both agent
+        and tools mode."""
+        captured = {}
+
+        async def capture_execute(tool_call_obj, context=None):
+            captured["context"] = context
+            return ToolResult(tool_call_id=tool_call_obj.id, content="ok", success=True)
+
+        mgr = MagicMock()
+        mgr.execute_tool = AsyncMock(side_effect=capture_execute)
+        mgr.get_tools_schema = MagicMock(return_value=[])
+
+        tc = _make_tool_call("id-1", "atlas_rag_query", '{"query":"x"}')
+
+        await execute_multiple_tools(
+            tool_calls=[tc],
+            session_context={
+                "user_email": "u@example.com",
+                "selected_data_sources": ["atlas_rag:technical-docs"],
+            },
+            tool_manager=mgr,
+            skip_approval=True,
+        )
+
+        assert captured["context"]["selected_data_sources"] == ["atlas_rag:technical-docs"]
+        assert captured["context"]["user_email"] == "u@example.com"
+
+    @pytest.mark.asyncio
     async def test_multiple_tools_run_concurrently(self):
         """Verify that two tool calls overlap in time (parallel execution)."""
         execution_log: List[str] = []

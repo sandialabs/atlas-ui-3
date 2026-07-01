@@ -107,6 +107,46 @@ async def test_tool_authorization_enforces_group_restrictions():
 
 
 @pytest.mark.asyncio
+async def test_tool_authorization_allows_atlas_rag_pseudo_tools():
+    """atlas_rag pseudo-tools must survive filtering in ordinary tools mode.
+
+    ``atlas_rag`` is a pseudo-server surfaced via /api/config, not an entry in
+    the MCP server config, so it never appears in ``get_authorized_servers``.
+    Like ``canvas_canvas`` it must be allowed through; per-user authorization is
+    enforced at execution time against the user's discovered source set.
+    """
+    # No MCP servers configured at all -> only pseudo-tools could survive.
+    tool_manager = MockToolManager({})
+    auth_service = ToolAuthorizationService(tool_manager)
+
+    selected_tools = [
+        "atlas_rag_query",
+        "atlas_rag_discover_data_sources",
+        "atlas_rag_bogus",  # unknown name in the namespace -> must be dropped
+        "canvas_canvas",
+        "unknown_server_tool",
+    ]
+
+    async def mock_auth_check(user: str, group: str) -> bool:
+        return False
+
+    with patch("atlas.application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
+        filtered_tools = await auth_service.filter_authorized_tools(
+            selected_tools=selected_tools,
+            user_email="user@example.com",
+        )
+
+    assert "atlas_rag_query" in filtered_tools
+    assert "atlas_rag_discover_data_sources" in filtered_tools
+    assert "canvas_canvas" in filtered_tools
+    # Exact-name gating: an unknown atlas_rag_* name the executor cannot route
+    # must NOT be admitted just because of the prefix.
+    assert "atlas_rag_bogus" not in filtered_tools
+    # A tool from an unconfigured/unauthorized real server is still dropped.
+    assert "unknown_server_tool" not in filtered_tools
+
+
+@pytest.mark.asyncio
 async def test_tool_authorization_does_not_fail_open():
     """
     Test that tool authorization does not return all tools when auth check fails.

@@ -147,6 +147,38 @@ async def test_chains_dependent_tools_then_answers():
 
 
 @pytest.mark.asyncio
+async def test_selected_data_sources_propagated_to_execution_context():
+    """Tools mode must carry the request's selected RAG sources on the execution
+    context so the atlas_rag tools honor the UI selection -- matching agent mode
+    -- instead of falling back to all authorized sources.
+    """
+    captured = {}
+    llm = ScriptedToolsLLM(turns=[
+        ("querying", [_tc("c1", "atlas_rag_query", '{"query":"x"}')]),
+        ("Done.", None),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=3))
+
+    async def _execute_multiple(tool_calls, session_context, tool_manager,
+                                update_callback=None, config_manager=None, skip_approval=False):
+        captured["session_context"] = session_context
+        return [ToolResult(tool_call_id=tc.id, content="ok", success=True) for tc in tool_calls]
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_multiple_tools = _execute_multiple
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        await runner.run_streaming(
+            session=_session(),
+            model="test-model",
+            messages=[{"role": "user", "content": "find the policy"}],
+            selected_tools=["atlas_rag_query"],
+            selected_data_sources=["atlas_rag:technical-docs"],
+        )
+
+    assert captured["session_context"]["selected_data_sources"] == ["atlas_rag:technical-docs"]
+
+
+@pytest.mark.asyncio
 async def test_anti_loop_stops_on_repeated_identical_call():
     """A model repeating the identical tool call is stopped and synthesized."""
     same = ("again", [_tc("c1", "calc", '{"e":"2+2"}')])
