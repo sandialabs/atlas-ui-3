@@ -20,6 +20,11 @@ class AgentContext:
     # absent, MCP tool calls fall back to single-use sessions and stateful
     # servers raise session errors. Defaults to None for backward compatibility.
     conversation_id: Optional[str] = None
+    # Trusted, server-side compliance level for this turn (the user's active
+    # level). Carried so RAG tools enforce compliance as a hard boundary using a
+    # value the model cannot influence. None when the feature is disabled or no
+    # level is active (meaning no compliance restriction).
+    compliance_level: Optional[str] = None
 
 
 @dataclass

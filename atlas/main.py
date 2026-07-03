@@ -544,6 +544,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             agent_max_steps=data.get("agent_max_steps", 10),
                             temperature=data.get("temperature", 0.7),
                             agent_loop_strategy=data.get("agent_loop_strategy"),
+                            # User's active compliance level (trusted server-side
+                            # once validated in the service layer, not by the model).
+                            compliance_level=data.get("compliance_level_filter"),
                             custom_system_prompt=custom_system_prompt,
                             update_callback=lambda message: websocket_update_callback(websocket, message),
                             files=data.get("files"),

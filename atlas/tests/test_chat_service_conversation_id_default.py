@@ -245,6 +245,97 @@ async def test_default_does_not_overwrite_existing_context_value():
     assert captured["conversation_id"] == "existing-conv-id"
 
 
+# --- Compliance level is a trusted, server-side boundary (PR #682) ---
+
+
+@pytest.mark.asyncio
+async def test_compliance_level_stashed_on_session_when_feature_enabled():
+    """When the compliance feature is on, the request's level is validated and
+    persisted on the session so tools can enforce it (the model cannot set it)."""
+    service, sessions = _make_service()
+    service.config_manager.app_settings.feature_compliance_levels_enabled = True
+    session_id = uuid4()
+
+    captured = {}
+
+    async def fake_execute(**kwargs):
+        captured["compliance_level"] = sessions[session_id].context.get("compliance_level")
+        return {"type": "done"}
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email="user@test.com",
+            compliance_level="Public",
+        )
+
+    # No compliance-levels.json in the test env -> validation is permissive and
+    # returns the level as-is; the key point is that it is stashed server-side.
+    assert captured["compliance_level"] == "Public"
+
+
+@pytest.mark.asyncio
+async def test_compliance_level_ignored_when_feature_disabled():
+    """With the feature off, a client/model-supplied level must not take effect."""
+    service, sessions = _make_service()
+    service.config_manager.app_settings.feature_compliance_levels_enabled = False
+    session_id = uuid4()
+
+    captured = {}
+
+    async def fake_execute(**kwargs):
+        captured["compliance_level"] = sessions[session_id].context.get("compliance_level")
+        return {"type": "done"}
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email="user@test.com",
+            compliance_level="Secret",
+        )
+
+    assert captured["compliance_level"] is None
+
+
+@pytest.mark.asyncio
+async def test_compliance_level_does_not_leak_to_orchestrator_kwargs():
+    """compliance_level is consumed by the service (stashed on the session) and
+    must not be forwarded as an unexpected kwarg to orchestrator.execute."""
+    service, sessions = _make_service()
+    service.config_manager.app_settings.feature_compliance_levels_enabled = True
+    session_id = uuid4()
+
+    captured = {}
+
+    async def fake_execute(**kwargs):
+        captured["kwargs"] = kwargs
+        return {"type": "done"}
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email="user@test.com",
+            compliance_level="Public",
+        )
+
+    assert "compliance_level" not in captured["kwargs"]
+
+
 # --- Multi-agent review hardening (PR #565) ---
 
 

@@ -542,6 +542,11 @@ async def execute_single_tool(
                     # Both agent mode and tools mode reach execute_tool() here, so
                     # this is the single place that must forward it.
                     "selected_data_sources": session_context.get("selected_data_sources"),
+                    # Trusted, server-side compliance level for this turn so RAG
+                    # tools enforce compliance as a hard boundary. Sourced from
+                    # the session (not tool arguments), so a model cannot change
+                    # or remove it.
+                    "compliance_level": session_context.get("compliance_level"),
                     # pass update callback so MCP client can emit progress
                     "update_callback": update_callback,
                 }

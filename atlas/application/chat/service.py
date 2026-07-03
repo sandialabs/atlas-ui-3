@@ -294,6 +294,28 @@ class ChatService:
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
 
+        # Establish the trusted, server-side compliance level for this turn.
+        # When the compliance feature is enabled this is a hard boundary: it is
+        # taken from the request (the user's active level) but persisted on the
+        # session so downstream tools/models cannot override or remove it. It is
+        # ignored entirely when the feature is disabled. Set every turn so a
+        # request that omits it clears any stale value. An invalid/unknown level
+        # validates to None (no restriction is applied to an unrecognized level;
+        # the group-membership boundary always still applies).
+        compliance_level_raw = kwargs.pop("compliance_level", None)
+        _config_manager = getattr(self, "config_manager", None)
+        compliance_enabled = bool(
+            _config_manager
+            and _config_manager.app_settings.feature_compliance_levels_enabled
+        )
+        if compliance_enabled and compliance_level_raw:
+            from atlas.core.compliance import get_compliance_manager
+            session.context["compliance_level"] = get_compliance_manager().validate_compliance_level(
+                compliance_level_raw, context="chat request"
+            )
+        else:
+            session.context["compliance_level"] = None
+
         turn_id = str(uuid4())
         turn_attrs = {
             "turn_id": turn_id,

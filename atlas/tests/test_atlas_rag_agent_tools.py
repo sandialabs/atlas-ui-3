@@ -253,6 +253,65 @@ async def test_execute_atlas_rag_tool_requires_user_context(monkeypatch):
     assert result.error == "Missing user context"
 
 
+class ComplianceAwareRAG:
+    """Fake unified RAG that enforces a compliance level at discovery.
+
+    ``by_level`` maps a compliance level (or None) to the source ids returned.
+    Records the compliance level discovery was called with.
+    """
+
+    def __init__(self, by_level):
+        self.by_level = by_level
+        self.discover_compliance_calls = []
+        self.query_calls = []
+
+    async def discover_data_sources(self, username, user_compliance_level=None):
+        self.discover_compliance_calls.append(user_compliance_level)
+        ids = self.by_level.get(user_compliance_level, [])
+        return [{"server": "atlas_rag", "sources": [{"id": i} for i in ids]}]
+
+    async def query_rag(self, username, qualified_data_source, messages):
+        self.query_calls.append(qualified_data_source)
+        return SimpleNamespace(content=f"ok {qualified_data_source}", is_completion=False)
+
+    async def query_rag_batch(self, username, qualified_data_sources, messages):
+        raise AssertionError("batch not expected in this test")
+
+
+@pytest.mark.asyncio
+async def test_execute_atlas_rag_query_enforces_trusted_compliance_level(monkeypatch):
+    """The compliance level comes from the trusted context and bounds the
+    allow-list, so a model cannot query a source outside its level."""
+    manager = _manager()
+    # At "Public" only public-docs is discoverable; secret-docs exists only at
+    # a higher level and must be unreachable when operating at Public.
+    unified = ComplianceAwareRAG(
+        by_level={"Public": ["public-docs"], "Secret": ["public-docs", "secret-docs"]}
+    )
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="call-compliance",
+            name="atlas_rag_query",
+            arguments={
+                "query": "leak it",
+                # Model tries to reach a higher-compliance source directly.
+                "data_sources": ["atlas_rag:public-docs", "atlas_rag:secret-docs"],
+            },
+        ),
+        context={"user_email": "u@example.com", "compliance_level": "Public"},
+    )
+
+    assert result.success is True
+    # Discovery was bounded by the trusted context level, not a model value.
+    assert unified.discover_compliance_calls == ["Public"]
+    # Only the in-level source was queried; the higher-level one was dropped.
+    assert unified.query_calls == ["atlas_rag:public-docs"]
+    payload = json.loads(result.content)
+    assert payload["results"]["ignored_sources"] == ["atlas_rag:secret-docs"]
+
+
 @pytest.mark.asyncio
 async def test_execute_atlas_rag_tool_ignores_model_supplied_identity(monkeypatch):
     """A model-supplied _atlas_user must never authenticate the caller: with no

@@ -565,9 +565,11 @@ class ExecutionMixin:
         args.pop("_atlas_user", None)
         user_email = None
         selected_data_sources: List[str] = []
+        compliance_level = None
         if isinstance(context, dict):
             user_email = context.get("user_email")
             selected_data_sources = list(context.get("selected_data_sources") or [])
+            compliance_level = context.get("compliance_level")
 
         if not user_email:
             return ToolResult(
@@ -581,21 +583,30 @@ class ExecutionMixin:
             unified_rag = app_factory.get_unified_rag_service()
             rag_mcp = app_factory.get_rag_mcp_service()
 
-            # The authorization allow-list is always the user's FULL
-            # group-authorized set: discovery is run with NO compliance level so
-            # a model/client value can never *widen* what the user may reach.
-            # compliance_level is deliberately not a tool argument (see the
-            # schemas) and is not a server-enforced boundary in this system --
-            # group membership, checked against the authenticated ``user_email``
-            # inside discovery, is the real boundary. HTTP sources come from
-            # ``unified_rag`` and MCP sources from ``rag_mcp``; each must be
-            # queried through the matching service, so track each source's origin.
+            # The authorization allow-list is the user's discoverable set, which
+            # is bounded by TWO server-side boundaries, both keyed on the
+            # authenticated ``user_email`` and neither settable by the model:
+            #   1. group membership, and
+            #   2. the compliance level, when the compliance feature is enabled.
+            # ``compliance_level`` comes from the trusted execution context (the
+            # user's active level, validated in the service layer), NOT from tool
+            # arguments -- so the model cannot widen its reach or mix sources
+            # across compliance levels. Discovery applies the compliance filter,
+            # and the query gate below only permits sources in this set, so a
+            # model- or client-supplied ``data_sources`` list cannot cross it.
+            # HTTP sources come from ``unified_rag`` and MCP sources from
+            # ``rag_mcp``; each must be queried through the matching service, so
+            # track each source's origin.
             http_servers: List[Dict[str, Any]] = []
             mcp_servers: List[Dict[str, Any]] = []
             if unified_rag:
-                http_servers = await unified_rag.discover_data_sources(user_email)
+                http_servers = await unified_rag.discover_data_sources(
+                    user_email, user_compliance_level=compliance_level
+                )
             if rag_mcp:
-                mcp_servers = await rag_mcp.discover_servers(user_email)
+                mcp_servers = await rag_mcp.discover_servers(
+                    user_email, user_compliance_level=compliance_level
+                )
 
             def _flatten(servers: List[Dict[str, Any]]) -> List[str]:
                 out: List[str] = []
