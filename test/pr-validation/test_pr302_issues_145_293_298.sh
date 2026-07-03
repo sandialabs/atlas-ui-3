@@ -83,8 +83,9 @@ else
     print_result 1 "mcp_call_timeout missing from AppSettings"
 fi
 
-# Check asyncio.wait_for is used in client.py for discovery
-WAIT_FOR_COUNT=$(grep -c "asyncio.wait_for" "$ATLAS_DIR/modules/mcp_tools/client.py" || true)
+# Check asyncio.wait_for is used in the MCP client package for discovery
+# (client.py was split into sibling mixin modules in PR #675, so scan the package).
+WAIT_FOR_COUNT=$(grep -rc "asyncio.wait_for" "$ATLAS_DIR/modules/mcp_tools/" | awk -F: '{s+=$2} END{print s+0}')
 if [ "$WAIT_FOR_COUNT" -ge 3 ]; then
     print_result 0 "asyncio.wait_for used $WAIT_FOR_COUNT times in MCP client (list_tools, list_prompts, call_tool)"
 else

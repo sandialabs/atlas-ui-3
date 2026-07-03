@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
+import re
 from pathlib import Path
 from typing import Annotated, Any, Dict
 
@@ -30,6 +31,36 @@ mcp = create_stdio_server("File_Viewer")
 # Cap how much we'll base64-encode into a single canvas artifact. Big enough for
 # typical docs/images, small enough to keep the chat payload sane.
 MAX_BYTES = 25 * 1024 * 1024  # 25 MB
+
+# Aggregate caps for folder display: even when every individual file is under
+# MAX_BYTES, a directory can hold enough of them to blow up the MCP/canvas/model
+# payload. Bound both the number of artifacts and their combined size.
+MAX_FOLDER_FILES = 50
+MAX_FOLDER_TOTAL_BYTES = 100 * 1024 * 1024  # 100 MB
+
+# Directories that are almost never what a developer wants displayed and are
+# high-noise / high-risk (secrets, huge vendored trees). Pruned from the walk by
+# default along with any hidden (dot-prefixed) directory.
+_IGNORED_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".tox",
+        ".idea",
+        ".vscode",
+        "dist",
+        "build",
+        ".next",
+        ".cache",
+    }
+)
 
 # Extensions the stdlib doesn't always know about, plus a few we want to pin to a
 # specific type so the viewer mapping below behaves predictably.
@@ -139,6 +170,49 @@ def _too_large_error(size: int) -> ValueError:
     )
 
 
+def _safe_artifact_name(name: str) -> str:
+    return re.sub(r"[^\w.\-]+", "_", name)
+
+
+def _unique_artifact_name(name: str, used: set[str]) -> str:
+    """Return ``name`` (or a suffixed variant) not already in ``used``.
+
+    Sanitizing relative paths collapses separators to ``_``, so distinct paths
+    (e.g. ``a/b.txt`` and ``a_b.txt``) can map to the same artifact name. Suffix
+    the stem -- before the extension, so MIME sniffing by suffix still works --
+    until the name is unique, and record it in ``used``.
+    """
+    if name not in used:
+        used.add(name)
+        return name
+    suffix = Path(name).suffix
+    stem = name[: len(name) - len(suffix)] if suffix else name
+    counter = 1
+    candidate = f"{stem}_{counter}{suffix}"
+    while candidate in used:
+        counter += 1
+        candidate = f"{stem}_{counter}{suffix}"
+    used.add(candidate)
+    return candidate
+
+
+def _artifact_from_bytes(data: bytes, name: str) -> tuple[Dict[str, Any], str, str]:
+    mime = _normalize_mime(name, data)
+    viewer = _viewer_hint(mime)
+    return (
+        {
+            "name": name,
+            "b64": base64.b64encode(data).decode("ascii"),
+            "mime": mime,
+            "size": len(data),
+            "viewer": viewer,
+            "description": f"Contents of {name}",
+        },
+        mime,
+        viewer,
+    )
+
+
 def _fetch_url(url: str, name: str) -> tuple[bytes, str]:
     """Stream a URL, enforcing MAX_BYTES before buffering the whole body."""
     resp = requests.get(url, timeout=30, stream=True)
@@ -244,9 +318,7 @@ def display_file(
     if size == 0:
         return {"results": {"error": f"File is empty: {name}"}}
 
-    mime = _normalize_mime(name, data)
-    viewer = _viewer_hint(mime)
-    b64 = base64.b64encode(data).decode("ascii")
+    artifact, mime, viewer = _artifact_from_bytes(data, name)
 
     return {
         "results": {
@@ -256,19 +328,10 @@ def display_file(
             "size": size,
             "message": f"Displaying {name} ({mime}, {size} bytes) in the canvas.",
         },
-        "artifacts": [
-            {
-                "name": name,
-                "b64": b64,
-                "mime": mime,
-                "size": size,
-                # Explicit viewer so the streaming progress_artifacts path (which
-                # filters on art.viewer) renders files whose displayability comes
-                # from MIME sniffing rather than the filename extension.
-                "viewer": viewer,
-                "description": f"Contents of {name}",
-            }
-        ],
+        # Explicit viewer so the streaming progress_artifacts path (which
+        # filters on art.viewer) renders files whose displayability comes from
+        # MIME sniffing rather than the filename extension.
+        "artifacts": [artifact],
         "display": {
             "open_canvas": True,
             "primary_file": name,
@@ -281,6 +344,156 @@ def display_file(
             "viewer_hint": viewer,
         },
     }
+
+
+@mcp.tool
+def display_folder_files(
+    directory: Annotated[
+        str,
+        "Path to a local directory whose returnable files should be opened in "
+        "the canvas. Absolute and relative paths are accepted; ~ and "
+        "environment variables are expanded.",
+    ],
+    level: Annotated[
+        int,
+        "Directory depth to include. Use 1 for files directly in the directory; "
+        "2 also includes files in immediate child directories.",
+    ] = 1,
+) -> Dict[str, Any]:
+    """Read returnable files from a local directory and display them in canvas.
+
+    Walks the directory up to ``level`` deep and returns each readable,
+    non-empty file under ``MAX_BYTES`` as a canvas artifact. To keep the payload
+    sane the result is capped at ``MAX_FOLDER_FILES`` files and
+    ``MAX_FOLDER_TOTAL_BYTES`` combined bytes; once a cap is hit the remaining
+    files are omitted and ``results.truncated`` is set.
+
+    Hidden (dot-prefixed) files and common high-noise / high-risk directories
+    (``.git``, ``node_modules``, virtualenvs, build output, etc.) are skipped by
+    default; point the tool directly at such a directory to read its files.
+    """
+    try:
+        max_depth = int(level)
+    except (TypeError, ValueError):
+        return {"results": {"error": f"Level must be an integer: {level}"}}
+    if max_depth < 1:
+        return {"results": {"error": "Level must be at least 1"}}
+
+    root = Path(os.path.expandvars(os.path.expanduser(directory)))
+    if not root.exists():
+        return {"results": {"error": f"Directory not found: {directory}"}}
+    if not root.is_dir():
+        return {"results": {"error": f"Path is not a directory: {directory}"}}
+
+    artifacts = []
+    files = []
+    skipped = []
+    used_names: set[str] = set()
+    total_bytes = 0
+    omitted_count = 0
+    truncated = False
+
+    def record_walk_error(error: OSError) -> None:
+        skipped.append({"path": error.filename or "", "reason": str(error)})
+
+    for current_dir, child_dirs, filenames in os.walk(root, onerror=record_walk_error):
+        # Prune ignored/hidden subtrees, then stop descending once we'd exceed
+        # the requested depth. Children at max depth are never entered, so
+        # current_depth can never run past max_depth.
+        child_dirs[:] = sorted(
+            d for d in child_dirs if d not in _IGNORED_DIRS and not d.startswith(".")
+        )
+        filenames.sort()
+
+        current_path = Path(current_dir)
+        relative_dir = current_path.relative_to(root)
+        current_depth = 1 if str(relative_dir) == "." else len(relative_dir.parts) + 1
+        if current_depth >= max_depth:
+            child_dirs[:] = []
+
+        for filename in filenames:
+            file_path = current_path / filename
+            relative_name = file_path.relative_to(root).as_posix()
+
+            if filename.startswith("."):
+                skipped.append({"path": relative_name, "reason": "hidden file"})
+                continue
+
+            try:
+                size = file_path.stat().st_size
+                if size > MAX_BYTES:
+                    raise _too_large_error(size)
+                if size == 0:
+                    raise ValueError("File is empty")
+            except (OSError, ValueError) as e:
+                skipped.append({"path": relative_name, "reason": str(e)})
+                continue
+
+            # Aggregate caps: omit (don't read) once we'd exceed the file count
+            # or total-byte budget, and flag the result as truncated.
+            if len(artifacts) >= MAX_FOLDER_FILES or total_bytes + size > MAX_FOLDER_TOTAL_BYTES:
+                truncated = True
+                omitted_count += 1
+                continue
+
+            try:
+                data = file_path.read_bytes()
+            except (OSError, ValueError) as e:
+                skipped.append({"path": relative_name, "reason": str(e)})
+                continue
+
+            artifact_name = _unique_artifact_name(
+                _safe_artifact_name(relative_name), used_names
+            )
+            artifact, mime, viewer = _artifact_from_bytes(data, artifact_name)
+            artifacts.append(artifact)
+            total_bytes += size
+            files.append(
+                {
+                    "path": relative_name,
+                    "name": artifact_name,
+                    "mime": mime,
+                    "size": size,
+                    "viewer": viewer,
+                }
+            )
+
+    message = (
+        f"Displaying {len(artifacts)} file(s) from {root} up to level {max_depth}."
+    )
+    if truncated:
+        message += (
+            f" Omitted {omitted_count} file(s) after reaching the display limit "
+            f"({MAX_FOLDER_FILES} files / {MAX_FOLDER_TOTAL_BYTES} bytes)."
+        )
+
+    result = {
+        "results": {
+            "operation": "display_folder_files",
+            "directory": str(root),
+            "level": max_depth,
+            "file_count": len(artifacts),
+            "skipped_count": len(skipped),
+            "truncated": truncated,
+            "omitted_count": omitted_count,
+            "files": files,
+            "skipped": skipped,
+            "message": message,
+        },
+        "artifacts": artifacts,
+        "meta_data": {
+            "source": directory,
+            "level": max_depth,
+        },
+    }
+    if artifacts:
+        result["display"] = {
+            "open_canvas": True,
+            "primary_file": artifacts[0]["name"],
+            "mode": "replace",
+            "viewer_hint": artifacts[0]["viewer"],
+        }
+    return result
 
 
 if __name__ == "__main__":

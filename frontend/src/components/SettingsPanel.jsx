@@ -292,6 +292,30 @@ const SettingsPanel = ({ isOpen, onClose }) => {
             )}
           </div>
 
+          {/* Compact Messages Setting (always in sync via context) */}
+          <div className="bg-gray-700 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-gray-50 font-medium">Compact Tool Messages</label>
+              <button
+                onClick={() => updateCtxSettings({ compactMessages: !(ctxSettings?.compactMessages !== false) })}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  ctxSettings?.compactMessages !== false ? 'bg-green-600' : 'bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    ctxSettings?.compactMessages !== false ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="text-sm text-gray-400">
+              When enabled (default), tool calls, approval prompts, and system notices render as dense,
+              single-line rows. Turn it off to use the classic layout with avatars, author headers, and
+              expanded message bubbles.
+            </p>
+          </div>
+
           {/* Debug Mode Setting */}
           <div className="bg-gray-700 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">

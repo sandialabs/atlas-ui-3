@@ -3,6 +3,8 @@ import {
   buildPromptInfoByKey,
   resolvePromptInfo,
   buildExportConversation,
+  buildPersistedMessage,
+  formatToolCallForText,
 } from '../utils/chatExport'
 
 const PROMPTS_CONFIG = [
@@ -188,5 +190,82 @@ describe('chatExport.buildExportConversation', () => {
     expect(sys.content).toContain('Custom prompt activated: My Helper')
     expect(sys.content).toContain('Prompt preview:')
     expect(sys.content).toContain('Always cite sources.')
+  })
+})
+
+describe('chatExport.buildPersistedMessage', () => {
+  it('keeps core fields for a normal message and adds no metadata', () => {
+    const out = buildPersistedMessage({ role: 'assistant', content: 'hello', timestamp: 't1' })
+    expect(out).toEqual({
+      role: 'assistant',
+      content: 'hello',
+      timestamp: 't1',
+      message_type: 'chat',
+    })
+    expect(out.metadata).toBeUndefined()
+  })
+
+  it('tucks tool-call fields into metadata so they survive a reload (issue #684)', () => {
+    const live = {
+      role: 'system',
+      content: '**Tool Call: calc_add**',
+      timestamp: 't2',
+      type: 'tool_call',
+      tool_call_id: 'tc1',
+      tool_name: 'calc_add',
+      server_name: 'calc',
+      arguments: { a: 1, b: 2 },
+      result: '3',
+      status: 'completed',
+    }
+    const out = buildPersistedMessage(live)
+    expect(out.message_type).toBe('tool_call')
+    expect(out.metadata).toEqual({
+      tool_call_id: 'tc1',
+      tool_name: 'calc_add',
+      server_name: 'calc',
+      arguments: { a: 1, b: 2 },
+      result: '3',
+      status: 'completed',
+    })
+  })
+
+  it('omits undefined tool fields from metadata', () => {
+    const out = buildPersistedMessage({ role: 'system', type: 'tool_call', tool_name: 't' })
+    expect(out.metadata).toEqual({ tool_name: 't' })
+  })
+})
+
+describe('chatExport.formatToolCallForText', () => {
+  it('returns null for non tool-call messages', () => {
+    expect(formatToolCallForText({ role: 'user', content: 'hi' })).toBeNull()
+    expect(formatToolCallForText(null)).toBeNull()
+  })
+
+  it('renders tool name, input arguments and output result', () => {
+    const block = formatToolCallForText({
+      type: 'tool_call',
+      tool_name: 'calc_add',
+      server_name: 'calc',
+      status: 'completed',
+      arguments: { a: 1, b: 2 },
+      result: '3',
+    })
+    expect(block).toContain('TOOL CALL: calc_add (calc)')
+    expect(block).toContain('Status: completed')
+    expect(block).toContain('Input Arguments:')
+    expect(block).toContain('"a": 1')
+    expect(block).toContain('Output Result:')
+    expect(block).toContain('3')
+  })
+
+  it('elides large base64 file data in arguments', () => {
+    const block = formatToolCallForText({
+      type: 'tool_call',
+      tool_name: 'upload',
+      arguments: { file_data_base64: 'x'.repeat(500) },
+    })
+    expect(block).toContain('hidden for display')
+    expect(block).not.toContain('x'.repeat(500))
   })
 })

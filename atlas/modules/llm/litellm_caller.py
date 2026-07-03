@@ -13,7 +13,6 @@ fallbacks, cost tracking, and provider-specific optimizations.
 
 import asyncio
 import logging
-import os
 import random
 import re
 import time
@@ -89,11 +88,9 @@ def _llm_response_attrs(response: Any, attempt: int) -> Dict[str, Any]:
 class LiteLLMCaller(LiteLLMStreamingMixin):
     """Clean interface for all LLM calling patterns using LiteLLM.
 
-    Note: this class may set provider-specific LLM API key environment
-    variables (for example ``OPENAI_API_KEY``) to maintain compatibility
-    with LiteLLM's internal provider detection. These mutations are
-    best-effort only and are not intended to provide strong isolation
-    guarantees in multi-tenant or highly concurrent environments.
+    Note: API keys are passed to LiteLLM per request via the ``api_key``
+    kwarg. Provider-specific environment variables are left under admin
+    control so custom gateways and aliases keep their configured key source.
     """
 
     def __init__(self, llm_config=None, debug_mode: bool = False, rag_service=None):
@@ -510,40 +507,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 raise
 
         if api_key:
-            # Always pass api_key to LiteLLM for all providers
+            # Always pass api_key to LiteLLM for all providers. LiteLLM accepts
+            # this per-call key directly, so avoid mutating provider-specific
+            # environment variables based on model or URL heuristics.
             kwargs["api_key"] = api_key
-
-            # Additionally set provider-specific env vars for LiteLLM's internal logic
-            def _set_env_var_if_needed(env_key: str, value: str) -> None:
-                existing = os.environ.get(env_key)
-                if existing is None:
-                    os.environ[env_key] = value
-                elif existing != value:
-                    logger.warning(
-                        "Overwriting existing environment variable %s for model %s",
-                        env_key,
-                        model_name,
-                    )
-                    os.environ[env_key] = value
-
-            if "openrouter" in model_config.model_url:
-                _set_env_var_if_needed("OPENROUTER_API_KEY", api_key)
-            elif "groq" in model_config.model_url:
-                _set_env_var_if_needed("GROQ_API_KEY", api_key)
-            elif "openai" in model_config.model_url:
-                _set_env_var_if_needed("OPENAI_API_KEY", api_key)
-            elif "anthropic" in model_config.model_url:
-                _set_env_var_if_needed("ANTHROPIC_API_KEY", api_key)
-            elif "google" in model_config.model_url:
-                _set_env_var_if_needed("GOOGLE_API_KEY", api_key)
-            elif "cerebras" in model_config.model_url:
-                _set_env_var_if_needed("CEREBRAS_API_KEY", api_key)
-            else:
-                # Custom endpoint - set OPENAI_API_KEY as fallback for
-                # OpenAI-compatible endpoints. This is a heuristic and
-                # only updates the env var if it is unset or already
-                # matches the same value.
-                _set_env_var_if_needed("OPENAI_API_KEY", api_key)
 
         # Set custom API base for non-standard endpoints
         if hasattr(model_config, 'model_url') and model_config.model_url:

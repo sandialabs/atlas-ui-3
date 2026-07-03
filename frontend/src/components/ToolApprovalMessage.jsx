@@ -1,14 +1,63 @@
 import { useState, useEffect } from 'react'
 import { useChat } from '../contexts/ChatContext'
+import { usePersistentState } from '../hooks/chat/usePersistentState'
 
 // Inline tool-approval prompt rendered as a chat message. Extracted from
-// Message.jsx. Behavior is unchanged from the inline version.
-const ToolApprovalMessage = ({ message }) => {
-  const { sendApprovalResponse, settings, updateSettings } = useChat()
+// Message.jsx. `compact` (default true) renders the dense single-line row added
+// in #673; when the user turns compact messages off it falls back to the
+// classic full-bubble approval layout.
+const ToolApprovalMessage = ({ message, compact = true }) => {
+  const { sendApprovalResponse, settings, updateSettings, updateToolResult } = useChat()
+  // The websocket handler defaults this to {}, but guard anyway so a malformed
+  // payload can't crash the row on Object.keys/Object.entries.
+  const args = message.arguments || {}
   const [isEditing, setIsEditing] = useState(false)
-  const [editedArgs, setEditedArgs] = useState(message.arguments)
+  const [editedArgs, setEditedArgs] = useState(args)
   const [reason, setReason] = useState('')
-  const [isExpanded, setIsExpanded] = useState(true)
+  // Once the user approves or rejects, the decision is final — there's no
+  // "undo" on the server side, and the backend doesn't echo a status change
+  // back. We record the choice on the message in the global store (keyed by the
+  // stable tool_call_id) so it survives this row remounting — the message list
+  // keys by array index, so an earlier message appearing/collapsing would
+  // otherwise reset local state and resurrect the Approve/Reject buttons. A
+  // local mirror gives an instant update before the dispatch propagates.
+  const [decision, setDecision] = useState(null)
+  const resolvedStatus = decision || message.status
+  const resolvedReason = message.rejection_reason || (decision === 'rejected' ? reason : '')
+  const autoApproved = Boolean(settings?.autoApproveTools && !message.admin_required)
+  // The backend reuses this tool_call_id for the execution lifecycle: once the
+  // call is approved and runs, tool_start/tool_complete overwrite this message's
+  // status to calling/in_progress/completed/failed. So anything that isn't
+  // 'pending' means the call already went through — it's resolved, and the
+  // Approve/Reject controls must stay gone (even if this row remounts and loses
+  // the local `decision` mirror). Only an explicit 'rejected' is a denial.
+  const isPending = resolvedStatus === 'pending'
+  const isRejected = resolvedStatus === 'rejected'
+  // A call needs a human in the loop when it isn't going to be auto-approved and
+  // is still awaiting a decision. Admin-required calls always land here because
+  // autoApproveTools never auto-approves them.
+  const needsReview = !autoApproved && isPending
+  // The arguments panel collapses to a single header line; the choice is
+  // persisted to localStorage (via usePersistentState, which guards storage
+  // access) so it sticks across messages and reloads (F5). The default applies
+  // only when there's no saved preference: auto-approved calls start collapsed
+  // (informational — the args box would otherwise dwarf the tool-call output)
+  // while calls that need the user's action start expanded so they're reviewable.
+  const [argsCollapsed, setArgsCollapsed] = usePersistentState(
+    'toolApprovalArgsCollapsed',
+    autoApproved
+  )
+  // Calls that need human review always open expanded — a reviewer shouldn't
+  // have to expand to see what they're approving — even if the user previously
+  // collapsed an (informational) auto-approved call. This is per-message local
+  // state, so collapsing it here doesn't overwrite the persisted preference that
+  // auto-approved rows read.
+  const [reviewCollapsed, setReviewCollapsed] = useState(false)
+  const isExpanded = needsReview ? !reviewCollapsed : !argsCollapsed
+  const toggleCollapsed = () => {
+    if (needsReview) setReviewCollapsed(c => !c)
+    else setArgsCollapsed(!argsCollapsed)
+  }
 
   useEffect(() => {
     if (settings?.autoApproveTools && !message.admin_required && message.status === 'pending') {
@@ -25,6 +74,9 @@ const ToolApprovalMessage = ({ message }) => {
   }, [settings?.autoApproveTools, message.admin_required, message.status, message.tool_call_id, message.arguments, sendApprovalResponse])
 
   const handleApprove = () => {
+    if (resolvedStatus !== 'pending') return
+    setDecision('approved')
+    updateToolResult?.(message.tool_call_id, { status: 'approved' })
     sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
@@ -34,11 +86,15 @@ const ToolApprovalMessage = ({ message }) => {
   }
 
   const handleReject = () => {
+    if (resolvedStatus !== 'pending') return
+    const rejectionReason = reason || 'User rejected the tool call'
+    setDecision('rejected')
+    updateToolResult?.(message.tool_call_id, { status: 'rejected', rejection_reason: rejectionReason })
     sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: false,
-      reason: reason || 'User rejected the tool call',
+      reason: rejectionReason,
     })
   }
 
@@ -49,123 +105,233 @@ const ToolApprovalMessage = ({ message }) => {
     }))
   }
 
-  if (message.status === 'approved' || message.status === 'rejected') {
+  // Shared editor used in both layouts when "Edit" is active.
+  const argsEditor = (
+    <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+      {Object.entries(editedArgs).map(([key, value]) => (
+        <div key={key} className="bg-gray-900 border border-gray-700 rounded-lg p-3">
+          <label className="block text-sm font-medium text-gray-300 mb-1">
+            {key}
+          </label>
+          <textarea
+            value={typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+            onChange={(e) => {
+              const newValue = e.target.value
+              if ((newValue.trim().startsWith('{') && newValue.trim().endsWith('}')) ||
+                  (newValue.trim().startsWith('[') && newValue.trim().endsWith(']'))) {
+                try {
+                  const parsed = JSON.parse(newValue)
+                  handleArgumentChange(key, parsed)
+                  return
+                } catch {
+                  // Not valid JSON yet, use string value
+                }
+              }
+              handleArgumentChange(key, newValue)
+            }}
+            className="w-full bg-gray-800 text-gray-200 border border-gray-600 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+            rows={Math.max(3, Math.min(20, (typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)).split('\n').length))}
+          />
+        </div>
+      ))}
+    </div>
+  )
+
+  const autoApproveToggle = !message.admin_required && (
+    <button
+      type="button"
+      onClick={() => {
+        try {
+          updateSettings?.({ autoApproveTools: !settings?.autoApproveTools })
+        } catch (e) {
+          console.error('Failed to toggle auto-approve from inline control', e)
+        }
+      }}
+      className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
+        settings?.autoApproveTools
+          ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
+          : 'bg-gray-700 text-gray-100 border-gray-600 hover:bg-gray-600'
+      }`}
+      title="Click to toggle auto-approve for non-admin tool calls. Admin-required calls will still prompt."
+    >
+      {settings?.autoApproveTools ? 'Auto-approve ON' : 'Auto-approve OFF'}
+    </button>
+  )
+
+  // ---- Classic (non-compact) layout: full bubble, pre-#673 styling ----
+  if (!compact) {
+    if (!autoApproved && !isPending) {
+      return (
+        <div className="text-gray-200">
+          <div className="flex items-center gap-2 mb-2">
+            <span className={`px-2 py-1 rounded text-xs font-medium ${
+              isRejected ? 'bg-red-600' : 'bg-green-600'
+            }`}>
+              {isRejected ? 'REJECTED' : 'APPROVED'}
+            </span>
+            <span className="font-medium">{message.tool_name}</span>
+          </div>
+          {isRejected && resolvedReason && (
+            <div className="text-sm text-gray-400">Reason: {resolvedReason}</div>
+          )}
+        </div>
+      )
+    }
+
     return (
       <div className="text-gray-200">
         <div className="flex items-center gap-2 mb-3">
           <span className={`px-2 py-1 rounded text-xs font-medium ${
-            message.status === 'approved' ? 'bg-green-600' : 'bg-red-600'
+            autoApproved ? 'bg-blue-600' : 'bg-yellow-600'
           }`}>
-            {message.status === 'approved' ? 'APPROVED' : 'REJECTED'}
+            {autoApproved ? 'AUTO-APPROVED' : 'APPROVAL REQUIRED'}
           </span>
           <span className="font-medium">{message.tool_name}</span>
+          {autoApproveToggle}
         </div>
-        {message.status === 'rejected' && message.rejection_reason && (
-          <div className="text-sm text-gray-400">Reason: {message.rejection_reason}</div>
+
+        {/* Arguments Section */}
+        <div className="mb-4">
+          <div className="border-l-4 border-yellow-500 pl-4">
+            <button
+              onClick={toggleCollapsed}
+              className="w-full text-left text-sm font-semibold text-yellow-400 mb-2 flex items-center gap-2 hover:text-yellow-300 transition-colors"
+              aria-expanded={isExpanded}
+            >
+              <span className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
+                ▶
+              </span>
+              Tool Arguments {!isExpanded ? `(${Object.keys(args).length} params)` : ''}
+            </button>
+
+            {isExpanded && (
+              <>
+                {message.allow_edit !== false && (
+                  <div className="mb-2 flex items-center gap-2">
+                    <button
+                      onClick={() => setIsEditing(!isEditing)}
+                      className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                    >
+                      {isEditing ? 'View Mode' : 'Edit Arguments'}
+                    </button>
+                  </div>
+                )}
+
+                {!isEditing ? (
+                  <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-96 overflow-y-auto">
+                    <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                      {JSON.stringify(args, null, 2)}
+                    </pre>
+                  </div>
+                ) : argsEditor}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Action Buttons and Rejection Reason */}
+        {!autoApproved && (
+          <div className="flex gap-2 items-center">
+            <button
+              onClick={handleApprove}
+              className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap"
+            >
+              Approve {isEditing ? '(with edits)' : ''}
+            </button>
+            <button
+              onClick={handleReject}
+              className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap"
+            >
+              Reject
+            </button>
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Rejection reason (optional)..."
+              className="flex-1 bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
         )}
       </div>
     )
   }
 
-  return (
-    <div className="text-gray-200">
-      <div className="flex items-center gap-2 mb-3">
-        <span className={`px-2 py-1 rounded text-xs font-medium ${
-          settings?.autoApproveTools && !message.admin_required ? 'bg-blue-600' : 'bg-yellow-600'
+  // ---- Compact (default) layout ----
+  if (!autoApproved && !isPending) {
+    return (
+      <div className="text-gray-200 flex items-center gap-2 flex-wrap">
+        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+          isRejected ? 'bg-red-600' : 'bg-green-600'
         }`}>
-          {settings?.autoApproveTools && !message.admin_required ? 'AUTO-APPROVED' : 'APPROVAL REQUIRED'}
+          {isRejected ? 'REJECTED' : 'APPROVED'}
         </span>
-        <span className="font-medium">{message.tool_name}</span>
-        {!message.admin_required && (
-          <button
-            type="button"
-            onClick={() => {
-              try {
-                updateSettings?.({ autoApproveTools: !settings?.autoApproveTools })
-              } catch (e) {
-                console.error('Failed to toggle auto-approve from inline control', e)
-              }
-            }}
-            className={`ml-2 px-2 py-0.5 rounded text-xs font-medium border transition-colors cursor-pointer ${
-              settings?.autoApproveTools
-                ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
-                : 'bg-gray-700 text-gray-100 border-gray-600 hover:bg-gray-600'
-            }`}
-            title="Click to toggle auto-approve for non-admin tool calls. Admin-required calls will still prompt."
-          >
-            {settings?.autoApproveTools ? 'Auto-approve ON' : 'Auto-approve OFF'}
-          </button>
+        <span className="font-medium text-sm">{message.tool_name}</span>
+        {isRejected && resolvedReason && (
+          <span className="text-sm text-gray-400">— {resolvedReason}</span>
         )}
       </div>
+    )
+  }
 
-      {/* Arguments Section */}
-      <div className="mb-4">
-        <div className="border-l-4 border-yellow-500 pl-4">
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="w-full text-left text-sm font-semibold text-yellow-400 mb-2 flex items-center gap-2 hover:text-yellow-300 transition-colors"
-          >
-            <span className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
-              ▶
-            </span>
-            Tool Arguments {!isExpanded ? `(${Object.keys(message.arguments).length} params)` : ''}
-          </button>
+  const argCount = Object.keys(args).length
 
-          {isExpanded && (
-            <>
-              <div className="mb-2 flex items-center gap-2">
-                <button
-                  onClick={() => setIsEditing(!isEditing)}
-                  className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-                >
-                  {isEditing ? 'View Mode' : 'Edit Arguments'}
-                </button>
-              </div>
-
-              {!isEditing ? (
-                <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-96 overflow-y-auto">
-                  <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                    {JSON.stringify(message.arguments, null, 2)}
-                  </pre>
-                </div>
-              ) : (
-                <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-                  {Object.entries(editedArgs).map(([key, value]) => (
-                    <div key={key} className="bg-gray-900 border border-gray-700 rounded-lg p-3">
-                      <label className="block text-sm font-medium text-gray-300 mb-1">
-                        {key}
-                      </label>
-                      <textarea
-                        value={typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
-                        onChange={(e) => {
-                          const newValue = e.target.value
-                          if ((newValue.trim().startsWith('{') && newValue.trim().endsWith('}')) ||
-                              (newValue.trim().startsWith('[') && newValue.trim().endsWith(']'))) {
-                            try {
-                              const parsed = JSON.parse(newValue)
-                              handleArgumentChange(key, parsed)
-                              return
-                            } catch {
-                              // Not valid JSON yet, use string value
-                            }
-                          }
-                          handleArgumentChange(key, newValue)
-                        }}
-                        className="w-full bg-gray-800 text-gray-200 border border-gray-600 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        rows={Math.max(3, Math.min(20, (typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)).split('\n').length))}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
+  return (
+    <div className="text-gray-200">
+      {/* Single-line summary: collapse toggle + status + tool name + auto-approve */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className="flex items-center gap-2 text-left hover:text-white transition-colors cursor-pointer"
+          aria-expanded={isExpanded}
+        >
+          <span className={`text-gray-500 text-xs transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
+            ▶
+          </span>
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+            autoApproved ? 'bg-blue-600' : 'bg-yellow-600'
+          }`}>
+            {autoApproved ? 'AUTO-APPROVED' : 'APPROVAL REQUIRED'}
+          </span>
+          <span className="font-medium text-sm">{message.tool_name}</span>
+          {!isExpanded && argCount > 0 && (
+            <span className="text-gray-500 text-xs">· {argCount} param{argCount !== 1 ? 's' : ''}</span>
           )}
-        </div>
+        </button>
+        {autoApproveToggle}
       </div>
 
+      {/* Expanded arguments (view / edit) */}
+      {isExpanded && (
+        <div className="mt-2 ml-5 border-l-2 border-yellow-500 pl-3">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-xs font-semibold text-yellow-400">Input Arguments</div>
+            {/* Hide the edit affordance when the server disallows edits — any
+                edits would be ignored server-side, so showing it is misleading. */}
+            {message.allow_edit !== false && (
+              <button
+                onClick={() => setIsEditing(!isEditing)}
+                className="px-2 py-0.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+              >
+                {isEditing ? 'View' : 'Edit'}
+              </button>
+            )}
+          </div>
+
+          {!isEditing ? (
+            <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-64 overflow-y-auto">
+              <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                {JSON.stringify(args, null, 2)}
+              </pre>
+            </div>
+          ) : argsEditor}
+        </div>
+      )}
+
       {/* Action Buttons and Rejection Reason - Compact Layout */}
-      {!(settings?.autoApproveTools && !message.admin_required) && (
-        <div className="flex gap-2 items-center">
+      {!autoApproved && (
+        <div className="flex gap-2 items-center mt-2 ml-5">
           <button
             onClick={handleApprove}
             className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap"

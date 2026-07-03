@@ -6,6 +6,17 @@ import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useSettings } from '../hooks/useSettings.js'
 
+// Mirror of useSettings' DEFAULT_SETTINGS. Tests reference this (and spread it
+// for overrides) instead of re-listing every key, so adding a new default does
+// not require touching a dozen literal assertions.
+const DEFAULTS = {
+  llmTemperature: 0.7,
+  maxIterations: 10,
+  autoApproveTools: false,
+  debugMode: false,
+  compactMessages: true,
+}
+
 // Mock localStorage
 const localStorageMock = {
   getItem: vi.fn(),
@@ -37,22 +48,17 @@ describe('useSettings', () => {
     it('should initialize with default settings when localStorage is empty', () => {
       const { result } = renderHook(() => useSettings())
 
-      expect(result.current.settings).toEqual({
-        llmTemperature: 0.7,
-        maxIterations: 10,
-        autoApproveTools: false,
-        debugMode: false
-      })
+      expect(result.current.settings).toEqual(DEFAULTS)
       expect(result.current.isLoaded).toBe(true)
       expect(localStorageMock.getItem).toHaveBeenCalledWith('chatui-settings')
     })
 
     it('should load settings from localStorage when available', () => {
       const savedSettings = {
+        ...DEFAULTS,
         llmTemperature: 0.5,
         maxIterations: 15,
         autoApproveTools: true,
-        debugMode: false
       }
       localStorageMock.getItem.mockReturnValue(JSON.stringify(savedSettings))
 
@@ -72,10 +78,9 @@ describe('useSettings', () => {
       const { result } = renderHook(() => useSettings())
 
       expect(result.current.settings).toEqual({
+        ...DEFAULTS,
         llmTemperature: 0.9,
         maxIterations: 20,
-        autoApproveTools: false, // default value
-        debugMode: false // default value
       })
     })
 
@@ -84,12 +89,7 @@ describe('useSettings', () => {
 
       const { result } = renderHook(() => useSettings())
 
-      expect(result.current.settings).toEqual({
-        llmTemperature: 0.7,
-        maxIterations: 10,
-        autoApproveTools: false,
-        debugMode: false
-      })
+      expect(result.current.settings).toEqual(DEFAULTS)
       expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to parse saved settings:', expect.any(Error))
     })
 
@@ -105,35 +105,22 @@ describe('useSettings', () => {
     it('should update settings and save to localStorage', () => {
       const { result } = renderHook(() => useSettings())
 
+      const expected = { ...DEFAULTS, llmTemperature: 0.8, maxIterations: 12 }
+
       act(() => {
         const updatedSettings = result.current.updateSettings({
           llmTemperature: 0.8,
           maxIterations: 12
         })
 
-        expect(updatedSettings).toEqual({
-          llmTemperature: 0.8,
-          maxIterations: 12,
-          autoApproveTools: false,
-          debugMode: false
-        })
+        expect(updatedSettings).toEqual(expected)
       })
 
-      expect(result.current.settings).toEqual({
-        llmTemperature: 0.8,
-        maxIterations: 12,
-        autoApproveTools: false,
-        debugMode: false
-      })
+      expect(result.current.settings).toEqual(expected)
 
       expect(localStorageMock.setItem).toHaveBeenCalledWith(
         'chatui-settings',
-        JSON.stringify({
-          llmTemperature: 0.8,
-          maxIterations: 12,
-          autoApproveTools: false,
-          debugMode: false
-        })
+        JSON.stringify(expected)
       )
     })
 
@@ -151,10 +138,9 @@ describe('useSettings', () => {
       })
 
       expect(result.current.settings).toEqual({
+        ...DEFAULTS,
         llmTemperature: 0.8,
         maxIterations: 15,
-        autoApproveTools: false,
-        debugMode: false
       })
     })
 
@@ -165,12 +151,7 @@ describe('useSettings', () => {
         result.current.updateSettings({})
       })
 
-      expect(result.current.settings).toEqual({
-        llmTemperature: 0.7,
-        maxIterations: 10,
-        autoApproveTools: false,
-        debugMode: false
-      })
+      expect(result.current.settings).toEqual(DEFAULTS)
     })
 
     it('should handle updating with null values', () => {
@@ -201,29 +182,14 @@ describe('useSettings', () => {
       act(() => {
         const resetSettings = result.current.resetSettings()
 
-        expect(resetSettings).toEqual({
-          llmTemperature: 0.7,
-          maxIterations: 10,
-          autoApproveTools: false,
-          debugMode: false
-        })
+        expect(resetSettings).toEqual(DEFAULTS)
       })
 
-      expect(result.current.settings).toEqual({
-        llmTemperature: 0.7,
-        maxIterations: 10,
-        autoApproveTools: false,
-        debugMode: false
-      })
+      expect(result.current.settings).toEqual(DEFAULTS)
 
       expect(localStorageMock.setItem).toHaveBeenLastCalledWith(
         'chatui-settings',
-        JSON.stringify({
-          llmTemperature: 0.7,
-          maxIterations: 10,
-          autoApproveTools: false,
-          debugMode: false
-        })
+        JSON.stringify(DEFAULTS)
       )
     })
   })
@@ -273,12 +239,7 @@ describe('useSettings', () => {
 
       const { result } = renderHook(() => useSettings())
 
-      expect(result.current.settings).toEqual({
-        llmTemperature: 0.7,
-        maxIterations: 10,
-        autoApproveTools: false,
-        debugMode: false
-      })
+      expect(result.current.settings).toEqual(DEFAULTS)
     })
 
     it('should handle setItem throwing errors during update', () => {
@@ -298,10 +259,7 @@ describe('useSettings', () => {
 
     it('should handle complex nested objects in settings', () => {
       const complexSettings = {
-        llmTemperature: 0.7,
-        maxIterations: 10,
-        autoApproveTools: false,
-        debugMode: false,
+        ...DEFAULTS,
         customConfig: {
           nested: {
             value: 'test'
@@ -327,20 +285,20 @@ describe('useSettings', () => {
       act(() => {
         result.current.updateSettings({ llmTemperature: 0.8 })
       })
-      
+
       act(() => {
         result.current.updateSettings({ maxIterations: 15 })
       })
-      
+
       act(() => {
         result.current.updateSettings({ autoApproveTools: true })
       })
 
       expect(result.current.settings).toEqual({
+        ...DEFAULTS,
         llmTemperature: 0.8,
         maxIterations: 15,
         autoApproveTools: true,
-        debugMode: false
       })
 
       // Reset
@@ -348,12 +306,7 @@ describe('useSettings', () => {
         result.current.resetSettings()
       })
 
-      expect(result.current.settings).toEqual({
-        llmTemperature: 0.7,
-        maxIterations: 10,
-        autoApproveTools: false,
-        debugMode: false
-      })
+      expect(result.current.settings).toEqual(DEFAULTS)
     })
 
     it('should maintain consistency between getSetting and direct access', () => {
