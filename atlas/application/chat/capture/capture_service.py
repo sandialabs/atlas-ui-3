@@ -62,10 +62,20 @@ class CaptureService:
         app_settings = getattr(self._config, "app_settings", None)
         return bool(getattr(app_settings, "feature_finetune_capture_enabled", False))
 
-    def is_enabled_for(self, user_email: Optional[str]) -> bool:
-        """Capture happens iff the system flag AND the user's consent are on."""
+    def is_enabled_for(
+        self, user_email: Optional[str], *, require_consent: bool = True
+    ) -> bool:
+        """Whether capture is active for this turn.
+
+        Normally requires the system flag AND the user's stored consent. When
+        ``require_consent`` is False (CLI / dev-machine invocation, where the
+        operator who set the system flag is the consenting party), the system
+        flag alone is sufficient.
+        """
         if not self.system_enabled():
             return False
+        if not require_consent:
+            return True
         try:
             return self._store.get_consent(user_email).enabled
         except Exception as exc:  # pragma: no cover - defensive
@@ -98,8 +108,14 @@ class CaptureService:
         model: str,
         temperature: Optional[float],
         correction: Optional[Dict[str, Any]] = None,
+        consent_source: str = "user_optin",
     ) -> CaptureTurnContext:
-        """Create the per-turn accumulator (caller activates it via capture_turn)."""
+        """Create the per-turn accumulator (caller activates it via capture_turn).
+
+        ``consent_source`` records how consent was obtained for provenance:
+        ``"user_optin"`` for the stored per-user record (UI), or ``"system_flag"``
+        for CLI/dev-machine turns where the system flag implies operator consent.
+        """
         user_hash = self._store.user_hash(user_email)
         return CaptureTurnContext(
             turn_id=str(uuid4()),
@@ -111,6 +127,7 @@ class CaptureService:
                 "user_hash": user_hash,
                 "consent_version": CONSENT_VERSION,
                 "system_flag_version": CAPTURE_SCHEMA_VERSION,
+                "source": consent_source,
             },
             correction=correction,
         )

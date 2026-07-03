@@ -23,6 +23,18 @@ Capture happens only when **both** are true at the moment a turn runs:
 Opting in is rejected while the system flag is off, so a user can never be
 recorded against a disabled system.
 
+### CLI / dev-machine capture
+
+The chat CLI (`atlas-chat`, via `AtlasClient`) has no per-user consent UI, and
+the operator who sets `FEATURE_FINETUNE_CAPTURE_ENABLED` is the consenting
+party. So **CLI turns imply consent**: when the system flag is on, every CLI
+turn is captured on the system flag alone, without a stored consent record.
+These records are tagged `consent.source = "system_flag"` (UI turns are
+`"user_optin"`) for provenance. The system flag is still required — with it off,
+the CLI captures nothing. Wiring: `AtlasClient.chat` passes
+`capture_consent_implied=True`, which routes `CaptureService.is_enabled_for`
+through `require_consent=False`.
+
 ## Configuration
 
 | Env var | Default | Purpose |

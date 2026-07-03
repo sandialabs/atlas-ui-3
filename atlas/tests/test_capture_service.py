@@ -83,6 +83,30 @@ class TestGating:
         assert state["user_enabled"] is False
         assert "current_consent_version" in state
 
+    def test_implied_consent_bypasses_user_record(self, service):
+        # CLI path: system flag on, no stored consent -> still enabled when
+        # consent is implied (the operator who set the flag is the consenter).
+        assert service.is_enabled_for("a@b.c") is False
+        assert service.is_enabled_for("a@b.c", require_consent=False) is True
+
+    def test_implied_consent_still_gated_by_system_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = CaptureStore(Path(tmp), user_salt="s")
+            svc = CaptureService(_config(system_enabled=False), store=store)
+            # Even implied consent cannot override the system flag being off.
+            assert svc.is_enabled_for("a@b.c", require_consent=False) is False
+
+    def test_consent_source_recorded_in_context(self, service):
+        default_ctx = service.build_context(
+            user_email="a@b.c", conversation_id="c", model="m", temperature=0.5
+        )
+        assert default_ctx.consent["source"] == "user_optin"
+        cli_ctx = service.build_context(
+            user_email="a@b.c", conversation_id="c", model="m", temperature=0.5,
+            consent_source="system_flag",
+        )
+        assert cli_ctx.consent["source"] == "system_flag"
+
 
 class TestContextVarIsolation:
     def test_context_not_leaked_outside_block(self, service):

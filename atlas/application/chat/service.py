@@ -308,12 +308,18 @@ class ChatService:
         # consent are on, activate a capture context for the turn so the LLM
         # caller can record full I/O. ``capture_correction`` (set by the rollback
         # flow) marks this turn as a (rejected, chosen) correction pair.
+        # ``capture_consent_implied`` (set by the CLI, where the operator who
+        # enabled the system flag is the consenting party) treats the system flag
+        # alone as sufficient, bypassing the per-user consent record.
         capture_correction = kwargs.pop("capture_correction", None)
+        capture_consent_implied = bool(kwargs.pop("capture_consent_implied", False))
         capture_ctx = None
         capture_service = None
         try:
             capture_service = self._get_capture_service()
-            if capture_service and capture_service.is_enabled_for(user_email):
+            if capture_service and capture_service.is_enabled_for(
+                user_email, require_consent=not capture_consent_implied
+            ):
                 capture_ctx = capture_service.build_context(
                     user_email=user_email,
                     conversation_id=session.context.get(
@@ -324,6 +330,9 @@ class ChatService:
                     correction=capture_correction
                     if isinstance(capture_correction, dict)
                     else None,
+                    consent_source="system_flag"
+                    if capture_consent_implied
+                    else "user_optin",
                 )
         except Exception as exc:  # pragma: no cover - capture must never break chat
             logger.debug("Capture setup skipped: %s", exc)

@@ -145,6 +145,10 @@ class AtlasClient:
             agent_max_steps=max_steps,
             user_email=user_email,
             temperature=temperature,
+            # CLI/dev-machine: the operator who set FEATURE_FINETUNE_CAPTURE_ENABLED
+            # is the consenting party, so the system flag alone enables capture
+            # (no per-user consent record, which the CLI has no way to set).
+            capture_consent_implied=True,
         )
 
         collected = event_publisher.get_result()
