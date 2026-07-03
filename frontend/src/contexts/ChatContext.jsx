@@ -12,7 +12,7 @@ import { useSettings } from '../hooks/useSettings'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
-import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation } from '../utils/chatExport'
+import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, formatToolCallForText } from '../utils/chatExport'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 
 // Safety timeout for stuck thinking state (no backend response)
@@ -542,15 +542,21 @@ export const ChatProvider = ({ children }) => {
 		}
 
 		// Notify backend to restore this conversation's context
-		// Sends the conversation_id and messages so the LLM has prior context
+		// Sends the conversation_id and messages so the LLM has prior context.
+		// Display-only rows (e.g. persisted tool_call messages, issue #684) are
+		// excluded: they exist purely to re-render the transcript and a bare
+		// role:'tool' row with no preceding tool_calls would be rejected as an
+		// orphan tool message by some providers.
 		if (sendMessage) {
 			sendMessage({
 				type: 'restore_conversation',
 				conversation_id: conversationData.id,
-				messages: conversationData.messages.map(msg => ({
-					role: msg.role,
-					content: msg.content || '',
-				})),
+				messages: conversationData.messages
+					.filter(msg => (msg.message_type || 'chat') !== 'tool_call')
+					.map(msg => ({
+						role: msg.role,
+						content: msg.content || '',
+					})),
 			})
 		}
 	}, [resetMessages, files, sendMessage, bulkAdd])
@@ -618,7 +624,14 @@ export const ChatProvider = ({ children }) => {
 				promptLine = 'Active Custom Prompt: Default\n'
 			}
 			let text = `Chat Export - ${config.appName}\nDate: ${new Date().toLocaleString()}\nUser: ${config.user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected RAG Sources: ${ragSourcesDisplay}\nAgent Mode: ${agent.agentModeEnabled ? 'Enabled' : 'Disabled'}\n${promptLine}\n${'='.repeat(50)}\n\n`
-			exportConversation.forEach(m => { text += `${m.role.toUpperCase()}:\n${m.content}\n\n` })
+			exportConversation.forEach(m => {
+				const toolBlock = formatToolCallForText(m)
+				if (toolBlock) {
+					text += `${toolBlock}\n\n`
+				} else {
+					text += `${m.role.toUpperCase()}:\n${m.content}\n\n`
+				}
+			})
 			if (files.canvasContent) text += `${'='.repeat(50)}\nCANVAS CONTENT:\n${files.canvasContent}\n`
 			const blob = new Blob([text], { type: 'text/plain' })
 			const url = URL.createObjectURL(blob)
@@ -741,12 +754,7 @@ export const ChatProvider = ({ children }) => {
 				title: firstUserMsg.substring(0, 200) || 'Untitled',
 				model: currentModel,
 				created_at: messages[0]?.timestamp || new Date().toISOString(),
-				messages: messages.map(m => ({
-					role: m.role,
-					content: m.content || '',
-					timestamp: m.timestamp,
-					message_type: m.type || 'chat',
-				})),
+				messages: messages.map(m => buildPersistedMessage(m)),
 				tags: [],
 			}).catch(e => console.error('Failed to save conversation locally:', e))
 		}, 1000)
