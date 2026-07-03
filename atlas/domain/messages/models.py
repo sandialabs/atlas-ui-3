@@ -7,6 +7,12 @@ from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID, uuid4
 
 
+# Message types that exist only so the UI can re-render a reloaded
+# conversation. They are persisted (issue #684) but must never be replayed
+# back to the LLM as conversation turns.
+DISPLAY_ONLY_MESSAGE_TYPES = frozenset({"tool_call"})
+
+
 class MessageRole(Enum):
     """Message role enumeration."""
     USER = "user"
@@ -156,10 +162,18 @@ class ConversationHistory:
         return removed
 
     def get_messages_for_llm(self) -> List[Dict[str, str]]:
-        """Get messages formatted for LLM API."""
+        """Get messages formatted for LLM API.
+
+        Display-only messages (``message_type`` in :data:`DISPLAY_ONLY_MESSAGE_TYPES`)
+        are excluded. These are records kept purely so the UI can re-render a
+        reloaded conversation (e.g. persisted ``tool_call`` rows from issue #684);
+        they carry no role/content the model should reason over and, in the case
+        of orphaned ``tool`` rows, would make some providers reject the request.
+        """
         return [
             {"role": msg.role.value, "content": msg.content}
             for msg in self.messages
+            if msg.metadata.get("message_type") not in DISPLAY_ONLY_MESSAGE_TYPES
         ]
 
     def to_dict(self) -> List[Dict[str, Any]]:

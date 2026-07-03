@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-02-20
+Last updated: 2026-06-28
 
 ## Overview
 
@@ -67,7 +67,7 @@ Four tables are created:
 | Table | Purpose |
 |-------|---------|
 | `conversations` | Conversation metadata (title, model, timestamps, message count) |
-| `conversation_messages` | Individual messages with role, content, sequence order |
+| `conversation_messages` | Individual messages with role, content, sequence order, `message_type`, and a JSON `metadata` blob (carries tool-call detail) |
 | `tags` | User-defined tags for organizing conversations |
 | `conversation_tags` | Many-to-many junction between conversations and tags |
 
@@ -150,6 +150,25 @@ The **Header** includes:
 - **Incognito toggle** with clear visual indicator (Saving/Incognito)
 
 Loading a saved conversation replaces the current chat view with the saved messages.
+
+### Tool calls in saved conversations
+
+Tool calls (MCP tool input arguments and output results) are persisted alongside
+the conversation as display-only `tool_call` messages, so reloading a saved
+conversation re-renders the tool input/output exactly as it appeared live.
+Each `tool_call` row is stored with its detail in the message `metadata_json`
+column (tool name, server, arguments, result, status) and is **excluded from the
+LLM context** on a subsequent turn — these rows exist purely to re-render the
+transcript and are never replayed to the model. They are also included in the
+`.txt` and `.json` chat exports. The canvas tool is intentionally not recorded
+as a transcript row (it renders into the canvas panel). In-chat agent-loop tool
+steps are out of scope for this persistence path.
+
+To keep saved conversations from growing without bound, large string values in
+the persisted arguments/result (for example a base64 file upload sent as a tool
+input, or a very large tool output) are truncated with a `…[truncated N chars]`
+marker before being written to `metadata_json`. The live UI event the user sees
+is unaffected — only the stored copy is capped.
 
 ## User Isolation
 
