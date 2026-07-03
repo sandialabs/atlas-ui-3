@@ -3,7 +3,7 @@ import 'katex/dist/katex.min.css'
 import { preProcessLatex, restoreLatexPlaceholders } from '../utils/latexPreprocessor'
 import { useChat } from '../contexts/ChatContext'
 import { memo, useEffect, useId, useRef, useState } from 'react'
-import { Copy, Pencil } from 'lucide-react'
+import { Copy, Pencil, RotateCcw } from 'lucide-react'
 import { marked, DOMPURIFY_CONFIG } from '../utils/markdownRenderer'
 import {
   extractSourceLabels,
@@ -25,7 +25,7 @@ import ToolElapsedTime from './ToolElapsedTime'
 const ragCitationsEnabled =
   import.meta.env.VITE_FEATURE_RAG_CITATIONS === 'true'
 
-const Message = ({ message, userIndex = null, onRewind = null }) => {
+const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null }) => {
   const { appName, downloadFile, isSynthesizing, settings } = useChat()
   const debugMode = settings?.debugMode || false
   // Compact transcript (default on) renders tool/approval/system rows as dense,
@@ -86,6 +86,10 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
   // Edit-and-resubmit a previous user prompt (issue #142). The pencil affordance
   // is only wired up for user messages and only when a rewind handler is passed.
   const canRewind = isUser && typeof onRewind === 'function' && userIndex !== null && !message._streaming
+  // Fine-tune capture "correct this turn" affordance (issue #622). Only on plain
+  // assistant text messages, and only when a correction handler is wired up
+  // (which the parent gates on the feature flag + the user's capture consent).
+  const canCorrect = message.role === 'assistant' && !message.type && typeof onCorrect === 'function' && !message._streaming
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
   const editRef = useRef(null)
@@ -632,6 +636,17 @@ const Message = ({ message, userIndex = null, onRewind = null }) => {
                   type="button"
                 >
                   <Pencil className="w-3 h-3" />
+                </button>
+              )}
+              {canCorrect && (
+                <button
+                  onClick={() => onCorrect(message)}
+                  className="correct-turn-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
+                  title="Correct this turn (pick the tool the assistant should have used)"
+                  aria-label="Correct this turn"
+                  type="button"
+                >
+                  <RotateCcw className="w-3 h-3" />
                 </button>
               )}
               <button
