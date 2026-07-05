@@ -24,6 +24,7 @@ from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
+from ..utilities.tool_history import ToolCallRecorder
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 from .streaming_final_answer import stream_final_answer
 
@@ -122,6 +123,13 @@ class AgenticLoop(AgentLoopProtocol):
         final_answer: Optional[str] = None
         use_streaming = streaming and event_publisher
 
+        # Record tool input/output as they stream to the UI so agent-mode tool
+        # calls persist in the saved conversation and re-render on reload.
+        # Issue #684 covered tools mode by wrapping its update callback; agent
+        # mode executes tools through this loop's own callback, so it needs the
+        # same wrapper here.
+        recorder = ToolCallRecorder(self.connection.send_json if self.connection else None)
+
         while steps < max_steps:
             steps += 1
 
@@ -178,7 +186,7 @@ class AgenticLoop(AgentLoopProtocol):
                     "conversation_id": context.conversation_id or str(context.session_id),
                 },
                 tool_manager=self.tool_manager,
-                update_callback=(self.connection.send_json if self.connection else None),
+                update_callback=recorder,
                 config_manager=self.config_manager,
                 skip_approval=self.skip_approval,
             )
@@ -206,6 +214,11 @@ class AgenticLoop(AgentLoopProtocol):
                     model, messages, temperature=temperature,
                     user_email=context.user_email,
                 )
+
+        # Persist the turn's tool calls before the caller appends the final
+        # assistant message so reloaded history reads
+        # user -> tool_call(s) -> assistant (mirrors ToolsModeRunner).
+        recorder.flush(context.history)
 
         await event_handler(AgentEvent(
             type="agent_completion", payload={"steps": steps},

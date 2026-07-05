@@ -23,7 +23,7 @@ import logging
 from collections import OrderedDict
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from atlas.domain.messages.models import Message, MessageRole
+from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
 from atlas.domain.sessions.models import Session
 
 logger = logging.getLogger(__name__)
@@ -128,13 +128,17 @@ class ToolCallRecorder:
             ))
         return out
 
-    def flush_to_history(self, session: Session) -> None:
-        """Append recorded tool-call messages to history, then reset.
+    def flush(self, history: ConversationHistory) -> None:
+        """Append recorded tool-call messages to a history, then reset.
 
         Call immediately before adding the turn's final assistant message so
         the persisted order is ``user -> tool_call(s) -> assistant``. Clearing
         afterwards makes repeated flushes within a turn idempotent.
         """
         for message in self.messages():
-            session.history.add_message(message)
+            history.add_message(message)
         self._calls.clear()
+
+    def flush_to_history(self, session: Session) -> None:
+        """Convenience wrapper over :meth:`flush` for callers holding a Session."""
+        self.flush(session.history)
