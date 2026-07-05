@@ -213,7 +213,32 @@ class TestToolCallRecorder:
         # progress with no start yields no renderable tool name
         assert recorder.messages() == []
 
-    def test_flush_to_history_appends_then_clears(self):
+    def test_auth_required_is_terminal_failed_not_stuck_calling(self):
+        # The executor aborts a call after emitting auth_required (no
+        # tool_complete/tool_error follows); the persisted row must not stay
+        # status="calling" or it reloads as a forever-in-progress tool.
+        recorder = ToolCallRecorder(None)
+
+        async def play():
+            await recorder({
+                "type": "tool_start", "tool_call_id": "tc1",
+                "tool_name": "corp_search", "server_name": "corp",
+                "arguments": {"q": "x"},
+            })
+            await recorder({
+                "type": "auth_required", "tool_call_id": "tc1",
+                "tool_name": "corp_search", "server_name": "corp",
+                "message": "Authentication required: token expired",
+            })
+
+        _run(play())
+
+        messages = recorder.messages()
+        assert len(messages) == 1
+        assert messages[0].metadata["status"] == "failed"
+        assert messages[0].metadata["result"] == "Authentication required: token expired"
+
+    def test_flush_appends_then_clears(self):
         recorder = ToolCallRecorder(None)
 
         async def play():
@@ -228,15 +253,12 @@ class TestToolCallRecorder:
 
         _run(play())
 
-        class _Sess:
-            history = ConversationHistory()
-
-        sess = _Sess()
-        recorder.flush_to_history(sess)
-        assert len(sess.history.messages) == 1
+        history = ConversationHistory()
+        recorder.flush(history)
+        assert len(history.messages) == 1
         # Second flush is a no-op (idempotent within a turn).
-        recorder.flush_to_history(sess)
-        assert len(sess.history.messages) == 1
+        recorder.flush(history)
+        assert len(history.messages) == 1
 
 
 class TestToolsModeRunnerWiring:
@@ -321,6 +343,361 @@ class TestToolsModeRunnerWiring:
         # The persisted tool row is excluded from the LLM context.
         llm_msgs = session.history.get_messages_for_llm()
         assert {m["role"] for m in llm_msgs} == {"user", "assistant"}
+
+
+class TestAgenticLoopWiring:
+    """End-to-end: prove the agentic loop installs the recorder and persists
+    agent-mode tool calls into the conversation history (the #684 fix only
+    covered ``ToolsModeRunner``; agent mode executes tools through the loop's
+    own update callback, so it needs its own recorder wiring).
+    """
+
+    def _make_llm(self, responses):
+        from unittest.mock import AsyncMock, MagicMock
+
+        llm = MagicMock()
+        llm.call_with_tools = AsyncMock(side_effect=list(responses))
+        return llm
+
+    def _tool_call_response(self):
+        from atlas.interfaces.llm import LLMResponse
+
+        return LLMResponse(
+            content="",
+            tool_calls=[{"id": "tc1", "type": "function",
+                         "function": {"name": "calc_add", "arguments": '{"a": 1, "b": 2}'}}],
+        )
+
+    def _final_response(self):
+        from atlas.interfaces.llm import LLMResponse
+
+        return LLMResponse(content="The answer is 3")
+
+    @staticmethod
+    async def _fake_execute_multiple_tools(**kwargs):
+        from unittest.mock import MagicMock
+
+        cb = kwargs["update_callback"]
+        await cb({"type": "tool_start", "tool_call_id": "tc1",
+                  "tool_name": "calc_add", "server_name": "calc",
+                  "arguments": {"a": 1, "b": 2}})
+        await cb({"type": "tool_complete", "tool_call_id": "tc1",
+                  "tool_name": "calc_add", "success": True, "result": "3"})
+        result = MagicMock()
+        result.content = "3"
+        result.tool_call_id = "tc1"
+        return [result]
+
+    def _run_loop(self, connection):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from uuid import uuid4
+
+        from atlas.application.chat.agent.agentic_loop import AgenticLoop
+        from atlas.application.chat.agent.protocols import AgentContext
+
+        history = ConversationHistory()
+        history.add_message(Message(role=MessageRole.USER, content="add 1 and 2"))
+        context = AgentContext(
+            session_id=uuid4(),
+            user_email="user@example.com",
+            files={},
+            history=history,
+        )
+
+        loop = AgenticLoop(
+            llm=self._make_llm([self._tool_call_response(), self._final_response()]),
+            tool_manager=MagicMock(),
+            prompt_provider=None,
+            connection=connection,
+        )
+
+        async def event_handler(evt):
+            pass
+
+        with patch("atlas.application.chat.agent.agentic_loop.error_handler.safe_get_tools_schema",
+                   new=AsyncMock(return_value=[])), \
+             patch("atlas.application.chat.agent.agentic_loop.tool_executor.execute_multiple_tools",
+                   new=self._fake_execute_multiple_tools):
+            result = _run(loop.run(
+                model="test-model",
+                messages=[{"role": "user", "content": "add 1 and 2"}],
+                context=context,
+                selected_tools=["calc_add"],
+                data_sources=None,
+                max_steps=5,
+                temperature=0.7,
+                event_handler=event_handler,
+                streaming=False,
+            ))
+        return result, history
+
+    def test_run_persists_tool_calls_and_forwards_live_events(self):
+        from unittest.mock import MagicMock
+
+        forwarded = []
+
+        async def send_json(payload):
+            forwarded.append(payload)
+
+        connection = MagicMock()
+        connection.send_json = send_json
+
+        result, history = self._run_loop(connection)
+
+        assert result.final_answer == "The answer is 3"
+        roles = [(m.role, m.metadata.get("message_type")) for m in history.messages]
+        assert roles == [
+            (MessageRole.USER, None),
+            (MessageRole.TOOL, "tool_call"),
+        ]
+        tool_msg = history.messages[1]
+        assert tool_msg.metadata["tool_name"] == "calc_add"
+        assert tool_msg.metadata["server_name"] == "calc"
+        assert tool_msg.metadata["arguments"] == {"a": 1, "b": 2}
+        assert tool_msg.metadata["result"] == "3"
+        assert tool_msg.metadata["status"] == "completed"
+        # The recorder forwarded the live events to the websocket callback.
+        assert [p["type"] for p in forwarded] == ["tool_start", "tool_complete"]
+        # The persisted tool row is excluded from the LLM context.
+        assert {m["role"] for m in history.get_messages_for_llm()} == {"user"}
+
+    def test_run_persists_tool_calls_without_connection(self):
+        # CLI-style runs have no websocket connection; recording must still work.
+        result, history = self._run_loop(connection=None)
+
+        assert result.final_answer == "The answer is 3"
+        tool_rows = [m for m in history.messages
+                     if m.metadata.get("message_type") == "tool_call"]
+        assert len(tool_rows) == 1
+        assert tool_rows[0].metadata["tool_name"] == "calc_add"
+        assert tool_rows[0].metadata["status"] == "completed"
+
+    def test_run_persists_tool_calls_across_steps_even_with_reused_ids(self):
+        # Two loop steps, each with a tool call. The provider reuses the SAME
+        # tool_call_id across steps (LiteLLM/local models can restart ids at
+        # call_0 per response); per-step flushing must keep each invocation as
+        # its own persisted row instead of the second overwriting the first.
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from uuid import uuid4
+
+        from atlas.application.chat.agent.agentic_loop import AgenticLoop
+        from atlas.application.chat.agent.protocols import AgentContext
+        from atlas.interfaces.llm import LLMResponse
+
+        history = ConversationHistory()
+        history.add_message(Message(role=MessageRole.USER, content="add then multiply"))
+        context = AgentContext(
+            session_id=uuid4(), user_email="user@example.com", files={}, history=history,
+        )
+
+        def tool_response(call_id, name):
+            return LLMResponse(
+                content="",
+                tool_calls=[{"id": call_id, "type": "function",
+                             "function": {"name": name, "arguments": "{}"}}],
+            )
+
+        llm = MagicMock()
+        llm.call_with_tools = AsyncMock(side_effect=[
+            tool_response("call_0", "calc_add"),
+            tool_response("call_0", "calc_mul"),
+            LLMResponse(content="The answer is 6"),
+        ])
+
+        async def fake_execute_multiple_tools(**kwargs):
+            cb = kwargs["update_callback"]
+            results = []
+            for tc in kwargs["tool_calls"]:
+                await cb({"type": "tool_start", "tool_call_id": tc["id"],
+                          "tool_name": tc["function"]["name"], "server_name": "calc",
+                          "arguments": {}})
+                await cb({"type": "tool_complete", "tool_call_id": tc["id"],
+                          "tool_name": tc["function"]["name"], "success": True,
+                          "result": "ok"})
+                result = MagicMock()
+                result.content = "ok"
+                result.tool_call_id = tc["id"]
+                results.append(result)
+            return results
+
+        loop = AgenticLoop(
+            llm=llm, tool_manager=MagicMock(), prompt_provider=None, connection=None,
+        )
+
+        async def event_handler(evt):
+            pass
+
+        with patch("atlas.application.chat.agent.agentic_loop.error_handler.safe_get_tools_schema",
+                   new=AsyncMock(return_value=[])), \
+             patch("atlas.application.chat.agent.agentic_loop.tool_executor.execute_multiple_tools",
+                   new=fake_execute_multiple_tools):
+            result = _run(loop.run(
+                model="test-model",
+                messages=[{"role": "user", "content": "add then multiply"}],
+                context=context,
+                selected_tools=["calc_add", "calc_mul"],
+                data_sources=None,
+                max_steps=5,
+                temperature=0.7,
+                event_handler=event_handler,
+                streaming=False,
+            ))
+
+        assert result.final_answer == "The answer is 6"
+        assert result.steps == 3
+        tool_rows = [m for m in history.messages
+                     if m.metadata.get("message_type") == "tool_call"]
+        assert [m.metadata["tool_name"] for m in tool_rows] == ["calc_add", "calc_mul"]
+        assert all(m.metadata["status"] == "completed" for m in tool_rows)
+
+    def test_run_persists_failed_tool_call_with_failed_status(self):
+        # A tool that errors mid-run must persist as a failed row, not vanish.
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from uuid import uuid4
+
+        from atlas.application.chat.agent.agentic_loop import AgenticLoop
+        from atlas.application.chat.agent.protocols import AgentContext
+        from atlas.interfaces.llm import LLMResponse
+
+        history = ConversationHistory()
+        history.add_message(Message(role=MessageRole.USER, content="add 1 and 2"))
+        context = AgentContext(
+            session_id=uuid4(), user_email="user@example.com", files={}, history=history,
+        )
+
+        llm = MagicMock()
+        llm.call_with_tools = AsyncMock(side_effect=[
+            LLMResponse(
+                content="",
+                tool_calls=[{"id": "tc1", "type": "function",
+                             "function": {"name": "calc_add", "arguments": "{}"}}],
+            ),
+            LLMResponse(content="The tool failed."),
+        ])
+
+        async def fake_execute_multiple_tools(**kwargs):
+            cb = kwargs["update_callback"]
+            await cb({"type": "tool_start", "tool_call_id": "tc1",
+                      "tool_name": "calc_add", "server_name": "calc",
+                      "arguments": {"a": 1}})
+            await cb({"type": "tool_error", "tool_call_id": "tc1",
+                      "tool_name": "calc_add", "error": "division by zero"})
+            result = MagicMock()
+            result.content = "error"
+            result.tool_call_id = "tc1"
+            return [result]
+
+        loop = AgenticLoop(
+            llm=llm, tool_manager=MagicMock(), prompt_provider=None, connection=None,
+        )
+
+        async def event_handler(evt):
+            pass
+
+        with patch("atlas.application.chat.agent.agentic_loop.error_handler.safe_get_tools_schema",
+                   new=AsyncMock(return_value=[])), \
+             patch("atlas.application.chat.agent.agentic_loop.tool_executor.execute_multiple_tools",
+                   new=fake_execute_multiple_tools):
+            _run(loop.run(
+                model="test-model",
+                messages=[{"role": "user", "content": "add 1 and 2"}],
+                context=context,
+                selected_tools=["calc_add"],
+                data_sources=None,
+                max_steps=5,
+                temperature=0.7,
+                event_handler=event_handler,
+                streaming=False,
+            ))
+
+        tool_rows = [m for m in history.messages
+                     if m.metadata.get("message_type") == "tool_call"]
+        assert len(tool_rows) == 1
+        assert tool_rows[0].metadata["status"] == "failed"
+        assert tool_rows[0].metadata["result"] == "division by zero"
+
+
+class TestAgentModeRunnerPersistedOrder:
+    """Cross-layer invariant: the loop flushes recorded tool calls before
+    ``AgentModeRunner`` appends the final assistant message, so a full
+    agent-mode run persists ``user -> tool_call(s) -> assistant``. Guards the
+    seam between ``AgenticLoop.run()`` (flush) and ``AgentModeRunner.run()``
+    (assistant append) that neither layer can enforce alone.
+    """
+
+    def test_agent_mode_run_persists_user_tool_assistant_order(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from atlas.application.chat.agent.factory import AgentLoopFactory
+        from atlas.application.chat.modes.agent import AgentModeRunner
+        from atlas.domain.sessions.models import Session
+        from atlas.interfaces.llm import LLMResponse
+
+        session = Session()
+        session.history.add_message(Message(role=MessageRole.USER, content="add 1 and 2"))
+
+        responses = iter([
+            LLMResponse(
+                content="",
+                tool_calls=[{"id": "tc1", "type": "function",
+                             "function": {"name": "calc_add", "arguments": "{}"}}],
+            ),
+            LLMResponse(content="The answer is 3"),
+        ])
+
+        # AgentModeRunner always runs the loop with streaming=True, so the
+        # loop consumes stream_with_tools (one async generator per LLM call).
+        def stream_with_tools(*args, **kwargs):
+            async def gen():
+                yield next(responses)
+            return gen()
+
+        llm = MagicMock()
+        llm.stream_with_tools = stream_with_tools
+
+        connection = MagicMock()
+        connection.send_json = AsyncMock()
+
+        factory = AgentLoopFactory(llm=llm, tool_manager=MagicMock(), connection=connection)
+        runner = AgentModeRunner(agent_loop_factory=factory, event_publisher=AsyncMock())
+
+        async def fake_execute_multiple_tools(**kwargs):
+            cb = kwargs["update_callback"]
+            await cb({"type": "tool_start", "tool_call_id": "tc1",
+                      "tool_name": "calc_add", "server_name": "calc",
+                      "arguments": {"a": 1, "b": 2}})
+            await cb({"type": "tool_complete", "tool_call_id": "tc1",
+                      "tool_name": "calc_add", "success": True, "result": "3"})
+            result = MagicMock()
+            result.content = "3"
+            result.tool_call_id = "tc1"
+            return [result]
+
+        with patch("atlas.application.chat.agent.agentic_loop.error_handler.safe_get_tools_schema",
+                   new=AsyncMock(return_value=[])), \
+             patch("atlas.application.chat.agent.agentic_loop.tool_executor.execute_multiple_tools",
+                   new=fake_execute_multiple_tools):
+            _run(runner.run(
+                session=session,
+                model="test-model",
+                messages=[{"role": "user", "content": "add 1 and 2"}],
+                selected_tools=["calc_add"],
+                selected_data_sources=None,
+                max_steps=5,
+            ))
+
+        roles = [(m.role, m.metadata.get("message_type")) for m in session.history.messages]
+        assert roles == [
+            (MessageRole.USER, None),
+            (MessageRole.TOOL, "tool_call"),
+            (MessageRole.ASSISTANT, None),
+        ]
+        tool_msg = session.history.messages[1]
+        assert tool_msg.metadata["tool_name"] == "calc_add"
+        assert tool_msg.metadata["result"] == "3"
+        final_msg = session.history.messages[2]
+        assert final_msg.content == "The answer is 3"
+        assert final_msg.metadata.get("agent_mode") is True
 
 
 class TestHistoryExcludesToolCalls:

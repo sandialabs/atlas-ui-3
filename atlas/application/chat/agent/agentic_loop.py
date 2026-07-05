@@ -24,6 +24,7 @@ from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
+from ..utilities.tool_history import ToolCallRecorder
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 from .streaming_final_answer import stream_final_answer
 
@@ -122,6 +123,13 @@ class AgenticLoop(AgentLoopProtocol):
         final_answer: Optional[str] = None
         use_streaming = streaming and event_publisher
 
+        # Record tool input/output as they stream to the UI so agent-mode tool
+        # calls persist in the saved conversation and re-render on reload.
+        # Issue #684 covered tools mode by wrapping its update callback; agent
+        # mode executes tools through this loop's own callback, so it needs the
+        # same wrapper here.
+        recorder = ToolCallRecorder(self.connection.send_json if self.connection else None)
+
         while steps < max_steps:
             steps += 1
 
@@ -178,7 +186,7 @@ class AgenticLoop(AgentLoopProtocol):
                     "conversation_id": context.conversation_id or str(context.session_id),
                 },
                 tool_manager=self.tool_manager,
-                update_callback=(self.connection.send_json if self.connection else None),
+                update_callback=recorder,
                 config_manager=self.config_manager,
                 skip_approval=self.skip_approval,
             )
@@ -193,6 +201,15 @@ class AgenticLoop(AgentLoopProtocol):
             await event_handler(AgentEvent(
                 type="agent_tool_results", payload={"results": results},
             ))
+
+            # Flush this step's recorded tool calls into history now rather
+            # than once at end of run: providers may reuse tool_call_ids
+            # across steps (e.g. ids restarting at call_0 per response), and
+            # the recorder keys by id, so a later step would overwrite an
+            # earlier row. Per-step flushing scopes ids to one step and keeps
+            # every invocation as its own row; all rows still land before the
+            # final assistant message the caller appends after run() returns.
+            recorder.flush(context.history)
 
         # Max steps exhausted without a text-only response
         if final_answer is None:

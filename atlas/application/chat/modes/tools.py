@@ -156,7 +156,7 @@ class ToolsModeRunner:
 
         # Persist the tool calls before the final answer so reloaded history
         # reads user -> tool_call(s) -> assistant.
-        recorder.flush_to_history(session)
+        recorder.flush(session.history)
 
         # Add final assistant message to history
         assistant_message = Message(
@@ -382,7 +382,7 @@ class ToolsModeRunner:
         )
 
         # Persist tool calls before the closing answer (issue #684).
-        recorder.flush_to_history(session)
+        recorder.flush(session.history)
 
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
@@ -624,7 +624,7 @@ class ToolsModeRunner:
         # Persist tool calls before the final answer so reloaded history reads
         # user -> tool_call(s) -> assistant (issue #684).
         if recorder is not None:
-            recorder.flush_to_history(session)
+            recorder.flush(session.history)
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
             content=content,

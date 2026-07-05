@@ -23,8 +23,7 @@ import logging
 from collections import OrderedDict
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from atlas.domain.messages.models import Message, MessageRole
-from atlas.domain.sessions.models import Session
+from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
 
 logger = logging.getLogger(__name__)
 
@@ -74,15 +73,17 @@ class ToolCallRecorder:
                 self._record(payload)
         except Exception:  # pragma: no cover - belt and suspenders
             # Fail open so UI event delivery never breaks, but leave a trace so a
-            # silent persistence gap is diagnosable.
-            logger.debug("ToolCallRecorder failed to record a tool event", exc_info=True)
+            # silent persistence gap is diagnosable at production log levels.
+            logger.warning("ToolCallRecorder failed to record a tool event", exc_info=True)
         if self._inner is not None:
             await self._inner(payload)
 
     def _record(self, payload: Dict[str, Any]) -> None:
         event_type = payload.get("type")
         tool_call_id = payload.get("tool_call_id")
-        if not tool_call_id or event_type not in ("tool_start", "tool_complete", "tool_error"):
+        if not tool_call_id or event_type not in (
+            "tool_start", "tool_complete", "tool_error", "auth_required",
+        ):
             return
         # The canvas tool renders into the canvas panel, not the transcript; the
         # UI suppresses it as a chat row, so it must not be persisted as one.
@@ -102,6 +103,13 @@ class ToolCallRecorder:
             entry["status"] = "completed" if payload.get("success") else "failed"
         elif event_type == "tool_error":
             entry["result"] = payload.get("error")
+            entry["status"] = "failed"
+        elif event_type == "auth_required":
+            # The executor aborts the call after emitting this (no
+            # tool_complete/tool_error follows), so treat it as terminal:
+            # without this the row would persist as status="calling" and
+            # reload as a forever-in-progress tool.
+            entry["result"] = payload.get("message") or "Authentication required"
             entry["status"] = "failed"
 
     def messages(self) -> List[Message]:
@@ -128,13 +136,13 @@ class ToolCallRecorder:
             ))
         return out
 
-    def flush_to_history(self, session: Session) -> None:
-        """Append recorded tool-call messages to history, then reset.
+    def flush(self, history: ConversationHistory) -> None:
+        """Append recorded tool-call messages to a history, then reset.
 
         Call immediately before adding the turn's final assistant message so
         the persisted order is ``user -> tool_call(s) -> assistant``. Clearing
         afterwards makes repeated flushes within a turn idempotent.
         """
         for message in self.messages():
-            session.history.add_message(message)
+            history.add_message(message)
         self._calls.clear()

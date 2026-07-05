@@ -150,7 +150,11 @@ class AgentModeRunner:
                 logger.warning("Failed to send agent_completion cleanup event: %s", cleanup_exc)
             raise
 
-        # Append final message
+        # Append final message. Ordering contract with AgenticLoop: the loop
+        # has already flushed this turn's tool_call rows into session.history
+        # (per step), so this append must come after run() returns — reloaded
+        # history reads user -> tool_call(s) -> assistant. Guarded by
+        # TestAgentModeRunnerPersistedOrder in test_tool_call_persistence.py.
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
             content=result.final_answer,
