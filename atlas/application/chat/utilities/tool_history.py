@@ -81,7 +81,9 @@ class ToolCallRecorder:
     def _record(self, payload: Dict[str, Any]) -> None:
         event_type = payload.get("type")
         tool_call_id = payload.get("tool_call_id")
-        if not tool_call_id or event_type not in ("tool_start", "tool_complete", "tool_error"):
+        if not tool_call_id or event_type not in (
+            "tool_start", "tool_complete", "tool_error", "auth_required",
+        ):
             return
         # The canvas tool renders into the canvas panel, not the transcript; the
         # UI suppresses it as a chat row, so it must not be persisted as one.
@@ -101,6 +103,13 @@ class ToolCallRecorder:
             entry["status"] = "completed" if payload.get("success") else "failed"
         elif event_type == "tool_error":
             entry["result"] = payload.get("error")
+            entry["status"] = "failed"
+        elif event_type == "auth_required":
+            # The executor aborts the call after emitting this (no
+            # tool_complete/tool_error follows), so treat it as terminal:
+            # without this the row would persist as status="calling" and
+            # reload as a forever-in-progress tool.
+            entry["result"] = payload.get("message") or "Authentication required"
             entry["status"] = "failed"
 
     def messages(self) -> List[Message]:

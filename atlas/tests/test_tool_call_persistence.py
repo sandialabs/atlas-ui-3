@@ -213,6 +213,31 @@ class TestToolCallRecorder:
         # progress with no start yields no renderable tool name
         assert recorder.messages() == []
 
+    def test_auth_required_is_terminal_failed_not_stuck_calling(self):
+        # The executor aborts a call after emitting auth_required (no
+        # tool_complete/tool_error follows); the persisted row must not stay
+        # status="calling" or it reloads as a forever-in-progress tool.
+        recorder = ToolCallRecorder(None)
+
+        async def play():
+            await recorder({
+                "type": "tool_start", "tool_call_id": "tc1",
+                "tool_name": "corp_search", "server_name": "corp",
+                "arguments": {"q": "x"},
+            })
+            await recorder({
+                "type": "auth_required", "tool_call_id": "tc1",
+                "tool_name": "corp_search", "server_name": "corp",
+                "message": "Authentication required: token expired",
+            })
+
+        _run(play())
+
+        messages = recorder.messages()
+        assert len(messages) == 1
+        assert messages[0].metadata["status"] == "failed"
+        assert messages[0].metadata["result"] == "Authentication required: token expired"
+
     def test_flush_appends_then_clears(self):
         recorder = ToolCallRecorder(None)
 
