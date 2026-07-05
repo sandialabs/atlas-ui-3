@@ -447,10 +447,11 @@ class TestAgenticLoopWiring:
         assert tool_rows[0].metadata["tool_name"] == "calc_add"
         assert tool_rows[0].metadata["status"] == "completed"
 
-    def test_run_accumulates_tool_calls_across_steps_and_flushes_once(self):
-        # Two loop steps, each with a tool call: the recorder accumulates
-        # across steps and the single end-of-run flush persists both rows in
-        # invocation order.
+    def test_run_persists_tool_calls_across_steps_even_with_reused_ids(self):
+        # Two loop steps, each with a tool call. The provider reuses the SAME
+        # tool_call_id across steps (LiteLLM/local models can restart ids at
+        # call_0 per response); per-step flushing must keep each invocation as
+        # its own persisted row instead of the second overwriting the first.
         from unittest.mock import AsyncMock, MagicMock, patch
         from uuid import uuid4
 
@@ -473,8 +474,8 @@ class TestAgenticLoopWiring:
 
         llm = MagicMock()
         llm.call_with_tools = AsyncMock(side_effect=[
-            tool_response("tc1", "calc_add"),
-            tool_response("tc2", "calc_mul"),
+            tool_response("call_0", "calc_add"),
+            tool_response("call_0", "calc_mul"),
             LLMResponse(content="The answer is 6"),
         ])
 
@@ -523,6 +524,72 @@ class TestAgenticLoopWiring:
                      if m.metadata.get("message_type") == "tool_call"]
         assert [m.metadata["tool_name"] for m in tool_rows] == ["calc_add", "calc_mul"]
         assert all(m.metadata["status"] == "completed" for m in tool_rows)
+
+    def test_run_persists_failed_tool_call_with_failed_status(self):
+        # A tool that errors mid-run must persist as a failed row, not vanish.
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from uuid import uuid4
+
+        from atlas.application.chat.agent.agentic_loop import AgenticLoop
+        from atlas.application.chat.agent.protocols import AgentContext
+        from atlas.interfaces.llm import LLMResponse
+
+        history = ConversationHistory()
+        history.add_message(Message(role=MessageRole.USER, content="add 1 and 2"))
+        context = AgentContext(
+            session_id=uuid4(), user_email="user@example.com", files={}, history=history,
+        )
+
+        llm = MagicMock()
+        llm.call_with_tools = AsyncMock(side_effect=[
+            LLMResponse(
+                content="",
+                tool_calls=[{"id": "tc1", "type": "function",
+                             "function": {"name": "calc_add", "arguments": "{}"}}],
+            ),
+            LLMResponse(content="The tool failed."),
+        ])
+
+        async def fake_execute_multiple_tools(**kwargs):
+            cb = kwargs["update_callback"]
+            await cb({"type": "tool_start", "tool_call_id": "tc1",
+                      "tool_name": "calc_add", "server_name": "calc",
+                      "arguments": {"a": 1}})
+            await cb({"type": "tool_error", "tool_call_id": "tc1",
+                      "tool_name": "calc_add", "error": "division by zero"})
+            result = MagicMock()
+            result.content = "error"
+            result.tool_call_id = "tc1"
+            return [result]
+
+        loop = AgenticLoop(
+            llm=llm, tool_manager=MagicMock(), prompt_provider=None, connection=None,
+        )
+
+        async def event_handler(evt):
+            pass
+
+        with patch("atlas.application.chat.agent.agentic_loop.error_handler.safe_get_tools_schema",
+                   new=AsyncMock(return_value=[])), \
+             patch("atlas.application.chat.agent.agentic_loop.tool_executor.execute_multiple_tools",
+                   new=fake_execute_multiple_tools):
+            _run(loop.run(
+                model="test-model",
+                messages=[{"role": "user", "content": "add 1 and 2"}],
+                context=context,
+                selected_tools=["calc_add"],
+                data_sources=None,
+                max_steps=5,
+                temperature=0.7,
+                event_handler=event_handler,
+                streaming=False,
+            ))
+
+        tool_rows = [m for m in history.messages
+                     if m.metadata.get("message_type") == "tool_call"]
+        assert len(tool_rows) == 1
+        assert tool_rows[0].metadata["status"] == "failed"
+        assert tool_rows[0].metadata["result"] == "division by zero"
 
 
 class TestAgentModeRunnerPersistedOrder:

@@ -202,6 +202,15 @@ class AgenticLoop(AgentLoopProtocol):
                 type="agent_tool_results", payload={"results": results},
             ))
 
+            # Flush this step's recorded tool calls into history now rather
+            # than once at end of run: providers may reuse tool_call_ids
+            # across steps (e.g. ids restarting at call_0 per response), and
+            # the recorder keys by id, so a later step would overwrite an
+            # earlier row. Per-step flushing scopes ids to one step and keeps
+            # every invocation as its own row; all rows still land before the
+            # final assistant message the caller appends after run() returns.
+            recorder.flush(context.history)
+
         # Max steps exhausted without a text-only response
         if final_answer is None:
             if use_streaming:
@@ -214,11 +223,6 @@ class AgenticLoop(AgentLoopProtocol):
                     model, messages, temperature=temperature,
                     user_email=context.user_email,
                 )
-
-        # Persist the turn's tool calls before the caller appends the final
-        # assistant message so reloaded history reads
-        # user -> tool_call(s) -> assistant (mirrors ToolsModeRunner).
-        recorder.flush(context.history)
 
         await event_handler(AgentEvent(
             type="agent_completion", payload={"steps": steps},
