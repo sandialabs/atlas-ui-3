@@ -73,8 +73,8 @@ class ToolCallRecorder:
                 self._record(payload)
         except Exception:  # pragma: no cover - belt and suspenders
             # Fail open so UI event delivery never breaks, but leave a trace so a
-            # silent persistence gap is diagnosable.
-            logger.debug("ToolCallRecorder failed to record a tool event", exc_info=True)
+            # silent persistence gap is diagnosable at production log levels.
+            logger.warning("ToolCallRecorder failed to record a tool event", exc_info=True)
         if self._inner is not None:
             await self._inner(payload)
 
