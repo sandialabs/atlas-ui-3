@@ -24,7 +24,6 @@ from collections import OrderedDict
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
-from atlas.domain.sessions.models import Session
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +137,3 @@ class ToolCallRecorder:
         for message in self.messages():
             history.add_message(message)
         self._calls.clear()
-
-    def flush_to_history(self, session: Session) -> None:
-        """Convenience wrapper over :meth:`flush` for callers holding a Session."""
-        self.flush(session.history)
