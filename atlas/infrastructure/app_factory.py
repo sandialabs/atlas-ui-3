@@ -28,24 +28,29 @@ class AppFactory:
         # MCP tools manager
         self.mcp_tools = MCPToolManager()
 
-        # Only initialize RAG services when the RAG feature flag is enabled
+        # Only initialize general RAG services when the RAG feature flag is enabled
         if self.config_manager.app_settings.feature_rag_enabled:
-            # RAG MCP service for MCP-based RAG servers (create first for dependency injection)
-            self.rag_mcp_service = RAGMCPService(
-                mcp_manager=self.mcp_tools,
-                config_manager=self.config_manager,
-                auth_check_func=is_user_in_group,
-            )
+            # atlas_rag pseudo-tools/MCP-backed RAG are independently gated.
+            if self.config_manager.app_settings.feature_atlas_rag_tools_enabled:
+                self.rag_mcp_service = RAGMCPService(
+                    mcp_manager=self.mcp_tools,
+                    config_manager=self.config_manager,
+                    auth_check_func=is_user_in_group,
+                )
+            else:
+                self.rag_mcp_service = None
 
-            # Unified RAG service for HTTP and MCP RAG sources (configured via rag-sources.json)
-            # Includes rag_mcp_service for routing MCP queries
+            # Unified RAG service for HTTP and optional MCP RAG sources (configured via rag-sources.json)
             self.unified_rag_service = UnifiedRAGService(
                 config_manager=self.config_manager,
                 mcp_manager=self.mcp_tools,
                 auth_check_func=is_user_in_group,
                 rag_mcp_service=self.rag_mcp_service,
             )
-            logger.info("RAG services initialized (FEATURE_RAG_ENABLED=true)")
+            logger.info(
+                "RAG services initialized (FEATURE_RAG_ENABLED=true, FEATURE_ATLAS_RAG_TOOLS_ENABLED=%s)",
+                self.config_manager.app_settings.feature_atlas_rag_tools_enabled,
+            )
         else:
             self.rag_mcp_service = None
             self.unified_rag_service = None

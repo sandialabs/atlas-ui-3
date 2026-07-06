@@ -108,14 +108,7 @@ async def test_tool_authorization_enforces_group_restrictions():
 
 @pytest.mark.asyncio
 async def test_tool_authorization_allows_atlas_rag_pseudo_tools():
-    """atlas_rag pseudo-tools must survive filtering in ordinary tools mode.
-
-    ``atlas_rag`` is a pseudo-server surfaced via /api/config, not an entry in
-    the MCP server config, so it never appears in ``get_authorized_servers``.
-    Like ``canvas_canvas`` it must be allowed through; per-user authorization is
-    enforced at execution time against the user's discovered source set.
-    """
-    # No MCP servers configured at all -> only pseudo-tools could survive.
+    """atlas_rag pseudo-tools survive filtering only when their feature flags are on."""
     tool_manager = MockToolManager({})
     auth_service = ToolAuthorizationService(tool_manager)
 
@@ -131,19 +124,41 @@ async def test_tool_authorization_allows_atlas_rag_pseudo_tools():
         return False
 
     with patch("atlas.application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
-        filtered_tools = await auth_service.filter_authorized_tools(
-            selected_tools=selected_tools,
-            user_email="user@example.com",
-        )
+        with patch(
+            "atlas.infrastructure.app_factory.app_factory.get_config_manager"
+        ) as mock_get_config:
+            mock_get_config.return_value.app_settings.feature_rag_enabled = True
+            mock_get_config.return_value.app_settings.feature_atlas_rag_tools_enabled = True
+            filtered_tools = await auth_service.filter_authorized_tools(
+                selected_tools=selected_tools,
+                user_email="user@example.com",
+            )
 
     assert "atlas_rag_query" in filtered_tools
     assert "atlas_rag_discover_data_sources" in filtered_tools
     assert "canvas_canvas" in filtered_tools
-    # Exact-name gating: an unknown atlas_rag_* name the executor cannot route
-    # must NOT be admitted just because of the prefix.
     assert "atlas_rag_bogus" not in filtered_tools
-    # A tool from an unconfigured/unauthorized real server is still dropped.
     assert "unknown_server_tool" not in filtered_tools
+
+
+@pytest.mark.asyncio
+async def test_tool_authorization_blocks_atlas_rag_pseudo_tools_when_flag_disabled():
+    tool_manager = MockToolManager({})
+    auth_service = ToolAuthorizationService(tool_manager)
+
+    with patch(
+        "atlas.infrastructure.app_factory.app_factory.get_config_manager"
+    ) as mock_get_config:
+        mock_get_config.return_value.app_settings.feature_rag_enabled = True
+        mock_get_config.return_value.app_settings.feature_atlas_rag_tools_enabled = False
+        filtered_tools = await auth_service.filter_authorized_tools(
+            selected_tools=["atlas_rag_query", "atlas_rag_discover_data_sources", "canvas_canvas"],
+            user_email="user@example.com",
+        )
+
+    assert "canvas_canvas" in filtered_tools
+    assert "atlas_rag_query" not in filtered_tools
+    assert "atlas_rag_discover_data_sources" not in filtered_tools
 
 
 @pytest.mark.asyncio

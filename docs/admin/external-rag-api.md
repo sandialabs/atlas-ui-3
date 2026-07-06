@@ -10,10 +10,11 @@ Atlas UI supports multiple RAG backends through a unified configuration file (`r
 
 ### Feature Flag Semantics
 
-RAG is controlled by the `FEATURE_RAG_ENABLED` feature flag.
+RAG is controlled by the `FEATURE_RAG_ENABLED` feature flag. The `atlas_rag` pseudo-server/tool exposure is separately controlled by `FEATURE_ATLAS_RAG_TOOLS_ENABLED`.
 
 - When `FEATURE_RAG_ENABLED=false`, the backend skips RAG service initialization and does not load `rag-sources.json`. The `/api/config` response will show `features.rag=false` and will return empty `rag_servers` and `data_sources`.
-- When `FEATURE_RAG_ENABLED=true`, the backend loads `rag-sources.json`, initializes RAG services, and exposes discovered sources to the UI via `/api/config`.
+- When `FEATURE_RAG_ENABLED=true`, the backend loads `rag-sources.json`, initializes HTTP/general RAG services, and exposes discovered sources to the UI via `/api/config`.
+- When both `FEATURE_RAG_ENABLED=true` and `FEATURE_ATLAS_RAG_TOOLS_ENABLED=true`, the backend also exposes the `atlas_rag` pseudo-server/tools and MCP-backed RAG discovery paths. The dedicated flag defaults to `false` so production can enable general RAG without automatically surfacing atlas_rag tools.
 
 ### Best-Effort Discovery and Retrieval
 
@@ -32,6 +33,7 @@ RAG discovery is best-effort. If one configured RAG source is offline or misconf
 
 ```bash
 FEATURE_RAG_ENABLED=true
+FEATURE_ATLAS_RAG_TOOLS_ENABLED=true
 ```
 
 2. Configure your RAG sources in `config/rag-sources.json`:
@@ -308,6 +310,7 @@ Users must explicitly select data sources from the sidebar to enable RAG; there 
 ### RAG panel not showing in UI
 
 - Verify `FEATURE_RAG_ENABLED=true` in `.env`
+- If you expect atlas_rag pseudo-tools or MCP-backed atlas_rag exposure, also verify `FEATURE_ATLAS_RAG_TOOLS_ENABLED=true`
 - Check that `rag-sources.json` has enabled sources
 - Restart the backend after changing configuration
 

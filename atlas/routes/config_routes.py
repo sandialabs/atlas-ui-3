@@ -202,7 +202,8 @@ async def get_config(
     # Only attempt RAG discovery if RAG feature is enabled
     if app_settings.feature_rag_enabled:
         # Discover HTTP and MCP RAG sources independently (best-effort)
-        # so a failure in one type does not prevent discovery of the other
+        # so a failure in one type does not prevent discovery of the other.
+        # atlas_rag pseudo-server exposure is separately gated.
         try:
             unified_rag = app_factory.get_unified_rag_service()
             if unified_rag:
@@ -213,15 +214,16 @@ async def get_config(
         except Exception as e:
             logger.warning("Error discovering HTTP RAG sources: %s", e)
 
-        try:
-            rag_mcp = app_factory.get_rag_mcp_service()
-            if rag_mcp:
-                mcp_rag_servers = await rag_mcp.discover_servers(
-                    current_user, user_compliance_level=compliance_level
-                )
-                rag_servers.extend(mcp_rag_servers)
-        except Exception as e:
-            logger.warning("Error discovering MCP RAG sources: %s", e)
+        if app_settings.feature_atlas_rag_tools_enabled:
+            try:
+                rag_mcp = app_factory.get_rag_mcp_service()
+                if rag_mcp:
+                    mcp_rag_servers = await rag_mcp.discover_servers(
+                        current_user, user_compliance_level=compliance_level
+                    )
+                    rag_servers.extend(mcp_rag_servers)
+            except Exception as e:
+                logger.warning("Error discovering MCP RAG sources: %s", e)
 
         # Build flat list of data sources for backward compatibility
         # Format: "server:source_id" for qualified references
@@ -246,7 +248,10 @@ async def get_config(
 
         # Add canvas pseudo-tool to authorized servers (available to all users)
         authorized_servers.append("canvas")
-        if app_settings.feature_rag_enabled:
+        if (
+            app_settings.feature_rag_enabled
+            and app_settings.feature_atlas_rag_tools_enabled
+        ):
             authorized_servers.append("atlas_rag")
 
         # Only build tool information for servers the user is authorized to access

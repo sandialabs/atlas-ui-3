@@ -65,17 +65,18 @@ class ToolAuthorizationService:
             # Filter tools by server prefix
             filtered_tools: List[str] = []
             for tool in selected_tools:
-                # Special case: canvas_canvas and the atlas_rag pseudo-tools are
-                # always allowed. These are pseudo-servers surfaced via
-                # /api/config (not entries in the MCP server config), so they
-                # never appear in `authorized_servers` below and would otherwise
-                # be stripped in ordinary tools mode. Gated by EXACT name so
-                # unknown atlas_rag_* names are still dropped. Access to the
-                # underlying RAG sources is still authorized per-user at
-                # execution time (group checks in discovery + the query gate),
-                # and the tools no-op when the RAG feature is disabled.
-                if tool in _ALWAYS_ALLOWED_PSEUDO_TOOLS:
+                # Special case: canvas_canvas is always allowed. atlas_rag
+                # pseudo-tools are only allowed when both general RAG and the
+                # dedicated atlas_rag pseudo-tool flag are enabled.
+                if tool == "canvas_canvas":
                     filtered_tools.append(tool)
+                    continue
+                if tool in {_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL}:
+                    from atlas.infrastructure.app_factory import app_factory
+
+                    settings = app_factory.get_config_manager().app_settings
+                    if settings.feature_rag_enabled and settings.feature_atlas_rag_tools_enabled:
+                        filtered_tools.append(tool)
                     continue
 
                 # Check if tool belongs to an authorized server
