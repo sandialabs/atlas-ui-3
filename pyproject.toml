@@ -34,7 +34,7 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.48b0,<1.0.0",
     "opentelemetry-instrumentation-logging>=0.48b0,<1.0.0",
     "opentelemetry-sdk>=1.43.0,<2.0.0",
-    "Pillow>=10.4.0,<13.0.0",
+    "Pillow>=12.3.0,<13.0.0",
     "psycopg2-binary>=2.9.12,<3.0.0",
     "pydantic>=2.0.0,<3.0.0",
     "PyJWT>=2.13.0,<3.0.0",
@@ -54,7 +54,7 @@ dependencies = [
 # tool without pulling the full mcp-demos set. Keep in sync with the
 # [dependency-groups] pptx entry below.
 pptx = [
-    "Pillow>=10.4.0,<13.0.0",
+    "Pillow>=12.3.0,<13.0.0",
     "python-pptx>=0.6.21,<2.0.0",
 ]
 # Keep in sync with [dependency-groups] mcp-demos below
@@ -65,7 +65,7 @@ mcp-demos = [
     "numpy>=2.4.6,<3.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "pandas>=2.0.0,<4.0.0",
-    "Pillow>=10.4.0,<13.0.0",
+    "Pillow>=12.3.0,<13.0.0",
     "pypdf>=5.0.0,<7.0.0",
     "python-pptx>=0.6.21,<2.0.0",
     "reportlab>=5.0.0,<6.0.0",
@@ -98,7 +98,7 @@ Issues = "https://github.com/sandialabs/atlas/issues"
 [dependency-groups]
 # Keep in sync with [project.optional-dependencies] pptx above
 pptx = [
-    "Pillow>=10.4.0,<13.0.0",
+    "Pillow>=12.3.0,<13.0.0",
     "python-pptx>=0.6.21,<2.0.0",
 ]
 # Keep in sync with [project.optional-dependencies] mcp-demos above
@@ -109,7 +109,7 @@ mcp-demos = [
     "numpy>=2.4.6,<3.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "pandas>=2.0.0,<4.0.0",
-    "Pillow>=10.4.0,<13.0.0",
+    "Pillow>=12.3.0,<13.0.0",
     "pypdf>=5.0.0,<7.0.0",
     "python-pptx>=0.6.21,<2.0.0",
     "reportlab>=5.0.0,<6.0.0",
