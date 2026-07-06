@@ -4,11 +4,22 @@ This test verifies that MCP server group restrictions are properly enforced
 during tool authorization in chat execution.
 """
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from atlas.application.chat.policies.tool_authorization import ToolAuthorizationService
+
+
+def _config_manager(feature_rag_enabled=True, feature_atlas_rag_tools_enabled=True):
+    """Build a minimal config manager stub exposing the RAG feature flags."""
+    return SimpleNamespace(
+        app_settings=SimpleNamespace(
+            feature_rag_enabled=feature_rag_enabled,
+            feature_atlas_rag_tools_enabled=feature_atlas_rag_tools_enabled,
+        )
+    )
 
 
 class MockToolManager:
@@ -110,7 +121,7 @@ async def test_tool_authorization_enforces_group_restrictions():
 async def test_tool_authorization_allows_atlas_rag_pseudo_tools():
     """atlas_rag pseudo-tools survive filtering only when their feature flags are on."""
     tool_manager = MockToolManager({})
-    auth_service = ToolAuthorizationService(tool_manager)
+    auth_service = ToolAuthorizationService(tool_manager, config_manager=_config_manager())
 
     selected_tools = [
         "atlas_rag_query",
@@ -124,15 +135,10 @@ async def test_tool_authorization_allows_atlas_rag_pseudo_tools():
         return False
 
     with patch("atlas.application.chat.policies.tool_authorization.is_user_in_group", mock_auth_check):
-        with patch(
-            "atlas.infrastructure.app_factory.app_factory.get_config_manager"
-        ) as mock_get_config:
-            mock_get_config.return_value.app_settings.feature_rag_enabled = True
-            mock_get_config.return_value.app_settings.feature_atlas_rag_tools_enabled = True
-            filtered_tools = await auth_service.filter_authorized_tools(
-                selected_tools=selected_tools,
-                user_email="user@example.com",
-            )
+        filtered_tools = await auth_service.filter_authorized_tools(
+            selected_tools=selected_tools,
+            user_email="user@example.com",
+        )
 
     assert "atlas_rag_query" in filtered_tools
     assert "atlas_rag_discover_data_sources" in filtered_tools
@@ -144,17 +150,15 @@ async def test_tool_authorization_allows_atlas_rag_pseudo_tools():
 @pytest.mark.asyncio
 async def test_tool_authorization_blocks_atlas_rag_pseudo_tools_when_flag_disabled():
     tool_manager = MockToolManager({})
-    auth_service = ToolAuthorizationService(tool_manager)
+    auth_service = ToolAuthorizationService(
+        tool_manager,
+        config_manager=_config_manager(feature_atlas_rag_tools_enabled=False),
+    )
 
-    with patch(
-        "atlas.infrastructure.app_factory.app_factory.get_config_manager"
-    ) as mock_get_config:
-        mock_get_config.return_value.app_settings.feature_rag_enabled = True
-        mock_get_config.return_value.app_settings.feature_atlas_rag_tools_enabled = False
-        filtered_tools = await auth_service.filter_authorized_tools(
-            selected_tools=["atlas_rag_query", "atlas_rag_discover_data_sources", "canvas_canvas"],
-            user_email="user@example.com",
-        )
+    filtered_tools = await auth_service.filter_authorized_tools(
+        selected_tools=["atlas_rag_query", "atlas_rag_discover_data_sources", "canvas_canvas"],
+        user_email="user@example.com",
+    )
 
     assert "canvas_canvas" in filtered_tools
     assert "atlas_rag_query" not in filtered_tools

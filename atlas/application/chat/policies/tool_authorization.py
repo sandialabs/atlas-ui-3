@@ -11,14 +11,6 @@ from atlas.modules.mcp_tools.mcp_discovery import (
 
 logger = logging.getLogger(__name__)
 
-# Pseudo-tools that are surfaced via /api/config rather than the MCP server
-# config, so they never appear in ``authorized_servers``. They are allowed by
-# EXACT name (not an ``atlas_rag_`` prefix) so unknown/unroutable names in that
-# namespace are still dropped, matching the executor's exact-match dispatch.
-_ALWAYS_ALLOWED_PSEUDO_TOOLS = frozenset(
-    {"canvas_canvas", _ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL}
-)
-
 
 class ToolAuthorizationService:
     """
@@ -29,14 +21,19 @@ class ToolAuthorizationService:
     - Special cases (e.g., canvas_canvas tool is always allowed)
     """
 
-    def __init__(self, tool_manager: Optional[Any] = None):
+    def __init__(self, tool_manager: Optional[Any] = None, config_manager: Optional[Any] = None):
         """
         Initialize the tool authorization service.
 
         Args:
             tool_manager: Optional tool manager with server configuration
+            config_manager: Optional config manager used to gate feature-flagged
+                pseudo-tools (e.g. atlas_rag). Injected rather than imported to
+                avoid an import cycle with app_factory; when absent, flagged
+                pseudo-tools fail closed.
         """
         self.tool_manager = tool_manager
+        self.config_manager = config_manager
 
     async def filter_authorized_tools(
         self,
@@ -72,10 +69,12 @@ class ToolAuthorizationService:
                     filtered_tools.append(tool)
                     continue
                 if tool in {_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL}:
-                    from atlas.infrastructure.app_factory import app_factory
-
-                    settings = app_factory.get_config_manager().app_settings
-                    if settings.feature_rag_enabled and settings.feature_atlas_rag_tools_enabled:
+                    settings = getattr(self.config_manager, "app_settings", None)
+                    if (
+                        settings is not None
+                        and settings.feature_rag_enabled
+                        and settings.feature_atlas_rag_tools_enabled
+                    ):
                         filtered_tools.append(tool)
                     continue
 

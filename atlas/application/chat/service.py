@@ -138,7 +138,9 @@ class ChatService:
         self._save_floor_locked: set = set()
 
         # Initialize refactored services
-        self.tool_authorization = ToolAuthorizationService(tool_manager=self.tool_manager)
+        self.tool_authorization = ToolAuthorizationService(
+            tool_manager=self.tool_manager, config_manager=self.config_manager
+        )
         self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
         self.message_builder = MessageBuilder()
 

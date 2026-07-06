@@ -38,11 +38,19 @@ def test_app_factory_accessors():
     assert app_factory.get_file_storage() is not None
     assert app_factory.get_file_manager() is not None
 
-    # RAG services are None when FEATURE_RAG_ENABLED is false (default)
-    rag_enabled = app_factory.get_config_manager().app_settings.feature_rag_enabled
+    # RAG services are None when FEATURE_RAG_ENABLED is false (default).
+    # The unified (HTTP) RAG service follows FEATURE_RAG_ENABLED, while the
+    # MCP-backed rag_mcp_service is additionally gated on the independent
+    # FEATURE_ATLAS_RAG_TOOLS_ENABLED flag (default false).
+    settings = app_factory.get_config_manager().app_settings
+    rag_enabled = settings.feature_rag_enabled
+    atlas_rag_tools_enabled = settings.feature_atlas_rag_tools_enabled
     if rag_enabled:
         assert app_factory.get_unified_rag_service() is not None
-        assert app_factory.get_rag_mcp_service() is not None
+        if atlas_rag_tools_enabled:
+            assert app_factory.get_rag_mcp_service() is not None
+        else:
+            assert app_factory.get_rag_mcp_service() is None
     else:
         assert app_factory.get_unified_rag_service() is None
         assert app_factory.get_rag_mcp_service() is None

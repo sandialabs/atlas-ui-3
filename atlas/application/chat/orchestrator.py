@@ -89,7 +89,9 @@ class ChatOrchestrator:
         self.config_manager = config_manager
 
         # Initialize services
-        self.tool_authorization = ToolAuthorizationService(tool_manager=tool_manager)
+        self.tool_authorization = ToolAuthorizationService(
+            tool_manager=tool_manager, config_manager=config_manager
+        )
         self.prompt_override = PromptOverrideService(tool_manager=tool_manager)
         self.message_builder = MessageBuilder(prompt_provider=prompt_provider)
 
