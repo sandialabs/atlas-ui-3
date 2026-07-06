@@ -273,3 +273,30 @@ class TestChatResult:
 
         result = ChatResult(message="ok")
         json.dumps(result.to_dict())  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# Fine-tune capture wiring (issue #622): CLI turns imply consent
+# ---------------------------------------------------------------------------
+
+class TestCaptureConsentWiring:
+    async def test_cli_chat_passes_implied_consent(self):
+        """AtlasClient.chat must forward capture_consent_implied=True so a CLI
+        turn is captured on the system flag alone (the CLI has no consent UI)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from atlas_client import AtlasClient
+
+        client = AtlasClient()
+        client._initialized = True  # skip real AppFactory/MCP init
+        chat_service = MagicMock()
+        chat_service.handle_chat_message = AsyncMock(return_value={})
+        factory = MagicMock()
+        factory.create_chat_service.return_value = chat_service
+        client._factory = factory
+
+        await client.chat(prompt="hi", model="m", user_email="u@x")
+
+        chat_service.handle_chat_message.assert_awaited_once()
+        _, kwargs = chat_service.handle_chat_message.call_args
+        assert kwargs.get("capture_consent_implied") is True

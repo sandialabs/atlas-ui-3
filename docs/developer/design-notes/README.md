@@ -27,3 +27,4 @@ docs that describe how the system works today, see the
 - [Animated Logo](animated-logo-2026-02-27.md) - Animated logo feature flag and effects
 - [Theme Default and Warning Contrast](theme-default-and-warning-contrast-2026-06-14.md) - Dark default + light-mode warning contrast (PR #654)
 - [Compact Tool / System / Approval Messages](compact-tool-system-messages-2026-06-23.md) - Approval prompts as compact rows with persisted collapse
+- [Opt-in Fine-tune Capture](finetune-capture-2026-06-25.md) - Consent-gated chat capture and rollback preference pairs (issue #622)

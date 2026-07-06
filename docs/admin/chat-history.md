@@ -161,8 +161,15 @@ column (tool name, server, arguments, result, status) and is **excluded from the
 LLM context** on a subsequent turn — these rows exist purely to re-render the
 transcript and are never replayed to the model. They are also included in the
 `.txt` and `.json` chat exports. The canvas tool is intentionally not recorded
-as a transcript row (it renders into the canvas panel). In-chat agent-loop tool
-steps are out of scope for this persistence path.
+as a transcript row (it renders into the canvas panel). This applies to both
+regular (tools-mode) chat and agent-mode runs: the agentic loop records the
+same `tool_start`/`tool_complete`/`tool_error` events its tool calls stream to
+the UI and flushes them into history after each agent step (always before the
+final assistant message). Per-step flushing also means an agent turn that
+errors mid-run keeps the tool calls from the steps that already completed; a
+turn that fails inside its very first tool step persists no tool rows for that
+step (matching tools mode, where a turn that errors before its flush persists
+none).
 
 To keep saved conversations from growing without bound, large string values in
 the persisted arguments/result (for example a base64 file upload sent as a tool

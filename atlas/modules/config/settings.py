@@ -505,6 +505,22 @@ class AppSettings(BaseSettings):
     # Runtime directories
     runtime_feedback_dir: Optional[str] = Field(default=None, validation_alias="RUNTIME_FEEDBACK_DIR")
 
+    # Opt-in fine-tune capture (off by default; also gated per-user by consent).
+    # When enabled, full LLM I/O for opted-in users is recorded for fine-tuning.
+    feature_finetune_capture_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("FEATURE_FINETUNE_CAPTURE_ENABLED"),
+        description="System gate for opt-in fine-tune data capture.",
+    )
+    runtime_capture_dir: Optional[str] = Field(
+        default=None, validation_alias="RUNTIME_CAPTURE_DIR"
+    )
+    capture_user_salt: Optional[str] = Field(
+        default=None,
+        validation_alias="CAPTURE_USER_SALT",
+        description="Salt for pseudonymizing user identifiers in capture records.",
+    )
+
     @model_validator(mode='after')
     def assemble_chat_history_db_url(self):
         """Build chat_history_db_url from DB_* parts when no full URL is supplied.

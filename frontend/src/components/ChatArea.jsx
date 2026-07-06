@@ -8,6 +8,9 @@ import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
 import { withUserOrdinals } from '../utils/userMessageOrdinal'
+import { buildCorrectionContext, flattenAvailableTools } from '../utils/captureCorrection'
+import { useCaptureConsent } from '../hooks/useCaptureConsent'
+import CorrectTurnModal from './CorrectTurnModal'
 
 const ChatArea = ({ onOpenRagPanel }) => {
   const [inputValue, setInputValue] = useState('')
@@ -38,6 +41,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     isSynthesizing,
     sendChatMessage,
     rewindAndResubmit,
+    sendCaptureCorrection,
     currentModel,
     models,
     tools,
@@ -67,6 +71,38 @@ const ChatArea = ({ onOpenRagPanel }) => {
   // Pair each message with its rewind ordinal once per messages change, rather
   // than re-running the two-pass scan on every render (incl. each streamed token).
   const messagesWithOrdinals = useMemo(() => withUserOrdinals(messages), [messages])
+
+  // Fine-tune capture "correct this turn" (issue #622). Only fetch consent and
+  // wire the affordance when the feature flag is on; the per-message control is
+  // shown only when the user has opted in (user_enabled) AND the flag is set.
+  const captureFeatureEnabled = !!features?.finetune_capture
+  const { fetchConsent: fetchCaptureConsent, userEnabled: captureUserEnabled } = useCaptureConsent()
+  useEffect(() => {
+    if (captureFeatureEnabled) fetchCaptureConsent()
+  }, [captureFeatureEnabled, fetchCaptureConsent])
+
+  const correctionsEnabled = captureFeatureEnabled && captureUserEnabled
+  const correctionToolOptions = useMemo(() => flattenAvailableTools(tools), [tools])
+  // Pending correction context built from the assistant turn being corrected.
+  const [pendingCorrection, setPendingCorrection] = useState(null)
+
+  // Open the correction modal for the assistant message at `messageIndex`.
+  const handleOpenCorrection = useCallback((messageIndex) => {
+    const ctx = buildCorrectionContext(messages, messageIndex)
+    if (!ctx) return
+    setPendingCorrection(ctx)
+  }, [messages])
+
+  const handleSubmitCorrection = useCallback((chosenTool, note) => {
+    if (!pendingCorrection) return
+    sendCaptureCorrection(
+      pendingCorrection.userIndex,
+      pendingCorrection.content,
+      chosenTool,
+      { note, rejected: pendingCorrection.rejected }
+    )
+    setPendingCorrection(null)
+  }, [pendingCorrection, sendCaptureCorrection])
 
   // Whether the currently selected model supports vision (image) input
   const currentModelSupportsVision = models?.some(
@@ -791,6 +827,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
             message={message}
             userIndex={userIndex}
             onRewind={userIndex !== null ? rewindAndResubmit : null}
+            onCorrect={correctionsEnabled ? () => handleOpenCorrection(index) : null}
           />
         ))}
         {agentModeEnabled && agentPendingQuestion && (
@@ -1202,6 +1239,14 @@ const ChatArea = ({ onOpenRagPanel }) => {
           </div>
         </div>
       </footer>
+
+      {/* Fine-tune capture "correct this turn" modal (issue #622) */}
+      <CorrectTurnModal
+        isOpen={!!pendingCorrection}
+        toolOptions={correctionToolOptions}
+        onClose={() => setPendingCorrection(null)}
+        onSubmit={handleSubmitCorrection}
+      />
     </div>
   )
 }

@@ -20,11 +20,11 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "boto3>=1.34.0,<2.0.0",
+    "boto3>=1.43.40,<2.0.0",
     "cryptography>=44.0.0,<50.0.0",
     "duckdb-engine>=0.17.0,<1.0.0",
     "fastapi>=0.115.0,<1.0.0",
-    "fastmcp[tasks]>=3.2.0,<4.0.0",
+    "fastmcp[tasks]>=3.4.3,<4.0.0",
     "httpx>=0.28.1,<1.0.0",
     "itsdangerous>=2.0.0,<3.0.0",
     "litellm>=1.90.0,<2.0.0",
@@ -34,13 +34,13 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.48b0,<1.0.0",
     "opentelemetry-instrumentation-logging>=0.48b0,<1.0.0",
     "opentelemetry-sdk>=1.43.0,<2.0.0",
-    "Pillow>=10.4.0,<13.0.0",
-    "psycopg2-binary>=2.9.0,<3.0.0",
+    "Pillow>=12.3.0,<13.0.0",
+    "psycopg2-binary>=2.9.12,<3.0.0",
     "pydantic>=2.0.0,<3.0.0",
     "PyJWT>=2.13.0,<3.0.0",
-    "pytz>=2024.1,<2027.0",
+    "pytz>=2026.2,<2027.0",
     "python-dotenv>=1.2.2,<2.0.0",
-    "python-multipart>=0.0.6,<1.0.0",
+    "python-multipart>=0.0.32,<1.0.0",
     "pyyaml>=6.0.0,<7.0.0",
     "requests>=2.31.0,<3.0.0",
     "sqlalchemy>=2.0.51,<3.0.0",
@@ -54,24 +54,24 @@ dependencies = [
 # tool without pulling the full mcp-demos set. Keep in sync with the
 # [dependency-groups] pptx entry below.
 pptx = [
-    "Pillow>=10.4.0,<13.0.0",
+    "Pillow>=12.3.0,<13.0.0",
     "python-pptx>=0.6.21,<2.0.0",
 ]
 # Keep in sync with [dependency-groups] mcp-demos below
 mcp-demos = [
     "beautifulsoup4>=4.12.0,<5.0.0",
     "duckduckgo-search>=7.0.0,<9.0.0",
-    "matplotlib>=3.8.0,<4.0.0",
+    "matplotlib>=3.11.0,<4.0.0",
     "numpy>=2.4.6,<3.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "pandas>=2.0.0,<4.0.0",
-    "Pillow>=10.4.0,<13.0.0",
+    "Pillow>=12.3.0,<13.0.0",
     "pypdf>=5.0.0,<7.0.0",
     "python-pptx>=0.6.21,<2.0.0",
-    "reportlab>=4.0.0,<6.0.0",
+    "reportlab>=5.0.0,<6.0.0",
     "scikit-learn>=1.3.0,<2.0.0",
-    "scipy>=1.11.0,<2.0.0",
-    "seaborn>=0.13.0,<1.0.0",
+    "scipy>=1.17.1,<2.0.0",
+    "seaborn>=0.13.2,<1.0.0",
 ]
 dev = [
     "alembic>=1.18.5,<2.0.0",
@@ -87,6 +87,7 @@ atlas-chat = "atlas.atlas_chat_cli:main"
 atlas-server = "atlas.server_cli:main"
 atlas-init = "atlas.init_cli:main"
 atlas-portal = "atlas.portal_cli:main"
+atlas-finetune-export = "atlas.finetune_export_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/sandialabs/atlas"
@@ -97,24 +98,24 @@ Issues = "https://github.com/sandialabs/atlas/issues"
 [dependency-groups]
 # Keep in sync with [project.optional-dependencies] pptx above
 pptx = [
-    "Pillow>=10.4.0,<13.0.0",
+    "Pillow>=12.3.0,<13.0.0",
     "python-pptx>=0.6.21,<2.0.0",
 ]
 # Keep in sync with [project.optional-dependencies] mcp-demos above
 mcp-demos = [
     "beautifulsoup4>=4.12.0,<5.0.0",
     "duckduckgo-search>=7.0.0,<9.0.0",
-    "matplotlib>=3.8.0,<4.0.0",
+    "matplotlib>=3.11.0,<4.0.0",
     "numpy>=2.4.6,<3.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "pandas>=2.0.0,<4.0.0",
-    "Pillow>=10.4.0,<13.0.0",
+    "Pillow>=12.3.0,<13.0.0",
     "pypdf>=5.0.0,<7.0.0",
     "python-pptx>=0.6.21,<2.0.0",
-    "reportlab>=4.0.0,<6.0.0",
+    "reportlab>=5.0.0,<6.0.0",
     "scikit-learn>=1.3.0,<2.0.0",
-    "scipy>=1.11.0,<2.0.0",
-    "seaborn>=0.13.0,<1.0.0",
+    "scipy>=1.17.1,<2.0.0",
+    "seaborn>=0.13.2,<1.0.0",
 ]
 dev = [
     {include-group = "mcp-demos"},

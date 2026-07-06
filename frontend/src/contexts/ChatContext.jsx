@@ -338,7 +338,7 @@ export const ChatProvider = ({ children }) => {
 		)
 	}, [config.ragServers])
 
-	const sendChatMessage = useCallback((content, extraFiles = {}, { rewindToUserIndex = null } = {}) => {
+	const sendChatMessage = useCallback((content, extraFiles = {}, { rewindToUserIndex = null, selectedToolsOverride = null, captureCorrection = null } = {}) => {
 		if (!content.trim() || !currentModel) return false
 		// Don't allow sending while the WebSocket is disconnected -- the message
 		// would never reach the backend and the UI would hang on "Thinking...".
@@ -351,7 +351,11 @@ export const ChatProvider = ({ children }) => {
 		// choice -- otherwise the agent loop has nothing to call and the model can
 		// emit tool calls the provider rejects. The backend enforces the same
 		// guard for non-UI clients.
-		if (agent.agentModeAvailable && agent.agentModeEnabled && selectedTools.size === 0) {
+		// A fine-tune correction (issue #622) narrows the turn to exactly one tool
+		// via selectedToolsOverride, so honor that list for the agent-mode guard and
+		// the outgoing payload instead of the persisted selection.
+		const toolsToSend = selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools]
+		if (agent.agentModeAvailable && agent.agentModeEnabled && toolsToSend.length === 0) {
 			toast.error('Agent mode needs at least one tool selected. Choose a tool or turn off Agent mode.')
 			return false
 		}
@@ -386,7 +390,7 @@ export const ChatProvider = ({ children }) => {
 			type: 'chat',
 			content,
 			model: currentModel,
-			selected_tools: [...selectedTools],
+			selected_tools: toolsToSend,
 			selected_prompts: activeKeyIsUserPrompt ? [] : activePrompts,
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			selected_data_sources: dataSourcesToSend,
@@ -403,6 +407,9 @@ export const ChatProvider = ({ children }) => {
 			// Rewind/edit-and-resubmit (issue #142): when set, the backend drops
 			// this user prompt and everything after it before running the turn.
 			rewind_to_user_index: rewindToUserIndex ?? undefined,
+			// Fine-tune capture correction (issue #622): when present, the backend
+			// records a (rejected, chosen) training pair for the re-run turn.
+			capture_correction: captureCorrection ?? undefined,
 		})
 		// Guard against a stale isConnected: if the socket dropped between the
 		// check above and the send, bail out without mutating the UI so we don't
@@ -461,6 +468,30 @@ export const ChatProvider = ({ children }) => {
 		// after the send is confirmed on the wire, so a failed/disconnected send
 		// never drops the visible tail of the conversation.
 		return sendChatMessage(content, {}, { rewindToUserIndex: userIndex })
+	}, [sendChatMessage, isThinking, isSynthesizing, isStreaming, toast])
+
+	// Fine-tune capture correction (issue #622). Re-runs a previous turn forcing the
+	// chosen tool so the backend records a (rejected, chosen) training pair. Built on
+	// the same rewind/edit-and-resubmit path: it resubmits the original user prompt
+	// (`content`) at its 0-based ordinal (`userIndex`), narrows the turn to exactly
+	// one tool, and attaches the rejected assistant text/tool calls.
+	const sendCaptureCorrection = useCallback((userIndex, content, chosenTool, { note = '', rejected = null } = {}) => {
+		const text = (content ?? '').trim()
+		if (text === '' || userIndex == null || !chosenTool) return false
+		if (isThinking || isSynthesizing || isStreaming) {
+			toast.error('Wait for the current response to finish before correcting.')
+			return false
+		}
+		const captureCorrection = {
+			rejected_turn_id: null,
+			note: note || '',
+			rejected: rejected || { assistant_message: '', tool_calls: [] },
+		}
+		return sendChatMessage(text, {}, {
+			rewindToUserIndex: userIndex,
+			selectedToolsOverride: [chosenTool],
+			captureCorrection,
+		})
 	}, [sendChatMessage, isThinking, isSynthesizing, isStreaming, toast])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
@@ -844,6 +875,7 @@ export const ChatProvider = ({ children }) => {
 		isSynthesizing,
 		sendChatMessage,
 		rewindAndResubmit,
+		sendCaptureCorrection,
 		clearChat,
 		stopAgent,
 		stopStreaming,

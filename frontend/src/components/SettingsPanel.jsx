@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useGlobusAuth } from '../hooks/useGlobusAuth'
 import PromptManager from './PromptManager'
+import CaptureConsentSection from './CaptureConsentSection'
 
 const TABS = [
   { id: 'prompts', label: 'Prompts', icon: Sparkles },
@@ -422,6 +423,12 @@ const SettingsPanel = ({ isOpen, onClose }) => {
                 )}
               </div>
             </div>
+          )}
+
+          {/* Help improve Atlas (fine-tune capture, issue #622) — only when the
+              finetune_capture feature flag is enabled. */}
+          {features?.finetune_capture && (
+            <CaptureConsentSection isOpen={isOpen} />
           )}
 
         </div>

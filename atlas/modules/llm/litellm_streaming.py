@@ -12,6 +12,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 from litellm import acompletion
 
+from atlas.application.chat.capture.capture_context import record_llm_call
 from atlas.core.metrics_logger import log_metric
 from atlas.core.telemetry import set_attrs, start_span
 
@@ -244,6 +245,11 @@ class LiteLLMStreamingMixin:
                     "tool_calls_count": len(tool_calls_list) if tool_calls_list else 0,
                     "retry_count": 0,
                 })
+
+                # Opt-in fine-tune capture: record full I/O for this call when a
+                # consenting user's turn has an active capture context. No-op and
+                # cheap when capture is off (the common case).
+                record_llm_call(messages, tools_schema, accumulated_content, tool_calls_list)
 
                 yield LLMResponse(
                     content=accumulated_content,

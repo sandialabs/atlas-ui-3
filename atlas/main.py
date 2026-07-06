@@ -66,6 +66,7 @@ from atlas.routes.admin_routes import admin_router
 from atlas.routes.agent_portal_availability import load_agent_portal_router
 
 # Import essential routes
+from atlas.routes.capture_routes import capture_router
 from atlas.routes.config_routes import router as config_router
 from atlas.routes.conversation_routes import router as conversation_router
 from atlas.routes.feedback_routes import feedback_router
@@ -284,6 +285,7 @@ app.include_router(files_router)
 app.include_router(mcp_files_router)
 app.include_router(health_router)
 app.include_router(feedback_router)
+app.include_router(capture_router)
 app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
@@ -553,6 +555,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
                             conversation_id=data.get("conversation_id"),
                             rewind_to_user_index=data.get("rewind_to_user_index"),
+                            capture_correction=data.get("capture_correction"),
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")

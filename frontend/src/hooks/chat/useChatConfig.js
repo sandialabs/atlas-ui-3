@@ -9,7 +9,8 @@ const DEFAULT_FEATURES = {
   chat_history: false,
   custom_prompts: false,
   compliance_levels: false,
-  file_content_extraction: false
+  file_content_extraction: false,
+  finetune_capture: false
 }
 
 const DEFAULT_FILE_EXTRACTION = {
