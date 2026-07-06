@@ -92,6 +92,7 @@ services:
       # Feature Flags
       - FEATURE_WORKSPACES_ENABLED=false
       - FEATURE_RAG_ENABLED=false
+      - FEATURE_ATLAS_RAG_TOOLS_ENABLED=false
       - FEATURE_TOOLS_ENABLED=true
       - FEATURE_MARKETPLACE_ENABLED=true
       - FEATURE_FILES_PANEL_ENABLED=true

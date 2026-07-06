@@ -525,6 +525,18 @@ class TestAppSettingsRAGFeature:
         """feature_rag_enabled should be a stored field, not a derived property."""
         assert "feature_rag_enabled" in AppSettings.model_fields
 
+    def test_feature_atlas_rag_tools_enabled_default_false(self, monkeypatch):
+        """atlas_rag pseudo-tools should default to disabled."""
+        monkeypatch.delenv("FEATURE_ATLAS_RAG_TOOLS_ENABLED", raising=False)
+        settings = AppSettings(_env_file=None)
+        assert settings.feature_atlas_rag_tools_enabled is False
+
+    def test_feature_atlas_rag_tools_enabled_from_environment(self, monkeypatch):
+        """FEATURE_ATLAS_RAG_TOOLS_ENABLED should enable atlas_rag pseudo-tools."""
+        monkeypatch.setenv("FEATURE_ATLAS_RAG_TOOLS_ENABLED", "true")
+        settings = AppSettings()
+        assert settings.feature_atlas_rag_tools_enabled is True
+
 
 class TestRAGSourceConfig:
     """Test RAGSourceConfig model validation."""

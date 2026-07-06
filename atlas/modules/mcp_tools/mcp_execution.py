@@ -18,6 +18,10 @@ from atlas.modules.mcp_tools.mcp_errors import (
     _is_task_forbidden_error,
     _is_task_forbidden_result,
 )
+from atlas.modules.mcp_tools.mcp_discovery import (
+    _ATLAS_RAG_DISCOVER_TOOL,
+    _ATLAS_RAG_QUERY_TOOL,
+)
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
 logger = logging.getLogger(__name__)
@@ -366,6 +370,8 @@ class ExecutionMixin:
                 content=f"Canvas content displayed: {content[:100]}..." if len(content) > 100 else f"Canvas content displayed: {content}",
                 success=True
             )
+        if tool_call.name in (_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL):
+            return await self._execute_atlas_rag_tool(tool_call, context)
 
         # Use the tool index to get server and tool name (avoids parsing issues with dashes/underscores)
         if not hasattr(self, "_tool_index") or not getattr(self, "_tool_index"):
@@ -542,3 +548,238 @@ class ExecutionMixin:
             result = await self.execute_tool(tool_call, context)
             results.append(result)
         return results
+
+    async def _execute_atlas_rag_tool(
+        self,
+        tool_call: ToolCall,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> ToolResult:
+        """Execute Atlas RAG pseudo-tools exposed to agent mode."""
+        from atlas.infrastructure.app_factory import app_factory
+
+        args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
+        # Never trust a model-supplied identity. The authenticated user must come
+        # from the server-side execution context only; strip any _atlas_user the
+        # model may have set so it cannot reach an authorization decision, and
+        # fail closed if the trusted context has no user.
+        args.pop("_atlas_user", None)
+        user_email = None
+        selected_data_sources: List[str] = []
+        compliance_level = None
+        if isinstance(context, dict):
+            user_email = context.get("user_email")
+            selected_data_sources = list(context.get("selected_data_sources") or [])
+            compliance_level = context.get("compliance_level")
+
+        if not user_email:
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                content="Atlas RAG tool requires an authenticated user context.",
+                success=False,
+                error="Missing user context",
+            )
+
+        try:
+            unified_rag = app_factory.get_unified_rag_service()
+            rag_mcp = app_factory.get_rag_mcp_service()
+
+            # The authorization allow-list is the user's discoverable set, which
+            # is bounded by TWO server-side boundaries, both keyed on the
+            # authenticated ``user_email`` and neither settable by the model:
+            #   1. group membership, and
+            #   2. the compliance level, when the compliance feature is enabled.
+            # ``compliance_level`` comes from the trusted execution context (the
+            # user's active level, validated in the service layer), NOT from tool
+            # arguments -- so the model cannot widen its reach or mix sources
+            # across compliance levels. Discovery applies the compliance filter,
+            # and the query gate below only permits sources in this set, so a
+            # model- or client-supplied ``data_sources`` list cannot cross it.
+            # HTTP sources come from ``unified_rag`` and MCP sources from
+            # ``rag_mcp``; each must be queried through the matching service, so
+            # track each source's origin.
+            http_servers: List[Dict[str, Any]] = []
+            mcp_servers: List[Dict[str, Any]] = []
+            if unified_rag:
+                http_servers = await unified_rag.discover_data_sources(
+                    user_email, user_compliance_level=compliance_level
+                )
+            if rag_mcp:
+                mcp_servers = await rag_mcp.discover_servers(
+                    user_email, user_compliance_level=compliance_level
+                )
+
+            def _flatten(servers: List[Dict[str, Any]]) -> List[str]:
+                out: List[str] = []
+                for server in servers:
+                    server_name = server.get("server", "")
+                    for source in server.get("sources", []):
+                        source_id = source.get("id", "")
+                        if server_name and source_id:
+                            out.append(f"{server_name}:{source_id}")
+                return out
+
+            http_sources = _flatten(http_servers)
+            mcp_sources = _flatten(mcp_servers)
+            source_origin: Dict[str, str] = {}
+            for s in http_sources:
+                source_origin.setdefault(s, "http")
+            for s in mcp_sources:
+                source_origin.setdefault(s, "mcp")
+
+            rag_servers = http_servers + mcp_servers
+            # Preserve discovery order while de-duping
+            deduped_sources = list(dict.fromkeys(http_sources + mcp_sources))
+
+            if tool_call.name == _ATLAS_RAG_DISCOVER_TOOL:
+                payload = {
+                    "results": {
+                        "sources": deduped_sources,
+                        "rag_servers": rag_servers,
+                    }
+                }
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content=json.dumps(payload, ensure_ascii=False),
+                    success=True,
+                )
+
+            query = args.get("query")
+            if not isinstance(query, str) or not query.strip():
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content="atlas_rag_query requires a non-empty 'query' string.",
+                    success=False,
+                    error="Missing query",
+                )
+
+            requested_sources = args.get("data_sources")
+            if isinstance(requested_sources, list):
+                sources = [s for s in requested_sources if isinstance(s, str) and ":" in s]
+            else:
+                sources = []
+            if not sources:
+                sources = [s for s in selected_data_sources if isinstance(s, str) and ":" in s]
+            if not sources:
+                sources = deduped_sources
+
+            # Authorization gate: only query sources in the user's discovered
+            # (group/compliance-authorized) set. ``data_sources`` may be filled
+            # by the model or a crafted client, and ``selected_data_sources``
+            # arrives from the request context, so neither can be trusted to
+            # name a source the user is actually allowed to read. ``query_rag``
+            # itself only checks that a source is *configured*, not that this
+            # user is authorized for it, so without this intersection a caller
+            # could bypass the UI-filtered list by naming a configured source
+            # directly. ``deduped_sources`` is the authoritative allow-list.
+            authorized = set(deduped_sources)
+            ignored_sources = sorted(s for s in sources if s not in authorized)
+            if ignored_sources:
+                logger.warning(
+                    "atlas_rag_query: ignoring %d requested source(s) outside the "
+                    "user's authorized set for user %s",
+                    len(ignored_sources),
+                    sanitize_for_logging(user_email),
+                )
+            sources = [s for s in sources if s in authorized]
+
+            if not sources:
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content="No authorized RAG data sources are available for this query.",
+                    success=False,
+                    error="No authorized RAG data sources",
+                )
+
+            messages = [{"role": "user", "content": query}]
+
+            # Group by server AND by origin so each source is queried through the
+            # service that can actually resolve it: HTTP sources via unified_rag,
+            # MCP sources via rag_mcp.synthesize. Without this split, MCP sources
+            # (which live in rag_mcp_config, not rag_sources_config) pass the auth
+            # gate but fail unified_rag.query_rag with "RAG source not found".
+            http_groups: Dict[str, List[str]] = {}
+            mcp_groups: Dict[str, List[str]] = {}
+            for source in sources:
+                server_name = source.split(":", 1)[0]
+                if source_origin.get(source) == "mcp":
+                    mcp_groups.setdefault(server_name, []).append(source)
+                else:
+                    http_groups.setdefault(server_name, []).append(source)
+
+            async def _query_http(group: List[str]) -> Dict[str, Any]:
+                if not unified_rag:
+                    raise RuntimeError("Unified RAG service is not configured")
+                if len(group) == 1:
+                    resp = await unified_rag.query_rag(user_email, group[0], messages)
+                else:
+                    resp = await unified_rag.query_rag_batch(user_email, group, messages)
+                return {
+                    "data_sources": group,
+                    "content": resp.content,
+                    "is_completion": bool(resp.is_completion),
+                }
+
+            async def _query_mcp(group: List[str]) -> Dict[str, Any]:
+                if not rag_mcp:
+                    raise RuntimeError("RAG MCP service is not configured")
+                mcp_response = await rag_mcp.synthesize(
+                    username=user_email, query=query, sources=group
+                )
+                results = mcp_response.get("results", {}) if isinstance(mcp_response, dict) else {}
+                return {
+                    "data_sources": group,
+                    "content": results.get("answer", ""),
+                    "is_completion": False,
+                }
+
+            # Run per-server queries concurrently; isolate failures so one backend
+            # error does not discard every other source's answer.
+            group_lists = list(http_groups.values()) + list(mcp_groups.values())
+            coros = [_query_http(g) for g in http_groups.values()]
+            coros += [_query_mcp(g) for g in mcp_groups.values()]
+            settled = await asyncio.gather(*coros, return_exceptions=True)
+
+            answers: List[Dict[str, Any]] = []
+            errors: List[Dict[str, Any]] = []
+            for group_sources, outcome in zip(group_lists, settled):
+                if isinstance(outcome, Exception):
+                    logger.error(
+                        "atlas_rag_query: source group %s failed: %s",
+                        sanitize_for_logging(", ".join(group_sources)),
+                        outcome,
+                        exc_info=True,
+                    )
+                    errors.append({"data_sources": group_sources, "error": str(outcome)})
+                else:
+                    answers.append(outcome)
+
+            results_payload: Dict[str, Any] = {
+                "query": query,
+                "answers": answers,
+                "combined_answer": "\n\n".join(
+                    answer["content"] for answer in answers if answer.get("content")
+                ),
+            }
+            # Surface partial coverage so the model does not summarize a silently
+            # narrowed corpus as complete.
+            if ignored_sources:
+                results_payload["ignored_sources"] = ignored_sources
+            if errors:
+                results_payload["errors"] = errors
+
+            payload = {"results": results_payload}
+            succeeded = bool(answers)
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                content=json.dumps(payload, ensure_ascii=False),
+                success=succeeded,
+                error=None if succeeded else "All RAG source queries failed",
+            )
+        except Exception as e:
+            logger.error("Error executing %s: %s", tool_call.name, e, exc_info=True)
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                content=f"Error executing tool: {str(e)}",
+                success=False,
+                error=str(e),
+            )

@@ -121,6 +121,13 @@ class ToolsModeRunner:
 
         # Execute tool workflow
         session_context = build_session_context(session)
+        # Carry the request's selected RAG data sources on the execution context
+        # so the atlas_rag tools honor the UI selection in tools mode exactly as
+        # they do in agent mode, instead of falling back to all authorized
+        # sources. build_session_context() only reflects session state, not this
+        # per-request selection.
+        if selected_data_sources:
+            session_context["selected_data_sources"] = selected_data_sources
 
         # Ensure update_callback is never None (critical for elicitation)
         effective_callback = update_callback
@@ -266,6 +273,10 @@ class ToolsModeRunner:
             )
 
         session_context = build_session_context(session)
+        # See note above: propagate the per-request RAG selection so atlas_rag
+        # tools behave consistently with agent mode in the streaming path too.
+        if selected_data_sources:
+            session_context["selected_data_sources"] = selected_data_sources
         effective_callback = update_callback
         if effective_callback is None:
             effective_callback = self._get_send_json()

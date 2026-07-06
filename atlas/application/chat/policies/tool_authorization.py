@@ -4,6 +4,10 @@ import logging
 from typing import Any, List, Optional
 
 from atlas.core.auth import is_user_in_group
+from atlas.modules.mcp_tools.mcp_discovery import (
+    _ATLAS_RAG_DISCOVER_TOOL,
+    _ATLAS_RAG_QUERY_TOOL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +21,19 @@ class ToolAuthorizationService:
     - Special cases (e.g., canvas_canvas tool is always allowed)
     """
 
-    def __init__(self, tool_manager: Optional[Any] = None):
+    def __init__(self, tool_manager: Optional[Any] = None, config_manager: Optional[Any] = None):
         """
         Initialize the tool authorization service.
 
         Args:
             tool_manager: Optional tool manager with server configuration
+            config_manager: Optional config manager used to gate feature-flagged
+                pseudo-tools (e.g. atlas_rag). Injected rather than imported to
+                avoid an import cycle with app_factory; when absent, flagged
+                pseudo-tools fail closed.
         """
         self.tool_manager = tool_manager
+        self.config_manager = config_manager
 
     async def filter_authorized_tools(
         self,
@@ -53,9 +62,20 @@ class ToolAuthorizationService:
             # Filter tools by server prefix
             filtered_tools: List[str] = []
             for tool in selected_tools:
-                # Special case: canvas_canvas is always allowed
+                # Special case: canvas_canvas is always allowed. atlas_rag
+                # pseudo-tools are only allowed when both general RAG and the
+                # dedicated atlas_rag pseudo-tool flag are enabled.
                 if tool == "canvas_canvas":
                     filtered_tools.append(tool)
+                    continue
+                if tool in {_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL}:
+                    settings = getattr(self.config_manager, "app_settings", None)
+                    if (
+                        settings is not None
+                        and settings.feature_rag_enabled
+                        and settings.feature_atlas_rag_tools_enabled
+                    ):
+                        filtered_tools.append(tool)
                     continue
 
                 # Check if tool belongs to an authorized server

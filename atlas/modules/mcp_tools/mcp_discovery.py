@@ -15,6 +15,56 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
+_ATLAS_RAG_DISCOVER_TOOL = "atlas_rag_discover_data_sources"
+_ATLAS_RAG_QUERY_TOOL = "atlas_rag_query"
+# NOTE: these schemas are deliberately model-facing only. User identity and the
+# compliance level are NOT model inputs — they must never appear here. The
+# authenticated user is taken from the server-side execution context, and the
+# authorization allow-list is always the user's full group-authorized set
+# (discovery is run with no client-supplied compliance level), so a model
+# cannot spoof identity or widen its own access via tool arguments.
+_ATLAS_RAG_TOOL_SCHEMAS = {
+    _ATLAS_RAG_DISCOVER_TOOL: {
+        "type": "function",
+        "function": {
+            "name": _ATLAS_RAG_DISCOVER_TOOL,
+            "description": (
+                "Discover RAG data sources available to the current user. "
+                "Returns server-qualified source IDs in the format server:source_id. "
+                "Takes no arguments; the authenticated user is supplied by ATLAS."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    _ATLAS_RAG_QUERY_TOOL: {
+        "type": "function",
+        "function": {
+            "name": _ATLAS_RAG_QUERY_TOOL,
+            "description": (
+                "Query selected RAG data sources and return retrieved/synthesized results. "
+                "If data_sources is omitted, uses the currently selected UI RAG sources, "
+                "falling back to all sources the user can access if none are selected. "
+                "Sources outside the user's authorized set are ignored."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "User query to run against RAG."},
+                    "data_sources": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional server-qualified sources (server:source_id).",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+}
+
 
 def _client():
     """Lazily import the client module to avoid a module-level import cycle.
@@ -450,6 +500,8 @@ class DiscoveryMixin:
         fabricated prefix. Server names can contain underscores (e.g.
         ``pptx_generator``), so splitting on ``_`` is unsafe.
         """
+        if tool_name in (_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL):
+            return "atlas_rag"
         index = getattr(self, "_tool_index", None)
         if not index:
             try:
@@ -486,7 +538,6 @@ class DiscoveryMixin:
         returning an empty set. This method now directly matches fully-qualified tool
         names against the discovered inventory instead of guessing via string surgery.
         """
-
         if not tool_names:
             return []
 
@@ -548,6 +599,9 @@ class DiscoveryMixin:
                         "parameters": getattr(tool, 'inputSchema', {}) or {}
                     }
                 })
+        for requested in tool_names:
+            if requested in _ATLAS_RAG_TOOL_SCHEMAS:
+                matched.append(_ATLAS_RAG_TOOL_SCHEMAS[requested])
 
 
 

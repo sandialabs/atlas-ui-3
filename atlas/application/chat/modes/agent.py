@@ -103,6 +103,8 @@ class AgentModeRunner:
             # loop's sequential MCP tool calls reuse one persistent session
             # (ChatService always populates this, falling back to str(session.id)).
             conversation_id=session.context.get("conversation_id", str(session.id)),
+            # Trusted compliance level stashed on the session by ChatService.
+            compliance_level=session.context.get("compliance_level"),
         )
 
         # Artifact processor wrapper for handling tool results.

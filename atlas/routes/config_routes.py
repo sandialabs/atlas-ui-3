@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.infrastructure.app_factory import app_factory
+from atlas.modules.mcp_tools.mcp_discovery import _ATLAS_RAG_TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,43 @@ CANVAS_TOOL_DESCRIPTION = (
     "3) Data visualizations, 4) Any polished content that should be "
     "viewed separately from the conversation."
 )
+ATLAS_RAG_SERVER_DESCRIPTION = "Atlas RAG tools for discovering and querying selected retrieval data sources."
+
+
+def _atlas_rag_tools_info() -> dict:
+    """Build the Atlas RAG pseudo-server entry for the tools panel."""
+    tool_names = []
+    tools_detailed = []
+    for schema in _ATLAS_RAG_TOOL_SCHEMAS.values():
+        function = schema["function"]
+        full_name = function["name"]
+        tool_name = full_name.removeprefix("atlas_rag_")
+        tool_names.append(tool_name)
+        tools_detailed.append({
+            "name": tool_name,
+            "description": function.get("description", ""),
+            "inputSchema": function.get("parameters", {}),
+        })
+
+    return {
+        "server": "atlas_rag",
+        "tools": tool_names,
+        "tools_detailed": tools_detailed,
+        "tool_count": len(tool_names),
+        "description": ATLAS_RAG_SERVER_DESCRIPTION,
+        "author": "Atlas",
+        "short_description": "Discover and query RAG sources",
+        "help_email": "",
+        # The tools-panel compliance filter hides any server with a falsy
+        # compliance_level once a compliance level is selected (strict mode).
+        # Mark the pseudo-server "Public" (as canvas does) so the RAG tools stay
+        # selectable under compliance filtering; the individual RAG *sources* are
+        # still compliance-filtered independently in the RAG panel and at query
+        # time, so this does not widen data access.
+        "compliance_level": "Public",
+        "auth_type": "none",
+        "auth_required": False,
+    }
 
 
 @router.get("/banners")
@@ -165,7 +203,8 @@ async def get_config(
     # Only attempt RAG discovery if RAG feature is enabled
     if app_settings.feature_rag_enabled:
         # Discover HTTP and MCP RAG sources independently (best-effort)
-        # so a failure in one type does not prevent discovery of the other
+        # so a failure in one type does not prevent discovery of the other.
+        # atlas_rag pseudo-server exposure is separately gated.
         try:
             unified_rag = app_factory.get_unified_rag_service()
             if unified_rag:
@@ -176,15 +215,16 @@ async def get_config(
         except Exception as e:
             logger.warning("Error discovering HTTP RAG sources: %s", e)
 
-        try:
-            rag_mcp = app_factory.get_rag_mcp_service()
-            if rag_mcp:
-                mcp_rag_servers = await rag_mcp.discover_servers(
-                    current_user, user_compliance_level=compliance_level
-                )
-                rag_servers.extend(mcp_rag_servers)
-        except Exception as e:
-            logger.warning("Error discovering MCP RAG sources: %s", e)
+        if app_settings.feature_atlas_rag_tools_enabled:
+            try:
+                rag_mcp = app_factory.get_rag_mcp_service()
+                if rag_mcp:
+                    mcp_rag_servers = await rag_mcp.discover_servers(
+                        current_user, user_compliance_level=compliance_level
+                    )
+                    rag_servers.extend(mcp_rag_servers)
+            except Exception as e:
+                logger.warning("Error discovering MCP RAG sources: %s", e)
 
         # Build flat list of data sources for backward compatibility
         # Format: "server:source_id" for qualified references
@@ -209,6 +249,11 @@ async def get_config(
 
         # Add canvas pseudo-tool to authorized servers (available to all users)
         authorized_servers.append("canvas")
+        if (
+            app_settings.feature_rag_enabled
+            and app_settings.feature_atlas_rag_tools_enabled
+        ):
+            authorized_servers.append("atlas_rag")
 
         # Only build tool information for servers the user is authorized to access
         for server_name in authorized_servers:
@@ -238,6 +283,8 @@ async def get_config(
                     'help_email': 'support@chatui.example.com',
                     'compliance_level': 'Public'
                 })
+            elif server_name == "atlas_rag":
+                tools_info.append(_atlas_rag_tools_info())
             elif server_name in mcp_manager.available_tools:
                 server_tools = mcp_manager.available_tools[server_name]['tools']
                 server_config = mcp_manager.available_tools[server_name]['config']

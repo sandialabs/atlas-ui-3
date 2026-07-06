@@ -206,8 +206,13 @@ class ConfigManager:
         Extracts MCP-type sources from rag_sources_config and converts them
         to MCPServerConfig format for compatibility with RAGMCPService.
         Returns an empty config when FEATURE_RAG_ENABLED is false.
+        HTTP RAG can still be enabled independently from atlas_rag pseudo-tools;
+        this gate only controls MCP-backed RAG sources/tool exposure.
         """
-        if not self.app_settings.feature_rag_enabled:
+        if not (
+            self.app_settings.feature_rag_enabled
+            and self.app_settings.feature_atlas_rag_tools_enabled
+        ):
             if self._rag_mcp_config is None:
                 self._rag_mcp_config = MCPConfig()
             return self._rag_mcp_config

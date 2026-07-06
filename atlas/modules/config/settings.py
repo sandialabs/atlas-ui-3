@@ -67,6 +67,14 @@ class AppSettings(BaseSettings):
         description="Enable RAG (Retrieval-Augmented Generation). Configure sources in rag-sources.json",
         validation_alias=AliasChoices("FEATURE_RAG_ENABLED"),
     )
+    feature_atlas_rag_tools_enabled: bool = Field(
+        False,
+        description=(
+            "Expose the atlas_rag pseudo-server/tools when general RAG is enabled. "
+            "Requires FEATURE_RAG_ENABLED=true."
+        ),
+        validation_alias=AliasChoices("FEATURE_ATLAS_RAG_TOOLS_ENABLED"),
+    )
 
     # Banner settings
     banner_enabled: bool = False
