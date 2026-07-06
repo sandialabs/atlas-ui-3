@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-06
+
 ### PR #700 - 2026-07-05
 - **Agent-mode tool calls persisted in saved conversations**: #685 covered tools mode only; the agentic loop now wraps its tool update callback in the same `ToolCallRecorder` and flushes the captured tool input/output into history after each step (id-reuse safe, always before the final assistant message), so reloaded agent conversations re-render user → tool_call(s) → assistant (also with no websocket connection, e.g. the chat CLI). Added agentic-loop wiring tests and updated `docs/admin/chat-history.md`.
 

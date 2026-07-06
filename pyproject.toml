@@ -1,6 +1,6 @@
 [project]
 name = "atlas-chat"
-version = "0.3.0"
+version = "0.4.0"
 description = "Trusted AI agent platform with MCP, RAG, access control, and auditable tool use"
 readme = "README.md"
 license = { text = "MIT" }
