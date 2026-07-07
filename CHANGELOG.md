@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #715 - 2026-07-07
+- **Configurable file upload size limit**: Added `MAX_FILE_UPLOAD_SIZE_MB` for chat attachments and `/api/files` uploads, with user-facing oversized-file errors before the frontend reads files.
+
 ## [0.4.0] - 2026-07-06
 
 ### PR #700 - 2026-07-05

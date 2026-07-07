@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.infrastructure.app_factory import app_factory
+from atlas.routes.files_routes import get_file_upload_limit_config
 from atlas.modules.mcp_tools.mcp_discovery import _ATLAS_RAG_TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,7 @@ async def get_config_shell(
             "agent_portal": app_settings.feature_agent_portal_enabled,
             "finetune_capture": app_settings.feature_finetune_capture_enabled,
         },
+        "file_upload": get_file_upload_limit_config(),
         "file_extraction": _get_file_extraction_config(config_manager),
     }
 
@@ -504,6 +506,7 @@ async def get_config(
             "agent_portal": app_settings.feature_agent_portal_enabled,
             "finetune_capture": app_settings.feature_finetune_capture_enabled,
         },
+        "file_upload": get_file_upload_limit_config(),
         "file_extraction": _get_file_extraction_config(config_manager)
     }
 

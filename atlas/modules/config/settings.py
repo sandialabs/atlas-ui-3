@@ -347,6 +347,12 @@ class AppSettings(BaseSettings):
     s3_region: str = "us-east-1"
     s3_timeout: int = 30
     s3_use_ssl: bool = False
+    max_file_upload_size_mb: int = Field(
+        default=250,
+        ge=1,
+        description="Maximum user-uploaded file size in MiB.",
+        validation_alias=AliasChoices("MAX_FILE_UPLOAD_SIZE_MB", "MAX_FILE_SIZE_MB"),
+    )
 
     # Feature flags
     feature_workspaces_enabled: bool = False

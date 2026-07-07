@@ -5,7 +5,6 @@ Provides REST API endpoints for file operations including upload, download,
 list, delete, and user statistics. Integrates with S3 storage backend.
 """
 
-import base64
 import logging
 import re
 from typing import Any, Dict, List, Optional
@@ -21,6 +20,8 @@ from atlas.infrastructure.app_factory import app_factory
 
 logger = logging.getLogger(__name__)
 
+BYTES_PER_MIB = 1024 * 1024
+
 
 def _normalize_file_key(raw_key: str) -> str:
     """Single-pass percent-decode to undo proxy-introduced double-encoding.
@@ -35,6 +36,73 @@ def _normalize_file_key(raw_key: str) -> str:
     user's prefix. See atlas/modules/file_storage/s3_client.py get_file/delete_file.
     """
     return unquote(raw_key)
+
+
+def get_max_file_upload_size_bytes() -> int:
+    """Return the configured maximum user-uploaded file size in bytes."""
+    settings = app_factory.get_config_manager().app_settings
+    return settings.max_file_upload_size_mb * BYTES_PER_MIB
+
+
+def get_file_upload_limit_config() -> Dict[str, int]:
+    """Return upload limit metadata for API clients."""
+    max_size_bytes = get_max_file_upload_size_bytes()
+    return {
+        "max_file_size_mb": max_size_bytes // BYTES_PER_MIB,
+        "max_file_size_bytes": max_size_bytes,
+    }
+
+
+def _base64_decoded_size(content_base64: str) -> int:
+    """Estimate decoded byte size from a base64 string without materializing bytes."""
+    if not isinstance(content_base64, str):
+        raise ValueError("Invalid base64 content")
+
+    normalized = "".join(content_base64.split())
+    if not normalized:
+        return 0
+
+    padding = len(normalized) - len(normalized.rstrip("="))
+    return (len(normalized) * 3 // 4) - padding
+
+
+def validate_base64_file_size(content_base64: str, *, max_size_bytes: Optional[int] = None) -> int:
+    """Validate base64 content against the configured upload limit and return decoded size."""
+    try:
+        content_size = _base64_decoded_size(content_base64)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid base64 content") from exc
+
+    limit = max_size_bytes or get_max_file_upload_size_bytes()
+    if content_size > limit:
+        max_size_mb = limit // BYTES_PER_MIB
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {max_size_mb}MB")
+
+    return content_size
+
+
+def find_oversized_inline_file(files: Any) -> Optional[tuple[str, int]]:
+    """Return the first oversized WebSocket inline file, if any."""
+    if not isinstance(files, dict):
+        return None
+
+    max_size = get_max_file_upload_size_bytes()
+    for filename, file_data in files.items():
+        if isinstance(file_data, str):
+            content_base64 = file_data
+        elif isinstance(file_data, dict):
+            content_base64 = file_data.get("content", "")
+        else:
+            raise HTTPException(status_code=400, detail="Invalid base64 content")
+
+        try:
+            content_size = _base64_decoded_size(content_base64)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid base64 content") from exc
+
+        if content_size > max_size:
+            return str(filename), content_size
+    return None
 
 router = APIRouter(prefix="/api", tags=["files"])
 
@@ -96,15 +164,7 @@ async def upload_file(
     current_user: str = Depends(get_current_user)
 ) -> FileResponse:
     """Upload a file to S3 storage."""
-    # Validate base64 content size (configurable limit to prevent abuse)
-    try:
-        content_size = len(request.content_base64) * 3 // 4  # approximate decoded size
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid base64 content")
-
-    max_size = 250 * 1024 * 1024  # 250MB default (configurable)
-    if content_size > max_size:
-        raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {max_size // (1024*1024)}MB")
+    content_size = validate_base64_file_size(request.content_base64)
 
     try:
         s3_client = app_factory.get_file_storage()

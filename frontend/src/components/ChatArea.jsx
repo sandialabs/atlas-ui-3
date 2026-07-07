@@ -11,6 +11,22 @@ import { withUserOrdinals } from '../utils/userMessageOrdinal'
 import { buildCorrectionContext, flattenAvailableTools } from '../utils/captureCorrection'
 import { useCaptureConsent } from '../hooks/useCaptureConsent'
 import CorrectTurnModal from './CorrectTurnModal'
+import { useToast } from './ui/toastContext'
+
+const DEFAULT_MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024
+
+const formatFileSize = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB'
+  const mib = bytes / (1024 * 1024)
+  if (mib >= 1) {
+    return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MB`
+  }
+  const kib = bytes / 1024
+  if (kib >= 1) {
+    return `${Number.isInteger(kib) ? kib : kib.toFixed(1)} KB`
+  }
+  return `${bytes} bytes`
+}
 
 const ChatArea = ({ onOpenRagPanel }) => {
   const [inputValue, setInputValue] = useState('')
@@ -61,12 +77,15 @@ const ChatArea = ({ onOpenRagPanel }) => {
     selectedDataSources,
     clearDataSources,
     features,
+    fileUpload,
     appName,
     user,
     followUpSuggestions,
     setFollowUpSuggestions,
   } = useChat()
   const { isConnected, connectionStatus } = useWS()
+  const toast = useToast()
+  const maxFileSizeBytes = fileUpload?.max_file_size_bytes || DEFAULT_MAX_FILE_SIZE_BYTES
 
   // Pair each message with its rewind ordinal once per messages change, rather
   // than re-running the two-pass scan on every render (incl. each streamed token).
@@ -579,6 +598,12 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
   const sanitizeFilename = (name) => name.replace(/[^\w.-]+/g, '_')
 
+  const rejectFileIfTooLarge = (file, displayName = file.name || 'File') => {
+    if (file.size <= maxFileSizeBytes) return false
+    toast.error(`${displayName} is too large. Maximum file size is ${formatFileSize(maxFileSizeBytes)}.`)
+    return true
+  }
+
   // Raster formats only — SVG is vector XML, not useful for LLM vision.
   const IMAGE_MIME_TYPES = {
     jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
@@ -599,25 +624,28 @@ const ChatArea = ({ onOpenRagPanel }) => {
     return IMAGE_MIME_TYPES[ext] || 'image/png'
   }
 
+  const addUploadedFile = (file, rawName = file.name) => {
+    if (rejectFileIfTooLarge(file, rawName)) return
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const base64Data = e.target.result.split(',')[1] // Remove data URL prefix
+      const safeName = sanitizeFilename(rawName)
+      // Determine extraction mode for this file
+      const mode = canExtractFile(safeName) ? globalExtractMode : 'none'
+      setUploadedFiles(prev => ({
+        ...prev,
+        [safeName]: {
+          content: base64Data,
+          extractMode: mode
+        }
+      }))
+    }
+    reader.readAsDataURL(file)
+  }
+
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files)
-    files.forEach(file => {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const base64Data = e.target.result.split(',')[1] // Remove data URL prefix
-        const safeName = sanitizeFilename(file.name)
-        // Determine extraction mode for this file
-        const mode = canExtractFile(safeName) ? globalExtractMode : 'none'
-        setUploadedFiles(prev => ({
-          ...prev,
-          [safeName]: {
-            content: base64Data,
-            extractMode: mode
-          }
-        }))
-      }
-      reader.readAsDataURL(file)
-    })
+    files.forEach(file => addUploadedFile(file))
     // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -667,35 +695,14 @@ const ChatArea = ({ onOpenRagPanel }) => {
     pastedFiles.forEach((item, idx) => {
       const file = item.getAsFile()
       if (!file) return
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const base64Data = event.target.result.split(',')[1]
-        // Browsers often assign generic names (e.g. "image.png") to pasted screenshots;
-        // detect those and replace with a unique timestamped name.
-        const isGenericName = !file.name || /^image\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name)
-        const ext = file.type.includes('/') ? file.type.split('/')[1].split('+')[0] : 'bin'
-        const rawName = isGenericName
-          ? `pasted_image_${Date.now()}_${idx}.${ext}`
-          : file.name
-        const safeName = sanitizeFilename(rawName)
-        const extractMode = canExtractFile(safeName) ? globalExtractMode : 'none'
-        setUploadedFiles(prev => ({
-          ...prev,
-          [safeName]: {
-            content: base64Data,
-            extractMode
-          }
-        }))
-      }
-      reader.onerror = () => {
-        console.error('Failed to read pasted file', {
-          name: file.name,
-          type: file.type,
-          index: idx,
-          error: reader.error
-        })
-      }
-      reader.readAsDataURL(file)
+      // Browsers often assign generic names (e.g. "image.png") to pasted screenshots;
+      // detect those and replace with a unique timestamped name.
+      const isGenericName = !file.name || /^image\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name)
+      const ext = file.type.includes('/') ? file.type.split('/')[1].split('+')[0] : 'bin'
+      const rawName = isGenericName
+        ? `pasted_image_${Date.now()}_${idx}.${ext}`
+        : file.name
+      addUploadedFile(file, rawName)
     })
   }
 
@@ -731,23 +738,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     const files = Array.from(e.dataTransfer.files)
     if (files.length === 0) return
 
-    files.forEach(file => {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const base64Data = event.target.result.split(',')[1]
-        const safeName = sanitizeFilename(file.name)
-        // Determine extraction mode for this file
-        const mode = canExtractFile(safeName) ? globalExtractMode : 'none'
-        setUploadedFiles(prev => ({
-          ...prev,
-          [safeName]: {
-            content: base64Data,
-            extractMode: mode
-          }
-        }))
-      }
-      reader.readAsDataURL(file)
-    })
+    files.forEach(file => addUploadedFile(file))
   }
 
   const canSend = inputValue.trim().length > 0 && currentModel && isConnected
