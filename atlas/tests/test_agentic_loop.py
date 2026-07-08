@@ -242,6 +242,9 @@ class TestAgenticLoopToolExecution:
 
         assert result.final_answer == "Based on the search results, here is your answer."
         assert result.steps == 2
+        assert result.metadata["intermediate_messages"] == [
+            {"step": 1, "content": "Let me search for that."}
+        ]
 
         event_types = [e.type for e in events]
         assert "agent_tool_results" in event_types
@@ -549,9 +552,15 @@ class _StreamErrorPublisher:
 
     def __init__(self):
         self.tokens: List[str] = []
+        self.calls: List[Dict[str, object]] = []
 
     async def publish_token_stream(self, token, is_first=False, is_last=False):
         self.tokens.append(token)
+        self.calls.append({
+            "token": token,
+            "is_first": is_first,
+            "is_last": is_last,
+        })
 
 
 class TestAgenticLoopStreamingErrorSurfacing:
@@ -616,6 +625,56 @@ class TestAgenticLoopStreamingErrorSurfacing:
         )
 
         assert result.final_answer == "partial answer"
+
+
+class TestAgenticLoopStreamingNarration:
+
+    @pytest.mark.asyncio
+    async def test_tool_call_turn_stream_is_closed_and_metadata_collected(self):
+        """Narration streamed before a tool call should finalize its bubble."""
+        class NarratingToolLLM(FakeLLM):
+            async def stream_with_tools(self, *a, **k):
+                self.call_count += 1
+                if self.call_count == 1:
+                    yield "I will search first."
+                    yield LLMResponse(
+                        content="I will search first.",
+                        tool_calls=[_make_tool_call("call-1", "search", '{"q": "x"}')],
+                    )
+                else:
+                    yield "Done."
+                    yield LLMResponse(content="Done.")
+
+        events, handler = _collect_events()
+        publisher = _StreamErrorPublisher()
+        context = _make_context()
+        loop = _make_loop(NarratingToolLLM(), _make_tool_manager({"search": "found"}))
+
+        result = await loop.run(
+            model="test-model",
+            messages=[{"role": "user", "content": "search"}],
+            context=context,
+            selected_tools=["search"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+            streaming=True,
+            event_publisher=publisher,
+        )
+
+        assert result.final_answer == "Done."
+        assert result.metadata["intermediate_messages"] == [
+            {"step": 1, "content": "I will search first."}
+        ]
+        assert [call["is_last"] for call in publisher.calls].count(True) == 2
+        assert publisher.calls[1] == {
+            "token": "",
+            "is_first": False,
+            "is_last": True,
+        }
+        assert context.history.messages[0].content == "I will search first."
+        assert context.history.messages[0].metadata["agent_intermediate"] is True
 
 
 # -- Tests: factory integration -----------------------------------------

@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #717 - 2026-07-08
+- **Agent-mode narration persisted**: Intermediate assistant text in agent mode now finalizes its live stream bubble even on tool-call turns, is saved with the conversation before the corresponding tool row, and agent-mode prompts now ask for concise narration before tool calls.
+
 ## [0.4.0] - 2026-07-06
 
 ### PR #700 - 2026-07-05

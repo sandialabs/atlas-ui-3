@@ -17,6 +17,22 @@ logger = logging.getLogger(__name__)
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
+_AGENT_NARRATION_INSTRUCTION = (
+    "In agent mode, briefly state what you are about to do before each tool call. "
+    "Keep these progress updates concise."
+)
+
+
+def _ensure_agent_narration_instruction(messages: List[Dict[str, Any]]) -> None:
+    """Ensure agent-mode LLM calls ask for per-tool-call narration."""
+    if messages and messages[0].get("role") == "system":
+        content = messages[0].get("content")
+        if isinstance(content, str) and _AGENT_NARRATION_INSTRUCTION not in content:
+            messages[0]["content"] = f"{content.rstrip()}\n\n{_AGENT_NARRATION_INSTRUCTION}"
+        return
+
+    messages.insert(0, {"role": "system", "content": _AGENT_NARRATION_INSTRUCTION})
+
 
 class AgentModeRunner:
     """
@@ -61,6 +77,29 @@ class AgentModeRunner:
         )
         return None
 
+    def _persist_intermediate_messages(self, session: Session, result_metadata: Dict[str, Any]) -> None:
+        """Persist intermediate assistant narration returned by an agent loop."""
+        if result_metadata.get("intermediate_messages_persisted"):
+            return
+
+        for item in result_metadata.get("intermediate_messages") or []:
+            if isinstance(item, dict):
+                content = item.get("content") or ""
+                step = item.get("step")
+            else:
+                content = str(item)
+                step = None
+            if not content.strip():
+                continue
+            metadata = {"agent_mode": True, "agent_intermediate": True}
+            if step is not None:
+                metadata["step"] = step
+            session.history.add_message(Message(
+                role=MessageRole.ASSISTANT,
+                content=content,
+                metadata=metadata,
+            ))
+
     async def run(
         self,
         session: Session,
@@ -92,6 +131,7 @@ class AgentModeRunner:
         # Get agent loop from factory based on strategy
         strategy = agent_loop_strategy or self.default_strategy
         agent_loop = self.agent_loop_factory.create(strategy)
+        _ensure_agent_narration_instruction(messages)
 
         # Build agent context
         agent_context = AgentContext(
@@ -153,10 +193,12 @@ class AgentModeRunner:
             raise
 
         # Append final message. Ordering contract with AgenticLoop: the loop
-        # has already flushed this turn's tool_call rows into session.history
-        # (per step), so this append must come after run() returns — reloaded
-        # history reads user -> tool_call(s) -> assistant. Guarded by
+        # has already flushed this turn's intermediate narration and tool_call
+        # rows into session.history (per step), so this append must come after
+        # run() returns — reloaded history reads user -> intermediate assistant
+        # -> tool_call(s) -> assistant. Guarded by
         # TestAgentModeRunnerPersistedOrder in test_tool_call_persistence.py.
+        self._persist_intermediate_messages(session, result.metadata)
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
             content=result.final_answer,

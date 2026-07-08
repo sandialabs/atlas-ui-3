@@ -638,7 +638,7 @@ class TestAgentModeRunnerPersistedOrder:
 
         responses = iter([
             LLMResponse(
-                content="",
+                content="I will calculate the sum.",
                 tool_calls=[{"id": "tc1", "type": "function",
                              "function": {"name": "calc_add", "arguments": "{}"}}],
             ),
@@ -689,15 +689,21 @@ class TestAgentModeRunnerPersistedOrder:
         roles = [(m.role, m.metadata.get("message_type")) for m in session.history.messages]
         assert roles == [
             (MessageRole.USER, None),
+            (MessageRole.ASSISTANT, None),
             (MessageRole.TOOL, "tool_call"),
             (MessageRole.ASSISTANT, None),
         ]
-        tool_msg = session.history.messages[1]
+        intermediate_msg = session.history.messages[1]
+        assert intermediate_msg.content == "I will calculate the sum."
+        assert intermediate_msg.metadata.get("agent_intermediate") is True
+        tool_msg = session.history.messages[2]
         assert tool_msg.metadata["tool_name"] == "calc_add"
         assert tool_msg.metadata["result"] == "3"
-        final_msg = session.history.messages[2]
+        final_msg = session.history.messages[3]
         assert final_msg.content == "The answer is 3"
         assert final_msg.metadata.get("agent_mode") is True
+        assert messages[0]["role"] == "system"
+        assert "before each tool call" in messages[0]["content"]
 
 
 class TestHistoryExcludesToolCalls:
