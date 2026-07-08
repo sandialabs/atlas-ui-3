@@ -5,6 +5,7 @@ Provides REST API endpoints for file operations including upload, download,
 list, delete, and user statistics. Integrates with S3 storage backend.
 """
 
+import base64
 import logging
 import re
 from typing import Any, Dict, List, Optional
