@@ -107,6 +107,12 @@ class ModelConfig(BaseModel):
     # to user role.  Required for models (e.g. Mistral/Devstral via vLLM)
     # that reject system messages mid-conversation after tool results.
     strict_role_ordering: bool = False
+    # When true, the logged-in user's identifier is sent as the
+    # "x-litellm-customer-id" HTTP header on each request.  A LiteLLM proxy
+    # uses this header to attribute spend/usage to the end user (customer).
+    # Only enable for models served through a LiteLLM instance that tracks
+    # per-customer usage.
+    pass_user_as_customer_id: bool = False
 
 
 class LLMConfig(BaseModel):

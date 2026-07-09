@@ -162,8 +162,33 @@ models:
 *   **`temperature`**: (float) A value between 0.0 and 1.0 that controls the creativity of the model's responses. Higher values are more creative.
 *   **`extra_headers`**: (dictionary) A set of custom HTTP headers to include in the request, which is useful for some proxy services or custom providers. **Environment Variable Support**: Header values can also use the `${VAR_NAME}` syntax for environment variable expansion. This is particularly useful for services like OpenRouter that require headers like `HTTP-Referer` and `X-Title`. If an environment variable is missing, the application will raise a clear error message.
 *   **`api_key_source`**: (string) Controls where the API key comes from. `"system"` (default) resolves from environment variables. `"user"` requires each user to provide their own key via the UI. See [Per-User API Keys](#per-user-api-keys-2026-02-08) above.
+*   **`pass_user_as_customer_id`**: (boolean, default `false`) When `true`, the logged-in user's identifier is sent as the `x-litellm-customer-id` HTTP header on each request to the model. A [LiteLLM proxy](https://docs.litellm.ai/docs/proxy/customers) uses this header to attribute spend/usage to the end user (customer). See [LiteLLM Customer ID Header](#litellm-customer-id-header) below.
 *   **`supports_vision`**: (boolean, default `false`) When `true`, the model accepts image inputs. Users can upload images in the chat UI, and those images are sent as inline base64 content blocks in the user message rather than being described in the text files manifest. Only raster image formats are supported (PNG, JPEG, GIF, WebP); SVG files are excluded. See [Vision Image Support](#vision-image-support-2026-03-23) below.
 *   **`compliance_level`**: (string) The security compliance level of this model (e.g., "Public", "Internal"). This is used to filter which models can be used in certain compliance contexts.
+
+## LiteLLM Customer ID Header
+
+When ATLAS talks to a model served through a [LiteLLM proxy](https://docs.litellm.ai/docs/proxy/customers), the proxy can track spend and usage per end user ("customer"). To enable this, set `pass_user_as_customer_id: true` on the model:
+
+```yaml
+models:
+  litellm-gpt-4o:
+    model_url: "https://litellm.internal.example.com/v1"
+    model_name: "gpt-4o"
+    api_key: "${LITELLM_API_KEY}"
+    compliance_level: "Internal"
+    supports_tools: true
+    pass_user_as_customer_id: true
+```
+
+### How It Works
+
+1. On every request for this model, ATLAS adds the `x-litellm-customer-id` header set to the logged-in user's identifier (their email).
+2. The LiteLLM proxy reads this header and attributes the request's spend/usage to that customer, upserting the customer record automatically. LiteLLM checks this header first in its customer-resolution priority order.
+3. The header is combined with any values configured in `extra_headers`; it does not replace them.
+4. For background or system calls that have no associated user, the header is omitted (it is used for tracking, not authentication).
+
+Only enable this for models served through a LiteLLM instance that performs per-customer tracking. Other providers ignore the header, but there is no reason to send it to them.
 
 ## Vision Image Support (2026-03-23)
 

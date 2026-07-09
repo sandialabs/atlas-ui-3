@@ -518,8 +518,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 kwargs["api_base"] = model_config.model_url
 
         # Handle extra headers with environment variable expansion
+        extra_headers_resolved: Dict[str, str] = {}
         if model_config.extra_headers:
-            extra_headers_resolved = {}
             for header_key, header_value in model_config.extra_headers.items():
                 try:
                     resolved_value = resolve_env_var(header_value)
@@ -527,6 +527,23 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 except ValueError as e:
                     logger.error(f"Failed to resolve extra header '{header_key}' for model {model_name}: {e}")
                     raise
+
+        # Optionally attribute the request to the logged-in user via the
+        # LiteLLM customer-id header so a LiteLLM proxy can track per-user
+        # (per-customer) spend/usage. Skipped when no user_email is available
+        # (e.g. background/system calls) since the header is for tracking, not
+        # authentication.
+        if getattr(model_config, "pass_user_as_customer_id", False):
+            if user_email:
+                extra_headers_resolved["x-litellm-customer-id"] = user_email
+            else:
+                logger.debug(
+                    "Model '%s' has pass_user_as_customer_id enabled but no user_email "
+                    "was provided; skipping x-litellm-customer-id header.",
+                    model_name,
+                )
+
+        if extra_headers_resolved:
             kwargs["extra_headers"] = extra_headers_resolved
 
         return kwargs

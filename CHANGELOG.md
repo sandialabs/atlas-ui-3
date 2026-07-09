@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #718 - 2026-07-09
+- **LiteLLM customer-id header**: Added a per-model `pass_user_as_customer_id` option (default `false`). When enabled, the logged-in user's identifier is sent as the `x-litellm-customer-id` HTTP header on each request, letting a LiteLLM proxy attribute spend/usage to that end user (customer). The header merges with any configured `extra_headers` and is omitted for background/system calls that have no associated user. Applies to both streaming and non-streaming paths (single `_get_model_kwargs` chokepoint). Added unit tests and documented the field in `docs/admin/llm-config.md` (closes #718).
+
 ### PR #716 - 2026-07-07
 - **Configurable file upload size limit**: Added `MAX_FILE_UPLOAD_SIZE_MB` for chat attachments and `/api/files` uploads, with user-facing oversized-file errors before the frontend reads files.
 
