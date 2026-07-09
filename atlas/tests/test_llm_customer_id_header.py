@@ -119,3 +119,66 @@ class TestCustomerIdHeader:
         """ModelConfig.pass_user_as_customer_id defaults to False."""
         cfg = ModelConfig(model_name="m", model_url="https://x/v1", api_key="k")
         assert cfg.pass_user_as_customer_id is False
+        assert cfg.customer_id_strip_suffix is None
+
+
+class TestCustomerIdSuffixStripping:
+    """Test customer_id_strip_suffix behavior in _get_model_kwargs."""
+
+    def test_suffix_stripped_when_configured(self):
+        """A matching email-domain suffix is removed from the header value."""
+        caller = _make_caller({
+            "litellm-model": {
+                "pass_user_as_customer_id": True,
+                "customer_id_strip_suffix": "@mydomain.com",
+            },
+        })
+        kwargs = caller._get_model_kwargs("litellm-model", user_email="alice@mydomain.com")
+        assert kwargs["extra_headers"]["x-litellm-customer-id"] == "alice"
+
+    def test_suffix_match_is_case_insensitive(self):
+        """The suffix matches regardless of casing (email domains are)."""
+        caller = _make_caller({
+            "litellm-model": {
+                "pass_user_as_customer_id": True,
+                "customer_id_strip_suffix": "@mydomain.com",
+            },
+        })
+        kwargs = caller._get_model_kwargs("litellm-model", user_email="Alice@MyDomain.COM")
+        assert kwargs["extra_headers"]["x-litellm-customer-id"] == "Alice"
+
+    def test_non_matching_suffix_leaves_value_unchanged(self):
+        """A non-matching suffix leaves the full email in place."""
+        caller = _make_caller({
+            "litellm-model": {
+                "pass_user_as_customer_id": True,
+                "customer_id_strip_suffix": "@otherdomain.com",
+            },
+        })
+        kwargs = caller._get_model_kwargs("litellm-model", user_email="alice@mydomain.com")
+        assert kwargs["extra_headers"]["x-litellm-customer-id"] == "alice@mydomain.com"
+
+    def test_no_suffix_configured_sends_full_email(self):
+        """Without a configured suffix the full email is sent (default)."""
+        caller = _make_caller({
+            "litellm-model": {"pass_user_as_customer_id": True},
+        })
+        kwargs = caller._get_model_kwargs("litellm-model", user_email="alice@mydomain.com")
+        assert kwargs["extra_headers"]["x-litellm-customer-id"] == "alice@mydomain.com"
+
+    def test_strip_not_applied_to_explicit_extra_header(self):
+        """Suffix stripping only affects the auto-injected user value."""
+        caller = _make_caller({
+            "litellm-model": {
+                "pass_user_as_customer_id": True,
+                "customer_id_strip_suffix": "@mydomain.com",
+                "extra_headers": {"x-litellm-customer-id": "svc@mydomain.com"},
+            },
+        })
+        kwargs = caller._get_model_kwargs("litellm-model", user_email="alice@mydomain.com")
+        assert kwargs["extra_headers"]["x-litellm-customer-id"] == "svc@mydomain.com"
+
+    def test_strip_helper_guards_empty_result(self):
+        """Stripping never yields an empty header value."""
+        # Value equal to the suffix would strip to "" -> keep original.
+        assert LiteLLMCaller._strip_customer_id_suffix("@mydomain.com", "@mydomain.com") == "@mydomain.com"

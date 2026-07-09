@@ -473,6 +473,24 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
         return stored.token_value
 
+    @staticmethod
+    def _strip_customer_id_suffix(value: str, suffix: Optional[str]) -> str:
+        """Strip a configured email-domain suffix from a customer-id value.
+
+        Turns e.g. ``user@mydomain.com`` into ``user`` before it is sent as the
+        ``x-litellm-customer-id`` header. The suffix is matched
+        case-insensitively (email domains are case-insensitive). The value is
+        returned unchanged when no suffix is configured, when it does not end
+        with the suffix, or when stripping would leave an empty string.
+        """
+        if not suffix:
+            return value
+        if value.lower().endswith(suffix.lower()):
+            stripped = value[: len(value) - len(suffix)]
+            if stripped:
+                return stripped
+        return value
+
     def _get_model_kwargs(
         self, model_name: str, temperature: Optional[float] = None, user_email: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -548,7 +566,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     model_name,
                 )
             elif user_email:
-                extra_headers_resolved["x-litellm-customer-id"] = user_email
+                customer_id = self._strip_customer_id_suffix(
+                    user_email, getattr(model_config, "customer_id_strip_suffix", None)
+                )
+                extra_headers_resolved["x-litellm-customer-id"] = customer_id
             else:
                 logger.debug(
                     "Model '%s' has pass_user_as_customer_id enabled but no user_email "

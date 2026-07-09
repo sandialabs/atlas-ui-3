@@ -163,6 +163,7 @@ models:
 *   **`extra_headers`**: (dictionary) A set of custom HTTP headers to include in the request, which is useful for some proxy services or custom providers. **Environment Variable Support**: Header values can also use the `${VAR_NAME}` syntax for environment variable expansion. This is particularly useful for services like OpenRouter that require headers like `HTTP-Referer` and `X-Title`. If an environment variable is missing, the application will raise a clear error message.
 *   **`api_key_source`**: (string) Controls where the API key comes from. `"system"` (default) resolves from environment variables. `"user"` requires each user to provide their own key via the UI. See [Per-User API Keys](#per-user-api-keys-2026-02-08) above.
 *   **`pass_user_as_customer_id`**: (boolean, default `false`) When `true`, the logged-in user's identifier is sent as the `x-litellm-customer-id` HTTP header on each request to the model. A [LiteLLM proxy](https://docs.litellm.ai/docs/proxy/customers) uses this header to attribute spend/usage to the end user (customer). See [LiteLLM Customer ID Header](#litellm-customer-id-header) below.
+*   **`customer_id_strip_suffix`**: (string, optional) An email-domain suffix (e.g. `"@mydomain.com"`) to strip from the reverse-proxy-provided username before it is sent as the `x-litellm-customer-id` header — turning `user@mydomain.com` into `user`. Only applies when `pass_user_as_customer_id` is `true` and the username actually ends with the suffix (matched case-insensitively); otherwise the value is sent unchanged. See [LiteLLM Customer ID Header](#litellm-customer-id-header) below.
 *   **`supports_vision`**: (boolean, default `false`) When `true`, the model accepts image inputs. Users can upload images in the chat UI, and those images are sent as inline base64 content blocks in the user message rather than being described in the text files manifest. Only raster image formats are supported (PNG, JPEG, GIF, WebP); SVG files are excluded. See [Vision Image Support](#vision-image-support-2026-03-23) below.
 *   **`compliance_level`**: (string) The security compliance level of this model (e.g., "Public", "Internal"). This is used to filter which models can be used in certain compliance contexts.
 
@@ -190,6 +191,30 @@ models:
 5. For background or system calls that have no associated user, the header is omitted (it is used for tracking, not authentication) — unless a static id is pinned via `extra_headers` as in point 4.
 
 Only enable this for models served through a LiteLLM instance that performs per-customer tracking. Other providers ignore the header, but there is no reason to send it to them.
+
+### Stripping a Domain Suffix
+
+The reverse proxy in front of ATLAS often supplies the username as a full email (`user@mydomain.com`), but you may want the LiteLLM customer id to be just the local part (`user`) — for example when your LiteLLM customer records are keyed by bare usernames. Set `customer_id_strip_suffix` to the domain suffix to remove:
+
+```yaml
+models:
+  litellm-gpt-4o:
+    model_url: "https://litellm.internal.example.com/v1"
+    model_name: "gpt-4o"
+    api_key: "${LITELLM_API_KEY}"
+    compliance_level: "Internal"
+    pass_user_as_customer_id: true
+    customer_id_strip_suffix: "@mydomain.com"
+```
+
+With this config, a request from `alice@mydomain.com` sends `x-litellm-customer-id: alice`.
+
+Behavior notes:
+
+- The suffix is matched case-insensitively (email domains are case-insensitive), so `@mydomain.com` also strips `@MyDomain.COM`.
+- If the username does not end with the configured suffix (e.g. a user from a different domain), the full value is sent unchanged.
+- Stripping applies only to the auto-injected logged-in user. A static id pinned via `extra_headers` (point 4 above) is never modified.
+- Leave `customer_id_strip_suffix` unset to send the full username, which is the default.
 
 ## Vision Image Support (2026-03-23)
 

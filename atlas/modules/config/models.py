@@ -113,6 +113,12 @@ class ModelConfig(BaseModel):
     # Only enable for models served through a LiteLLM instance that tracks
     # per-customer usage.
     pass_user_as_customer_id: bool = False
+    # Optional email-domain suffix to strip from the reverse-proxy-provided
+    # username before it is sent as the "x-litellm-customer-id" header.
+    # Example: "@mydomain.com" turns "user@mydomain.com" into "user".  Only
+    # applies when pass_user_as_customer_id is true and the value actually ends
+    # with the suffix; otherwise the value is sent unchanged.
+    customer_id_strip_suffix: Optional[str] = None
 
 
 class LLMConfig(BaseModel):
