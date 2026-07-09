@@ -185,8 +185,9 @@ models:
 
 1. On every request for this model, ATLAS adds the `x-litellm-customer-id` header set to the logged-in user's identifier (their email).
 2. The LiteLLM proxy reads this header and attributes the request's spend/usage to that customer, upserting the customer record automatically. LiteLLM checks this header first in its customer-resolution priority order.
-3. The header is combined with any values configured in `extra_headers`; it does not replace them.
-4. For background or system calls that have no associated user, the header is omitted (it is used for tracking, not authentication).
+3. The header is combined with any other values configured in `extra_headers`; it does not replace them.
+4. **Explicit `extra_headers` win.** If you set `x-litellm-customer-id` yourself under `extra_headers` (matched case-insensitively), that value is authoritative and ATLAS leaves it untouched — the logged-in user is *not* injected over it. Use this to pin a static customer id for a service account or for testing.
+5. For background or system calls that have no associated user, the header is omitted (it is used for tracking, not authentication) — unless a static id is pinned via `extra_headers` as in point 4.
 
 Only enable this for models served through a LiteLLM instance that performs per-customer tracking. Other providers ignore the header, but there is no reason to send it to them.
 

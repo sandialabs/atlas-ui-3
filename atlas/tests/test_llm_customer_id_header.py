@@ -91,6 +91,30 @@ class TestCustomerIdHeader:
         assert kwargs["extra_headers"]["X-Title"] == "atlas"
         assert kwargs["extra_headers"]["x-litellm-customer-id"] == "bob@example.com"
 
+    def test_explicit_extra_header_wins_over_user(self):
+        """An explicitly-configured customer id is not overwritten by the user."""
+        caller = _make_caller({
+            "litellm-model": {
+                "pass_user_as_customer_id": True,
+                "extra_headers": {"x-litellm-customer-id": "service-account-1"},
+            },
+        })
+        kwargs = caller._get_model_kwargs("litellm-model", user_email="bob@example.com")
+        assert kwargs["extra_headers"]["x-litellm-customer-id"] == "service-account-1"
+
+    def test_explicit_extra_header_wins_case_insensitive(self):
+        """Explicit customer id wins even when its casing differs from the header."""
+        caller = _make_caller({
+            "litellm-model": {
+                "pass_user_as_customer_id": True,
+                "extra_headers": {"X-LiteLLM-Customer-Id": "service-account-2"},
+            },
+        })
+        kwargs = caller._get_model_kwargs("litellm-model", user_email="bob@example.com")
+        # The operator's header (original casing) is preserved and not duplicated.
+        assert kwargs["extra_headers"]["X-LiteLLM-Customer-Id"] == "service-account-2"
+        assert "x-litellm-customer-id" not in kwargs["extra_headers"]
+
     def test_config_field_defaults_false(self):
         """ModelConfig.pass_user_as_customer_id defaults to False."""
         cfg = ModelConfig(model_name="m", model_url="https://x/v1", api_key="k")

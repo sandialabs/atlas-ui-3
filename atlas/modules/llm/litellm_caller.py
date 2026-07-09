@@ -534,7 +534,20 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         # (e.g. background/system calls) since the header is for tracking, not
         # authentication.
         if getattr(model_config, "pass_user_as_customer_id", False):
-            if user_email:
+            # Explicit extra_headers are authoritative: if the operator has
+            # already pinned a customer id (e.g. a static id for a service
+            # account or for testing), leave it in place and do not overwrite
+            # it. HTTP header names are case-insensitive, so compare accordingly.
+            has_explicit_customer_id = any(
+                key.lower() == "x-litellm-customer-id" for key in extra_headers_resolved
+            )
+            if has_explicit_customer_id:
+                logger.debug(
+                    "Model '%s' already sets x-litellm-customer-id via extra_headers; "
+                    "keeping the configured value instead of the logged-in user.",
+                    model_name,
+                )
+            elif user_email:
                 extra_headers_resolved["x-litellm-customer-id"] = user_email
             else:
                 logger.debug(
