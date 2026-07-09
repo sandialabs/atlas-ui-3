@@ -9,8 +9,15 @@ import ChatArea from '../components/ChatArea'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 
+const h = vi.hoisted(() => ({
+  toastError: vi.fn()
+}))
+
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/WSContext')
+vi.mock('../components/ui/toastContext', () => ({
+  useToast: () => ({ error: h.toastError, success: vi.fn(), info: vi.fn(), dismiss: vi.fn() })
+}))
 
 describe('ChatArea - Drag and Drop File Attachment', () => {
   const defaultChatContext = {
@@ -234,6 +241,35 @@ describe('ChatArea - Drag and Drop File Attachment', () => {
     fireEvent.drop(chatArea, dropEvent)
 
     expect(mockFileReader.readAsDataURL).toHaveBeenCalledTimes(2)
+
+    global.FileReader.mockRestore()
+  })
+
+  it('should reject dropped files larger than the configured max size', () => {
+    const mockFileReader = {
+      readAsDataURL: vi.fn(),
+      onload: null
+    }
+
+    vi.spyOn(global, 'FileReader').mockImplementation(() => mockFileReader)
+    useChat.mockReturnValue({
+      ...defaultChatContext,
+      fileUpload: { max_file_size_bytes: 5, max_file_size_mb: 1 }
+    })
+
+    render(
+      <BrowserRouter>
+        <ChatArea />
+      </BrowserRouter>
+    )
+
+    const chatArea = screen.getByRole('main').parentElement
+    const mockFile = createMockFile('too-large.txt', 'too large')
+
+    fireEvent.drop(chatArea, createDragEvent('drop', [mockFile]))
+
+    expect(mockFileReader.readAsDataURL).not.toHaveBeenCalled()
+    expect(h.toastError).toHaveBeenCalledWith('too-large.txt is too large. Maximum file size is 5 bytes.')
 
     global.FileReader.mockRestore()
   })

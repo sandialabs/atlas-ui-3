@@ -22,6 +22,7 @@ def test_config_shell_endpoint_returns_200():
     assert "features" in data
     assert "agent_mode_available" in data
     assert "is_in_admin_group" in data
+    assert "file_upload" in data
     assert "file_extraction" in data
 
 
@@ -125,3 +126,34 @@ def test_config_shell_feature_flags_match_full_config():
         assert value == full_features[key], (
             f"Feature '{key}' mismatch: shell={value}, full={full_features[key]}"
         )
+
+
+def test_config_shell_file_upload_matches_full_config():
+    """File upload limits from /api/config/shell should match /api/config."""
+    client = TestClient(app)
+    headers = {"X-User-Email": "test@test.com"}
+
+    shell_resp = client.get("/api/config/shell", headers=headers)
+    full_resp = client.get("/api/config", headers=headers)
+
+    assert shell_resp.status_code == 200
+    assert full_resp.status_code == 200
+    assert shell_resp.json()["file_upload"] == full_resp.json()["file_upload"]
+
+
+def test_config_shell_file_upload_uses_env_setting():
+    """File upload limit config should reflect the app setting."""
+    config_manager = app_factory.get_config_manager()
+    original_limit = config_manager.app_settings.max_file_upload_size_mb
+
+    try:
+        config_manager.app_settings.max_file_upload_size_mb = 7
+        client = TestClient(app)
+        resp = client.get("/api/config/shell", headers={"X-User-Email": "test@test.com"})
+
+        assert resp.status_code == 200
+        file_upload = resp.json()["file_upload"]
+        assert file_upload["max_file_size_mb"] == 7
+        assert file_upload["max_file_size_bytes"] == 7 * 1024 * 1024
+    finally:
+        config_manager.app_settings.max_file_upload_size_mb = original_limit

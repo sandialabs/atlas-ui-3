@@ -70,8 +70,12 @@ from atlas.routes.capture_routes import capture_router
 from atlas.routes.config_routes import router as config_router
 from atlas.routes.conversation_routes import router as conversation_router
 from atlas.routes.feedback_routes import feedback_router
-from atlas.routes.files_routes import mcp_files_router
-from atlas.routes.files_routes import router as files_router
+from atlas.routes.files_routes import (
+    find_oversized_inline_file,
+    get_file_upload_limit_config,
+    mcp_files_router,
+    router as files_router,
+)
 from atlas.routes.globus_auth_routes import api_router as globus_api_router
 from atlas.routes.globus_auth_routes import browser_router as globus_browser_router
 from atlas.routes.health_routes import router as health_router
@@ -529,6 +533,28 @@ async def websocket_endpoint(websocket: WebSocket):
                     if config_manager.app_settings.custom_prompts_effective
                     else None
                 )
+
+                try:
+                    oversized_file = find_oversized_inline_file(data.get("files"))
+                except HTTPException as e:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": str(e.detail),
+                        "error_type": "file_upload"
+                    })
+                    continue
+                if oversized_file:
+                    filename, _ = oversized_file
+                    limit = get_file_upload_limit_config()
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": (
+                            f"File '{filename}' is too large. "
+                            f"Maximum size is {limit['max_file_size_mb']}MB."
+                        ),
+                        "error_type": "file_upload"
+                    })
+                    continue
 
                 # Handle chat message in background so we can still receive approval responses
                 async def handle_chat():
