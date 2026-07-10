@@ -7,7 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #717 - 2026-07-08
-- **Agent-mode narration persisted**: Intermediate assistant text in agent mode now finalizes its live stream bubble even on tool-call turns, is saved with the conversation before the corresponding tool row, and agent-mode prompts now ask for concise narration before tool calls.
+- **Agent-mode narration persisted**: Intermediate assistant text in agent mode now finalizes its live stream bubble even on tool-call turns, is saved with the conversation before the corresponding tool row, and agent-mode prompts now ask for concise narration before tool calls. The persisted narration is a display-only `agent_intermediate` row (excluded from `get_messages_for_llm()`) so reloaded conversations re-render it without replaying back-to-back assistant turns that strict-alternation providers reject.
+
+### PR #716 - 2026-07-07
+- **Configurable file upload size limit**: Added `MAX_FILE_UPLOAD_SIZE_MB` for chat attachments and `/api/files` uploads, with user-facing oversized-file errors before the frontend reads files.
 
 ## [0.4.0] - 2026-07-06
 

@@ -19,6 +19,11 @@ const DEFAULT_FILE_EXTRACTION = {
   supported_extensions: []
 }
 
+const DEFAULT_FILE_UPLOAD = {
+  max_file_size_mb: 250,
+  max_file_size_bytes: 250 * 1024 * 1024
+}
+
 export const CONFIG_CACHE_KEY = 'chatui-config-cache'
 
 /**
@@ -41,7 +46,7 @@ function readCachedConfig() {
  * to prevent cross-user leakage in shared browser sessions.
  */
 const SAFE_CACHE_FIELDS = [
-  'app_name', 'models', 'features', 'file_extraction',
+  'app_name', 'models', 'features', 'file_extraction', 'file_upload',
   'banner_enabled', 'agent_mode_available'
 ]
 
@@ -100,6 +105,11 @@ export function useChatConfig() {
       ? { ...DEFAULT_FILE_EXTRACTION, ...cached.current.file_extraction }
       : DEFAULT_FILE_EXTRACTION
   )
+  const [fileUpload, setFileUpload] = useState(
+    cached.current?.file_upload
+      ? { ...DEFAULT_FILE_UPLOAD, ...cached.current.file_upload }
+      : DEFAULT_FILE_UPLOAD
+  )
   const [isCanvasOpen, setIsCanvasOpen] = useState(false)
   const [currentModel, setCurrentModel] = useState(() => {
     try {
@@ -128,6 +138,7 @@ export function useChatConfig() {
     setUser(cfg.user || 'Unknown')
     setFeatures(prev => ({ ...DEFAULT_FEATURES, ...(cfg.features || prev) }))
     setFileExtraction(prev => ({ ...DEFAULT_FILE_EXTRACTION, ...(cfg.file_extraction || prev) }))
+    setFileUpload(prev => ({ ...DEFAULT_FILE_UPLOAD, ...(cfg.file_upload || prev) }))
     setAgentModeAvailable(!!cfg.agent_mode_available)
     setIsInAdminGroup(!!cfg.is_in_admin_group)
 
@@ -189,6 +200,7 @@ export function useChatConfig() {
         setDataSources([])
         setUser('Unauthenticated')
         setFeatures(DEFAULT_FEATURES)
+        setFileUpload(DEFAULT_FILE_UPLOAD)
         setAgentModeAvailable(false)
       }
       return null
@@ -256,6 +268,7 @@ export function useChatConfig() {
     agentModeAvailable,
     isInAdminGroup,
     fileExtraction,
+    fileUpload,
     configReady,
     refreshConfig: fetchConfig, // Allow manual refresh of config (e.g., after MCP reload)
   }

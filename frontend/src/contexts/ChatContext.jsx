@@ -867,6 +867,7 @@ export const ChatProvider = ({ children }) => {
 		setAgentPendingQuestion: agent.setAgentPendingQuestion,
 		isInAdminGroup: config.isInAdminGroup,
 		fileExtraction: config.fileExtraction,
+		fileUpload: config.fileUpload,
 		messages,
 		updateToolResult,
 		isWelcomeVisible,
