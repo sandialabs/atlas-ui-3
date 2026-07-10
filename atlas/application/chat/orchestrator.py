@@ -4,7 +4,9 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from atlas.domain.errors import SessionNotFoundError
+from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.model_access import is_model_allowed
+from atlas.domain.errors import AuthorizationError, SessionNotFoundError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
@@ -145,6 +147,35 @@ class ChatOrchestrator:
         except Exception:
             return True
 
+    async def _ensure_model_authorized(self, model: str, user_email: Optional[str]) -> None:
+        """Reject the turn if the user may not access the requested model.
+
+        Enforces the per-model ``groups`` access-control list. Models without a
+        ``groups`` restriction (the default) are allowed for everyone, so this is
+        a no-op unless an operator has opted a model into group restriction.
+        Unknown models are left to the downstream caller to reject so behavior is
+        unchanged when access control is not configured.
+        """
+        if not self.config_manager:
+            return
+        try:
+            model_config = self.config_manager.llm_config.models.get(model)
+        except Exception:
+            return
+        if model_config is None:
+            return
+        if await is_model_allowed(model_config, user_email):
+            return
+        logger.warning(
+            "Rejected chat: user %s not authorized for model %s",
+            sanitize_for_logging(user_email or "<anonymous>"),
+            sanitize_for_logging(model),
+        )
+        raise AuthorizationError(
+            "You are not authorized to use the selected model.",
+            code="MODEL_ACCESS_DENIED",
+        )
+
     async def execute(
         self,
         session_id: UUID,
@@ -188,6 +219,11 @@ class ChatOrchestrator:
         session = await self.session_repository.get(session_id)
         if not session:
             raise SessionNotFoundError(f"Session {session_id} not found")
+
+        # Enforce per-model group access control at request time. The `model`
+        # string comes straight off the client, so listing-layer filtering alone
+        # is bypassable -- a crafted request must be rejected here too.
+        await self._ensure_model_authorized(model, user_email)
 
         # Rewind/edit-and-resubmit: drop the targeted prompt and everything after
         # it so the new content takes its place in a single linear thread.

@@ -152,6 +152,53 @@ models:
 - `"system"` (default) - API key resolved from environment variables using `${VAR_NAME}` syntax
 - `"user"` - API key provided per-user via the UI, stored encrypted on disk
 
+## Restricting Model Access by Group (2026-07-10)
+
+By default every model is available to every user. To restrict a model to
+specific groups, add an optional `groups` list to the model definition. This
+uses the same `groups` access-control convention as MCP servers and RAG sources.
+
+```yaml
+models:
+  # Open to everyone (default) — no `groups` line.
+  gpt-4o-mini:
+    model_name: gpt-4o-mini
+    model_url: https://api.openai.com/v1/chat/completions
+    api_key: "${OPENAI_API_KEY}"
+    compliance_level: "External"
+
+  # Restricted — only members of `research` or `admin` may see or use it.
+  internal-frontier:
+    model_name: openai/frontier-internal
+    model_url: https://llm.internal.example.com/v1
+    api_key: "${INTERNAL_LLM_API_KEY}"
+    compliance_level: "Internal"
+    groups:
+      - research
+      - admin
+```
+
+### Behavior
+
+- **Omitted / empty `groups`**: unchanged — the model is available to all users
+  (fully backward compatible).
+- **Non-empty `groups`**: a user may access the model only if they are a member
+  of **at least one** listed group. Group membership is resolved through the same
+  `is_user_in_group` check used for MCP servers and RAG sources (external
+  authorization endpoint in production, mock groups in local debug mode).
+
+### Enforcement
+
+Access is enforced in two places so it cannot be bypassed by a crafted request:
+
+1. **Listing** — restricted models are filtered out of the `/api/config` and
+   `/api/config/shell` responses for unauthorized users, so they never appear in
+   the model dropdown.
+2. **Execution** — the chat orchestrator re-checks authorization for the
+   requested model on every turn before any LLM call. An unauthorized model
+   request is rejected with an authorization error even if the client sends the
+   model name directly over the WebSocket.
+
 ## Configuration Fields Explained
 
 *   **`model_name`**: (string) The identifier for the model that will be sent to the LLM provider. For `LiteLLM`, you often need to prefix this with the provider name (e.g., `openai/`, `anthropic/`).
@@ -166,6 +213,7 @@ models:
 *   **`customer_id_strip_suffix`**: (string, optional) An email-domain suffix (e.g. `"@mydomain.com"`) to strip from the reverse-proxy-provided username before it is sent as the `x-litellm-customer-id` header — turning `user@mydomain.com` into `user`. Only applies when `pass_user_as_customer_id` is `true` and the username actually ends with the suffix (matched case-insensitively); otherwise the value is sent unchanged. See [LiteLLM Customer ID Header](#litellm-customer-id-header) below.
 *   **`supports_vision`**: (boolean, default `false`) When `true`, the model accepts image inputs. Users can upload images in the chat UI, and those images are sent as inline base64 content blocks in the user message rather than being described in the text files manifest. Only raster image formats are supported (PNG, JPEG, GIF, WebP); SVG files are excluded. See [Vision Image Support](#vision-image-support-2026-03-23) below.
 *   **`compliance_level`**: (string) The security compliance level of this model (e.g., "Public", "Internal"). This is used to filter which models can be used in certain compliance contexts.
+*   **`groups`**: (list of strings, optional) Access-control groups for this model. When omitted or empty (the default), the model is available to everyone. When set, only users who belong to at least one listed group can see or use the model. Enforced at both the model-listing and chat-execution layers. See [Restricting Model Access by Group](#restricting-model-access-by-group-2026-07-10) above.
 
 ## LiteLLM Customer ID Header
 
