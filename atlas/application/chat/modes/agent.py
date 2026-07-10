@@ -91,7 +91,11 @@ class AgentModeRunner:
                 step = None
             if not content.strip():
                 continue
-            metadata = {"agent_mode": True, "agent_intermediate": True}
+            metadata = {
+                "agent_mode": True,
+                "agent_intermediate": True,
+                "message_type": "agent_intermediate",
+            }
             if step is not None:
                 metadata["step"] = step
             session.history.add_message(Message(

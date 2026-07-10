@@ -675,6 +675,7 @@ class TestAgenticLoopStreamingNarration:
         }
         assert context.history.messages[0].content == "I will search first."
         assert context.history.messages[0].metadata["agent_intermediate"] is True
+        assert context.history.messages[0].metadata["message_type"] == "agent_intermediate"
 
 
 # -- Tests: factory integration -----------------------------------------

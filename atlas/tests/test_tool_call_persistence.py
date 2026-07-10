@@ -673,6 +673,7 @@ class TestAgentModeRunnerPersistedOrder:
             result.tool_call_id = "tc1"
             return [result]
 
+        messages = [{"role": "user", "content": "add 1 and 2"}]
         with patch("atlas.application.chat.agent.agentic_loop.error_handler.safe_get_tools_schema",
                    new=AsyncMock(return_value=[])), \
              patch("atlas.application.chat.agent.agentic_loop.tool_executor.execute_multiple_tools",
@@ -680,7 +681,7 @@ class TestAgentModeRunnerPersistedOrder:
             _run(runner.run(
                 session=session,
                 model="test-model",
-                messages=[{"role": "user", "content": "add 1 and 2"}],
+                messages=messages,
                 selected_tools=["calc_add"],
                 selected_data_sources=None,
                 max_steps=5,
@@ -689,13 +690,14 @@ class TestAgentModeRunnerPersistedOrder:
         roles = [(m.role, m.metadata.get("message_type")) for m in session.history.messages]
         assert roles == [
             (MessageRole.USER, None),
-            (MessageRole.ASSISTANT, None),
+            (MessageRole.ASSISTANT, "agent_intermediate"),
             (MessageRole.TOOL, "tool_call"),
             (MessageRole.ASSISTANT, None),
         ]
         intermediate_msg = session.history.messages[1]
         assert intermediate_msg.content == "I will calculate the sum."
         assert intermediate_msg.metadata.get("agent_intermediate") is True
+        assert intermediate_msg.metadata.get("message_type") == "agent_intermediate"
         tool_msg = session.history.messages[2]
         assert tool_msg.metadata["tool_name"] == "calc_add"
         assert tool_msg.metadata["result"] == "3"
@@ -707,9 +709,14 @@ class TestAgentModeRunnerPersistedOrder:
 
 
 class TestHistoryExcludesToolCalls:
-    def test_tool_call_messages_not_sent_to_llm(self):
+    def test_display_only_messages_not_sent_to_llm(self):
         history = ConversationHistory()
         history.add_message(Message(role=MessageRole.USER, content="add 1 and 2"))
+        history.add_message(Message(
+            role=MessageRole.ASSISTANT,
+            content="I will calculate the sum.",
+            metadata={"message_type": "agent_intermediate", "agent_intermediate": True},
+        ))
         history.add_message(Message(
             role=MessageRole.TOOL,
             content="Tool call: calc_add",

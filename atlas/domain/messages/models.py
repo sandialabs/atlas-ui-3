@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 # Message types that exist only so the UI can re-render a reloaded
 # conversation. They are persisted (issue #684) but must never be replayed
 # back to the LLM as conversation turns.
-DISPLAY_ONLY_MESSAGE_TYPES = frozenset({"tool_call"})
+DISPLAY_ONLY_MESSAGE_TYPES = frozenset({"tool_call", "agent_intermediate"})
 
 
 class MessageRole(Enum):
@@ -30,6 +30,7 @@ class MessageType(Enum):
     TOOL_RESULT = "tool_result"
     AGENT_UPDATE = "agent_update"
     INTERMEDIATE_UPDATE = "intermediate_update"
+    AGENT_INTERMEDIATE = "agent_intermediate"
     DOWNLOAD_FILE = "download_file"
     FILE_DOWNLOAD = "file_download"
 

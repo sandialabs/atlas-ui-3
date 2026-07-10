@@ -182,6 +182,7 @@ class AgenticLoop(AgentLoopProtocol):
                     metadata={
                         "agent_mode": True,
                         "agent_intermediate": True,
+                        "message_type": "agent_intermediate",
                         "step": steps,
                     },
                 ))
