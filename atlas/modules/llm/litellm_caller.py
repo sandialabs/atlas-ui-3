@@ -473,6 +473,24 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
         return stored.token_value
 
+    @staticmethod
+    def _strip_customer_id_suffix(value: str, suffix: Optional[str]) -> str:
+        """Strip a configured email-domain suffix from a customer-id value.
+
+        Turns e.g. ``user@mydomain.com`` into ``user`` before it is sent as the
+        ``x-litellm-customer-id`` header. The suffix is matched
+        case-insensitively (email domains are case-insensitive). The value is
+        returned unchanged when no suffix is configured, when it does not end
+        with the suffix, or when stripping would leave an empty string.
+        """
+        if not suffix:
+            return value
+        if value.lower().endswith(suffix.lower()):
+            stripped = value[: len(value) - len(suffix)]
+            if stripped:
+                return stripped
+        return value
+
     def _get_model_kwargs(
         self, model_name: str, temperature: Optional[float] = None, user_email: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -518,8 +536,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 kwargs["api_base"] = model_config.model_url
 
         # Handle extra headers with environment variable expansion
+        extra_headers_resolved: Dict[str, str] = {}
         if model_config.extra_headers:
-            extra_headers_resolved = {}
             for header_key, header_value in model_config.extra_headers.items():
                 try:
                     resolved_value = resolve_env_var(header_value)
@@ -527,6 +545,39 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 except ValueError as e:
                     logger.error(f"Failed to resolve extra header '{header_key}' for model {model_name}: {e}")
                     raise
+
+        # Optionally attribute the request to the logged-in user via the
+        # LiteLLM customer-id header so a LiteLLM proxy can track per-user
+        # (per-customer) spend/usage. Skipped when no user_email is available
+        # (e.g. background/system calls) since the header is for tracking, not
+        # authentication.
+        if getattr(model_config, "pass_user_as_customer_id", False):
+            # Explicit extra_headers are authoritative: if the operator has
+            # already pinned a customer id (e.g. a static id for a service
+            # account or for testing), leave it in place and do not overwrite
+            # it. HTTP header names are case-insensitive, so compare accordingly.
+            has_explicit_customer_id = any(
+                key.lower() == "x-litellm-customer-id" for key in extra_headers_resolved
+            )
+            if has_explicit_customer_id:
+                logger.debug(
+                    "Model '%s' already sets x-litellm-customer-id via extra_headers; "
+                    "keeping the configured value instead of the logged-in user.",
+                    model_name,
+                )
+            elif user_email:
+                customer_id = self._strip_customer_id_suffix(
+                    user_email, getattr(model_config, "customer_id_strip_suffix", None)
+                )
+                extra_headers_resolved["x-litellm-customer-id"] = customer_id
+            else:
+                logger.debug(
+                    "Model '%s' has pass_user_as_customer_id enabled but no user_email "
+                    "was provided; skipping x-litellm-customer-id header.",
+                    model_name,
+                )
+
+        if extra_headers_resolved:
             kwargs["extra_headers"] = extra_headers_resolved
 
         return kwargs
