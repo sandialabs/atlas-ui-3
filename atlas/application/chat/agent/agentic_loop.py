@@ -122,7 +122,6 @@ class AgenticLoop(AgentLoopProtocol):
 
         steps = 0
         final_answer: Optional[str] = None
-        intermediate_messages: List[Dict[str, Any]] = []
         use_streaming = streaming and event_publisher
 
         # Record tool input/output as they stream to the UI so agent-mode tool
@@ -172,10 +171,12 @@ class AgenticLoop(AgentLoopProtocol):
                 "tool_calls": [_to_tool_call_dict(tc) for tc in tool_calls],
             })
             if llm_response.content and llm_response.content.strip():
-                intermediate_messages.append({
-                    "step": steps,
-                    "content": llm_response.content,
-                })
+                # The loop is the single owner of narration persistence: write
+                # the intermediate assistant text straight into history (before
+                # the tool_call rows) so reloads match the live transcript. It
+                # is a display-only ``agent_intermediate`` row, excluded from
+                # get_messages_for_llm() so strict-alternation providers never
+                # see back-to-back assistant turns on the next request.
                 context.history.add_message(Message(
                     role=MessageRole.ASSISTANT,
                     content=llm_response.content,
@@ -254,8 +255,6 @@ class AgenticLoop(AgentLoopProtocol):
             metadata={
                 "agent_mode": True,
                 "strategy": "agentic",
-                "intermediate_messages": intermediate_messages,
-                "intermediate_messages_persisted": True,
             },
         )
 
@@ -331,13 +330,7 @@ class AgenticLoop(AgentLoopProtocol):
                     final_response = item
         except Exception:
             logger.exception("Error during streaming LLM call in agentic loop")
-            if accumulated_content:
-                # Partial text already streamed to the UI -- close the stream and
-                # return what we have rather than discarding it.
-                await event_publisher.publish_token_stream(
-                    token="", is_first=False, is_last=True,
-                )
-            else:
+            if not accumulated_content:
                 # Nothing was produced before the error. Surface it instead of
                 # returning an empty response that looks to the user like the
                 # model silently said nothing (e.g. the provider rejecting a
@@ -345,6 +338,9 @@ class AgenticLoop(AgentLoopProtocol):
                 # called a tool"). The caller's error handling publishes a
                 # user-visible message.
                 raise
+            # Partial text already streamed to the UI -- fall through to the
+            # single stream-close below and return what we have rather than
+            # discarding it.
 
         if final_response is None:
             final_response = LLMResponse(content=accumulated_content)

@@ -77,33 +77,6 @@ class AgentModeRunner:
         )
         return None
 
-    def _persist_intermediate_messages(self, session: Session, result_metadata: Dict[str, Any]) -> None:
-        """Persist intermediate assistant narration returned by an agent loop."""
-        if result_metadata.get("intermediate_messages_persisted"):
-            return
-
-        for item in result_metadata.get("intermediate_messages") or []:
-            if isinstance(item, dict):
-                content = item.get("content") or ""
-                step = item.get("step")
-            else:
-                content = str(item)
-                step = None
-            if not content.strip():
-                continue
-            metadata = {
-                "agent_mode": True,
-                "agent_intermediate": True,
-                "message_type": "agent_intermediate",
-            }
-            if step is not None:
-                metadata["step"] = step
-            session.history.add_message(Message(
-                role=MessageRole.ASSISTANT,
-                content=content,
-                metadata=metadata,
-            ))
-
     async def run(
         self,
         session: Session,
@@ -197,12 +170,12 @@ class AgentModeRunner:
             raise
 
         # Append final message. Ordering contract with AgenticLoop: the loop
-        # has already flushed this turn's intermediate narration and tool_call
-        # rows into session.history (per step), so this append must come after
-        # run() returns — reloaded history reads user -> intermediate assistant
+        # is the single owner of narration persistence and has already flushed
+        # this turn's intermediate narration and tool_call rows into
+        # session.history (per step), so this append must come after run()
+        # returns — reloaded history reads user -> intermediate assistant
         # -> tool_call(s) -> assistant. Guarded by
         # TestAgentModeRunnerPersistedOrder in test_tool_call_persistence.py.
-        self._persist_intermediate_messages(session, result.metadata)
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
             content=result.final_answer,

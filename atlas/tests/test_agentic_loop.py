@@ -228,11 +228,12 @@ class TestAgenticLoopToolExecution:
         tool_mgr = _make_tool_manager({"search": "Found 3 results."})
         events, handler = _collect_events()
 
+        context = _make_context()
         loop = _make_loop(llm, tool_mgr)
         result = await loop.run(
             model="test-model",
             messages=[{"role": "user", "content": "Search for test"}],
-            context=_make_context(),
+            context=context,
             selected_tools=["search"],
             data_sources=None,
             max_steps=5,
@@ -242,9 +243,13 @@ class TestAgenticLoopToolExecution:
 
         assert result.final_answer == "Based on the search results, here is your answer."
         assert result.steps == 2
-        assert result.metadata["intermediate_messages"] == [
-            {"step": 1, "content": "Let me search for that."}
-        ]
+        # The loop is the single owner of narration persistence: the step-1
+        # narration is flushed straight into history as a display-only
+        # agent_intermediate row (there is no metadata copy of it).
+        intermediate = context.history.messages[0]
+        assert intermediate.content == "Let me search for that."
+        assert intermediate.metadata["message_type"] == "agent_intermediate"
+        assert intermediate.metadata["step"] == 1
 
         event_types = [e.type for e in events]
         assert "agent_tool_results" in event_types
@@ -625,6 +630,10 @@ class TestAgenticLoopStreamingErrorSurfacing:
         )
 
         assert result.final_answer == "partial answer"
+        # The partial text is finalized by exactly one is_last close (the single
+        # stream-close after the try/except), not a redundant double close from
+        # the error handler as well.
+        assert [call["is_last"] for call in publisher.calls].count(True) == 1
 
 
 class TestAgenticLoopStreamingNarration:
@@ -664,9 +673,6 @@ class TestAgenticLoopStreamingNarration:
         )
 
         assert result.final_answer == "Done."
-        assert result.metadata["intermediate_messages"] == [
-            {"step": 1, "content": "I will search first."}
-        ]
         assert [call["is_last"] for call in publisher.calls].count(True) == 2
         assert publisher.calls[1] == {
             "token": "",
