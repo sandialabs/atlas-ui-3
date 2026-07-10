@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.domain.errors import AuthorizationError, SessionNotFoundError
 from atlas.domain.messages.models import Message, MessageRole
@@ -167,8 +168,8 @@ class ChatOrchestrator:
             return
         logger.warning(
             "Rejected chat: user %s not authorized for model %s",
-            user_email or "<anonymous>",
-            model,
+            sanitize_for_logging(user_email or "<anonymous>"),
+            sanitize_for_logging(model),
         )
         raise AuthorizationError(
             "You are not authorized to use the selected model.",

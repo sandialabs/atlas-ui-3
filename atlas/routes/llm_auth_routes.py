@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
+from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.mcp_tools.token_storage import get_token_storage
 
@@ -40,6 +41,12 @@ async def get_llm_auth_status(current_user: str = Depends(get_current_user)):
         for model_name, model_config in llm_config.models.items():
             api_key_source = getattr(model_config, "api_key_source", "system")
             if api_key_source != "user":
+                continue
+
+            # Do not enumerate models the user is not authorized to access
+            # (per-model `groups`); otherwise the listing-layer hiding is
+            # bypassable via this endpoint for user-key models.
+            if not await is_model_allowed(model_config, current_user):
                 continue
 
             storage_key = f"llm:{model_name}"
@@ -82,6 +89,13 @@ async def upload_llm_token(
             raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
 
         model_config = llm_config.models[model_name]
+
+        # Reject token uploads for models the user is not authorized to access.
+        # Return 404 (not 403) so a restricted model is indistinguishable from a
+        # nonexistent one and its name/existence is not leaked.
+        if not await is_model_allowed(model_config, current_user):
+            raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
+
         if getattr(model_config, "api_key_source", "system") != "user":
             raise HTTPException(
                 status_code=400,

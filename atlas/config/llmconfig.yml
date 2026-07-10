@@ -182,11 +182,6 @@ models:
     description: "Local mock LLM for testing"
     compliance_level: "Internal"
     supports_tools: false
-    # Optional: restrict this model to specific groups. Omit (as here) to keep
-    # the default of "available to everyone". When set, only users in at least
-    # one listed group can see or use the model. See docs/admin/llm-config.md.
-    # groups:
-    #   - admin
     model_card: >
       Mock model for local development and testing. Returns canned responses
       and does not call any real LLM API. Does not support tool calling or
