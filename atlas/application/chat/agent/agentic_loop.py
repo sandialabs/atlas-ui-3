@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.modules.prompts.prompt_provider import PromptProvider
@@ -169,6 +170,23 @@ class AgenticLoop(AgentLoopProtocol):
                 "content": llm_response.content,
                 "tool_calls": [_to_tool_call_dict(tc) for tc in tool_calls],
             })
+            if llm_response.content and llm_response.content.strip():
+                # The loop is the single owner of narration persistence: write
+                # the intermediate assistant text straight into history (before
+                # the tool_call rows) so reloads match the live transcript. It
+                # is a display-only ``agent_intermediate`` row, excluded from
+                # get_messages_for_llm() so strict-alternation providers never
+                # see back-to-back assistant turns on the next request.
+                context.history.add_message(Message(
+                    role=MessageRole.ASSISTANT,
+                    content=llm_response.content,
+                    metadata={
+                        "agent_mode": True,
+                        "agent_intermediate": True,
+                        "message_type": "agent_intermediate",
+                        "step": steps,
+                    },
+                ))
 
             results = await tool_executor.execute_multiple_tools(
                 tool_calls=tool_calls,
@@ -234,7 +252,10 @@ class AgenticLoop(AgentLoopProtocol):
         return AgentResult(
             final_answer=final_answer,
             steps=steps,
-            metadata={"agent_mode": True, "strategy": "agentic"},
+            metadata={
+                "agent_mode": True,
+                "strategy": "agentic",
+            },
         )
 
     async def _call_llm(
@@ -309,13 +330,7 @@ class AgenticLoop(AgentLoopProtocol):
                     final_response = item
         except Exception:
             logger.exception("Error during streaming LLM call in agentic loop")
-            if accumulated_content:
-                # Partial text already streamed to the UI -- close the stream and
-                # return what we have rather than discarding it.
-                await event_publisher.publish_token_stream(
-                    token="", is_first=False, is_last=True,
-                )
-            else:
+            if not accumulated_content:
                 # Nothing was produced before the error. Surface it instead of
                 # returning an empty response that looks to the user like the
                 # model silently said nothing (e.g. the provider rejecting a
@@ -323,12 +338,18 @@ class AgenticLoop(AgentLoopProtocol):
                 # called a tool"). The caller's error handling publishes a
                 # user-visible message.
                 raise
+            # Partial text already streamed to the UI -- fall through to the
+            # single stream-close below and return what we have rather than
+            # discarding it.
 
         if final_response is None:
             final_response = LLMResponse(content=accumulated_content)
+        elif accumulated_content and not final_response.content:
+            final_response.content = accumulated_content
 
-        # If the response is text-only (no tools), close the stream
-        if not final_response.has_tool_calls() and accumulated_content:
+        # Close any streamed text, including narration for tool-call turns, so
+        # each iteration finalizes as its own UI bubble before tool rows render.
+        if accumulated_content:
             await event_publisher.publish_token_stream(
                 token="", is_first=False, is_last=True,
             )

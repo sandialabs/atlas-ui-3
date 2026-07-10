@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #717 - 2026-07-08
+- **Agent-mode narration persisted**: Intermediate assistant text in agent mode now finalizes its live stream bubble even on tool-call turns, is saved with the conversation before the corresponding tool row, and agent-mode prompts now ask for concise narration before tool calls. The persisted narration is a display-only `agent_intermediate` row (excluded from `get_messages_for_llm()`) so reloaded conversations re-render it without replaying back-to-back assistant turns that strict-alternation providers reject.
+
 ### PR #718 - 2026-07-09
 - **LiteLLM customer-id header**: Added a per-model `pass_user_as_customer_id` option (default `false`). When enabled, the logged-in user's identifier is sent as the `x-litellm-customer-id` HTTP header on each request, letting a LiteLLM proxy attribute spend/usage to that end user (customer). The header merges with any configured `extra_headers` (an explicit `x-litellm-customer-id` there is authoritative and wins, matched case-insensitively) and is omitted for background/system calls that have no associated user. A companion `customer_id_strip_suffix` option optionally strips a configured email-domain suffix (e.g. `@mydomain.com`) from the reverse-proxy-provided username before sending it, turning `user@mydomain.com` into `user`. Applies to both streaming and non-streaming paths (single `_get_model_kwargs` chokepoint). Added unit tests and documented the fields in `docs/admin/llm-config.md` (closes #718).
 
