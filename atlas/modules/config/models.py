@@ -82,6 +82,11 @@ class ModelConfig(BaseModel):
     extra_headers: Optional[Dict[str, str]] = None
     # Compliance/security level (e.g., "External", "Internal", "Public")
     compliance_level: Optional[str] = None
+    # Access groups. Empty (the default) means every user may access this model,
+    # preserving the historical behavior. When non-empty, only users who are a
+    # member of at least one listed group may see or use this model. Matches the
+    # ``groups`` access-control convention used by MCPServerConfig / RAGSourceConfig.
+    groups: List[str] = Field(default_factory=list)
     # API key source: "system" uses env var resolution, "user" requires per-user key from token storage,
     # "globus" uses Globus OAuth token for the configured scope (requires globus_scope)
     api_key_source: str = "system"

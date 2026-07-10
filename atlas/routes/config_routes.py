@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 
 from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
+from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
 from atlas.routes.files_routes import get_file_upload_limit_config
 from atlas.modules.mcp_tools.mcp_discovery import _ATLAS_RAG_TOOL_SCHEMAS
@@ -137,6 +138,9 @@ async def get_config_shell(
     # Build models list without per-user token validity checks (fast path)
     models_list = []
     for model_name, model_config in llm_config.models.items():
+        # Hide models the user is not authorized to access (per-model `groups`).
+        if not await is_model_allowed(model_config, current_user):
+            continue
         model_info = {
             "name": model_name,
             "description": model_config.description,
@@ -418,6 +422,9 @@ async def get_config(
 
     models_list = []
     for model_name, model_config in llm_config.models.items():
+        # Hide models the user is not authorized to access (per-model `groups`).
+        if not await is_model_allowed(model_config, current_user):
+            continue
         model_info = {
             "name": model_name,
             "description": model_config.description,
