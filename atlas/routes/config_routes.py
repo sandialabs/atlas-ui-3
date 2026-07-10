@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 
-from atlas.core.auth import is_user_in_group
+from atlas.core.auth import is_user_authorized_for_groups, is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.infrastructure.app_factory import app_factory
 from atlas.routes.files_routes import get_file_upload_limit_config
@@ -84,6 +84,58 @@ def _atlas_rag_tools_info() -> dict:
     }
 
 
+def _model_info(model_name: str, model_config, app_settings, current_user: str, token_storage=None) -> dict:
+    """Build frontend-safe metadata for one authorized model."""
+    model_info = {
+        "name": model_name,
+        "description": model_config.description,
+    }
+    if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
+        model_info["compliance_level"] = model_config.compliance_level
+    api_key_source = getattr(model_config, "api_key_source", "system")
+    if api_key_source == "user":
+        model_info["api_key_source"] = "user"
+        if token_storage is not None:
+            stored = token_storage.get_valid_token(current_user, f"llm:{model_name}")
+            model_info["user_has_key"] = stored is not None
+    elif api_key_source == "globus":
+        model_info["api_key_source"] = "globus"
+        globus_scope = getattr(model_config, "globus_scope", None)
+        model_info["globus_scope"] = globus_scope
+        if token_storage is not None:
+            if globus_scope:
+                stored = token_storage.get_valid_token(current_user, f"globus:{globus_scope}")
+                model_info["user_has_key"] = stored is not None
+            else:
+                model_info["user_has_key"] = False
+    model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
+    model_info["supports_pdf"] = bool(getattr(model_config, "supports_pdf", False))
+    model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
+    model_card = getattr(model_config, "model_card", None)
+    if model_card:
+        model_info["model_card"] = model_card
+    return model_info
+
+
+async def _authorized_models_list(
+    llm_config,
+    app_settings,
+    current_user: str,
+    token_storage=None,
+) -> list[dict]:
+    """Build the models list, omitting models whose group ACL excludes the user."""
+    models_list = []
+    for model_name, model_config in llm_config.models.items():
+        if not await is_user_authorized_for_groups(
+            current_user,
+            getattr(model_config, "groups", []),
+            is_user_in_group,
+        ):
+            continue
+        models_list.append(_model_info(model_name, model_config, app_settings, current_user, token_storage))
+    return models_list
+
+
 @router.get("/banners")
 async def get_banners(current_user: str = Depends(get_current_user)):
     """Get banners for the user."""
@@ -135,27 +187,7 @@ async def get_config_shell(
     app_settings = config_manager.app_settings
 
     # Build models list without per-user token validity checks (fast path)
-    models_list = []
-    for model_name, model_config in llm_config.models.items():
-        model_info = {
-            "name": model_name,
-            "description": model_config.description,
-        }
-        if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
-            model_info["compliance_level"] = model_config.compliance_level
-        api_key_source = getattr(model_config, "api_key_source", "system")
-        if api_key_source == "user":
-            model_info["api_key_source"] = "user"
-        elif api_key_source == "globus":
-            model_info["api_key_source"] = "globus"
-            model_info["globus_scope"] = getattr(model_config, "globus_scope", None)
-        model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
-        model_info["supports_pdf"] = bool(getattr(model_config, "supports_pdf", False))
-        model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
-        model_card = getattr(model_config, "model_card", None)
-        if model_card:
-            model_info["model_card"] = model_card
-        models_list.append(model_info)
+    models_list = await _authorized_models_list(llm_config, app_settings, current_user)
 
     return {
         "app_name": app_settings.app_name,
@@ -416,37 +448,7 @@ async def get_config(
     from atlas.modules.mcp_tools.token_storage import get_token_storage
     token_storage = get_token_storage()
 
-    models_list = []
-    for model_name, model_config in llm_config.models.items():
-        model_info = {
-            "name": model_name,
-            "description": model_config.description,
-        }
-        # Include compliance_level if feature is enabled
-        if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
-            model_info["compliance_level"] = model_config.compliance_level
-        # Include api_key_source so frontend knows which models need user keys
-        api_key_source = getattr(model_config, "api_key_source", "system")
-        if api_key_source == "user":
-            model_info["api_key_source"] = "user"
-            stored = token_storage.get_valid_token(current_user, f"llm:{model_name}")
-            model_info["user_has_key"] = stored is not None
-        elif api_key_source == "globus":
-            model_info["api_key_source"] = "globus"
-            globus_scope = getattr(model_config, "globus_scope", None)
-            model_info["globus_scope"] = globus_scope
-            if globus_scope:
-                stored = token_storage.get_valid_token(current_user, f"globus:{globus_scope}")
-                model_info["user_has_key"] = stored is not None
-            else:
-                model_info["user_has_key"] = False
-        model_info["supports_vision"] = bool(getattr(model_config, "supports_vision", False))
-        model_info["supports_pdf"] = bool(getattr(model_config, "supports_pdf", False))
-        model_info["supports_tools"] = bool(getattr(model_config, "supports_tools", True))
-        model_card = getattr(model_config, "model_card", None)
-        if model_card:
-            model_info["model_card"] = model_card
-        models_list.append(model_info)
+    models_list = await _authorized_models_list(llm_config, app_settings, current_user, token_storage)
 
     # Build tool approval settings - only include tools from authorized servers
     tool_approvals_config = config_manager.tool_approvals_config

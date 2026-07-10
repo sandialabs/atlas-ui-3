@@ -22,6 +22,7 @@ models:
     extra_headers:
       "x-my-custom-header": "value"
     compliance_level: "External"
+    groups: ["llm_power_users"]
     supports_vision: true
 
   OpenRouterLlama:
@@ -35,6 +36,7 @@ models:
       "HTTP-Referer": "${OPENROUTER_SITE_URL}"
       "X-Title": "${OPENROUTER_SITE_NAME}"
     compliance_level: "External"
+    groups: ["research"]
 ```
 
 **Note**: The second example demonstrates environment variable expansion in `extra_headers`, which is useful for services like OpenRouter that require site identification headers.
@@ -152,6 +154,23 @@ models:
 - `"system"` (default) - API key resolved from environment variables using `${VAR_NAME}` syntax
 - `"user"` - API key provided per-user via the UI, stored encrypted on disk
 
+## Group-Restricted Models
+
+Models can be restricted to one or more authorization groups with the same group-checking mechanism used for MCP servers and RAG sources. Add a `groups` list to the model definition:
+
+```yaml
+models:
+  internal-reasoning:
+    model_name: openai/internal-reasoning
+    model_url: https://llm-gateway.example.com/v1
+    api_key: "${INTERNAL_LLM_API_KEY}"
+    description: "Internal reasoning model"
+    compliance_level: "Internal"
+    groups: ["llm_power_users"]
+```
+
+When `groups` is omitted or empty, the model is available to all authenticated users. When one or more groups are listed, a user must belong to at least one of those groups to see the model in `/api/config/shell`, `/api/config`, or per-user API key status, and the chat backend rejects direct requests for the hidden model.
+
 ## Configuration Fields Explained
 
 *   **`model_name`**: (string) The identifier for the model that will be sent to the LLM provider. For `LiteLLM`, you often need to prefix this with the provider name (e.g., `openai/`, `anthropic/`).
@@ -162,6 +181,7 @@ models:
 *   **`temperature`**: (float) A value between 0.0 and 1.0 that controls the creativity of the model's responses. Higher values are more creative.
 *   **`extra_headers`**: (dictionary) A set of custom HTTP headers to include in the request, which is useful for some proxy services or custom providers. **Environment Variable Support**: Header values can also use the `${VAR_NAME}` syntax for environment variable expansion. This is particularly useful for services like OpenRouter that require headers like `HTTP-Referer` and `X-Title`. If an environment variable is missing, the application will raise a clear error message.
 *   **`api_key_source`**: (string) Controls where the API key comes from. `"system"` (default) resolves from environment variables. `"user"` requires each user to provide their own key via the UI. See [Per-User API Keys](#per-user-api-keys-2026-02-08) above.
+*   **`groups`**: (list of strings, optional) Restricts the model to users who belong to at least one listed authorization group. Leave unset or empty to make the model available to all authenticated users. See [Group-Restricted Models](#group-restricted-models) above.
 *   **`pass_user_as_customer_id`**: (boolean, default `false`) When `true`, the logged-in user's identifier is sent as the `x-litellm-customer-id` HTTP header on each request to the model. A [LiteLLM proxy](https://docs.litellm.ai/docs/proxy/customers) uses this header to attribute spend/usage to the end user (customer). See [LiteLLM Customer ID Header](#litellm-customer-id-header) below.
 *   **`customer_id_strip_suffix`**: (string, optional) An email-domain suffix (e.g. `"@mydomain.com"`) to strip from the reverse-proxy-provided username before it is sent as the `x-litellm-customer-id` header — turning `user@mydomain.com` into `user`. Only applies when `pass_user_as_customer_id` is `true` and the username actually ends with the suffix (matched case-insensitively); otherwise the value is sent unchanged. See [LiteLLM Customer ID Header](#litellm-customer-id-header) below.
 *   **`supports_vision`**: (boolean, default `false`) When `true`, the model accepts image inputs. Users can upload images in the chat UI, and those images are sent as inline base64 content blocks in the user message rather than being described in the text files manifest. Only raster image formats are supported (PNG, JPEG, GIF, WebP); SVG files are excluded. See [Vision Image Support](#vision-image-support-2026-03-23) below.

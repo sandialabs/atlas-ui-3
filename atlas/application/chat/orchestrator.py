@@ -4,7 +4,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from atlas.domain.errors import SessionNotFoundError
+from atlas.core.auth import is_user_authorized_for_groups
+from atlas.domain.errors import AuthorizationError, SessionNotFoundError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
@@ -145,6 +146,28 @@ class ChatOrchestrator:
         except Exception:
             return True
 
+    async def _ensure_model_authorized(self, model: str, user_email: Optional[str]) -> None:
+        """Reject configured models whose group ACL excludes the current user."""
+        if not self.config_manager:
+            return
+        try:
+            model_config = self.config_manager.llm_config.models.get(model)
+        except Exception:
+            return
+        if not model_config:
+            return
+        groups = getattr(model_config, "groups", [])
+        if await is_user_authorized_for_groups(user_email, groups):
+            return
+        logger.warning(
+            "Rejected model %s for unauthorized user",
+            model,
+        )
+        raise AuthorizationError(
+            "Model not found or access denied",
+            code="MODEL_ACCESS_DENIED",
+        )
+
     async def execute(
         self,
         session_id: UUID,
@@ -188,6 +211,8 @@ class ChatOrchestrator:
         session = await self.session_repository.get(session_id)
         if not session:
             raise SessionNotFoundError(f"Session {session_id} not found")
+
+        await self._ensure_model_authorized(model, user_email)
 
         # Rewind/edit-and-resubmit: drop the targeted prompt and everything after
         # it so the new content takes its place in a single linear thread.

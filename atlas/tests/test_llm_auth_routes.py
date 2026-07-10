@@ -9,7 +9,7 @@ Updated: 2026-02-08
 """
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -39,6 +39,7 @@ def _mock_llm_config(models_dict):
         m = MagicMock()
         m.description = attrs.get("description", "")
         m.api_key_source = attrs.get("api_key_source", "system")
+        m.groups = attrs.get("groups", [])
         mock_models[name] = m
     mock_config.models = mock_models
     return mock_config
@@ -100,6 +101,23 @@ class TestGetLLMAuthStatus:
         data = response.json()
         assert data["models"][0]["authenticated"] is True
         assert data["models"][0]["is_expired"] is False
+
+    def test_filters_group_restricted_models(self, client, mock_deps):
+        """Should hide user-key models when the current user lacks required groups."""
+        restricted = MagicMock()
+        restricted.description = "Restricted"
+        restricted.api_key_source = "user"
+        restricted.groups = ["llm_special"]
+        mock_deps["config_manager"].llm_config.models["restricted-model"] = restricted
+
+        with patch(
+            "atlas.routes.llm_auth_routes.is_user_authorized_for_groups",
+            AsyncMock(side_effect=lambda _user, groups: not groups),
+        ):
+            response = client.get("/api/llm/auth/status")
+
+        assert response.status_code == 200
+        assert [model["model_name"] for model in response.json()["models"]] == ["user-model"]
 
 
 class TestUploadLLMToken:
@@ -200,6 +218,27 @@ class TestUploadLLMToken:
         )
         assert response.status_code == 400
         assert "does not accept per-user" in response.json()["detail"]
+
+    def test_upload_hidden_when_user_lacks_model_group(self, client, mock_deps):
+        """Should not allow uploading a key for a model hidden by groups."""
+        restricted = MagicMock()
+        restricted.api_key_source = "user"
+        restricted.groups = ["llm_special"]
+        mock_deps["factory"].get_config_manager.return_value.llm_config.models[
+            "restricted-model"
+        ] = restricted
+
+        with patch(
+            "atlas.routes.llm_auth_routes.is_user_authorized_for_groups",
+            AsyncMock(return_value=False),
+        ):
+            response = client.post(
+                "/api/llm/auth/restricted-model/token",
+                json={"token": "sk-abc123"},
+            )
+
+        assert response.status_code == 404
+        mock_deps["token_storage"].store_token.assert_not_called()
 
     def test_upload_strips_whitespace(self, client, mock_deps):
         """Should strip whitespace from token."""

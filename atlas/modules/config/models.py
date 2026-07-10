@@ -82,6 +82,8 @@ class ModelConfig(BaseModel):
     extra_headers: Optional[Dict[str, str]] = None
     # Compliance/security level (e.g., "External", "Internal", "Public")
     compliance_level: Optional[str] = None
+    # Optional access groups. If set, users must belong to at least one group.
+    groups: List[str] = Field(default_factory=list)
     # API key source: "system" uses env var resolution, "user" requires per-user key from token storage,
     # "globus" uses Globus OAuth token for the configured scope (requires globus_scope)
     api_key_source: str = "system"

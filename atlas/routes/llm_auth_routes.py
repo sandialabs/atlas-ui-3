@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from atlas.core.auth import is_user_authorized_for_groups
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.mcp_tools.token_storage import get_token_storage
@@ -38,6 +39,12 @@ async def get_llm_auth_status(current_user: str = Depends(get_current_user)):
 
         models_status = []
         for model_name, model_config in llm_config.models.items():
+            if not await is_user_authorized_for_groups(
+                current_user,
+                getattr(model_config, "groups", []),
+            ):
+                continue
+
             api_key_source = getattr(model_config, "api_key_source", "system")
             if api_key_source != "user":
                 continue
@@ -82,6 +89,12 @@ async def upload_llm_token(
             raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
 
         model_config = llm_config.models[model_name]
+        if not await is_user_authorized_for_groups(
+            current_user,
+            getattr(model_config, "groups", []),
+        ):
+            raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
+
         if getattr(model_config, "api_key_source", "system") != "user":
             raise HTTPException(
                 status_code=400,

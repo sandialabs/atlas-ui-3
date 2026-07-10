@@ -12,8 +12,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from atlas.application.chat.orchestrator import ChatOrchestrator
+from atlas.domain.errors import AuthorizationError
 from atlas.domain.sessions.models import Session
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
+from atlas.modules.config.config_manager import LLMConfig, ModelConfig
 
 
 def _make_orchestrator(
@@ -21,6 +23,7 @@ def _make_orchestrator(
     rag_mock=None,
     tools_mock=None,
     agent_mock=None,
+    config_manager=None,
 ):
     """Build a ChatOrchestrator with mocked mode runners."""
     llm = MagicMock()
@@ -51,6 +54,7 @@ def _make_orchestrator(
         rag_mode=rag_runner,
         tools_mode=tools_runner,
         agent_mode=agent_runner,
+        config_manager=config_manager,
     )
     return orch, repo, {
         "plain": plain, "rag": rag, "tools": tools, "agent": agent,
@@ -230,3 +234,32 @@ async def test_agent_mode_with_selected_atlas_rag_tool_routes_to_agent():
 
     called_kwargs = mocks["agent"].await_args.kwargs
     assert called_kwargs["selected_tools"] == ["atlas_rag_query"]
+
+
+@pytest.mark.asyncio
+async def test_group_restricted_model_denied_before_message_added():
+    config_manager = MagicMock()
+    config_manager.llm_config = LLMConfig(
+        models={
+            "restricted-model": ModelConfig(
+                model_name="openai/restricted",
+                model_url="https://example.test/v1",
+                groups=["llm_special"],
+            )
+        }
+    )
+    orch, repo, mocks = _make_orchestrator(config_manager=config_manager)
+    sid = await _seed_session(repo)
+
+    with pytest.raises(AuthorizationError) as exc:
+        await orch.execute(
+            session_id=sid,
+            content="Hello",
+            model="restricted-model",
+            user_email="user@example.com",
+        )
+
+    assert exc.value.code == "MODEL_ACCESS_DENIED"
+    session = await repo.get(sid)
+    assert session.history.messages == []
+    mocks["plain"].assert_not_awaited()

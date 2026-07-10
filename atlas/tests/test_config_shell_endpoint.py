@@ -2,10 +2,13 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from main import app
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
+from atlas.modules.config.config_manager import LLMConfig, ModelConfig
+from atlas.routes import config_routes
 
 
 def test_config_shell_endpoint_returns_200():
@@ -157,3 +160,43 @@ def test_config_shell_file_upload_uses_env_setting():
         assert file_upload["max_file_size_bytes"] == 7 * 1024 * 1024
     finally:
         config_manager.app_settings.max_file_upload_size_mb = original_limit
+
+
+def test_model_config_accepts_groups():
+    model = ModelConfig(
+        model_name="openai/test",
+        model_url="https://example.test/v1",
+        groups=["llm_special"],
+    )
+
+    assert model.groups == ["llm_special"]
+
+
+@pytest.mark.asyncio
+async def test_authorized_models_list_filters_group_restricted_models():
+    llm_config = LLMConfig(
+        models={
+            "public-model": ModelConfig(
+                model_name="openai/public",
+                model_url="https://example.test/v1",
+                description="Public",
+            ),
+            "restricted-model": ModelConfig(
+                model_name="openai/restricted",
+                model_url="https://example.test/v1",
+                description="Restricted",
+                groups=["llm_special"],
+            ),
+        }
+    )
+    app_settings = MagicMock()
+    app_settings.feature_compliance_levels_enabled = False
+
+    with patch.object(config_routes, "is_user_in_group", AsyncMock(return_value=False)):
+        models = await config_routes._authorized_models_list(
+            llm_config,
+            app_settings,
+            "user@example.com",
+        )
+
+    assert [model["name"] for model in models] == ["public-model"]

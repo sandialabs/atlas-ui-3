@@ -4,7 +4,7 @@ import hmac
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Tuple
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 import jwt
@@ -71,6 +71,24 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         }
         user_groups = mock_groups.get(user_id, [])
         return group_id in user_groups
+
+
+async def is_user_authorized_for_groups(
+    user_id: Optional[str],
+    groups: List[str],
+    auth_check_func: Optional[Callable[[str, str], Awaitable[bool]]] = None,
+) -> bool:
+    """Return True when a user is allowed by an optional group allowlist."""
+    if not groups:
+        return True
+    if not user_id:
+        return False
+
+    check = auth_check_func or is_user_in_group
+    for group in groups:
+        if await check(user_id, group):
+            return True
+    return False
 
 
 def _get_alb_public_key(kid: str, aws_region: str) -> Optional[str]:
