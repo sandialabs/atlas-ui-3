@@ -50,8 +50,13 @@ class ToolAuthorizationService:
         Returns:
             Filtered list of authorized tool names
         """
-        if not selected_tools or not self.tool_manager:
-            return selected_tools or []
+        if not selected_tools:
+            return []
+        if not self.tool_manager:
+            logger.warning(
+                "Tool ACL filtering requested but no tool manager available; dropping tools"
+            )
+            return []
 
         try:
             user = user_email or ""
@@ -94,11 +99,11 @@ class ToolAuthorizationService:
             return filtered_tools
 
         except Exception:
-            logger.debug(
-                "Tool ACL filtering failed; proceeding with original selection",
+            logger.warning(
+                "Tool ACL filtering failed; dropping all selected tools",
                 exc_info=True
             )
-            return selected_tools
+            return []
 
     async def _get_authorized_servers(self, user: str) -> List[str]:
         """

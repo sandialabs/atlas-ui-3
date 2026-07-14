@@ -13,14 +13,14 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
 from atlas.domain.messages.models import ToolCall, ToolResult
+from atlas.modules.mcp_tools.mcp_discovery import (
+    _ATLAS_RAG_DISCOVER_TOOL,
+    _ATLAS_RAG_QUERY_TOOL,
+)
 from atlas.modules.mcp_tools.mcp_errors import (
     _is_session_terminated_error,
     _is_task_forbidden_error,
     _is_task_forbidden_result,
-)
-from atlas.modules.mcp_tools.mcp_discovery import (
-    _ATLAS_RAG_DISCOVER_TOOL,
-    _ATLAS_RAG_QUERY_TOOL,
 )
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
@@ -58,6 +58,49 @@ class ExecutionMixin:
 
         self._server_task_support[server_name] = supports
         return supports
+
+    def _is_user_present(self, context: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Return the trusted user email from execution context, if any."""
+        if isinstance(context, dict):
+            return context.get("user_email") or None
+        return None
+
+    async def _is_server_authorized_for_user(
+        self,
+        server_name: str,
+        user_email: Optional[str],
+    ) -> bool:
+        """Fail-closed group ACL check for an MCP server.
+
+        Mirrors ``MCPToolManager.get_authorized_servers`` but is designed to be
+        called at the single execution choke point with the trusted user
+        identity from the request context. Missing user context, disabled
+        servers, or any error in the authorization check all deny access.
+        """
+        server_config = getattr(self, "servers_config", {}).get(server_name, {})
+        if not server_config.get("enabled", True):
+            return False
+
+        required_groups = server_config.get("groups", [])
+        if not required_groups:
+            return True
+
+        if not user_email:
+            return False
+
+        # Import locally to avoid a module-level import cycle with core.auth.
+        from atlas.core.auth import is_user_in_group
+        try:
+            group_checks = [await is_user_in_group(user_email, group) for group in required_groups]
+            return any(group_checks)
+        except Exception:
+            logger.warning(
+                "Group check failed for server '%s' user '%s'; failing closed",
+                sanitize_for_logging(server_name),
+                sanitize_for_logging(user_email),
+                exc_info=True,
+            )
+            return False
 
     async def call_tool(
         self,
@@ -405,13 +448,31 @@ class ExecutionMixin:
         server_name = tool_entry['server']
         actual_tool_name = tool_entry['tool'].name if tool_entry['tool'] else tool_call.name
 
+        # Fail-closed authorization at the single execution choke point. This
+        # closes the agent-mode ACL bypass (where selected_tools reach the loop
+        # without request-time filtering) and blocks hallucinated or prompt-
+        # injected tool names from executing against group-restricted servers.
+        user_email = self._is_user_present(context)
+        if not await self._is_server_authorized_for_user(server_name, user_email):
+            error_msg = f"Tool '{tool_call.name}' is not authorized for this user"
+            logger.warning(
+                "Denied execution of tool '%s' on server '%s' for user '%s'",
+                sanitize_for_logging(tool_call.name),
+                sanitize_for_logging(server_name),
+                sanitize_for_logging(user_email or "<anonymous>"),
+            )
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                content=error_msg,
+                success=False,
+                error=error_msg,
+            )
+
         try:
             update_cb = None
-            user_email = None
             conversation_id = None
             if isinstance(context, dict):
                 update_cb = context.get("update_callback")
-                user_email = context.get("user_email")
                 conversation_id = context.get("conversation_id")
 
             if update_cb is None:
