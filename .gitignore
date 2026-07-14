@@ -8,6 +8,10 @@ atlas/.env.example
 .claude
 
 .pytest_cache
+# Node
+node_modules/
+**/node_modules/
+
 # Python
 __pycache__/
 *.py[cod]
