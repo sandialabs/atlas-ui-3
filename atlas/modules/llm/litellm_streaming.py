@@ -7,10 +7,10 @@ These methods are mixed into LiteLLMCaller via LiteLLMStreamingMixin.
 import asyncio
 import logging
 import time
-from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 from litellm import acompletion
+from litellm.types.utils import ChatCompletionMessageToolCall, Function
 
 from atlas.application.chat.capture.capture_context import record_llm_call
 from atlas.core.metrics_logger import log_metric
@@ -216,17 +216,26 @@ class LiteLLMStreamingMixin:
                                 if hasattr(tc_delta.function, "arguments") and tc_delta.function.arguments:
                                     entry["function"]["arguments"] += tc_delta.function.arguments
 
-                # Build final tool_calls list as namespace objects (matching
-                # litellm's non-streaming response format with attribute access)
+                # Build final tool_calls list using litellm's own response type
+                # rather than SimpleNamespace. The objects are appended verbatim
+                # to the assistant message and re-sent on the follow-up request
+                # (agentic loop). litellm's Bedrock Converse transformer accesses
+                # tool calls with dict syntax (``"function" in tool``,
+                # ``tool["id"]``); SimpleNamespace supports only attribute access,
+                # so a Bedrock follow-up raised "Unable to convert openai tool
+                # calls to bedrock tool calls". ChatCompletionMessageToolCall
+                # supports BOTH attribute access (used by the tool executor) and
+                # dict access (used by the Bedrock transform), matching the
+                # non-streaming path exactly.
                 tool_calls_list = None
                 if accumulated_tool_calls:
                     tool_calls_list = []
                     for k in sorted(accumulated_tool_calls.keys()):
                         tc = accumulated_tool_calls[k]
-                        tool_calls_list.append(SimpleNamespace(
+                        tool_calls_list.append(ChatCompletionMessageToolCall(
                             id=tc["id"],
                             type=tc["type"],
-                            function=SimpleNamespace(
+                            function=Function(
                                 name=tc["function"]["name"],
                                 arguments=tc["function"]["arguments"],
                             ),
