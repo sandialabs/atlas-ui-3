@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2026-07-14
+### PR #723 - 2026-07-14
 - **Fail-closed MCP tool ACL enforcement at execution time**: Fixed agent mode bypassing the tool authorization filter by enforcing group ACL checks inside `MCPToolManager.execute_tool` at the single execution choke point, keyed on the trusted `context["user_email"]`. Missing user context, disabled servers, group-check exceptions, and unauthorized membership now deny execution rather than fall back to allowing the call. Also made `ToolAuthorizationService.filter_authorized_tools` fail closed: it returns an empty list whenever the ACL check cannot complete instead of returning the unfiltered selection.
 
 ### PR #717 - 2026-07-08
