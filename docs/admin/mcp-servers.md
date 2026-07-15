@@ -204,7 +204,7 @@ export MY_API_KEY="your-secret-api-key"
 
 ## Access Control with Groups
 
-You can restrict access to MCP servers based on user groups. This is a critical feature for controlling which users can access powerful or sensitive tools. If a user is not in the required group, the server will be completely invisible to them in the UI, and any attempt to call its functions will be blocked.
+You can restrict access to MCP servers based on user groups. This is a critical feature for controlling which users can access powerful or sensitive tools. Group checks run at both request time (when tools are listed or selected) and at the single tool-execution choke point inside `MCPToolManager.execute_tool`, keyed on the authenticated user's identity from the request context. A missing user context, a disabled server, an unreachable authorization service, or membership that does not satisfy the `groups` list will all fail closed and deny execution. If a user is not in the required group, the server will be completely invisible to them in the UI, and any attempt to call its functions will be blocked.
 
 ## A Note on the `_atlas_user` Argument
 

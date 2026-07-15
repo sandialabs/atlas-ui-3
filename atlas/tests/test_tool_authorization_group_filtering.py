@@ -280,3 +280,26 @@ async def test_tool_authorization_passes_auth_function_not_none():
         "auth_check_func must not be None - this is a security vulnerability"
     assert callable(call_tracker["auth_func_received"]), \
         "auth_check_func must be callable"
+
+
+@pytest.mark.asyncio
+async def test_tool_authorization_fail_closed_on_exception():
+    """Any exception during ACL filtering must return an empty list, not the
+    original selected_tools."""
+
+    class ExplodingToolManager:
+        def __init__(self):
+            self.servers_config = {"server": {"enabled": True, "groups": ["admin"]}}
+
+        async def get_authorized_servers(self, user_email: str, auth_check_func):
+            raise RuntimeError("auth endpoint unreachable")
+
+    auth_service = ToolAuthorizationService(ExplodingToolManager())
+
+    filtered_tools = await auth_service.filter_authorized_tools(
+        selected_tools=["server_secret_tool"],
+        user_email="user@example.com",
+    )
+
+    assert filtered_tools == [], \
+        "Authorization filter must fail closed and drop all tools on error"

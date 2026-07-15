@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #723 - 2026-07-14
+- **Fail-closed MCP tool ACL enforcement at execution time**: Fixed agent mode bypassing the tool authorization filter by enforcing group ACL checks inside `MCPToolManager.execute_tool` at the single execution choke point, keyed on the trusted `context["user_email"]`. Missing user context, disabled servers, group-check exceptions, and unauthorized membership now deny execution rather than fall back to allowing the call. Also made `ToolAuthorizationService.filter_authorized_tools` fail closed: it returns an empty list whenever the ACL check cannot complete instead of returning the unfiltered selection.
+- **Runtime-only container compatibility**: Enable the PyO3 stable-ABI compatibility mode while installing LiteLLM so the rolling Chainguard Python 3.14 image does not fail its native extension build.
+
 ### PR #717 - 2026-07-08
 - **Agent-mode narration persisted**: Intermediate assistant text in agent mode now finalizes its live stream bubble even on tool-call turns, is saved with the conversation before the corresponding tool row, and agent-mode prompts now ask for concise narration before tool calls. The persisted narration is a display-only `agent_intermediate` row (excluded from `get_messages_for_llm()`) so reloaded conversations re-render it without replaying back-to-back assistant turns that strict-alternation providers reject.
 
