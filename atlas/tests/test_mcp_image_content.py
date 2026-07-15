@@ -66,6 +66,7 @@ class TestImageContentHandling:
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._elicitation_routing = {}
         manager._sampling_routing = {}
+        manager.servers_config = {"test-server": {"enabled": True}}
 
         # Mock tool object
         class MockTool:
@@ -118,6 +119,7 @@ class TestImageContentHandling:
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._elicitation_routing = {}
         manager._sampling_routing = {}
+        manager.servers_config = {"test-server": {"enabled": True}}
 
         # Mock tool object
         class MockTool:
@@ -166,6 +168,7 @@ class TestImageContentHandling:
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._elicitation_routing = {}
         manager._sampling_routing = {}
+        manager.servers_config = {"test-server": {"enabled": True}}
 
         # Mock tool object
         class MockTool:
@@ -213,6 +216,7 @@ class TestImageContentHandling:
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._elicitation_routing = {}
         manager._sampling_routing = {}
+        manager.servers_config = {"test-server": {"enabled": True}}
 
         # Mock tool object
         class MockTool:
