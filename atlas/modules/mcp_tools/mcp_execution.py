@@ -77,7 +77,14 @@ class ExecutionMixin:
         identity from the request context. Missing user context, disabled
         servers, or any error in the authorization check all deny access.
         """
-        server_config = getattr(self, "servers_config", {}).get(server_name, {})
+        server_config = getattr(self, "servers_config", {}).get(server_name)
+        if server_config is None:
+            logger.warning(
+                "No configuration found for server '%s'; denying tool execution",
+                sanitize_for_logging(server_name),
+            )
+            return False
+
         if not server_config.get("enabled", True):
             return False
 

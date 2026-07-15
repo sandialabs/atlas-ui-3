@@ -156,6 +156,23 @@ async def test_execute_tool_denies_disabled_server():
 
 
 @pytest.mark.asyncio
+async def test_execute_tool_denies_server_missing_from_configuration():
+    """Discovered tools without a current server configuration must not execute."""
+    manager = _manager({})
+    manager._tool_index = _tool_index("stale_rag_server", "search")
+
+    with patch.object(manager, "call_tool", new_callable=AsyncMock) as mock_call:
+        result = await manager.execute_tool(
+            ToolCall(id="call-7", name="stale_rag_server_search", arguments={}),
+            context={"user_email": "user@example.com"},
+        )
+
+    assert result.success is False
+    assert "not authorized" in result.error.lower()
+    mock_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_execute_tool_allows_allowed_tool_without_context_user_for_open_server():
     """Backwards compatibility: unrestricted servers work without user context.
 
@@ -173,7 +190,7 @@ async def test_execute_tool_allows_allowed_tool_without_context_user_for_open_se
             is_error=False,
         )
         result = await manager.execute_tool(
-            ToolCall(id="call-7", name="open_server_ping", arguments={}),
+            ToolCall(id="call-8", name="open_server_ping", arguments={}),
             context={},
         )
 
