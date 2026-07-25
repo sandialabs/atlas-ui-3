@@ -40,6 +40,7 @@ from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
     ContextWindowExceededError,
     LLMAuthenticationError,
+    LLMBadRequestError,
     LLMServiceError,
     LLMTimeoutError,
     RateLimitError,
@@ -120,7 +121,23 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             litellm.set_verbose = debug_mode
 
     @staticmethod
-    def _raise_llm_domain_error(exc: Exception) -> NoReturn:
+    def _tools_implicated_by(error_str: str, tools_schema: Optional[List[Dict]]) -> List[str]:
+        """Return the tool names a provider rejection points at.
+
+        Providers name the offending function in the error text. When they do,
+        report only that tool; otherwise every tool in the request is a
+        candidate and the user needs the full list to bisect.
+        """
+        names = [
+            name
+            for tool in (tools_schema or [])
+            if (name := (tool.get("function") or {}).get("name"))
+        ]
+        named = [name for name in names if name in error_str]
+        return named or names
+
+    @staticmethod
+    def _raise_llm_domain_error(exc: Exception, tools_schema: Optional[List[Dict]] = None) -> NoReturn:
         """Classify a litellm exception and raise the corresponding domain error.
 
         This ensures the WebSocket handler receives specific error types
@@ -154,6 +171,31 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 "Your conversation is too long for this model's context window. "
                 "Please start a new conversation or switch to a model with a larger context window."
             ) from exc
+
+        # A rejected request is the caller's problem to fix, not a transient
+        # service fault. Checked after ContextWindowExceededError because that
+        # litellm error subclasses BadRequestError.
+        if isinstance(exc, litellm.BadRequestError):
+            logger.error("LLM rejected the request (%s): %s", error_type, error_str)
+            implicated = LiteLLMCaller._tools_implicated_by(error_str, tools_schema)
+            if len(implicated) == 1:
+                user_msg = (
+                    f"The model provider rejected this request because of the tool "
+                    f"'{implicated[0]}'. Turn that tool off and try again."
+                )
+            elif implicated:
+                listed = ", ".join(f"'{name}'" for name in implicated)
+                user_msg = (
+                    f"The model provider rejected this request because of one of the "
+                    f"selected tools ({listed}). Turn them off and re-enable them one "
+                    f"at a time to find the one at fault."
+                )
+            else:
+                user_msg = (
+                    "The model provider rejected this request. Please try again or "
+                    "contact support if the issue persists."
+                )
+            raise LLMBadRequestError(user_msg, tool_names=implicated) from exc
 
         # All other LLM errors get a generic but user-friendly message
         # Include the original error type in the log-level message for debugging
@@ -869,7 +911,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         except Exception as exc:
             logger.error("Error calling LLM with tools: %s", exc, exc_info=True)
-            self._raise_llm_domain_error(exc)
+            self._raise_llm_domain_error(exc, tools_schema=tools_schema)
 
     async def call_with_rag_and_tools(
         self,

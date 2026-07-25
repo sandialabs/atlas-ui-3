@@ -272,7 +272,7 @@ class LiteLLMStreamingMixin:
                     "error_type": type(exc).__name__,
                 })
                 logger.error("Error in streaming LLM call with tools: %s", exc, exc_info=True)
-                self._raise_llm_domain_error(exc)
+                self._raise_llm_domain_error(exc, tools_schema=tools_schema)
 
     async def stream_with_rag(
         self,
