@@ -1,0 +1,11 @@
+{
+  "badschema": {
+    "command": ["python", "../test/pr-validation/fixtures/pr733/badschema_mcp_server.py"],
+    "cwd": "atlas",
+    "groups": ["users"],
+    "description": "Advertises one tool with an invalid inputSchema and one valid tool",
+    "author": "PR validation",
+    "short_description": "invalid schema repro",
+    "compliance_level": "Internal"
+  }
+}

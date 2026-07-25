@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #733 - 2026-07-24
+- **Tool-caused provider rejections name the tool**: A malformed tool definition makes the provider reject the whole request, and the resulting `BadRequestError` was flattened into a generic "the LLM service encountered an error" message that pointed users at the model rather than the tool. `_raise_llm_domain_error` now maps it to a new `LLMBadRequestError` carrying the implicated tool names (only the tool the provider named, or every tool in the request when it names none), checked after the context-window branch since `litellm.ContextWindowExceededError` subclasses `BadRequestError`. `classify_llm_error` short-circuits on that error instead of re-classifying its own user-facing message. Tools-mode error frames now also carry `error_type` via a new `error_type_for()` mapping (closes #728, #729).
+
 ### PR #723 - 2026-07-14
 - **Fail-closed MCP tool ACL enforcement at execution time**: Fixed agent mode bypassing the tool authorization filter by enforcing group ACL checks inside `MCPToolManager.execute_tool` at the single execution choke point, keyed on the trusted `context["user_email"]`. Missing user context, disabled servers, group-check exceptions, and unauthorized membership now deny execution rather than fall back to allowing the call. Also made `ToolAuthorizationService.filter_authorized_tools` fail closed: it returns an empty list whenever the ACL check cannot complete instead of returning the unfiltered selection.
 - **Runtime-only container compatibility**: Enable the PyO3 stable-ABI compatibility mode while installing LiteLLM so the rolling Chainguard Python 3.14 image does not fail its native extension build.
