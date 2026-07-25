@@ -238,13 +238,14 @@ class ToolsModeRunner:
 
         # If streaming failed and we got no content, send the error to the frontend
         if streaming_error and not accumulated_content:
-            _error_class, user_msg, log_msg = error_handler.classify_llm_error(
+            error_class, user_msg, log_msg = error_handler.classify_llm_error(
                 streaming_error,
             )
             logger.error("Streaming tools classified error: %s", log_msg)
             await self.event_publisher.send_json({
                 "type": "error",
                 "message": user_msg,
+                "error_type": error_handler.error_type_for(error_class),
             })
             await self.event_publisher.publish_response_complete()
             return event_notifier.create_chat_response(user_msg)

@@ -1,7 +1,7 @@
 ```markdown
 # Error Flow Diagram
 
-Last updated: 2026-01-19
+Last updated: 2026-07-24
 
 ## Complete Error Handling Flow
 
@@ -144,6 +144,44 @@ Last updated: 2026-01-19
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## Provider Rejections Caused by a Tool Definition
+
+A malformed tool definition makes the provider reject the whole request, so no
+tool ever executes and the turn fails. Per-tool error isolation does not apply,
+because the failure happens before any tool runs. The provider names the
+function it objected to, and that name is what the user needs in order to
+deselect the right tool.
+
+`_raise_llm_domain_error()` raises `LLMBadRequestError` for `BadRequestError`,
+carrying the implicated tool names. If the provider's text names a tool from the
+request, only that tool is reported; otherwise every tool in the request is
+listed so the user can bisect.
+
+```
+litellm.BadRequestError
+	  │  "Invalid schema for function 'safety_docs_plan': ..."
+	  ▼
+LLMBadRequestError(tool_names=["safety_docs_plan"])
+	  │
+	  ▼
+{
+  "type": "error",
+  "message": "The model provider rejected this request because of the tool
+              'safety_docs_plan'. Turn that tool off and try again.",
+  "error_type": "bad_request"
+}
+```
+
+Two ordering constraints matter here:
+
+- `litellm.ContextWindowExceededError` subclasses `BadRequestError`, so the
+  context-window check must run first or long conversations get misreported as
+  tool failures.
+- `classify_llm_error()` short-circuits on `LLMBadRequestError` before its
+  keyword matching. Without that, `str(error)` would be the already-built
+  user-facing message, and the keyword rules would classify the message text
+  rather than the original failure.
+
 ## Key Points
 
 1. **Error Classification**: The `classify_llm_error()` function examines the exception type and message to determine the appropriate error category.
@@ -152,7 +190,7 @@ Last updated: 2026-01-19
 
 3. **Detailed Logging**: Full error details are logged for debugging purposes (not shown to users).
 
-4. **Error Type Field**: The `error_type` field allows the frontend to potentially handle different error types differently in the future (e.g., automatic retry for timeouts).
+4. **Error Type Field**: The `error_type` field allows the frontend to potentially handle different error types differently in the future (e.g., automatic retry for timeouts). `error_type_for()` in `error_handler.py` maps a domain error class to the same vocabulary the WebSocket handler in `main.py` uses, so every error frame carries one regardless of which path raised it.
 
 5. **No Sensitive Data Exposure**: API keys, stack traces, and other sensitive information are never sent to the frontend.
 ```
