@@ -72,6 +72,42 @@ class TestBadRequestNamesTheTool:
         assert "safety_docs_plan" in info.value.message
         assert "calculator_calculate" in info.value.message
 
+    def test_non_tool_rejection_does_not_blame_the_tool_selection(self):
+        """Most 400s are unrelated to tools; tools being selected is not evidence."""
+        exc = _bad_request(
+            "OpenAIException - Invalid value for 'temperature': must be <= 2."
+        )
+
+        with pytest.raises(LLMBadRequestError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc, tools_schema=TOOLS_SCHEMA)
+
+        assert info.value.tool_names == []
+        assert "safety_docs_plan" not in info.value.message
+        assert "calculator_calculate" not in info.value.message
+
+    def test_malformed_message_rejection_does_not_blame_tools(self):
+        exc = _bad_request(
+            "OpenAIException - Invalid value for 'messages[1].role': must be one of "
+            "'system', 'user', 'assistant'."
+        )
+
+        with pytest.raises(LLMBadRequestError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc, tools_schema=TOOLS_SCHEMA)
+
+        assert info.value.tool_names == []
+
+    def test_tool_name_is_matched_as_a_whole_token(self):
+        """A prefix of a longer word in the provider text is not a tool match."""
+        schema = [{"type": "function", "function": {"name": "calc"}}]
+        exc = _bad_request(
+            "OpenAIException - Invalid value for 'messages[0]': could not calculate length."
+        )
+
+        with pytest.raises(LLMBadRequestError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc, tools_schema=schema)
+
+        assert info.value.tool_names == []
+
     def test_bad_request_without_tools_claims_no_tool(self):
         exc = _bad_request("OpenAIException - Invalid value for 'temperature': must be <= 2.")
 
@@ -259,3 +295,41 @@ async def test_error_frame_includes_error_type():
     frames = _error_frames(pub)
     assert frames, "expected an error frame"
     assert frames[0].get("error_type") == "bad_request"
+
+
+@pytest.mark.asyncio
+async def test_rag_and_tools_does_not_retry_a_rejected_request():
+    """A provider rejection is not a RAG failure, so it must not trigger the fallback.
+
+    ``call_with_rag_and_tools`` falls back to a tools-only call when RAG breaks.
+    If ``LLMBadRequestError`` is not in the passthrough tuple, the rejection is
+    misread as a RAG failure: the request is sent a second time only to be
+    rejected again, and the logs blame RAG for a tool-definition problem.
+    """
+    caller = LiteLLMCaller.__new__(LiteLLMCaller)
+    caller._rag_service = MagicMock()
+
+    rejection = LLMBadRequestError(
+        "The model provider rejected this request because of the tool 'safety_docs_plan'.",
+        tool_names=["safety_docs_plan"],
+    )
+    caller._query_all_rag_sources = AsyncMock(
+        return_value=[("docs", SimpleNamespace(
+            content="context",
+            metadata=None,
+            is_completion=False,
+        ))]
+    )
+    caller.call_with_tools = AsyncMock(side_effect=rejection)
+
+    with pytest.raises(LLMBadRequestError) as info:
+        await caller.call_with_rag_and_tools(
+            model_name="test-model",
+            messages=[{"role": "user", "content": "hi"}],
+            data_sources=["docs"],
+            tools_schema=TOOLS_SCHEMA,
+            user_email="user@example.com",
+        )
+
+    assert info.value is rejection
+    assert caller.call_with_tools.await_count == 1, "must not retry after a rejection"
