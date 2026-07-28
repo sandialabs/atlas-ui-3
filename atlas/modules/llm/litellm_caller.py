@@ -64,6 +64,15 @@ litellm.modify_params = True
 MAX_LLM_RETRIES = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
 
+# Substrings that mark a provider rejection as being about the tool payload
+# rather than the rest of the request. Only when one of these appears (and the
+# provider named no specific tool) is it fair to point the user at the whole
+# tool selection.
+TOOL_REJECTION_MARKERS = re.compile(
+    r"\b(tool|tools|tool_call|tool_calls|tool_choice|function|functions|function_call)\b",
+    re.IGNORECASE,
+)
+
 
 def _llm_response_attrs(response: Any, attempt: int) -> Dict[str, Any]:
     """Extract per-response attributes from a litellm ModelResponse.
@@ -124,17 +133,36 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
     def _tools_implicated_by(error_str: str, tools_schema: Optional[List[Dict]]) -> List[str]:
         """Return the tool names a provider rejection points at.
 
-        Providers name the offending function in the error text. When they do,
-        report only that tool; otherwise every tool in the request is a
-        candidate and the user needs the full list to bisect.
+        Attribution requires positive evidence, because most 400s have nothing
+        to do with tools (invalid parameters, malformed messages, unsupported
+        options) and blaming the tool selection for those sends users off to
+        disable tools that were never at fault.
+
+        Two levels of evidence, in order:
+
+        1. The error text names a tool from the request — report only that tool.
+        2. The error text points at the tool payload but names no tool — every
+           tool in the request is a candidate, so list them all to bisect.
+
+        Anything else attributes nothing.
         """
         names = [
             name
             for tool in (tools_schema or [])
             if (name := (tool.get("function") or {}).get("name"))
         ]
-        named = [name for name in names if name in error_str]
-        return named or names
+        # Whole-token match: a tool called "calc" must not be blamed for text
+        # that merely happens to contain "calculate".
+        named = [
+            name
+            for name in names
+            if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", error_str)
+        ]
+        if named:
+            return named
+        if names and TOOL_REJECTION_MARKERS.search(error_str):
+            return names
+        return []
 
     @staticmethod
     def _raise_llm_domain_error(exc: Exception, tools_schema: Optional[List[Dict]] = None) -> NoReturn:
@@ -861,7 +889,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
-        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, ContextWindowExceededError):
+        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, LLMBadRequestError, ContextWindowExceededError):
             raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
@@ -1043,7 +1071,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
-        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, ContextWindowExceededError):
+        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, LLMBadRequestError, ContextWindowExceededError):
             raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)

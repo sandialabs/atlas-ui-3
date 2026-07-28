@@ -153,9 +153,16 @@ function it objected to, and that name is what the user needs in order to
 deselect the right tool.
 
 `_raise_llm_domain_error()` raises `LLMBadRequestError` for `BadRequestError`,
-carrying the implicated tool names. If the provider's text names a tool from the
-request, only that tool is reported; otherwise every tool in the request is
-listed so the user can bisect.
+carrying the implicated tool names. Attribution needs positive evidence, because
+most 400s are not about tools at all — an out-of-range parameter or a malformed
+message history is a `BadRequestError` too, and pointing those at the tool
+selection sends the user to disable tools that were never at fault. Three cases:
+
+| Provider text | Reported |
+| --- | --- |
+| names a tool from the request (whole-token match) | just that tool |
+| refers to the tool payload (`tool`, `tools`, `function`, `tool_choice`, …) but names no tool | every tool in the request, to bisect |
+| anything else | no tool; a plain "the provider rejected this request" |
 
 ```
 litellm.BadRequestError
@@ -181,6 +188,11 @@ Two ordering constraints matter here:
   keyword matching. Without that, `str(error)` would be the already-built
   user-facing message, and the keyword rules would classify the message text
   rather than the original failure.
+
+`LLMBadRequestError` is also in the passthrough tuples of `call_with_rag()` and
+`call_with_rag_and_tools()`. Those methods fall back to a simpler call when RAG
+breaks; a provider rejection is not a RAG failure, so without the passthrough the
+same rejected request is sent a second time and the logs blame RAG.
 
 ## Key Points
 
