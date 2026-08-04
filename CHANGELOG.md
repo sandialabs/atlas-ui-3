@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2026-08-03
+### PR #739 - 2026-08-03
 - **Fresh-clone dev setup no longer 500s on `/api/config`** (fixes #732): `MCP_TOKEN_ENCRYPTION_KEY` is now validated during startup instead of lazily inside request handlers, so a server configured with no key — or with the public `.env.example` placeholder — refuses to boot with an actionable message rather than appearing healthy and answering every `/api/config` with a bare 500. The guard is a single shared `resolve_encryption_key()` used by both the lifespan check and `MCPTokenStorage`. `atlas-init` now writes a freshly generated key into its minimal `.env` (it previously omitted the variable entirely, hitting the same failure), and `.env.example` plus the installation docs spell out that the placeholder must be replaced and how to generate a key.
 - **Documented dev install now includes the demo MCP dependencies** (fixes #732): the setup instructions used `uv pip install -e ".[dev]"`, which omits the `mcp-demos` extra that bundled demo MCP servers import at startup — `pptx_generator` crashed on `import pptx` and discovery reported only `Connection closed`. `AGENTS.md`, `README.md`, and the getting-started guides now document `".[dev,mcp-demos]"`.
 
