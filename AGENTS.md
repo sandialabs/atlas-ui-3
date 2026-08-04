@@ -26,7 +26,7 @@ Atlas UI 3 is a full-stack LLM chat interface with Model Context Protocol (MCP) 
 
 **PyPI Packaging**: CI bundles the frontend into `atlas/static/` before building the wheel; at runtime `atlas/main.py` checks `atlas/static/` first (package install) then falls back to `frontend/dist/` (local dev).
 
-**Dependency Management**: All Python dependencies are in `pyproject.toml` (single source of truth); no `requirements.txt`. Use `uv pip install -e ".[dev]"` for development. Data-science and MCP demo packages live in the `mcp-demos` optional extra.
+**Dependency Management**: All Python dependencies are in `pyproject.toml` (single source of truth); no `requirements.txt`. Use `uv pip install -e ".[dev,mcp-demos]"` for development. The `mcp-demos` extra holds the data-science and document packages the bundled demo MCP servers import at startup (e.g. `pptx_generator` needs `python-pptx`); without it those servers fail tool discovery.
 
 **Version Bumps**: Update both `pyproject.toml` and `atlas/version.py` atomically in the same commit.
 
@@ -52,7 +52,7 @@ result = await client.chat("Hello!")
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh   # one-time
 uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,mcp-demos]"   # mcp-demos: deps the bundled demo MCP servers need
 bash agent_start.sh   # builds frontend, starts backend, seeds/mocks
 ```
 

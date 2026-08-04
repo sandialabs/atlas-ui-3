@@ -210,3 +210,51 @@ class TestInitCliEnvFile:
 
         assert result.returncode == 0, result.stderr
         assert (target / ".env").exists()
+
+
+class TestMinimalEnvEncryptionKey:
+    """atlas-init must write a usable MCP_TOKEN_ENCRYPTION_KEY.
+
+    The minimal .env previously omitted the variable entirely, so a fresh
+    `atlas-init` install booted and then answered GET /api/config with a 500
+    from the token-storage guard.
+    """
+
+    def _write_env(self, tmp_path: Path) -> str:
+        from atlas.init_cli import create_minimal_env
+
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        env_path = tmp_path / ".env"
+        assert create_minimal_env(env_path, force=True) is True
+        return env_path.read_text(encoding="utf-8")
+
+    def test_minimal_env_sets_encryption_key(self, tmp_path):
+        content = self._write_env(tmp_path)
+        keys = [
+            line.split("=", 1)[1].strip()
+            for line in content.splitlines()
+            if line.startswith("MCP_TOKEN_ENCRYPTION_KEY=")
+        ]
+        assert len(keys) == 1, "expected exactly one MCP_TOKEN_ENCRYPTION_KEY line"
+        assert len(keys[0]) >= 32
+
+    def test_generated_key_is_not_a_rejected_placeholder(self, tmp_path):
+        from atlas.modules.mcp_tools.token_storage import (
+            _PLACEHOLDER_ENCRYPTION_KEYS,
+            resolve_encryption_key,
+        )
+
+        content = self._write_env(tmp_path)
+        key = next(
+            line.split("=", 1)[1].strip()
+            for line in content.splitlines()
+            if line.startswith("MCP_TOKEN_ENCRYPTION_KEY=")
+        )
+        assert key not in _PLACEHOLDER_ENCRYPTION_KEYS
+        # The generated value must satisfy the same guard the server applies.
+        assert resolve_encryption_key(encryption_key=key) == key
+
+    def test_key_is_unique_per_install(self, tmp_path):
+        first = self._write_env(tmp_path / "a")
+        second = self._write_env(tmp_path / "b")
+        assert first != second, "atlas-init must not write a shared constant key"

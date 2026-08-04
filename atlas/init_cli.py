@@ -15,6 +15,7 @@ shared directory and each user needs their own API keys (e.g. ``~/.atlasrc``).
 
 import argparse
 import os
+import secrets
 import shutil
 import sys
 from pathlib import Path
@@ -91,7 +92,11 @@ def create_minimal_env(env_path: Path, force: bool = False) -> bool:
             print(f"  Skipping {env_path}")
             return False
 
-    minimal_env = """\
+    # A unique key per install: the value must be stable across restarts
+    # (rotating it invalidates every stored MCP token) but must never be a
+    # shared or repo-public constant, so generate it here rather than
+    # shipping a placeholder the user has to notice and replace.
+    minimal_env = f"""\
 # Atlas Configuration
 # See https://github.com/sandialabs/atlas-ui-3 for full documentation
 
@@ -112,6 +117,13 @@ DEBUG_MODE=true
 # Custom config location (auto-detected by atlas-server if config/ exists)
 # =============================================================================
 APP_CONFIG_DIR=./config
+
+# =============================================================================
+# MCP Per-User Token Storage
+# =============================================================================
+# Encrypts user API keys/tokens for MCP servers. Generated uniquely for this
+# install. Keep it stable - rotating it invalidates all stored tokens.
+MCP_TOKEN_ENCRYPTION_KEY={secrets.token_urlsafe(32)}
 
 # =============================================================================
 # Optional: RAG Configuration

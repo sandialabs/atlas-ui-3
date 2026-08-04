@@ -457,7 +457,8 @@ cd atlas-ui-3
 uv venv && source .venv/bin/activate
 
 # Install atlas package in editable mode (with dev dependencies)
-uv pip install -e ".[dev]"
+# Add the mcp-demos extra to run the bundled demo MCP servers
+uv pip install -e ".[dev,mcp-demos]"
 ```
 
 ### What Editable Mode Does

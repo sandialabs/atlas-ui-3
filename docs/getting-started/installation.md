@@ -81,7 +81,10 @@ source .venv/bin/activate
 .venv\Scripts\activate
 
 # Install atlas package in editable mode (with dev dependencies)
-uv pip install -e ".[dev]"
+# The mcp-demos extra installs what the bundled demo MCP servers import at
+# startup (python-pptx, pandas, matplotlib, ...). Omit it and servers such as
+# pptx_generator fail tool discovery with "Connection closed".
+uv pip install -e ".[dev,mcp-demos]"
 ```
 
 ### 3. Configure Your Environment
@@ -95,6 +98,7 @@ cp .env.example .env
 Now, open the `.env` file and add your API keys for the LLM providers you intend to use (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
 
 **Important Configuration Notes:**
+*   **`MCP_TOKEN_ENCRYPTION_KEY`**: You must replace the placeholder that ships in `.env.example`. It is a public value, so Atlas rejects it and refuses to start. Generate your own with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and keep it stable — rotating it invalidates all stored MCP tokens.
 *   **`APP_LOG_DIR`**: It is essential to set `APP_LOG_DIR=/workspaces/atlas-ui-3/logs` (or another appropriate path) to ensure application logs are correctly stored.
 *   **`USE_MOCK_S3`**: For local development and personal use, setting `USE_MOCK_S3=true` is acceptable. However, **this must never be used in a production environment** due to security and data durability concerns.
 

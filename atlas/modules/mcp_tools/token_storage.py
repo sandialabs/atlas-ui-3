@@ -43,6 +43,42 @@ _PLACEHOLDER_ENCRYPTION_KEYS = frozenset({
     "your-random-string-at-least-32-chars",
 })
 
+_ENCRYPTION_KEY_ERROR = (
+    "MCP_TOKEN_ENCRYPTION_KEY is not set (or is still the shipped "
+    "placeholder). Atlas refuses to start MCP token storage "
+    "without an explicit, unique encryption key, because a "
+    "generated ephemeral key would make previously encrypted "
+    "tokens unreadable after every restart and the public "
+    "placeholder would leave stored tokens decryptable by anyone "
+    "with the repository. Set MCP_TOKEN_ENCRYPTION_KEY to a stable "
+    "secret of at least 32 characters and restart the application. "
+    "Generate one with: python -c \"import secrets; "
+    "print(secrets.token_urlsafe(32))\""
+)
+
+
+def resolve_encryption_key(
+    encryption_key: Optional[str] = None,
+    app_settings: Any = None,
+) -> str:
+    """Return the configured token-encryption key, or raise if unusable.
+
+    Rejects both a missing key and the placeholder shipped in
+    ``.env.example``: encrypting user tokens with a repo-public secret is
+    no better than not encrypting them. Callers that only want to validate
+    configuration (e.g. the startup check in ``atlas/main.py``) can discard
+    the return value.
+    """
+    if app_settings is None:
+        # Import here to avoid circular imports
+        from atlas.modules.config.config_manager import get_app_settings
+        app_settings = get_app_settings()
+
+    key_source = encryption_key or app_settings.mcp_token_encryption_key
+    if not key_source or key_source in _PLACEHOLDER_ENCRYPTION_KEYS:
+        raise RuntimeError(_ENCRYPTION_KEY_ERROR)
+    return key_source
+
 
 class AuthenticationRequiredException(Exception):
     """Exception raised when a user needs to authenticate with an MCP server.
@@ -179,23 +215,7 @@ class MCPTokenStorage:
         # filesystem, so a misconfigured deployment fails cleanly without
         # leaving empty token directories behind. Prefer the passed arg,
         # then the configured setting.
-        key_source = encryption_key or app_settings.mcp_token_encryption_key
-        if not key_source or key_source in _PLACEHOLDER_ENCRYPTION_KEYS:
-            # Refuse to operate without a real, operator-supplied key. A
-            # generated ephemeral key silently made previously-encrypted
-            # tokens unreadable after every restart, and the shipped
-            # placeholder would encrypt tokens with a repo-public secret —
-            # both are worse than failing loudly.
-            raise RuntimeError(
-                "MCP_TOKEN_ENCRYPTION_KEY is not set (or is still the shipped "
-                "placeholder). Atlas refuses to start MCP token storage "
-                "without an explicit, unique encryption key, because a "
-                "generated ephemeral key would make previously encrypted "
-                "tokens unreadable after every restart and the public "
-                "placeholder would leave stored tokens decryptable by anyone "
-                "with the repository. Set MCP_TOKEN_ENCRYPTION_KEY to a stable "
-                "secret of at least 32 characters and restart the application."
-            )
+        key_source = resolve_encryption_key(encryption_key, app_settings)
 
         self._storage_dir = storage_dir or self._get_storage_dir(app_settings)
         self._storage_dir.mkdir(parents=True, exist_ok=True)

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-08-03
+- **Fresh-clone dev setup no longer 500s on `/api/config`** (fixes #732): `MCP_TOKEN_ENCRYPTION_KEY` is now validated during startup instead of lazily inside request handlers, so a server configured with no key — or with the public `.env.example` placeholder — refuses to boot with an actionable message rather than appearing healthy and answering every `/api/config` with a bare 500. The guard is a single shared `resolve_encryption_key()` used by both the lifespan check and `MCPTokenStorage`. `atlas-init` now writes a freshly generated key into its minimal `.env` (it previously omitted the variable entirely, hitting the same failure), and `.env.example` plus the installation docs spell out that the placeholder must be replaced and how to generate a key.
+- **Documented dev install now includes the demo MCP dependencies** (fixes #732): the setup instructions used `uv pip install -e ".[dev]"`, which omits the `mcp-demos` extra that bundled demo MCP servers import at startup — `pptx_generator` crashed on `import pptx` and discovery reported only `Connection closed`. `AGENTS.md`, `README.md`, and the getting-started guides now document `".[dev,mcp-demos]"`.
+
 ### PR #723 - 2026-07-14
 - **Fail-closed MCP tool ACL enforcement at execution time**: Fixed agent mode bypassing the tool authorization filter by enforcing group ACL checks inside `MCPToolManager.execute_tool` at the single execution choke point, keyed on the trusted `context["user_email"]`. Missing user context, disabled servers, group-check exceptions, and unauthorized membership now deny execution rather than fall back to allowing the call. Also made `ToolAuthorizationService.filter_authorized_tools` fail closed: it returns an empty list whenever the ACL check cannot complete instead of returning the unfiltered selection.
 - **Runtime-only container compatibility**: Enable the PyO3 stable-ABI compatibility mode while installing LiteLLM so the rolling Chainguard Python 3.14 image does not fail its native extension build.
