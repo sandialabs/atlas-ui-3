@@ -189,7 +189,8 @@ models:
 
 ### Enforcement
 
-Access is enforced in two places so it cannot be bypassed by a crafted request:
+Access is enforced everywhere a model name can enter the system, so it cannot be
+bypassed by a crafted request:
 
 1. **Listing** — restricted models are filtered out of the `/api/config` and
    `/api/config/shell` responses for unauthorized users, so they never appear in
@@ -198,6 +199,12 @@ Access is enforced in two places so it cannot be bypassed by a crafted request:
    requested model on every turn before any LLM call. An unauthorized model
    request is rejected with an authorization error even if the client sends the
    model name directly over the WebSocket.
+3. **Auxiliary LLM endpoints** — `POST /api/suggest_followups` (follow-up
+   question suggestions) also takes a model name in its request body and rejects
+   unauthorized models with `403` before calling the LLM.
+4. **Per-user API keys** — the `/api/llm-auth` endpoints hide restricted models
+   and refuse key uploads for them, so a user cannot register a key against a
+   model they may not use.
 
 ## Configuration Fields Explained
 

@@ -12,7 +12,8 @@ from typing import Dict, List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from atlas.core.log_sanitizer import get_current_user
+from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
+from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,21 @@ async def suggest_followups(
     config_manager = app_factory.get_config_manager()
     if not config_manager.app_settings.feature_followup_suggestions_enabled:
         raise HTTPException(status_code=404, detail="Feature not enabled")
+
+    # Enforce the per-model ``groups`` access-control list before the model named
+    # in the request body is used for an LLM call. Without this, a crafted request
+    # could reach a model the user is not allowed to see in /api/config.
+    model_config = config_manager.llm_config.models.get(request.model)
+    if model_config is not None and not await is_model_allowed(model_config, current_user):
+        logger.warning(
+            "Rejected follow-up suggestions: user %s not authorized for model %s",
+            sanitize_for_logging(current_user),
+            sanitize_for_logging(request.model),
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to use the selected model.",
+        )
 
     llm = app_factory.get_llm_caller()
 
