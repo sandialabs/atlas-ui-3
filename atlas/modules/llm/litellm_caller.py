@@ -58,6 +58,16 @@ litellm.drop_params = True  # Drop unsupported params instead of erroring
 # tools= (e.g. title generation or plain replies on a conversation that earlier
 # used tools). Without this, Anthropic's transformer raises UnsupportedParamsError.
 litellm.modify_params = True
+# Never let litellm reach out to huggingface.co for a tokenizer.  When a
+# streamed response carries no usage block, litellm reconstructs token counts
+# locally at end-of-stream (stream_chunk_builder), and for models whose name
+# contains "llama-3"/"llama-2"/"command-r" that path calls a *blocking*
+# Tokenizer.from_pretrained() download from inside the async event loop.  In a
+# network-restricted deployment that call stalls the entire single-threaded
+# server -- every user's stream, the websocket keepalives, and the /api/health
+# probe -- until it finally fails and falls back to tiktoken anyway.  Opting out
+# skips straight to the fallback, so token counts are unchanged.
+litellm.disable_hf_tokenizer_download = True
 
 # Retry configuration for transient LLM errors
 MAX_LLM_RETRIES = 3
