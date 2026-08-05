@@ -347,10 +347,7 @@ class ChatService:
                 and compliance_level_raw != session.context["compliance_level"]
             ):
                 logger.warning(
-                    "Ignoring client compliance filter %s for model %s; using server-configured level %s",
-                    sanitize_for_logging(compliance_level_raw),
-                    sanitize_for_logging(model),
-                    sanitize_for_logging(session.context["compliance_level"]),
+                    "Ignoring client compliance filter; using server-configured model level"
                 )
         else:
             session.context["compliance_level"] = None

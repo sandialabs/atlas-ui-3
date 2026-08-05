@@ -126,14 +126,15 @@ class ComplianceLevelManager:
             # Unknown compliance level
             valid_levels = list(self.levels.keys())
             logger.warning(
-                f"Invalid compliance level '{level_name}' {context}. "
-                f"Valid levels: {', '.join(valid_levels)}. "
-                f"Setting to None."
+                "Invalid compliance level in %s. %d valid level(s) are configured. "
+                "Setting to None.",
+                context or "request",
+                len(valid_levels),
             )
             return None
 
         if canonical != level_name:
-            logger.debug(f"Resolved alias '{level_name}' to '{canonical}' {context}")
+            logger.debug("Resolved compliance level alias in %s", context or "request")
 
         return canonical
 
