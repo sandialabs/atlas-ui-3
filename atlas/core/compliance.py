@@ -7,9 +7,10 @@ validation and allowlist checking.
 
 import json
 import logging
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +206,10 @@ class ComplianceLevelManager:
 
 # Global instance
 _compliance_manager: Optional[ComplianceLevelManager] = None
+_active_compliance_context: ContextVar[Tuple[Optional[str], bool]] = ContextVar(
+    "active_compliance_context",
+    default=(None, False),
+)
 
 
 def get_compliance_manager() -> ComplianceLevelManager:
@@ -213,3 +218,22 @@ def get_compliance_manager() -> ComplianceLevelManager:
     if _compliance_manager is None:
         _compliance_manager = ComplianceLevelManager()
     return _compliance_manager
+
+
+def set_active_compliance_context(
+    level: Optional[str],
+    *,
+    enforce: bool,
+) -> Token[Tuple[Optional[str], bool]]:
+    """Set the per-turn compliance context used by query-time enforcement."""
+    return _active_compliance_context.set((level, enforce))
+
+
+def reset_active_compliance_context(token: Token[Tuple[Optional[str], bool]]) -> None:
+    """Restore the previous per-turn compliance context."""
+    _active_compliance_context.reset(token)
+
+
+def get_active_compliance_context() -> Tuple[Optional[str], bool]:
+    """Return ``(active_level, enforce)`` for the current async context."""
+    return _active_compliance_context.get()

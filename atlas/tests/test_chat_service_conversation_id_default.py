@@ -245,21 +245,25 @@ async def test_default_does_not_overwrite_existing_context_value():
     assert captured["conversation_id"] == "existing-conv-id"
 
 
-# --- Compliance level is a trusted, server-side boundary (PR #682) ---
+# --- Compliance level is a trusted, server-side boundary ---
 
 
 @pytest.mark.asyncio
 async def test_compliance_level_stashed_on_session_when_feature_enabled():
-    """When the compliance feature is on, the request's level is validated and
-    persisted on the session so tools can enforce it (the model cannot set it)."""
+    """When enabled, the active level comes from server-side model config."""
     service, sessions = _make_service()
     service.config_manager.app_settings.feature_compliance_levels_enabled = True
+    service.config_manager.llm_config.models = {
+        "test-model": MagicMock(compliance_level="Internal")
+    }
     session_id = uuid4()
 
     captured = {}
 
     async def fake_execute(**kwargs):
+        from atlas.core.compliance import get_active_compliance_context
         captured["compliance_level"] = sessions[session_id].context.get("compliance_level")
+        captured["active_context"] = get_active_compliance_context()
         return {"type": "done"}
 
     mock_orchestrator = MagicMock()
@@ -274,9 +278,8 @@ async def test_compliance_level_stashed_on_session_when_feature_enabled():
             compliance_level="Public",
         )
 
-    # No compliance-levels.json in the test env -> validation is permissive and
-    # returns the level as-is; the key point is that it is stashed server-side.
-    assert captured["compliance_level"] == "Public"
+    assert captured["compliance_level"] == "Internal"
+    assert captured["active_context"] == ("Internal", True)
 
 
 @pytest.mark.asyncio

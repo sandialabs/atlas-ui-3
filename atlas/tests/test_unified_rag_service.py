@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from atlas.domain.unified_rag_service import UnifiedRAGService
+from atlas.domain.errors import DataSourcePermissionError
 from atlas.modules.config.config_manager import RAGSourceConfig, RAGSourcesConfig
 from atlas.modules.rag.client import DataSource, RAGResponse
 
@@ -356,6 +357,81 @@ class TestQueryRAG:
         assert result.metadata is not None
         assert result.metadata.data_source_name == "test_mcp"
         assert result.metadata.retrieval_method == "mcp_synthesis"
+
+
+class TestQueryRAGCompliance:
+    """Tests for query-time compliance enforcement."""
+
+    class _ComplianceManager:
+        def is_accessible(self, user_level, resource_level):
+            return user_level == resource_level
+
+    @pytest.mark.asyncio
+    async def test_query_rag_allows_matching_compliance_level(self, unified_rag_service):
+        """A matching server-side compliance level should allow the query."""
+        mock_client = AsyncMock()
+        mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+
+        with (
+            patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
+            patch(
+                "atlas.domain.unified_rag_service.get_compliance_manager",
+                return_value=self._ComplianceManager(),
+            ),
+        ):
+            result = await unified_rag_service.query_rag(
+                username="test@test.com",
+                qualified_data_source="test_http:corpus1",
+                messages=[{"role": "user", "content": "q"}],
+                user_compliance_level="Internal",
+            )
+
+        assert result.content == "ok"
+        mock_client.query_rag.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_query_rag_rejects_mismatched_compliance_level(self, unified_rag_service):
+        """Query-time checks must reject sources hidden by discovery filtering."""
+        mock_client = AsyncMock()
+
+        with (
+            patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
+            patch(
+                "atlas.domain.unified_rag_service.get_compliance_manager",
+                return_value=self._ComplianceManager(),
+            ),
+        ):
+            with pytest.raises(DataSourcePermissionError, match="not accessible"):
+                await unified_rag_service.query_rag(
+                    username="test@test.com",
+                    qualified_data_source="test_http:corpus1",
+                    messages=[{"role": "user", "content": "q"}],
+                    user_compliance_level="Public",
+                )
+
+        mock_client.query_rag.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_query_rag_batch_rejects_mismatched_compliance_level(self, unified_rag_service):
+        """Batch queries must enforce compliance before contacting the backend."""
+        mock_client = AsyncMock()
+
+        with (
+            patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
+            patch(
+                "atlas.domain.unified_rag_service.get_compliance_manager",
+                return_value=self._ComplianceManager(),
+            ),
+        ):
+            with pytest.raises(DataSourcePermissionError, match="not accessible"):
+                await unified_rag_service.query_rag_batch(
+                    username="test@test.com",
+                    qualified_data_sources=["test_http:corpus1", "test_http:corpus2"],
+                    messages=[{"role": "user", "content": "q"}],
+                    user_compliance_level="Public",
+                )
+
+        mock_client.query_rag.assert_not_called()
 
 
 class TestSourceFiltering:

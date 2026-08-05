@@ -10,7 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
-from atlas.core.compliance import get_compliance_manager
+from atlas.core.compliance import (
+    get_active_compliance_context,
+    get_compliance_manager,
+    reset_active_compliance_context,
+    set_active_compliance_context,
+)
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import (
     LABEL_MAX_CHARS,
@@ -20,6 +25,7 @@ from atlas.core.telemetry import (
     size_bytes,
     start_span,
 )
+from atlas.domain.errors import DataSourcePermissionError
 from atlas.modules.config.config_manager import ConfigManager, RAGSourceConfig, resolve_env_var
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
 from atlas.modules.rag.client import RAGResponse
@@ -140,6 +146,60 @@ class UnifiedRAGService:
             if await self.auth_check_func(username, group):
                 return True
         return False
+
+    async def _ensure_source_query_allowed(
+        self,
+        username: str,
+        source_name: str,
+        source_config: RAGSourceConfig,
+    ) -> None:
+        """Enforce server-side access controls before querying a RAG backend."""
+        if not source_config.enabled:
+            raise ValueError(f"RAG source is disabled: {source_name}")
+
+        if not await self._is_user_authorized(username, source_config.groups):
+            logger.warning(
+                "Rejected RAG query for source %s: user %s is not in an authorized group",
+                sanitize_for_logging(source_name),
+                sanitize_for_logging(username),
+            )
+            raise DataSourcePermissionError(
+                "You are not authorized to query the selected data source.",
+                code="DATA_SOURCE_ACCESS_DENIED",
+            )
+
+        user_compliance_level, enforce_compliance = get_active_compliance_context()
+        resource_compliance_level = source_config.compliance_level
+        if not enforce_compliance or not resource_compliance_level:
+            return
+
+        if not user_compliance_level:
+            logger.warning(
+                "Rejected RAG query for source %s: no trusted compliance level is active",
+                sanitize_for_logging(source_name),
+            )
+            raise DataSourcePermissionError(
+                "The selected data source is not accessible without a trusted compliance level.",
+                code="DATA_SOURCE_COMPLIANCE_MISMATCH",
+            )
+
+        compliance_mgr = get_compliance_manager()
+        if compliance_mgr.is_accessible(
+            user_level=user_compliance_level,
+            resource_level=resource_compliance_level,
+        ):
+            return
+
+        logger.warning(
+            "Rejected RAG query for source %s due to compliance mismatch (user: %s, source: %s)",
+            sanitize_for_logging(source_name),
+            sanitize_for_logging(user_compliance_level),
+            sanitize_for_logging(resource_compliance_level),
+        )
+        raise DataSourcePermissionError(
+            "The selected data source is not accessible at your current compliance level.",
+            code="DATA_SOURCE_COMPLIANCE_MISMATCH",
+        )
 
     async def discover_data_sources(
         self,
@@ -262,6 +322,7 @@ class UnifiedRAGService:
         username: str,
         qualified_data_source: str,
         messages: List[Dict],
+        user_compliance_level: Optional[str] = None,
     ) -> RAGResponse:
         """Query a RAG source.
 
@@ -282,10 +343,17 @@ class UnifiedRAGService:
             "message_count": len(messages),
             "batch": False,
         }
-        with start_span("rag.query", span_attrs) as span:
-            response = await self._query_rag_impl(username, qualified_data_source, messages)
-            set_attrs(span, _rag_response_attrs(response))
-            return response
+        token = None
+        if user_compliance_level is not None:
+            token = set_active_compliance_context(user_compliance_level, enforce=True)
+        try:
+            with start_span("rag.query", span_attrs) as span:
+                response = await self._query_rag_impl(username, qualified_data_source, messages)
+                set_attrs(span, _rag_response_attrs(response))
+                return response
+        finally:
+            if token is not None:
+                reset_active_compliance_context(token)
 
     async def _query_rag_impl(
         self,
@@ -323,6 +391,8 @@ class UnifiedRAGService:
         if not source_config:
             logger.error("[RAG] Source not found in config: %s", server_name)
             raise ValueError(f"RAG source not found: {server_name}")
+
+        await self._ensure_source_query_allowed(username, server_name, source_config)
 
         logger.debug(
             "[RAG] Source config: type=%s, enabled=%s, compliance_level=%s",
@@ -421,6 +491,7 @@ class UnifiedRAGService:
         username: str,
         qualified_data_sources: List[str],
         messages: List[Dict],
+        user_compliance_level: Optional[str] = None,
     ) -> RAGResponse:
         """Query multiple RAG sources on the same server in a single request.
 
@@ -451,10 +522,17 @@ class UnifiedRAGService:
             "batch": True,
             "batch_size": len(qualified_data_sources or []),
         }
-        with start_span("rag.query", span_attrs) as span:
-            response = await self._query_rag_batch_impl(username, qualified_data_sources, messages)
-            set_attrs(span, _rag_response_attrs(response))
-            return response
+        token = None
+        if user_compliance_level is not None:
+            token = set_active_compliance_context(user_compliance_level, enforce=True)
+        try:
+            with start_span("rag.query", span_attrs) as span:
+                response = await self._query_rag_batch_impl(username, qualified_data_sources, messages)
+                set_attrs(span, _rag_response_attrs(response))
+                return response
+        finally:
+            if token is not None:
+                reset_active_compliance_context(token)
 
     async def _query_rag_batch_impl(
         self,
@@ -497,6 +575,8 @@ class UnifiedRAGService:
 
         if not source_config:
             raise ValueError(f"RAG source not found: {server_name}")
+
+        await self._ensure_source_query_allowed(username, server_name, source_config)
 
         if source_config.type == "http":
             client = self._get_http_client(server_name, source_config)

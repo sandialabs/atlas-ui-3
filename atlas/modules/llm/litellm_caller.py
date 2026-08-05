@@ -39,6 +39,7 @@ from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
     ContextWindowExceededError,
+    DataSourcePermissionError,
     LLMAuthenticationError,
     LLMBadRequestError,
     LLMServiceError,
@@ -493,6 +494,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         successful: List[Tuple[str, Any]] = []
         for (server_name, _sources), result in zip(server_groups.items(), results):
             if isinstance(result, Exception):
+                if isinstance(result, DataSourcePermissionError):
+                    raise result
                 logger.error("[RAG] Failed to query server %s: %s", server_name, result)
             else:
                 successful.append(result)
@@ -951,7 +954,15 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
-        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, LLMBadRequestError, ContextWindowExceededError):
+        except (
+            RateLimitError,
+            LLMTimeoutError,
+            LLMAuthenticationError,
+            LLMServiceError,
+            LLMBadRequestError,
+            ContextWindowExceededError,
+            DataSourcePermissionError,
+        ):
             raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
@@ -1133,7 +1144,15 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
-        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, LLMBadRequestError, ContextWindowExceededError):
+        except (
+            RateLimitError,
+            LLMTimeoutError,
+            LLMAuthenticationError,
+            LLMServiceError,
+            LLMBadRequestError,
+            ContextWindowExceededError,
+            DataSourcePermissionError,
+        ):
             raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)
