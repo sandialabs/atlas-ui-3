@@ -36,6 +36,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, WebSocketException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketState
 
 from atlas.core.auth import get_user_from_header
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
@@ -99,7 +100,16 @@ logger = logging.getLogger(__name__)
 async def websocket_update_callback(websocket: WebSocket, message: dict):
     """
     Callback function to handle websocket updates with logging.
+
+    Drops the message if the socket is no longer connected.  Producers deep in
+    the chat pipeline (file ingest, canvas updates, tool notifications) call
+    this on every update; without the guard a client that disconnects mid-turn
+    turns each one into a raised WebSocketDisconnect that either spams the log
+    with tracebacks or aborts an in-progress operation partway through.
     """
+    if websocket.client_state != WebSocketState.CONNECTED:
+        logger.debug("Dropping %s update; websocket not connected", message.get("type"))
+        return
     try:
         mtype = message.get("type")
         if mtype == "intermediate_update":
@@ -117,7 +127,39 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
     except Exception:
         # Non-fatal logging error; continue to send
         pass
-    await websocket.send_json(message)
+    try:
+        await websocket.send_json(message)
+    except (WebSocketDisconnect, RuntimeError) as e:
+        # The socket closed between the state check above and the send (or the
+        # server already sent its close frame).  Nothing to deliver -- the
+        # disconnect handler owns cleanup.
+        logger.debug("Websocket closed before update could be sent: %s", e)
+
+
+async def cleanup_disconnected_session(chat_service, session_id, user_email, active_chat_task):
+    """Tear down a session whose websocket has closed.
+
+    Cancels the in-flight turn *before* releasing resources: without this the
+    background chat task keeps streaming tokens, calling tools and holding MCP
+    sessions against a session that end_session() is about to tear down -- work
+    nobody can receive.  Mirrors the stop_streaming/reset_session paths.
+    """
+    task = active_chat_task.get("task")
+    if task and not task.done():
+        logger.info("Cancelling active chat task (client disconnected)")
+        task.cancel()
+
+    # Release MCP sessions for this conversation
+    session = await chat_service.session_repository.get(session_id)
+    if session:
+        conv_id = session.context.get("conversation_id", str(session_id))
+        try:
+            from atlas.modules.mcp_tools import mcp_tool_manager
+            await mcp_tool_manager.release_sessions(conv_id, user_email=user_email)
+        except Exception as e:
+            logger.warning("Error releasing MCP sessions on disconnect: %s", e)
+    await chat_service.end_session(session_id)
+    logger.info(f"WebSocket connection closed for session {session_id}")
 
 
 def _ensure_feedback_directory():
@@ -672,8 +714,24 @@ async def websocket_endpoint(websocket: WebSocket):
                             "error_type": "unexpected"
                         })
 
+                async def handle_chat_guarded():
+                    """Run handle_chat so a dead socket cannot orphan the task.
+
+                    Every error branch in handle_chat reports back over the
+                    websocket.  If the client is already gone that send raises a
+                    *second* exception from inside the except block, which
+                    escapes the task entirely and surfaces only as an
+                    "exception was never retrieved" warning at GC time.  The
+                    error metric is logged before each send, so nothing is lost
+                    by absorbing it here.
+                    """
+                    try:
+                        await handle_chat()
+                    except (WebSocketDisconnect, RuntimeError) as e:
+                        logger.info("Chat handler ended; websocket already closed: %s", e)
+
                 # Start chat handling in background
-                active_chat_task["task"] = asyncio.create_task(handle_chat())
+                active_chat_task["task"] = asyncio.create_task(handle_chat_guarded())
 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection)
@@ -832,17 +890,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
 
     except WebSocketDisconnect:
-        # Release MCP sessions for this conversation
-        session = await chat_service.session_repository.get(session_id)
-        if session:
-            conv_id = session.context.get("conversation_id", str(session_id))
-            try:
-                from atlas.modules.mcp_tools import mcp_tool_manager
-                await mcp_tool_manager.release_sessions(conv_id, user_email=user_email)
-            except Exception as e:
-                logger.warning("Error releasing MCP sessions on disconnect: %s", e)
-        await chat_service.end_session(session_id)
-        logger.info(f"WebSocket connection closed for session {session_id}")
+        await cleanup_disconnected_session(
+            chat_service, session_id, user_email, active_chat_task
+        )
 
 
 if static_dir.exists():
