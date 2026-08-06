@@ -144,6 +144,7 @@ atlas = [
     "config/*.yml",
     "config/*.md",
     "config/prompts/*.md",
+    "config/skills/**/*",
     "config/mcp-example-configs/*.json",
     "mcp/**/*",
     "static/**/*",

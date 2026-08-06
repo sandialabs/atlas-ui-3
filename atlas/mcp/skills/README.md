@@ -25,7 +25,13 @@ cp atlas/config/mcp-example-configs/mcp-skills.json /tmp/skills.json
 # then merge that object into your config/mcp.json
 ```
 
-Skill discovery itself is controlled by `FEATURE_SKILLS_ENABLED` and `SKILLS_PATHS`.
+Which directories are scanned is controlled by `SKILLS_PATHS`. Note that this server
+reads skills regardless of `FEATURE_SKILLS_ENABLED` — that flag governs whether the
+skill index is injected into the system prompt, while access to this server is
+governed by its presence in `mcp.json` and its `groups` entry. Enabling the server
+without the flag gives the model the reading tools but no index telling it what
+exists, which is rarely what you want.
+
 See [docs/user-guide/skills/README.md](../../../docs/user-guide/skills/README.md).
 
 ## Security
