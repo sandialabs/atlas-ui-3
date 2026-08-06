@@ -1,10 +1,13 @@
 """Message builder - constructs messages with history and files manifest."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from atlas.domain.sessions.models import Session
 from atlas.modules.prompts.prompt_provider import PromptProvider
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from atlas.modules.skills import SkillRegistry
 
 from ..utilities import file_processor
 
@@ -85,14 +88,31 @@ class MessageBuilder:
     Combines conversation history with files manifest and system prompt.
     """
 
-    def __init__(self, prompt_provider: Optional[PromptProvider] = None):
+    def __init__(
+        self,
+        prompt_provider: Optional[PromptProvider] = None,
+        skill_registry: Optional["SkillRegistry"] = None,
+    ):
         """
         Initialize message builder.
 
         Args:
             prompt_provider: Optional prompt provider for loading system prompt
+            skill_registry: Optional registry whose skill index is appended to
+                the system prompt when the skills feature is enabled
         """
         self.prompt_provider = prompt_provider
+        self.skill_registry = skill_registry
+
+    def _render_skill_index(self) -> Optional[str]:
+        """Render the skill index, never letting a skills problem break chat."""
+        if not self.skill_registry:
+            return None
+        try:
+            return self.skill_registry.render_index()
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"Skipping skill index injection: {e}")
+            return None
 
     async def build_messages(
         self,
@@ -134,6 +154,16 @@ class MessageBuilder:
             elif self.prompt_provider:
                 system_prompt = self.prompt_provider.get_system_prompt(
                     user_email=session.user_email
+                )
+            # The skill index is additive: it is appended to whichever system
+            # prompt won above, including a user-supplied custom one, so
+            # selecting a custom prompt does not silently drop skills. It is
+            # appended after template formatting so a brace in a skill
+            # description can never reach str.format().
+            skill_index = self._render_skill_index()
+            if skill_index:
+                system_prompt = (
+                    f"{system_prompt}\n\n{skill_index}" if system_prompt else skill_index
                 )
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})

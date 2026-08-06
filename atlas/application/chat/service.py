@@ -26,6 +26,7 @@ from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.interfaces.transport import ChatConnectionProtocol
 from atlas.modules.config import ConfigManager
 from atlas.modules.prompts.prompt_provider import PromptProvider
+from atlas.modules.skills import SkillRegistry
 
 from .agent import AgentLoopFactory
 from .modes.agent import AgentModeRunner
@@ -94,6 +95,9 @@ class ChatService:
         self.prompt_provider: Optional[PromptProvider] = (
             PromptProvider(self.config_manager) if self.config_manager else None
         )
+        self.skill_registry: Optional[SkillRegistry] = (
+            SkillRegistry(self.config_manager) if self.config_manager else None
+        )
         self.file_manager = file_manager
 
         # Initialize or use provided event publisher
@@ -142,7 +146,7 @@ class ChatService:
             tool_manager=self.tool_manager, config_manager=self.config_manager
         )
         self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
-        self.message_builder = MessageBuilder()
+        self.message_builder = MessageBuilder(skill_registry=self.skill_registry)
 
         # Initialize mode runners
         self.plain_mode = PlainModeRunner(
@@ -227,6 +231,7 @@ class ChatService:
                 tools_mode=self.tools_mode,
                 agent_mode=self.agent_mode,
                 config_manager=self.config_manager,
+                skill_registry=self.skill_registry,
             )
         return self.orchestrator
 
@@ -236,6 +241,11 @@ class ChatService:
         user_email: Optional[str] = None
     ) -> Session:
         """Create a new chat session."""
+        # Rescan skills on each new session so a skill added on disk is picked
+        # up without restarting the server.
+        if self.skill_registry:
+            self.skill_registry.invalidate()
+
         session = Session(id=session_id, user_email=user_email)
         await self.session_repository.create(session)
 
