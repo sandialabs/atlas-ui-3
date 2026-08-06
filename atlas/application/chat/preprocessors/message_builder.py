@@ -111,7 +111,7 @@ class MessageBuilder:
         try:
             return self.skill_registry.render_index()
         except Exception as e:  # pragma: no cover - defensive
-            logger.warning(f"Skipping skill index injection: {e}")
+            logger.warning(f"Skipping skill index injection: {e}", exc_info=True)
             return None
 
     async def build_messages(

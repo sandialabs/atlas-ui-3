@@ -24,8 +24,9 @@ mcp = create_stdio_server("Agent Skills")
 # the on-disk skill set can change underneath it.
 _registry = SkillRegistry(config_manager)
 
-# Bundled resources a skill may reference. Kept to the spec's conventional
-# directories so a skill cannot be used to read arbitrary files.
+# Any file inside a skill's own directory may be read, since skills are free to
+# organize their resources however they like. The containment check in
+# read_skill_resource is what stops a skill being used to read unrelated files.
 MAX_RESOURCE_BYTES = 256 * 1024
 
 
@@ -85,7 +86,7 @@ def read_skill(name: str) -> Dict[str, Any]:
 
     try:
         content = skill.path.read_text(encoding="utf-8")
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         return {"error": f"Could not read skill '{name}': {e}"}
 
     resources: List[str] = []
@@ -125,8 +126,14 @@ def read_skill_resource(name: str, resource_path: str) -> Dict[str, Any]:
     if skill is None:
         return {"error": f"No skill named '{name}'."}
 
-    root = skill.directory.resolve()
-    candidate = (root / resource_path).resolve()
+    # Resolution itself can fail on a broken symlink or an unreadable parent,
+    # so keep it inside the guard: an MCP tool must return a structured error
+    # rather than raise out of the server process.
+    try:
+        root = skill.directory.resolve()
+        candidate = (root / resource_path).resolve()
+    except OSError as e:
+        return {"error": f"Could not resolve '{resource_path}': {e}"}
 
     # Refuse anything that escapes the skill directory, including via symlink
     # or "..", so a skill cannot be used to read unrelated files.
@@ -135,10 +142,9 @@ def read_skill_resource(name: str, resource_path: str) -> Dict[str, Any]:
     except ValueError:
         return {"error": "resource_path must stay within the skill directory."}
 
-    if not candidate.is_file():
-        return {"error": f"No such file in skill '{name}': {resource_path}"}
-
     try:
+        if not candidate.is_file():
+            return {"error": f"No such file in skill '{name}': {resource_path}"}
         size = candidate.stat().st_size
         if size > MAX_RESOURCE_BYTES:
             return {

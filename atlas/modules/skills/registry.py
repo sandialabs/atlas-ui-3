@@ -132,7 +132,9 @@ def parse_skill_file(path: Path, tier: str = TIER_PACKAGED) -> Skill:
     """Parse and validate a single SKILL.md. Raises SkillValidationError."""
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
+        # UnicodeDecodeError must be caught here: it is not an OSError, and
+        # letting it escape would abort the whole scan over one bad file.
         raise SkillValidationError(f"could not read file: {e}") from e
 
     frontmatter, _body = _parse_frontmatter(text)
@@ -285,19 +287,18 @@ class SkillRegistry:
         if not skills:
             return None
 
-        lines = [
-            "# Available Skills",
-            "",
-            "The following skills are available. Each entry gives a skill name and a "
-            "description of what it does and when it applies. The descriptions below "
-            "are the complete listing — the full instructions for a skill are not "
-            "loaded yet.",
-            "",
-            "When a user's request matches a skill's description, read that skill's "
-            "instructions before acting on the request, using the skills tool if one "
-            "is available. Do not guess at a skill's contents from its description.",
-            "",
-        ]
-        for skill in skills:
-            lines.append(f"- **{skill.name}**: {skill.description}")
+        preamble = (
+            "The following skills are available. Each entry gives a skill name and a"
+            " description of what it does and when it applies. The descriptions below"
+            " are the complete listing — the full instructions for a skill are not"
+            " loaded yet."
+        )
+        usage = (
+            "When a user's request matches a skill's description, read that skill's"
+            " instructions before acting on the request, using the skills tool if one"
+            " is available. Do not guess at a skill's contents from its description."
+        )
+
+        lines = ["# Available Skills", "", preamble, "", usage, ""]
+        lines.extend(f"- **{skill.name}**: {skill.description}" for skill in skills)
         return "\n".join(lines)

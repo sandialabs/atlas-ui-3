@@ -150,6 +150,30 @@ def test_invalid_skill_is_skipped_not_fatal(tmp_path):
     assert [s.name for s in registry.get_skills()] == ["good"]
 
 
+def test_non_utf8_skill_is_skipped_not_fatal(tmp_path):
+    """A non-UTF-8 SKILL.md raises UnicodeDecodeError, not OSError, and that
+    must not abort the scan and take every other skill down with it."""
+    root = tmp_path / "skills"
+    write_skill(root, "good")
+    bad_dir = root / "binary"
+    bad_dir.mkdir(parents=True)
+    (bad_dir / "SKILL.md").write_bytes(b"---\nname: binary\ndescription: \xff\xfe\n---\n")
+
+    registry = make_registry(tmp_path, root)
+
+    assert [s.name for s in registry.get_skills()] == ["good"]
+
+
+def test_parse_non_utf8_raises_validation_error(tmp_path):
+    skill_dir = tmp_path / "binary"
+    skill_dir.mkdir()
+    path = skill_dir / "SKILL.md"
+    path.write_bytes(b"---\nname: binary\ndescription: \xff\xfe\n---\n")
+
+    with pytest.raises(SkillValidationError):
+        parse_skill_file(path)
+
+
 def test_directories_without_skill_md_are_ignored(tmp_path):
     root = tmp_path / "skills"
     write_skill(root, "real")
@@ -435,6 +459,26 @@ def test_server_refuses_paths_outside_skill_directory(skills_server, resource_pa
     result = skills_server.read_skill_resource("alpha", resource_path)
     assert "error" in result
     assert "content" not in result
+
+
+def test_server_returns_error_for_unreadable_resource(skills_server, tmp_path):
+    """Binary resources must produce a structured error, not crash the server."""
+    (tmp_path / "skills" / "alpha" / "blob.bin").write_bytes(b"\xff\xfe\x00")
+
+    result = skills_server.read_skill_resource("alpha", "blob.bin")
+
+    assert "error" in result
+    assert "content" not in result
+
+
+def test_server_refuses_oversized_resource(skills_server, tmp_path):
+    big = tmp_path / "skills" / "alpha" / "big.md"
+    big.write_text("x" * (skills_server.MAX_RESOURCE_BYTES + 1))
+
+    result = skills_server.read_skill_resource("alpha", "big.md")
+
+    assert "error" in result
+    assert "limit" in result["error"]
 
 
 @pytest.mark.asyncio
