@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from atlas.core.log_sanitizer import get_current_user
+from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.infrastructure.app_factory import app_factory
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,19 @@ async def suggest_followups(
     config_manager = app_factory.get_config_manager()
     if not config_manager.app_settings.feature_followup_suggestions_enabled:
         raise HTTPException(status_code=404, detail="Feature not enabled")
+
+    # Enforce the per-model ``groups`` access-control list before the model named
+    # in the request body is used for an LLM call. Restricted and nonexistent
+    # models both return 404 so a restricted model is indistinguishable from a
+    # nonexistent one (same policy as the /api/llm/auth endpoints).
+    decision = await check_model_access(
+        config_manager.llm_config.models,
+        request.model,
+        current_user,
+        context="follow-up suggestions",
+    )
+    if decision is not ModelAccessDecision.ALLOWED:
+        raise HTTPException(status_code=404, detail=f"Model '{request.model}' not found")
 
     llm = app_factory.get_llm_caller()
 

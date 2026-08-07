@@ -11,9 +11,11 @@ every membership decision through :func:`atlas.core.auth.is_user_in_group`.
 """
 
 import logging
+from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from atlas.core.auth import is_user_in_group
+from atlas.core.log_sanitizer import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,46 @@ async def is_model_allowed(
                 exc_info=True,
             )
     return False
+
+
+class ModelAccessDecision(Enum):
+    """Outcome of looking up a model name and checking group access for a user."""
+
+    ALLOWED = "allowed"
+    UNKNOWN = "unknown"
+    DENIED = "denied"
+
+
+async def check_model_access(
+    models: Optional[Dict[str, Any]],
+    model_name: str,
+    user_email: Optional[str],
+    *,
+    context: str = "request",
+    auth_check_func: Optional[AuthCheckFunc] = None,
+) -> ModelAccessDecision:
+    """Shared lookup-and-check for every entry point that accepts a model name.
+
+    Funnels the lookup / group-check / sanitized-log / deny sequence through one
+    place so deny policy cannot drift between enforcement points. Returns
+    ``UNKNOWN`` when the model is not configured — callers decide whether to
+    tolerate that (chat leaves unknown models to the downstream caller; HTTP
+    endpoints should treat unknown and denied identically so restricted model
+    names are not leaked). Logs one sanitized warning on ``DENIED``, tagged with
+    ``context`` (e.g. ``"chat"``, ``"follow-up suggestions"``).
+    """
+    model_config = (models or {}).get(model_name)
+    if model_config is None:
+        return ModelAccessDecision.UNKNOWN
+    if await is_model_allowed(model_config, user_email, auth_check_func):
+        return ModelAccessDecision.ALLOWED
+    logger.warning(
+        "Rejected %s: user %s not authorized for model %s",
+        context,
+        sanitize_for_logging(user_email or "<anonymous>"),
+        sanitize_for_logging(model_name),
+    )
+    return ModelAccessDecision.DENIED
 
 
 async def filter_authorized_models(
