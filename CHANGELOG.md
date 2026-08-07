@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #745 - 2026-08-07
+- **Mobile keyboard keeps composer visible**: The chat shell now tracks the browser visual viewport height so the flex layout shrinks when a mobile software keyboard opens, keeping the message composer above the keyboard instead of pinned to the obscured layout viewport (closes #745).
+
 ### PR #740 - 2026-08-03
 - **No blocking tokenizer download on the event loop**: Set `litellm.disable_hf_tokenizer_download`. When a streamed response carries no usage block, LiteLLM reconstructs token counts locally at end-of-stream, and for llama-family model names that path made a *blocking* `Tokenizer.from_pretrained()` call to huggingface.co from inside the async event loop. In a network-restricted deployment that stalled the entire single-threaded server -- every user's stream, the WebSocket keepalives, and the `/api/health` probe that a container orchestrator uses to decide whether to restart the pod. LiteLLM already falls back to the bundled tiktoken tokenizer when the download fails, so token counts are unchanged.
 - **Graceful mid-turn WebSocket disconnect**: A client that goes away while a turn is running no longer produces error spam or orphaned work. Updates are dropped when the socket is no longer connected (guarded at both send paths: `websocket_update_callback` and `WebSocketConnectionAdapter.send_json`), the in-flight chat task is now cancelled on disconnect instead of continuing to stream tokens and hold MCP sessions against a torn-down session, and a failed error-frame delivery can no longer escape the background task as an unretrieved exception.

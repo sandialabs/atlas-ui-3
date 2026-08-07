@@ -25,6 +25,7 @@ import SplashScreen from './components/SplashScreen'
 import ElicitationDialog from './components/ElicitationDialog'
 import AgentPortal from './components/AgentPortal'
 import { ToastProvider, DialogProvider } from './components/ui/ToastProvider'
+import { watchAppViewportHeight } from './utils/visualViewportHeight'
 
 // Log build info to browser console on startup
 console.info(
@@ -40,6 +41,8 @@ function ChatInterface() {
   const [filesPanelOpen, setFilesPanelOpen] = useState(false)
   const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false)
   const { canvasContent, customUIContent, canvasFiles, features, pendingElicitation } = useChat()
+
+  useEffect(() => watchAppViewportHeight(), [])
 
   // Auto-open tools panel when returning from marketplace
   useEffect(() => {
@@ -81,7 +84,10 @@ function ChatInterface() {
   }, [canvasFiles])
 
   return (
-    <div className="flex flex-col h-screen w-full bg-gray-900 text-gray-200 overflow-hidden">
+    <div
+      className="flex flex-col h-screen w-full bg-gray-900 text-gray-200 overflow-hidden"
+      style={{ height: 'var(--app-viewport-height, 100vh)' }}
+    >
       {/* Banner Panel - full width across the top */}
       <BannerPanel />
 
