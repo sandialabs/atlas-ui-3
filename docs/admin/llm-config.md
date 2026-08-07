@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-03-23
+Last updated: 2026-08-06
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -189,8 +189,8 @@ models:
 
 ### Enforcement
 
-Access is enforced everywhere a model name can enter the system, so it cannot be
-bypassed by a crafted request:
+Access is enforced at each of these user-facing entry points that accept a model
+name:
 
 1. **Listing** — restricted models are filtered out of the `/api/config` and
    `/api/config/shell` responses for unauthorized users, so they never appear in
@@ -201,10 +201,17 @@ bypassed by a crafted request:
    model name directly over the WebSocket.
 3. **Auxiliary LLM endpoints** — `POST /api/suggest_followups` (follow-up
    question suggestions) also takes a model name in its request body and rejects
-   unauthorized models with `403` before calling the LLM.
-4. **Per-user API keys** — the `/api/llm-auth` endpoints hide restricted models
+   restricted models with `404` before calling the LLM. `404` (not `403`) so a
+   restricted model is indistinguishable from a nonexistent one.
+4. **Per-user API keys** — the `/api/llm/auth` endpoints hide restricted models
    and refuse key uploads for them, so a user cannot register a key against a
    model they may not use.
+
+Note: model selection for MCP *sampling* requests (a server-initiated
+`sampling/createMessage` during a tool call) is matched against the configured
+models without a per-user group check, because no user identity is attached to
+the sampling context. Restrict access to such MCP servers with the server's own
+`groups` ACL rather than relying on per-model groups alone.
 
 ## Configuration Fields Explained
 

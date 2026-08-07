@@ -308,13 +308,19 @@ def _suggest(client, user, model):
 def test_suggest_followups_denies_restricted_model(
     restricted_model_config, followups_enabled, stub_llm_caller
 ):
-    """A crafted suggestions request for a restricted model is rejected."""
+    """A crafted suggestions request for a restricted model is rejected with 404.
+
+    404 (not 403) so a restricted model is indistinguishable from a nonexistent
+    one and its name/existence is not leaked -- same policy as /api/llm/auth.
+    """
     from main import app
     from starlette.testclient import TestClient
 
     client = TestClient(app)
-    resp = _suggest(client, "user@example.com", "admin-only-model")
-    assert resp.status_code == 403
+    restricted = _suggest(client, "user@example.com", "admin-only-model")
+    missing = _suggest(client, "user@example.com", "no-such-model")
+    assert restricted.status_code == 404
+    assert missing.status_code == 404
     stub_llm_caller.call_plain.assert_not_called()
 
 
