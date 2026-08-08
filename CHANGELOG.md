@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #745 - 2026-08-07
+### PR #746 - 2026-08-07
 - **Mobile keyboard keeps composer visible**: The chat shell now tracks the browser visual viewport height so the flex layout shrinks when a mobile software keyboard opens, keeping the message composer above the keyboard instead of pinned to the obscured layout viewport (closes #745).
 
 ### PR #740 - 2026-08-03
