@@ -1,7 +1,6 @@
-```markdown
 # Error Flow Diagram
 
-Last updated: 2026-01-19
+Last updated: 2026-07-24
 
 ## Complete Error Handling Flow
 
@@ -144,6 +143,67 @@ Last updated: 2026-01-19
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## Provider Rejections Caused by a Tool Definition
+
+A malformed tool definition makes the provider reject the whole request, so no
+tool ever executes and the turn fails. Per-tool error isolation does not apply,
+because the failure happens before any tool runs. The provider names the
+function it objected to, and that name is what the user needs in order to
+deselect the right tool.
+
+`_raise_llm_domain_error()` raises `LLMBadRequestError` for `BadRequestError`,
+carrying the implicated tool names. Attribution needs positive evidence, because
+most 400s are not about tools at all — an out-of-range parameter or a malformed
+message history is a `BadRequestError` too, and pointing those at the tool
+selection sends the user to disable tools that were never at fault. Three cases:
+
+| Provider text | Reported |
+| --- | --- |
+| names a tool from the request (whole-token match) | just that tool |
+| refers to the tool payload (`tool`, `tools`, `function`, `tool_choice`, …) but names no tool | every tool in the request, to bisect |
+| refers to the message history (`messages`, `tool_call_id`, `role`) | no tool — deselecting tools cannot fix a bad conversation |
+| anything else | no tool; a plain "the provider rejected this request" |
+
+```
+litellm.BadRequestError
+	  │  "Invalid schema for function 'safety_docs_plan': ..."
+	  ▼
+LLMBadRequestError(tool_names=["safety_docs_plan"])
+	  │
+	  ▼
+{
+  "type": "error",
+  "message": "The model provider rejected this request because of the tool
+              'safety_docs_plan'. Turn that tool off and try again.",
+  "error_type": "bad_request"
+}
+```
+
+Three ordering constraints matter here:
+
+- `_raise_llm_domain_error()` checks concrete exception types before falling
+  back to message keywords. The keywords match the provider's text, and a
+  rejection routinely quotes the offending schema — a tool named
+  `timeout_checker` or `vault_api_key_lookup` would otherwise be raised as a
+  timeout or an auth failure and lose its attribution.
+- `litellm.ContextWindowExceededError` subclasses `BadRequestError`, so the
+  context-window check must run first or long conversations get misreported as
+  tool failures.
+- `classify_llm_error()` short-circuits on `LLMBadRequestError` before its
+  keyword matching. Without that, `str(error)` would be the already-built
+  user-facing message, and the keyword rules would classify the message text
+  rather than the original failure.
+
+`_is_retryable_error()` returns `False` for `BadRequestError` before its
+transient-keyword tests, for the same reason: a 400 is deterministic, and one
+that happens to contain `timeout` would otherwise be retried three times with
+backoff before failing.
+
+`LLMBadRequestError` is also in the passthrough tuples of `call_with_rag()` and
+`call_with_rag_and_tools()`. Those methods fall back to a simpler call when RAG
+breaks; a provider rejection is not a RAG failure, so without the passthrough the
+same rejected request is sent a second time and the logs blame RAG.
+
 ## Key Points
 
 1. **Error Classification**: The `classify_llm_error()` function examines the exception type and message to determine the appropriate error category.
@@ -152,8 +212,7 @@ Last updated: 2026-01-19
 
 3. **Detailed Logging**: Full error details are logged for debugging purposes (not shown to users).
 
-4. **Error Type Field**: The `error_type` field allows the frontend to potentially handle different error types differently in the future (e.g., automatic retry for timeouts).
+4. **Error Type Field**: The `error_type` field allows the frontend to potentially handle different error types differently in the future (e.g., automatic retry for timeouts). `error_type_for()` in `error_handler.py` maps a domain error class to the same vocabulary the WebSocket handler in `main.py` uses, so every error frame carries one regardless of which path raised it.
 
 5. **No Sensitive Data Exposure**: API keys, stack traces, and other sensitive information are never sent to the frontend.
-```
 

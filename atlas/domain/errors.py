@@ -59,6 +59,19 @@ class LLMServiceError(LLMError):
     pass
 
 
+class LLMBadRequestError(LLMError):
+    """Raised when the provider rejects the request itself.
+
+    Carries the tool names implicated in the rejection so the user can be told
+    which tool to deselect. ``tool_names`` is empty when the rejection was not
+    about a tool definition.
+    """
+
+    def __init__(self, message: str, tool_names: Optional[list] = None, code: Optional[str] = None):
+        super().__init__(message, code)
+        self.tool_names = list(tool_names or [])
+
+
 class ToolError(DomainError):
     """Tool execution error."""
     pass
