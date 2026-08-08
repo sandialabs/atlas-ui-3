@@ -250,7 +250,13 @@ async def test_default_does_not_overwrite_existing_context_value():
 
 @pytest.mark.asyncio
 async def test_compliance_level_stashed_on_session_when_feature_enabled():
-    """When enabled, the active level comes from server-side model config."""
+    """The user's level and the model's level are tracked separately.
+
+    ``compliance_level`` keeps its long-standing meaning (the user's validated
+    filter, which scopes MCP discovery and tool execution). The model's
+    server-side level lands under ``model_compliance_level`` and is what
+    query-time RAG enforcement runs on.
+    """
     service, sessions = _make_service()
     service.config_manager.app_settings.feature_compliance_levels_enabled = True
     service.config_manager.llm_config.models = {
@@ -262,7 +268,9 @@ async def test_compliance_level_stashed_on_session_when_feature_enabled():
 
     async def fake_execute(**kwargs):
         from atlas.core.compliance import get_active_compliance_context
-        captured["compliance_level"] = sessions[session_id].context.get("compliance_level")
+        context = sessions[session_id].context
+        captured["compliance_level"] = context.get("compliance_level")
+        captured["model_compliance_level"] = context.get("model_compliance_level")
         captured["active_context"] = get_active_compliance_context()
         return {"type": "done"}
 
@@ -278,8 +286,77 @@ async def test_compliance_level_stashed_on_session_when_feature_enabled():
             compliance_level="Public",
         )
 
-    assert captured["compliance_level"] == "Internal"
+    # Tool authorization is not silently re-scoped to the model's level.
+    assert captured["compliance_level"] == "Public"
+    assert captured["model_compliance_level"] == "Internal"
     assert captured["active_context"] == ("Internal", True)
+
+
+@pytest.mark.asyncio
+async def test_enforcement_is_off_when_model_has_no_compliance_level():
+    """Feature on but no trusted level resolved -> enforce must be False.
+
+    Enforcing with a ``None`` level would make the RAG gate reject every
+    compliance-tagged source, so a deployment that enables the feature without
+    per-model levels would lose all tagged sources.
+    """
+    service, sessions = _make_service()
+    service.config_manager.app_settings.feature_compliance_levels_enabled = True
+    service.config_manager.llm_config.models = {
+        "test-model": MagicMock(compliance_level=None)
+    }
+    session_id = uuid4()
+
+    captured = {}
+
+    async def fake_execute(**kwargs):
+        from atlas.core.compliance import get_active_compliance_context
+        captured["active_context"] = get_active_compliance_context()
+        captured["model_compliance_level"] = sessions[session_id].context.get(
+            "model_compliance_level"
+        )
+        return {"type": "done"}
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email="user@test.com",
+            compliance_level="Public",
+        )
+
+    assert captured["model_compliance_level"] is None
+    assert captured["active_context"] == (None, False)
+
+
+@pytest.mark.asyncio
+async def test_compliance_context_is_reset_after_the_turn():
+    """The per-turn ContextVar must not leak into the next turn."""
+    from atlas.core.compliance import get_active_compliance_context
+
+    service, sessions = _make_service()
+    service.config_manager.app_settings.feature_compliance_levels_enabled = True
+    service.config_manager.llm_config.models = {
+        "test-model": MagicMock(compliance_level="Internal")
+    }
+    session_id = uuid4()
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(return_value={"type": "done"})
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email="user@test.com",
+        )
+
+    assert get_active_compliance_context() == (None, False)
 
 
 @pytest.mark.asyncio

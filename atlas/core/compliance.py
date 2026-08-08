@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+from atlas.core.log_sanitizer import sanitize_for_logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -123,18 +125,24 @@ class ComplianceLevelManager:
             if not self.levels:
                 return level_name
 
-            # Unknown compliance level
+            # Unknown compliance level. Neither the rejected level name nor the
+            # caller-supplied context is echoed verbatim: the level name can come
+            # from a client payload (log injection) and the context can name the
+            # selected model, which must not appear in compliance warnings.
             valid_levels = list(self.levels.keys())
             logger.warning(
                 "Invalid compliance level in %s. %d valid level(s) are configured. "
                 "Setting to None.",
-                context or "request",
+                sanitize_for_logging(context) if context else "request",
                 len(valid_levels),
             )
             return None
 
         if canonical != level_name:
-            logger.debug("Resolved compliance level alias in %s", context or "request")
+            logger.debug(
+                "Resolved compliance level alias in %s",
+                sanitize_for_logging(context) if context else "request",
+            )
 
         return canonical
 
