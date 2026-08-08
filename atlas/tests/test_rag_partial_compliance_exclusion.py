@@ -26,6 +26,8 @@ def _make_caller():
 
 
 def _denial(source: str) -> DataSourcePermissionError:
+    """A denial shaped like the real one, which names the *corpus* the user
+    selected rather than the ``rag-sources.json`` server key."""
     return DataSourcePermissionError(
         f"The data source '{source}' is not accessible at the compliance level "
         "of the selected model. Deselect it, or switch to a model cleared for "
@@ -57,7 +59,7 @@ async def test_one_denied_group_does_not_discard_the_others():
     caller = _make_caller()
     service = _rag_service({
         "allowed:corpus": RAGResponse(content="good context"),
-        "denied:corpus": _denial("denied"),
+        "denied:corpus": _denial("denied-corpus"),
     })
 
     successful, exclusions = await caller._query_all_rag_sources(
@@ -69,7 +71,7 @@ async def test_one_denied_group_does_not_discard_the_others():
 
     assert [response.content for _label, response in successful] == ["good context"]
     assert len(exclusions) == 1
-    assert "denied" in exclusions[0]
+    assert "denied-corpus" in exclusions[0]
 
 
 @pytest.mark.asyncio
@@ -77,8 +79,8 @@ async def test_all_groups_denied_raises():
     """With nothing left to answer from, degrading silently is the bug."""
     caller = _make_caller()
     service = _rag_service({
-        "a:corpus": _denial("a"),
-        "b:corpus": _denial("b"),
+        "a:corpus": _denial("a-corpus"),
+        "b:corpus": _denial("b-corpus"),
     })
 
     with pytest.raises(DataSourcePermissionError):
@@ -134,7 +136,7 @@ async def test_exclusion_notice_reaches_the_rag_system_message():
     caller = _make_caller()
     service = _rag_service({
         "allowed:corpus": RAGResponse(content="good context"),
-        "denied:corpus": _denial("denied"),
+        "denied:corpus": _denial("denied-corpus"),
     })
 
     captured = {}

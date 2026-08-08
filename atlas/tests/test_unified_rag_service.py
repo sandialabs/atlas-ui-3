@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from atlas.domain.unified_rag_service import UnifiedRAGService
 from atlas.domain.errors import DataSourcePermissionError
+from atlas.domain.unified_rag_service import UnifiedRAGService
 from atlas.modules.config.config_manager import RAGSourceConfig, RAGSourcesConfig
 from atlas.modules.rag.client import DataSource, RAGResponse
 
@@ -488,8 +488,10 @@ class TestQueryRAGProductionEnforcementPath:
                 )
 
         assert excinfo.value.code == "DATA_SOURCE_COMPLIANCE_MISMATCH"
-        # The denial names the source so the user knows which one to deselect.
-        assert "test_http" in str(excinfo.value)
+        # The denial names the *corpus* the user selected, not the rag-sources
+        # server key, which the UI never displays.
+        assert "'corpus1'" in str(excinfo.value)
+        assert "test_http" not in str(excinfo.value)
         mock_client.query_rag.assert_not_called()
 
     @pytest.mark.asyncio
@@ -568,7 +570,8 @@ class TestQueryRAGProductionEnforcementPath:
                 )
 
         assert excinfo.value.code == "DATA_SOURCE_ACCESS_DENIED"
-        assert "test_mcp" in str(excinfo.value)
+        assert "'corpus1'" in str(excinfo.value)
+        assert "test_mcp" not in str(excinfo.value)
         mock_client.query_rag.assert_not_called()
 
     @pytest.mark.asyncio
@@ -589,12 +592,19 @@ class TestQueryRAGProductionEnforcementPath:
                 )
 
         assert excinfo.value.code == "DATA_SOURCE_DISABLED"
-        assert "disabled" in str(excinfo.value)
+        assert "'corpus1'" in str(excinfo.value)
+        assert "currently disabled" in str(excinfo.value)
         mock_client.query_rag.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_batch_denial_names_the_offending_source(self, unified_rag_service):
-        """In the batch path the message must identify which source to deselect."""
+    async def test_batch_denial_names_every_offending_source(self, unified_rag_service):
+        """In the batch path the message must identify what to deselect.
+
+        Authorization is decided per server, so every corpus in the batch is
+        rejected together and every one of them has to be named -- a message
+        that names only one (or names the ``rag-sources.json`` server key, which
+        the UI never shows) leaves the rest unexplained.
+        """
         mock_client = AsyncMock()
 
         with (
@@ -612,7 +622,12 @@ class TestQueryRAGProductionEnforcementPath:
                     messages=[{"role": "user", "content": "q"}],
                 )
 
-        assert "test_http" in str(excinfo.value)
+        message = str(excinfo.value)
+        assert "'corpus1'" in message
+        assert "'corpus2'" in message
+        assert "test_http" not in message
+        # Plural remedy, since more than one source has to be deselected.
+        assert "Deselect them" in message
         mock_client.query_rag.assert_not_called()
 
     @pytest.mark.asyncio
@@ -638,6 +653,121 @@ class TestQueryRAGProductionEnforcementPath:
             )
 
         assert get_active_compliance_context() == (None, False)
+
+
+class TestGateAgainstTheRealComplianceManager:
+    """The gate against the real ``ComplianceLevelManager``, not a stub.
+
+    Every other compliance test here substitutes a stub whose ``is_accessible``
+    is strict equality. That is the right shape for isolating the gate, but it
+    means nothing exercises the real manager -- whose behaviour with no
+    ``compliance-levels.json`` loaded is *permissive*, the opposite of the stub
+    and the opposite of the frontend's ``isComplianceAccessible``. The picker
+    mirrors this permissiveness deliberately (see
+    ``rag-panel-model-compliance.test.jsx``), so it is pinned on both sides.
+    """
+
+    @staticmethod
+    def _real_manager_with_no_config():
+        from pathlib import Path
+
+        from atlas.core.compliance import ComplianceLevelManager
+
+        # A path that cannot exist, so no levels are loaded.
+        return ComplianceLevelManager(config_path=Path("/nonexistent/compliance-levels.json"))
+
+    @pytest.mark.asyncio
+    async def test_gate_is_permissive_with_no_levels_configured(self, unified_rag_service):
+        """No levels configured: the gate must be a no-op, not a blanket denial.
+
+        A deployment that never wrote a compliance-levels.json must keep working
+        exactly as it did before query-time enforcement existed.
+        """
+        from atlas.core.compliance import (
+            reset_active_compliance_context,
+            set_active_compliance_context,
+        )
+
+        manager = self._real_manager_with_no_config()
+        assert manager.levels == {}
+
+        mock_client = AsyncMock()
+        mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+
+        # "Public" against the Internal-tagged test_http source: the stub used
+        # elsewhere would reject this, the real manager must allow it.
+        token = set_active_compliance_context("Public", enforce=True)
+        try:
+            with (
+                patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
+                patch(
+                    "atlas.domain.unified_rag_service.get_compliance_manager",
+                    return_value=manager,
+                ),
+            ):
+                response = await unified_rag_service.query_rag(
+                    username="test@test.com",
+                    qualified_data_source="test_http:corpus1",
+                    messages=[{"role": "user", "content": "q"}],
+                )
+        finally:
+            reset_active_compliance_context(token)
+
+        assert response.content == "ok"
+        mock_client.query_rag.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_real_manager_denies_outside_the_allowlist(self, unified_rag_service):
+        """With levels configured, the real manager's allowlist is enforced."""
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from atlas.core.compliance import (
+            ComplianceLevelManager,
+            reset_active_compliance_context,
+            set_active_compliance_context,
+        )
+
+        levels = {
+            "mode": "explicit_allowlist",
+            "levels": [
+                {"name": "Public", "allowed_with": ["Public"]},
+                {"name": "Internal", "allowed_with": ["Internal", "Public"]},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "compliance-levels.json"
+            config_path.write_text(json.dumps(levels), encoding="utf-8")
+            manager = ComplianceLevelManager(config_path=config_path)
+            assert set(manager.levels) == {"Public", "Internal"}
+
+            mock_client = AsyncMock()
+            token = set_active_compliance_context("Public", enforce=True)
+            try:
+                with (
+                    patch.object(
+                        unified_rag_service, "_get_http_client", return_value=mock_client
+                    ),
+                    patch(
+                        "atlas.domain.unified_rag_service.get_compliance_manager",
+                        return_value=manager,
+                    ),
+                ):
+                    # test_http is tagged Internal; Public is not cleared for it.
+                    with pytest.raises(DataSourcePermissionError) as excinfo:
+                        await unified_rag_service.query_rag(
+                            username="test@test.com",
+                            qualified_data_source="test_http:corpus1",
+                            messages=[{"role": "user", "content": "q"}],
+                        )
+            finally:
+                reset_active_compliance_context(token)
+
+        assert excinfo.value.code == "DATA_SOURCE_COMPLIANCE_MISMATCH"
+        assert "'corpus1'" in str(excinfo.value)
+        mock_client.query_rag.assert_not_called()
 
 
 class TestSourceFiltering:

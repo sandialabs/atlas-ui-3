@@ -42,6 +42,33 @@ def _extract_query_text(messages: List[Dict]) -> str:
     return ""
 
 
+def _describe_sources(
+    server_name: str, source_ids: Optional[List[str]]
+) -> tuple[str, str]:
+    """Build the subject of a denial message, naming what the user selected.
+
+    Authorization is decided per *server*, but the user picked *corpora*, and
+    the server key from ``rag-sources.json`` is never displayed in the UI. So
+    every corpus selected from the rejected server is named -- all of them are
+    rejected together, and in the batch path naming only one would leave the
+    rest unexplained.
+
+    Returns ``(subject, pronoun)``: a phrase ending in "is"/"are" so callers can
+    append the reason (e.g. ``"The data source 'internal-docs' is"``), and the
+    matching "it"/"them" for the remedy clause. Falls back to the server key
+    when no corpus is known, which is better than naming nothing at all.
+    """
+    names = [str(s) for s in (source_ids or []) if s]
+    if not names:
+        names = [server_name]
+
+    quoted = [f"'{name}'" for name in names]
+    if len(quoted) == 1:
+        return f"The data source {quoted[0]} is", "it"
+    listed = ", ".join(quoted[:-1]) + f" and {quoted[-1]}"
+    return f"The data sources {listed} are", "them"
+
+
 def _rag_response_attrs(response: RAGResponse) -> Dict[str, Any]:
     """Extract per-response RAG attributes for a span.
 
@@ -152,8 +179,25 @@ class UnifiedRAGService:
         username: str,
         source_name: str,
         source_config: RAGSourceConfig,
+        source_ids: Optional[List[str]] = None,
     ) -> None:
         """Enforce server-side access controls before querying a RAG backend.
+
+        Args:
+            username: The user making the query.
+            source_name: The server key from ``rag-sources.json``. Used for the
+                log lines and as a fallback in messages; it is a config key the
+                UI never displays, so it is not what the user is told about.
+            source_config: The server's configuration. Authorization is decided
+                per *server*: ``enabled``, ``groups`` and ``compliance_level``
+                all live on this entry, so a denial covers every corpus selected
+                from that server.
+            source_ids: The corpora the user actually selected from this server,
+                as displayed in the picker. All of them are named in the denial
+                message -- the check is per-server, so every one of them is
+                rejected together, and in the batch path a message naming only
+                one (or naming the server key instead) leaves the user unable to
+                tell what to deselect.
 
         Raises:
             DataSourcePermissionError: The source is disabled, the user is not in
@@ -164,18 +208,25 @@ class UnifiedRAGService:
                 (``DATA_SOURCE_DISABLED`` / ``DATA_SOURCE_ACCESS_DENIED`` /
                 ``DATA_SOURCE_COMPLIANCE_MISMATCH``) says which.
 
-        Denial messages name the offending source and the remedy: in the batch
-        path several sources are in flight at once, and a message that does not
-        name one leaves the user with no way to tell which to deselect.
+        Scope:
+            This gate covers RAG sources routed through ``UnifiedRAGService``,
+            i.e. the ``http``-origin sources configured in ``rag-sources.json``.
+            It does **not** cover ``mcp``-origin sources: ``mcp_execution``
+            splits selected sources by origin and hands MCP ones directly to
+            ``RAGMCPService.synthesize``, which performs compliance filtering
+            only at discovery time. Closing that requires lifting this check
+            into a shared policy called by both services; until then the
+            query-time boundary is enforced for HTTP RAG sources only.
         """
+        subject, pronoun = _describe_sources(source_name, source_ids)
+
         if not source_config.enabled:
             logger.warning(
                 "Rejected RAG query for source %s: source is disabled",
                 sanitize_for_logging(source_name),
             )
             raise DataSourcePermissionError(
-                f"The data source '{source_name}' is currently disabled. "
-                "Deselect it and try again.",
+                f"{subject} currently disabled. Deselect {pronoun} and try again.",
                 code="DATA_SOURCE_DISABLED",
             )
 
@@ -186,8 +237,8 @@ class UnifiedRAGService:
                 hash_short(username),
             )
             raise DataSourcePermissionError(
-                f"You are not authorized to query the data source '{source_name}'. "
-                "Deselect it, or ask an administrator for access to its group.",
+                f"{subject} not accessible to you. Deselect {pronoun}, or ask "
+                "an administrator for access to its group.",
                 code="DATA_SOURCE_ACCESS_DENIED",
             )
 
@@ -202,8 +253,8 @@ class UnifiedRAGService:
                 sanitize_for_logging(source_name),
             )
             raise DataSourcePermissionError(
-                f"The data source '{source_name}' is not accessible without a trusted "
-                "compliance level. Deselect it, or select a model that carries a "
+                f"{subject} not accessible without a trusted compliance level. "
+                f"Deselect {pronoun}, or select a model that carries a "
                 "compliance level.",
                 code="DATA_SOURCE_COMPLIANCE_MISMATCH",
             )
@@ -223,9 +274,9 @@ class UnifiedRAGService:
             sanitize_for_logging(source_name),
         )
         raise DataSourcePermissionError(
-            f"The data source '{source_name}' is not accessible at the compliance "
-            "level of the selected model. Deselect it, or switch to a model cleared "
-            "for that source.",
+            f"{subject} not accessible at the compliance level of the selected "
+            f"model. Deselect {pronoun}, or switch to a model cleared for "
+            "that source.",
             code="DATA_SOURCE_COMPLIANCE_MISMATCH",
         )
 
@@ -430,7 +481,9 @@ class UnifiedRAGService:
             logger.error("[RAG] Source not found in config: %s", server_name)
             raise ValueError(f"RAG source not found: {server_name}")
 
-        await self._ensure_source_query_allowed(username, server_name, source_config)
+        await self._ensure_source_query_allowed(
+            username, server_name, source_config, source_ids=[source_id]
+        )
 
         logger.debug(
             "[RAG] Source config: type=%s, enabled=%s, compliance_level=%s",
@@ -619,7 +672,11 @@ class UnifiedRAGService:
         if not source_config:
             raise ValueError(f"RAG source not found: {server_name}")
 
-        await self._ensure_source_query_allowed(username, server_name, source_config)
+        # Every corpus in the batch comes from this one server and is rejected
+        # together, so the denial message names all of them.
+        await self._ensure_source_query_allowed(
+            username, server_name, source_config, source_ids=source_ids
+        )
 
         if source_config.type == "http":
             client = self._get_http_client(server_name, source_config)
