@@ -349,7 +349,20 @@ class ChatService:
                     trusted_compliance_level = compliance_mgr.validate_compliance_level(
                         configured_level, context="model configuration"
                     )
-            except Exception:
+            except Exception as exc:
+                # The realistic failure modes are attribute/lookup errors on
+                # _config_manager.llm_config.models (AttributeError, TypeError,
+                # KeyError), but the catch stays broad: this guard exists so a
+                # broken compliance lookup can never break a chat turn, and
+                # narrowing it would reintroduce that risk for exception types
+                # not foreseen here. The warning names only the exception type
+                # -- never the model identifier, which compliance warning paths
+                # deliberately keep out of the log stream.
+                logger.warning(
+                    "Could not resolve the selected model's compliance level "
+                    "(%s); RAG compliance enforcement is disabled for this turn.",
+                    type(exc).__name__,
+                )
                 trusted_compliance_level = None
             session.context["compliance_level"] = (
                 compliance_mgr.validate_compliance_level(
