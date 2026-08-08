@@ -215,8 +215,9 @@ class UnifiedRAGService:
             splits selected sources by origin and hands MCP ones directly to
             ``RAGMCPService.synthesize``, which performs compliance filtering
             only at discovery time. Closing that requires lifting this check
-            into a shared policy called by both services; until then the
-            query-time boundary is enforced for HTTP RAG sources only.
+            into a shared policy called by both services (tracked in #752);
+            until then the query-time boundary is enforced for HTTP RAG
+            sources only.
         """
         subject, pronoun = _describe_sources(source_name, source_ids)
 
