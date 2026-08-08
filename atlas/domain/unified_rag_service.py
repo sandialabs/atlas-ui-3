@@ -153,51 +153,79 @@ class UnifiedRAGService:
         source_name: str,
         source_config: RAGSourceConfig,
     ) -> None:
-        """Enforce server-side access controls before querying a RAG backend."""
+        """Enforce server-side access controls before querying a RAG backend.
+
+        Raises:
+            DataSourcePermissionError: The source is disabled, the user is not in
+                an authorized group, or the source sits outside the compliance
+                boundary that is active for this turn. Every failure mode raises
+                the same error type so callers can distinguish an authorization
+                denial from a backend failure; the ``code`` attribute
+                (``DATA_SOURCE_DISABLED`` / ``DATA_SOURCE_ACCESS_DENIED`` /
+                ``DATA_SOURCE_COMPLIANCE_MISMATCH``) says which.
+
+        Denial messages name the offending source and the remedy: in the batch
+        path several sources are in flight at once, and a message that does not
+        name one leaves the user with no way to tell which to deselect.
+        """
         if not source_config.enabled:
-            raise ValueError(f"RAG source is disabled: {source_name}")
+            logger.warning(
+                "Rejected RAG query for source %s: source is disabled",
+                sanitize_for_logging(source_name),
+            )
+            raise DataSourcePermissionError(
+                f"The data source '{source_name}' is currently disabled. "
+                "Deselect it and try again.",
+                code="DATA_SOURCE_DISABLED",
+            )
 
         if not await self._is_user_authorized(username, source_config.groups):
             logger.warning(
                 "Rejected RAG query for source %s: user %s is not in an authorized group",
                 sanitize_for_logging(source_name),
-                sanitize_for_logging(username),
+                hash_short(username),
             )
             raise DataSourcePermissionError(
-                "You are not authorized to query the selected data source.",
+                f"You are not authorized to query the data source '{source_name}'. "
+                "Deselect it, or ask an administrator for access to its group.",
                 code="DATA_SOURCE_ACCESS_DENIED",
             )
 
-        user_compliance_level, enforce_compliance = get_active_compliance_context()
+        active_compliance_level, enforce_compliance = get_active_compliance_context()
         resource_compliance_level = source_config.compliance_level
         if not enforce_compliance or not resource_compliance_level:
             return
 
-        if not user_compliance_level:
+        if not active_compliance_level:
             logger.warning(
                 "Rejected RAG query for source %s: no trusted compliance level is active",
                 sanitize_for_logging(source_name),
             )
             raise DataSourcePermissionError(
-                "The selected data source is not accessible without a trusted compliance level.",
+                f"The data source '{source_name}' is not accessible without a trusted "
+                "compliance level. Deselect it, or select a model that carries a "
+                "compliance level.",
                 code="DATA_SOURCE_COMPLIANCE_MISMATCH",
             )
 
         compliance_mgr = get_compliance_manager()
         if compliance_mgr.is_accessible(
-            user_level=user_compliance_level,
+            user_level=active_compliance_level,
             resource_level=resource_compliance_level,
         ):
             return
 
+        # Deliberately logs neither compliance label: the point of query-time
+        # enforcement is to keep compliance labels out of the log stream. The
+        # source name is enough to diagnose a denial.
         logger.warning(
-            "Rejected RAG query for source %s due to compliance mismatch (user: %s, source: %s)",
+            "Rejected RAG query for source %s: outside the active compliance boundary",
             sanitize_for_logging(source_name),
-            sanitize_for_logging(user_compliance_level),
-            sanitize_for_logging(resource_compliance_level),
         )
         raise DataSourcePermissionError(
-            "The selected data source is not accessible at your current compliance level.",
+            f"The data source '{source_name}' is not accessible at the compliance "
+            "level of the selected model. Deselect it, or switch to a model cleared "
+            "for that source.",
             code="DATA_SOURCE_COMPLIANCE_MISMATCH",
         )
 
@@ -322,7 +350,7 @@ class UnifiedRAGService:
         username: str,
         qualified_data_source: str,
         messages: List[Dict],
-        user_compliance_level: Optional[str] = None,
+        enforced_compliance_level: Optional[str] = None,
     ) -> RAGResponse:
         """Query a RAG source.
 
@@ -330,9 +358,19 @@ class UnifiedRAGService:
             username: The user making the query.
             qualified_data_source: Data source in format "server:source_id" (e.g., "atlas_rag:technical-docs").
             messages: List of message dictionaries.
+            enforced_compliance_level: Overrides the ambient compliance context
+                for this call. This must be a **trusted, server-derived** level
+                (the selected model's configured level) -- never a client-supplied
+                filter. Production callers leave this ``None`` and let
+                ``ChatService`` establish the context for the whole turn; it
+                exists for callers that run outside a chat turn, and for tests.
 
         Returns:
             RAGResponse with content and metadata.
+
+        Raises:
+            DataSourcePermissionError: The source is disabled, out of group, or
+                outside the active compliance boundary.
         """
         query_text = _extract_query_text(messages)
         span_attrs = {
@@ -344,8 +382,8 @@ class UnifiedRAGService:
             "batch": False,
         }
         token = None
-        if user_compliance_level is not None:
-            token = set_active_compliance_context(user_compliance_level, enforce=True)
+        if enforced_compliance_level is not None:
+            token = set_active_compliance_context(enforced_compliance_level, enforce=True)
         try:
             with start_span("rag.query", span_attrs) as span:
                 response = await self._query_rag_impl(username, qualified_data_source, messages)
@@ -491,7 +529,7 @@ class UnifiedRAGService:
         username: str,
         qualified_data_sources: List[str],
         messages: List[Dict],
-        user_compliance_level: Optional[str] = None,
+        enforced_compliance_level: Optional[str] = None,
     ) -> RAGResponse:
         """Query multiple RAG sources on the same server in a single request.
 
@@ -505,12 +543,17 @@ class UnifiedRAGService:
             qualified_data_sources: Data sources in format "server:source_id".
                 All sources MUST belong to the same server.
             messages: List of message dictionaries.
+            enforced_compliance_level: Overrides the ambient compliance context
+                for this call. Must be a **trusted, server-derived** level, never
+                a client-supplied filter. See :meth:`query_rag`.
 
         Returns:
             RAGResponse with content and metadata from the batched query.
 
         Raises:
             ValueError: If sources list is empty or sources span multiple servers.
+            DataSourcePermissionError: The source is disabled, out of group, or
+                outside the active compliance boundary.
         """
         query_text = _extract_query_text(messages)
         span_attrs = {
@@ -523,8 +566,8 @@ class UnifiedRAGService:
             "batch_size": len(qualified_data_sources or []),
         }
         token = None
-        if user_compliance_level is not None:
-            token = set_active_compliance_context(user_compliance_level, enforce=True)
+        if enforced_compliance_level is not None:
+            token = set_active_compliance_context(enforced_compliance_level, enforce=True)
         try:
             with start_span("rag.query", span_attrs) as span:
                 response = await self._query_rag_batch_impl(username, qualified_data_sources, messages)
