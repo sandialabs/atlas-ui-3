@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #750 - 2026-08-08
+- **Chat content stays inside the mobile viewport**: Long unbroken strings -- tool names like `basic_memory_discover_topics`, raw URLs, base64 blobs -- set the min-content width of their box, which inside a flex row becomes the item's automatic minimum (`min-width: auto`) and stopped the row from shrinking, scrolling the whole page sideways on a phone. The transcript container now carries a `.chat-messages` scope that clears that minimum and lets long strings wrap (code blocks excluded so snippets keep their own horizontal scroller); the assistant bubble shrinks beside the avatar instead of claiming `w-full` on top of it; tool-call rows, tool logs, file chips and download buttons wrap or truncate; and the header button groups shrink so the model name truncates rather than pushing the header past a 375px screen (closes #747).
+
 ### PR #746 - 2026-08-07
 - **Mobile keyboard keeps composer visible**: The chat shell now tracks the browser visual viewport height so the flex layout shrinks when a mobile software keyboard opens, keeping the message composer above the keyboard instead of pinned to the obscured layout viewport (closes #745).
 
