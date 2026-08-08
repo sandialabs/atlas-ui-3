@@ -39,9 +39,14 @@ const RAG_SOURCES = [
   }
 ]
 
-function setup({ currentModel, complianceLevelFilter = null }) {
+function setup({
+  currentModel,
+  complianceLevelFilter = null,
+  complianceLevels = COMPLIANCE_LEVELS,
+  ragSources = RAG_SOURCES
+}) {
   useChat.mockReturnValue({
-    ragSources: RAG_SOURCES,
+    ragSources,
     selectedDataSources: new Set(),
     toggleDataSource: vi.fn(),
     addDataSources: vi.fn(),
@@ -57,11 +62,11 @@ function setup({ currentModel, complianceLevelFilter = null }) {
   })
 
   useMarketplace.mockReturnValue({
-    complianceLevels: COMPLIANCE_LEVELS,
+    complianceLevels,
     isComplianceAccessible: (userLevel, resourceLevel) => {
       if (!userLevel) return true
       if (!resourceLevel) return false
-      const level = COMPLIANCE_LEVELS.find(l => l.name === userLevel)
+      const level = complianceLevels.find(l => l.name === userLevel)
       return !!level && level.allowed_with.includes(resourceLevel)
     }
   })
@@ -102,5 +107,27 @@ describe('RagPanel - selected model compliance boundary', () => {
 
     expect(screen.queryByText('internal-docs')).not.toBeInTheDocument()
     expect(screen.queryByText('public-docs')).not.toBeInTheDocument()
+  })
+
+  it('does not hide a source that carries no compliance level', () => {
+    // The server gate returns early for untagged sources, so the picker must
+    // not hide them either.
+    const untagged = {
+      id: 'untagged-docs',
+      label: 'untagged-docs',
+      serverName: 'atlas_rag'
+    }
+    setup({ currentModel: 'public-model', ragSources: [untagged] })
+
+    expect(screen.getByText('untagged-docs')).toBeInTheDocument()
+  })
+
+  it('renders all sources when compliance levels are not loaded', () => {
+    // An empty config (fetch pending or failed) must not blank the panel:
+    // the server's ComplianceLevelManager is permissive in that state.
+    setup({ currentModel: 'public-model', complianceLevels: [] })
+
+    expect(screen.getByText('public-docs')).toBeInTheDocument()
+    expect(screen.getByText('internal-docs')).toBeInTheDocument()
   })
 })

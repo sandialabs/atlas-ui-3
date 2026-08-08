@@ -15,7 +15,7 @@ const RagPanel = ({ isOpen, onClose }) => {
     models,
     currentModel
   } = useChat()
-  const { isComplianceAccessible } = useMarketplace()
+  const { isComplianceAccessible, complianceLevels } = useMarketplace()
 
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -64,8 +64,22 @@ const RagPanel = ({ isOpen, onClose }) => {
     // The server-side gate compares the *per-server* value, so this filter
     // does too; the header filter and the badge stay on the per-corpus label
     // the user is shown.
-    if (complianceLevelsEnabled && modelComplianceLevel) {
+    //
+    // This filter deliberately mirrors the server's *permissive* treatment of
+    // untagged sources and missing config, so the picker never hides something
+    // the gate would allow:
+    //   - a source carrying no per-server level is never excluded (the gate
+    //     returns early on `not resource_compliance_level`);
+    //   - an empty/unloaded complianceLevels config disables the filter
+    //     entirely (the server's ComplianceLevelManager is permissive with no
+    //     config loaded, and a failed fetch must not blank the panel).
+    if (
+      complianceLevelsEnabled &&
+      modelComplianceLevel &&
+      (complianceLevels || []).length > 0
+    ) {
       sources = sources.filter(source =>
+        !source.serverComplianceLevel ||
         isComplianceAccessible(modelComplianceLevel, source.serverComplianceLevel)
       )
     }
@@ -82,7 +96,7 @@ const RagPanel = ({ isOpen, onClose }) => {
     }
 
     return sources
-  }, [ragSources, complianceLevelFilter, complianceLevelsEnabled, modelComplianceLevel, isComplianceAccessible, searchQuery])
+  }, [ragSources, complianceLevelFilter, complianceLevelsEnabled, modelComplianceLevel, complianceLevels, isComplianceAccessible, searchQuery])
 
   // Enable all filtered data sources
   const enableAll = useCallback(() => {
