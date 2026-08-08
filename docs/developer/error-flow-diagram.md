@@ -1,4 +1,3 @@
-```markdown
 # Error Flow Diagram
 
 Last updated: 2026-07-24
@@ -162,6 +161,7 @@ selection sends the user to disable tools that were never at fault. Three cases:
 | --- | --- |
 | names a tool from the request (whole-token match) | just that tool |
 | refers to the tool payload (`tool`, `tools`, `function`, `tool_choice`, …) but names no tool | every tool in the request, to bisect |
+| refers to the message history (`messages`, `tool_call_id`, `role`) | no tool — deselecting tools cannot fix a bad conversation |
 | anything else | no tool; a plain "the provider rejected this request" |
 
 ```
@@ -179,8 +179,13 @@ LLMBadRequestError(tool_names=["safety_docs_plan"])
 }
 ```
 
-Two ordering constraints matter here:
+Three ordering constraints matter here:
 
+- `_raise_llm_domain_error()` checks concrete exception types before falling
+  back to message keywords. The keywords match the provider's text, and a
+  rejection routinely quotes the offending schema — a tool named
+  `timeout_checker` or `vault_api_key_lookup` would otherwise be raised as a
+  timeout or an auth failure and lose its attribution.
 - `litellm.ContextWindowExceededError` subclasses `BadRequestError`, so the
   context-window check must run first or long conversations get misreported as
   tool failures.
@@ -188,6 +193,11 @@ Two ordering constraints matter here:
   keyword matching. Without that, `str(error)` would be the already-built
   user-facing message, and the keyword rules would classify the message text
   rather than the original failure.
+
+`_is_retryable_error()` returns `False` for `BadRequestError` before its
+transient-keyword tests, for the same reason: a 400 is deterministic, and one
+that happens to contain `timeout` would otherwise be retried three times with
+backoff before failing.
 
 `LLMBadRequestError` is also in the passthrough tuples of `call_with_rag()` and
 `call_with_rag_and_tools()`. Those methods fall back to a simpler call when RAG
@@ -205,5 +215,4 @@ same rejected request is sent a second time and the logs blame RAG.
 4. **Error Type Field**: The `error_type` field allows the frontend to potentially handle different error types differently in the future (e.g., automatic retry for timeouts). `error_type_for()` in `error_handler.py` maps a domain error class to the same vocabulary the WebSocket handler in `main.py` uses, so every error frame carries one regardless of which path raised it.
 
 5. **No Sensitive Data Exposure**: API keys, stack traces, and other sensitive information are never sent to the frontend.
-```
 

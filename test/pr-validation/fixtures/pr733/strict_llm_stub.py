@@ -23,11 +23,14 @@ app = FastAPI()
 def validate_tools(tools):
     """Return a provider-shaped error body for the first invalid tool, else None."""
     for i, tool in enumerate(tools or []):
-        function = tool.get("function") or {}
+        function = tool.get("function") if isinstance(tool, dict) else None
+        function = function if isinstance(function, dict) else {}
         parameters = function.get("parameters")
         if parameters is None:
             continue
-        declared = parameters.get("type")
+        # A non-dict `parameters` is itself invalid; report it rather than
+        # raising an AttributeError and answering the negative test with a 500.
+        declared = parameters.get("type") if isinstance(parameters, dict) else parameters
         if declared != "object":
             return {
                 "error": {
