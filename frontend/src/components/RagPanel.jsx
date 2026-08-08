@@ -1,6 +1,7 @@
 import { useMemo, useState, useCallback } from 'react'
 import { X, Search, CheckSquare, Square } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
+import { useMarketplace } from '../contexts/MarketplaceContext'
 
 const RagPanel = ({ isOpen, onClose }) => {
   const {
@@ -10,12 +11,26 @@ const RagPanel = ({ isOpen, onClose }) => {
     addDataSources,
     clearDataSources,
     features,
-    complianceLevelFilter
+    complianceLevelFilter,
+    models,
+    currentModel
   } = useChat()
+  const { isComplianceAccessible } = useMarketplace()
 
   const [searchQuery, setSearchQuery] = useState('')
 
   const complianceLevelsEnabled = features.compliance_levels
+
+  // The boundary that is actually enforced server-side at query time is the
+  // *selected model's* compliance level, not the header filter. Derive it here
+  // so the picker cannot offer a source that would be excluded on send.
+  const modelComplianceLevel = useMemo(() => {
+    if (!complianceLevelsEnabled || !currentModel) return null
+    const match = (models || [])
+      .map(m => (typeof m === 'string' ? { name: m } : m))
+      .find(m => (m.name || '') === currentModel)
+    return match?.compliance_level || null
+  }, [complianceLevelsEnabled, models, currentModel])
 
   // Helper to get badge color
   const getComplianceBadgeColor = (level) => {
@@ -38,6 +53,15 @@ const RagPanel = ({ isOpen, onClose }) => {
       )
     }
 
+    // Filter by the selected model's compliance level, which is the boundary
+    // the server enforces at query time. Without this a source can pass the
+    // header filter, be selected, and then be excluded from the answer.
+    if (complianceLevelsEnabled && modelComplianceLevel) {
+      sources = sources.filter(source =>
+        isComplianceAccessible(modelComplianceLevel, source.complianceLevel)
+      )
+    }
+
     // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase()
@@ -50,7 +74,7 @@ const RagPanel = ({ isOpen, onClose }) => {
     }
 
     return sources
-  }, [ragSources, complianceLevelFilter, complianceLevelsEnabled, searchQuery])
+  }, [ragSources, complianceLevelFilter, complianceLevelsEnabled, modelComplianceLevel, isComplianceAccessible, searchQuery])
 
   // Enable all filtered data sources
   const enableAll = useCallback(() => {
