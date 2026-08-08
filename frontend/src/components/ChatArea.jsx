@@ -215,6 +215,23 @@ const ChatArea = ({ onOpenRagPanel }) => {
     })
   }, [messages, isThinking, isSynthesizing, scrollToBottom])
 
+  // Opening the mobile keyboard shrinks the shell (see visualViewportHeight),
+  // but scrollTop is preserved, which pushes the newest message below the fold.
+  // Re-anchor on a shrink unless the user deliberately scrolled up.
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (!viewport) return
+    let lastHeight = viewport.height
+    const handleViewportResize = () => {
+      const height = viewport.height
+      const shrank = height < lastHeight - 1
+      lastHeight = height
+      if (shrank) requestAnimationFrame(() => scrollToBottom(false, false))
+    }
+    viewport.addEventListener('resize', handleViewportResize)
+    return () => viewport.removeEventListener('resize', handleViewportResize)
+  }, [scrollToBottom])
+
   // Observe DOM mutations inside messages container (handles content expansion post-render).
   // Never force-scroll from mutations — if the user scrolled away to read, respect that.
   // Only the message-change effect above should force-scroll (on genuinely new messages).
