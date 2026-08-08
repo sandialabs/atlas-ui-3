@@ -417,11 +417,11 @@ async def test_rag_and_tools_does_not_retry_a_rejected_request():
         tool_names=["safety_docs_plan"],
     )
     caller._query_all_rag_sources = AsyncMock(
-        return_value=[("docs", SimpleNamespace(
+        return_value=([("docs", SimpleNamespace(
             content="context",
             metadata=None,
             is_completion=False,
-        ))]
+        ))], [])
     )
     caller.call_with_tools = AsyncMock(side_effect=rejection)
 

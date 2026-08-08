@@ -298,7 +298,7 @@ class LiteLLMStreamingMixin:
             raise ValueError("RAG service not configured")
 
         # Query RAG sources (non-streaming)
-        source_responses = await self._query_all_rag_sources(
+        source_responses, rag_exclusions = await self._query_all_rag_sources(
             data_sources, rag_service, user_email, messages,
         )
 
@@ -331,6 +331,7 @@ class LiteLLMStreamingMixin:
             "role": "system",
             "content": (
                 f"{context_label}:\n\n{rag_content}"
+                f"{self._build_rag_exclusion_notice(rag_exclusions)}"
                 f"{citation_block}\n\n"
                 "Use this context to inform your response. "
                 "Cite sources inline using [1], [2], etc. where applicable."
@@ -373,7 +374,7 @@ class LiteLLMStreamingMixin:
         if rag_service is None:
             raise ValueError("RAG service not configured")
 
-        source_responses = await self._query_all_rag_sources(
+        source_responses, rag_exclusions = await self._query_all_rag_sources(
             data_sources, rag_service, user_email, messages,
         )
 
@@ -408,6 +409,7 @@ class LiteLLMStreamingMixin:
             "role": "system",
             "content": (
                 f"{context_label}:\n\n{rag_content}"
+                f"{self._build_rag_exclusion_notice(rag_exclusions)}"
                 f"{citation_block}\n\n"
                 "Use this context to inform your response. "
                 "Cite sources inline using [1], [2], etc. where applicable."

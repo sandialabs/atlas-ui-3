@@ -439,12 +439,19 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         rag_service,
         user_email: str,
         messages: List[Dict[str, str]],
-    ) -> List[Tuple[str, Any]]:
+    ) -> Tuple[List[Tuple[str, Any]], List[str]]:
         """Query all RAG data sources in parallel, batching by server.
 
         Sources sharing the same server are sent as a single batched request
         (one HTTP call with multiple corpora) instead of N separate calls.
         Different servers are queried in parallel.
+
+        A source the user is not allowed to query is dropped rather than
+        failing the whole turn: one out-of-boundary selection must not discard
+        results already retrieved from other server groups. The hard error is
+        reserved for the case where *every* group was rejected, since there is
+        then nothing to answer from and silently degrading to a non-RAG answer
+        is exactly the failure mode this path exists to prevent.
 
         Args:
             data_sources: Qualified data source identifiers (server:source_id).
@@ -453,7 +460,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             messages: Conversation messages for RAG context.
 
         Returns:
-            List of (display_source, rag_response) tuples, one per server batch.
+            ``(successful, exclusions)`` -- ``successful`` is a list of
+            (display_source, rag_response) tuples, one per surviving server
+            batch; ``exclusions`` holds one user-facing message per rejected
+            group, each naming the source and the remedy.
+
+        Raises:
+            DataSourcePermissionError: Every selected group was rejected.
         """
         # Group data sources by server
         server_groups: Dict[str, List[str]] = defaultdict(list)
@@ -492,15 +505,48 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         )
 
         successful: List[Tuple[str, Any]] = []
+        denials: List[DataSourcePermissionError] = []
         for (server_name, _sources), result in zip(server_groups.items(), results):
             if isinstance(result, Exception):
                 if isinstance(result, DataSourcePermissionError):
-                    raise result
+                    denials.append(result)
+                    continue
                 logger.error("[RAG] Failed to query server %s: %s", server_name, result)
             else:
                 successful.append(result)
 
-        return successful
+        if denials and not successful:
+            # Nothing survived -- surface the denial instead of degrading to a
+            # silent non-RAG answer.
+            raise denials[0]
+
+        exclusions = [str(denial) for denial in denials]
+        if exclusions:
+            logger.warning(
+                "[RAG] Excluded %d of %d server group(s) the user may not query; "
+                "answering from the remainder",
+                len(exclusions),
+                len(server_groups),
+            )
+        return successful, exclusions
+
+    @staticmethod
+    def _build_rag_exclusion_notice(exclusions: List[str]) -> str:
+        """Render dropped-source messages for inclusion in the RAG context block.
+
+        The notice goes into the RAG system message rather than being appended
+        to the finished answer so it reaches the user identically on the
+        streaming and non-streaming paths.
+        """
+        if not exclusions:
+            return ""
+        bullets = "\n".join(f"- {message}" for message in exclusions)
+        return (
+            "\n\nThe following selected data sources were NOT searched and are "
+            f"absent from the context above:\n{bullets}\n"
+            "Open your reply by stating in one sentence that these sources were "
+            "excluded, then answer from the context that is present."
+        )
 
     @staticmethod
     def _combine_rag_contexts(
@@ -872,7 +918,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         try:
             # Query all RAG sources in parallel
-            source_responses = await self._query_all_rag_sources(
+            source_responses, rag_exclusions = await self._query_all_rag_sources(
                 data_sources, rag_service, user_email, messages,
             )
 
@@ -921,6 +967,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 "role": "system",
                 "content": (
                     f"{context_label}:\n\n{rag_content}"
+                    f"{self._build_rag_exclusion_notice(rag_exclusions)}"
                     f"{citation_block}\n\n"
                     "Use this context to inform your response. "
                     "Cite sources inline using [1], [2], etc. where applicable."
@@ -1062,7 +1109,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         try:
             # Query all RAG sources in parallel
-            source_responses = await self._query_all_rag_sources(
+            source_responses, rag_exclusions = await self._query_all_rag_sources(
                 data_sources, rag_service, user_email, messages,
             )
 
@@ -1107,6 +1154,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 "role": "system",
                 "content": (
                     f"{context_label}:\n\n{rag_content}"
+                    f"{self._build_rag_exclusion_notice(rag_exclusions)}"
                     f"{citation_block}\n\n"
                     "Use this context to inform your response. "
                     "Cite sources inline using [1], [2], etc. where applicable."
