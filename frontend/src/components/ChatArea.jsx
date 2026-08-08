@@ -11,6 +11,7 @@ import { withUserOrdinals } from '../utils/userMessageOrdinal'
 import { buildCorrectionContext, flattenAvailableTools } from '../utils/captureCorrection'
 import { useCaptureConsent } from '../hooks/useCaptureConsent'
 import CorrectTurnModal from './CorrectTurnModal'
+import AgentBusyIndicator from './AgentBusyIndicator'
 import { useToast } from './ui/toastContext'
 
 const DEFAULT_MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024
@@ -65,6 +66,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     toggleTool,
     sessionFiles,
     agentModeEnabled,
+    currentAgentStep,
     agentPendingQuestion,
     setAgentPendingQuestion,
     stopAgent,
@@ -892,6 +894,13 @@ const ChatArea = ({ onOpenRagPanel }) => {
             </div>
           </div>
         )}
+        <AgentBusyIndicator
+          isAgentRunning={isAgentRunning}
+          isThinking={isThinking}
+          isStreaming={isStreaming}
+          currentAgentStep={currentAgentStep}
+          appName={appName}
+        />
         {/* Sentinel for auto-scroll */}
         <div ref={endRef} />
       </main>
