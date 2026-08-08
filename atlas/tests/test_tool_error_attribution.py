@@ -141,6 +141,103 @@ class TestBadRequestNamesTheTool:
         assert "OpenAIException" not in info.value.message
 
 
+class TestProviderTextDoesNotRerouteTheRejection:
+    """A 400 is typed as one, whatever words the provider's text happens to use.
+
+    The rejection quotes the schema it objected to, so a tool named
+    ``request_timeout_probe`` or ``vault_api_key_lookup`` puts a keyword from
+    another error category into the text. Matching that keyword first would
+    raise a timeout or an auth error, drop ``tool_names``, and tell the user to
+    retry a request that can never succeed.
+    """
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        ["request_timeout_probe", "vault_api_key_lookup", "rate_limit_inspector"],
+    )
+    def test_keyword_in_the_tool_name_still_raises_bad_request(self, tool_name):
+        schema = [{"type": "function", "function": {"name": tool_name}}]
+        exc = _bad_request(
+            f"OpenAIException - Invalid schema for function '{tool_name}': "
+            "schema must be a JSON Schema of 'type: \"object\"', got 'string'."
+        )
+
+        with pytest.raises(LLMBadRequestError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc, tools_schema=schema)
+
+        assert info.value.tool_names == [tool_name]
+        assert tool_name in info.value.message
+
+    def test_such_a_rejection_is_not_retried(self):
+        """The transient-keyword test would otherwise burn three round trips."""
+        exc = _bad_request(
+            "OpenAIException - Invalid schema for function 'request_timeout_probe': bad type."
+        )
+
+        assert LiteLLMCaller._is_retryable_error(exc) is False
+
+    def test_plain_bad_request_is_not_retried(self):
+        exc = _bad_request("OpenAIException - Invalid value for 'temperature': must be <= 2.")
+
+        assert LiteLLMCaller._is_retryable_error(exc) is False
+
+    def test_transient_errors_are_still_retried(self):
+        assert LiteLLMCaller._is_retryable_error(
+            litellm.RateLimitError(message="slow down", model="m", llm_provider="openai")
+        ) is True
+        assert LiteLLMCaller._is_retryable_error(Exception("upstream server error")) is True
+
+    def test_untyped_provider_text_still_falls_back_to_keywords(self):
+        """Errors that are not litellm types keep the old keyword behaviour."""
+        with pytest.raises(RateLimitError):
+            LiteLLMCaller._raise_llm_domain_error(Exception("rate limit reached"))
+
+    def test_overflow_reported_as_a_plain_bad_request_stays_context_window(self):
+        """Some providers report an overflow as a 400 rather than a typed error."""
+        exc = _bad_request(
+            "OpenAIException - This model's maximum context length is 8192 tokens."
+        )
+
+        with pytest.raises(ContextWindowExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc, tools_schema=TOOLS_SCHEMA)
+
+
+class TestMessageHistoryRejectionsBlameNoTool:
+    """Tool words in a message-history rejection are not evidence about tools."""
+
+    def test_orphaned_tool_calls_block_does_not_blame_the_selection(self):
+        exc = _bad_request(
+            "OpenAIException - An assistant message with 'tool_calls' must be followed "
+            "by tool messages responding to each tool_call_id."
+        )
+
+        with pytest.raises(LLMBadRequestError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc, tools_schema=TOOLS_SCHEMA)
+
+        assert info.value.tool_names == []
+        assert "safety_docs_plan" not in info.value.message
+
+    def test_stray_tool_role_message_does_not_blame_the_selection(self):
+        exc = _bad_request(
+            "OpenAIException - Invalid parameter: messages with role 'tool' must be a "
+            "response to a preceding message with 'tool_calls'."
+        )
+
+        with pytest.raises(LLMBadRequestError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc, tools_schema=TOOLS_SCHEMA)
+
+        assert info.value.tool_names == []
+
+    def test_a_tool_payload_rejection_is_still_attributed(self):
+        """The suppression above must not swallow real tool-payload rejections."""
+        exc = _bad_request("OpenAIException - Invalid 'tools': too many functions supplied.")
+
+        with pytest.raises(LLMBadRequestError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc, tools_schema=TOOLS_SCHEMA)
+
+        assert info.value.tool_names == ["safety_docs_plan", "calculator_calculate"]
+
+
 class TestClassifyPreservesToolDetail:
     """classify_llm_error must not re-generalize an already-specific error."""
 
@@ -184,6 +281,12 @@ class TestErrorTypeMapping:
 
     def test_falls_back_for_unknown_classes(self):
         assert error_type_for(ValueError) == "unexpected"
+
+    def test_a_subclass_inherits_its_parents_error_type(self):
+        class NarrowerRejection(LLMBadRequestError):
+            pass
+
+        assert error_type_for(NarrowerRejection) == "bad_request"
 
 
 def _publisher():
