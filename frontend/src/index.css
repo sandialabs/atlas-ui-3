@@ -623,6 +623,39 @@
   color: #1d4ed8; /* blue-700 */
 }
 
+/* ── Viewport containment for chat content (#747) ──
+   A long unbroken string -- a tool name like basic_memory_discover_topics, a
+   raw URL, a base64 blob -- has a min-content width as wide as the string
+   itself. Inside a flex row that width becomes the item's automatic minimum
+   (min-width: auto), so the row refuses to shrink and the transcript ends up
+   wider than a phone screen, taking the whole page with it. Clearing that
+   automatic minimum inside the transcript lets each row shrink back to its
+   column, and overflow-wrap gives the text somewhere to break. Replaced
+   elements (svg/img icons) are deliberately excluded so icons keep their
+   intrinsic minimum instead of being squashed. */
+.chat-messages :where(div, span, p, li, dd, dt, a, button, label, td, th, h1, h2, h3, h4, h5, h6) {
+  min-width: 0;
+}
+
+.chat-messages,
+.selectable-markdown,
+.message-content {
+  overflow-wrap: anywhere;
+}
+
+/* Code blocks keep their own horizontal scroller -- breaking a token mid-word
+   would corrupt indentation and make snippets unreadable. */
+.chat-messages pre,
+.chat-messages pre code {
+  overflow-wrap: normal;
+}
+
+/* Markdown tables stay inside the message column; their cells wrap under the
+   overflow-wrap rule above instead of stretching the table past the screen. */
+.selectable-markdown table {
+  max-width: 100%;
+}
+
 /* Print styles for chat export (#150) */
 @media print {
   /* Hide non-content UI elements */

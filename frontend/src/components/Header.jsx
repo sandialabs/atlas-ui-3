@@ -147,7 +147,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   return (
     <header className="flex items-center justify-between p-2 sm:p-4 bg-gray-800 border-b border-gray-700">
       {/* Left section */}
-      <div className="flex items-center gap-2 sm:gap-4">
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
         {/* Mobile sidebar toggle */}
         {features?.chat_history && (
           <button
@@ -197,14 +197,14 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
       </div>
 
       {/* Right section */}
-      <div className="flex items-center gap-2 sm:gap-4">
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
         {/* Model Selection Dropdown - Always visible but more compact on mobile */}
-        <div className="relative">
+        <div className="relative min-w-0">
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors min-w-[80px] sm:min-w-[160px]"
+            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors min-w-0 sm:min-w-[160px] max-w-full"
           >
-            <span className="text-xs sm:text-sm text-gray-200 truncate">
+            <span className="text-xs sm:text-sm text-gray-200 truncate min-w-0">
               {currentModel || 'Model...'}
             </span>
             {(() => {
