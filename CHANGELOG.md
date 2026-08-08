@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #751 - 2026-08-08
+- **Agent mode shows progress between loop steps**: `isThinking` is set once on send and cleared by the first streamed token, so the wait while the agent loop called the LLM for its next turn rendered no spinner and the run looked frozen. A new `AgentBusyIndicator` renders whenever an agent run is in flight and neither the thinking indicator nor a token stream is on screen, reporting the current step number (closes #748).
+
 ### PR #746 - 2026-08-07
 - **Mobile keyboard keeps composer visible**: The chat shell now tracks the browser visual viewport height so the flex layout shrinks when a mobile software keyboard opens, keeping the message composer above the keyboard instead of pinned to the obscured layout viewport (closes #745).
 
