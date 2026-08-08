@@ -170,4 +170,19 @@ describe('RagPanel - selected model compliance boundary', () => {
 
     expect(screen.getByText(/selected but will not be searched/)).toBeInTheDocument()
   })
+
+  it('lets a selected out-of-boundary source be deselected', () => {
+    // The server's denial message tells the user to "Deselect it". Disabling
+    // the row must not take that away: an out-of-boundary row that is already
+    // selected stays clickable, and clicking it deselects.
+    const toggleDataSource = vi.fn()
+    setup({
+      currentModel: 'public-model',
+      selectedDataSources: new Set(['atlas_rag:internal-docs']),
+      toggleDataSource
+    })
+
+    fireEvent.click(screen.getByText('internal-docs'))
+    expect(toggleDataSource).toHaveBeenCalledWith('atlas_rag:internal-docs')
+  })
 })

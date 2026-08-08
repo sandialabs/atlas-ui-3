@@ -202,17 +202,24 @@ const RagPanel = ({ isOpen, onClose }) => {
                 const isSelected = selectedDataSources.has(selectionKey)
                 const outOfBoundary = isOutOfModelBoundary(dataSource)
                 const displayLabel = dataSource.label || dataSource.name || dataSource.id
+                // An out-of-boundary row cannot be selected, but one that is
+                // *already* selected must stay deselectable -- that is the whole
+                // point of disabling rather than hiding it, and it is what the
+                // server's "Deselect it" denial message tells the user to do.
+                const clickable = !outOfBoundary || isSelected
 
                 return (
                   <div
                     key={selectionKey}
-                    onClick={outOfBoundary ? undefined : () => toggleDataSource(selectionKey)}
+                    onClick={clickable ? () => toggleDataSource(selectionKey) : undefined}
                     title={outOfBoundary
-                      ? 'Outside the selected model\'s compliance boundary; the server will not query it'
+                      ? (isSelected
+                        ? 'Outside the selected model\'s compliance boundary; the server will not query it. Click to deselect.'
+                        : 'Outside the selected model\'s compliance boundary; the server will not query it')
                       : undefined}
                     className={`px-3 py-2 rounded-lg border transition-colors ${
                       outOfBoundary
-                        ? 'bg-gray-800 border-gray-700 text-gray-500 opacity-60 cursor-not-allowed'
+                        ? `bg-gray-800 border-gray-700 text-gray-500 opacity-60 ${isSelected ? 'cursor-pointer' : 'cursor-not-allowed'}`
                         : isSelected
                           ? 'bg-green-700 border-green-600 text-white cursor-pointer'
                           : 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600 cursor-pointer'
@@ -239,7 +246,7 @@ const RagPanel = ({ isOpen, onClose }) => {
                     {outOfBoundary && (
                       <div className="text-xs mt-1 text-amber-400">
                         Outside the selected model&apos;s compliance boundary
-                        {isSelected && ' — selected but will not be searched'}
+                        {isSelected && ' — selected but will not be searched; click to deselect'}
                       </div>
                     )}
                   </div>
