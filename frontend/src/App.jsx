@@ -85,7 +85,7 @@ function ChatInterface() {
 
   return (
     <div
-      className="flex flex-col h-screen w-full bg-gray-900 text-gray-200 overflow-hidden"
+      className="relative flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
       style={{ height: 'var(--app-viewport-height, 100vh)' }}
     >
       {/* Banner Panel - full width across the top */}
