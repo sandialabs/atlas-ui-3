@@ -27,13 +27,15 @@ const RAG_SOURCES = [
     id: 'public-docs',
     label: 'public-docs',
     serverName: 'atlas_rag',
-    complianceLevel: 'Public'
+    complianceLevel: 'Public',
+    serverComplianceLevel: 'Public'
   },
   {
     id: 'internal-docs',
     label: 'internal-docs',
     serverName: 'atlas_rag',
-    complianceLevel: 'Internal'
+    complianceLevel: 'Internal',
+    serverComplianceLevel: 'Internal'
   }
 ]
 
@@ -55,6 +57,7 @@ function setup({ currentModel, complianceLevelFilter = null }) {
   })
 
   useMarketplace.mockReturnValue({
+    complianceLevels: COMPLIANCE_LEVELS,
     isComplianceAccessible: (userLevel, resourceLevel) => {
       if (!userLevel) return true
       if (!resourceLevel) return false

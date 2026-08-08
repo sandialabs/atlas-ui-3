@@ -56,9 +56,17 @@ const RagPanel = ({ isOpen, onClose }) => {
     // Filter by the selected model's compliance level, which is the boundary
     // the server enforces at query time. Without this a source can pass the
     // header filter, be selected, and then be excluded from the answer.
+    //
+    // Two compliance granularities exist side by side on each source:
+    //   source.complianceLevel        per-corpus label from the RAG backend's
+    //                                 own discovery response (shown on the badge)
+    //   source.serverComplianceLevel  per-server label from rag-sources.json
+    // The server-side gate compares the *per-server* value, so this filter
+    // does too; the header filter and the badge stay on the per-corpus label
+    // the user is shown.
     if (complianceLevelsEnabled && modelComplianceLevel) {
       sources = sources.filter(source =>
-        isComplianceAccessible(modelComplianceLevel, source.complianceLevel)
+        isComplianceAccessible(modelComplianceLevel, source.serverComplianceLevel)
       )
     }
 
