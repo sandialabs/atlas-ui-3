@@ -12,6 +12,7 @@ from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
     ContextWindowExceededError,
     LLMAuthenticationError,
+    LLMBadRequestError,
     LLMServiceError,
     LLMTimeoutError,
     RateLimitError,
@@ -68,6 +69,31 @@ async def safe_get_tools_schema(
         raise ValidationError(f"Failed to get tools schema: {str(e)}")
 
 
+# Mirrors the error_type strings the WebSocket handler in atlas/main.py sends,
+# so clients can branch on one vocabulary regardless of which path raised.
+# Ordered most specific first: lookup walks it, so a subclass resolves to its
+# nearest listed ancestor rather than falling through to "unexpected".
+_ERROR_TYPE_BY_CLASS = (
+    (RateLimitError, "rate_limit"),
+    (LLMTimeoutError, "timeout"),
+    (LLMAuthenticationError, "authentication"),
+    (ContextWindowExceededError, "context_window_exceeded"),
+    (ValidationError, "validation"),
+    (LLMBadRequestError, "bad_request"),
+    (LLMServiceError, "domain"),
+)
+
+
+def error_type_for(error_class: type) -> str:
+    """Map a domain error class to the ``error_type`` string sent to clients."""
+    if not isinstance(error_class, type):
+        return "unexpected"
+    for known, error_type in _ERROR_TYPE_BY_CLASS:
+        if issubclass(error_class, known):
+            return error_type
+    return "unexpected"
+
+
 def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
     """
     Classify LLM errors and return appropriate error type, user message, and log message.
@@ -77,6 +103,12 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
 
     NOTE: user_message MUST NOT contain raw exception details or sensitive data.
     """
+    # Errors that already carry a specific, user-safe message must not be
+    # re-generalized here: str(error) is that message, so keyword matching
+    # below would classify the message rather than the original failure.
+    if isinstance(error, LLMBadRequestError):
+        return (LLMBadRequestError, error.message, f"LLM rejected the request: {error.message}")
+
     error_str = str(error)
     error_type_name = type(error).__name__
 
@@ -154,6 +186,9 @@ async def safe_call_llm_with_tools(
         # Classify the error and raise appropriate error type
         error_class, user_msg, log_msg = classify_llm_error(e)
         logger.error(log_msg, exc_info=True)
+        if error_class is LLMBadRequestError:
+            # Rebuilding the error would drop the attribution it carries.
+            raise LLMBadRequestError(user_msg, tool_names=getattr(e, "tool_names", None))
         raise error_class(user_msg)
 
 

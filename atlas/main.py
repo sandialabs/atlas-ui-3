@@ -55,6 +55,7 @@ from atlas.domain.errors import (
     ContextWindowExceededError,
     DomainError,
     LLMAuthenticationError,
+    LLMBadRequestError,
     LLMTimeoutError,
     RateLimitError,
     ValidationError,
@@ -656,6 +657,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "context_window_exceeded"
+                        })
+                    except LLMBadRequestError as e:
+                        logger.warning(f"Provider rejected the request in chat handler: {e}")
+                        log_metric("error", user_email, error_type="bad_request")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "bad_request"
                         })
                     except ValidationError as e:
                         logger.warning(f"Validation error in chat handler: {e}")

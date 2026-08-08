@@ -40,6 +40,7 @@ from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
     ContextWindowExceededError,
     LLMAuthenticationError,
+    LLMBadRequestError,
     LLMServiceError,
     LLMTimeoutError,
     RateLimitError,
@@ -72,6 +73,26 @@ litellm.disable_hf_tokenizer_download = True
 # Retry configuration for transient LLM errors
 MAX_LLM_RETRIES = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
+
+# Substrings that mark a provider rejection as being about the tool payload
+# rather than the rest of the request. Only when one of these appears (and the
+# provider named no specific tool) is it fair to point the user at the whole
+# tool selection.  `tool_call`/`tool_calls`/`function_call` are deliberately
+# absent: those name the assistant's call blocks in the message history, not
+# the tool definitions the user can deselect.
+TOOL_REJECTION_MARKERS = re.compile(
+    r"\b(tool|tools|tool_choice|function|functions)\b",
+    re.IGNORECASE,
+)
+
+# A rejection of the conversation itself -- an assistant `tool_calls` block
+# with no matching tool response, a stray `role: "tool"` message. The tool
+# words in that text are about message history, and deselecting tools does not
+# fix it, so it must not put the whole tool selection on trial.
+MESSAGE_HISTORY_MARKERS = re.compile(
+    r"\b(messages|tool_call_id|role)\b",
+    re.IGNORECASE,
+)
 
 
 def _llm_response_attrs(response: Any, attempt: int) -> Dict[str, Any]:
@@ -130,7 +151,48 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             litellm.set_verbose = debug_mode
 
     @staticmethod
-    def _raise_llm_domain_error(exc: Exception) -> NoReturn:
+    def _tools_implicated_by(error_str: str, tools_schema: Optional[List[Dict]]) -> List[str]:
+        """Return the tool names a provider rejection points at.
+
+        Attribution requires positive evidence, because most 400s have nothing
+        to do with tools (invalid parameters, malformed messages, unsupported
+        options) and blaming the tool selection for those sends users off to
+        disable tools that were never at fault.
+
+        Two levels of evidence, in order:
+
+        1. The error text names a tool from the request — report only that tool.
+        2. The error text points at the tool payload but names no tool — every
+           tool in the request is a candidate, so list them all to bisect.
+           Rejections of the message history are excluded here: they mention
+           tool words, but no tool definition is at fault.
+
+        Anything else attributes nothing.
+        """
+        names = [
+            name
+            for tool in (tools_schema or [])
+            if (name := (tool.get("function") or {}).get("name"))
+        ]
+        # Whole-token match: a tool called "calc" must not be blamed for text
+        # that merely happens to contain "calculate".
+        named = [
+            name
+            for name in names
+            if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", error_str)
+        ]
+        if named:
+            return named
+        if (
+            names
+            and TOOL_REJECTION_MARKERS.search(error_str)
+            and not MESSAGE_HISTORY_MARKERS.search(error_str)
+        ):
+            return names
+        return []
+
+    @staticmethod
+    def _raise_llm_domain_error(exc: Exception, tools_schema: Optional[List[Dict]] = None) -> NoReturn:
         """Classify a litellm exception and raise the corresponding domain error.
 
         This ensures the WebSocket handler receives specific error types
@@ -139,30 +201,82 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         """
         error_str = str(exc)
         error_type = type(exc).__name__
+        lowered = error_str.lower()
 
-        # Map litellm exception types to domain errors
-        if isinstance(exc, litellm.RateLimitError) or "rate limit" in error_str.lower():
+        # Concrete exception types are checked before any message keywords.
+        # The keyword tests below match against the provider's text, and a
+        # rejection can quote a tool or property named "timeout_checker" or
+        # "vault_api_key_lookup" -- exactly the case this attribution exists
+        # for. Typing it off the exception class keeps the provider's wording
+        # from rerouting it to the wrong branch.
+        if isinstance(exc, litellm.RateLimitError):
             raise RateLimitError(
                 "The LLM service is experiencing high traffic. Please try again in a moment."
             ) from exc
-        if isinstance(exc, litellm.Timeout) or "timeout" in error_str.lower():
+        if isinstance(exc, litellm.Timeout):
             raise LLMTimeoutError(
                 "The LLM service request timed out. Please try again."
             ) from exc
-        if isinstance(exc, litellm.AuthenticationError) or any(
-            kw in error_str.lower()
+        if isinstance(exc, litellm.AuthenticationError):
+            raise LLMAuthenticationError(
+                "There was an authentication issue with the LLM service. "
+                "Please check your API key or contact your administrator."
+            ) from exc
+        # Before the BadRequestError branch: this litellm error subclasses it,
+        # and providers that report an overflow as a plain 400 are recognised
+        # by phrase. The phrases are specific enough not to collide with a
+        # tool name, unlike the single words matched further down.
+        if isinstance(exc, litellm.ContextWindowExceededError) or any(
+            kw in lowered for kw in CONTEXT_WINDOW_KEYWORDS
+        ):
+            raise ContextWindowExceededError(
+                "Your conversation is too long for this model's context window. "
+                "Please start a new conversation or switch to a model with a larger context window."
+            ) from exc
+        # A rejected request is the caller's problem to fix, not a transient
+        # service fault.
+        if isinstance(exc, litellm.BadRequestError):
+            logger.error("LLM rejected the request (%s): %s", error_type, error_str)
+            implicated = LiteLLMCaller._tools_implicated_by(error_str, tools_schema)
+            if len(implicated) == 1:
+                user_msg = (
+                    f"The model provider rejected this request because of the tool "
+                    f"'{implicated[0]}'. Turn that tool off and try again."
+                )
+            elif implicated:
+                listed = ", ".join(f"'{name}'" for name in implicated)
+                user_msg = (
+                    f"The model provider rejected this request because of one of the "
+                    f"selected tools ({listed}). Turn them off and re-enable them one "
+                    f"at a time to find the one at fault."
+                )
+            else:
+                # Deterministic: the same request will be refused again, so do
+                # not send the user back to the retry button.
+                user_msg = (
+                    "The model provider rejected this request as invalid. Retrying "
+                    "will not help -- try starting a new conversation, or contact "
+                    "support if the issue persists."
+                )
+            raise LLMBadRequestError(user_msg, tool_names=implicated) from exc
+
+        # Untyped errors (raw provider text, wrapped transports) fall back to
+        # keyword matching.
+        if "rate limit" in lowered:
+            raise RateLimitError(
+                "The LLM service is experiencing high traffic. Please try again in a moment."
+            ) from exc
+        if "timeout" in lowered:
+            raise LLMTimeoutError(
+                "The LLM service request timed out. Please try again."
+            ) from exc
+        if any(
+            kw in lowered
             for kw in ("unauthorized", "authentication", "invalid api key", "invalid_api_key")
         ):
             raise LLMAuthenticationError(
                 "There was an authentication issue with the LLM service. "
                 "Please check your API key or contact your administrator."
-            ) from exc
-        if isinstance(exc, litellm.ContextWindowExceededError) or any(
-            kw in error_str.lower() for kw in CONTEXT_WINDOW_KEYWORDS
-        ):
-            raise ContextWindowExceededError(
-                "Your conversation is too long for this model's context window. "
-                "Please start a new conversation or switch to a model with a larger context window."
             ) from exc
 
         # All other LLM errors get a generic but user-friendly message
@@ -176,10 +290,18 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
     def _is_retryable_error(exc: Exception) -> bool:
         """Check if an LLM error is transient and worth retrying.
 
-        Auth errors are never retryable. Rate limits, timeouts, and
-        generic service errors (5xx) are retried with backoff.
+        Auth errors, rejected requests, and context-window overflows are never
+        retryable. Rate limits, timeouts, and generic service errors (5xx) are
+        retried with backoff.
         """
         error_str = str(exc).lower()
+
+        # A rejected request is deterministic: the identical payload will be
+        # refused again. Checked before the transient keyword tests, because a
+        # 400 quoting a tool or property named "timeout" would otherwise be
+        # retried three times with backoff before failing.
+        if isinstance(exc, litellm.BadRequestError):
+            return False
 
         # Auth errors will never succeed on retry
         if isinstance(exc, litellm.AuthenticationError) or any(
@@ -829,7 +951,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
-        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, ContextWindowExceededError):
+        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, LLMBadRequestError, ContextWindowExceededError):
             raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
@@ -879,7 +1001,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         except Exception as exc:
             logger.error("Error calling LLM with tools: %s", exc, exc_info=True)
-            self._raise_llm_domain_error(exc)
+            self._raise_llm_domain_error(exc, tools_schema=tools_schema)
 
     async def call_with_rag_and_tools(
         self,
@@ -1011,7 +1133,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             return llm_response
 
-        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, ContextWindowExceededError):
+        except (RateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMServiceError, LLMBadRequestError, ContextWindowExceededError):
             raise  # Don't mask LLM errors with a fallback retry
         except Exception as exc:
             logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)

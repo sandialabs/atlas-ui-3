@@ -1,0 +1,8 @@
+models:
+  strict-stub:
+    model_url: "http://127.0.0.1:8124/v1"
+    model_name: "openai/strict-stub"
+    api_key: "stub"
+    description: "Local stub that validates tool schemas the way providers do"
+    compliance_level: "Internal"
+    supports_tools: true
