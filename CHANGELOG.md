@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #763 - 2026-08-09
+- **One line per tool call instead of two**: An auto-approved tool call rendered two transcript rows — `▶ [AUTO-APPROVED] basic_fns_bash · 2 params` followed a second later by `▶ [SUCCESS] basic_fns_bash (basic_fns) · 2 params` — each wrapping at phone widths, so two calls consumed roughly ten lines and pushed the assistant's answer off screen. The approval row is no longer rendered for auto-approved calls (the component still mounts, hidden, because it owns the auto-approval response); the `APPROVAL REQUIRED` review path is unchanged. The surviving `tool_call` row drops the server name (usually a prefix of the tool name) and the param count (the disclosure triangle already signals expandability), and replaces the `SUCCESS`/`FAILED` text pill with a labelled colored glyph, so it fits one line at 390px. The server name moves into the expanded detail. The `Auto-approve ON/OFF` toggle, previously repeated once per call, now lives on the `Active Tools:` strip above the composer where it stays visible instead of scrolling away. Whether a call was auto-approved is also now persisted on the message as `auto_approved` at the moment of the decision and rendering keys off that field, so toggling the setting no longer makes old transcripts re-render as if history had changed (closes #762).
+
 ### PR #751 - 2026-08-08
 - **Agent mode shows progress between loop steps**: `isThinking` is set once on send and cleared by the first streamed token, so the wait while the agent loop called the LLM for its next turn rendered no spinner and the run looked frozen. A new `AgentBusyIndicator` renders whenever an agent run is in flight and neither the thinking indicator nor a token stream is on screen, reporting the current step number (closes #748).
 

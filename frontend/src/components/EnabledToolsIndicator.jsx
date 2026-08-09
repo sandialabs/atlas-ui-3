@@ -3,8 +3,9 @@ import { X, ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
 
 const EnabledToolsIndicator = () => {
-  const { selectedTools, toggleTool } = useChat()
+  const { selectedTools, toggleTool, settings, updateSettings } = useChat()
   const [isExpanded, setIsExpanded] = useState(false)
+  const autoApproveOn = Boolean(settings?.autoApproveTools)
 
   const allTools = Array.from(selectedTools).map(key => {
     const parts = key.split('_')
@@ -59,6 +60,29 @@ const EnabledToolsIndicator = () => {
             )}
           </button>
         )}
+        {/* Auto-approve lives here rather than on every approval row (#762).
+            This strip is the persistent per-conversation status bar, so one
+            indicator replaces one pill per tool call — and it stays on screen
+            instead of scrolling away with the transcript. */}
+        <button
+          type="button"
+          onClick={() => {
+            try {
+              updateSettings?.({ autoApproveTools: !autoApproveOn })
+            } catch (e) {
+              console.error('Failed to toggle auto-approve from the Active Tools strip', e)
+            }
+          }}
+          aria-pressed={autoApproveOn}
+          className={`px-2 py-1 rounded border transition-colors cursor-pointer ${
+            autoApproveOn
+              ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
+              : 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'
+          }`}
+          title="Click to toggle auto-approve for non-admin tool calls. Admin-required calls will still prompt."
+        >
+          {autoApproveOn ? 'Auto-approve ON' : 'Auto-approve OFF'}
+        </button>
       </div>
     </div>
   )
