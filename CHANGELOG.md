@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #751 - 2026-08-08
+- **Agent mode shows progress between loop steps**: `isThinking` is set once on send and cleared by the first streamed token, so the wait while the agent loop called the LLM for its next turn rendered no spinner and the run looked frozen. A new `AgentBusyIndicator` renders whenever an agent run is in flight and neither the thinking indicator nor a token stream is on screen, reporting the current step number (closes #748).
+
 ### PR #750 - 2026-08-08
 - **Chat content stays inside the mobile viewport**: Long unbroken strings -- tool names like `basic_memory_discover_topics`, raw URLs, base64 blobs -- set the min-content width of their box, which inside a flex row becomes the item's automatic minimum (`min-width: auto`) and stopped the row from shrinking, scrolling the whole page sideways on a phone. The transcript container now carries a `.chat-messages` scope that clears that minimum and lets long strings wrap (code blocks excluded so snippets keep their own horizontal scroller); the assistant bubble shrinks beside the avatar instead of claiming `w-full` on top of it; tool-call rows, tool logs, file chips and download buttons wrap or truncate; and the header button groups shrink so the model name truncates rather than pushing the header past a 375px screen (closes #747).
 
