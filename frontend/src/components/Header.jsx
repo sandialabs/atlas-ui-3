@@ -146,7 +146,10 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
 
   return (
     <header className="flex items-center justify-between p-2 sm:p-4 bg-gray-800 border-b border-gray-700">
-      {/* Left section */}
+      {/* Left section. Deliberately not min-w-0: these are fixed-size icon
+          buttons with nothing to truncate, so letting the section shrink below
+          them only makes it paint over the right-hand group. The right section
+          shrinks instead, truncating the model name. */}
       <div className="flex items-center gap-2 sm:gap-4">
         {/* Mobile sidebar toggle */}
         {features?.chat_history && (
@@ -197,14 +200,20 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
       </div>
 
       {/* Right section */}
-      <div className="flex items-center gap-2 sm:gap-4">
-        {/* Model Selection Dropdown - Always visible but more compact on mobile */}
-        <div className="relative">
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+        {/* Model Selection Dropdown - Always visible but more compact on mobile.
+            The desktop floor is 7rem rather than the old 160px: a floor wider
+            than this button's now shrinkable wrapper made it spill over its
+            neighbours in a crowded header, while dropping the floor entirely
+            collapsed the label to a bare chevron. 7rem keeps the model name
+            legible without overlapping, and the title exposes it in full. */}
+        <div className="relative min-w-0">
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors min-w-[80px] sm:min-w-[160px]"
+            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors min-w-0 sm:min-w-[7rem] max-w-full"
+            title={currentModel ? `Model: ${currentModel}` : 'Select a model'}
           >
-            <span className="text-xs sm:text-sm text-gray-200 truncate">
+            <span className="text-xs sm:text-sm text-gray-200 truncate min-w-0">
               {currentModel || 'Model...'}
             </span>
             {(() => {

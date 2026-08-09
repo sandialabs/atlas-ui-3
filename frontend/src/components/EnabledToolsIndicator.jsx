@@ -23,17 +23,17 @@ const EnabledToolsIndicator = () => {
 
   return (
     <div className="flex items-start gap-2 text-xs text-gray-400 mb-2">
-      <span className="mt-1">Active Tools:</span>
-      <div className="flex-1 flex flex-wrap gap-1 items-center">
+      <span className="mt-1 flex-shrink-0">Active Tools:</span>
+      <div className="flex-1 min-w-0 flex flex-wrap gap-1 items-center">
         {displayTools.map((item, idx) => (
           <div
             key={idx}
-            className="px-2 py-1 rounded flex items-center gap-1 bg-gray-700 text-gray-300"
+            className="px-2 py-1 rounded flex items-center gap-1 bg-gray-700 text-gray-300 max-w-full min-w-0"
           >
-            <span>{item.name}</span>
+            <span className="min-w-0 truncate" title={item.name}>{item.name}</span>
             <button
               onClick={() => toggleTool(item.key)}
-              className="hover:bg-red-600 hover:bg-opacity-50 rounded p-0.5 transition-colors"
+              className="hover:bg-red-600 hover:bg-opacity-50 rounded p-0.5 transition-colors flex-shrink-0"
               title={`Remove ${item.name}`}
             >
               <X className="w-3 h-3" />
