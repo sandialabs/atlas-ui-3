@@ -1,6 +1,7 @@
 import { useMemo, useState, useCallback } from 'react'
 import { X, Search, CheckSquare, Square } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
+import { useMarketplace } from '../contexts/MarketplaceContext'
 
 const RagPanel = ({ isOpen, onClose }) => {
   const {
@@ -10,12 +11,26 @@ const RagPanel = ({ isOpen, onClose }) => {
     addDataSources,
     clearDataSources,
     features,
-    complianceLevelFilter
+    complianceLevelFilter,
+    models,
+    currentModel
   } = useChat()
+  const { isComplianceAccessible, complianceLevels } = useMarketplace()
 
   const [searchQuery, setSearchQuery] = useState('')
 
   const complianceLevelsEnabled = features.compliance_levels
+
+  // The boundary that is actually enforced server-side at query time is the
+  // *selected model's* compliance level, not the header filter. Derive it here
+  // so the picker cannot offer a source that would be excluded on send.
+  const modelComplianceLevel = useMemo(() => {
+    if (!complianceLevelsEnabled || !currentModel) return null
+    const match = (models || [])
+      .map(m => (typeof m === 'string' ? { name: m } : m))
+      .find(m => (m.name || '') === currentModel)
+    return match?.compliance_level || null
+  }, [complianceLevelsEnabled, models, currentModel])
 
   // Helper to get badge color
   const getComplianceBadgeColor = (level) => {
@@ -26,6 +41,38 @@ const RagPanel = ({ isOpen, onClose }) => {
       default: return 'bg-gray-500 text-gray-50'
     }
   }
+
+  // Out-of-boundary sources are rendered disabled, not hidden: a hidden row
+  // that stays selected can only be cleared via "Clear all", and the server's
+  // denial message ("Deselect it, or switch to a model cleared for that
+  // source") only makes sense when the checkbox stays reachable.
+  //
+  // Two compliance granularities exist side by side on each source:
+  //   source.complianceLevel        per-corpus label from the RAG backend's
+  //                                 own discovery response (shown on the badge)
+  //   source.serverComplianceLevel  per-server label from rag-sources.json
+  // The server-side gate compares the *per-server* value, so the model-level
+  // check below does too; the header filter and the badge stay on the
+  // per-corpus label the user is shown.
+  //
+  // This check deliberately mirrors the server's *permissive* treatment of
+  // untagged sources and missing config, so the picker never disables
+  // something the gate would allow:
+  //   - a source carrying no per-server level is never excluded (the gate
+  //     returns early on `not resource_compliance_level`);
+  //   - an empty/unloaded complianceLevels config disables the check
+  //     entirely (the server's ComplianceLevelManager is permissive with no
+  //     config loaded, and a failed fetch must not blank the panel).
+  const modelBoundaryActive =
+    complianceLevelsEnabled &&
+    !!modelComplianceLevel &&
+    (complianceLevels || []).length > 0
+
+  const isOutOfModelBoundary = useCallback((source) => {
+    if (!modelBoundaryActive) return false
+    if (!source.serverComplianceLevel) return false
+    return !isComplianceAccessible(modelComplianceLevel, source.serverComplianceLevel)
+  }, [modelBoundaryActive, modelComplianceLevel, isComplianceAccessible])
 
   // Apply filtering logic based on compliance level and search query
   const filteredDataSources = useMemo(() => {
@@ -52,11 +99,14 @@ const RagPanel = ({ isOpen, onClose }) => {
     return sources
   }, [ragSources, complianceLevelFilter, complianceLevelsEnabled, searchQuery])
 
-  // Enable all filtered data sources
+  // Enable all filtered data sources, skipping rows the model boundary
+  // disables -- selecting those would only produce a query-time exclusion.
   const enableAll = useCallback(() => {
-    const keys = filteredDataSources.map(ds => `${ds.serverName}:${ds.id}`)
+    const keys = filteredDataSources
+      .filter(ds => !isOutOfModelBoundary(ds))
+      .map(ds => `${ds.serverName}:${ds.id}`)
     addDataSources(keys)
-  }, [filteredDataSources, addDataSources])
+  }, [filteredDataSources, isOutOfModelBoundary, addDataSources])
 
   // Clear all selected data sources (clears everything, not just filtered)
   const clearAll = useCallback(() => {
@@ -150,16 +200,29 @@ const RagPanel = ({ isOpen, onClose }) => {
               {filteredDataSources.map(dataSource => {
                 const selectionKey = `${dataSource.serverName}:${dataSource.id}`
                 const isSelected = selectedDataSources.has(selectionKey)
+                const outOfBoundary = isOutOfModelBoundary(dataSource)
                 const displayLabel = dataSource.label || dataSource.name || dataSource.id
+                // An out-of-boundary row cannot be selected, but one that is
+                // *already* selected must stay deselectable -- that is the whole
+                // point of disabling rather than hiding it, and it is what the
+                // server's "Deselect it" denial message tells the user to do.
+                const clickable = !outOfBoundary || isSelected
 
                 return (
                   <div
                     key={selectionKey}
-                    onClick={() => toggleDataSource(selectionKey)}
-                    className={`px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
-                      isSelected
-                        ? 'bg-green-700 border-green-600 text-white'
-                        : 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600'
+                    onClick={clickable ? () => toggleDataSource(selectionKey) : undefined}
+                    title={outOfBoundary
+                      ? (isSelected
+                        ? 'Outside the selected model\'s compliance boundary; the server will not query it. Click to deselect.'
+                        : 'Outside the selected model\'s compliance boundary; the server will not query it')
+                      : undefined}
+                    className={`px-3 py-2 rounded-lg border transition-colors ${
+                      outOfBoundary
+                        ? `bg-gray-800 border-gray-700 text-gray-500 opacity-60 ${isSelected ? 'cursor-pointer' : 'cursor-not-allowed'}`
+                        : isSelected
+                          ? 'bg-green-700 border-green-600 text-white cursor-pointer'
+                          : 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600 cursor-pointer'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -173,13 +236,19 @@ const RagPanel = ({ isOpen, onClose }) => {
                       )}
                     </div>
                     {dataSource.description && (
-                      <div className={`text-xs mt-0.5 line-clamp-2 ${isSelected ? 'opacity-80' : 'text-gray-400'}`}>
+                      <div className={`text-xs mt-0.5 line-clamp-2 ${isSelected && !outOfBoundary ? 'opacity-80' : 'text-gray-400'}`}>
                         {dataSource.description}
                       </div>
                     )}
-                    <div className={`text-xs mt-0.5 ${isSelected ? 'opacity-60' : 'text-gray-500'}`}>
+                    <div className={`text-xs mt-0.5 ${isSelected && !outOfBoundary ? 'opacity-60' : 'text-gray-500'}`}>
                       {dataSource.serverDisplayName}
                     </div>
+                    {outOfBoundary && (
+                      <div className="text-xs mt-1 text-amber-400">
+                        Outside the selected model&apos;s compliance boundary
+                        {isSelected && ' — selected but will not be searched; click to deselect'}
+                      </div>
+                    )}
                   </div>
                 )
               })}

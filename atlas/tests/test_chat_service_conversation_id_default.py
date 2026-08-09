@@ -245,21 +245,33 @@ async def test_default_does_not_overwrite_existing_context_value():
     assert captured["conversation_id"] == "existing-conv-id"
 
 
-# --- Compliance level is a trusted, server-side boundary (PR #682) ---
+# --- Compliance level is a trusted, server-side boundary ---
 
 
 @pytest.mark.asyncio
 async def test_compliance_level_stashed_on_session_when_feature_enabled():
-    """When the compliance feature is on, the request's level is validated and
-    persisted on the session so tools can enforce it (the model cannot set it)."""
+    """The user's level and the model's level are tracked separately.
+
+    ``compliance_level`` keeps its long-standing meaning (the user's validated
+    filter, which scopes MCP discovery and tool execution). The model's
+    server-side level lands under ``model_compliance_level`` and is what
+    query-time RAG enforcement runs on.
+    """
     service, sessions = _make_service()
     service.config_manager.app_settings.feature_compliance_levels_enabled = True
+    service.config_manager.llm_config.models = {
+        "test-model": MagicMock(compliance_level="Internal")
+    }
     session_id = uuid4()
 
     captured = {}
 
     async def fake_execute(**kwargs):
-        captured["compliance_level"] = sessions[session_id].context.get("compliance_level")
+        from atlas.core.compliance import get_active_compliance_context
+        context = sessions[session_id].context
+        captured["compliance_level"] = context.get("compliance_level")
+        captured["model_compliance_level"] = context.get("model_compliance_level")
+        captured["active_context"] = get_active_compliance_context()
         return {"type": "done"}
 
     mock_orchestrator = MagicMock()
@@ -274,9 +286,134 @@ async def test_compliance_level_stashed_on_session_when_feature_enabled():
             compliance_level="Public",
         )
 
-    # No compliance-levels.json in the test env -> validation is permissive and
-    # returns the level as-is; the key point is that it is stashed server-side.
+    # Tool authorization is not silently re-scoped to the model's level.
     assert captured["compliance_level"] == "Public"
+    assert captured["model_compliance_level"] == "Internal"
+    assert captured["active_context"] == ("Internal", True)
+
+
+@pytest.mark.asyncio
+async def test_enforcement_is_off_when_model_has_no_compliance_level():
+    """Feature on but no trusted level resolved -> enforce must be False.
+
+    Enforcing with a ``None`` level would make the RAG gate reject every
+    compliance-tagged source, so a deployment that enables the feature without
+    per-model levels would lose all tagged sources.
+    """
+    service, sessions = _make_service()
+    service.config_manager.app_settings.feature_compliance_levels_enabled = True
+    service.config_manager.llm_config.models = {
+        "test-model": MagicMock(compliance_level=None)
+    }
+    session_id = uuid4()
+
+    captured = {}
+
+    async def fake_execute(**kwargs):
+        from atlas.core.compliance import get_active_compliance_context
+        captured["active_context"] = get_active_compliance_context()
+        captured["model_compliance_level"] = sessions[session_id].context.get(
+            "model_compliance_level"
+        )
+        return {"type": "done"}
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email="user@test.com",
+            compliance_level="Public",
+        )
+
+    assert captured["model_compliance_level"] is None
+    assert captured["active_context"] == (None, False)
+
+
+@pytest.mark.asyncio
+async def test_model_level_lookup_failure_disables_enforcement_and_logs(caplog):
+    """A broken model-config lookup must fail open, noisily.
+
+    If resolving the selected model's compliance level raises, the turn must
+    still proceed with enforcement off (a None trusted level), and a WARNING
+    must be logged so an operator can tell the boundary is not active. The
+    warning must not name the model.
+    """
+    import logging
+
+    service, sessions = _make_service()
+    service.config_manager.app_settings.feature_compliance_levels_enabled = True
+    # Realistic failure mode: llm_config has no models mapping at all, so the
+    # .get(model) lookup raises AttributeError.
+    service.config_manager.llm_config.models = None
+    session_id = uuid4()
+
+    captured = {}
+
+    async def fake_execute(**kwargs):
+        from atlas.core.compliance import get_active_compliance_context
+        captured["active_context"] = get_active_compliance_context()
+        captured["model_compliance_level"] = sessions[session_id].context.get(
+            "model_compliance_level"
+        )
+        return {"type": "done"}
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+
+    with (
+        patch.object(service, "_get_orchestrator", return_value=mock_orchestrator),
+        caplog.at_level(logging.WARNING, logger="atlas.application.chat.service"),
+    ):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email="user@test.com",
+        )
+
+    # The turn proceeded.
+    mock_orchestrator.execute.assert_called_once()
+    # No trusted level resolved, and enforcement is off for the turn.
+    assert captured["model_compliance_level"] is None
+    assert captured["active_context"] == (None, False)
+    # The fail-open is visible to an operator, without naming the model.
+    warning_records = [
+        r for r in caplog.records
+        if r.levelno == logging.WARNING
+        and "enforcement is disabled for this turn" in r.getMessage()
+    ]
+    assert len(warning_records) == 1
+    assert "test-model" not in warning_records[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_compliance_context_is_reset_after_the_turn():
+    """The per-turn ContextVar must not leak into the next turn."""
+    from atlas.core.compliance import get_active_compliance_context
+
+    service, sessions = _make_service()
+    service.config_manager.app_settings.feature_compliance_levels_enabled = True
+    service.config_manager.llm_config.models = {
+        "test-model": MagicMock(compliance_level="Internal")
+    }
+    session_id = uuid4()
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(return_value={"type": "done"})
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email="user@test.com",
+        )
+
+    assert get_active_compliance_context() == (None, False)
 
 
 @pytest.mark.asyncio
