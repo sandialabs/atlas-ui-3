@@ -187,10 +187,15 @@ describe('transcript containment styles (#747)', () => {
     expect(css).toMatch(
       /\.chat-messages \.katex-display\s*\{[^}]*overflow-x: auto;/
     )
-    expect(css).toMatch(
+    // The table scroller is phone-only: display:block drops the table out of
+    // table layout, so above the sm breakpoint its columns would stop
+    // stretching and leave a bordered gap beside the last one.
+    const phoneOnly = css.match(/@media \(max-width: 639px\)\s*\{[\s\S]*?\n\}/)
+    expect(phoneOnly).not.toBeNull()
+    expect(phoneOnly[0]).toMatch(
       /\.chat-messages \.selectable-markdown table\s*\{[^}]*overflow-x: auto;/
     )
-    expect(css).toMatch(
+    expect(phoneOnly[0]).toMatch(
       /\.chat-messages \.selectable-markdown table th,[\s\S]*?overflow-wrap: normal;/
     )
   })

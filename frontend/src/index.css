@@ -659,19 +659,28 @@
   overflow-y: hidden;
 }
 
-/* Markdown tables stay inside the message column and scroll horizontally when
-   their columns cannot fit. Wrapping cells instead (max-width alone) collapsed
-   a six-column table at 375px into columns one or two characters wide, so the
-   cells opt back out of `overflow-wrap: anywhere` and the table scrolls. */
+/* Markdown tables stay inside the message column. */
 .chat-messages .selectable-markdown table {
-  display: block;
   max-width: 100%;
-  overflow-x: auto;
 }
 
-.chat-messages .selectable-markdown table th,
-.chat-messages .selectable-markdown table td {
-  overflow-wrap: normal;
+/* On phone widths a table gets its own scroller instead of wrapping: relying
+   on `overflow-wrap: anywhere` collapsed a six-column table at 375px into
+   columns one or two characters wide. This is deliberately not applied above
+   the sm breakpoint -- `display: block` drops the table out of table layout,
+   so its columns stop stretching to fill the message and a wide bordered gap
+   opens to the right of the last column. Below sm the columns always exceed
+   the message width, so the table scrolls and no gap can appear. */
+@media (max-width: 639px) {
+  .chat-messages .selectable-markdown table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .chat-messages .selectable-markdown table th,
+  .chat-messages .selectable-markdown table td {
+    overflow-wrap: normal;
+  }
 }
 
 /* Print styles for chat export (#150) */
