@@ -23,6 +23,11 @@ from atlas.domain.sessions.models import Session
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 from atlas.modules.config.models import LLMConfig, ModelConfig
 
+# Group membership is mocked only in debug mode (see core.auth), so these tests
+# must request it explicitly to pass in both CI legs (DEBUG_MODE true and false).
+# See the mock_admin_authorization fixture in conftest.py.
+pytestmark = pytest.mark.usefixtures("mock_admin_authorization")
+
 
 async def _auth_check_admin_only(user_email: str, group: str) -> bool:
     """Mock membership: only ``admin@test.com`` is in the ``admin`` group."""

@@ -1,6 +1,12 @@
+import pytest
 from main import app
 from atlas.modules.config import config_manager
 from starlette.testclient import TestClient
+
+# Admin group membership is mocked only in debug mode (see core.auth), so these
+# tests must request it explicitly to pass in both CI legs (DEBUG_MODE true and
+# false). See the mock_admin_authorization fixture in conftest.py.
+pytestmark = pytest.mark.usefixtures("mock_admin_authorization")
 
 
 def test_admin_routes_require_admin(monkeypatch):
@@ -13,7 +19,8 @@ def test_admin_routes_require_admin(monkeypatch):
 
     # Admin access when user is in admin group (mocked via config in core.auth)
     r2 = client.get("/admin/", headers={"X-User-Email": config_manager.app_settings.admin_test_user})
-    # In debug mode off, should allow if auth module says admin test user is admin
+    # admin_test_user is an admin via the debug-only mock group table, which
+    # mock_admin_authorization enables regardless of the CI leg's DEBUG_MODE.
     assert r2.status_code == 200
     data = r2.json()
     assert data.get("available_endpoints") is not None

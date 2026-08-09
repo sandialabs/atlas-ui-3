@@ -79,3 +79,69 @@ import atlas.modules.llm.litellm_caller  # noqa: E402, F401
 # Explicitly reference the module to satisfy static analyzers that flag unused imports.
 # The import above is intentional: it pre-populates sys.modules with the real module.
 _ = atlas.modules.llm.litellm_caller.LiteLLMCaller  # noqa: E402
+
+# --- Config singleton isolation -----------------------------------------
+import pytest  # noqa: E402
+
+from atlas.modules.config.config_manager import config_manager as _config_manager  # noqa: E402
+
+# Every lazily-built config cached on the ConfigManager singleton.
+_CONFIG_CACHE_ATTRS = (
+    "_app_settings",
+    "_llm_config",
+    "_mcp_config",
+    "_rag_mcp_config",
+    "_rag_sources_config",
+    "_tool_approvals_config",
+    "_file_extractors_config",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_cache():
+    """Restore the ConfigManager singleton's cached config after every test.
+
+    ``config_manager`` is process-wide and ``reload_configs()`` only *clears* its
+    cache -- each config is rebuilt lazily on next access. So a test that
+    monkeypatches env vars and calls ``reload_configs()`` leaves the singleton
+    holding (or about to build) settings derived from that test's environment,
+    and every later test in the session silently inherits them.
+
+    This is not hypothetical. ``test_is_user_in_group_debug_admin`` sets
+    DEBUG_MODE=true, reloads, then reads ``app_settings`` -- pinning
+    ``debug_mode=True`` for the rest of the session. That leak was the only
+    reason ~39 admin-route tests passed in the DEBUG_MODE=false CI leg: mock
+    admin group membership is debug-only, so those tests were never actually
+    exercising production mode. Snapshot and restore so config state cannot
+    leak across tests in either direction.
+    """
+    saved = {attr: getattr(_config_manager, attr) for attr in _CONFIG_CACHE_ATTRS}
+    try:
+        yield
+    finally:
+        for attr, value in saved.items():
+            setattr(_config_manager, attr, value)
+
+
+@pytest.fixture
+def mock_admin_authorization(monkeypatch):
+    """Enable the debug-only mock group table so admin routes are reachable.
+
+    ``core.auth.is_user_in_group`` consults its mock group table (which is what
+    makes ``admin_test_user`` / ``test@test.com`` an admin) only when
+    ``debug_mode`` is on; with DEBUG_MODE=false no user can be an admin unless an
+    external auth endpoint is configured. Admin-route tests assert real 200
+    responses, so they need debug mode declared explicitly rather than inherited
+    by accident from leaked global state -- see ``_isolate_config_cache``.
+
+    Non-admin identities such as ``user@example.com`` remain non-admin under the
+    mock table, so tests asserting 302/403 denial stay meaningful.
+    """
+    monkeypatch.setenv("DEBUG_MODE", "true")
+    _config_manager.reload_configs()
+    # Materialize the settings *now*, while DEBUG_MODE is still patched.
+    # reload_configs() only clears the cache, so leaving it empty would defer the
+    # rebuild until after monkeypatch has restored the real environment.
+    settings = _config_manager.app_settings
+    assert settings.debug_mode is True
+    return settings
