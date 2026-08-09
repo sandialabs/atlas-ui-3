@@ -1,7 +1,8 @@
 import pytest
 from main import app
-from atlas.modules.config import config_manager
 from starlette.testclient import TestClient
+
+from atlas.modules.config import config_manager
 
 # Admin group membership is mocked only in debug mode (see core.auth), so these
 # tests must request it explicitly to pass in both CI legs (DEBUG_MODE true and
@@ -69,16 +70,14 @@ def test_system_status_requires_admin():
     assert r.status_code in (302, 403)
 
 
-def test_admin_routes_allow_any_user_with_skip_authorization_checks(monkeypatch):
+def test_admin_routes_allow_any_user_with_skip_authorization_checks(skip_auth_checks_env):
     """SKIP_AUTHORIZATION_CHECKS (dev-only) should let a user with no admin
-    configuration reach admin routes, without needing ADMIN_TEST_USER set."""
-    monkeypatch.setenv("DEBUG_MODE", "true")
-    monkeypatch.setenv("SKIP_AUTHORIZATION_CHECKS", "true")
-    config_manager.reload_configs()
-    try:
-        client = TestClient(app)
-        r = client.get("/admin/", headers={"X-User-Email": "not-configured-anywhere@example.com"})
-        assert r.status_code == 200
-    finally:
-        monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
-        config_manager.reload_configs()
+    configuration reach admin routes, without needing ADMIN_TEST_USER set.
+
+    Uses the ``skip_auth_checks_env`` fixture so both ``DEBUG_MODE`` and
+    ``SKIP_AUTHORIZATION_CHECKS`` are saved and restored and the ConfigManager
+    cache is reset on exit (Copilot review on PR #758).
+    """
+    client = TestClient(app)
+    r = client.get("/admin/", headers={"X-User-Email": "not-configured-anywhere@example.com"})
+    assert r.status_code == 200

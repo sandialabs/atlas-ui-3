@@ -145,3 +145,46 @@ def mock_admin_authorization(monkeypatch):
     settings = _config_manager.app_settings
     assert settings.debug_mode is True
     return settings
+
+
+# Env vars that the dev-only authorization bypass touches. Tests that need the
+# bypass must use ``skip_auth_checks_env`` rather than hand-rolling
+# ``monkeypatch.setenv`` + ``reload_configs()``, so that *every* env var the test
+# mutates is saved and restored -- not just one -- and the ConfigManager cache
+# is reset on the way out. The earlier manual approach only cleared
+# ``SKIP_AUTHORIZATION_CHECKS`` in its ``finally`` block, leaving
+# ``DEBUG_MODE=true`` patched into ``os.environ`` when ``reload_configs()`` ran,
+# which leaked the bypass into later tests (Copilot review on PR #758).
+_SKIP_AUTH_ENV_VARS = ("DEBUG_MODE", "SKIP_AUTHORIZATION_CHECKS")
+
+
+@pytest.fixture
+def skip_auth_checks_env():
+    """Enable DEBUG_MODE + SKIP_AUTHORIZATION_CHECKS, then fully restore both
+    env vars and clear the ConfigManager cache on exit.
+
+    Saves the prior values of *both* env vars, sets them to ``"true"``, reloads
+    the config singleton, and materializes ``app_settings`` while the env is
+    still patched (``reload_configs()`` only clears the cache; it does not
+    rebuild). On teardown both env vars are restored to their saved values
+    *before* ``reload_configs()`` runs, so the cleared cache can never be
+    rebuilt with the test's values by a later test. The autouse
+    ``_isolate_config_cache`` fixture is a second layer of defense that
+    snapshots/restores the cache attributes themselves.
+    """
+    saved = {key: os.environ.get(key) for key in _SKIP_AUTH_ENV_VARS}
+    for key in _SKIP_AUTH_ENV_VARS:
+        os.environ[key] = "true"
+    _config_manager.reload_configs()
+    settings = _config_manager.app_settings
+    assert settings.debug_mode is True
+    assert settings.skip_authorization_checks is True
+    try:
+        yield settings
+    finally:
+        for key, val in saved.items():
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val
+        _config_manager.reload_configs()
