@@ -229,18 +229,24 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           </div>
         </div>
 
-        {/* Action Buttons and Rejection Reason */}
+        {/* Action Buttons and Rejection Reason.
+            The row wraps and the buttons opt out of shrinking: the transcript
+            containment rule clears min-width on every button, so in a nowrap
+            row the fixed-width actions would absorb all the shrinkage and
+            render as "Ap"/"Re" while the text input held its intrinsic
+            minimum. The input keeps a legible floor and drops to its own line
+            instead of becoming a sliver (#747). */}
         {!autoApproved && (
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-wrap gap-2 items-center">
             <button
               onClick={handleApprove}
-              className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap"
+              className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap shrink-0"
             >
               Approve {isEditing ? '(with edits)' : ''}
             </button>
             <button
               onClick={handleReject}
-              className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap"
+              className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap shrink-0"
             >
               Reject
             </button>
@@ -249,7 +255,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Rejection reason (optional)..."
-              className="flex-1 bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 min-w-[12rem] bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         )}
@@ -329,18 +335,20 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
         </div>
       )}
 
-      {/* Action Buttons and Rejection Reason - Compact Layout */}
+      {/* Action Buttons and Rejection Reason - Compact Layout.
+          Wraps and pins the button widths for the same reason as the classic
+          layout above (#747). */}
       {!autoApproved && (
-        <div className="flex gap-2 items-center mt-2 ml-5">
+        <div className="flex flex-wrap gap-2 items-center mt-2 ml-5">
           <button
             onClick={handleApprove}
-            className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap"
+            className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap shrink-0"
           >
             Approve {isEditing ? '(with edits)' : ''}
           </button>
           <button
             onClick={handleReject}
-            className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap"
+            className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap shrink-0"
           >
             Reject
           </button>
@@ -349,7 +357,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Rejection reason (optional)..."
-            className="flex-1 bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 min-w-[12rem] bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
       )}

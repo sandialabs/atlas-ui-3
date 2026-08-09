@@ -824,7 +824,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
       <main
         ref={messagesRef}
-        className={`overflow-y-auto custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
+        className={`chat-messages overflow-y-auto overflow-x-hidden custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
         {/* withUserOrdinals assigns each rewindable user message its 0-based
             ordinal (null for non-rewindable rows -- assistant/tool/system and
@@ -1057,7 +1057,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
                   return (
                     <div
                       key={filename}
-                      className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
+                      className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm max-w-full min-w-0 ${
                         supportsExtraction ? borderColors[mode] : 'bg-gray-700'
                       }`}
                     >
@@ -1071,10 +1071,10 @@ const ChatArea = ({ onOpenRagPanel }) => {
                           <ModeIcon className="w-3 h-3" />
                         </button>
                       )}
-                      <span className="text-gray-200">{filename}</span>
+                      <span className="text-gray-200 min-w-0 truncate" title={filename}>{filename}</span>
                       <button
                         onClick={() => removeFile(filename)}
-                        className="text-gray-400 hover:text-red-400 transition-colors"
+                        className="text-gray-400 hover:text-red-400 transition-colors flex-shrink-0"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -1170,9 +1170,9 @@ const ChatArea = ({ onOpenRagPanel }) => {
                           : 'hover:bg-gray-700 text-gray-200'
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <span className="font-black">/{tool.name}</span>
-                        <span className="text-xs text-gray-400">from {tool.server}</span>
+                      <div className="flex items-center gap-2 flex-wrap min-w-0">
+                        <span className="font-black min-w-0 break-all">/{tool.name}</span>
+                        <span className="text-xs text-gray-400 min-w-0 break-all">from {tool.server}</span>
                       </div>
                     </div>
                   ))}
@@ -1195,12 +1195,12 @@ const ChatArea = ({ onOpenRagPanel }) => {
                           : 'hover:bg-gray-700 text-gray-200'
                       }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">@file {file.filename}</span>
-                          <span className="text-xs px-2 py-1 rounded bg-gray-600 text-gray-300">{file.type}</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-medium min-w-0 truncate" title={file.filename}>@file {file.filename}</span>
+                          <span className="text-xs px-2 py-1 rounded bg-gray-600 text-gray-300 flex-shrink-0">{file.type}</span>
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-400">
+                        <div className="flex items-center gap-2 text-xs text-gray-400 flex-shrink-0">
                           <span>{file.source === 'tool' ? 'generated' : 'uploaded'}</span>
                           <span>{(file.size / 1024).toFixed(1)}KB</span>
                         </div>
