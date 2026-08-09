@@ -650,10 +650,28 @@
   overflow-wrap: normal;
 }
 
-/* Markdown tables stay inside the message column; their cells wrap under the
-   overflow-wrap rule above instead of stretching the table past the screen. */
-.selectable-markdown table {
+/* Display math cannot be broken mid-expression, so it gets its own scroller
+   rather than being clipped by the transcript's overflow-x-hidden: KaTeX lays
+   the formula out at its natural width and overflow-wrap has nothing to break
+   on, which on a phone silently hid the right-hand side of long equations. */
+.chat-messages .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Markdown tables stay inside the message column and scroll horizontally when
+   their columns cannot fit. Wrapping cells instead (max-width alone) collapsed
+   a six-column table at 375px into columns one or two characters wide, so the
+   cells opt back out of `overflow-wrap: anywhere` and the table scrolls. */
+.chat-messages .selectable-markdown table {
+  display: block;
   max-width: 100%;
+  overflow-x: auto;
+}
+
+.chat-messages .selectable-markdown table th,
+.chat-messages .selectable-markdown table td {
+  overflow-wrap: normal;
 }
 
 /* Print styles for chat export (#150) */

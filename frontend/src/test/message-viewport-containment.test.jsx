@@ -18,6 +18,7 @@ import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import Message from '../components/Message'
+import ToolApprovalMessage from '../components/ToolApprovalMessage'
 import { useChat } from '../contexts/ChatContext'
 
 vi.mock('../contexts/ChatContext', () => ({
@@ -33,6 +34,9 @@ const setChat = (settings = {}) => {
     appName: 'Atlas',
     downloadFile: vi.fn(),
     isSynthesizing: false,
+    sendApprovalResponse: vi.fn(),
+    updateSettings: vi.fn(),
+    updateToolResult: vi.fn(),
     settings: { autoApproveTools: false, ...settings },
   })
 }
@@ -117,6 +121,42 @@ describe('message viewport containment (#747)', () => {
   })
 })
 
+describe('tool approval actions stay legible (#747)', () => {
+  // The containment rule clears min-width on every button in the transcript.
+  // In a nowrap row the fixed-width Approve/Reject actions absorbed all of the
+  // shrinkage -- rendering as "Ap" and "Re" at 375px -- while the flex-1 text
+  // input held its intrinsic minimum. The row must wrap and the buttons must
+  // opt out of shrinking instead.
+  const approvalMessage = {
+    role: 'assistant',
+    type: 'tool_approval_request',
+    tool_name: 'basic_memory_discover_topics',
+    server_name: 'basic_memory',
+    status: 'pending',
+    arguments: { q: LONG_URL },
+    tool_call_id: 'call_1',
+  }
+
+  for (const compact of [true, false]) {
+    it(`keeps the ${compact ? 'compact' : 'classic'} action row wrappable`, () => {
+      const { container } = render(
+        <ToolApprovalMessage message={approvalMessage} compact={compact} />
+      )
+      const input = container.querySelector('input[type="text"]')
+      const row = input.parentElement
+      expect(row.className).toContain('flex-wrap')
+      // A legible floor, so the input drops to its own line rather than
+      // collapsing to a sliver next to the buttons.
+      expect(input.className).toContain('min-w-[12rem]')
+      const actions = [...row.querySelectorAll('button')]
+      expect(actions.length).toBeGreaterThanOrEqual(2)
+      for (const button of actions) {
+        expect(button.className).toContain('shrink-0')
+      }
+    })
+  }
+})
+
 describe('transcript containment styles (#747)', () => {
   // vitest runs with the frontend/ directory as its root.
   const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
@@ -125,17 +165,47 @@ describe('transcript containment styles (#747)', () => {
     expect(css).toMatch(/\.chat-messages :where\([^)]*\)\s*\{\s*min-width: 0;/)
   })
 
+  it('leaves replaced elements out of the shrink list so icons keep their size', () => {
+    // Pin the exclusion itself: a "simplification" to :where(*) would squash
+    // every svg/img icon in the transcript while still matching the rule above.
+    const [, selectorList] = css.match(/\.chat-messages :where\(([^)]*)\)/)
+    const tags = selectorList.split(',').map((s) => s.trim())
+    expect(tags).not.toContain('svg')
+    expect(tags).not.toContain('img')
+    expect(tags).not.toContain('*')
+    expect(tags).toContain('div')
+  })
+
   it('gives long strings a break opportunity but leaves code alone', () => {
     expect(css).toMatch(/\.chat-messages,[\s\S]*?overflow-wrap: anywhere;/)
     expect(css).toMatch(/\.chat-messages pre[\s\S]*?overflow-wrap: normal;/)
   })
 
-  it('applies the .chat-messages hook to the transcript container', () => {
+  it('gives display math and wide tables their own scroller', () => {
+    // Neither can be broken by overflow-wrap, so without a scroller the
+    // transcript's overflow-x-hidden clips them with no affordance (#747).
+    expect(css).toMatch(
+      /\.chat-messages \.katex-display\s*\{[^}]*overflow-x: auto;/
+    )
+    expect(css).toMatch(
+      /\.chat-messages \.selectable-markdown table\s*\{[^}]*overflow-x: auto;/
+    )
+    expect(css).toMatch(
+      /\.chat-messages \.selectable-markdown table th,[\s\S]*?overflow-wrap: normal;/
+    )
+  })
+
+  it('applies the .chat-messages hook to the transcript container element', () => {
     const chatArea = readFileSync(
       resolve(process.cwd(), 'src/components/ChatArea.jsx'),
       'utf8'
     )
-    expect(chatArea).toContain('chat-messages')
-    expect(chatArea).toContain('overflow-x-hidden')
+    // Match the className of the <main> element rather than the file at large:
+    // a bare substring check also matches the comments that discuss the class,
+    // so moving it to the wrong element would leave the test green.
+    const main = chatArea.match(/<main[\s\S]*?className=\{`([^`]*)`\}/)
+    expect(main).not.toBeNull()
+    expect(main[1]).toContain('chat-messages')
+    expect(main[1]).toContain('overflow-x-hidden')
   })
 })

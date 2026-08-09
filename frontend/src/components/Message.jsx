@@ -588,7 +588,11 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       console.error('Error parsing markdown content:', error)
       return (
         <div className="text-gray-200">
-          <pre className="whitespace-pre-wrap">{content}</pre>
+          {/* Every other <pre> in the transcript carries its own scroller; this
+              one is exempted from `overflow-wrap: anywhere` by the pre rule in
+              index.css, so without one a long unbroken token in an
+              already-failing message would be clipped with no way to see it. */}
+          <pre className="whitespace-pre-wrap overflow-x-auto">{content}</pre>
         </div>
       )
     }
