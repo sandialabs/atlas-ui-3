@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #758 - 2026-08-08
+- **Dev-only flag to skip authorization checks**: New `SKIP_AUTHORIZATION_CHECKS` setting (only usable with `DEBUG_MODE=true`; app refuses to start otherwise) lets local users reach admin-gated routes without configuring `ADMIN_TEST_USER` to match their own email. Authentication is unaffected (closes #757).
+
 ### PR #751 - 2026-08-08
 - **Agent mode shows progress between loop steps**: `isThinking` is set once on send and cleared by the first streamed token, so the wait while the agent loop called the LLM for its next turn rendered no spinner and the run looked frozen. A new `AgentBusyIndicator` renders whenever an agent run is in flight and neither the thinking indicator nor a token stream is on screen, reporting the current step number (closes #748).
 
