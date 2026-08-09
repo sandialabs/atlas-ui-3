@@ -18,9 +18,14 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import ToolApprovalMessage from '../components/ToolApprovalMessage'
 import Message from '../components/Message'
 import { useChat } from '../contexts/ChatContext'
+import { useToast } from '../components/ui/toastContext'
 
 vi.mock('../contexts/ChatContext', () => ({
   useChat: vi.fn(),
+}))
+
+vi.mock('../components/ui/toastContext', () => ({
+  useToast: vi.fn(),
 }))
 
 const baseMessage = {
@@ -32,8 +37,12 @@ const baseMessage = {
   status: 'pending',
 }
 
+const toastError = vi.fn()
+
 const setChat = (overrides = {}) => {
-  const sendApprovalResponse = overrides.sendApprovalResponse || vi.fn()
+  // Default to a successful send so approve/reject tests persist terminal state
+  // the same way a live WebSocket does (`sendMessage` returns true when open).
+  const sendApprovalResponse = overrides.sendApprovalResponse || vi.fn().mockReturnValue(true)
   const updateSettings = overrides.updateSettings || vi.fn()
   const updateToolResult = overrides.updateToolResult || vi.fn()
   useChat.mockReturnValue({
@@ -52,6 +61,7 @@ const setChat = (overrides = {}) => {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  useToast.mockReturnValue({ error: toastError, success: vi.fn(), info: vi.fn(), dismiss: vi.fn() })
 })
 
 afterEach(() => {
@@ -112,12 +122,12 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     }
   })
 
-  it('does not persist auto_approved when the WebSocket is down during the auto-approval delay', async () => {
+  it('marks auto_approved false and toasts when the WebSocket is down during auto-approval', async () => {
     // If the socket dropped during the 100ms delay, `sendApprovalResponse`
-    // returns false. Persisting `auto_approved: true` anyway would leave the
-    // row stuck hidden with no approval in flight — the backend never got the
-    // response, and rendering keys off the persisted flag so the row never
-    // comes back to retry. The flag must only be set after a successful send.
+    // returns false. Persisting `auto_approved: true` would leave the row
+    // stuck hidden with no approval in flight. Instead persist false so
+    // `resolveAutoApproved` un-hides the review row for a manual retry, and
+    // surface a toast so the failure is not silent.
     vi.useFakeTimers()
     try {
       const sendApprovalResponse = vi.fn().mockReturnValue(false)
@@ -130,10 +140,69 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
       await vi.advanceTimersByTimeAsync(200)
 
       expect(sendApprovalResponse).toHaveBeenCalledTimes(1)
-      expect(updateToolResult).not.toHaveBeenCalled()
+      expect(updateToolResult).toHaveBeenCalledWith('call_1', { auto_approved: false })
+      expect(toastError).toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('does not re-send auto-approval after a successful send when deps churn', async () => {
+    // After a successful auto-send, status stays `pending` until tool_start.
+    // `sendApprovalResponse` is not memoized, so a parent re-render changes
+    // its identity and would re-run the effect without the auto_approved /
+    // ref gate — sending a second tool_approval_response for the same call.
+    vi.useFakeTimers()
+    try {
+      const sendApprovalResponse = vi.fn().mockReturnValue(true)
+      const updateToolResult = vi.fn()
+      setChat({
+        settings: { autoApproveTools: true },
+        sendApprovalResponse,
+        updateToolResult,
+      })
+      const { rerender } = render(
+        <ToolApprovalMessage message={baseMessage} compact={true} />
+      )
+
+      await vi.advanceTimersByTimeAsync(200)
+      expect(sendApprovalResponse).toHaveBeenCalledTimes(1)
+      expect(updateToolResult).toHaveBeenCalledWith('call_1', { auto_approved: true })
+
+      // Simulate the store patch + a new sendApprovalResponse identity.
+      const sendApprovalResponse2 = vi.fn().mockReturnValue(true)
+      setChat({
+        settings: { autoApproveTools: true },
+        sendApprovalResponse: sendApprovalResponse2,
+        updateToolResult,
+      })
+      rerender(
+        <ToolApprovalMessage
+          message={{ ...baseMessage, auto_approved: true }}
+          compact={true}
+        />
+      )
+      await vi.advanceTimersByTimeAsync(200)
+
+      expect(sendApprovalResponse).toHaveBeenCalledTimes(1)
+      expect(sendApprovalResponse2).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not patch terminal status when a manual approve send fails', () => {
+    const sendApprovalResponse = vi.fn().mockReturnValue(false)
+    const { updateToolResult } = setChat({ sendApprovalResponse })
+    render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+
+    expect(sendApprovalResponse).toHaveBeenCalledTimes(1)
+    expect(updateToolResult).not.toHaveBeenCalled()
+    // Controls stay so the user can retry after reconnect.
+    expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument()
+    expect(toastError).toHaveBeenCalled()
   })
 
   it('keeps a persisted auto-approved call hidden after the setting is toggled off', () => {
@@ -380,6 +449,8 @@ describe('Message — tool-call collapse is shared across compact/classic (regre
       />
     )
 
+    // HTML `hidden` (space-y attribute selector) and the utility class.
+    expect(container.firstChild).toHaveAttribute('hidden')
     expect(container.firstChild).toHaveClass('hidden')
     expect(container.textContent).toBe('')
   })

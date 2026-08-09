@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
+import { useToast } from './ui/toastContext'
 import { resolveAutoApproved } from '../utils/toolApproval'
 
 // Inline tool-approval prompt rendered as a chat message. Extracted from
@@ -14,6 +15,12 @@ import { resolveAutoApproved } from '../utils/toolApproval'
 // APPROVAL REQUIRED path is unchanged.
 const ToolApprovalMessage = ({ message, compact = true }) => {
   const { sendApprovalResponse, settings, updateToolResult } = useChat()
+  const toast = useToast()
+  // Keep a stable handle for the effect: the no-provider useToast fallback
+  // returns a fresh object every call, and putting `toast` in the effect deps
+  // would re-arm the auto-approval timer on every render.
+  const toastRef = useRef(toast)
+  toastRef.current = toast
   // The websocket handler defaults this to {}, but guard anyway so a malformed
   // payload can't crash the row on Object.keys/Object.entries.
   const args = message.arguments || {}
@@ -28,6 +35,12 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   // otherwise reset local state and resurrect the Approve/Reject buttons. A
   // local mirror gives an instant update before the dispatch propagates.
   const [decision, setDecision] = useState(null)
+  // Guards the auto-approval effect against re-sending when `sendApprovalResponse`
+  // changes identity (it is `sendMessage` from WSContext and is not memoized).
+  // After a successful send, status stays `pending` until tool_start overwrites
+  // it, so deps can re-fire; this ref + the `auto_approved` gate stop a second
+  // `tool_approval_response` for the same call.
+  const autoApprovalSentRef = useRef(false)
   const resolvedStatus = decision || message.status
   const resolvedReason = message.rejection_reason || (decision === 'rejected' ? reason : '')
   const autoApproved = resolveAutoApproved({ ...message, status: resolvedStatus }, settings)
@@ -49,16 +62,18 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   const toggleCollapsed = () => setReviewCollapsed(c => !c)
 
   useEffect(() => {
+    // A boolean `auto_approved` means the decision was already recorded
+    // (true = sent successfully; false = send failed or manual path took over).
+    // Do not auto-send again in either case.
+    if (typeof message.auto_approved === 'boolean') return
+    if (autoApprovalSentRef.current) return
     if (settings?.autoApproveTools && !message.admin_required && message.status === 'pending') {
       const timer = setTimeout(() => {
-        // Only record the decision once the server has actually been told.
-        // `sendApprovalResponse` returns false when the WebSocket isn't open;
-        // persisting `auto_approved: true` before the send completes would
-        // leave the row stuck hidden if the socket dropped during the 100ms
-        // delay — the approval never reached the backend, but rendering keys
-        // off the persisted flag and so the row never comes back to retry.
-        // The live `autoApproveTools` setting still hides the row while the
-        // socket is down, so there is no visible flicker on the success path.
+        if (autoApprovalSentRef.current) return
+        // Only record a successful auto-approve once the server has actually
+        // been told. `sendApprovalResponse` returns false when the WebSocket
+        // isn't open; persisting `auto_approved: true` before the send would
+        // leave the row stuck hidden with no approval in flight.
         const sent = sendApprovalResponse({
           type: 'tool_approval_response',
           tool_call_id: message.tool_call_id,
@@ -66,36 +81,55 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           arguments: message.arguments,
         })
         if (sent) {
+          autoApprovalSentRef.current = true
           updateToolResult?.(message.tool_call_id, { auto_approved: true })
+        } else {
+          // Force the review row visible so the user can approve manually.
+          // `resolveAutoApproved` treats a boolean false as "not auto", which
+          // also un-hides the Message wrapper that keys off the same helper.
+          updateToolResult?.(message.tool_call_id, { auto_approved: false })
+          toastRef.current.error(
+            'Auto-approve failed (not connected). Approve manually, or reconnect and try again.'
+          )
         }
       }, 100)
       return () => clearTimeout(timer)
     }
-  }, [settings?.autoApproveTools, message.admin_required, message.status, message.tool_call_id, message.arguments, sendApprovalResponse, updateToolResult])
+  }, [settings?.autoApproveTools, message.admin_required, message.status, message.auto_approved, message.tool_call_id, message.arguments, sendApprovalResponse, updateToolResult])
 
   const handleApprove = () => {
     if (resolvedStatus !== 'pending') return
-    setDecision('approved')
-    updateToolResult?.(message.tool_call_id, { status: 'approved', auto_approved: false })
-    sendApprovalResponse({
+    // Persist terminal state only after a successful send — same rule as the
+    // auto path. A dropped socket must leave the controls available to retry.
+    const sent = sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: true,
       arguments: isEditing ? editedArgs : message.arguments,
     })
+    if (!sent) {
+      toastRef.current.error('Could not send approval (not connected). Try again when reconnected.')
+      return
+    }
+    setDecision('approved')
+    updateToolResult?.(message.tool_call_id, { status: 'approved', auto_approved: false })
   }
 
   const handleReject = () => {
     if (resolvedStatus !== 'pending') return
     const rejectionReason = reason || 'User rejected the tool call'
-    setDecision('rejected')
-    updateToolResult?.(message.tool_call_id, { status: 'rejected', rejection_reason: rejectionReason, auto_approved: false })
-    sendApprovalResponse({
+    const sent = sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: false,
       reason: rejectionReason,
     })
+    if (!sent) {
+      toastRef.current.error('Could not send rejection (not connected). Try again when reconnected.')
+      return
+    }
+    setDecision('rejected')
+    updateToolResult?.(message.tool_call_id, { status: 'rejected', rejection_reason: rejectionReason, auto_approved: false })
   }
 
   const handleArgumentChange = (key, value) => {

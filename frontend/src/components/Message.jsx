@@ -185,8 +185,9 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   // call gets no transcript row of its own (#762) — the tool_call row that
   // follows names the same tool a moment later — but the component still has to
   // mount, because it owns the effect that sends the approval. Rendering it
-  // inside a display:none wrapper keeps it mounted while contributing no height
-  // and no `space-y-4` gap to the transcript.
+  // inside a hidden wrapper keeps it mounted while contributing no height and
+  // no `space-y-4` gap to the transcript (the HTML `hidden` attribute is what
+  // Tailwind's space-y selector excludes; see the early-return markup below).
   const isHiddenApprovalRow =
     message.type === 'tool_approval_request' && resolveAutoApproved(message, settings)
 
@@ -647,8 +648,13 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   }
 
   if (isHiddenApprovalRow) {
+    // Use the HTML `hidden` attribute so Tailwind's `space-y-*` utilities
+    // (`> :not([hidden]) ~ :not([hidden])`) exclude this node. The `hidden`
+    // utility class alone sets display:none but is not matched by that
+    // attribute selector, so a leading hidden child can still force
+    // margin-top onto the following sibling.
     return (
-      <div className="hidden">
+      <div hidden className="hidden">
         <ToolApprovalMessage message={message} compact={compactMessages} />
       </div>
     )
