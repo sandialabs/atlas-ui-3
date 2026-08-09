@@ -17,6 +17,7 @@ import {
   processToolResult,
   downloadReturnedFile,
 } from '../utils/toolResultUtils'
+import { resolveAutoApproved } from '../utils/toolApproval'
 import ToolApprovalMessage from './ToolApprovalMessage'
 import ToolElapsedTime from './ToolElapsedTime'
 
@@ -180,7 +181,15 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   const avatarText = isUser ? 'Y' : isSystem ? 'S' : 'A'
   const authorName = isUser ? 'You' : isSystem ? 'System' : appName
 
-  // Note: Tool auto-approval handled inside ToolApprovalMessage; we keep message visible so inline toggle remains accessible.
+  // Tool auto-approval is handled inside ToolApprovalMessage. An auto-approved
+  // call gets no transcript row of its own (#762) — the tool_call row that
+  // follows names the same tool a moment later — but the component still has to
+  // mount, because it owns the effect that sends the approval. Rendering it
+  // inside a hidden wrapper keeps it mounted while contributing no height and
+  // no `space-y-4` gap to the transcript (the HTML `hidden` attribute is what
+  // Tailwind's space-y selector excludes; see the early-return markup below).
+  const isHiddenApprovalRow =
+    message.type === 'tool_approval_request' && resolveAutoApproved(message, settings)
 
   const renderContent = () => {
     if (message.type === 'tool_approval_request') {
@@ -201,6 +210,11 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       const statusColor =
         isToolActive ? 'bg-blue-600' :
         message.status === 'completed' ? 'bg-green-600' : 'bg-red-600'
+      // Compact rows show the outcome as a glyph rather than a text pill so the
+      // whole row fits one line on a phone (#762).
+      const succeeded = message.status === 'completed'
+      const statusGlyph = succeeded ? '✓' : '✗'
+      const statusGlyphColor = succeeded ? 'text-green-400' : 'text-red-400'
       // The compact toggle controls chrome only (avatar / author-header / bubble
       // + badge sizing). The collapse behavior is shared across both modes, so
       // details start collapsed and expand on click either way — matching the
@@ -211,37 +225,58 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
         <div className="text-gray-200 selectable-markdown">
           {/* Compact: single clickable summary line. Classic: static badge row. */}
           {compactMessages ? (
+            /* One line at 390px (#762): triangle + status glyph + tool name.
+               The server name is dropped — it is usually a prefix of the tool
+               name (`basic_fns` beside `basic_fns_bash`); it moves into the
+               expanded detail. The param count goes too — the triangle already
+               signals that there is something to expand. */
             <button
               onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
-              className={`w-full text-left flex items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              className={`w-full min-w-0 text-left flex flex-wrap items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
               type="button"
               aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
             >
               {hasDetails && (
-                <span className={`text-gray-500 text-xs transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
+                <span className={`text-gray-500 text-xs flex-shrink-0 transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
                   ▶
                 </span>
               )}
-              {isToolActive && (
-                <svg className="w-3.5 h-3.5 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              {isToolActive ? (
+                /* Active spinner: labelled for screen readers and hover so the
+                   spinning state is announced as "CALLING"/"IN PROGRESS" instead
+                   of nothing. Mirrors the outcome-glyph path below. */
+                <svg
+                  className="w-3.5 h-3.5 spinner text-blue-400 flex-shrink-0"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  role="img"
+                  aria-label={statusLabel}
+                  title={statusLabel}
+                >
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
+              ) : (
+                /* A colored glyph instead of a text pill — the outcome is
+                   binary, and the pill cost more horizontal room than the tool
+                   name it sat beside. Labelled for screen readers and hover. */
+                <span
+                  className={`flex-shrink-0 text-sm leading-none ${statusGlyphColor}`}
+                  role="img"
+                  aria-label={statusLabel}
+                  title={statusLabel}
+                >
+                  {statusGlyph}
+                </span>
               )}
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColor}`}>
-                {statusLabel}
-              </span>
-              <span className="font-medium text-sm">{message.tool_name}</span>
-              <span className="text-gray-500 text-xs">({message.server_name})</span>
+              <span className="font-medium text-sm min-w-0 break-words">{message.tool_name}</span>
               {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
-              {toolDetailsCollapsed && argCount > 0 && (
-                <span className="text-gray-500 text-xs">· {argCount} param{argCount !== 1 ? 's' : ''}</span>
-              )}
             </button>
           ) : (
             <button
               onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
-              className={`w-full text-left flex items-center gap-2 mb-3 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              className={`w-full min-w-0 text-left flex flex-wrap items-center gap-2 mb-3 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
               type="button"
               aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
             >
@@ -251,16 +286,24 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 </span>
               )}
               {isToolActive && (
-                <svg className="w-4 h-4 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg
+                  className="w-4 h-4 spinner text-blue-400 flex-shrink-0"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  role="img"
+                  aria-label={statusLabel}
+                  title={statusLabel}
+                >
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
               )}
-              <span className={`px-2 py-1 rounded text-xs font-medium ${statusColor}`}>
+              <span className={`px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${statusColor}`}>
                 {statusLabel}
               </span>
-              <span className="font-medium">{message.tool_name}</span>
-              <span className="text-gray-400 text-sm">({message.server_name})</span>
+              <span className="font-medium min-w-0 break-words">{message.tool_name}</span>
+              <span className="text-gray-400 text-sm min-w-0 break-words">({message.server_name})</span>
               {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
             </button>
           )}
@@ -346,10 +389,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                       <button
                         key={index}
                         onClick={() => downloadFile(filename)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors"
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
                         title="Download file"
                       >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         {filename}
@@ -369,10 +412,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                       <button
                         key={index}
                         onClick={() => downloadReturnedFile(filename, parsedResult.returned_file_contents[index])}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors"
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
                         title="Download file"
                       >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         {filename}
@@ -386,10 +429,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 <div className="mt-2 ml-5">
                   <button
                     onClick={() => downloadReturnedFile(parsedResult.returned_file_name, parsedResult.returned_file_base64)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
                     title="Download file"
                   >
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
                     {parsedResult.returned_file_name}
@@ -404,6 +447,12 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           {/* Expanded details: input arguments + output, revealed together */}
           {showDetails && (
             <div className="mt-2 ml-5 space-y-3">
+              {/* The collapsed compact row drops the server name to stay on one
+                  line (#762), so it lives here instead — the classic row still
+                  shows it inline. */}
+              {compactMessages && message.server_name && (
+                <div className="text-xs text-gray-500">Server: {message.server_name}</div>
+              )}
               {argCount > 0 && (
                 <div className="border-l-2 border-blue-500 pl-3">
                   <div className="text-xs font-semibold text-blue-400 mb-1">Input Arguments</div>
@@ -462,7 +511,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
             <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-600 text-white uppercase flex-shrink-0">
               Agent
             </span>
-            <span className="text-purple-300">{message.content}</span>
+            <span className="text-purple-300 min-w-0 break-words">{message.content}</span>
           </div>
         )
       }
@@ -515,7 +564,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
             <span className={`px-2 py-0.5 rounded text-xs font-medium ${badgeColor} uppercase flex-shrink-0`}>
               {logLevel}
             </span>
-            <div className={`${textColor} text-sm font-mono`}>
+            <div className={`${textColor} text-sm font-mono min-w-0 break-words`}>
               {message.content}
             </div>
           </div>
@@ -543,10 +592,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
               </div>
             )
           default:
-            return <div className="text-gray-200 whitespace-pre-wrap">{message.content}</div>
+            return <div className="text-gray-200 whitespace-pre-wrap break-words">{message.content}</div>
         }
       }
-      return <div className="text-gray-200 whitespace-pre-wrap">{message.content}</div>
+      return <div className="text-gray-200 whitespace-pre-wrap break-words">{message.content}</div>
     }
 
     // Render markdown for assistant messages
@@ -588,10 +637,27 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       console.error('Error parsing markdown content:', error)
       return (
         <div className="text-gray-200">
-          <pre className="whitespace-pre-wrap">{content}</pre>
+          {/* Every other <pre> in the transcript carries its own scroller; this
+              one is exempted from `overflow-wrap: anywhere` by the pre rule in
+              index.css, so without one a long unbroken token in an
+              already-failing message would be clipped with no way to see it. */}
+          <pre className="whitespace-pre-wrap overflow-x-auto">{content}</pre>
         </div>
       )
     }
+  }
+
+  if (isHiddenApprovalRow) {
+    // Use the HTML `hidden` attribute so Tailwind's `space-y-*` utilities
+    // (`> :not([hidden]) ~ :not([hidden])`) exclude this node. The `hidden`
+    // utility class alone sets display:none but is not matched by that
+    // attribute selector, so a leading hidden child can still force
+    // margin-top onto the following sibling.
+    return (
+      <div hidden className="hidden">
+        <ToolApprovalMessage message={message} compact={compactMessages} />
+      </div>
+    )
   }
 
   // Compact rows (tool calls, logs, agent meta, system notices) skip the avatar,
@@ -599,7 +665,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   // padding aligns their content under the assistant column (avatar w-8 + gap-3).
   if (isCompact) {
     return (
-      <div ref={containerRef} className="w-full pl-11 pr-2 text-sm">
+      <div ref={containerRef} className="w-full min-w-0 pl-11 pr-2 text-sm">
         {renderContent()}
       </div>
     )
@@ -611,7 +677,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
         {avatarText}
       </div>
 
-      <div ref={containerRef} className={`${isUser ? 'max-w-[70%] user-message-bubble' : 'w-full bg-gray-800'} rounded-lg p-4`}>
+      {/* The bubble is a flex sibling of the avatar, so it must be allowed to
+          shrink (min-w-0): with the default min-width:auto a single unbroken
+          token inside would push the row past the viewport. */}
+      <div ref={containerRef} className={`min-w-0 ${isUser ? 'max-w-[70%] user-message-bubble' : 'flex-1 bg-gray-800'} rounded-lg p-4`}>
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium text-gray-300">

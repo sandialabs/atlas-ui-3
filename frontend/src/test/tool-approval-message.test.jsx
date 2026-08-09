@@ -18,9 +18,14 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import ToolApprovalMessage from '../components/ToolApprovalMessage'
 import Message from '../components/Message'
 import { useChat } from '../contexts/ChatContext'
+import { useToast } from '../components/ui/toastContext'
 
 vi.mock('../contexts/ChatContext', () => ({
   useChat: vi.fn(),
+}))
+
+vi.mock('../components/ui/toastContext', () => ({
+  useToast: vi.fn(),
 }))
 
 const baseMessage = {
@@ -32,8 +37,12 @@ const baseMessage = {
   status: 'pending',
 }
 
+const toastError = vi.fn()
+
 const setChat = (overrides = {}) => {
-  const sendApprovalResponse = overrides.sendApprovalResponse || vi.fn()
+  // Default to a successful send so approve/reject tests persist terminal state
+  // the same way a live WebSocket does (`sendMessage` returns true when open).
+  const sendApprovalResponse = overrides.sendApprovalResponse || vi.fn().mockReturnValue(true)
   const updateSettings = overrides.updateSettings || vi.fn()
   const updateToolResult = overrides.updateToolResult || vi.fn()
   useChat.mockReturnValue({
@@ -52,6 +61,7 @@ const setChat = (overrides = {}) => {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  useToast.mockReturnValue({ error: toastError, success: vi.fn(), info: vi.fn(), dismiss: vi.fn() })
 })
 
 afterEach(() => {
@@ -80,16 +90,150 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     expect(screen.getByText(/print\(1\)/)).toBeInTheDocument()
   })
 
-  it('collapses an auto-approved row by default (informational) and hides the action buttons', () => {
-    setChat({ settings: { autoApproveTools: true } })
+  it('renders nothing for an auto-approved call (#762) but still sends the approval', async () => {
+    // The row said "we approved a thing we are about to report anyway" — the
+    // tool_call row names the same tool a moment later. The component still
+    // mounts because it owns the auto-approval effect.
+    vi.useFakeTimers()
+    try {
+      // `sendApprovalResponse` returns true when the WebSocket is open; the
+      // auto-approval effect only persists `auto_approved` after a successful
+      // send, so the mock must report a successful send.
+      const sendApprovalResponse = vi.fn().mockReturnValue(true)
+      const { updateToolResult } = setChat({
+        settings: { autoApproveTools: true },
+        sendApprovalResponse,
+      })
+      const { container } = render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+
+      expect(container).toBeEmptyDOMElement()
+      expect(screen.queryByText('AUTO-APPROVED')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument()
+
+      await vi.advanceTimersByTimeAsync(200)
+      // The decision is recorded on the message only after the send succeeds,
+      // so rendering no longer depends on the live setting.
+      expect(updateToolResult).toHaveBeenCalledWith('call_1', { auto_approved: true })
+      expect(sendApprovalResponse).toHaveBeenCalledWith(
+        expect.objectContaining({ tool_call_id: 'call_1', approved: true })
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('marks auto_approved false and toasts when the WebSocket is down during auto-approval', async () => {
+    // If the socket dropped during the 100ms delay, `sendApprovalResponse`
+    // returns false. Persisting `auto_approved: true` would leave the row
+    // stuck hidden with no approval in flight. Instead persist false so
+    // `resolveAutoApproved` un-hides the review row for a manual retry, and
+    // surface a toast so the failure is not silent.
+    vi.useFakeTimers()
+    try {
+      const sendApprovalResponse = vi.fn().mockReturnValue(false)
+      const { updateToolResult } = setChat({
+        settings: { autoApproveTools: true },
+        sendApprovalResponse,
+      })
+      render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+
+      await vi.advanceTimersByTimeAsync(200)
+
+      expect(sendApprovalResponse).toHaveBeenCalledTimes(1)
+      expect(updateToolResult).toHaveBeenCalledWith('call_1', { auto_approved: false })
+      expect(toastError).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not re-send auto-approval after a successful send when deps churn', async () => {
+    // After a successful auto-send, status stays `pending` until tool_start.
+    // `sendApprovalResponse` is not memoized, so a parent re-render changes
+    // its identity and would re-run the effect without the auto_approved /
+    // ref gate — sending a second tool_approval_response for the same call.
+    vi.useFakeTimers()
+    try {
+      const sendApprovalResponse = vi.fn().mockReturnValue(true)
+      const updateToolResult = vi.fn()
+      setChat({
+        settings: { autoApproveTools: true },
+        sendApprovalResponse,
+        updateToolResult,
+      })
+      const { rerender } = render(
+        <ToolApprovalMessage message={baseMessage} compact={true} />
+      )
+
+      await vi.advanceTimersByTimeAsync(200)
+      expect(sendApprovalResponse).toHaveBeenCalledTimes(1)
+      expect(updateToolResult).toHaveBeenCalledWith('call_1', { auto_approved: true })
+
+      // Simulate the store patch + a new sendApprovalResponse identity.
+      const sendApprovalResponse2 = vi.fn().mockReturnValue(true)
+      setChat({
+        settings: { autoApproveTools: true },
+        sendApprovalResponse: sendApprovalResponse2,
+        updateToolResult,
+      })
+      rerender(
+        <ToolApprovalMessage
+          message={{ ...baseMessage, auto_approved: true }}
+          compact={true}
+        />
+      )
+      await vi.advanceTimersByTimeAsync(200)
+
+      expect(sendApprovalResponse).toHaveBeenCalledTimes(1)
+      expect(sendApprovalResponse2).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not patch terminal status when a manual approve send fails', () => {
+    const sendApprovalResponse = vi.fn().mockReturnValue(false)
+    const { updateToolResult } = setChat({ sendApprovalResponse })
     render(<ToolApprovalMessage message={baseMessage} compact={true} />)
 
-    expect(screen.getByText('AUTO-APPROVED')).toBeInTheDocument()
-    // Collapsed: arguments panel not rendered, param count shown instead.
-    expect(screen.queryByText('Input Arguments')).not.toBeInTheDocument()
-    expect(screen.getByText(/2 params/)).toBeInTheDocument()
-    // Auto-approved calls run regardless — no manual Approve/Reject.
-    expect(screen.queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+
+    expect(sendApprovalResponse).toHaveBeenCalledTimes(1)
+    expect(updateToolResult).not.toHaveBeenCalled()
+    // Controls stay so the user can retry after reconnect.
+    expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument()
+    expect(toastError).toHaveBeenCalled()
+  })
+
+  it('keeps a persisted auto-approved call hidden after the setting is toggled off', () => {
+    // Regression for the live-settings defect: the approval decision is history
+    // and must not re-render differently when the setting changes later.
+    setChat({ settings: { autoApproveTools: false } })
+    const { container } = render(
+      <ToolApprovalMessage
+        message={{ ...baseMessage, status: 'completed', auto_approved: true }}
+        compact={true}
+      />
+    )
+
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('shows the APPROVAL REQUIRED row for an admin-required call even with auto-approve on', () => {
+    setChat({ settings: { autoApproveTools: true } })
+    render(
+      <ToolApprovalMessage message={{ ...baseMessage, admin_required: true }} compact={true} />
+    )
+
+    expect(screen.getByText('APPROVAL REQUIRED')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument()
+  })
+
+  it('no longer hosts the auto-approve toggle — it lives on the Active Tools strip', () => {
+    setChat()
+    render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+
+    expect(screen.queryByRole('button', { name: /Auto-approve/ })).not.toBeInTheDocument()
   })
 
   it('hides the Edit affordance when allow_edit is false', () => {
@@ -138,7 +282,10 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     const { unmount } = render(<ToolApprovalMessage message={baseMessage} compact={true} />)
 
     fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
-    expect(updateToolResult).toHaveBeenCalledWith('call_1', { status: 'approved' })
+    expect(updateToolResult).toHaveBeenCalledWith('call_1', {
+      status: 'approved',
+      auto_approved: false,
+    })
 
     // Simulate the remount with the patched message the store now holds.
     unmount()
@@ -179,6 +326,7 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     expect(updateToolResult).toHaveBeenCalledWith('call_1', {
       status: 'rejected',
       rejection_reason: 'looks unsafe',
+      auto_approved: false,
     })
     expect(screen.getByText('REJECTED')).toBeInTheDocument()
     expect(screen.getByText(/looks unsafe/)).toBeInTheDocument()
@@ -220,17 +368,18 @@ describe('Message — tool-call collapse is shared across compact/classic (regre
     timestamp: '2026-06-25T00:00:00Z',
   }
 
-  const expectCollapsibleDetails = () => {
+  // Compact rows label the outcome on a glyph; classic rows keep the text pill.
+  const expectCollapsibleDetails = (header) => {
     // Default collapsed: no Input Arguments until the header is clicked.
     expect(screen.queryByText('Input Arguments')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByText('SUCCESS'))
+    fireEvent.click(header())
     expect(screen.getByText('Input Arguments')).toBeInTheDocument()
   }
 
   it('keeps tool-call details collapsible in compact mode', () => {
     setChat({ settings: { compactMessages: true } })
     render(<Message message={toolCall} />)
-    expectCollapsibleDetails()
+    expectCollapsibleDetails(() => screen.getByLabelText('SUCCESS'))
   })
 
   it('keeps tool-call details collapsible in classic mode (compact off)', () => {
@@ -238,6 +387,71 @@ describe('Message — tool-call collapse is shared across compact/classic (regre
     // controls chrome, so this must remain true with compact off.
     setChat({ settings: { compactMessages: false } })
     render(<Message message={toolCall} />)
-    expectCollapsibleDetails()
+    expectCollapsibleDetails(() => screen.getByText('SUCCESS'))
+  })
+
+  it('collapses the compact row to one line: no status pill, server name, or param count (#762)', () => {
+    setChat({ settings: { compactMessages: true } })
+    render(<Message message={toolCall} />)
+
+    expect(screen.getByText('run_python')).toBeInTheDocument()
+    // Outcome is a labelled glyph, not a text pill.
+    expect(screen.queryByText('SUCCESS')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('SUCCESS')).toHaveTextContent('✓')
+    expect(screen.queryByText('(python)')).not.toBeInTheDocument()
+    expect(screen.queryByText(/1 param/)).not.toBeInTheDocument()
+
+    // The server name is not lost — it moves into the expanded detail.
+    fireEvent.click(screen.getByLabelText('SUCCESS'))
+    expect(screen.getByText('Server: python')).toBeInTheDocument()
+  })
+
+  it('marks a failed call with a red ✗ glyph', () => {
+    setChat({ settings: { compactMessages: true } })
+    render(<Message message={{ ...toolCall, status: 'failed' }} />)
+
+    expect(screen.getByLabelText('FAILED')).toHaveTextContent('✗')
+  })
+
+  it('labels the active spinner for screen readers in compact and classic modes', () => {
+    // The active spinner replaces the outcome glyph while a tool is running.
+    // Without an aria-label the spinning state is announced as nothing, so
+    // the spinner carries the same statusLabel as the glyph (Copilot review).
+    const active = { ...toolCall, status: 'calling', result: undefined }
+    setChat({ settings: { compactMessages: true } })
+    const { rerender } = render(<Message message={active} />)
+    expect(screen.getByLabelText('CALLING')).toBeInTheDocument()
+
+    setChat({ settings: { compactMessages: false } })
+    rerender(<Message message={active} />)
+    expect(screen.getByLabelText('CALLING')).toBeInTheDocument()
+
+    const inProgress = { ...toolCall, status: 'in_progress', result: undefined }
+    setChat({ settings: { compactMessages: true } })
+    rerender(<Message message={inProgress} />)
+    expect(screen.getByLabelText('IN PROGRESS')).toBeInTheDocument()
+  })
+
+  it('renders no transcript row for an auto-approved approval request (#762)', () => {
+    // The hidden wrapper keeps ToolApprovalMessage mounted (it owns the
+    // auto-approval effect) while contributing no height or space-y gap.
+    setChat({ settings: { compactMessages: true, autoApproveTools: true } })
+    const { container } = render(
+      <Message
+        message={{
+          role: 'system',
+          type: 'tool_approval_request',
+          tool_call_id: 'call_1',
+          tool_name: 'run_python',
+          arguments: { code: 'print(1)' },
+          status: 'pending',
+        }}
+      />
+    )
+
+    // HTML `hidden` (space-y attribute selector) and the utility class.
+    expect(container.firstChild).toHaveAttribute('hidden')
+    expect(container.firstChild).toHaveClass('hidden')
+    expect(container.textContent).toBe('')
   })
 })
