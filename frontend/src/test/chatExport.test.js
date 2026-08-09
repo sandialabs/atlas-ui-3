@@ -234,6 +234,75 @@ describe('chatExport.buildPersistedMessage', () => {
     const out = buildPersistedMessage({ role: 'system', type: 'tool_call', tool_name: 't' })
     expect(out.metadata).toEqual({ tool_name: 't' })
   })
+
+  it('persists auto_approved and status on tool_approval_request so reloaded transcripts keep the flag', () => {
+    // Without persisting these fields, a reloaded conversation lost the
+    // auto-approval decision and re-rendered the row as if the setting were
+    // still live — the restore path spreads `metadata` back onto the message,
+    // so the flag must round-trip through `metadata`.
+    const live = {
+      role: 'system',
+      content: 'Tool Approval Required: run_python',
+      timestamp: 't3',
+      type: 'tool_approval_request',
+      tool_call_id: 'call_1',
+      tool_name: 'run_python',
+      arguments: { code: 'print(1)' },
+      allow_edit: true,
+      admin_required: false,
+      status: 'completed',
+      auto_approved: true,
+    }
+    const out = buildPersistedMessage(live)
+    expect(out.message_type).toBe('tool_approval_request')
+    expect(out.metadata).toEqual({
+      tool_call_id: 'call_1',
+      tool_name: 'run_python',
+      arguments: { code: 'print(1)' },
+      allow_edit: true,
+      admin_required: false,
+      status: 'completed',
+      auto_approved: true,
+    })
+  })
+
+  it('omits undefined approval fields from metadata', () => {
+    const out = buildPersistedMessage({
+      role: 'system',
+      type: 'tool_approval_request',
+      tool_call_id: 'call_1',
+      tool_name: 'run_python',
+      status: 'pending',
+    })
+    expect(out.metadata).toEqual({
+      tool_call_id: 'call_1',
+      tool_name: 'run_python',
+      status: 'pending',
+    })
+    // auto_approved is the whole point: it must not appear when unset, so the
+    // restore path doesn't spread a stale `false` over a row that was never
+    // decided.
+    expect(out.metadata).not.toHaveProperty('auto_approved')
+  })
+
+  it('preserves rejection_reason on a rejected approval row', () => {
+    const out = buildPersistedMessage({
+      role: 'system',
+      type: 'tool_approval_request',
+      tool_call_id: 'call_1',
+      tool_name: 'run_python',
+      status: 'rejected',
+      auto_approved: false,
+      rejection_reason: 'looks unsafe',
+    })
+    expect(out.metadata).toEqual({
+      tool_call_id: 'call_1',
+      tool_name: 'run_python',
+      status: 'rejected',
+      auto_approved: false,
+      rejection_reason: 'looks unsafe',
+    })
+  })
 })
 
 describe('chatExport.formatToolCallForText', () => {

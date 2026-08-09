@@ -1,13 +1,26 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
-import { usePersistentState } from '../hooks/chat/usePersistentState'
+import { useToast } from './ui/toastContext'
+import { resolveAutoApproved } from '../utils/toolApproval'
 
 // Inline tool-approval prompt rendered as a chat message. Extracted from
 // Message.jsx. `compact` (default true) renders the dense single-line row added
 // in #673; when the user turns compact messages off it falls back to the
 // classic full-bubble approval layout.
+//
+// Auto-approved calls render nothing (#762): the row said "we approved a thing
+// we are about to report anyway", and the tool_call row that follows names the
+// same tool a moment later. The component still mounts — it owns the effect
+// that sends the auto-approval — it just has no visible output. The
+// APPROVAL REQUIRED path is unchanged.
 const ToolApprovalMessage = ({ message, compact = true }) => {
-  const { sendApprovalResponse, settings, updateSettings, updateToolResult } = useChat()
+  const { sendApprovalResponse, settings, updateToolResult } = useChat()
+  const toast = useToast()
+  // Keep a stable handle for the effect: the no-provider useToast fallback
+  // returns a fresh object every call, and putting `toast` in the effect deps
+  // would re-arm the auto-approval timer on every render.
+  const toastRef = useRef(toast)
+  toastRef.current = toast
   // The websocket handler defaults this to {}, but guard anyway so a malformed
   // payload can't crash the row on Object.keys/Object.entries.
   const args = message.arguments || {}
@@ -22,9 +35,15 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   // otherwise reset local state and resurrect the Approve/Reject buttons. A
   // local mirror gives an instant update before the dispatch propagates.
   const [decision, setDecision] = useState(null)
+  // Guards the auto-approval effect against re-sending when `sendApprovalResponse`
+  // changes identity (it is `sendMessage` from WSContext and is not memoized).
+  // After a successful send, status stays `pending` until tool_start overwrites
+  // it, so deps can re-fire; this ref + the `auto_approved` gate stop a second
+  // `tool_approval_response` for the same call.
+  const autoApprovalSentRef = useRef(false)
   const resolvedStatus = decision || message.status
   const resolvedReason = message.rejection_reason || (decision === 'rejected' ? reason : '')
-  const autoApproved = Boolean(settings?.autoApproveTools && !message.admin_required)
+  const autoApproved = resolveAutoApproved({ ...message, status: resolvedStatus }, settings)
   // The backend reuses this tool_call_id for the execution lifecycle: once the
   // call is approved and runs, tool_start/tool_complete overwrite this message's
   // status to calling/in_progress/completed/failed. So anything that isn't
@@ -33,69 +52,84 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   // the local `decision` mirror). Only an explicit 'rejected' is a denial.
   const isPending = resolvedStatus === 'pending'
   const isRejected = resolvedStatus === 'rejected'
-  // A call needs a human in the loop when it isn't going to be auto-approved and
-  // is still awaiting a decision. Admin-required calls always land here because
-  // autoApproveTools never auto-approves them.
-  const needsReview = !autoApproved && isPending
-  // The arguments panel collapses to a single header line; the choice is
-  // persisted to localStorage (via usePersistentState, which guards storage
-  // access) so it sticks across messages and reloads (F5). The default applies
-  // only when there's no saved preference: auto-approved calls start collapsed
-  // (informational — the args box would otherwise dwarf the tool-call output)
-  // while calls that need the user's action start expanded so they're reviewable.
-  const [argsCollapsed, setArgsCollapsed] = usePersistentState(
-    'toolApprovalArgsCollapsed',
-    autoApproved
-  )
   // Calls that need human review always open expanded — a reviewer shouldn't
-  // have to expand to see what they're approving — even if the user previously
-  // collapsed an (informational) auto-approved call. This is per-message local
-  // state, so collapsing it here doesn't overwrite the persisted preference that
-  // auto-approved rows read.
+  // have to expand to see what they're approving. Since #762 the only rows this
+  // component renders are review-required ones (auto-approved calls render
+  // nothing), so there is no persisted collapse preference to honour: this is
+  // per-message local state that starts expanded every time.
   const [reviewCollapsed, setReviewCollapsed] = useState(false)
-  const isExpanded = needsReview ? !reviewCollapsed : !argsCollapsed
-  const toggleCollapsed = () => {
-    if (needsReview) setReviewCollapsed(c => !c)
-    else setArgsCollapsed(!argsCollapsed)
-  }
+  const isExpanded = !reviewCollapsed
+  const toggleCollapsed = () => setReviewCollapsed(c => !c)
 
   useEffect(() => {
+    // A boolean `auto_approved` means the decision was already recorded
+    // (true = sent successfully; false = send failed or manual path took over).
+    // Do not auto-send again in either case.
+    if (typeof message.auto_approved === 'boolean') return
+    if (autoApprovalSentRef.current) return
     if (settings?.autoApproveTools && !message.admin_required && message.status === 'pending') {
       const timer = setTimeout(() => {
-        sendApprovalResponse({
+        if (autoApprovalSentRef.current) return
+        // Only record a successful auto-approve once the server has actually
+        // been told. `sendApprovalResponse` returns false when the WebSocket
+        // isn't open; persisting `auto_approved: true` before the send would
+        // leave the row stuck hidden with no approval in flight.
+        const sent = sendApprovalResponse({
           type: 'tool_approval_response',
           tool_call_id: message.tool_call_id,
           approved: true,
           arguments: message.arguments,
         })
+        if (sent) {
+          autoApprovalSentRef.current = true
+          updateToolResult?.(message.tool_call_id, { auto_approved: true })
+        } else {
+          // Force the review row visible so the user can approve manually.
+          // `resolveAutoApproved` treats a boolean false as "not auto", which
+          // also un-hides the Message wrapper that keys off the same helper.
+          updateToolResult?.(message.tool_call_id, { auto_approved: false })
+          toastRef.current.error(
+            'Auto-approve failed (not connected). Approve manually, or reconnect and try again.'
+          )
+        }
       }, 100)
       return () => clearTimeout(timer)
     }
-  }, [settings?.autoApproveTools, message.admin_required, message.status, message.tool_call_id, message.arguments, sendApprovalResponse])
+  }, [settings?.autoApproveTools, message.admin_required, message.status, message.auto_approved, message.tool_call_id, message.arguments, sendApprovalResponse, updateToolResult])
 
   const handleApprove = () => {
     if (resolvedStatus !== 'pending') return
-    setDecision('approved')
-    updateToolResult?.(message.tool_call_id, { status: 'approved' })
-    sendApprovalResponse({
+    // Persist terminal state only after a successful send — same rule as the
+    // auto path. A dropped socket must leave the controls available to retry.
+    const sent = sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: true,
       arguments: isEditing ? editedArgs : message.arguments,
     })
+    if (!sent) {
+      toastRef.current.error('Could not send approval (not connected). Try again when reconnected.')
+      return
+    }
+    setDecision('approved')
+    updateToolResult?.(message.tool_call_id, { status: 'approved', auto_approved: false })
   }
 
   const handleReject = () => {
     if (resolvedStatus !== 'pending') return
     const rejectionReason = reason || 'User rejected the tool call'
-    setDecision('rejected')
-    updateToolResult?.(message.tool_call_id, { status: 'rejected', rejection_reason: rejectionReason })
-    sendApprovalResponse({
+    const sent = sendApprovalResponse({
       type: 'tool_approval_response',
       tool_call_id: message.tool_call_id,
       approved: false,
       reason: rejectionReason,
     })
+    if (!sent) {
+      toastRef.current.error('Could not send rejection (not connected). Try again when reconnected.')
+      return
+    }
+    setDecision('rejected')
+    updateToolResult?.(message.tool_call_id, { status: 'rejected', rejection_reason: rejectionReason, auto_approved: false })
   }
 
   const handleArgumentChange = (key, value) => {
@@ -137,30 +171,16 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
     </div>
   )
 
-  const autoApproveToggle = !message.admin_required && (
-    <button
-      type="button"
-      onClick={() => {
-        try {
-          updateSettings?.({ autoApproveTools: !settings?.autoApproveTools })
-        } catch (e) {
-          console.error('Failed to toggle auto-approve from inline control', e)
-        }
-      }}
-      className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
-        settings?.autoApproveTools
-          ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
-          : 'bg-gray-700 text-gray-100 border-gray-600 hover:bg-gray-600'
-      }`}
-      title="Click to toggle auto-approve for non-admin tool calls. Admin-required calls will still prompt."
-    >
-      {settings?.autoApproveTools ? 'Auto-approve ON' : 'Auto-approve OFF'}
-    </button>
-  )
+  // Auto-approved calls contribute no transcript row at all (#762). The hooks
+  // above still run — including the effect that sends the approval — so this
+  // must come after them, not as an early bail-out. The auto-approve toggle
+  // that used to live on this row now sits on the Active Tools strip above the
+  // composer, where one indicator replaces one per call.
+  if (autoApproved) return null
 
   // ---- Classic (non-compact) layout: full bubble, pre-#673 styling ----
   if (!compact) {
-    if (!autoApproved && !isPending) {
+    if (!isPending) {
       return (
         <div className="text-gray-200">
           <div className="flex items-center gap-2 mb-2">
@@ -181,13 +201,10 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
     return (
       <div className="text-gray-200">
         <div className="flex items-center gap-2 mb-3">
-          <span className={`px-2 py-1 rounded text-xs font-medium ${
-            autoApproved ? 'bg-blue-600' : 'bg-yellow-600'
-          }`}>
-            {autoApproved ? 'AUTO-APPROVED' : 'APPROVAL REQUIRED'}
+          <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-600">
+            APPROVAL REQUIRED
           </span>
           <span className="font-medium">{message.tool_name}</span>
-          {autoApproveToggle}
         </div>
 
         {/* Arguments Section */}
@@ -236,35 +253,33 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
             render as "Ap"/"Re" while the text input held its intrinsic
             minimum. The input keeps a legible floor and drops to its own line
             instead of becoming a sliver (#747). */}
-        {!autoApproved && (
-          <div className="flex flex-wrap gap-2 items-center">
-            <button
-              onClick={handleApprove}
-              className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap shrink-0"
-            >
-              Approve {isEditing ? '(with edits)' : ''}
-            </button>
-            <button
-              onClick={handleReject}
-              className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap shrink-0"
-            >
-              Reject
-            </button>
-            <input
-              type="text"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Rejection reason (optional)..."
-              className="flex-1 min-w-[12rem] bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2 items-center">
+          <button
+            onClick={handleApprove}
+            className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap shrink-0"
+          >
+            Approve {isEditing ? '(with edits)' : ''}
+          </button>
+          <button
+            onClick={handleReject}
+            className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap shrink-0"
+          >
+            Reject
+          </button>
+          <input
+            type="text"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Rejection reason (optional)..."
+            className="flex-1 min-w-[12rem] bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
       </div>
     )
   }
 
   // ---- Compact (default) layout ----
-  if (!autoApproved && !isPending) {
+  if (!isPending) {
     return (
       <div className="text-gray-200 flex items-center gap-2 flex-wrap">
         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
@@ -284,7 +299,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
 
   return (
     <div className="text-gray-200">
-      {/* Single-line summary: collapse toggle + status + tool name + auto-approve */}
+      {/* Single-line summary: collapse toggle + status + tool name */}
       <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
@@ -295,17 +310,14 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           <span className={`text-gray-500 text-xs transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
             ▶
           </span>
-          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-            autoApproved ? 'bg-blue-600' : 'bg-yellow-600'
-          }`}>
-            {autoApproved ? 'AUTO-APPROVED' : 'APPROVAL REQUIRED'}
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-600">
+            APPROVAL REQUIRED
           </span>
           <span className="font-medium text-sm">{message.tool_name}</span>
           {!isExpanded && argCount > 0 && (
             <span className="text-gray-500 text-xs">· {argCount} param{argCount !== 1 ? 's' : ''}</span>
           )}
         </button>
-        {autoApproveToggle}
       </div>
 
       {/* Expanded arguments (view / edit) */}
@@ -338,29 +350,27 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
       {/* Action Buttons and Rejection Reason - Compact Layout.
           Wraps and pins the button widths for the same reason as the classic
           layout above (#747). */}
-      {!autoApproved && (
-        <div className="flex flex-wrap gap-2 items-center mt-2 ml-5">
-          <button
-            onClick={handleApprove}
-            className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap shrink-0"
-          >
-            Approve {isEditing ? '(with edits)' : ''}
-          </button>
-          <button
-            onClick={handleReject}
-            className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap shrink-0"
-          >
-            Reject
-          </button>
-          <input
-            type="text"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="Rejection reason (optional)..."
-            className="flex-1 min-w-[12rem] bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-      )}
+      <div className="flex flex-wrap gap-2 items-center mt-2 ml-5">
+        <button
+          onClick={handleApprove}
+          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap shrink-0"
+        >
+          Approve {isEditing ? '(with edits)' : ''}
+        </button>
+        <button
+          onClick={handleReject}
+          className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap shrink-0"
+        >
+          Reject
+        </button>
+        <input
+          type="text"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Rejection reason (optional)..."
+          className="flex-1 min-w-[12rem] bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
     </div>
   )
 }

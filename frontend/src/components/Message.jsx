@@ -17,6 +17,7 @@ import {
   processToolResult,
   downloadReturnedFile,
 } from '../utils/toolResultUtils'
+import { resolveAutoApproved } from '../utils/toolApproval'
 import ToolApprovalMessage from './ToolApprovalMessage'
 import ToolElapsedTime from './ToolElapsedTime'
 
@@ -180,7 +181,15 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   const avatarText = isUser ? 'Y' : isSystem ? 'S' : 'A'
   const authorName = isUser ? 'You' : isSystem ? 'System' : appName
 
-  // Note: Tool auto-approval handled inside ToolApprovalMessage; we keep message visible so inline toggle remains accessible.
+  // Tool auto-approval is handled inside ToolApprovalMessage. An auto-approved
+  // call gets no transcript row of its own (#762) — the tool_call row that
+  // follows names the same tool a moment later — but the component still has to
+  // mount, because it owns the effect that sends the approval. Rendering it
+  // inside a hidden wrapper keeps it mounted while contributing no height and
+  // no `space-y-4` gap to the transcript (the HTML `hidden` attribute is what
+  // Tailwind's space-y selector excludes; see the early-return markup below).
+  const isHiddenApprovalRow =
+    message.type === 'tool_approval_request' && resolveAutoApproved(message, settings)
 
   const renderContent = () => {
     if (message.type === 'tool_approval_request') {
@@ -201,6 +210,11 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       const statusColor =
         isToolActive ? 'bg-blue-600' :
         message.status === 'completed' ? 'bg-green-600' : 'bg-red-600'
+      // Compact rows show the outcome as a glyph rather than a text pill so the
+      // whole row fits one line on a phone (#762).
+      const succeeded = message.status === 'completed'
+      const statusGlyph = succeeded ? '✓' : '✗'
+      const statusGlyphColor = succeeded ? 'text-green-400' : 'text-red-400'
       // The compact toggle controls chrome only (avatar / author-header / bubble
       // + badge sizing). The collapse behavior is shared across both modes, so
       // details start collapsed and expand on click either way — matching the
@@ -211,6 +225,11 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
         <div className="text-gray-200 selectable-markdown">
           {/* Compact: single clickable summary line. Classic: static badge row. */}
           {compactMessages ? (
+            /* One line at 390px (#762): triangle + status glyph + tool name.
+               The server name is dropped — it is usually a prefix of the tool
+               name (`basic_fns` beside `basic_fns_bash`); it moves into the
+               expanded detail. The param count goes too — the triangle already
+               signals that there is something to expand. */
             <button
               onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
               className={`w-full min-w-0 text-left flex flex-wrap items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
@@ -218,25 +237,41 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
               aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
             >
               {hasDetails && (
-                <span className={`text-gray-500 text-xs transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
+                <span className={`text-gray-500 text-xs flex-shrink-0 transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
                   ▶
                 </span>
               )}
-              {isToolActive && (
-                <svg className="w-3.5 h-3.5 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              {isToolActive ? (
+                /* Active spinner: labelled for screen readers and hover so the
+                   spinning state is announced as "CALLING"/"IN PROGRESS" instead
+                   of nothing. Mirrors the outcome-glyph path below. */
+                <svg
+                  className="w-3.5 h-3.5 spinner text-blue-400 flex-shrink-0"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  role="img"
+                  aria-label={statusLabel}
+                  title={statusLabel}
+                >
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
+              ) : (
+                /* A colored glyph instead of a text pill — the outcome is
+                   binary, and the pill cost more horizontal room than the tool
+                   name it sat beside. Labelled for screen readers and hover. */
+                <span
+                  className={`flex-shrink-0 text-sm leading-none ${statusGlyphColor}`}
+                  role="img"
+                  aria-label={statusLabel}
+                  title={statusLabel}
+                >
+                  {statusGlyph}
+                </span>
               )}
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${statusColor}`}>
-                {statusLabel}
-              </span>
               <span className="font-medium text-sm min-w-0 break-words">{message.tool_name}</span>
-              <span className="text-gray-500 text-xs min-w-0 break-words">({message.server_name})</span>
               {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
-              {toolDetailsCollapsed && argCount > 0 && (
-                <span className="text-gray-500 text-xs">· {argCount} param{argCount !== 1 ? 's' : ''}</span>
-              )}
             </button>
           ) : (
             <button
@@ -251,7 +286,15 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 </span>
               )}
               {isToolActive && (
-                <svg className="w-4 h-4 spinner text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg
+                  className="w-4 h-4 spinner text-blue-400 flex-shrink-0"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  role="img"
+                  aria-label={statusLabel}
+                  title={statusLabel}
+                >
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
@@ -404,6 +447,12 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           {/* Expanded details: input arguments + output, revealed together */}
           {showDetails && (
             <div className="mt-2 ml-5 space-y-3">
+              {/* The collapsed compact row drops the server name to stay on one
+                  line (#762), so it lives here instead — the classic row still
+                  shows it inline. */}
+              {compactMessages && message.server_name && (
+                <div className="text-xs text-gray-500">Server: {message.server_name}</div>
+              )}
               {argCount > 0 && (
                 <div className="border-l-2 border-blue-500 pl-3">
                   <div className="text-xs font-semibold text-blue-400 mb-1">Input Arguments</div>
@@ -596,6 +645,19 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
         </div>
       )
     }
+  }
+
+  if (isHiddenApprovalRow) {
+    // Use the HTML `hidden` attribute so Tailwind's `space-y-*` utilities
+    // (`> :not([hidden]) ~ :not([hidden])`) exclude this node. The `hidden`
+    // utility class alone sets display:none but is not matched by that
+    // attribute selector, so a leading hidden child can still force
+    // margin-top onto the following sibling.
+    return (
+      <div hidden className="hidden">
+        <ToolApprovalMessage message={message} compact={compactMessages} />
+      </div>
+    )
   }
 
   // Compact rows (tool calls, logs, agent meta, system notices) skip the avatar,
