@@ -51,15 +51,23 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   useEffect(() => {
     if (settings?.autoApproveTools && !message.admin_required && message.status === 'pending') {
       const timer = setTimeout(() => {
-        // Record the decision on the message before sending it: rendering keys
-        // off this persisted field, not the live setting (#762).
-        updateToolResult?.(message.tool_call_id, { auto_approved: true })
-        sendApprovalResponse({
+        // Only record the decision once the server has actually been told.
+        // `sendApprovalResponse` returns false when the WebSocket isn't open;
+        // persisting `auto_approved: true` before the send completes would
+        // leave the row stuck hidden if the socket dropped during the 100ms
+        // delay — the approval never reached the backend, but rendering keys
+        // off the persisted flag and so the row never comes back to retry.
+        // The live `autoApproveTools` setting still hides the row while the
+        // socket is down, so there is no visible flicker on the success path.
+        const sent = sendApprovalResponse({
           type: 'tool_approval_response',
           tool_call_id: message.tool_call_id,
           approved: true,
           arguments: message.arguments,
         })
+        if (sent) {
+          updateToolResult?.(message.tool_call_id, { auto_approved: true })
+        }
       }, 100)
       return () => clearTimeout(timer)
     }

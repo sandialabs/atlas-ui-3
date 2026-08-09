@@ -40,6 +40,23 @@ const TOOL_CALL_PERSISTED_FIELDS = [
   'status',
 ]
 
+// Tool-approval-request fields the renderer reads off the top-level message
+// (ToolApprovalMessage.jsx / resolveAutoApproved). The auto-approval decision
+// is persisted on the message as `auto_approved` (#762); without persisting it
+// here, reloaded transcripts lost the flag and re-rendered auto-approved rows
+// as if the setting were still live. `status` and `rejection_reason` carry the
+// manual-approval terminal state for the same reason.
+const TOOL_APPROVAL_PERSISTED_FIELDS = [
+  'tool_call_id',
+  'tool_name',
+  'arguments',
+  'allow_edit',
+  'admin_required',
+  'status',
+  'auto_approved',
+  'rejection_reason',
+]
+
 // Serialize a live message into the shape persisted to history (local IndexedDB
 // or the server schema): role / content / timestamp / message_type plus a
 // `metadata` blob carrying any tool-call detail. Keeping tool I/O here means a
@@ -54,6 +71,12 @@ export function buildPersistedMessage(m) {
   if (m.type === 'tool_call') {
     const metadata = {}
     for (const field of TOOL_CALL_PERSISTED_FIELDS) {
+      if (m[field] !== undefined) metadata[field] = m[field]
+    }
+    persisted.metadata = metadata
+  } else if (m.type === 'tool_approval_request') {
+    const metadata = {}
+    for (const field of TOOL_APPROVAL_PERSISTED_FIELDS) {
       if (m[field] !== undefined) metadata[field] = m[field]
     }
     persisted.metadata = metadata

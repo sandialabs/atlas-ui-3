@@ -86,8 +86,13 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     // mounts because it owns the auto-approval effect.
     vi.useFakeTimers()
     try {
-      const { sendApprovalResponse, updateToolResult } = setChat({
+      // `sendApprovalResponse` returns true when the WebSocket is open; the
+      // auto-approval effect only persists `auto_approved` after a successful
+      // send, so the mock must report a successful send.
+      const sendApprovalResponse = vi.fn().mockReturnValue(true)
+      const { updateToolResult } = setChat({
         settings: { autoApproveTools: true },
+        sendApprovalResponse,
       })
       const { container } = render(<ToolApprovalMessage message={baseMessage} compact={true} />)
 
@@ -96,12 +101,36 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
       expect(screen.queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument()
 
       await vi.advanceTimersByTimeAsync(200)
-      // The decision is recorded on the message, so rendering no longer depends
-      // on the live setting.
+      // The decision is recorded on the message only after the send succeeds,
+      // so rendering no longer depends on the live setting.
       expect(updateToolResult).toHaveBeenCalledWith('call_1', { auto_approved: true })
       expect(sendApprovalResponse).toHaveBeenCalledWith(
         expect.objectContaining({ tool_call_id: 'call_1', approved: true })
       )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not persist auto_approved when the WebSocket is down during the auto-approval delay', async () => {
+    // If the socket dropped during the 100ms delay, `sendApprovalResponse`
+    // returns false. Persisting `auto_approved: true` anyway would leave the
+    // row stuck hidden with no approval in flight — the backend never got the
+    // response, and rendering keys off the persisted flag so the row never
+    // comes back to retry. The flag must only be set after a successful send.
+    vi.useFakeTimers()
+    try {
+      const sendApprovalResponse = vi.fn().mockReturnValue(false)
+      const { updateToolResult } = setChat({
+        settings: { autoApproveTools: true },
+        sendApprovalResponse,
+      })
+      render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+
+      await vi.advanceTimersByTimeAsync(200)
+
+      expect(sendApprovalResponse).toHaveBeenCalledTimes(1)
+      expect(updateToolResult).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
@@ -313,6 +342,25 @@ describe('Message — tool-call collapse is shared across compact/classic (regre
     render(<Message message={{ ...toolCall, status: 'failed' }} />)
 
     expect(screen.getByLabelText('FAILED')).toHaveTextContent('✗')
+  })
+
+  it('labels the active spinner for screen readers in compact and classic modes', () => {
+    // The active spinner replaces the outcome glyph while a tool is running.
+    // Without an aria-label the spinning state is announced as nothing, so
+    // the spinner carries the same statusLabel as the glyph (Copilot review).
+    const active = { ...toolCall, status: 'calling', result: undefined }
+    setChat({ settings: { compactMessages: true } })
+    const { rerender } = render(<Message message={active} />)
+    expect(screen.getByLabelText('CALLING')).toBeInTheDocument()
+
+    setChat({ settings: { compactMessages: false } })
+    rerender(<Message message={active} />)
+    expect(screen.getByLabelText('CALLING')).toBeInTheDocument()
+
+    const inProgress = { ...toolCall, status: 'in_progress', result: undefined }
+    setChat({ settings: { compactMessages: true } })
+    rerender(<Message message={inProgress} />)
+    expect(screen.getByLabelText('IN PROGRESS')).toBeInTheDocument()
   })
 
   it('renders no transcript row for an auto-approved approval request (#762)', () => {
