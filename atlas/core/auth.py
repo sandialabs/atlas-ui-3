@@ -33,6 +33,16 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         True if the user is in the group, False otherwise.
     """
     app_settings = config_manager.app_settings
+
+    # Dev-only convenience: bypass authorization entirely so a new local user
+    # does not have to configure ADMIN_TEST_USER to reach admin-gated routes.
+    # This never affects authentication (identity resolution is unchanged) and
+    # is only reachable when DEBUG_MODE=true -- enforced at startup by
+    # AppSettings.validate_skip_authorization_checks_dev_only, which refuses to
+    # boot if this is set without debug mode.
+    if app_settings.debug_mode and app_settings.skip_authorization_checks:
+        return True
+
     auth_url = app_settings.auth_group_check_url
     api_key = app_settings.auth_group_check_api_key
 

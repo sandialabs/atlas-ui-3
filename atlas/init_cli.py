@@ -107,6 +107,10 @@ ANTHROPIC_API_KEY=your-anthropic-api-key-here
 # =============================================================================
 PORT=8000
 DEBUG_MODE=true
+# Dev-only convenience: skip admin/group authorization checks so you don't
+# need to set ADMIN_TEST_USER to reach admin routes. Only works with
+# DEBUG_MODE=true; never enable in production.
+# SKIP_AUTHORIZATION_CHECKS=true
 
 # =============================================================================
 # Custom config location (auto-detected by atlas-server if config/ exists)

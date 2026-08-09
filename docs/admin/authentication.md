@@ -195,6 +195,18 @@ If `AUTH_GROUP_CHECK_URL` is not set, the application will fall back to the mock
 
 When using the mock implementation (no external endpoint configured), **all users are treated as part of the `users` group by default**. This ensures that basic, non-privileged features remain available even without an authorization service. Higher-privilege groups such as `admin` require explicit membership via your real authorization system. The mock group table (which grants admin access to the configured test user) is **only active when `DEBUG_MODE=true`**. In production mode, no admin privileges are granted via the mock — only the default `users` group is available.
 
+### Local Setup Shortcut: `SKIP_AUTHORIZATION_CHECKS`
+
+By default, even in debug mode, the mock authorization table only grants admin access to two hardcoded identities (`ADMIN_TEST_USER`, default `admin@example.com`, and `test@test.com`). A new contributor running locally with their real email would normally need to set `ADMIN_TEST_USER` to match it before reaching admin-gated routes.
+
+Setting `SKIP_AUTHORIZATION_CHECKS=true` skips that step: every authorized-group check (`is_user_in_group`) returns `True` for every user, so any locally authenticated user has full access, including admin. It does **not** affect authentication — you still need a valid identity (real header, or the `DEBUG_MODE` test-user fallback described above).
+
+Guardrails:
+- Only takes effect when `DEBUG_MODE=true`. The application **refuses to start** if `SKIP_AUTHORIZATION_CHECKS=true` and `DEBUG_MODE=false`.
+- Defaults to `false` — strictly opt-in.
+- Logs a startup warning whenever it's active.
+- **Never enable this in production.** It grants admin access to every request.
+
 ### Legacy Method: Modifying the Code
 
 For advanced use cases, you can still directly modify the `is_user_in_group` function located in `atlas/core/auth.py`. The default implementation is a mock and **must be replaced** if you are not using the HTTP endpoint method.

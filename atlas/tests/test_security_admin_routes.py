@@ -60,3 +60,18 @@ def test_system_status_requires_admin():
     # Non-admin user should be denied
     r = client.get("/admin/system-status", headers={"X-User-Email": "user@example.com"})
     assert r.status_code in (302, 403)
+
+
+def test_admin_routes_allow_any_user_with_skip_authorization_checks(monkeypatch):
+    """SKIP_AUTHORIZATION_CHECKS (dev-only) should let a user with no admin
+    configuration reach admin routes, without needing ADMIN_TEST_USER set."""
+    monkeypatch.setenv("DEBUG_MODE", "true")
+    monkeypatch.setenv("SKIP_AUTHORIZATION_CHECKS", "true")
+    config_manager.reload_configs()
+    try:
+        client = TestClient(app)
+        r = client.get("/admin/", headers={"X-User-Email": "not-configured-anywhere@example.com"})
+        assert r.status_code == 200
+    finally:
+        monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
+        config_manager.reload_configs()
