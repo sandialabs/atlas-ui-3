@@ -112,7 +112,7 @@ OpenAI/Azure rejects the whole request:
 > An assistant message with 'tool_calls' must be followed by tool messages
 > responding to each 'tool_call_id'.
 
-This bit the RAG+tools path (PR #769). The RAG context message was inserted with
+This bit the RAG+tools path (PR #770). The RAG context message was inserted with
 `messages.insert(-1, ...)` -- "before the last message" -- which is the user turn
 only on the first round. On a continuation round the conversation ends with the
 assistant `tool_calls` message and its replies, so the context landed inside the
