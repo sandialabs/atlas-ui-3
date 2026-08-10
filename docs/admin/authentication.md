@@ -201,13 +201,22 @@ By default, even in debug mode, the mock authorization table only grants admin a
 
 Setting `SKIP_AUTHORIZATION_CHECKS=true` skips that step: every authorized-group check (`is_user_in_group`) returns `True` for every user, so any locally authenticated user has full access, including admin. It does **not** affect authentication — you still need a valid identity (real header, or the `DEBUG_MODE` test-user fallback described above). Note that in debug mode a request with no auth header is assigned the configured `test_user` identity, so with this flag on a headerless request is effectively an administrator.
 
+**Blast radius.** The bypass is not limited to admin pages — `is_user_in_group` is the single authorization gate for every group-restricted surface in the app, so enabling it unlocks:
+
+- **Admin routes** (the `/admin/*` config and log endpoints).
+- **Group-restricted models** — any model in `llmconfig.yml` whose `required_groups` lists a non-`users` group becomes available to every caller (`atlas/core/model_access.py`).
+- **Restricted MCP servers** — any MCP server gated by `required_groups` becomes reachable (`mcp_execution.py`), including advanced tool servers that would otherwise require an elevated group.
+- **Feedback/capture routes** and any other endpoint that gates on group membership.
+
+Each request that is granted by the bypass also emits a `logger.warning` at the point of the check (`atlas/core/auth.py`), so the audit trail can distinguish a bypass-granted admin action from one that passed a real group check.
+
 Guardrails:
 - Only takes effect when `DEBUG_MODE=true`. The application **refuses to start** if `SKIP_AUTHORIZATION_CHECKS=true` and `DEBUG_MODE=false`.
 - Refuses to start if `ENVIRONMENT=production`, even when `DEBUG_MODE=true` -- the bypass is a development-environment convenience only.
 - Mutually exclusive with `AUTH_GROUP_CHECK_URL`: the app refuses to start if both are set, so the bypass can only ever override the mock group table, never a configured external authorization service.
 - Defaults to `false` — strictly opt-in.
-- Logs a startup warning whenever it's active.
-- **Never enable this in production.** It grants admin access to every request.
+- Logs a startup warning whenever it's active, plus a per-request warning at the bypass point.
+- **Never enable this in production.** It grants every group-restricted surface — admin routes, restricted models, restricted MCP servers, and feedback routes — to every request.
 
 ### Legacy Method: Modifying the Code
 

@@ -52,6 +52,15 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
     # this branch can only ever override the mock table below, never a real
     # authorization service.
     if app_settings.debug_mode and app_settings.skip_authorization_checks:
+        # Request-time audit signal: the startup warning is the only other
+        # indicator, so without this an admin action granted by the bypass is
+        # indistinguishable from one that passed a real group check.
+        logger.warning(
+            "Authorization bypass active: granting group '%s' to user '%s' "
+            "via SKIP_AUTHORIZATION_CHECKS (DEBUG_MODE=true, dev-only).",
+            group_id,
+            user_id,
+        )
         return True
 
     auth_url = app_settings.auth_group_check_url

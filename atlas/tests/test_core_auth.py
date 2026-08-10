@@ -35,11 +35,21 @@ async def test_is_user_in_group_skip_authorization_checks_grants_any_group(skip_
 
 
 def test_skip_authorization_checks_requires_debug_mode(monkeypatch):
-    """Startup must refuse SKIP_AUTHORIZATION_CHECKS=true without DEBUG_MODE=true."""
+    """Startup must refuse SKIP_AUTHORIZATION_CHECKS=true without DEBUG_MODE=true.
+
+    Pins the debug-mode guardrail by name: the other two refusal messages
+    (production environment, external auth endpoint) also contain the
+    substring ``SKIP_AUTHORIZATION_CHECKS``, so matching on ``DEBUG_MODE`` with
+    the other two guardrails satisfied makes this test fail if the debug-mode
+    branch of the validator is deleted (AGENT-REVIEW-BOT-3 review on PR #758).
+    """
     monkeypatch.setenv("DEBUG_MODE", "false")
     monkeypatch.setenv("SKIP_AUTHORIZATION_CHECKS", "true")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("AUTH_GROUP_CHECK_URL", raising=False)
+    monkeypatch.delenv("AUTH_GROUP_CHECK_API_KEY", raising=False)
     monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
-    with pytest.raises(ValueError, match="SKIP_AUTHORIZATION_CHECKS"):
+    with pytest.raises(ValueError, match="DEBUG_MODE"):
         AppSettings()
 
 
@@ -89,3 +99,27 @@ async def test_is_user_in_group_denied_in_production_mode(monkeypatch):
     admin_test_user = config_manager.app_settings.admin_test_user
     admin_group = config_manager.app_settings.admin_group
     assert await is_user_in_group(admin_test_user, admin_group) is False
+
+
+def test_skip_authorization_checks_boot_path_refuses_to_start(monkeypatch):
+    """The boot path (``ConfigManager.app_settings``) must re-raise the
+    ``ValueError`` from ``AppSettings.validate_skip_authorization_checks_dev_only``,
+    not swallow it and retry with default settings. The three refusal tests above
+    construct ``AppSettings()`` directly, one layer below this property, so
+    without this test a regression in ``config_loader.app_settings`` (e.g. catching
+    ``ValueError`` and falling back) leaves the suite green while the documented
+    "refuses to start" guarantee degrades (AGENT-REVIEW-BOT-3 review on PR #758).
+    """
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("SKIP_AUTHORIZATION_CHECKS", "true")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("AUTH_GROUP_CHECK_URL", raising=False)
+    monkeypatch.delenv("AUTH_GROUP_CHECK_API_KEY", raising=False)
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    config_manager.reload_configs()
+    try:
+        with pytest.raises(ValueError, match="DEBUG_MODE"):
+            config_manager.app_settings
+    finally:
+        # Leave the cache clean so the next test reconstructs with restored env.
+        config_manager.reload_configs()
