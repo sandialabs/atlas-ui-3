@@ -41,3 +41,51 @@ def test_skip_authorization_checks_requires_debug_mode(monkeypatch):
     monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     with pytest.raises(ValueError, match="SKIP_AUTHORIZATION_CHECKS"):
         AppSettings()
+
+
+def test_skip_authorization_checks_refused_in_production_environment(monkeypatch):
+    """Startup must refuse SKIP_AUTHORIZATION_CHECKS=true when ENVIRONMENT=production,
+    even with DEBUG_MODE=true -- a prod deployment that accidentally has debug mode
+    on must still be denied the bypass (AGENT-REVIEW-BOT-3 review on PR #758)."""
+    monkeypatch.setenv("DEBUG_MODE", "true")
+    monkeypatch.setenv("SKIP_AUTHORIZATION_CHECKS", "true")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("AUTH_GROUP_CHECK_URL", raising=False)
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    with pytest.raises(ValueError, match="ENVIRONMENT"):
+        AppSettings()
+
+
+def test_skip_authorization_checks_refused_with_external_auth_endpoint(monkeypatch):
+    """Startup must refuse SKIP_AUTHORIZATION_CHECKS=true when an external
+    AUTH_GROUP_CHECK_URL is configured -- the bypass must never silently override
+    a real authorizer (AGENT-REVIEW-BOT-3 review on PR #758)."""
+    monkeypatch.setenv("DEBUG_MODE", "true")
+    monkeypatch.setenv("SKIP_AUTHORIZATION_CHECKS", "true")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "secret")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    with pytest.raises(ValueError, match="AUTH_GROUP_CHECK_URL"):
+        AppSettings()
+
+
+@pytest.mark.asyncio
+async def test_is_user_in_group_denied_in_production_mode(monkeypatch):
+    """With DEBUG_MODE=false and no external authorizer, the mock admin table is
+    disabled, so an otherwise-admin identity is NOT an admin. This is the invariant
+    the ``mock_admin_authorization`` / ``skip_auth_checks_env`` fixtures opt out of;
+    deleting the ``if not app_settings.debug_mode: return False`` guard in
+    ``core.auth`` must turn this test red (AGENT-REVIEW-BOT-3 review on PR #758).
+    """
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.delenv("AUTH_GROUP_CHECK_URL", raising=False)
+    monkeypatch.delenv("AUTH_GROUP_CHECK_API_KEY", raising=False)
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    admin_test_user = config_manager.app_settings.admin_test_user
+    admin_group = config_manager.app_settings.admin_group
+    assert await is_user_in_group(admin_test_user, admin_group) is False

@@ -613,8 +613,11 @@ class AppSettings(BaseSettings):
 
         SKIP_AUTHORIZATION_CHECKS is a local-setup convenience that grants every
         authenticated caller every group (including admin). It must never be
-        reachable in production, so it is a hard startup failure -- not just a
-        no-op -- if set without DEBUG_MODE=true.
+        reachable in production, so each guardrail below is a hard startup
+        failure -- not just a no-op. The bypass is also mutually exclusive with a
+        configured external authorizer: it is meant for the no-endpoint local
+        case only, and must never silently override a real ``AUTH_GROUP_CHECK_URL``
+        service.
         """
         if self.skip_authorization_checks and not self.debug_mode:
             logging.getLogger(__name__).error(
@@ -622,7 +625,31 @@ class AppSettings(BaseSettings):
                 "Skipping authorization is only permitted in debug mode. Refusing to start."
             )
             raise ValueError(
-                "SKIP_AUTHORIZATION_CHECKS is only permitted when DEBUG_MODE=true."
+                "SKIP_AUTHORIZATION_CHECKS is only permitted when DEBUG_MODE=true. "
+                "Set DEBUG_MODE=true for local development, or unset SKIP_AUTHORIZATION_CHECKS."
+            )
+        if self.skip_authorization_checks and self.environment.lower() == "production":
+            logging.getLogger(__name__).error(
+                "SECURITY: SKIP_AUTHORIZATION_CHECKS=true but ENVIRONMENT=production. "
+                "Skipping authorization is only permitted in a development environment. "
+                "Refusing to start."
+            )
+            raise ValueError(
+                "SKIP_AUTHORIZATION_CHECKS is only permitted when ENVIRONMENT is not "
+                "'production'. Set ENVIRONMENT=development for local use, or unset "
+                "SKIP_AUTHORIZATION_CHECKS."
+            )
+        if self.skip_authorization_checks and self.auth_group_check_url:
+            logging.getLogger(__name__).error(
+                "SECURITY: SKIP_AUTHORIZATION_CHECKS=true but AUTH_GROUP_CHECK_URL is "
+                "configured. The bypass is a local-setup shortcut for when no external "
+                "authorization endpoint is configured; it must not silently override a "
+                "real authorizer. Refusing to start."
+            )
+            raise ValueError(
+                "SKIP_AUTHORIZATION_CHECKS cannot be combined with AUTH_GROUP_CHECK_URL. "
+                "Unset AUTH_GROUP_CHECK_URL to use the local bypass, or unset "
+                "SKIP_AUTHORIZATION_CHECKS to use the external authorizer."
             )
         if self.skip_authorization_checks:
             logging.getLogger(__name__).warning(

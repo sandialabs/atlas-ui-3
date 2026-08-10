@@ -199,10 +199,12 @@ When using the mock implementation (no external endpoint configured), **all user
 
 By default, even in debug mode, the mock authorization table only grants admin access to two hardcoded identities (`ADMIN_TEST_USER`, default `admin@example.com`, and `test@test.com`). A new contributor running locally with their real email would normally need to set `ADMIN_TEST_USER` to match it before reaching admin-gated routes.
 
-Setting `SKIP_AUTHORIZATION_CHECKS=true` skips that step: every authorized-group check (`is_user_in_group`) returns `True` for every user, so any locally authenticated user has full access, including admin. It does **not** affect authentication — you still need a valid identity (real header, or the `DEBUG_MODE` test-user fallback described above).
+Setting `SKIP_AUTHORIZATION_CHECKS=true` skips that step: every authorized-group check (`is_user_in_group`) returns `True` for every user, so any locally authenticated user has full access, including admin. It does **not** affect authentication — you still need a valid identity (real header, or the `DEBUG_MODE` test-user fallback described above). Note that in debug mode a request with no auth header is assigned the configured `test_user` identity, so with this flag on a headerless request is effectively an administrator.
 
 Guardrails:
 - Only takes effect when `DEBUG_MODE=true`. The application **refuses to start** if `SKIP_AUTHORIZATION_CHECKS=true` and `DEBUG_MODE=false`.
+- Refuses to start if `ENVIRONMENT=production`, even when `DEBUG_MODE=true` -- the bypass is a development-environment convenience only.
+- Mutually exclusive with `AUTH_GROUP_CHECK_URL`: the app refuses to start if both are set, so the bypass can only ever override the mock group table, never a configured external authorization service.
 - Defaults to `false` — strictly opt-in.
 - Logs a startup warning whenever it's active.
 - **Never enable this in production.** It grants admin access to every request.
