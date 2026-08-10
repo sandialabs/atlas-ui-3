@@ -103,6 +103,23 @@ messages.append({"role": "tool", "content": result2.content, "tool_call_id": "tc
 messages.append({"role": "tool", "content": result3.content, "tool_call_id": "tc3"})
 ```
 
+### Ordering invariant: nothing may split that block
+
+The `tool` messages must follow their assistant message *immediately*. Any
+message injected between them orphans the remaining `tool_call_id`s, and
+OpenAI/Azure rejects the whole request:
+
+> An assistant message with 'tool_calls' must be followed by tool messages
+> responding to each 'tool_call_id'.
+
+This bit the RAG+tools path (PR #769). The RAG context message was inserted with
+`messages.insert(-1, ...)` -- "before the last message" -- which is the user turn
+only on the first round. On a continuation round the conversation ends with the
+assistant `tool_calls` message and its replies, so the context landed inside the
+block. Insertion now goes through `LiteLLMCaller._rag_insert_index()`, which
+targets the last `user` message (appending when there is none). Any future code
+that injects context into an in-flight conversation must do the same.
+
 ## Manual Testing
 
 Parallel tool calling is model-dependent -- the LLM decides whether to return

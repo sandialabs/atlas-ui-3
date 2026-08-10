@@ -31,6 +31,7 @@ class LiteLLMStreamingMixin:
       - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> list
       - _build_rag_completion_response(rag_response, display_source) -> str
       - _combine_rag_contexts(source_responses) -> tuple
+      - _rag_insert_index(messages) -> int
       - _rag_service attribute
     """
 
@@ -327,7 +328,7 @@ class LiteLLMStreamingMixin:
             citation_block = self._build_citation_instructions(rag_metadata)
 
         messages_with_rag = messages.copy()
-        messages_with_rag.insert(-1, {
+        messages_with_rag.insert(self._rag_insert_index(messages_with_rag), {
             "role": "system",
             "content": (
                 f"{context_label}:\n\n{rag_content}"
@@ -405,7 +406,7 @@ class LiteLLMStreamingMixin:
             citation_block = self._build_citation_instructions(rag_metadata)
 
         messages_with_rag = messages.copy()
-        messages_with_rag.insert(-1, {
+        messages_with_rag.insert(self._rag_insert_index(messages_with_rag), {
             "role": "system",
             "content": (
                 f"{context_label}:\n\n{rag_content}"

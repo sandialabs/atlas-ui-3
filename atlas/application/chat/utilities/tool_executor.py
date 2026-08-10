@@ -810,9 +810,12 @@ async def handle_synthesis_decision(
 
     Pure function that doesn't maintain state.
     """
-    # Check if we have only canvas tools
-    canvas_tool_calls = [tc for tc in llm_response.tool_calls if tc.function.name == "canvas_canvas"]
-    has_only_canvas_tools = len(canvas_tool_calls) == len(llm_response.tool_calls)
+    # Check if we have only canvas tools. Guard against a response with no tool
+    # calls at all (None or []): that is not "canvas-only" and must fall through
+    # to synthesis instead of claiming content was displayed in the canvas.
+    response_tool_calls = llm_response.tool_calls or []
+    canvas_tool_calls = [tc for tc in response_tool_calls if tc.function.name == "canvas_canvas"]
+    has_only_canvas_tools = bool(response_tool_calls) and len(canvas_tool_calls) == len(response_tool_calls)
 
     if has_only_canvas_tools:
         # Canvas tools don't need follow-up
