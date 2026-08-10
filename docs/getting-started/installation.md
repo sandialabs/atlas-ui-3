@@ -1,6 +1,6 @@
 # Installation
 
-Last updated: 2026-02-04
+Last updated: 2026-08-09
 
 This guide provides everything you need to get Atlas UI 3 running, whether you prefer using Docker for a quick setup or setting up a local development environment.
 
@@ -97,6 +97,7 @@ Now, open the `.env` file and add your API keys for the LLM providers you intend
 **Important Configuration Notes:**
 *   **`APP_LOG_DIR`**: It is essential to set `APP_LOG_DIR=/workspaces/atlas-ui-3/logs` (or another appropriate path) to ensure application logs are correctly stored.
 *   **`USE_MOCK_S3`**: For local development and personal use, setting `USE_MOCK_S3=true` is acceptable. However, **this must never be used in a production environment** due to security and data durability concerns.
+*   **`SKIP_AUTHORIZATION_CHECKS`** (optional, local-only convenience): In debug mode the mock authorization table only grants admin access to two hardcoded identities (`ADMIN_TEST_USER`, default `admin@example.com`, and `test@test.com`), so a new contributor running locally with their real email would otherwise have to set `ADMIN_TEST_USER` to match it before reaching admin-gated routes. Setting `SKIP_AUTHORIZATION_CHECKS=true` skips that step -- every group check returns `True`, so any locally authenticated user has full access including admin. It is strictly opt-in (commented out in `.env.example`), never affects authentication, and the app refuses to start if the flag is set without `DEBUG_MODE=true`, when `ENVIRONMENT=production`, or together with `AUTH_GROUP_CHECK_URL`. See [docs/admin/authentication.md](../admin/authentication.md) for full guardrail details.
 
 ### 4. All-in-One Start Script (Recommended)
 
