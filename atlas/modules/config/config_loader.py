@@ -122,6 +122,13 @@ class ConfigManager:
             try:
                 self._app_settings = AppSettings()
                 logger.info("Application settings loaded successfully")
+            except ValueError:
+                # Hard validation failures (e.g. dev-only flag misuse enforced by
+                # AppSettings model validators) are intentional refusals-to-start.
+                # Re-raise cleanly so the operator sees one traceback and a clear
+                # message, rather than a misleading "fallback" retry that re-raises
+                # the same error a second time.
+                raise
             except Exception as e:
                 logger.error(f"Failed to load application settings: {e}", exc_info=True)
                 # Create default settings as fallback

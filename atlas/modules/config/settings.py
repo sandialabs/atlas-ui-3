@@ -45,6 +45,17 @@ class AppSettings(BaseSettings):
     app_name: str = "ATLAS"
     port: int = 8000
     debug_mode: bool = False
+    skip_authorization_checks: bool = Field(
+        False,
+        description=(
+            "Dev-only convenience: bypass group/authorization checks (is_user_in_group "
+            "always returns True) so a new local user does not need to configure "
+            "ADMIN_TEST_USER to reach admin-gated routes. Never affects authentication "
+            "(identity resolution is unchanged) and only takes effect when DEBUG_MODE=true; "
+            "see validate_skip_authorization_checks_dev_only."
+        ),
+        validation_alias=AliasChoices("SKIP_AUTHORIZATION_CHECKS"),
+    )
     # Logging settings
     log_level: str = "INFO"  # Override default logging level (DEBUG, INFO, WARNING, ERROR)
     feature_metrics_logging_enabled: bool = Field(
@@ -593,6 +604,58 @@ class AppSettings(BaseSettings):
             raise ValueError(
                 "FEATURE_AGENT_PORTAL_ENABLED is only permitted when DEBUG_MODE=true. "
                 "See docs/agentportal/threat-model.md."
+            )
+        return self
+
+    @model_validator(mode='after')
+    def validate_skip_authorization_checks_dev_only(self):
+        """Refuse to boot with authorization checks skipped outside debug mode.
+
+        SKIP_AUTHORIZATION_CHECKS is a local-setup convenience that grants every
+        authenticated caller every group (including admin). It must never be
+        reachable in production, so each guardrail below is a hard startup
+        failure -- not just a no-op. The bypass is also mutually exclusive with a
+        configured external authorizer: it is meant for the no-endpoint local
+        case only, and must never silently override a real ``AUTH_GROUP_CHECK_URL``
+        service.
+        """
+        if self.skip_authorization_checks and not self.debug_mode:
+            logging.getLogger(__name__).error(
+                "SECURITY: SKIP_AUTHORIZATION_CHECKS=true but DEBUG_MODE=false. "
+                "Skipping authorization is only permitted in debug mode. Refusing to start."
+            )
+            raise ValueError(
+                "SKIP_AUTHORIZATION_CHECKS is only permitted when DEBUG_MODE=true. "
+                "Set DEBUG_MODE=true for local development, or unset SKIP_AUTHORIZATION_CHECKS."
+            )
+        if self.skip_authorization_checks and self.environment.lower() == "production":
+            logging.getLogger(__name__).error(
+                "SECURITY: SKIP_AUTHORIZATION_CHECKS=true but ENVIRONMENT=production. "
+                "Skipping authorization is only permitted in a development environment. "
+                "Refusing to start."
+            )
+            raise ValueError(
+                "SKIP_AUTHORIZATION_CHECKS is only permitted when ENVIRONMENT is not "
+                "'production'. Set ENVIRONMENT=development for local use, or unset "
+                "SKIP_AUTHORIZATION_CHECKS."
+            )
+        if self.skip_authorization_checks and self.auth_group_check_url:
+            logging.getLogger(__name__).error(
+                "SECURITY: SKIP_AUTHORIZATION_CHECKS=true but AUTH_GROUP_CHECK_URL is "
+                "configured. The bypass is a local-setup shortcut for when no external "
+                "authorization endpoint is configured; it must not silently override a "
+                "real authorizer. Refusing to start."
+            )
+            raise ValueError(
+                "SKIP_AUTHORIZATION_CHECKS cannot be combined with AUTH_GROUP_CHECK_URL. "
+                "Unset AUTH_GROUP_CHECK_URL to use the local bypass, or unset "
+                "SKIP_AUTHORIZATION_CHECKS to use the external authorizer."
+            )
+        if self.skip_authorization_checks:
+            logging.getLogger(__name__).warning(
+                "SECURITY: SKIP_AUTHORIZATION_CHECKS=true - all authorization checks are "
+                "bypassed (every user is treated as a member of every group). This is a "
+                "local development convenience only and must never be enabled in production."
             )
         return self
 
