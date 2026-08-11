@@ -1,0 +1,10 @@
+{
+  "atlas_rag": {
+    "type": "http",
+    "display_name": "Mock RAG",
+    "url": "http://127.0.0.1:8127",
+    "bearer_token": "test-atlas-rag-token",
+    "groups": ["users"],
+    "compliance_level": "Internal"
+  }
+}

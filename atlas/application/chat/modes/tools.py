@@ -418,9 +418,15 @@ class ToolsModeRunner:
         update_callback: Optional[UpdateCallback],
     ) -> str:
         """Stream the tool synthesis LLM call."""
-        # Check canvas-only shortcut
-        canvas_calls = [tc for tc in llm_response.tool_calls if tc.function.name == "canvas_canvas"]
-        if len(canvas_calls) == len(llm_response.tool_calls):
+        # Check canvas-only shortcut. ``tool_calls`` is None on the placeholder
+        # response built when a continuation round fails mid-stream, and an
+        # empty list is not "canvas-only" -- neither may take the shortcut.
+        response_tool_calls = llm_response.tool_calls or []
+        canvas_calls = [
+            tc for tc in response_tool_calls
+            if self._tool_call_signature(tc)[0] == "canvas_canvas"
+        ]
+        if response_tool_calls and len(canvas_calls) == len(response_tool_calls):
             return llm_response.content or "Content displayed in canvas."
 
         # Add files manifest

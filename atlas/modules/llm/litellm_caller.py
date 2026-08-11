@@ -778,6 +778,26 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         return sanitized
 
     @staticmethod
+    def _rag_insert_index(messages: List[Dict[str, Any]]) -> int:
+        """Index at which the RAG context message can be safely inserted.
+
+        The RAG context belongs just before the user turn it was retrieved for.
+        Inserting at ``-1`` (before the last message) is only equivalent when the
+        conversation ends on that user message. In a tool-calling continuation
+        round the tail is ``assistant(tool_calls=[...]), tool, tool, ...``, and
+        splitting that block makes OpenAI/Azure reject the request with
+        "assistant message with 'tool_calls' must be followed by tool messages
+        responding to each 'tool_call_id'".
+
+        Returns the index of the last user message, or ``len(messages)`` when
+        there is none (append at the end, which is never inside a tool block).
+        """
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                return i
+        return len(messages)
+
+    @staticmethod
     def _enforce_strict_role_ordering(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Rewrite messages so that system/user messages never directly follow tool messages.
 
@@ -973,7 +993,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     "Cite sources inline using [1], [2], etc. where applicable."
                 ),
             }
-            messages_with_rag.insert(-1, rag_context_message)
+            messages_with_rag.insert(self._rag_insert_index(messages_with_rag), rag_context_message)
 
             logger.debug("[LLM+RAG] Calling LLM with RAG-enriched context...")
             llm_response = await self.call_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email)
@@ -1160,7 +1180,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     "Cite sources inline using [1], [2], etc. where applicable."
                 ),
             }
-            messages_with_rag.insert(-1, rag_context_message)
+            messages_with_rag.insert(self._rag_insert_index(messages_with_rag), rag_context_message)
 
             logger.debug("[LLM+RAG+Tools] Calling LLM with RAG-enriched context and tools...")
             llm_response = await self.call_with_tools(model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature, user_email=user_email)
