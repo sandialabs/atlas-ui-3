@@ -77,8 +77,6 @@ from atlas.routes.files_routes import (
     find_oversized_inline_file,
     get_file_upload_limit_config,
     mcp_files_router,
-)
-from atlas.routes.files_routes import (
     router as files_router,
 )
 from atlas.routes.globus_auth_routes import api_router as globus_api_router
@@ -455,10 +453,15 @@ def _websocket_origin_allowed(websocket: WebSocket, app_settings) -> bool:
     attack; rejecting header-less clients would break legitimate integrations
     without closing anything.
 
-    When the header is present it must name loopback, this deployment's own
-    host, or an entry in WEBSOCKET_ALLOWED_ORIGINS.
+    When the header is present it must name loopback (only for a loopback
+    target), this deployment's own host, or an entry in
+    WEBSOCKET_ALLOWED_ORIGINS.
+
+    Both settings are read as direct attributes rather than through getattr
+    with a default: if either is ever renamed, this should fail loudly instead
+    of silently disabling the check or emptying the allowlist.
     """
-    if not getattr(app_settings, "feature_websocket_origin_check_enabled", True):
+    if not app_settings.feature_websocket_origin_check_enabled:
         return True
 
     origin = websocket.headers.get("origin")
@@ -467,7 +470,7 @@ def _websocket_origin_allowed(websocket: WebSocket, app_settings) -> bool:
 
     return origin_is_allowed(
         origin,
-        parse_allowed_hosts(getattr(app_settings, "websocket_allowed_origins", "")),
+        parse_allowed_hosts(app_settings.websocket_allowed_origins),
         request_host=websocket.headers.get("host"),
     )
 

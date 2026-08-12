@@ -186,25 +186,45 @@ def test_nested_huge_exponent_is_rejected():
         safe_eval_math("2 * (9 ** 999999)", NAMES)
 
 
-def test_computed_exponent_is_rejected():
-    """The exponent is a BinOp, so a literals-only check would read past it."""
-    with pytest.raises(UnsafeExpressionError, match="Exponent too large"):
-        safe_eval_math("9**9**9", NAMES)
-
-
-def test_chained_exponentiation_is_rejected():
-    """Each exponent is under the cap; the result still grows without bound."""
+@pytest.mark.parametrize(
+    "expression",
+    [
+        # ** is right-associative, so the outer exponent is a BinOp and a
+        # literals-only check reads straight past it.
+        pytest.param("9**9**9", id="right_associative"),
+        pytest.param("2 ** (500 + 501)", id="computed_exponent"),
+        pytest.param("((9**999)**999)**999", id="triple_nested"),
+        pytest.param("(10**1000)**1000", id="chained_under_cap"),
+    ],
+)
+def test_computed_and_chained_exponents_are_rejected(expression):
+    """These all evade a check that only inspects literal operands."""
     with pytest.raises(UnsafeExpressionError, match="too large"):
-        safe_eval_math("(10**1000)**1000", NAMES)
+        safe_eval_math(expression, NAMES)
 
 
-def test_huge_left_shift_is_rejected():
+@pytest.mark.parametrize(
+    "expression",
+    ["1 << 99999999", "1 << 10000000000", "1 << (10**9)"],
+)
+def test_huge_left_shift_is_rejected(expression):
+    """`1 << 10000000000` is 16 characters and allocates over a gigabyte."""
     with pytest.raises(UnsafeExpressionError, match="too large"):
-        safe_eval_math("1 << 99999999", NAMES)
+        safe_eval_math(expression, NAMES)
 
 
 def test_modest_exponent_still_works():
     assert safe_eval_math("2 ** 32", NAMES) == 4294967296
+
+
+def test_computed_exponent_at_the_boundary_is_allowed():
+    """Proves the guard reads the computed value, not the literal text.
+
+    `2 ** (500 + 500)` has no literal exponent at all; it is accepted because
+    the evaluated exponent is exactly at the cap, while `500 + 501` above is
+    rejected for being one past it.
+    """
+    assert safe_eval_math("2 ** (500 + 500)", NAMES) == 2**1000
 
 
 def test_modest_shift_still_works():

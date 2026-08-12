@@ -5,6 +5,7 @@ Provides mathematical operations through MCP protocol.
 """
 
 import math
+import sys
 import time
 from typing import Any, Dict, Union
 
@@ -18,6 +19,41 @@ from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
 mcp = create_stdio_server("Calculator")
+
+
+# Ratio of decimal digits to bits, used to size an int without converting it
+# to a string -- which is the very operation we are checking is possible.
+_DIGITS_PER_BIT = 0.30103
+
+
+def _result_is_returnable(value: Any) -> bool:
+    """Return False if serializing this result would raise.
+
+    CPython caps int-to-str conversion (``sys.get_int_max_str_digits()``,
+    4300 by default). An int above that limit computes fine but raises
+    ValueError when JSON-encoded -- which happens in the MCP layer *after*
+    evaluate() has returned its success payload, so the failure escapes the
+    documented ``is_error`` contract entirely and surfaces as a broken
+    response instead of a tool error.
+
+    The size bounds in the evaluator stop the expensive cases, but they are
+    set for compute cost, not for serializability: ``(2**1000)**15`` and
+    ``factorial(1000)*factorial(1000)`` are both cheap and both too long to
+    encode. Multiplication has no bound at all, by design -- it is linear.
+    """
+    limit = sys.get_int_max_str_digits()
+    if limit <= 0:  # Limit disabled by the host application.
+        return True
+
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, tuple):  # divmod() and modf() return pairs
+            pending.extend(item)
+        elif isinstance(item, int) and not isinstance(item, bool):
+            if item.bit_length() * _DIGITS_PER_BIT + 1 > limit:
+                return False
+    return True
 
 
 def _bounded_pow(base, exponent, modulus=None):
@@ -137,6 +173,14 @@ def evaluate(expression: str) -> Dict[str, Any]:
     - Attribute access, subscripting, and comprehensions are rejected outright
     - Only the mathematical names listed above are reachable
 
+    **Not Supported** (these return an error rather than a result):
+    - Keyword arguments -- write `round(3.14159, 2)`, not `round(3.14159, ndigits=2)`
+    - String literals, f-strings, and list/dict syntax
+    - `and`, `or`, `not`, `in`, `is` -- this evaluates numbers, not logic
+    - Attribute access (`x.y`), indexing (`x[0]`), lambdas, and comprehensions
+    - Results too large to return: an integer beyond roughly 4300 digits, or an
+      exponent/argument above 1000, is refused rather than computed
+
     **Examples:**
     - Basic: "2 + 3 * 4" → 14
     - Trigonometry: "sin(pi/2)" → 1.0
@@ -171,6 +215,15 @@ def evaluate(expression: str) -> Dict[str, Any]:
 
     try:
         result = safe_eval_math(expression_str, ALLOWED_NAMES)
+        if not _result_is_returnable(result):
+            meta.update({"is_error": True, "reason": "result_too_large"})
+            return {
+                "results": {
+                    "error": "Result too large to return",
+                    "expression": expression_str,
+                },
+                "meta_data": _finalize_meta(meta, start)
+            }
         payload = {
             "operation": "evaluate",
             "expression": expression_str,

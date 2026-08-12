@@ -37,6 +37,26 @@ def test_parse_allowed_hosts_handles_empty_values():
     assert parse_allowed_hosts(None) == frozenset()
 
 
+def test_parse_allowed_hosts_accepts_full_origins():
+    """The setting is named *_ALLOWED_ORIGINS, so operators will paste origins.
+
+    Stored verbatim, "https://atlas.example.com" would be compared against a
+    bare hostname, never match, and show up only as continued 1008s.
+    """
+    assert parse_allowed_hosts("https://atlas.example.com") == {"atlas.example.com"}
+    assert parse_allowed_hosts("http://atlas.example.com:8443") == {"atlas.example.com"}
+    assert parse_allowed_hosts(
+        "https://atlas.example.com, atlas.internal"
+    ) == {"atlas.example.com", "atlas.internal"}
+
+
+def test_full_origin_allowlist_entry_actually_matches():
+    allowed = parse_allowed_hosts("https://atlas-alt.example.com")
+    assert origin_is_allowed(
+        "https://atlas-alt.example.com", allowed, request_host="backend.internal"
+    ) is True
+
+
 # --- extract_host ---------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -221,10 +241,23 @@ def test_feature_flag_disables_the_check():
     assert _websocket_origin_allowed(socket, settings) is True
 
 
-def test_check_defaults_to_enabled_when_setting_is_absent():
-    """An older settings object must not silently opt out of the check."""
+def test_settings_are_read_as_direct_attributes():
+    """A rename must fail loudly, not silently disable the check.
+
+    Reading through getattr with a default would turn a renamed setting into a
+    silently permissive check, which is the worst possible failure mode here.
+    """
     socket = _socket({"origin": "https://attacker.example.com", "host": "atlas.example.com"})
-    assert _websocket_origin_allowed(socket, SimpleNamespace()) is False
+    with pytest.raises(AttributeError):
+        _websocket_origin_allowed(socket, SimpleNamespace())
+
+
+def test_both_settings_exist_on_the_real_settings_model():
+    """Direct attribute access is only safe if the fields are really there."""
+    from atlas.modules.config.settings import AppSettings
+
+    assert "feature_websocket_origin_check_enabled" in AppSettings.model_fields
+    assert "websocket_allowed_origins" in AppSettings.model_fields
 
 
 # --- end to end through the app ------------------------------------------

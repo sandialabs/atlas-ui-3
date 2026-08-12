@@ -30,14 +30,21 @@ LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 def parse_allowed_hosts(raw: Optional[str]) -> frozenset[str]:
-    """Split a comma-separated hostname allowlist into normalized entries.
+    """Split a comma-separated allowlist into normalized hostnames.
 
     Blank entries and surrounding whitespace are discarded so that a value
     like ``"a.example.com, , b.example.com "`` behaves as intended.
+
+    Entries go through :func:`extract_host`, so an operator may write either a
+    bare hostname or a full origin. The settings are named ``*_ALLOWED_ORIGINS``,
+    which invites ``https://atlas.example.com``; stored verbatim that would be
+    compared against a bare hostname, never match, and present as nothing but
+    continued 1008 rejections with no clue why. Both spellings work.
     """
     if not raw:
         return frozenset()
-    return frozenset(host.strip().lower() for host in raw.split(",") if host.strip())
+    hosts = (extract_host(entry) for entry in raw.split(","))
+    return frozenset(host for host in hosts if host)
 
 
 def extract_host(value: Optional[str]) -> Optional[str]:

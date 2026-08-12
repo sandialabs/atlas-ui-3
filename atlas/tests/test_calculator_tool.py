@@ -10,6 +10,7 @@ to the evaluator that calls it.
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -87,18 +88,61 @@ def test_reported_rce_payload_is_refused(evaluate, tmp_path):
     [
         "9 ** 999999",
         "9**9**9",
+        "((9**999)**999)**999",
+        "2 ** (500 + 501)",
         "(10**1000)**1000",
         "pow(9, 999999)",
+        "pow(9, 99999999)",
         "factorial(999999)",
+        "factorial(3000000)",
         "comb(999999, 500000)",
         "perm(999999, 500000)",
         "1 << 99999999",
+        "1 << 10000000000",
     ],
 )
 def test_expensive_expressions_are_refused(evaluate, expression):
     """Each of these must return an error quickly rather than compute."""
     payload = evaluate(expression)
     assert _is_error(payload) is True
+
+
+# --- the result must always be returnable ---------------------------------
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "(2**1000)**15",                    # cheap to compute, too long to encode
+        "factorial(1000)*factorial(1000)",  # multiplication is deliberately unbounded
+    ],
+)
+def test_unserializable_results_are_reported_as_tool_errors(evaluate, expression):
+    """An int past CPython's int->str cap must not escape as a success payload.
+
+    Otherwise the ValueError fires in the MCP layer after evaluate() returns,
+    breaking the is_error contract the docstring promises on every path.
+    """
+    payload = evaluate(expression)
+    assert _is_error(payload) is True
+    assert payload["meta_data"]["reason"] == "result_too_large"
+    json.dumps(payload)  # must not raise
+
+
+def test_every_payload_this_tool_returns_is_json_serializable(evaluate):
+    expressions = [
+        "2 + 2", "divmod(7, 2)", "modf(3.5)", "1 < 2", "sqrt(2)",
+        "(2**1000)**15", "factorial(1000)*factorial(1000)",
+        "9**9**9", "().__class__", "1 / 0", "sqrt(-1)", "1+" * 200 + "1",
+    ]
+    for expression in expressions:
+        json.dumps(evaluate(expression))
+
+
+def test_large_but_encodable_result_still_succeeds(evaluate):
+    """The guard must not reject results that serialize fine."""
+    payload = evaluate("2 ** 1000")
+    assert _is_error(payload) is False
+    assert _result(payload) == 2**1000
 
 
 def test_oversized_expression_is_refused(evaluate):
