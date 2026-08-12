@@ -8,19 +8,60 @@ import math
 import time
 from typing import Any, Dict, Union
 
-from atlas.mcp_shared.safe_math_eval import MAX_EXPRESSION_LENGTH, safe_eval_math
+from atlas.mcp_shared.safe_math_eval import (
+    MAX_EXPRESSION_LENGTH,
+    guard_exponent,
+    guard_operand_size,
+    safe_eval_math,
+)
 from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
 mcp = create_stdio_server("Calculator")
 
+
+def _bounded_pow(base, exponent, modulus=None):
+    """``pow`` with the same size bound the ``**`` operator carries.
+
+    Without this, ``pow(9, 999999)`` reaches the identical big-int blowup that
+    ``9 ** 999999`` is stopped from reaching -- the evaluator bounds operators
+    it interprets, not functions it was handed. Three-argument ``pow`` is
+    modular and cheap regardless of exponent, so it skips the check.
+    """
+    if modulus is not None:
+        return pow(base, exponent, modulus)
+    guard_exponent(base, exponent)
+    return pow(base, exponent)
+
+
+def _bounded_factorial(n):
+    """``math.factorial`` bounded so a small argument cannot hang the server."""
+    return math.factorial(guard_operand_size(n))
+
+
+def _bounded_comb(n, k):
+    """``math.comb`` bounded on both arguments."""
+    return math.comb(guard_operand_size(n), guard_operand_size(k))
+
+
+def _bounded_perm(n, k=None):
+    """``math.perm`` bounded on both arguments."""
+    if k is None:
+        return math.perm(guard_operand_size(n))
+    return math.perm(guard_operand_size(n), guard_operand_size(k))
+
+
 # The complete set of names an expression may reference. Anything outside this
 # table is unreachable -- see atlas/mcp_shared/safe_math_eval.py for why that
 # guarantee holds. Module-level so the table is built once, not per call.
+#
+# The growth functions are wrapped: the evaluator bounds the operators it
+# interprets, but a function in this table is opaque to it, so anything that
+# can turn a short argument into a huge number is bounded here.
 ALLOWED_NAMES = {
     # Built-ins
     "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
-    "pow": pow, "divmod": divmod,
+    "pow": _bounded_pow, "divmod": divmod,
     # Constants
     "pi": math.pi, "e": math.e, "tau": math.tau, "inf": math.inf, "nan": math.nan,
     # Trigonometric
@@ -36,7 +77,8 @@ ALLOWED_NAMES = {
     "ceil": math.ceil, "floor": math.floor, "trunc": math.trunc, "modf": math.modf,
     "copysign": math.copysign, "fabs": math.fabs, "fmod": math.fmod,
     # Combinatorics & number theory
-    "factorial": math.factorial, "comb": math.comb, "perm": math.perm, "gcd": math.gcd, "lcm": math.lcm,
+    "factorial": _bounded_factorial, "comb": _bounded_comb, "perm": _bounded_perm,
+    "gcd": math.gcd, "lcm": math.lcm,
     # Float checks
     "isfinite": math.isfinite, "isinf": math.isinf, "isnan": math.isnan
 }
@@ -108,9 +150,13 @@ def evaluate(expression: str) -> Dict[str, Any]:
     Returns:
         MCP contract shape with results and timing metadata:
         {
-          "results": {"operation": "evaluate", "expression": str, "result": float},
+          "results": {"operation": "evaluate", "expression": str, "result": number},
           "meta_data": {"is_error": bool, "elapsed_ms": float, "reason": str}
         }
+
+        `result` is whatever the expression evaluates to: usually an int or
+        float, but `divmod()` yields a tuple and a comparison yields a bool.
+        On error, `results` carries `error` and `expression` instead.
     """
     start = time.perf_counter()
     expression_str = str(expression)

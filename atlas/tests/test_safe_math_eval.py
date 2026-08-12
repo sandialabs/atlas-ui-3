@@ -15,6 +15,8 @@ import pytest
 from atlas.mcp_shared.safe_math_eval import (
     MAX_EXPRESSION_LENGTH,
     UnsafeExpressionError,
+    guard_exponent,
+    guard_operand_size,
     safe_eval_math,
 )
 
@@ -184,8 +186,59 @@ def test_nested_huge_exponent_is_rejected():
         safe_eval_math("2 * (9 ** 999999)", NAMES)
 
 
+def test_computed_exponent_is_rejected():
+    """The exponent is a BinOp, so a literals-only check would read past it."""
+    with pytest.raises(UnsafeExpressionError, match="Exponent too large"):
+        safe_eval_math("9**9**9", NAMES)
+
+
+def test_chained_exponentiation_is_rejected():
+    """Each exponent is under the cap; the result still grows without bound."""
+    with pytest.raises(UnsafeExpressionError, match="too large"):
+        safe_eval_math("(10**1000)**1000", NAMES)
+
+
+def test_huge_left_shift_is_rejected():
+    with pytest.raises(UnsafeExpressionError, match="too large"):
+        safe_eval_math("1 << 99999999", NAMES)
+
+
 def test_modest_exponent_still_works():
     assert safe_eval_math("2 ** 32", NAMES) == 4294967296
+
+
+def test_modest_shift_still_works():
+    assert safe_eval_math("1 << 20", NAMES) == 1048576
+
+
+def test_float_exponent_is_not_size_checked():
+    """Float powers resolve in constant time, so the size guard skips them.
+
+    CPython raises OverflowError rather than returning inf; either way it
+    returns immediately and cannot exhaust memory, and the caller surfaces the
+    arithmetic error. What matters here is that the guard does not reject it.
+    """
+    with pytest.raises(OverflowError):
+        safe_eval_math("1.5 ** 999999.0", NAMES)
+
+
+def test_native_arithmetic_errors_propagate():
+    """Division by zero is a maths error, not a safety violation."""
+    with pytest.raises(ZeroDivisionError):
+        safe_eval_math("1 / 0", NAMES)
+
+
+def test_guard_exponent_is_exported_for_callers_exposing_pow():
+    """pow() is opaque to the evaluator, so callers must bound it themselves."""
+    with pytest.raises(UnsafeExpressionError, match="Exponent too large"):
+        guard_exponent(9, 999999)
+    guard_exponent(9, 100)  # must not raise
+
+
+def test_guard_operand_size_bounds_growth_functions():
+    with pytest.raises(UnsafeExpressionError, match="Argument too large"):
+        guard_operand_size(999999)
+    assert guard_operand_size(10) == 10
 
 
 def test_names_mapping_is_the_only_reachable_scope():

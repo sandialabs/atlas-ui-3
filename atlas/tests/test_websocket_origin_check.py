@@ -64,11 +64,47 @@ def test_missing_origin_is_not_allowed_by_the_primitive():
     assert origin_is_allowed("") is False
 
 
-def test_loopback_is_always_allowed():
+def test_loopback_is_allowed_when_the_target_is_unknown():
+    """No request_host: the local-dev and Agent Portal case."""
     assert origin_is_allowed("http://localhost:5173") is True
     assert origin_is_allowed("http://127.0.0.1:8000") is True
     assert origin_is_allowed("http://[::1]:8000") is True
     assert origin_is_allowed("https://localhost") is True
+
+
+def test_loopback_is_allowed_when_the_target_is_also_loopback():
+    assert origin_is_allowed(
+        "http://localhost:5173", request_host="localhost:8000"
+    ) is True
+    assert origin_is_allowed(
+        "http://127.0.0.1:5173", request_host="localhost:8000"
+    ) is True
+
+
+def test_loopback_origin_is_rejected_for_a_production_target():
+    """A malicious app on the user's own machine must not reach production.
+
+    Otherwise a page at http://localhost:3000 could open the socket at
+    atlas.example.com, with the browser supplying the victim's cookies.
+    """
+    assert origin_is_allowed(
+        "http://localhost:3000", request_host="atlas.example.com"
+    ) is False
+    assert origin_is_allowed(
+        "http://127.0.0.1:3000", request_host="atlas.example.com"
+    ) is False
+    assert origin_is_allowed(
+        "http://[::1]:3000", request_host="atlas.example.com"
+    ) is False
+
+
+def test_loopback_origin_still_honours_an_explicit_allowlist():
+    """An operator who deliberately lists localhost gets it back."""
+    assert origin_is_allowed(
+        "http://localhost:3000",
+        parse_allowed_hosts("localhost"),
+        request_host="atlas.example.com",
+    ) is True
 
 
 def test_same_host_as_request_is_allowed():
@@ -161,6 +197,16 @@ def test_same_origin_browser_request_is_allowed():
 def test_cross_origin_browser_request_is_rejected():
     socket = _socket({"origin": "https://attacker.example.com", "host": "atlas.example.com"})
     assert _websocket_origin_allowed(socket, _settings()) is False
+
+
+def test_local_app_cannot_reach_a_production_socket():
+    socket = _socket({"origin": "http://localhost:3000", "host": "atlas.example.com"})
+    assert _websocket_origin_allowed(socket, _settings()) is False
+
+
+def test_local_dev_still_connects():
+    socket = _socket({"origin": "http://localhost:5173", "host": "localhost:8000"})
+    assert _websocket_origin_allowed(socket, _settings()) is True
 
 
 def test_allowlist_admits_a_host_the_proxy_rewrote():

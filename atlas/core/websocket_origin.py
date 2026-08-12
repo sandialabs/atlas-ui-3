@@ -72,11 +72,23 @@ def origin_is_allowed(
 ) -> bool:
     """Return True if ``origin`` may open a socket to this server.
 
-    An origin is accepted when it is loopback, when it names the same host the
-    request was addressed to, or when it appears in ``allowed_hosts``. Ports
-    are ignored throughout -- a same-host page on another port is same-site
-    for this purpose, and requiring a port match would break every deployment
-    that terminates TLS on one port and serves on another.
+    An origin is accepted when it is loopback and the target is loopback too,
+    when it names the same host the request was addressed to, or when it
+    appears in ``allowed_hosts``.
+
+    Comparison is by hostname; scheme and port are not compared. This is
+    deliberate, and it is looser than the browser's own origin definition:
+    ``https://atlas.example.com:8443`` is a distinct origin from
+    ``https://atlas.example.com`` but is accepted here. Two reasons. First,
+    the backend cannot reconstruct the browser-facing origin -- behind a
+    TLS-terminating proxy it sees plain HTTP on an internal port, so a strict
+    comparison would reject every legitimate upgrade. Second, cookies are not
+    isolated by port or (for ``Secure``-less cookies) by scheme, so hostname
+    is the granularity at which the ambient credentials this defends actually
+    live. The residual risk is a *different* app on another port of the same
+    hostname; deployments where that is a real concern should put the exact
+    hostnames in ``allowed_hosts`` and front the backend with a proxy that
+    does not share a hostname with untrusted applications.
 
     A missing or malformed ``Origin`` returns False. Callers that want to
     admit non-browser clients must special-case that before calling; the
@@ -114,12 +126,19 @@ def origin_is_allowed(
     if not hostname:
         return False
 
-    if hostname in LOOPBACK_HOSTS:
-        return True
+    target = extract_host(request_host) if request_host else None
 
-    if request_host:
-        target = extract_host(request_host)
-        if target and hostname == target:
+    if hostname in LOOPBACK_HOSTS:
+        # Loopback is trusted only when the socket being opened is itself
+        # loopback. In production it must not be: a user who visits a
+        # malicious page served by some other app on their own machine would
+        # otherwise have that page open the production socket, with the
+        # browser supplying their cookies and the proxy authenticating it.
+        # A caller that passes no request_host (the Agent Portal, which binds
+        # loopback anyway) keeps the unconditional local-dev behaviour.
+        if target is None or target in LOOPBACK_HOSTS:
             return True
+    elif target and hostname == target:
+        return True
 
     return hostname in {host.strip().lower() for host in allowed_hosts if host.strip()}

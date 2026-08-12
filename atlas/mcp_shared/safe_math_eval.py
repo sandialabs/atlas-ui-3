@@ -25,17 +25,34 @@ from __future__ import annotations
 import ast
 from typing import Any, Callable, Mapping
 
-__all__ = ["MAX_EXPRESSION_LENGTH", "UnsafeExpressionError", "safe_eval_math"]
+__all__ = [
+    "MAX_EXPONENT",
+    "MAX_EXPRESSION_LENGTH",
+    "MAX_RESULT_BITS",
+    "UnsafeExpressionError",
+    "guard_exponent",
+    "guard_operand_size",
+    "safe_eval_math",
+]
 
 # Bound on input length. Kept as a named constant so the tool docstring, the
 # error path, and the tests all agree on one value.
 MAX_EXPRESSION_LENGTH = 200
 
-# Guard against expressions that are cheap to write and ruinous to evaluate:
-# ``9**9**9`` is four tokens and will not finish. Applied to every ``**``
-# whose operands are literal ints, which is the only form that can be checked
-# before evaluation.
-MAX_LITERAL_EXPONENT = 1000
+# Guards against expressions that are cheap to write and ruinous to evaluate.
+# ``9**9**9`` is five tokens and will not finish; neither will ``1 << 9**9``.
+#
+# Both bounds are applied to *evaluated* operands, not to literals in the
+# source. Checking the parse tree is not enough: in ``9**9**9`` the outer
+# exponent is a BinOp rather than a constant, so a literals-only check reads
+# straight past it.
+#
+# MAX_EXPONENT catches the obvious case with a clear message. MAX_RESULT_BITS
+# catches the chained case -- ``(10**1000)**1000`` keeps every individual
+# exponent under the cap while the result grows without bound -- by bounding
+# the size of the number the operation would have to build.
+MAX_EXPONENT = 1000
+MAX_RESULT_BITS = 100_000
 
 
 class UnsafeExpressionError(ValueError):
@@ -87,14 +104,51 @@ def _describe(node: ast.AST) -> str:
     return type(node).__name__
 
 
-def _check_pow_bounds(node: ast.BinOp) -> None:
-    """Reject literal exponents large enough to hang the process."""
-    exponent = node.right
-    if isinstance(exponent, ast.Constant) and isinstance(exponent.value, int):
-        if abs(exponent.value) > MAX_LITERAL_EXPONENT:
-            raise UnsafeExpressionError(
-                f"Exponent too large (limit {MAX_LITERAL_EXPONENT})"
-            )
+def _bit_length(value: Any) -> int:
+    """Approximate size in bits of an evaluated operand, or 0 if not an int."""
+    return value.bit_length() if isinstance(value, int) else 0
+
+
+def guard_exponent(base: Any, exponent: Any) -> None:
+    """Reject a power operation whose result would be ruinously large.
+
+    Exported so that callers exposing ``pow`` in their name table can apply
+    the same bound -- otherwise ``pow(9, 999999)`` walks straight past the
+    guard that ``9 ** 999999`` trips.
+
+    Float operands are not checked: they overflow to ``inf`` in constant time
+    and cannot be used to exhaust memory.
+    """
+    if not isinstance(exponent, int) or isinstance(exponent, bool):
+        return
+    if abs(exponent) > MAX_EXPONENT:
+        raise UnsafeExpressionError(f"Exponent too large (limit {MAX_EXPONENT})")
+    if _bit_length(base) * abs(exponent) > MAX_RESULT_BITS:
+        raise UnsafeExpressionError("Result would be too large to compute")
+
+
+def guard_operand_size(value: Any, limit: int = MAX_EXPONENT) -> Any:
+    """Reject an argument large enough to make a growth function hang.
+
+    ``factorial``, ``comb``, and ``perm`` are as effective as ``**`` for
+    burning CPU, and they are ordinary calls rather than operators, so the
+    evaluator cannot see them. Callers wrap those functions with this.
+
+    Returns the value so wrappers can write ``func(guard_operand_size(n))``.
+    """
+    if isinstance(value, int) and not isinstance(value, bool) and abs(value) > limit:
+        raise UnsafeExpressionError(f"Argument too large (limit {limit})")
+    return value
+
+
+def _guard_shift(left: Any, right: Any) -> None:
+    """Reject a left shift whose result would be ruinously large."""
+    if not isinstance(right, int) or isinstance(right, bool):
+        return
+    if right < 0:
+        return  # Python raises ValueError itself; let it surface normally.
+    if _bit_length(left) + right > MAX_RESULT_BITS:
+        raise UnsafeExpressionError("Result would be too large to compute")
 
 
 def _evaluate(node: ast.AST, names: Mapping[str, Any]) -> Any:
@@ -118,9 +172,16 @@ def _evaluate(node: ast.AST, names: Mapping[str, Any]) -> Any:
         handler = _BIN_OPS.get(type(node.op))
         if handler is None:
             raise UnsafeExpressionError(f"Unsupported operator: {_describe(node.op)}")
+        # Both operands are evaluated before the size guards run, so a
+        # computed exponent such as the outer 9 in ``9**9**9`` is checked by
+        # value rather than by whether it happened to be written as a literal.
+        left = _evaluate(node.left, names)
+        right = _evaluate(node.right, names)
         if isinstance(node.op, ast.Pow):
-            _check_pow_bounds(node)
-        return handler(_evaluate(node.left, names), _evaluate(node.right, names))
+            guard_exponent(left, right)
+        elif isinstance(node.op, ast.LShift):
+            _guard_shift(left, right)
+        return handler(left, right)
 
     if isinstance(node, ast.UnaryOp):
         handler = _UNARY_OPS.get(type(node.op))
@@ -178,14 +239,24 @@ def safe_eval_math(expression: str, names: Mapping[str, Any]) -> Any:
         expression: The expression source. Must be at most
             :data:`MAX_EXPRESSION_LENGTH` characters.
         names: Mapping of the constants and callables the expression may use.
-            Nothing outside this mapping is reachable.
+            Nothing outside this mapping is reachable. Callables must be safe
+            to invoke with arbitrary numeric arguments -- this function bounds
+            the operators it evaluates itself, but it cannot know the cost of
+            a function the caller supplied. Wrap growth functions such as
+            ``factorial`` with :func:`guard_operand_size` and ``pow`` with
+            :func:`guard_exponent` before passing them in.
 
     Returns:
         The value of the expression.
 
     Raises:
         UnsafeExpressionError: If the expression is too long, does not parse,
-            or contains any construct outside plain arithmetic.
+            contains any construct outside plain arithmetic, or would build a
+            number too large to compute.
+        Exception: Ordinary arithmetic errors from the operation itself --
+            ZeroDivisionError, OverflowError, the ValueError ``sqrt(-1)``
+            raises -- propagate unchanged. They are maths errors, not safety
+            violations, and the caller reports them as such.
     """
     if not isinstance(expression, str):
         raise UnsafeExpressionError("Expression must be a string")
