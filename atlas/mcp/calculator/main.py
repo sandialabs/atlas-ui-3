@@ -4,6 +4,7 @@ Calculator MCP Server using FastMCP
 Provides mathematical operations through MCP protocol.
 """
 
+import logging
 import math
 import sys
 import time
@@ -11,11 +12,14 @@ from typing import Any, Dict, Union
 
 from atlas.mcp_shared.safe_math_eval import (
     MAX_EXPRESSION_LENGTH,
+    UnsafeExpressionError,
     guard_exponent,
     guard_operand_size,
     safe_eval_math,
 )
 from atlas.mcp_shared.server_factory import create_stdio_server
+
+logger = logging.getLogger(__name__)
 
 # Initialize the MCP server
 mcp = create_stdio_server("Calculator")
@@ -27,32 +31,46 @@ _DIGITS_PER_BIT = 0.30103
 
 
 def _result_is_returnable(value: Any) -> bool:
-    """Return False if serializing this result would raise.
+    """Return False if this result cannot be encoded in the tool's response.
 
-    CPython caps int-to-str conversion (``sys.get_int_max_str_digits()``,
-    4300 by default). An int above that limit computes fine but raises
-    ValueError when JSON-encoded -- which happens in the MCP layer *after*
-    evaluate() has returned its success payload, so the failure escapes the
-    documented ``is_error`` contract entirely and surfaces as a broken
-    response instead of a tool error.
+    Anything that fails here would otherwise raise in the MCP serialization
+    layer *after* evaluate() has returned a success payload, so the failure
+    escapes the documented ``is_error`` contract entirely and surfaces as a
+    broken response rather than a tool error. Three ways that happened:
 
-    The size bounds in the evaluator stop the expensive cases, but they are
-    set for compute cost, not for serializability: ``(2**1000)**15`` and
-    ``factorial(1000)*factorial(1000)`` are both cheap and both too long to
-    encode. Multiplication has no bound at all, by design -- it is linear.
+    - **Oversized ints.** CPython caps int-to-str conversion
+      (``sys.get_int_max_str_digits()``, 4300 by default). The evaluator's
+      size bounds do not cover this -- they are set for compute cost, and
+      ``(2**1000)**15`` and ``factorial(1000)*factorial(1000)`` are both cheap
+      and both too long to encode. Multiplication is deliberately unbounded
+      for numbers, being linear.
+    - **Non-finite floats.** ``inf`` and ``nan`` are reachable as constants
+      and from overflow. ``json.dumps`` emits bare ``Infinity``/``NaN``, which
+      is not valid JSON and is rejected by strict parsers.
+    - **Complex numbers.** Not JSON-encodable at all.
+
+    This is written as a whole-value property rather than a list of known-bad
+    expressions, so a new route to any of them is caught without a new case.
     """
     limit = sys.get_int_max_str_digits()
-    if limit <= 0:  # Limit disabled by the host application.
-        return True
 
     pending = [value]
     while pending:
         item = pending.pop()
         if isinstance(item, tuple):  # divmod() and modf() return pairs
             pending.extend(item)
-        elif isinstance(item, int) and not isinstance(item, bool):
-            if item.bit_length() * _DIGITS_PER_BIT + 1 > limit:
+        elif isinstance(item, bool):
+            continue
+        elif isinstance(item, int):
+            # limit <= 0 means the host disabled the cap entirely.
+            if limit > 0 and item.bit_length() * _DIGITS_PER_BIT + 1 > limit:
                 return False
+        elif isinstance(item, float):
+            if not math.isfinite(item):
+                return False
+        else:
+            # Complex, or anything else a future name-table entry returns.
+            return False
     return True
 
 
@@ -68,6 +86,18 @@ def _bounded_pow(base, exponent, modulus=None):
         return pow(base, exponent, modulus)
     guard_exponent(base, exponent)
     return pow(base, exponent)
+
+
+def _bounded_round(number, ndigits=None):
+    """``round`` with its ndigits bounded.
+
+    A large negative ndigits is superlinear on ints -- `round(5, -32000000)`
+    takes tens of seconds and `round(5, -999999999)` does not return. Same
+    class as the pow/factorial wrappers, reached through a different argument.
+    """
+    if ndigits is None:
+        return round(number)
+    return round(number, guard_operand_size(ndigits))
 
 
 def _bounded_factorial(n):
@@ -96,7 +126,7 @@ def _bounded_perm(n, k=None):
 # can turn a short argument into a huge number is bounded here.
 ALLOWED_NAMES = {
     # Built-ins
-    "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
+    "abs": abs, "round": _bounded_round, "min": min, "max": max, "sum": sum,
     "pow": _bounded_pow, "divmod": divmod,
     # Constants
     "pi": math.pi, "e": math.e, "tau": math.tau, "inf": math.inf, "nan": math.nan,
@@ -173,13 +203,21 @@ def evaluate(expression: str) -> Dict[str, Any]:
     - Attribute access, subscripting, and comprehensions are rejected outright
     - Only the mathematical names listed above are reachable
 
-    **Not Supported** (these return an error rather than a result):
-    - Keyword arguments -- write `round(3.14159, 2)`, not `round(3.14159, ndigits=2)`
-    - String literals, f-strings, and list/dict syntax
+    **Not Supported** (these return an error rather than a result). Where a
+    form used to work, the replacement is given -- these are the spellings to
+    use:
+    - Keyword arguments. Write `round(3.14159, 2)`, NOT `round(3.14159, ndigits=2)`
+    - List and dict syntax. Write `sum((1, 2, 3))` with parentheses,
+      NOT `sum([1, 2, 3])` with brackets
+    - String literals and f-strings
     - `and`, `or`, `not`, `in`, `is` -- this evaluates numbers, not logic
     - Attribute access (`x.y`), indexing (`x[0]`), lambdas, and comprehensions
-    - Results too large to return: an integer beyond roughly 4300 digits, or an
-      exponent/argument above 1000, is refused rather than computed
+    - Complex numbers such as `2j`
+    - Results that cannot be returned: an integer beyond roughly 4300 digits,
+      or a non-finite result such as `inf` or `nan`
+    - Arguments large enough to hang the server: an exponent, `ndigits`, or
+      `factorial`/`comb`/`perm` argument above 1000, or a tuple repetition
+      producing more than 1000 elements
 
     **Examples:**
     - Basic: "2 + 3 * 4" → 14
@@ -216,10 +254,10 @@ def evaluate(expression: str) -> Dict[str, Any]:
     try:
         result = safe_eval_math(expression_str, ALLOWED_NAMES)
         if not _result_is_returnable(result):
-            meta.update({"is_error": True, "reason": "result_too_large"})
+            meta.update({"is_error": True, "reason": "result_not_returnable"})
             return {
                 "results": {
-                    "error": "Result too large to return",
+                    "error": "Result cannot be returned (too large, or not a finite number)",
                     "expression": expression_str,
                 },
                 "meta_data": _finalize_meta(meta, start)
@@ -231,7 +269,23 @@ def evaluate(expression: str) -> Dict[str, Any]:
         }
         meta.update({"is_error": False})
         return {"results": payload, "meta_data": _finalize_meta(meta, start)}
+    except UnsafeExpressionError as e:
+        # A refused construct is worth a log line: a sandbox-escape attempt
+        # and a typo both end up here, and without this they are
+        # indistinguishable from each other and invisible to an operator.
+        logger.warning(
+            "calculator rejected expression: %s (expression=%r)",
+            e,
+            expression_str[:MAX_EXPRESSION_LENGTH],
+        )
+        meta.update({"is_error": True, "reason": "rejected_expression"})
+        return {
+            "results": {"error": f"Evaluation error: {e}", "expression": expression_str},
+            "meta_data": _finalize_meta(meta, start)
+        }
     except Exception as e:  # noqa: BLE001 - broad for safe tool boundary
+        # Ordinary maths errors: ZeroDivisionError, OverflowError, the
+        # ValueError from sqrt(-1). Not a safety event, so not logged.
         meta.update({"is_error": True, "reason": type(e).__name__})
         return {
             "results": {"error": f"Evaluation error: {e}", "expression": expression_str},

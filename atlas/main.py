@@ -38,7 +38,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
-from atlas.core.auth import get_user_from_header
+from atlas.core.auth import resolve_user_from_auth_header
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from atlas.core.metrics_logger import log_metric
@@ -553,11 +553,20 @@ async def websocket_endpoint(websocket: WebSocket):
     # Authenticate user BEFORE accepting the connection
     user_email = None
 
-    # Check configured auth header first (consistent with AuthMiddleware)
-    auth_header_name = config_manager.app_settings.auth_user_header
+    # Check configured auth header first, through the same resolver
+    # AuthMiddleware uses. Calling get_user_from_header directly here would
+    # skip JWT verification whenever AUTH_USER_HEADER_TYPE is aws-alb-jwt,
+    # letting any non-empty header value authenticate the socket.
+    app_settings = config_manager.app_settings
+    auth_header_name = app_settings.auth_user_header
     x_email_header = websocket.headers.get(auth_header_name)
     if x_email_header:
-        user_email = get_user_from_header(x_email_header)
+        user_email = resolve_user_from_auth_header(
+            x_email_header,
+            header_type=app_settings.auth_user_header_type,
+            expected_alb_arn=app_settings.auth_aws_expected_alb_arn,
+            aws_region=app_settings.auth_aws_region,
+        )
 
     # Fallback to query parameter (development/testing ONLY)
     if not user_email and is_debug_mode:

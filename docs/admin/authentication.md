@@ -74,12 +74,28 @@ called cross-site WebSocket hijacking.
 Atlas therefore validates the `Origin` header before accepting a chat
 WebSocket. An upgrade is allowed when the origin is:
 
-- **loopback** (`localhost`, `127.0.0.1`, `::1`), or
+- **loopback** (`localhost`, `127.0.0.1`, `::1`) **and the target is also
+  loopback** — that is, the `Host` header names a loopback address too. A
+  loopback origin is *not* trusted against a production hostname, so a
+  malicious page served by another application on the user's own machine
+  cannot open the production socket, or
 - **the same host the request was addressed to**, compared against the `Host`
-  header and ignoring port, or
-- **listed in `WEBSOCKET_ALLOWED_ORIGINS`** (comma-separated hostnames).
+  header, or
+- **listed in `WEBSOCKET_ALLOWED_ORIGINS`**.
 
 Anything else is rejected with close code 1008 before authentication runs.
+
+Matching is by **hostname only** — scheme and port are ignored. This is looser
+than the browser's own definition of an origin, and deliberately so: behind a
+TLS-terminating proxy the backend sees plain HTTP on an internal port and
+cannot reconstruct the browser-facing origin, and cookies are not isolated by
+port in any case. The consequence is that a *different* application on another
+port of the same hostname is treated as same-site; do not share a hostname
+between Atlas and untrusted applications.
+
+`WEBSOCKET_ALLOWED_ORIGINS` accepts either bare hostnames or full origins —
+`atlas.example.com` and `https://atlas.example.com` are equivalent, and any
+scheme or port in an entry is discarded.
 
 A request with **no** `Origin` header is allowed. Browsers always send the
 header on an upgrade, so its absence means a non-browser client — a CLI, a

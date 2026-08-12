@@ -54,6 +54,12 @@ MAX_EXPRESSION_LENGTH = 200
 MAX_EXPONENT = 1000
 MAX_RESULT_BITS = 100_000
 
+# Sequence repetition is a third route to the same exhaustion: `(1,)*(10**8)`
+# is twelve characters and allocates hundreds of megabytes. Tuples exist here
+# only so `divmod` results and `sum((1, 2))` read naturally, so the cap on
+# elements can be small.
+MAX_SEQUENCE_ELEMENTS = 1000
+
 
 class UnsafeExpressionError(ValueError):
     """Raised when an expression is malformed or uses a disallowed construct."""
@@ -96,7 +102,11 @@ _COMPARE_OPS: Mapping[type, Callable[[Any, Any], Any]] = {
 # Literal types an expression may contain. Strings are excluded: the
 # calculator has no use for them, and allowing them widens the surface of
 # every function in the table that would otherwise reject a non-number.
-_ALLOWED_CONSTANTS = (int, float, complex, bool)
+#
+# complex is excluded too. It evaluates fine but is not JSON-encodable, so a
+# literal like `2j` produced a success payload that then raised TypeError in
+# the serialization layer -- outside the caller's error contract entirely.
+_ALLOWED_CONSTANTS = (int, float, bool)
 
 
 def _describe(node: ast.AST) -> str:
@@ -134,11 +144,34 @@ def guard_operand_size(value: Any, limit: int = MAX_EXPONENT) -> Any:
     burning CPU, and they are ordinary calls rather than operators, so the
     evaluator cannot see them. Callers wrap those functions with this.
 
+    Floats are bounded as well as ints. Some of these functions historically
+    accepted integral floats, and ``round``'s ndigits does today, so an
+    int-only check would leave a hole that depends on the Python version.
+
     Returns the value so wrappers can write ``func(guard_operand_size(n))``.
     """
-    if isinstance(value, int) and not isinstance(value, bool) and abs(value) > limit:
-        raise UnsafeExpressionError(f"Argument too large (limit {limit})")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        # NaN compares false against everything, so test for the safe case.
+        if not abs(value) <= limit:
+            raise UnsafeExpressionError(f"Argument too large (limit {limit})")
     return value
+
+
+def _guard_repetition(left: Any, right: Any) -> None:
+    """Reject sequence repetition that would allocate an enormous tuple.
+
+    ``ast.Mult`` is ordinary arithmetic for numbers, but with a sequence on
+    either side Python reinterprets it as repetition, so the numeric size
+    guards never see it.
+    """
+    for sequence, count in ((left, right), (right, left)):
+        if isinstance(sequence, tuple) and isinstance(count, int) and not isinstance(count, bool):
+            if len(sequence) * abs(count) > MAX_SEQUENCE_ELEMENTS:
+                raise UnsafeExpressionError(
+                    f"Sequence too large (limit {MAX_SEQUENCE_ELEMENTS} elements)"
+                )
 
 
 def _guard_shift(left: Any, right: Any) -> None:
@@ -181,6 +214,8 @@ def _evaluate(node: ast.AST, names: Mapping[str, Any]) -> Any:
             guard_exponent(left, right)
         elif isinstance(node.op, ast.LShift):
             _guard_shift(left, right)
+        elif isinstance(node.op, ast.Mult):
+            _guard_repetition(left, right)
         return handler(left, right)
 
     if isinstance(node, ast.UnaryOp):

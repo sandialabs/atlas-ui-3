@@ -148,4 +148,7 @@ def origin_is_allowed(
     elif target and hostname == target:
         return True
 
-    return hostname in {host.strip().lower() for host in allowed_hosts if host.strip()}
+    # Normalize through extract_host here too, so a caller that passes a raw
+    # list rather than the output of parse_allowed_hosts gets the same rule
+    # instead of a weaker lowercase-only one.
+    return hostname in {h for h in (extract_host(entry) for entry in allowed_hosts) if h}

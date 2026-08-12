@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -124,18 +125,66 @@ def test_unserializable_results_are_reported_as_tool_errors(evaluate, expression
     """
     payload = evaluate(expression)
     assert _is_error(payload) is True
-    assert payload["meta_data"]["reason"] == "result_too_large"
+    assert payload["meta_data"]["reason"] == "result_not_returnable"
     json.dumps(payload)  # must not raise
 
 
-def test_every_payload_this_tool_returns_is_json_serializable(evaluate):
-    expressions = [
-        "2 + 2", "divmod(7, 2)", "modf(3.5)", "1 < 2", "sqrt(2)",
-        "(2**1000)**15", "factorial(1000)*factorial(1000)",
-        "9**9**9", "().__class__", "1 / 0", "sqrt(-1)", "1+" * 200 + "1",
+# Every distinct shape a caller can drive this tool into. The property is
+# universal -- any payload it returns must encode -- so new refusal classes
+# belong here rather than in a bespoke test.
+ALL_RESULT_SHAPES = [
+    # ordinary successes
+    "2 + 2", "sqrt(2)", "1 < 2", "2 ** 1000",
+    # tuple and nested-tuple results
+    "divmod(7, 2)", "modf(3.5)", "(divmod(7, 2), divmod(9, 2))", "(1, (2, (3, 4)))",
+    # non-finite floats, reachable as constants and by overflow
+    "inf", "-inf", "nan", "(inf, nan)", "1.5 ** 999999.0",
+    # complex, which is not JSON-encodable at all
+    "2j", "(2j, 1)", "complex",
+    # oversized ints
+    "(2**1000)**15", "factorial(1000)*factorial(1000)",
+    # refusals of every other class
+    "9**9**9", "(1,)*(10**8)", "round(5, -999999999)", "factorial(3000000)",
+    "().__class__", "sum([1, 2, 3])", "round(3.1, ndigits=2)", "'abc'",
+    "1 / 0", "sqrt(-1)", "1+" * 200 + "1", "2 +",
+]
+
+
+@pytest.mark.parametrize("expression", ALL_RESULT_SHAPES)
+def test_every_payload_this_tool_returns_is_json_serializable(evaluate, expression):
+    """Universal property: whatever comes back must encode, success or error.
+
+    Anything that fails to encode would raise in the MCP layer after this
+    function returned, escaping the is_error contract entirely.
+    """
+    payload = evaluate(expression)
+    json.dumps(payload, allow_nan=False)  # allow_nan=False == strict JSON
+
+
+@pytest.mark.parametrize("expression", ["2j", "(2j, 1)", "inf", "nan", "(inf, nan)"])
+def test_non_encodable_results_are_tool_errors(evaluate, expression):
+    """Complex and non-finite results must be refused, not returned."""
+    payload = evaluate(expression)
+    assert _is_error(payload) is True
+
+
+def test_resource_bounds_reject_quickly(evaluate):
+    """The bounds must refuse before computing, not after.
+
+    Asserting only `is_error is True` would still pass if the guard ran after
+    a 30-second computation, so this pins the timing the guards exist for.
+    """
+    expensive = [
+        "9**9**9", "pow(9, 99999999)", "factorial(3000000)",
+        "1 << 10000000000", "(1,)*(10**8)", "round(5, -999999999)",
+        "((9**999)**999)**999",
     ]
-    for expression in expressions:
-        json.dumps(evaluate(expression))
+    for expression in expensive:
+        started = time.perf_counter()
+        payload = evaluate(expression)
+        elapsed = time.perf_counter() - started
+        assert _is_error(payload) is True, expression
+        assert elapsed < 1.0, f"{expression} took {elapsed:.2f}s; guard ran too late"
 
 
 def test_large_but_encodable_result_still_succeeds(evaluate):

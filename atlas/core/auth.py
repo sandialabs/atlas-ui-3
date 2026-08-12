@@ -231,7 +231,51 @@ def get_user_from_aws_alb_jwt(encoded_jwt, expected_alb_arn, aws_region):
 
 
 def get_user_from_header(x_email_header: Optional[str]) -> Optional[str]:
-    """Extract user email from authentication header value."""
+    """Extract user email from a plain ``email-string`` authentication header.
+
+    This performs NO verification -- it trusts the value entirely, which is
+    only sound when a reverse proxy has authenticated the request and strips
+    client-supplied copies of the header. Call
+    :func:`resolve_user_from_auth_header` instead of calling this directly, so
+    the configured header type is always honoured.
+    """
     if not x_email_header:
         return None
     return x_email_header.strip()
+
+
+def resolve_user_from_auth_header(
+    header_value: Optional[str],
+    *,
+    header_type: str,
+    expected_alb_arn: str = "",
+    aws_region: str = "us-east-1",
+) -> Optional[str]:
+    """Resolve the authenticated user from the configured auth header.
+
+    The single place where ``AUTH_USER_HEADER_TYPE`` is interpreted. It exists
+    because it previously was not: HTTP middleware branched on the header type
+    and cryptographically verified ``aws-alb-jwt``, while both WebSocket
+    endpoints called :func:`get_user_from_header` unconditionally. In an
+    ALB-JWT deployment that meant HTTP verified an ES256 signature and the
+    signer ARN, while a WebSocket upgrade accepted any non-empty header value
+    as the user's identity -- a full authentication bypass on the socket for
+    anyone able to reach the backend directly or through a proxy that does not
+    strip the header.
+
+    Args:
+        header_value: Raw value of the configured auth header.
+        header_type: ``"aws-alb-jwt"`` for a signed ALB token, anything else
+            for a trusted plain email string.
+        expected_alb_arn: ARN the JWT's signer must match, for ALB mode.
+        aws_region: Region whose public keys verify the JWT, for ALB mode.
+
+    Returns:
+        The verified user email, or None if the header is absent or fails
+        verification.
+    """
+    if not header_value:
+        return None
+    if header_type == "aws-alb-jwt":
+        return get_user_from_aws_alb_jwt(header_value, expected_alb_arn, aws_region)
+    return get_user_from_header(header_value)

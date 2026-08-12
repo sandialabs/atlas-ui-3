@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from atlas.core.auth import get_user_from_header
+from atlas.core.auth import resolve_user_from_auth_header
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 from atlas.infrastructure.app_factory import app_factory
@@ -1238,10 +1238,18 @@ def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
         if websocket.headers.get(header) != config_manager.app_settings.proxy_secret:
             return None
 
-    auth_header_name = config_manager.app_settings.auth_user_header
-    x_header = websocket.headers.get(auth_header_name)
+    # Resolve through the shared helper so the configured header type is
+    # honoured here exactly as it is on HTTP; calling get_user_from_header
+    # directly would accept any non-empty value in aws-alb-jwt deployments.
+    app_settings = config_manager.app_settings
+    x_header = websocket.headers.get(app_settings.auth_user_header)
     if x_header:
-        user_email = get_user_from_header(x_header)
+        user_email = resolve_user_from_auth_header(
+            x_header,
+            header_type=app_settings.auth_user_header_type,
+            expected_alb_arn=app_settings.auth_aws_expected_alb_arn,
+            aws_region=app_settings.auth_aws_region,
+        )
         if user_email:
             return user_email
 
