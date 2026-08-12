@@ -7,9 +7,12 @@ validation and allowlist checking.
 
 import json
 import logging
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
+
+from atlas.core.log_sanitizer import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
@@ -122,17 +125,24 @@ class ComplianceLevelManager:
             if not self.levels:
                 return level_name
 
-            # Unknown compliance level
+            # Unknown compliance level. Neither the rejected level name nor the
+            # caller-supplied context is echoed verbatim: the level name can come
+            # from a client payload (log injection) and the context can name the
+            # selected model, which must not appear in compliance warnings.
             valid_levels = list(self.levels.keys())
             logger.warning(
-                f"Invalid compliance level '{level_name}' {context}. "
-                f"Valid levels: {', '.join(valid_levels)}. "
-                f"Setting to None."
+                "Invalid compliance level in %s. %d valid level(s) are configured. "
+                "Setting to None.",
+                sanitize_for_logging(context) if context else "request",
+                len(valid_levels),
             )
             return None
 
         if canonical != level_name:
-            logger.debug(f"Resolved alias '{level_name}' to '{canonical}' {context}")
+            logger.debug(
+                "Resolved compliance level alias in %s",
+                sanitize_for_logging(context) if context else "request",
+            )
 
         return canonical
 
@@ -205,6 +215,10 @@ class ComplianceLevelManager:
 
 # Global instance
 _compliance_manager: Optional[ComplianceLevelManager] = None
+_active_compliance_context: ContextVar[Tuple[Optional[str], bool]] = ContextVar(
+    "active_compliance_context",
+    default=(None, False),
+)
 
 
 def get_compliance_manager() -> ComplianceLevelManager:
@@ -213,3 +227,22 @@ def get_compliance_manager() -> ComplianceLevelManager:
     if _compliance_manager is None:
         _compliance_manager = ComplianceLevelManager()
     return _compliance_manager
+
+
+def set_active_compliance_context(
+    level: Optional[str],
+    *,
+    enforce: bool,
+) -> Token[Tuple[Optional[str], bool]]:
+    """Set the per-turn compliance context used by query-time enforcement."""
+    return _active_compliance_context.set((level, enforce))
+
+
+def reset_active_compliance_context(token: Token[Tuple[Optional[str], bool]]) -> None:
+    """Restore the previous per-turn compliance context."""
+    _active_compliance_context.reset(token)
+
+
+def get_active_compliance_context() -> Tuple[Optional[str], bool]:
+    """Return ``(active_level, enforce)`` for the current async context."""
+    return _active_compliance_context.get()

@@ -21,9 +21,17 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
     """
     Check if a user is in a specified group.
 
-    This function first checks for a configured external authorization endpoint.
-    If available, it makes an HTTP request to check group membership.
-    If not configured, it falls back to a mock implementation for local development.
+    Resolution order:
+    1. Dev-only bypass: when ``DEBUG_MODE=true`` and ``SKIP_AUTHORIZATION_CHECKS``
+       is set, return ``True`` for any user/group. This is mutually exclusive with
+       a configured external authorizer -- ``AppSettings.validate_skip_authorization_checks_dev_only``
+       refuses to start if ``AUTH_GROUP_CHECK_URL`` is also set, or if the flag
+       is on outside debug mode / a development environment -- so the bypass can
+       only ever override the mock table below, never a real authorization service.
+    2. External endpoint: when ``AUTH_GROUP_CHECK_URL`` and ``AUTH_GROUP_CHECK_API_KEY``
+       are configured, query the HTTP authorization service for membership.
+    3. Mock table (fallback for local development): everyone is in the ``users``
+       group; the debug-only mock table grants admin to the configured test users.
 
     Args:
         user_id: User email/identifier.
@@ -33,6 +41,28 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         True if the user is in the group, False otherwise.
     """
     app_settings = config_manager.app_settings
+
+    # Dev-only convenience: bypass authorization entirely so a new local user
+    # does not have to configure ADMIN_TEST_USER to reach admin-gated routes.
+    # This never affects authentication (identity resolution is unchanged) and
+    # is only reachable when DEBUG_MODE=true, ENVIRONMENT is not "production",
+    # and no AUTH_GROUP_CHECK_URL is configured -- enforced at startup by
+    # AppSettings.validate_skip_authorization_checks_dev_only, which refuses to
+    # boot otherwise. The mutual-exclusivity with an external authorizer means
+    # this branch can only ever override the mock table below, never a real
+    # authorization service.
+    if app_settings.debug_mode and app_settings.skip_authorization_checks:
+        # Request-time audit signal: the startup warning is the only other
+        # indicator, so without this an admin action granted by the bypass is
+        # indistinguishable from one that passed a real group check.
+        logger.warning(
+            "Authorization bypass active: granting group '%s' to user '%s' "
+            "via SKIP_AUTHORIZATION_CHECKS (DEBUG_MODE=true, dev-only).",
+            group_id,
+            user_id,
+        )
+        return True
+
     auth_url = app_settings.auth_group_check_url
     api_key = app_settings.auth_group_check_api_key
 

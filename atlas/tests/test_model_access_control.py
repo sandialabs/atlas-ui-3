@@ -23,6 +23,11 @@ from atlas.domain.sessions.models import Session
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 from atlas.modules.config.models import LLMConfig, ModelConfig
 
+# Group membership is mocked only in debug mode (see core.auth), so these tests
+# must request it explicitly to pass in both CI legs (DEBUG_MODE true and false).
+# See the mock_admin_authorization fixture in conftest.py.
+pytestmark = pytest.mark.usefixtures("mock_admin_authorization")
+
 
 async def _auth_check_admin_only(user_email: str, group: str) -> bool:
     """Mock membership: only ``admin@test.com`` is in the ``admin`` group."""
@@ -269,3 +274,89 @@ def test_config_shell_hides_restricted_model_from_non_member(restricted_model_co
     resp = client.get("/api/config/shell", headers={"X-User-Email": "user@example.com"})
     assert resp.status_code == 200
     assert "admin-only-model" not in _model_names(resp)
+
+
+# --------------------------------------------------------------------------- #
+# Execution layer: /api/suggest_followups rejects restricted models
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def followups_enabled(monkeypatch):
+    """Turn on the follow-up suggestions feature flag for one test."""
+    from atlas.infrastructure.app_factory import app_factory
+
+    app_settings = app_factory.get_config_manager().app_settings
+    monkeypatch.setattr(
+        app_settings, "feature_followup_suggestions_enabled", True, raising=False
+    )
+
+
+@pytest.fixture
+def stub_llm_caller(monkeypatch):
+    """Replace the LLM caller so no real model call is made; returns the stub."""
+    from atlas.infrastructure.app_factory import app_factory
+
+    llm = MagicMock()
+    llm.call_plain = AsyncMock(return_value='["a?", "b?", "c?"]')
+    monkeypatch.setattr(app_factory, "get_llm_caller", lambda: llm)
+    return llm
+
+
+def _suggest(client, user, model):
+    return client.post(
+        "/api/suggest_followups",
+        headers={"X-User-Email": user},
+        json={"messages": [{"role": "user", "content": "hi"}], "model": model},
+    )
+
+
+def test_suggest_followups_denies_restricted_model(
+    restricted_model_config, followups_enabled, stub_llm_caller
+):
+    """A crafted suggestions request for a restricted model is rejected with 404.
+
+    404 (not 403) so a restricted model is indistinguishable from a nonexistent
+    one and its name/existence is not leaked -- same policy as /api/llm/auth.
+    """
+    from main import app
+    from starlette.testclient import TestClient
+
+    client = TestClient(app)
+    restricted = _suggest(client, "user@example.com", "admin-only-model")
+    missing = _suggest(client, "user@example.com", "no-such-model")
+    assert restricted.status_code == 404
+    assert missing.status_code == 404
+    stub_llm_caller.call_plain.assert_not_called()
+
+
+def test_suggest_followups_allows_authorized_model(
+    restricted_model_config, followups_enabled, stub_llm_caller
+):
+    """A member of the model's group still gets suggestions."""
+    from main import app
+    from starlette.testclient import TestClient
+
+    client = TestClient(app)
+    resp = _suggest(client, "test@test.com", "admin-only-model")
+    assert resp.status_code == 200
+    assert resp.json()["questions"] == ["a?", "b?", "c?"]
+    stub_llm_caller.call_plain.assert_called_once()
+
+
+def test_suggest_followups_allows_unrestricted_model(
+    followups_enabled, stub_llm_caller
+):
+    """Models without ``groups`` remain reachable by everyone."""
+    from main import app
+    from starlette.testclient import TestClient
+    from atlas.infrastructure.app_factory import app_factory
+
+    models = app_factory.get_config_manager().llm_config.models
+    models["open-model"] = ModelConfig(model_name="open", model_url="http://x/v1")
+    try:
+        client = TestClient(app)
+        resp = _suggest(client, "user@example.com", "open-model")
+        assert resp.status_code == 200
+        stub_llm_caller.call_plain.assert_called_once()
+    finally:
+        models.pop("open-model", None)

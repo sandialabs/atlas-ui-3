@@ -12,6 +12,11 @@ from atlas.modules.mcp_tools.client import MCPToolManager
 class TestMCPAdminEndpoints:
     """Integration tests for MCP admin endpoints."""
 
+    # Admin group membership is mocked only in debug mode (see core.auth), so
+    # these tests must request it explicitly to pass in both CI legs
+    # (DEBUG_MODE true and false). See conftest.mock_admin_authorization.
+    pytestmark = pytest.mark.usefixtures("mock_admin_authorization")
+
     def test_mcp_status_endpoint_requires_admin(self):
         """Test that MCP status endpoint requires admin access."""
         from main import app

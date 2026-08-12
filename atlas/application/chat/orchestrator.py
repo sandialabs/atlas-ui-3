@@ -4,8 +4,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from atlas.core.log_sanitizer import sanitize_for_logging
-from atlas.core.model_access import is_model_allowed
+from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.domain.errors import AuthorizationError, SessionNotFoundError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.events import EventPublisher
@@ -159,18 +158,12 @@ class ChatOrchestrator:
         if not self.config_manager:
             return
         try:
-            model_config = self.config_manager.llm_config.models.get(model)
+            models = self.config_manager.llm_config.models
         except Exception:
             return
-        if model_config is None:
+        decision = await check_model_access(models, model, user_email, context="chat")
+        if decision is not ModelAccessDecision.DENIED:
             return
-        if await is_model_allowed(model_config, user_email):
-            return
-        logger.warning(
-            "Rejected chat: user %s not authorized for model %s",
-            sanitize_for_logging(user_email or "<anonymous>"),
-            sanitize_for_logging(model),
-        )
         raise AuthorizationError(
             "You are not authorized to use the selected model.",
             code="MODEL_ACCESS_DENIED",

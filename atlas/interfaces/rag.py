@@ -11,6 +11,15 @@ class RAGClientProtocol(Protocol):
 
     Defines the interface that all RAG clients must implement,
     enabling dependency injection and easier testing.
+
+    Note:
+        Implementations of this protocol are *transport* clients and perform no
+        authorization. Enabled-source, group, and compliance checks run one
+        layer up, in ``UnifiedRAGService._ensure_source_query_allowed``, before
+        any client method is called. Do not add a compliance parameter here:
+        the enforced level is ambient (an ``atlas.core.compliance`` ContextVar
+        established per chat turn) precisely so a client cannot be handed --
+        and cannot honour -- a caller-supplied level.
     """
 
     async def discover_data_sources(self, user_name: str) -> List[DataSource]:
