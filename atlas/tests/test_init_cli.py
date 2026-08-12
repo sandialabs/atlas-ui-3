@@ -3,7 +3,6 @@
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -258,3 +257,81 @@ class TestMinimalEnvEncryptionKey:
         first = self._write_env(tmp_path / "a")
         second = self._write_env(tmp_path / "b")
         assert first != second, "atlas-init must not write a shared constant key"
+
+
+class TestFullInitEncryptionKey:
+    """The default (non-minimal) atlas-init path must also produce a bootable .env.
+
+    It copies `.env.example` verbatim, which ships the exact placeholder the
+    server rejects — so the documented `atlas-init && atlas-server` flow used to
+    produce an install that refused to boot.
+    """
+
+    def _run_init(self, target: Path, extra=()):
+        return subprocess.run(
+            [sys.executable, "-m", "atlas.init_cli",
+             "--target", str(target), "--force", *extra],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={k: v for k, v in os.environ.items() if k != "ATLAS_ENV_FILE"},
+        )
+
+    @staticmethod
+    def _key_lines(env_path: Path):
+        return [
+            line.split("=", 1)[1].strip()
+            for line in env_path.read_text(encoding="utf-8").splitlines()
+            if line.strip().startswith("MCP_TOKEN_ENCRYPTION_KEY=")
+        ]
+
+    def test_default_path_writes_a_key_the_server_accepts(self, tmp_path):
+        from atlas.modules.mcp_tools.token_storage import resolve_encryption_key
+
+        target = tmp_path / "project"
+        result = self._run_init(target)
+        assert result.returncode == 0, result.stderr
+
+        env_path = target / ".env"
+        # Confirm we exercised the .env.example copy, not the minimal fallback.
+        assert "MCP_CALL_TIMEOUT" in env_path.read_text(encoding="utf-8")
+
+        keys = self._key_lines(env_path)
+        assert len(keys) == 1, f"expected exactly one key line, got {keys}"
+        assert resolve_encryption_key(encryption_key=keys[0]) == keys[0]
+
+    def test_env_file_is_owner_only(self, tmp_path):
+        """The .env holds the key that decrypts every user's MCP tokens."""
+        import stat
+
+        target = tmp_path / "project"
+        assert self._run_init(target).returncode == 0
+        mode = stat.S_IMODE((target / ".env").stat().st_mode)
+        assert mode == 0o600, f"expected 0600, got {oct(mode)}"
+
+    def test_minimal_env_file_is_owner_only(self, tmp_path):
+        import stat
+
+        target = tmp_path / "project"
+        assert self._run_init(target, ["--minimal"]).returncode == 0
+        mode = stat.S_IMODE((target / ".env").stat().st_mode)
+        assert mode == 0o600, f"expected 0600, got {oct(mode)}"
+
+    def test_rerun_keeps_the_existing_key(self, tmp_path):
+        """Minting a new key on re-run silently orphans every stored token."""
+        target = tmp_path / "project"
+        assert self._run_init(target).returncode == 0
+        first = self._key_lines(target / ".env")[0]
+
+        assert self._run_init(target).returncode == 0
+        assert self._key_lines(target / ".env")[0] == first
+
+        # ...and across the minimal path too, so the branches cannot drift.
+        assert self._run_init(target, ["--minimal"]).returncode == 0
+        assert self._key_lines(target / ".env")[0] == first
+
+    def test_fresh_installs_get_different_keys(self, tmp_path):
+        a, b = tmp_path / "a", tmp_path / "b"
+        assert self._run_init(a).returncode == 0
+        assert self._run_init(b).returncode == 0
+        assert self._key_lines(a / ".env")[0] != self._key_lines(b / ".env")[0]

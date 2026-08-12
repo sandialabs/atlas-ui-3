@@ -217,7 +217,7 @@ class TestMCPTokenStorage:
         # Pass encryption key directly to avoid app_settings caching issues
         storage = MCPTokenStorage(
             storage_dir=temp_storage_dir,
-            encryption_key="test-encryption-key-12345"
+            encryption_key="test-encryption-key-12345-at-least-32-chars"
         )
         yield storage
 
@@ -416,7 +416,7 @@ class TestMCPTokenStoragePersistence:
     def test_persistence_across_instances(self, temp_storage_dir):
         """Tokens should persist across storage instances."""
         # Pass encryption_key directly to avoid app_settings caching issues
-        encryption_key = "test-encryption-key-12345"
+        encryption_key = "test-encryption-key-12345-at-least-32-chars"
 
         # Create first storage instance and store token
         storage1 = MCPTokenStorage(storage_dir=temp_storage_dir, encryption_key=encryption_key)
@@ -449,7 +449,7 @@ class TestMCPTokenStorageEncryption:
         # Pass encryption key directly to avoid app_settings caching issues
         storage = MCPTokenStorage(
             storage_dir=temp_storage_dir,
-            encryption_key="test-encryption-key-12345"
+            encryption_key="test-encryption-key-12345-at-least-32-chars"
         )
         storage.store_token(
             user_email="user@example.com",
@@ -470,7 +470,7 @@ class TestMCPTokenStorageEncryption:
         # Store with one key
         storage1 = MCPTokenStorage(
             storage_dir=temp_storage_dir,
-            encryption_key="first-encryption-key"
+            encryption_key="first-encryption-key-padded-to-32-chars-min"
         )
         storage1.store_token(
             user_email="user@example.com",
@@ -482,7 +482,7 @@ class TestMCPTokenStorageEncryption:
         # Try to read with different key
         storage2 = MCPTokenStorage(
             storage_dir=temp_storage_dir,
-            encryption_key="different-encryption-key"
+            encryption_key="different-encryption-key-padded-to-32-chars"
         )
 
         # Should return None (decryption fails gracefully)

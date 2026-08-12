@@ -8,11 +8,23 @@ This guide provides everything you need to get Atlas UI 3 running, whether you p
 
 Using Docker is the fastest way to get the application running.
 
+#### Generate the required encryption key first
+
+The container has no default for `MCP_TOKEN_ENCRYPTION_KEY`, and Atlas refuses to
+start without it, so generate one before your first `docker run` and reuse the
+same value on every subsequent run — rotating it invalidates all stored MCP tokens:
+
+```bash
+export MCP_TOKEN_ENCRYPTION_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+```
+
 ### Option 1: Use Pre-built Image from Quay.io
 
 ```bash
 docker pull quay.io/agarlan-snl/atlas-ui-3:latest
-docker run -p 8000:8000 quay.io/agarlan-snl/atlas-ui-3:latest
+docker run -p 8000:8000 \
+  -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+  quay.io/agarlan-snl/atlas-ui-3:latest
 ```
 
 ### Option 2: Build Locally
@@ -26,7 +38,9 @@ docker run -p 8000:8000 quay.io/agarlan-snl/atlas-ui-3:latest
 2.  **Run the Container:**
     Once the image is built, start the container:
     ```bash
-    docker run -p 8000:8000 atlas-ui-3
+    docker run -p 8000:8000 \
+      -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+      atlas-ui-3
     ```
 
 3.  **Access the Application:**
@@ -38,7 +52,20 @@ Use the runtime-only Dockerfile when you want a slimmer deployed image with only
 
 ```bash
 docker build -f Dockerfile.runtimeonly -t atlas-ui-3-runtime .
-docker run -p 8000:8000 atlas-ui-3-runtime
+docker run -p 8000:8000 \
+  -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+  atlas-ui-3-runtime
+```
+
+### Option 4: Docker Compose
+
+`docker-compose.yml` requires `MCP_TOKEN_ENCRYPTION_KEY` to be set in the
+environment or in a `.env` file next to it, and fails with a clear message if it
+is missing:
+
+```bash
+echo "MCP_TOKEN_ENCRYPTION_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
+docker compose up
 ```
 
 ## Local Development Setup

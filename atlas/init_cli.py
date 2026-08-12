@@ -19,6 +19,18 @@ import secrets
 import shutil
 import sys
 from pathlib import Path
+from typing import Optional
+
+_ENCRYPTION_KEY_VAR = "MCP_TOKEN_ENCRYPTION_KEY"
+
+
+def generate_encryption_key() -> str:
+    """Return a fresh MCP token-encryption key.
+
+    ``token_urlsafe(32)`` yields 43 characters, comfortably above the 32-character
+    floor ``atlas.modules.mcp_tools.token_storage`` enforces at startup.
+    """
+    return secrets.token_urlsafe(32)
 
 
 def get_package_root() -> Path:
@@ -81,7 +93,94 @@ def copy_with_prompt(src: Path, dst: Path, force: bool = False) -> bool:
     return True
 
 
-def create_minimal_env(env_path: Path, force: bool = False) -> bool:
+def _read_encryption_key(env_path: Path) -> Optional[str]:
+    """Return a usable MCP_TOKEN_ENCRYPTION_KEY already present in ``env_path``.
+
+    Re-running ``atlas-init`` over an existing install must not mint a new key:
+    rotating it silently orphans every MCP token the previous key encrypted.
+    Only a value the server itself would accept is carried forward; a missing
+    file, a missing variable, or the repo-public placeholder yields ``None`` so
+    the caller generates a fresh key.
+    """
+    if not env_path.exists():
+        return None
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith(f"{_ENCRYPTION_KEY_VAR}="):
+            continue
+        value = stripped.split("=", 1)[1].strip().strip("'\"")
+        try:
+            from atlas.modules.mcp_tools.token_storage import resolve_encryption_key
+            return resolve_encryption_key(encryption_key=value)
+        except Exception:
+            return None
+    return None
+
+
+def _write_env_securely(env_path: Path, content: str) -> None:
+    """Write ``content`` to ``env_path`` readable only by the owner.
+
+    The file holds the key that decrypts every user's stored MCP tokens, and
+    ``Path.write_text`` alone leaves it 0644 under the usual umask — readable
+    by every account on the shared-install host this module targets. Tighten
+    the mode before the secret is written, not after.
+    """
+    fd = os.open(env_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+    except BaseException:
+        os.close(fd)
+        raise
+    # An existing file keeps its old mode through O_CREAT, so set it explicitly.
+    try:
+        os.chmod(env_path, 0o600)
+    except OSError:
+        # Best effort: some filesystems (e.g. mounted Windows shares) refuse.
+        pass
+
+
+def _ensure_encryption_key(env_path: Path, key: str) -> None:
+    """Rewrite ``env_path`` so ``MCP_TOKEN_ENCRYPTION_KEY`` is set to ``key``.
+
+    Used by the non-minimal path, which copies ``.env.example`` verbatim —
+    including the placeholder the server rejects, so the documented
+    ``atlas-init && atlas-server`` flow would otherwise produce an install that
+    refuses to boot. Shared with the minimal path via ``key`` so the two
+    branches cannot drift on what counts as an acceptable value.
+    """
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    except OSError:
+        return
+
+    assignment = f"{_ENCRYPTION_KEY_VAR}={key}\n"
+    replaced = False
+    for index, line in enumerate(lines):
+        if line.strip().startswith(f"{_ENCRYPTION_KEY_VAR}="):
+            lines[index] = assignment
+            replaced = True
+            break
+    if not replaced:
+        if lines and not lines[-1].endswith("\n"):
+            lines.append("\n")
+        lines.append("\n# Generated uniquely for this install by atlas-init.\n")
+        lines.append(assignment)
+
+    _write_env_securely(env_path, "".join(lines))
+    print(f"  Set {_ENCRYPTION_KEY_VAR} in {env_path}")
+
+
+def create_minimal_env(
+    env_path: Path,
+    force: bool = False,
+    encryption_key: Optional[str] = None,
+) -> bool:
     """Create a minimal .env file with just API key placeholders.
 
     ``env_path`` is the full path to the .env file to create (not a directory).
@@ -96,6 +195,7 @@ def create_minimal_env(env_path: Path, force: bool = False) -> bool:
     # (rotating it invalidates every stored MCP token) but must never be a
     # shared or repo-public constant, so generate it here rather than
     # shipping a placeholder the user has to notice and replace.
+    mcp_token_encryption_key = encryption_key or generate_encryption_key()
     minimal_env = f"""\
 # Atlas Configuration
 # See https://github.com/sandialabs/atlas-ui-3 for full documentation
@@ -127,7 +227,7 @@ APP_CONFIG_DIR=./config
 # =============================================================================
 # Encrypts user API keys/tokens for MCP servers. Generated uniquely for this
 # install. Keep it stable - rotating it invalidates all stored tokens.
-MCP_TOKEN_ENCRYPTION_KEY={secrets.token_urlsafe(32)}
+MCP_TOKEN_ENCRYPTION_KEY={mcp_token_encryption_key}
 
 # =============================================================================
 # Optional: RAG Configuration
@@ -137,7 +237,7 @@ MCP_TOKEN_ENCRYPTION_KEY={secrets.token_urlsafe(32)}
 # ATLAS_RAG_BEARER_TOKEN=your-api-key-here
 """
 
-    env_path.write_text(minimal_env, encoding="utf-8")
+    _write_env_securely(env_path, minimal_env)
     print(f"  Created {env_path}")
     return True
 
@@ -178,10 +278,20 @@ def run_init(args: argparse.Namespace) -> int:
     package_config = get_config_dir()
     env_example = get_env_example_path()
 
+    # Resolve the encryption key once, before anything can overwrite the file:
+    # carry forward a usable existing value (re-running atlas-init must not
+    # orphan already-encrypted MCP tokens) and otherwise mint a fresh one. Both
+    # branches below use this same value.
+    existing_key = _read_encryption_key(env_path)
+    encryption_key = existing_key or generate_encryption_key()
+    if existing_key:
+        print(f"  Keeping the existing {_ENCRYPTION_KEY_VAR} (rotating it would "
+              "invalidate all stored MCP tokens)")
+
     if args.minimal:
         # Minimal mode: just create a simple .env
         print("Creating minimal configuration...")
-        create_minimal_env(env_path, force=args.force)
+        create_minimal_env(env_path, force=args.force, encryption_key=encryption_key)
     else:
         # Full mode: copy config and .env
         print("Copying configuration files...")
@@ -200,11 +310,14 @@ def run_init(args: argparse.Namespace) -> int:
         # Copy .env.example to the resolved env path
         if env_example.exists():
             if copy_with_prompt(env_example, env_path, force=args.force):
+                # .env.example ships the placeholder the server rejects, so the
+                # verbatim copy would refuse to boot. Replace it in place.
+                _ensure_encryption_key(env_path, encryption_key)
                 print(f"\n  Remember to edit {env_path} and add your API keys!")
         else:
             # Fall back to creating minimal env
             print("  .env.example not found, creating minimal .env...")
-            create_minimal_env(env_path, force=args.force)
+            create_minimal_env(env_path, force=args.force, encryption_key=encryption_key)
 
     print("\n" + "=" * 60)
     print("Setup complete!")
