@@ -132,11 +132,13 @@ def _write_env_securely(env_path: Path, content: str) -> None:
     """
     fd = os.open(env_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
+        handle = os.fdopen(fd, "w", encoding="utf-8")
     except BaseException:
+        # fdopen did not take ownership of the descriptor, so we still must.
         os.close(fd)
         raise
+    with handle:
+        handle.write(content)
     # An existing file keeps its old mode through O_CREAT, so set it explicitly.
     try:
         os.chmod(env_path, 0o600)
