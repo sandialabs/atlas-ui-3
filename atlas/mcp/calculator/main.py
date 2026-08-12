@@ -8,10 +8,38 @@ import math
 import time
 from typing import Any, Dict, Union
 
+from atlas.mcp_shared.safe_math_eval import MAX_EXPRESSION_LENGTH, safe_eval_math
 from atlas.mcp_shared.server_factory import create_stdio_server
 
 # Initialize the MCP server
 mcp = create_stdio_server("Calculator")
+
+# The complete set of names an expression may reference. Anything outside this
+# table is unreachable -- see atlas/mcp_shared/safe_math_eval.py for why that
+# guarantee holds. Module-level so the table is built once, not per call.
+ALLOWED_NAMES = {
+    # Built-ins
+    "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
+    "pow": pow, "divmod": divmod,
+    # Constants
+    "pi": math.pi, "e": math.e, "tau": math.tau, "inf": math.inf, "nan": math.nan,
+    # Trigonometric
+    "sin": math.sin, "cos": math.cos, "tan": math.tan,
+    "asin": math.asin, "acos": math.acos, "atan": math.atan, "atan2": math.atan2,
+    "hypot": math.hypot, "degrees": math.degrees, "radians": math.radians,
+    # Hyperbolic
+    "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh,
+    "asinh": math.asinh, "acosh": math.acosh, "atanh": math.atanh,
+    # Exponential & logarithmic
+    "exp": math.exp, "sqrt": math.sqrt, "log": math.log, "log10": math.log10, "log2": math.log2,
+    # Rounding & numeric ops
+    "ceil": math.ceil, "floor": math.floor, "trunc": math.trunc, "modf": math.modf,
+    "copysign": math.copysign, "fabs": math.fabs, "fmod": math.fmod,
+    # Combinatorics & number theory
+    "factorial": math.factorial, "comb": math.comb, "perm": math.perm, "gcd": math.gcd, "lcm": math.lcm,
+    # Float checks
+    "isfinite": math.isfinite, "isinf": math.isinf, "isnan": math.isnan
+}
 
 
 def to_float(value: Union[str, int, float]) -> float:
@@ -63,9 +91,9 @@ def evaluate(expression: str) -> Dict[str, Any]:
 
     **Security Features:**
     - Expression length limited to 200 characters
-    - Only safe mathematical functions are allowed
-    - No access to file system, network, or dangerous operations
-    - Sandboxed evaluation environment
+    - Parsed and walked as an AST; `eval` is never used
+    - Attribute access, subscripting, and comprehensions are rejected outright
+    - Only the mathematical names listed above are reachable
 
     **Examples:**
     - Basic: "2 + 3 * 4" → 14
@@ -88,40 +116,15 @@ def evaluate(expression: str) -> Dict[str, Any]:
     expression_str = str(expression)
     meta: Dict[str, Any] = {}
 
-    # Safety check length
-    if len(expression_str) > 200:
+    if len(expression_str) > MAX_EXPRESSION_LENGTH:
         meta.update({"is_error": True, "reason": "too_long"})
         return {
             "results": {"error": "Expression too long", "expression": expression_str},
             "meta_data": _finalize_meta(meta, start)
         }
 
-    allowed_names = {
-        # Built-ins
-        "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
-        "pow": pow, "divmod": divmod,
-        # Constants
-        "pi": math.pi, "e": math.e, "tau": math.tau, "inf": math.inf, "nan": math.nan,
-        # Trigonometric
-        "sin": math.sin, "cos": math.cos, "tan": math.tan,
-        "asin": math.asin, "acos": math.acos, "atan": math.atan, "atan2": math.atan2,
-        "hypot": math.hypot, "degrees": math.degrees, "radians": math.radians,
-        # Hyperbolic
-        "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh,
-        "asinh": math.asinh, "acosh": math.acosh, "atanh": math.atanh,
-        # Exponential & logarithmic
-        "exp": math.exp, "sqrt": math.sqrt, "log": math.log, "log10": math.log10, "log2": math.log2,
-        # Rounding & numeric ops
-        "ceil": math.ceil, "floor": math.floor, "trunc": math.trunc, "modf": math.modf,
-        "copysign": math.copysign, "fabs": math.fabs, "fmod": math.fmod,
-        # Combinatorics & number theory
-        "factorial": math.factorial, "comb": math.comb, "perm": math.perm, "gcd": math.gcd, "lcm": math.lcm,
-        # Float checks
-        "isfinite": math.isfinite, "isinf": math.isinf, "isnan": math.isnan
-    }
-
     try:
-        result = eval(expression_str, {"__builtins__": {}}, allowed_names)
+        result = safe_eval_math(expression_str, ALLOWED_NAMES)
         payload = {
             "operation": "evaluate",
             "expression": expression_str,

@@ -48,6 +48,7 @@ from atlas.core.middleware import AuthMiddleware
 from atlas.core.otel_config import setup_opentelemetry
 from atlas.core.rate_limit_middleware import RateLimitMiddleware
 from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
+from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
 # Import domain errors
 from atlas.domain.errors import (
@@ -76,6 +77,8 @@ from atlas.routes.files_routes import (
     find_oversized_inline_file,
     get_file_upload_limit_config,
     mcp_files_router,
+)
+from atlas.routes.files_routes import (
     router as files_router,
 )
 from atlas.routes.globus_auth_routes import api_router as globus_api_router
@@ -442,6 +445,33 @@ async def help_image(path: str):
     raise HTTPException(status_code=404, detail="Help image not found")
 
 
+def _websocket_origin_allowed(websocket: WebSocket, app_settings) -> bool:
+    """Decide whether a chat WebSocket upgrade may proceed, by Origin.
+
+    An absent Origin is allowed. Browsers always send the header on an
+    upgrade, so its absence means a non-browser client -- a CLI, a test
+    harness, an MCP server -- and those carry no ambient cookies for an
+    attacker page to borrow. Cross-site WebSocket hijacking is a browser
+    attack; rejecting header-less clients would break legitimate integrations
+    without closing anything.
+
+    When the header is present it must name loopback, this deployment's own
+    host, or an entry in WEBSOCKET_ALLOWED_ORIGINS.
+    """
+    if not getattr(app_settings, "feature_websocket_origin_check_enabled", True):
+        return True
+
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+
+    return origin_is_allowed(
+        origin,
+        parse_allowed_hosts(getattr(app_settings, "websocket_allowed_origins", "")),
+        request_host=websocket.headers.get("host"),
+    )
+
+
 # WebSocket endpoint for chat
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -484,6 +514,19 @@ async def websocket_endpoint(websocket: WebSocket):
     config_manager = app_factory.get_config_manager()
 
     is_debug_mode = config_manager.app_settings.debug_mode
+
+    # Origin check: a WS upgrade is not preflighted, so the same-origin policy
+    # does not apply. Without this, any page the user visits can open a socket
+    # here; the proxy authenticates it from their cookies and hands the
+    # attacker a live session. Runs before every other check so a rejected
+    # origin never reaches authentication.
+    if not _websocket_origin_allowed(websocket, config_manager.app_settings):
+        logger.warning(
+            "WS rejected disallowed origin=%s client=%s",
+            sanitize_for_logging(websocket.headers.get("origin") or ""),
+            sanitize_for_logging(websocket.client),
+        )
+        raise WebSocketException(code=1008, reason="Origin not allowed")
 
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (

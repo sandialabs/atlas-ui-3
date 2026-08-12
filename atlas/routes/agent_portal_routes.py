@@ -12,13 +12,17 @@ import base64
 import logging
 import os
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from atlas.core.auth import get_user_from_header
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
+from atlas.core.websocket_origin import (
+    LOOPBACK_HOSTS,
+    origin_is_allowed,
+    parse_allowed_hosts,
+)
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.agent_portal import (
     PresetNotFoundError,
@@ -1204,13 +1208,13 @@ async def list_audit(
     return {"events": store.list_audit(current_user, limit=limit)}
 
 
-_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_LOOPBACK_HOSTS = LOOPBACK_HOSTS
 
 
-def _extra_allowed_origin_hosts() -> set[str]:
+def _extra_allowed_origin_hosts() -> frozenset[str]:
     """Hostnames from AGENT_PORTAL_ALLOWED_ORIGINS, normalized to lowercase."""
     raw = app_factory.get_config_manager().app_settings.agent_portal_allowed_origins or ""
-    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+    return parse_allowed_hosts(raw)
 
 
 def _origin_is_allowed(origin: Optional[str]) -> bool:
@@ -1221,19 +1225,12 @@ def _origin_is_allowed(origin: Optional[str]) -> bool:
     is always allowed for local dev; additional hostnames may be permitted
     via AGENT_PORTAL_ALLOWED_ORIGINS for deployments behind an auth proxy
     (e.g. Cloudflare Access).
+
+    Unlike the chat socket at /ws, this endpoint does not consult the Host
+    header and does not admit a missing Origin: the portal is a dev-only
+    preview that grants command execution, so its allowlist stays explicit.
     """
-    if not origin:
-        return False
-    try:
-        parsed = urlparse(origin)
-    except ValueError:
-        return False
-    if parsed.scheme not in ("http", "https"):
-        return False
-    hostname = (parsed.hostname or "").lower()
-    if hostname in _LOOPBACK_HOSTS:
-        return True
-    return hostname in _extra_allowed_origin_hosts()
+    return origin_is_allowed(origin, _extra_allowed_origin_hosts())
 
 
 def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
