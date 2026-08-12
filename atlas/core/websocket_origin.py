@@ -82,6 +82,15 @@ def origin_is_allowed(
     admit non-browser clients must special-case that before calling; the
     decision is theirs, not this function's.
 
+    On trusting ``Host``: a client can of course send any ``Host`` it likes,
+    and so make its own ``Origin`` match. That does not weaken anything here.
+    The attack this guards against needs a *browser* to attach the victim's
+    cookies, and a browser sets ``Host`` from the URL being connected to --
+    script on the attacker's page cannot override it. An attacker willing to
+    forge both headers is simply an unauthenticated client talking to the
+    server directly, which is what the proxy secret and the auth header are
+    for.
+
     Args:
         origin: Raw ``Origin`` header value.
         allowed_hosts: Extra hostnames to accept, already-normalized or not.

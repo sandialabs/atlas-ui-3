@@ -18,11 +18,7 @@ from pydantic import BaseModel, Field
 
 from atlas.core.auth import get_user_from_header
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
-from atlas.core.websocket_origin import (
-    LOOPBACK_HOSTS,
-    origin_is_allowed,
-    parse_allowed_hosts,
-)
+from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.agent_portal import (
     PresetNotFoundError,
@@ -1206,9 +1202,6 @@ async def list_audit(
     _require_enabled()
     store = get_portal_store()
     return {"events": store.list_audit(current_user, limit=limit)}
-
-
-_LOOPBACK_HOSTS = LOOPBACK_HOSTS
 
 
 def _extra_allowed_origin_hosts() -> frozenset[str]:
