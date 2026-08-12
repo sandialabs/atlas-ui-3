@@ -185,6 +185,21 @@ async def lifespan(app: FastAPI):
     # Initialize configuration
     config = app_factory.get_config_manager()
 
+    # CONFIG: Validate the MCP token encryption key at startup.
+    #
+    # The key is only resolved lazily, inside request handlers such as
+    # GET /api/config. Without this check a server started with a missing
+    # key (or with the .env.example placeholder still in place) boots
+    # "healthy" — /api/health and /api/config/shell both return 200 — and
+    # then answers /api/config with a bare 500 whose cause is invisible to
+    # the frontend. Fail here instead, with the actionable message.
+    from atlas.modules.mcp_tools.token_storage import resolve_encryption_key
+    try:
+        resolve_encryption_key(app_settings=config.app_settings)
+    except RuntimeError as e:
+        logger.error("STARTUP FAILED: %s", e)
+        raise
+
     # SECURITY WARNING: Check for missing proxy secret in production
     if not config.app_settings.debug_mode:
         if not config.app_settings.feature_proxy_secret_enabled:

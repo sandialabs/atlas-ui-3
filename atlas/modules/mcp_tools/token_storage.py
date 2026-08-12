@@ -35,13 +35,73 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger(__name__)
 
-# Placeholder values that ship in the repository (e.g. in .env.example).
-# Accepting one would encrypt every user's tokens with a repo-public secret,
-# so they are rejected exactly like a missing key. Keep this in sync with the
-# placeholder written to .env.example.
+# Minimum accepted key length. Every surface that documents this variable
+# (.env.example, docker-compose.yml, the installation and python-package
+# guides) promises "at least 32 characters"; the gate below is what makes
+# that promise true rather than advisory.
+MIN_ENCRYPTION_KEY_LENGTH = 32
+
+# Placeholder values that ship in the repository (e.g. in .env.example and
+# docker-compose.yml). Accepting one would encrypt every user's tokens with a
+# repo-public secret, so they are rejected exactly like a missing key. Keep
+# this in sync with any placeholder value committed to the repository.
 _PLACEHOLDER_ENCRYPTION_KEYS = frozenset({
     "your-random-string-at-least-32-chars",
+    "dev-only-mcp-token-encryption-key-change-me",
 })
+
+_GENERATE_HINT = (
+    "Generate one with: python -c \"import secrets; "
+    "print(secrets.token_urlsafe(32))\""
+)
+
+_ENCRYPTION_KEY_ERROR = (
+    "MCP_TOKEN_ENCRYPTION_KEY is not set (or is still a placeholder that "
+    "ships in this repository). Atlas refuses to start MCP token storage "
+    "without an explicit, unique encryption key, because a "
+    "generated ephemeral key would make previously encrypted "
+    "tokens unreadable after every restart and a public "
+    "placeholder would leave stored tokens decryptable by anyone "
+    "with the repository. Set MCP_TOKEN_ENCRYPTION_KEY to a stable "
+    f"secret of at least {MIN_ENCRYPTION_KEY_LENGTH} characters and restart "
+    f"the application. {_GENERATE_HINT}"
+)
+
+_ENCRYPTION_KEY_TOO_SHORT_ERROR = (
+    f"MCP_TOKEN_ENCRYPTION_KEY must be at least {MIN_ENCRYPTION_KEY_LENGTH} "
+    "characters. It is stretched with PBKDF2 under a fixed salt, so a short "
+    "value is brute-forceable offline by anyone who obtains the token store. "
+    f"{_GENERATE_HINT}"
+)
+
+
+def resolve_encryption_key(
+    encryption_key: Optional[str] = None,
+    app_settings: Any = None,
+) -> str:
+    """Return the configured token-encryption key, or raise if unusable.
+
+    Rejects a missing key, a placeholder committed to this repository, and a
+    key shorter than :data:`MIN_ENCRYPTION_KEY_LENGTH`: encrypting user tokens
+    with a repo-public or trivially short secret is no better than not
+    encrypting them. Callers that only want to validate configuration (e.g.
+    the startup check in ``atlas/main.py``) can discard the return value.
+    """
+    key_source = encryption_key
+    if not key_source:
+        if app_settings is None:
+            # Import here to avoid circular imports. Deferred until we
+            # actually need it so callers that already hold a candidate key
+            # (e.g. ``atlas-init``) can validate without loading settings.
+            from atlas.modules.config.config_manager import get_app_settings
+            app_settings = get_app_settings()
+        key_source = app_settings.mcp_token_encryption_key
+
+    if not key_source or key_source in _PLACEHOLDER_ENCRYPTION_KEYS:
+        raise RuntimeError(_ENCRYPTION_KEY_ERROR)
+    if len(key_source) < MIN_ENCRYPTION_KEY_LENGTH:
+        raise RuntimeError(_ENCRYPTION_KEY_TOO_SHORT_ERROR)
+    return key_source
 
 
 class AuthenticationRequiredException(Exception):
@@ -179,23 +239,7 @@ class MCPTokenStorage:
         # filesystem, so a misconfigured deployment fails cleanly without
         # leaving empty token directories behind. Prefer the passed arg,
         # then the configured setting.
-        key_source = encryption_key or app_settings.mcp_token_encryption_key
-        if not key_source or key_source in _PLACEHOLDER_ENCRYPTION_KEYS:
-            # Refuse to operate without a real, operator-supplied key. A
-            # generated ephemeral key silently made previously-encrypted
-            # tokens unreadable after every restart, and the shipped
-            # placeholder would encrypt tokens with a repo-public secret —
-            # both are worse than failing loudly.
-            raise RuntimeError(
-                "MCP_TOKEN_ENCRYPTION_KEY is not set (or is still the shipped "
-                "placeholder). Atlas refuses to start MCP token storage "
-                "without an explicit, unique encryption key, because a "
-                "generated ephemeral key would make previously encrypted "
-                "tokens unreadable after every restart and the public "
-                "placeholder would leave stored tokens decryptable by anyone "
-                "with the repository. Set MCP_TOKEN_ENCRYPTION_KEY to a stable "
-                "secret of at least 32 characters and restart the application."
-            )
+        key_source = resolve_encryption_key(encryption_key, app_settings)
 
         self._storage_dir = storage_dir or self._get_storage_dir(app_settings)
         self._storage_dir.mkdir(parents=True, exist_ok=True)
