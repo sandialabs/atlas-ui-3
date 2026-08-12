@@ -474,6 +474,15 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("WEBSOCKET_ALLOWED_ORIGINS"),
     )
 
+    # Ceiling on max_tokens for MCP sampling requests. The value in a sampling
+    # request comes from the MCP server, not from Atlas, so without a ceiling
+    # a server can bill an arbitrary amount against a metered API.
+    mcp_sampling_max_tokens: int = Field(
+        default=4096,
+        description="Maximum max_tokens honoured for an MCP sampling request",
+        validation_alias=AliasChoices("MCP_SAMPLING_MAX_TOKENS"),
+    )
+
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
     capability_token_ttl_seconds: int = 3600

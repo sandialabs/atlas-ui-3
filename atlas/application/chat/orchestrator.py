@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.domain.errors import AuthorizationError, SessionNotFoundError
 from atlas.domain.messages.models import Message, MessageRole
@@ -169,6 +170,31 @@ class ChatOrchestrator:
             code="MODEL_ACCESS_DENIED",
         )
 
+    def _tools_are_enabled(self) -> bool:
+        """Whether the tools feature is on for this deployment."""
+        if not self.config_manager:
+            return True
+        return bool(getattr(self.config_manager.app_settings, "feature_tools_enabled", False))
+
+    def _clamp_agent_steps(self, requested: Any) -> int:
+        """Clamp a client-supplied agent step count to the configured maximum.
+
+        ``agent_max_steps`` arrives straight off the WebSocket frame, and each
+        step is a metered model call plus any tool calls it makes. Without a
+        server-side ceiling a single request can multiply cost arbitrarily.
+        Non-integer and negative values fall back to the configured default
+        rather than failing the turn.
+        """
+        configured = 10
+        if self.config_manager:
+            configured = int(getattr(self.config_manager.app_settings, "agent_max_steps", 10) or 10)
+
+        if isinstance(requested, bool) or not isinstance(requested, int):
+            return configured
+        if requested < 1:
+            return configured
+        return min(requested, configured)
+
     async def execute(
         self,
         session_id: UUID,
@@ -217,6 +243,30 @@ class ChatOrchestrator:
         # string comes straight off the client, so listing-layer filtering alone
         # is bypassable -- a crafted request must be rejected here too.
         await self._ensure_model_authorized(model, user_email)
+
+        # Enforce FEATURE_TOOLS_ENABLED server-side. The flag previously only
+        # filtered what /api/config advertised, so a crafted client could still
+        # submit selected_tools, selected_prompts, or agent_mode and have them
+        # honoured -- the flag looked like a security boundary but was purely
+        # cosmetic. Enforced here rather than in the WebSocket handler so
+        # programmatic callers (AtlasClient) are covered by the same rule.
+        if not self._tools_are_enabled():
+            if selected_tools or selected_prompts or agent_mode:
+                logger.warning(
+                    "Discarding tool request from %s: tools are disabled "
+                    "(tools=%s prompts=%s agent_mode=%s)",
+                    sanitize_for_logging(user_email or "unknown"),
+                    bool(selected_tools),
+                    bool(selected_prompts),
+                    bool(agent_mode),
+                )
+            selected_tools = None
+            selected_prompts = None
+            agent_mode = False
+
+        # Bound the client-supplied step count to the operator's maximum.
+        if "agent_max_steps" in kwargs:
+            kwargs["agent_max_steps"] = self._clamp_agent_steps(kwargs.get("agent_max_steps"))
 
         # Rewind/edit-and-resubmit: drop the targeted prompt and everything after
         # it so the new content takes its place in a single linear thread.

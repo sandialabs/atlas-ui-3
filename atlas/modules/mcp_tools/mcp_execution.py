@@ -533,7 +533,7 @@ class ExecutionMixin:
             if update_cb is not None:
                 async with self._use_log_callback(_tool_log_callback):
                     async with self._use_elicitation_context(server_name, tool_call, update_cb):
-                        async with self._use_sampling_context(server_name, tool_call, update_cb):
+                        async with self._use_sampling_context(server_name, tool_call, update_cb, user_email):
                             raw_result = await self.call_tool(
                                 server_name,
                                 actual_tool_name,
@@ -546,7 +546,7 @@ class ExecutionMixin:
                             )
             else:
                 async with self._use_elicitation_context(server_name, tool_call, update_cb):
-                    async with self._use_sampling_context(server_name, tool_call, update_cb):
+                    async with self._use_sampling_context(server_name, tool_call, update_cb, user_email):
                         raw_result = await self.call_tool(
                             server_name,
                             actual_tool_name,
