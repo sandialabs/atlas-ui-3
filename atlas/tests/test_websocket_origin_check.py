@@ -84,12 +84,28 @@ def test_missing_origin_is_not_allowed_by_the_primitive():
     assert origin_is_allowed("") is False
 
 
-def test_loopback_is_allowed_when_the_target_is_unknown():
-    """No request_host: the local-dev and Agent Portal case."""
-    assert origin_is_allowed("http://localhost:5173") is True
-    assert origin_is_allowed("http://127.0.0.1:8000") is True
-    assert origin_is_allowed("http://[::1]:8000") is True
-    assert origin_is_allowed("https://localhost") is True
+def test_loopback_requires_an_explicit_opt_in():
+    """Permissiveness must be requested, not inferred from a missing Host.
+
+    Inferring it meant an unparseable Host header produced target=None and
+    silently took the same branch as a caller that had opted in.
+    """
+    assert origin_is_allowed("http://localhost:5173") is False
+    assert origin_is_allowed("http://127.0.0.1:8000") is False
+
+
+def test_loopback_is_allowed_when_the_caller_opts_in():
+    """The Agent Portal case: it binds loopback, so any loopback origin is fine."""
+    assert origin_is_allowed("http://localhost:5173", trust_loopback=True) is True
+    assert origin_is_allowed("http://127.0.0.1:8000", trust_loopback=True) is True
+    assert origin_is_allowed("http://[::1]:8000", trust_loopback=True) is True
+    assert origin_is_allowed("https://localhost", trust_loopback=True) is True
+
+
+@pytest.mark.parametrize("bad_host", ["", "   ", "host/x//y", "http://"])
+def test_unparseable_host_does_not_become_permissive(bad_host):
+    """A malformed Host must not be treated like an opt-in to loopback trust."""
+    assert origin_is_allowed("http://localhost:3000", request_host=bad_host) is False
 
 
 def test_loopback_is_allowed_when_the_target_is_also_loopback():

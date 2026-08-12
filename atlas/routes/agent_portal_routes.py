@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from atlas.core.auth import resolve_user_from_auth_header
+from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 from atlas.infrastructure.app_factory import app_factory
@@ -1223,10 +1223,14 @@ def _origin_is_allowed(origin: Optional[str]) -> bool:
     header and does not admit a missing Origin: the portal is a dev-only
     preview that grants command execution, so its allowlist stays explicit.
     """
-    return origin_is_allowed(origin, _extra_allowed_origin_hosts())
+    # trust_loopback: the portal is a dev-only preview that binds loopback, so
+    # any loopback origin is legitimate here regardless of the Host header.
+    return origin_is_allowed(
+        origin, _extra_allowed_origin_hosts(), trust_loopback=True
+    )
 
 
-def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
+async def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
     """Mirror the authentication flow used by /ws for consistency."""
     config_manager = app_factory.get_config_manager()
     is_debug_mode = config_manager.app_settings.debug_mode
@@ -1244,7 +1248,7 @@ def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
     app_settings = config_manager.app_settings
     x_header = websocket.headers.get(app_settings.auth_user_header)
     if x_header:
-        user_email = resolve_user_from_auth_header(
+        user_email = await resolve_user_from_auth_header_async(
             x_header,
             header_type=app_settings.auth_user_header_type,
             expected_alb_arn=app_settings.auth_aws_expected_alb_arn,
@@ -1289,7 +1293,7 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
         await websocket.close(code=4403, reason="Origin not allowed")
         return
 
-    user_email = _authenticate_ws(websocket)
+    user_email = await _authenticate_ws(websocket)
     if not user_email:
         await websocket.close(code=1008, reason="Authentication required")
         return

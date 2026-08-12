@@ -38,7 +38,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
-from atlas.core.auth import resolve_user_from_auth_header
+from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from atlas.core.metrics_logger import log_metric
@@ -561,7 +561,9 @@ async def websocket_endpoint(websocket: WebSocket):
     auth_header_name = app_settings.auth_user_header
     x_email_header = websocket.headers.get(auth_header_name)
     if x_email_header:
-        user_email = resolve_user_from_auth_header(
+        # Async form: JWT verification can fetch the ALB public key with a
+        # blocking 5s httpx call, which would stall the whole event loop.
+        user_email = await resolve_user_from_auth_header_async(
             x_email_header,
             header_type=app_settings.auth_user_header_type,
             expected_alb_arn=app_settings.auth_aws_expected_alb_arn,

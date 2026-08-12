@@ -29,10 +29,12 @@ __all__ = [
     "MAX_EXPONENT",
     "MAX_EXPRESSION_LENGTH",
     "MAX_RESULT_BITS",
+    "MAX_SEQUENCE_ELEMENTS",
     "UnsafeExpressionError",
     "guard_exponent",
     "guard_operand_size",
     "safe_eval_math",
+    "total_elements",
 ]
 
 # Bound on input length. Kept as a named constant so the tool docstring, the
@@ -109,9 +111,43 @@ _COMPARE_OPS: Mapping[type, Callable[[Any, Any], Any]] = {
 _ALLOWED_CONSTANTS = (int, float, bool)
 
 
+# Caller-facing wording for the node types actually reachable from a
+# mathematical expression. The message is the only feedback an LLM caller
+# gets, so "Unsupported expression element: List" -- naming a CPython AST
+# class -- turns a fixable mistake into a dead end, where "use parentheses:
+# sum((1, 2, 3))" turns it into a successful retry.
+_NODE_GUIDANCE = {
+    "List": "list syntax is not supported; use parentheses, e.g. sum((1, 2, 3))",
+    "Dict": "dict syntax is not supported",
+    "Set": "set syntax is not supported; use parentheses for a group of numbers",
+    "Attribute": "attribute access (x.y) is not supported",
+    "Subscript": "indexing (x[0]) is not supported",
+    "ListComp": "comprehensions are not supported",
+    "SetComp": "comprehensions are not supported",
+    "DictComp": "comprehensions are not supported",
+    "GeneratorExp": "generator expressions are not supported",
+    "Lambda": "lambdas are not supported",
+    "IfExp": "conditional expressions (a if b else c) are not supported",
+    "BoolOp": "and/or are not supported; this evaluates numbers, not logic",
+    "JoinedStr": "f-strings are not supported",
+    "FormattedValue": "f-strings are not supported",
+    "NamedExpr": "assignment (:=) is not supported",
+    "Await": "await is not supported",
+    "Starred": "argument unpacking (*args) is not supported",
+    "Slice": "slicing is not supported",
+}
+
+
 def _describe(node: ast.AST) -> str:
-    """Human-readable name for a rejected node, for the error message."""
-    return type(node).__name__
+    """Caller-facing description of a rejected node.
+
+    Falls back to the AST class name for node types not worth enumerating --
+    those are unreachable from anything resembling a maths expression, so the
+    precise wording matters less than not crashing on them.
+    """
+    name = type(node).__name__
+    guidance = _NODE_GUIDANCE.get(name)
+    return guidance if guidance else name
 
 
 def _bit_length(value: Any) -> int:
@@ -159,6 +195,34 @@ def guard_operand_size(value: Any, limit: int = MAX_EXPONENT) -> Any:
     return value
 
 
+def total_elements(value: Any, limit: int = MAX_SEQUENCE_ELEMENTS) -> int:
+    """Count elements in a possibly-nested tuple, stopping once past ``limit``.
+
+    Counting only the top level is not enough. Repetition composes: each
+    ``* n`` multiplies whatever the operand already contains, so
+    ``(((1,)*1000,)*1000,)*1000`` keeps every individual operand at one
+    top-level element while building 10**9 leaves, in 25 characters.
+
+    Returns ``limit + 1`` as soon as the budget is exceeded, so a structure
+    that is already enormous costs no more to reject than a small one.
+    """
+    if not isinstance(value, tuple):
+        return 1
+
+    counted = 0
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, tuple):
+            counted += len(item)
+            if counted > limit:
+                return limit + 1
+            pending.extend(item)
+        if counted > limit:
+            return limit + 1
+    return counted
+
+
 def _guard_repetition(left: Any, right: Any) -> None:
     """Reject sequence repetition that would allocate an enormous tuple.
 
@@ -168,7 +232,10 @@ def _guard_repetition(left: Any, right: Any) -> None:
     """
     for sequence, count in ((left, right), (right, left)):
         if isinstance(sequence, tuple) and isinstance(count, int) and not isinstance(count, bool):
-            if len(sequence) * abs(count) > MAX_SEQUENCE_ELEMENTS:
+            # Size the operand recursively: nesting is how repetition evades a
+            # top-level count.
+            existing = total_elements(sequence)
+            if existing * abs(count) > MAX_SEQUENCE_ELEMENTS:
                 raise UnsafeExpressionError(
                     f"Sequence too large (limit {MAX_SEQUENCE_ELEMENTS} elements)"
                 )
@@ -264,7 +331,7 @@ def _evaluate(node: ast.AST, names: Mapping[str, Any]) -> Any:
 
     # Everything not handled above -- Attribute, Subscript, comprehensions,
     # Lambda, IfExp, JoinedStr, Await, NamedExpr, and the rest -- lands here.
-    raise UnsafeExpressionError(f"Unsupported expression element: {_describe(node)}")
+    raise UnsafeExpressionError(f"Unsupported expression: {_describe(node)}")
 
 
 def safe_eval_math(expression: str, names: Mapping[str, Any]) -> Any:

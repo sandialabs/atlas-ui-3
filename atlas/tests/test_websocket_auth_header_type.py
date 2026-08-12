@@ -18,7 +18,10 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from atlas.core.auth import resolve_user_from_auth_header
+from atlas.core.auth import (
+    resolve_user_from_auth_header,
+    resolve_user_from_auth_header_async,
+)
 
 ALB_ARN = "arn:aws:elasticloadbalancing:us-east-1:1234:loadbalancer/app/x/y"
 
@@ -71,6 +74,103 @@ def test_jwt_mode_delegates_to_the_verifier():
         )
     assert result == "ok@example.com"
     verifier.assert_called_once_with("some.jwt.value", ALB_ARN, "us-west-2")
+
+
+# --- the async resolver ---------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_async_resolver_matches_the_sync_one_for_plain_headers():
+    assert await resolve_user_from_auth_header_async(
+        " alice@example.com ", header_type="email-string"
+    ) == "alice@example.com"
+    assert await resolve_user_from_auth_header_async(
+        None, header_type="email-string"
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_async_resolver_rejects_unsigned_values_in_jwt_mode():
+    assert await resolve_user_from_auth_header_async(
+        "attacker@example.com", header_type="aws-alb-jwt", expected_alb_arn=ALB_ARN
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_jwt_verification_runs_off_the_event_loop():
+    """The key fetch is a blocking 5s httpx call; it must not block the loop.
+
+    Asserting the verifier runs on a different thread is the observable
+    consequence of using asyncio.to_thread, and is what stops one cache miss
+    stalling every other in-flight connection.
+    """
+    import threading
+
+    loop_thread = threading.get_ident()
+    seen = {}
+
+    def _verifier(token, arn, region):
+        seen["thread"] = threading.get_ident()
+        return "alice@example.com"
+
+    with patch("atlas.core.auth.get_user_from_aws_alb_jwt", _verifier):
+        result = await resolve_user_from_auth_header_async(
+            "a.jwt", header_type="aws-alb-jwt", expected_alb_arn=ALB_ARN
+        )
+
+    assert result == "alice@example.com"
+    assert seen["thread"] != loop_thread
+
+
+@pytest.mark.asyncio
+async def test_plain_headers_do_not_pay_for_a_thread_hop():
+    """No I/O on this path, so pushing it through a thread would cost more."""
+    import threading
+
+    loop_thread = threading.get_ident()
+    with patch("atlas.core.auth.get_user_from_aws_alb_jwt") as verifier:
+        await resolve_user_from_auth_header_async(
+            "alice@example.com", header_type="email-string"
+        )
+    verifier.assert_not_called()
+    assert threading.get_ident() == loop_thread
+
+
+# --- ALB key cache --------------------------------------------------------
+
+def test_failed_key_fetches_are_negatively_cached():
+    """Otherwise a fresh `kid` per request forces one outbound call per upgrade."""
+    import httpx
+
+    from atlas.core import auth as auth_module
+
+    auth_module._alb_key_cache.clear()
+    calls = {"n": 0}
+
+    def _fail(*args, **kwargs):
+        calls["n"] += 1
+        raise httpx.RequestError("no network")
+
+    with patch("atlas.core.auth.httpx.get", _fail):
+        for _ in range(5):
+            assert auth_module._get_alb_public_key("abc123", "us-east-1") is None
+
+    assert calls["n"] == 1, "failed fetch was retried instead of negatively cached"
+    auth_module._alb_key_cache.clear()
+
+
+def test_alb_key_cache_is_bounded():
+    """`kid` comes from an unverified header, so the cache is attacker-influenced."""
+    import httpx
+
+    from atlas.core import auth as auth_module
+
+    auth_module._alb_key_cache.clear()
+    with patch("atlas.core.auth.httpx.get", side_effect=httpx.RequestError("x")):
+        for i in range(auth_module._ALB_CACHE_MAX_ENTRIES + 50):
+            auth_module._get_alb_public_key(f"kid{i}", "us-east-1")
+
+    assert len(auth_module._alb_key_cache) <= auth_module._ALB_CACHE_MAX_ENTRIES
+    auth_module._alb_key_cache.clear()
 
 
 # --- the chat socket ------------------------------------------------------
@@ -131,7 +231,8 @@ def test_chat_socket_accepts_a_verified_token_in_jwt_mode(jwt_mode_factory):
 
 # --- the agent portal socket ---------------------------------------------
 
-def test_agent_portal_ws_rejects_unsigned_header_in_jwt_mode():
+@pytest.mark.asyncio
+async def test_agent_portal_ws_rejects_unsigned_header_in_jwt_mode():
     from atlas.routes import agent_portal_routes as ap
 
     with patch.object(ap.app_factory, "get_config_manager", return_value=_jwt_config()):
@@ -139,10 +240,11 @@ def test_agent_portal_ws_rejects_unsigned_header_in_jwt_mode():
             headers={"X-User-Email": "attacker@example.com"},
             query_params={},
         )
-        assert ap._authenticate_ws(socket) is None
+        assert await ap._authenticate_ws(socket) is None
 
 
-def test_agent_portal_ws_accepts_a_verified_token_in_jwt_mode():
+@pytest.mark.asyncio
+async def test_agent_portal_ws_accepts_a_verified_token_in_jwt_mode():
     from atlas.routes import agent_portal_routes as ap
 
     with patch.object(ap.app_factory, "get_config_manager", return_value=_jwt_config()), \
@@ -151,10 +253,11 @@ def test_agent_portal_ws_accepts_a_verified_token_in_jwt_mode():
             headers={"X-User-Email": "a.valid.jwt"},
             query_params={},
         )
-        assert ap._authenticate_ws(socket) == "alice@example.com"
+        assert await ap._authenticate_ws(socket) == "alice@example.com"
 
 
-def test_plain_mode_still_works_on_both_sockets():
+@pytest.mark.asyncio
+async def test_plain_mode_still_works_on_both_sockets():
     """The default email-string deployment is unaffected by the change."""
     from atlas.routes import agent_portal_routes as ap
 
@@ -165,4 +268,4 @@ def test_plain_mode_still_works_on_both_sockets():
             headers={"X-User-Email": "alice@example.com"},
             query_params={},
         )
-        assert ap._authenticate_ws(socket) == "alice@example.com"
+        assert await ap._authenticate_ws(socket) == "alice@example.com"

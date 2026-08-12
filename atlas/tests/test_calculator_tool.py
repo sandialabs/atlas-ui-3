@@ -63,6 +63,32 @@ def test_expressions_evaluate(evaluate, expression, expected):
     assert _result(payload) == expected
 
 
+@pytest.mark.parametrize(
+    "expression,expected",
+    [
+        # The bounded wrappers must not break legitimate calls. Only their
+        # rejection branches were exercised before, so a tightening that broke
+        # round(x, -2) would have landed green.
+        ("round(3.14159, 2)", 3.14),
+        ("round(2.5)", 2),
+        ("round(1234, -2)", 1200),
+        ("round(-1234, -2)", -1200),
+        ("round(5, 0)", 5),
+        ("perm(5)", 120),
+        ("perm(5, 2)", 20),
+        ("comb(5, 2)", 10),
+        ("factorial(0)", 1),
+        ("sum((1, 2, 3))", 6),
+        ("(1,) * 5", (1, 1, 1, 1, 1)),
+        ("((1, 2), (3, 4))", ((1, 2), (3, 4))),
+    ],
+)
+def test_bounded_wrappers_accept_legitimate_calls(evaluate, expression, expected):
+    payload = evaluate(expression)
+    assert _is_error(payload) is False, payload["results"].get("error")
+    assert _result(payload) == expected
+
+
 def test_three_argument_pow_still_works(evaluate):
     """Modular pow is cheap regardless of exponent, so it must not be bounded."""
     payload = evaluate("pow(9, 999999, 7)")
@@ -176,8 +202,14 @@ def test_resource_bounds_reject_quickly(evaluate):
     """
     expensive = [
         "9**9**9", "pow(9, 99999999)", "factorial(3000000)",
-        "1 << 10000000000", "(1,)*(10**8)", "round(5, -999999999)",
+        "1 << 10000000000", "round(5, -999999999)",
         "((9**999)**999)**999",
+        # Sequence repetition, flat and nested. Nesting is how repetition
+        # evades a guard that counts only top-level elements: each operand
+        # below stays at one element while the leaf count multiplies.
+        "(1,)*(10**8)",
+        "((1,)*1000,)*1000",
+        "(((1,)*1000,)*1000,)*1000",
     ]
     for expression in expensive:
         started = time.perf_counter()

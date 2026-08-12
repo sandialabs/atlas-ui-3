@@ -12,6 +12,7 @@ from typing import Any, Dict, Union
 
 from atlas.mcp_shared.safe_math_eval import (
     MAX_EXPRESSION_LENGTH,
+    MAX_SEQUENCE_ELEMENTS,
     UnsafeExpressionError,
     guard_exponent,
     guard_operand_size,
@@ -54,10 +55,24 @@ def _result_is_returnable(value: Any) -> bool:
     """
     limit = sys.get_int_max_str_digits()
 
+    # Hard node budget. The evaluator's sequence guard should mean nothing
+    # this large ever reaches here, but this function must not be the thing
+    # that wedges the server if it does: the calculator is a synchronous stdio
+    # server, so an unbounded walk blocks every user, not just the caller.
+    # A structure past the budget is refused rather than inspected further --
+    # it could not be returned anyway.
+    budget = MAX_SEQUENCE_ELEMENTS * 10
+    visited = 0
+
     pending = [value]
     while pending:
+        visited += 1
+        if visited > budget:
+            return False
         item = pending.pop()
         if isinstance(item, tuple):  # divmod() and modf() return pairs
+            if len(item) > budget:
+                return False
             pending.extend(item)
         elif isinstance(item, bool):
             continue
@@ -176,7 +191,9 @@ def evaluate(expression: str) -> Dict[str, Any]:
     - Built-in functions: abs(), round(), min(), max(), sum(), pow(), divmod()
 
     **Mathematical Constants:**
-    - pi, e, tau, inf, nan
+    - pi, e, tau
+    - inf, nan (usable as arguments, e.g. `isinf(inf)`, but not as the final
+      result -- they have no valid JSON encoding)
 
     **Trigonometric Functions:**
     - sin(), cos(), tan(), asin(), acos(), atan(), atan2()

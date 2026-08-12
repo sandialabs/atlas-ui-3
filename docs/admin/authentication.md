@@ -97,6 +97,21 @@ between Atlas and untrusted applications.
 `atlas.example.com` and `https://atlas.example.com` are equivalent, and any
 scheme or port in an entry is discarded.
 
+**Troubleshooting a rejected upgrade.** The origin check runs *before* the
+connection is accepted, so the browser cannot receive the 1008 close code and
+its reason — it reports a bare 1006 ("abnormal closure") with no explanation,
+and the UI can only surface reasons for 1008. A socket that fails to connect
+with 1006 and no further detail is the expected symptom. The reason is in the
+backend log:
+
+```
+WS rejected disallowed origin=https://example.com client=...
+```
+
+If you see that for an origin that should be valid, your proxy is likely
+rewriting `Host`; add the browser-facing hostname to
+`WEBSOCKET_ALLOWED_ORIGINS`.
+
 A request with **no** `Origin` header is allowed. Browsers always send the
 header on an upgrade, so its absence means a non-browser client — a CLI, a
 test harness, a service integration — and those carry no ambient cookies for
