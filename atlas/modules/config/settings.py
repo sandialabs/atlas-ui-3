@@ -454,6 +454,26 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("AGENT_PORTAL_ALLOWED_ORIGINS"),
     )
 
+    # Origin validation for the main chat WebSocket at /ws. A WS upgrade skips
+    # the CORS preflight, so without this check any page the user visits can
+    # open an authenticated socket on their behalf (cross-site WebSocket
+    # hijacking). Same-origin requests and loopback are always allowed, so the
+    # default needs no configuration; the allowlist below is only for
+    # deployments where the proxy rewrites Host to something other than the
+    # hostname the browser used.
+    feature_websocket_origin_check_enabled: bool = Field(
+        default=True,
+        description="Reject chat WebSocket upgrades from disallowed origins. "
+                    "Disable only if a proxy rewrites Host and the allowlist "
+                    "cannot express the deployment's hostnames.",
+        validation_alias=AliasChoices("FEATURE_WEBSOCKET_ORIGIN_CHECK_ENABLED"),
+    )
+    websocket_allowed_origins: str = Field(
+        default="",
+        description="Comma-separated extra Origin hostnames allowed for the chat WebSocket",
+        validation_alias=AliasChoices("WEBSOCKET_ALLOWED_ORIGINS"),
+    )
+
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
     capability_token_ttl_seconds: int = 3600

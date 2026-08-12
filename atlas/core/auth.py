@@ -1,5 +1,6 @@
 """Authentication and authorization module."""
 
+import asyncio
 import hmac
 import logging
 import re
@@ -13,8 +14,28 @@ from atlas.modules.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 
-# Cache with TTL for ALB public keys: {(kid, region): (key, expiry_time)}
-_alb_key_cache: Dict[Tuple[str, str], Tuple[str, datetime]] = {}
+# Cache with TTL for ALB public keys: {(kid, region): (key_or_None, expiry)}.
+# A None value is a negatively cached failure -- see _get_alb_public_key.
+_alb_key_cache: Dict[Tuple[str, str], Tuple[Optional[str], datetime]] = {}
+
+# Short TTL for failed fetches: long enough to absorb a burst of bogus `kid`
+# values, short enough that a transient network failure recovers on its own.
+_ALB_NEGATIVE_TTL = timedelta(minutes=5)
+
+# Ceiling on cache entries. `kid` is attacker-influenced (it comes from an
+# unverified JWT header), so without a bound the negative cache is itself a
+# memory-growth lever.
+_ALB_CACHE_MAX_ENTRIES = 256
+
+
+def _prune_alb_cache() -> None:
+    """Drop expired entries, then oldest-first if still over the ceiling."""
+    now = datetime.utcnow()
+    for key in [k for k, (_, exp) in _alb_key_cache.items() if exp <= now]:
+        _alb_key_cache.pop(key, None)
+    while len(_alb_key_cache) >= _ALB_CACHE_MAX_ENTRIES:
+        oldest = min(_alb_key_cache, key=lambda k: _alb_key_cache[k][1])
+        _alb_key_cache.pop(oldest, None)
 
 
 async def is_user_in_group(user_id: str, group_id: str) -> bool:
@@ -139,21 +160,36 @@ def _get_alb_public_key(kid: str, aws_region: str) -> Optional[str]:
             del _alb_key_cache[cache_key]
 
     url = f'https://public-keys.auth.elb.{aws_region}.amazonaws.com/{kid}'
+
+    def _remember_failure() -> None:
+        """Negatively cache a failed fetch.
+
+        Without this, a caller presenting a fresh ``kid`` on every request
+        forces one outbound HTTPS call per upgrade -- an amplification lever
+        against both this process and the ALB key endpoint. The TTL is short
+        so a genuine transient failure recovers quickly.
+        """
+        _prune_alb_cache()
+        _alb_key_cache[cache_key] = (None, now + _ALB_NEGATIVE_TTL)
+
     try:
         response = httpx.get(url, timeout=5.0)
         response.raise_for_status()
         pub_key = response.text
 
         # Cache with 1-hour TTL
+        _prune_alb_cache()
         expiry = now + timedelta(hours=1)
         _alb_key_cache[cache_key] = (pub_key, expiry)
 
         return pub_key
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error fetching ALB public key from {url}: {e.response.status_code}")
+        _remember_failure()
         return None
     except httpx.RequestError as e:
         logger.error(f"Error fetching ALB public key from {url}: {e}")
+        _remember_failure()
         return None
 
 
@@ -231,7 +267,78 @@ def get_user_from_aws_alb_jwt(encoded_jwt, expected_alb_arn, aws_region):
 
 
 def get_user_from_header(x_email_header: Optional[str]) -> Optional[str]:
-    """Extract user email from authentication header value."""
+    """Extract user email from a plain ``email-string`` authentication header.
+
+    This performs NO verification -- it trusts the value entirely, which is
+    only sound when a reverse proxy has authenticated the request and strips
+    client-supplied copies of the header. Call
+    :func:`resolve_user_from_auth_header` instead of calling this directly, so
+    the configured header type is always honoured.
+    """
     if not x_email_header:
         return None
     return x_email_header.strip()
+
+
+def resolve_user_from_auth_header(
+    header_value: Optional[str],
+    *,
+    header_type: str,
+    expected_alb_arn: str = "",
+    aws_region: str = "us-east-1",
+) -> Optional[str]:
+    """Resolve the authenticated user from the configured auth header.
+
+    The single place where ``AUTH_USER_HEADER_TYPE`` is interpreted. It exists
+    because it previously was not: HTTP middleware branched on the header type
+    and cryptographically verified ``aws-alb-jwt``, while both WebSocket
+    endpoints called :func:`get_user_from_header` unconditionally. In an
+    ALB-JWT deployment that meant HTTP verified an ES256 signature and the
+    signer ARN, while a WebSocket upgrade accepted any non-empty header value
+    as the user's identity -- a full authentication bypass on the socket for
+    anyone able to reach the backend directly or through a proxy that does not
+    strip the header.
+
+    Args:
+        header_value: Raw value of the configured auth header.
+        header_type: ``"aws-alb-jwt"`` for a signed ALB token, anything else
+            for a trusted plain email string.
+        expected_alb_arn: ARN the JWT's signer must match, for ALB mode.
+        aws_region: Region whose public keys verify the JWT, for ALB mode.
+
+    Returns:
+        The verified user email, or None if the header is absent or fails
+        verification.
+    """
+    if not header_value:
+        return None
+    if header_type == "aws-alb-jwt":
+        return get_user_from_aws_alb_jwt(header_value, expected_alb_arn, aws_region)
+    return get_user_from_header(header_value)
+
+
+async def resolve_user_from_auth_header_async(
+    header_value: Optional[str],
+    *,
+    header_type: str,
+    expected_alb_arn: str = "",
+    aws_region: str = "us-east-1",
+) -> Optional[str]:
+    """Async form of :func:`resolve_user_from_auth_header`.
+
+    JWT verification can fetch the ALB public key over the network, and that
+    fetch is a synchronous ``httpx.get`` with a 5-second timeout. Called
+    directly from a coroutine it blocks the event loop, so one cache miss
+    stalls every other in-flight request and connection for up to 5 seconds.
+    Running it in a worker thread keeps the loop free.
+
+    The plain-header path does no I/O, so it stays inline -- pushing every
+    request through a thread would cost more than it saves.
+    """
+    if not header_value:
+        return None
+    if header_type != "aws-alb-jwt":
+        return get_user_from_header(header_value)
+    return await asyncio.to_thread(
+        get_user_from_aws_alb_jwt, header_value, expected_alb_arn, aws_region
+    )

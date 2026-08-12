@@ -61,6 +61,78 @@ WebSocket connections follow the same authentication model as HTTP requests:
 - If the `/api/config` endpoint returns an error (e.g., 401), the UI displays "Chat UI (Unauthenticated)" with user shown as "Unauthenticated"
 - If the WebSocket connection is rejected with code 1008, the connection status displays the authentication error reason
 
+### WebSocket Origin Validation
+
+A WebSocket upgrade is not covered by a CORS preflight, so the same-origin
+policy does not protect `/ws` the way it protects `fetch`. Without an explicit
+check, any page a logged-in user visits could open a socket to Atlas; the
+browser would attach their session cookies, the reverse proxy would
+authenticate the upgrade on their behalf, and the attacker's page would hold a
+live session able to read conversations and call tools as that user. This is
+called cross-site WebSocket hijacking.
+
+Atlas therefore validates the `Origin` header before accepting a chat
+WebSocket. An upgrade is allowed when the origin is:
+
+- **loopback** (`localhost`, `127.0.0.1`, `::1`) **and the target is also
+  loopback** — that is, the `Host` header names a loopback address too. A
+  loopback origin is *not* trusted against a production hostname, so a
+  malicious page served by another application on the user's own machine
+  cannot open the production socket, or
+- **the same host the request was addressed to**, compared against the `Host`
+  header, or
+- **listed in `WEBSOCKET_ALLOWED_ORIGINS`**.
+
+Anything else is rejected with close code 1008 before authentication runs.
+
+Matching is by **hostname only** — scheme and port are ignored. This is looser
+than the browser's own definition of an origin, and deliberately so: behind a
+TLS-terminating proxy the backend sees plain HTTP on an internal port and
+cannot reconstruct the browser-facing origin, and cookies are not isolated by
+port in any case. The consequence is that a *different* application on another
+port of the same hostname is treated as same-site; do not share a hostname
+between Atlas and untrusted applications.
+
+`WEBSOCKET_ALLOWED_ORIGINS` accepts either bare hostnames or full origins —
+`atlas.example.com` and `https://atlas.example.com` are equivalent, and any
+scheme or port in an entry is discarded.
+
+**Troubleshooting a rejected upgrade.** The origin check runs *before* the
+connection is accepted, so the browser cannot receive the 1008 close code and
+its reason — it reports a bare 1006 ("abnormal closure") with no explanation,
+and the UI can only surface reasons for 1008. A socket that fails to connect
+with 1006 and no further detail is the expected symptom. The reason is in the
+backend log:
+
+```
+WS rejected disallowed origin=https://example.com client=...
+```
+
+If you see that for an origin that should be valid, your proxy is likely
+rewriting `Host`; add the browser-facing hostname to
+`WEBSOCKET_ALLOWED_ORIGINS`.
+
+A request with **no** `Origin` header is allowed. Browsers always send the
+header on an upgrade, so its absence means a non-browser client — a CLI, a
+test harness, a service integration — and those carry no ambient cookies for
+an attacker page to borrow.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FEATURE_WEBSOCKET_ORIGIN_CHECK_ENABLED` | `true` | Master switch for the check |
+| `WEBSOCKET_ALLOWED_ORIGINS` | *(empty)* | Extra hostnames to accept |
+
+**A normal deployment needs no configuration here.** The same-origin rule
+covers the case where the browser and the backend agree on the hostname. Set
+`WEBSOCKET_ALLOWED_ORIGINS` only if your proxy rewrites `Host` to an internal
+name (for example `proxy_set_header Host backend.internal`), so that the
+browser's origin no longer matches what the backend sees. Disabling the check
+entirely re-opens the hijacking path and should be a last resort.
+
+The Agent Portal stream socket has its own, stricter allowlist
+(`AGENT_PORTAL_ALLOWED_ORIGINS`) — it does not consult `Host` and does not
+admit a missing `Origin`. See [the Agent Portal threat model](../agentportal/threat-model.md).
+
 ## Configuring the Authentication Header
 
 Different reverse proxy setups use different header names to pass authenticated user information. The application supports configuring the header name via the `AUTH_USER_HEADER` environment variable.

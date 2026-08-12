@@ -38,7 +38,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
-from atlas.core.auth import get_user_from_header
+from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from atlas.core.metrics_logger import log_metric
@@ -48,6 +48,7 @@ from atlas.core.middleware import AuthMiddleware
 from atlas.core.otel_config import setup_opentelemetry
 from atlas.core.rate_limit_middleware import RateLimitMiddleware
 from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
+from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
 # Import domain errors
 from atlas.domain.errors import (
@@ -442,6 +443,38 @@ async def help_image(path: str):
     raise HTTPException(status_code=404, detail="Help image not found")
 
 
+def _websocket_origin_allowed(websocket: WebSocket, app_settings) -> bool:
+    """Decide whether a chat WebSocket upgrade may proceed, by Origin.
+
+    An absent Origin is allowed. Browsers always send the header on an
+    upgrade, so its absence means a non-browser client -- a CLI, a test
+    harness, an MCP server -- and those carry no ambient cookies for an
+    attacker page to borrow. Cross-site WebSocket hijacking is a browser
+    attack; rejecting header-less clients would break legitimate integrations
+    without closing anything.
+
+    When the header is present it must name loopback (only for a loopback
+    target), this deployment's own host, or an entry in
+    WEBSOCKET_ALLOWED_ORIGINS.
+
+    Both settings are read as direct attributes rather than through getattr
+    with a default: if either is ever renamed, this should fail loudly instead
+    of silently disabling the check or emptying the allowlist.
+    """
+    if not app_settings.feature_websocket_origin_check_enabled:
+        return True
+
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+
+    return origin_is_allowed(
+        origin,
+        parse_allowed_hosts(app_settings.websocket_allowed_origins),
+        request_host=websocket.headers.get("host"),
+    )
+
+
 # WebSocket endpoint for chat
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -485,6 +518,19 @@ async def websocket_endpoint(websocket: WebSocket):
 
     is_debug_mode = config_manager.app_settings.debug_mode
 
+    # Origin check: a WS upgrade is not preflighted, so the same-origin policy
+    # does not apply. Without this, any page the user visits can open a socket
+    # here; the proxy authenticates it from their cookies and hands the
+    # attacker a live session. Runs before every other check so a rejected
+    # origin never reaches authentication.
+    if not _websocket_origin_allowed(websocket, config_manager.app_settings):
+        logger.warning(
+            "WS rejected disallowed origin=%s client=%s",
+            sanitize_for_logging(websocket.headers.get("origin") or ""),
+            sanitize_for_logging(websocket.client),
+        )
+        raise WebSocketException(code=1008, reason="Origin not allowed")
+
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
         config_manager.app_settings.feature_proxy_secret_enabled
@@ -507,11 +553,22 @@ async def websocket_endpoint(websocket: WebSocket):
     # Authenticate user BEFORE accepting the connection
     user_email = None
 
-    # Check configured auth header first (consistent with AuthMiddleware)
-    auth_header_name = config_manager.app_settings.auth_user_header
+    # Check configured auth header first, through the same resolver
+    # AuthMiddleware uses. Calling get_user_from_header directly here would
+    # skip JWT verification whenever AUTH_USER_HEADER_TYPE is aws-alb-jwt,
+    # letting any non-empty header value authenticate the socket.
+    app_settings = config_manager.app_settings
+    auth_header_name = app_settings.auth_user_header
     x_email_header = websocket.headers.get(auth_header_name)
     if x_email_header:
-        user_email = get_user_from_header(x_email_header)
+        # Async form: JWT verification can fetch the ALB public key with a
+        # blocking 5s httpx call, which would stall the whole event loop.
+        user_email = await resolve_user_from_auth_header_async(
+            x_email_header,
+            header_type=app_settings.auth_user_header_type,
+            expected_alb_arn=app_settings.auth_aws_expected_alb_arn,
+            aws_region=app_settings.auth_aws_region,
+        )
 
     # Fallback to query parameter (development/testing ONLY)
     if not user_email and is_debug_mode:
