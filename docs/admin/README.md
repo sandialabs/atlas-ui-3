@@ -20,7 +20,6 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 - [WebSocket Auth Testing](websocket-auth-testing.md) - Testing WebSocket authentication with wscat
 - [Compliance & Data Security](compliance.md) - Compliance levels and data segregation
 - [Tool Approval System](tool-approval.md) - Managing tool execution permissions
-- [Email Domain Whitelist](domain-whitelist.md) - Restricting access by email domain
 - [Globus OAuth Integration](globus-auth-integration-2026-02-24.md) - OAuth for ALCF endpoints
 
 ## Storage & Infrastructure

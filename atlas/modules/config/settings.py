@@ -418,12 +418,6 @@ class AppSettings(BaseSettings):
         description="Enable compliance level filtering for MCP servers and data sources",
         validation_alias=AliasChoices("FEATURE_COMPLIANCE_LEVELS_ENABLED"),
     )
-    # Email domain whitelist feature gate
-    feature_domain_whitelist_enabled: bool = Field(
-        False,
-        description="Enable email domain whitelist restriction (configured in domain-whitelist.json)",
-        validation_alias=AliasChoices("FEATURE_DOMAIN_WHITELIST_ENABLED", "FEATURE_DOE_LAB_CHECK_ENABLED"),
-    )
     # File content extraction feature gate
     feature_file_content_extraction_enabled: bool = Field(
         False,
