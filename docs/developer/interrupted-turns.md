@@ -74,12 +74,18 @@ Bounds, all in `agent_digest.py` and `domain/messages/models.py`:
 Results and arguments come from fetched pages, external MCP servers, and command
 output, and they end up inside **assistant-role** content that is replayed for
 several turns. The digest header states that the quoted text is verbatim tool
-output and not instruction, each field is wrapped in a `<<<…>>>` fence, and `&`,
-`<`, `>` are escaped so no value can close or forge a delimiter. `tool_name` is
-whitespace-collapsed and length-capped so it cannot inject extra digest lines.
-`status` carries only literals written by the recorder, but it goes through the
-same quoting, so "every value on the line is escaped" holds by construction
-rather than by an audit of the call sites.
+output and not instruction, arguments and results are wrapped in a `<<<…>>>`
+fence, and `&`, `<`, `>` are escaped in every field — fenced or not — so no
+value can close or forge a delimiter. `tool_name` is whitespace-collapsed and
+length-capped so it cannot inject extra digest lines. `status` carries only
+literals written by the recorder, but it goes through the same quoting (plus its
+own `[`/`]`, since it is rendered in brackets rather than a fence), so "every
+value on the line is escaped" holds by construction rather than by an audit of
+the call sites.
+
+One mapping (`_ESCAPES`, extended per field) drives both the substitution and
+the cost walk that spends the budget, so a field that escapes more characters
+than the default cannot slip past the ceiling its cost was computed against.
 
 ## Frontend contract
 

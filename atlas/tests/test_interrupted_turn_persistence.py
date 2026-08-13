@@ -165,6 +165,36 @@ class TestBuildToolDigest:
         assert "kaboom" in line
         assert len(digest.split("\n")) == 2
 
+    def test_a_status_cannot_close_its_own_bracket(self):
+        """The status is delimited by `[...]`, not by a fence, so `]` counts."""
+        digest = build_tool_digest([
+            _tool_row("boom", {}, "kaboom", status="failed] and [ok"),
+        ])
+        line = digest.split("\n")[1]
+        status = line.split(" [", 1)[1].split("] ->", 1)[0]
+        assert "]" not in status and "[" not in status
+
+    def test_the_status_cap_binds(self):
+        from atlas.application.chat.utilities import agent_digest
+
+        digest = build_tool_digest([
+            _tool_row("boom", {}, "kaboom", status="z" * 500),
+        ])
+        status = digest.split(" [", 1)[1].split("] ->", 1)[0]
+        kept = status.split("…[+", 1)[0].replace("&#91;", "[")
+        assert len(kept) == agent_digest._MAX_STATUS_CHARS
+
+    def test_every_escape_is_charged_what_it_actually_costs(self):
+        """One mapping drives both the cost walk and the substitution."""
+        from atlas.application.chat.utilities import agent_digest
+
+        ceiling = agent_digest._ESCAPED_ALLOWANCE * agent_digest._MAX_STATUS_CHARS
+        # Brackets expand to five characters but are not in the default map:
+        # costing them at one would let this field run past its ceiling.
+        digest = build_tool_digest([_tool_row("boom", {}, "ok", status="]" * 500)])
+        status = digest.split(" [", 1)[1].split("] ->", 1)[0]
+        assert len(status.split("…[+", 1)[0]) <= ceiling
+
     def test_marks_failed_calls(self):
         digest = build_tool_digest([_tool_row("boom", {}, "kaboom", status="failed")])
         assert "[failed]" in digest
