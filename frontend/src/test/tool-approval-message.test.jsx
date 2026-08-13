@@ -370,16 +370,12 @@ describe('Message — tool-call collapse is shared across compact/classic (regre
 
   // Compact rows label the outcome on a glyph; classic rows keep the text pill.
   const expectCollapsibleDetails = (header) => {
-    // Default collapsed: the details are always in the DOM so the print
-    // export can reveal them via `print:block` (#774), but the wrapper carries
-    // the `hidden` class so they are not shown on screen until the header is
-    // clicked.
-    const collapsedWrapper = screen.getByText('Input Arguments').closest('.space-y-3')
-    expect(collapsedWrapper).toHaveClass('hidden')
-    expect(collapsedWrapper).toHaveClass('print:block')
+    // Default collapsed: no Input Arguments until the header is clicked. (The
+    // print export mounts them on `beforeprint` instead — see
+    // print-export.test.jsx for that path.)
+    expect(screen.queryByText('Input Arguments')).not.toBeInTheDocument()
     fireEvent.click(header())
-    const expandedWrapper = screen.getByText('Input Arguments').closest('.space-y-3')
-    expect(expandedWrapper).not.toHaveClass('hidden')
+    expect(screen.getByText('Input Arguments')).toBeInTheDocument()
   }
 
   it('keeps tool-call details collapsible in compact mode', () => {

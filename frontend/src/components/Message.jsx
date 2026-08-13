@@ -18,6 +18,7 @@ import {
   downloadReturnedFile,
 } from '../utils/toolResultUtils'
 import { resolveAutoApproved } from '../utils/toolApproval'
+import { useIsPrinting } from '../hooks/useIsPrinting'
 import ToolApprovalMessage from './ToolApprovalMessage'
 import ToolElapsedTime from './ToolElapsedTime'
 
@@ -37,6 +38,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   // when multiple RAG responses exist in the same conversation.
   const rawId = useId()
   const messageScope = rawId.replace(/:/g, '')
+
+  // Collapsed tool details are mounted only while the page is being printed —
+  // see the hook for why they are not simply always rendered (#774).
+  const isPrinting = useIsPrinting()
 
   // A tool call collapses to a single summary line by default; expanding reveals
   // its input arguments and output together. Persisted to localStorage so the
@@ -221,6 +226,16 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       // pre-#673 layout, where tool input/output were collapsible and defaulted
       // collapsed. (Debug mode seeds toolDetailsCollapsed=false → expanded.)
       const showDetails = !toolDetailsCollapsed
+      // Collapsed rows still have to appear in the PDF (#774), but only while
+      // printing: mounting every row's serialized arguments and result all the
+      // time would cost a JSON.stringify and a hidden <pre> per tool call on
+      // screen, and MCP results are not size-bounded.
+      // `hasDetails` also guards the print path: a compact row carries the
+      // server name in this block, but a classic row with no arguments and no
+      // result has nothing to show, and an empty wrapper would print as a
+      // band of indented whitespace.
+      const printableDetails = hasDetails || (compactMessages && !!message.server_name)
+      const renderDetails = showDetails || (isPrinting && printableDetails)
       return (
         <div className="text-gray-200 selectable-markdown">
           {/* Compact: single clickable summary line. Classic: static badge row. */}
@@ -445,10 +460,11 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           })()}
 
           {/* Expanded details: input arguments + output, revealed together.
-              Always rendered so the print export shows tool input/output
-              without requiring the user to expand each row first -- when
-              collapsed the block is hidden on screen but `print:block`
-              reveals it in the PDF (#774). */}
+              Also mounted while printing, so the PDF shows tool input/output
+              without requiring the user to expand each row first -- collapsed
+              rows keep `hidden print:block`, which stays out of the on-screen
+              layout and is revealed only in the print rendering (#774). */}
+          {renderDetails && (
           <div className={`mt-2 ml-5 space-y-3 ${showDetails ? '' : 'hidden print:block'}`}>
             {/* The collapsed compact row drops the server name to stay on one
                 line (#762), so it lives here instead — the classic row still
@@ -491,6 +507,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
               </div>
             )}
           </div>
+          )}
 
           {/* Synthesis indicator - shown on completed tool messages while LLM interprets results */}
           {message.status === 'completed' && isSynthesizing && (

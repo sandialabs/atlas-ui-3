@@ -20,7 +20,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import Message from '../components/Message'
 import { useChat } from '../contexts/ChatContext'
 
@@ -54,9 +54,36 @@ const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
 
 // Pull just the @media print block so every assertion below is scoped to it
 // rather than to the whole stylesheet (a rule outside print would not fire
-// in the PDF and would produce a false positive).
-const printBlock = css.match(/@media print\s*\{([\s\S]*)\n\}/)
-const printCss = printBlock ? printBlock[1] : ''
+// in the PDF and would produce a false positive). The braces are matched by
+// counting rather than with a regex: `[\s\S]*` is greedy and would run to the
+// last `}` in the file, swallowing every later at-rule and letting a
+// non-print rule satisfy these assertions.
+const extractPrintBlock = (source) => {
+  const start = source.search(/@media print\s*\{/)
+  if (start === -1) return ''
+  const open = source.indexOf('{', start)
+  let depth = 0
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === '{') depth += 1
+    else if (source[i] === '}') {
+      depth -= 1
+      if (depth === 0) return source.slice(open + 1, i)
+    }
+  }
+  return ''
+}
+
+const printCss = extractPrintBlock(css)
+
+describe('print export -- the print block is extracted exactly', () => {
+  it('stops at the closing brace of @media print', () => {
+    // Guard for the assertions below: if the extraction over-ran, a rule from
+    // a later at-rule could satisfy them. `@media (hover: none)` follows the
+    // print block in index.css and must not be included.
+    expect(printCss).not.toMatch(/@media \(hover/)
+    expect(printCss).toMatch(/@page/)
+  })
+})
 
 describe('print export -- right side not clipped (#774)', () => {
   it('overrides overflow-x-auto so horizontal scrollers show all content', () => {
@@ -142,27 +169,47 @@ describe('print export -- tool calls render in the PDF (#774)', () => {
     expect(summary.className).toContain('no-print-hide')
   })
 
-  it('renders tool call details even when collapsed, hidden on screen but visible in print', () => {
-    // Default state is collapsed (toolDetailsCollapsed defaults to true), so
-    // the details block must be in the DOM with `hidden print:block` -- the
-    // `print:block` class is what the print stylesheet reveals. If the
-    // details were conditionally rendered only when expanded, the PDF would
-    // show the tool name but not its input/output.
+  const findLabel = (container, text) =>
+    [...container.querySelectorAll('.text-xs.font-semibold')].find((el) => el.textContent === text)
+
+  it('does not mount collapsed details on screen', () => {
+    // MCP results are not size-bounded, so a collapsed row must not serialize
+    // its arguments and result into hidden <pre> elements just in case the
+    // user prints later.
     const { container } = render(<Message message={toolCallMessage} />)
-    const labels = [...container.querySelectorAll('.text-xs.font-semibold')]
-    const inputLabel = labels.find((el) => el.textContent === 'Input Arguments')
-    const outputLabel = labels.find((el) => el.textContent === 'Output Result')
+    expect(findLabel(container, 'Input Arguments')).toBeUndefined()
+    expect(findLabel(container, 'Output Result')).toBeUndefined()
+  })
+
+  it('mounts collapsed details on beforeprint, hidden on screen but visible in print', () => {
+    // Default state is collapsed (toolDetailsCollapsed defaults to true). When
+    // the browser starts printing, the details must appear in the DOM carrying
+    // `hidden print:block` -- `print:block` is what the print stylesheet
+    // reveals, so the PDF shows the tool's input/output for a row the user
+    // never expanded, while the block stays out of the on-screen layout.
+    const { container } = render(<Message message={toolCallMessage} />)
+
+    act(() => {
+      window.dispatchEvent(new Event('beforeprint'))
+    })
+
+    const inputLabel = findLabel(container, 'Input Arguments')
+    const outputLabel = findLabel(container, 'Output Result')
     expect(inputLabel).toBeTruthy()
     expect(outputLabel).toBeTruthy()
 
-    // The details wrapper must carry the hidden + print:block pair so it is
-    // hidden on screen (collapsed) but rendered in the PDF.
     const detailsWrapper = inputLabel.closest('.space-y-3')
     expect(detailsWrapper.className).toContain('hidden')
     expect(detailsWrapper.className).toContain('print:block')
+
+    // ...and unmounted again once the print job is over.
+    act(() => {
+      window.dispatchEvent(new Event('afterprint'))
+    })
+    expect(findLabel(container, 'Input Arguments')).toBeUndefined()
   })
 
-  it('renders tool call details without hidden when expanded', () => {
+  it('mounts details without hidden when the user expanded the row', () => {
     // When the user expands the row on screen, the details block must not
     // carry `hidden` -- otherwise the screen view would disagree with the
     // expanded state and the print view would render an already-visible block
@@ -174,6 +221,19 @@ describe('print export -- tool calls render in the PDF (#774)', () => {
     )
     const detailsWrapper = inputLabel.closest('.space-y-3')
     expect(detailsWrapper.className).not.toContain('hidden')
+  })
+
+  it('does not mount an empty details wrapper for a call with nothing to show', () => {
+    // A classic-mode row with no arguments and no result has no details; an
+    // empty wrapper would print as a band of indented whitespace.
+    setChat({ compactMessages: false })
+    const { container } = render(
+      <Message message={{ ...toolCallMessage, arguments: {}, result: null, status: 'calling' }} />
+    )
+    act(() => {
+      window.dispatchEvent(new Event('beforeprint'))
+    })
+    expect(container.querySelector('.space-y-3')).toBeNull()
   })
 
   it('does not hide the tool call summary for an in-progress call', () => {
