@@ -380,6 +380,14 @@ class AppSettings(BaseSettings):
         description="Enable the per-user custom prompt library UI and API",
         validation_alias=AliasChoices("FEATURE_CUSTOM_PROMPTS_ENABLED"),
     )
+    feature_skills_enabled: bool = Field(
+        False,
+        description=(
+            "Enable Agent Skills discovery. When on, the name/description index of "
+            "discovered skills is appended to the system prompt."
+        ),
+        validation_alias=AliasChoices("FEATURE_SKILLS_ENABLED"),
+    )
 
     @property
     def custom_prompts_effective(self) -> bool:
@@ -512,6 +520,19 @@ class AppSettings(BaseSettings):
     # Agent prompts
     agent_reason_prompt_filename: str = "agent_reason_prompt.md"  # Filename for agent reason phase
     agent_observe_prompt_filename: str = "agent_observe_prompt.md"  # Filename for agent observe phase
+
+    # Agent Skills settings
+    skills_paths: str = Field(
+        default="",
+        description=(
+            "Directories to scan for Agent Skills, separated by the OS path separator "
+            "or commas. When set, these replace the layered defaults "
+            "(atlas/config/skills, then ~/.atlas|.claude|.agents/skills, then the same "
+            "three directories under the project root). Later entries win on name "
+            "collisions."
+        ),
+        validation_alias="SKILLS_PATHS",
+    )
 
     # Config file names (can be overridden via environment variables)
     mcp_config_file: str = Field(default="mcp.json", validation_alias="MCP_CONFIG_FILE")

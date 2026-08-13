@@ -63,6 +63,7 @@ class ChatOrchestrator:
         tools_mode: Optional[ToolsModeRunner] = None,
         agent_mode: Optional[AgentModeRunner] = None,
         config_manager: Optional[Any] = None,
+        skill_registry: Optional[Any] = None,
     ):
         """
         Initialize chat orchestrator.
@@ -80,6 +81,8 @@ class ChatOrchestrator:
             tools_mode: Optional pre-configured tools mode runner
             agent_mode: Optional pre-configured agent mode runner
             config_manager: Optional config manager for model capability lookups
+            skill_registry: Optional Agent Skills registry; its index is appended
+                to the system prompt when the skills feature is enabled
         """
         self.llm = llm
         self.event_publisher = event_publisher
@@ -94,7 +97,10 @@ class ChatOrchestrator:
             tool_manager=tool_manager, config_manager=config_manager
         )
         self.prompt_override = PromptOverrideService(tool_manager=tool_manager)
-        self.message_builder = MessageBuilder(prompt_provider=prompt_provider)
+        self.skill_registry = skill_registry
+        self.message_builder = MessageBuilder(
+            prompt_provider=prompt_provider, skill_registry=skill_registry
+        )
 
         # Initialize or use provided mode runners
         self.plain_mode = plain_mode or PlainModeRunner(

@@ -101,6 +101,8 @@ services:
       - FEATURE_CHAT_HISTORY_ENABLED=true
       # Per-user custom prompt library (requires chat history)
       - FEATURE_CUSTOM_PROMPTS_ENABLED=false
+      # Agent Skills index injection (see docs/user-guide/skills/README.md)
+      - FEATURE_SKILLS_ENABLED=false
       # Chat history DB (choose one):
       # DuckDB (default, no extra services required):
       - CHAT_HISTORY_DB_URL=duckdb:///data/chat_history.db
