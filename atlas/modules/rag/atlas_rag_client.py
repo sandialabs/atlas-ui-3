@@ -489,11 +489,15 @@ class AtlasRAGClient:
 
             except httpx.HTTPStatusError as exc:
                 status_code = exc.response.status_code
+                # The response body is deliberately not logged: a backend can
+                # echo the query (or other user text) into its error detail,
+                # and v2 exists to keep that text out of places it does not
+                # need to be. The status and endpoint are what diagnose this.
                 logger.error(
-                    "HTTP error querying RAG v2 for %s: %s (status %d)",
+                    "HTTP error querying RAG v2 for %s: status %d from %s",
                     user_name,
-                    exc.response.text,
                     status_code,
+                    self.query_path,
                 )
                 if status_code == 400:
                     raise HTTPException(

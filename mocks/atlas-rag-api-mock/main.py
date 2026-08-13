@@ -341,6 +341,18 @@ def grep_search(query: str, text: str, context_chars: int = 240) -> List[Tuple[s
     return unique[:5]
 
 
+def safe_log(value: Any, max_chars: int = 120) -> str:
+    """Flatten a value for logging.
+
+    ``as_user`` and ``corpora`` arrive from the request, so newlines in them
+    would let a caller forge extra log lines. Strip control characters and cap
+    the length before anything reaches the log stream.
+    """
+    text = str(value)
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
+    return text[:max_chars]
+
+
 def _make_data_source(corpus_id: str) -> DataSource:
     corpus = DATA_SOURCES[corpus_id]
     return DataSource(
@@ -579,7 +591,7 @@ async def discover_data_sources_v2(
 ):
     """v2 discovery: the v1 list, with each source declaring ``api_version``."""
     user = as_user or ""
-    logger.info("Discovery request (v2): user=%s role=%s", user, role)
+    logger.info("Discovery request (v2): user=%s role=%s", safe_log(user), role)
     accessible = get_accessible_corpora(user)
     return [DataSourceV2(**src.model_dump(), api_version="v2") for src in accessible]
 
@@ -614,8 +626,8 @@ async def rag_query_v2(
     logger.info("---------- RAG query (v2) ----------")
     logger.info(
         "RAG v2 query user=%s corpora=%s mode=%s top_k=%d query_chars=%d",
-        user,
-        request.corpora,
+        safe_log(user),
+        safe_log(request.corpora),
         request.mode,
         request.top_k,
         len(request.query),

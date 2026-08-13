@@ -541,3 +541,82 @@ class TestUnifiedRAGServiceV2Routing:
 
         assert client.api_version == "v2"
         assert client.query_path == "/api/v2/rag/query"
+
+
+class TestToolResultReferences:
+    """A RAG tool result must name its sources, not just carry prose.
+
+    The agent loop forwards only ``ToolResult.content``, so document identity
+    that lives on ``RAGResponse.metadata`` has to be folded into the payload
+    or the model (and the references UI) never sees it.
+    """
+
+    def test_references_are_extracted_from_metadata(self):
+        from atlas.modules.mcp_tools.mcp_execution import _tool_references
+        from atlas.modules.rag.client import DocumentMetadata, RAGMetadata
+
+        response = RAGResponse(
+            content="answer",
+            metadata=RAGMetadata(
+                query_processing_time_ms=1,
+                total_documents_searched=1,
+                documents_found=[
+                    DocumentMetadata(
+                        source="corpus",
+                        content_type="atlas-search",
+                        confidence_score=0.9,
+                        title="PTO Policy",
+                        citation="[1] PTO Policy",
+                        document_ref=1,
+                        url="https://example.com/pto",
+                    ),
+                ],
+                data_source_name="corpus",
+                retrieval_method="v2_synthesized",
+            ),
+        )
+
+        assert _tool_references(response) == [
+            {
+                "document_ref": 1,
+                "filename": "PTO Policy",
+                "citation": "[1] PTO Policy",
+                "url": "https://example.com/pto",
+            }
+        ]
+
+    def test_no_metadata_yields_no_references(self):
+        from atlas.modules.mcp_tools.mcp_execution import _tool_references
+
+        assert _tool_references(RAGResponse(content="answer", metadata=None)) == []
+        assert _tool_references(object()) == []
+
+    def test_reference_count_is_capped(self):
+        from atlas.modules.mcp_tools.mcp_execution import (
+            _MAX_TOOL_REFERENCES,
+            _tool_references,
+        )
+        from atlas.modules.rag.client import DocumentMetadata, RAGMetadata
+
+        docs = [
+            DocumentMetadata(
+                source="corpus",
+                content_type="atlas-search",
+                confidence_score=0.5,
+                title=f"doc-{i}",
+                document_ref=i,
+            )
+            for i in range(_MAX_TOOL_REFERENCES + 10)
+        ]
+        response = RAGResponse(
+            content="answer",
+            metadata=RAGMetadata(
+                query_processing_time_ms=1,
+                total_documents_searched=len(docs),
+                documents_found=docs,
+                data_source_name="corpus",
+                retrieval_method="v2_raw",
+            ),
+        )
+
+        assert len(_tool_references(response)) == _MAX_TOOL_REFERENCES

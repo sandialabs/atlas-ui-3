@@ -4,8 +4,8 @@
 # Test plan:
 # - Config: api_version selects the v2 endpoint paths; v1 stays the default
 # - Client: query_v2 posts {query, corpora, mode, top_k} and never `messages`
-# - Client: raw mode returns evidence (is_completion=False), synthesized an
-#   answer (is_completion=True)
+# - Client: raw mode returns evidence (is_completion=False); synthesized
+#   returns an answer (is_completion=True)
 # - Client: an empty query is rejected before any request is made
 # - Mock E2E: /api/v2/discover/datasources advertises api_version, and
 #   /api/v2/rag/query serves both modes, 400s an empty query and 403s an

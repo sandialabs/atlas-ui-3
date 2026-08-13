@@ -495,7 +495,10 @@ class UnifiedRAGService:
             "user_hash": hash_short(username),
             "message_count": len(messages),
             "explicit_query": query is not None,
-            "mode": mode or "",
+            # What the caller asked for; empty means "let the source decide".
+            # The mode that actually ran is visible on the response attributes
+            # as ``retrieval_method`` (``v2_raw`` / ``v2_synthesized``).
+            "requested_mode": mode or "",
             "batch": False,
         }
         token = None
@@ -697,7 +700,7 @@ class UnifiedRAGService:
             "user_hash": hash_short(username),
             "message_count": len(messages),
             "explicit_query": query is not None,
-            "mode": mode or "",
+            "requested_mode": mode or "",
             "batch": True,
             "batch_size": len(qualified_data_sources or []),
         }
