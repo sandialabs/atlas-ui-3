@@ -16,8 +16,10 @@ import pytest
 from main import app
 from starlette.testclient import TestClient
 
-AUTH_HEADERS = {"X-User-Email": "test@test.com"}
-ADMIN_HEADERS = {"X-User-Email": "admin@test.com"}
+from atlas.modules.config.config_manager import config_manager
+
+AUTH_HEADERS = {"X-User-Email": config_manager.app_settings.test_user}
+ADMIN_HEADERS = {"X-User-Email": config_manager.app_settings.admin_test_user}
 
 
 @pytest.fixture
@@ -42,9 +44,9 @@ def mock_feedback_dir(temp_feedback_dir, monkeypatch):
 
 @pytest.fixture
 def mock_admin_check():
-    """Mock admin group check to allow admin@test.com."""
+    """Mock admin group check to allow the configured admin test user."""
     async def mock_is_user_in_group(user: str, group: str) -> bool:
-        return user == "admin@test.com"
+        return user == config_manager.app_settings.admin_test_user
 
     with patch("atlas.routes.feedback_routes.is_user_in_group", mock_is_user_in_group):
         yield
@@ -121,7 +123,7 @@ class TestFeedbackSubmission:
             saved_data = json.load(f)
         assert saved_data["rating"] == 0
         assert saved_data["comment"] == "Neutral feedback"
-        assert saved_data["user"] == "test@test.com"
+        assert saved_data["user"] == config_manager.app_settings.test_user
 
 
 class TestFeedbackAdminAccess:
@@ -273,7 +275,7 @@ class TestFeedbackDownload:
         assert feedback["id"] == feedback_id
         assert feedback["rating"] == 1
         assert feedback["comment"] == "JSON test"
-        assert feedback["user"] == "test@test.com"
+        assert feedback["user"] == config_manager.app_settings.test_user
         assert "timestamp" in feedback
         assert "session_info" in feedback
         assert "server_context" in feedback

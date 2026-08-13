@@ -126,7 +126,7 @@ def mock_admin_authorization(monkeypatch):
     """Enable the debug-only mock group table so admin routes are reachable.
 
     ``core.auth.is_user_in_group`` consults its mock group table (which is what
-    makes ``admin_test_user`` / ``test@test.com`` an admin) only when
+    makes the configured ``admin_test_user`` / ``test_user`` an admin) only when
     ``debug_mode`` is on; with DEBUG_MODE=false no user can be an admin unless an
     external auth endpoint is configured. Admin-route tests assert real 200
     responses, so they need debug mode declared explicitly rather than inherited
@@ -143,6 +143,30 @@ def mock_admin_authorization(monkeypatch):
     settings = _config_manager.app_settings
     assert settings.debug_mode is True
     return settings
+
+
+@pytest.fixture
+def test_user():
+    """Return the configured non-admin test identity."""
+    return _config_manager.app_settings.test_user
+
+
+@pytest.fixture
+def admin_test_user():
+    """Return the configured admin test identity."""
+    return _config_manager.app_settings.admin_test_user
+
+
+@pytest.fixture
+def test_user_headers(test_user):
+    """Return auth headers for the configured non-admin test identity."""
+    return {"X-User-Email": test_user}
+
+
+@pytest.fixture
+def admin_test_user_headers(admin_test_user):
+    """Return auth headers for the configured admin test identity."""
+    return {"X-User-Email": admin_test_user}
 
 
 # Env vars that the dev-only authorization bypass touches. Tests that need the

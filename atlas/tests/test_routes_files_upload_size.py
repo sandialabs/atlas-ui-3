@@ -18,7 +18,7 @@ def test_upload_file_rejects_configured_oversized_file():
         client = TestClient(app)
         resp = client.post(
             "/api/files",
-            headers={"X-User-Email": "test@test.com"},
+            headers={"X-User-Email": config_manager.app_settings.test_user},
             json={
                 "filename": "large.txt",
                 "content_base64": content,

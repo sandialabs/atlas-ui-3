@@ -11,8 +11,9 @@ import json
 
 import pytest
 from main import app
-from atlas.routes import config_routes
 from starlette.testclient import TestClient
+
+from atlas.routes import config_routes
 
 
 @pytest.fixture
@@ -38,7 +39,7 @@ def test_splash_disabled_when_feature_flag_off(isolated_splash, monkeypatch):
     _set_enabled(monkeypatch, config_manager, False)
 
     client = TestClient(app)
-    resp = client.get("/api/splash", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/splash", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert resp.status_code == 200
     data = resp.json()
     assert data["enabled"] is False
@@ -70,7 +71,7 @@ def test_splash_loads_markdown_and_settings(isolated_splash, monkeypatch):
     )
 
     client = TestClient(app)
-    resp = client.get("/api/splash", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/splash", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert resp.status_code == 200
     data = resp.json()
     assert data["enabled"] is True
@@ -98,7 +99,7 @@ def test_splash_ignores_enabled_field_in_config_file(isolated_splash, monkeypatc
     )
 
     client = TestClient(app)
-    resp = client.get("/api/splash", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/splash", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert resp.status_code == 200
     data = resp.json()
     # Env var is the single source of truth, so it stays enabled.
@@ -114,7 +115,7 @@ def test_splash_missing_markdown_returns_empty_string(isolated_splash, monkeypat
     )
 
     client = TestClient(app)
-    resp = client.get("/api/splash", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/splash", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert resp.status_code == 200
     data = resp.json()
     assert data["enabled"] is True

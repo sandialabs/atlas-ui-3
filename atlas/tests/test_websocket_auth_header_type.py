@@ -22,6 +22,7 @@ from atlas.core.auth import (
     resolve_user_from_auth_header,
     resolve_user_from_auth_header_async,
 )
+from atlas.modules.config.config_manager import config_manager
 
 ALB_ARN = "arn:aws:elasticloadbalancing:us-east-1:1234:loadbalancer/app/x/y"
 
@@ -185,7 +186,7 @@ def _jwt_config():
     config.app_settings.feature_proxy_secret_enabled = False
     config.app_settings.feature_websocket_origin_check_enabled = True
     config.app_settings.websocket_allowed_origins = ""
-    config.app_settings.test_user = "test@test.com"
+    config.app_settings.test_user = config_manager.app_settings.test_user
     return config
 
 

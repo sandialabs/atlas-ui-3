@@ -4,6 +4,7 @@ from main import app
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
+from atlas.modules.config.config_manager import config_manager
 
 
 def _set_proxy_secret_on_app(secret="test-proxy-secret"):
@@ -16,7 +17,7 @@ def _set_proxy_secret_on_app(secret="test-proxy-secret"):
 
 
 def _headers():
-    return {"X-User-Email": "test@test.com", "X-Proxy-Secret": "test-proxy-secret"}
+    return {"X-User-Email": config_manager.app_settings.test_user, "X-Proxy-Secret": "test-proxy-secret"}
 
 
 def test_config_endpoint_smoke(monkeypatch):

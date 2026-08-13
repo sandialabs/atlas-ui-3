@@ -1,10 +1,12 @@
 from main import app
 from starlette.testclient import TestClient
 
+from atlas.modules.config.config_manager import config_manager
+
 
 def test_security_headers_present_by_default():
     client = TestClient(app)
-    r = client.get("/api/files/healthz", headers={"X-User-Email": "test@test.com"})
+    r = client.get("/api/files/healthz", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert r.status_code == 200
     # HSTS intentionally omitted
     assert r.headers.get("X-Content-Type-Options") == "nosniff"
@@ -17,9 +19,8 @@ def test_security_headers_present_by_default():
 def test_csp_includes_websocket_origins_for_configured_port():
     """CSP connect-src should include ws:// and wss:// for the configured port."""
     client = TestClient(app)
-    r = client.get("/api/files/healthz", headers={"X-User-Email": "test@test.com"})
+    r = client.get("/api/files/healthz", headers={"X-User-Email": config_manager.app_settings.test_user})
     csp = r.headers.get("Content-Security-Policy", "")
-    from atlas.modules.config import config_manager
     port = config_manager.app_settings.port
     assert f"ws://localhost:{port}" in csp, f"CSP missing ws://localhost:{port}: {csp}"
     assert f"wss://localhost:{port}" in csp, f"CSP missing wss://localhost:{port}: {csp}"
@@ -27,12 +28,11 @@ def test_csp_includes_websocket_origins_for_configured_port():
 
 def test_csp_includes_websocket_origins_for_non_default_port():
     """When port is set to a non-default value, CSP should include that port's WS origins."""
-    from atlas.modules.config import config_manager
     original_port = config_manager.app_settings.port
     try:
         config_manager.app_settings.port = 9999
         client = TestClient(app)
-        r = client.get("/api/files/healthz", headers={"X-User-Email": "test@test.com"})
+        r = client.get("/api/files/healthz", headers={"X-User-Email": config_manager.app_settings.test_user})
         csp = r.headers.get("Content-Security-Policy", "")
         assert "ws://localhost:9999" in csp, f"CSP missing ws://localhost:9999: {csp}"
         assert "wss://localhost:9999" in csp, f"CSP missing wss://localhost:9999: {csp}"
@@ -84,7 +84,7 @@ def test_download_filename_sanitized(monkeypatch):
     client = TestClient(app)
 
     # Trigger download endpoint directly (no need to actually upload first)
-    r = client.get("/api/files/download/k_mal", headers={"X-User-Email": "test@test.com"})
+    r = client.get("/api/files/download/k_mal", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert r.status_code == 200
     cd = r.headers.get("Content-Disposition", "")
     assert "\r" not in cd and "\n" not in cd

@@ -15,9 +15,10 @@ from starlette.testclient import TestClient
 
 from atlas.application.chat.capture.capture_service import CaptureService
 from atlas.application.chat.capture.capture_store import CaptureStore
+from atlas.modules.config.config_manager import config_manager
 
-USER_HEADERS = {"X-User-Email": "test@test.com"}
-ADMIN_HEADERS = {"X-User-Email": "admin@test.com"}
+USER_HEADERS = {"X-User-Email": config_manager.app_settings.test_user}
+ADMIN_HEADERS = {"X-User-Email": config_manager.app_settings.admin_test_user}
 
 
 def _config(system_enabled=True):
@@ -48,7 +49,7 @@ def patched_service():
 @pytest.fixture
 def mock_admin():
     async def _is_user_in_group(user: str, group: str) -> bool:
-        return user == "admin@test.com"
+        return user == config_manager.app_settings.admin_test_user
 
     with patch("atlas.routes.capture_routes.is_user_in_group", _is_user_in_group):
         yield
@@ -89,7 +90,7 @@ class TestConsent:
 class TestSelfDelete:
     def test_delete_my_data(self, patched_service):
         service = patched_service["service"]
-        service.set_consent("test@test.com", True)
+        service.set_consent(config_manager.app_settings.test_user, True)
         client = TestClient(app)
         resp = client.delete("/api/capture/me", headers=USER_HEADERS)
         assert resp.status_code == 200

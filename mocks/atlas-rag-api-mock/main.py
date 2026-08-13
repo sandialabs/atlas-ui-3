@@ -198,6 +198,18 @@ class RagResponse(BaseModel):
     metadata: RagMetadata
 
 
+class RegisterUserRequest(BaseModel):
+    """Test-only helper: register (or update) a user in the mock's group table.
+
+    Lets integration tests register the configured ATLAS test identity so the
+    live mock recognizes it regardless of ``TEST_USER`` overrides -- the mock
+    otherwise ships a fixed user database (see ``mock_data.json``).
+    """
+
+    user: str = Field(..., description="User ID to register or update")
+    groups: List[str] = Field(default_factory=list, description="Group memberships for the user")
+
+
 # ------------------------------------------------------------------------------
 # Search Helpers
 # ------------------------------------------------------------------------------
@@ -494,6 +506,19 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
+@app.post("/admin/users")
+async def register_test_user(req: RegisterUserRequest):
+    """Register or update a test user's group memberships (test-only helper).
+
+    Authenticated by the same bearer token as the RAG endpoints. Existing
+    users are overwritten. Used by the integration test fixture to ensure the
+    configured ATLAS test identity is recognized regardless of overrides.
+    """
+    USERS_GROUPS_DB[req.user] = list(req.groups)
+    logger.info("Registered test user %s with groups %s", req.user, req.groups)
+    return {"user": req.user, "groups": USERS_GROUPS_DB[req.user]}
+
+
 @app.get("/")
 async def root():
     return {
@@ -507,6 +532,7 @@ async def root():
                 "List accessible data sources",
             "POST /api/v1/rag/completions?as_user=<user>":
                 "Search and query (returns RagResponse with references/sections)",
+            "POST /admin/users": "Register/update a test user's groups (test-only)",
             "GET /health": "Health check",
         },
     }
