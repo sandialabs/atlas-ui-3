@@ -150,6 +150,10 @@ class AgenticLoop(AgentLoopProtocol):
             # (issue #755); anything that never reported a result is closed out
             # rather than left rendering as in-progress forever.
             try:
+                await recorder.notify_incomplete()
+            except BaseException:  # pragma: no cover - transport may be gone
+                logger.debug("Could not notify UI of interrupted tool calls", exc_info=True)
+            try:
                 recorder.flush(context.history, mark_incomplete=True)
             except Exception:  # pragma: no cover - never mask the real failure
                 logger.warning("Failed to flush tool calls while unwinding", exc_info=True)

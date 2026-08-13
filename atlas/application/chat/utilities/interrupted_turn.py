@@ -13,7 +13,12 @@ assistant message.
 import logging
 from typing import Any, Dict, Optional
 
-from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
+from atlas.domain.messages.models import (
+    DISPLAY_ONLY_MESSAGE_TYPES,
+    ConversationHistory,
+    Message,
+    MessageRole,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +51,13 @@ def make_interrupted_message(metadata: Optional[Dict[str, Any]] = None) -> Messa
 
 
 def close_open_turn(history: ConversationHistory) -> bool:
-    """Append a terminal assistant message if history ends on a user message.
+    """Append a terminal assistant message if the turn has no reply yet.
+
+    "Has no reply" is judged against what the model will actually see, so the
+    scan walks back past display-only rows (``tool_call`` narration and the
+    like). Tools mode flushes its recorded calls before unwinding, leaving
+    history ending on a ``tool_call`` row while the last model-visible message
+    is still the user's -- exactly the case this exists to catch.
 
     Returns True when a message was appended. Safe to call on any cancel path:
     a turn already closed by its mode runner (agent mode) is left alone.
@@ -54,7 +65,14 @@ def close_open_turn(history: ConversationHistory) -> bool:
     messages = getattr(history, "messages", None)
     if not messages:
         return False
-    if messages[-1].role != MessageRole.USER:
+    for message in reversed(messages):
+        if message.metadata.get("message_type") in DISPLAY_ONLY_MESSAGE_TYPES:
+            continue
+        if message.role != MessageRole.USER:
+            return False
+        break
+    else:
+        # Nothing but display-only rows: no user turn to close.
         return False
     history.add_message(make_interrupted_message())
     return True

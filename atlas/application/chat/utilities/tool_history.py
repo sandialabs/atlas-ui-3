@@ -45,6 +45,9 @@ _MAX_STR_CHARS = 8000
 # Stop walking absurdly deep structures; anything past this is stored as-is.
 _MAX_DEPTH = 6
 
+# Shown in the stopped tool row, live and after a reload.
+_INTERRUPTED_RESULT = "Stopped before the tool result was recorded."
+
 
 def _elide_for_storage(value: Any, depth: int = 0) -> Any:
     """Recursively cap large string values so persisted tool I/O stays bounded."""
@@ -142,6 +145,39 @@ class ToolCallRecorder:
             ))
         return out
 
+    def _pending_ids(self) -> List[str]:
+        return [
+            entry["tool_call_id"]
+            for entry in self._calls.values()
+            if entry.get("status") in (None, "calling") and entry.get("tool_name")
+        ]
+
+    async def notify_incomplete(self) -> None:
+        """Tell the UI that still-running calls were stopped, not lost.
+
+        The live row was created on ``tool_start`` and nothing else arrives on
+        the cancel path, so without this it spins as "CALLING" until a reload
+        replaces it with the persisted ``interrupted`` row -- the live view
+        contradicting the saved one (issue #755). Best-effort: the socket may
+        already be gone, which is exactly when this matters least.
+        """
+        if self._inner is None:
+            return
+        for entry in self._calls.values():
+            if entry.get("status") not in (None, "calling") or not entry.get("tool_name"):
+                continue
+            try:
+                await self._inner({
+                    "type": "tool_interrupted",
+                    "tool_call_id": entry["tool_call_id"],
+                    "tool_name": entry["tool_name"],
+                    "status": "interrupted",
+                    "result": _INTERRUPTED_RESULT,
+                })
+            except Exception:
+                logger.debug("Could not notify UI of interrupted tool call", exc_info=True)
+                return
+
     def flush(self, history: ConversationHistory, mark_incomplete: bool = False) -> None:
         """Append recorded tool-call messages to a history, then reset.
 
@@ -161,9 +197,7 @@ class ToolCallRecorder:
                     # own turn is not a tool error, and the UI renders the two
                     # differently.
                     entry["status"] = "interrupted"
-                    entry.setdefault(
-                        "result", "Stopped before the tool result was recorded."
-                    )
+                    entry.setdefault("result", _INTERRUPTED_RESULT)
         for message in self.messages():
             history.add_message(message)
         self._calls.clear()

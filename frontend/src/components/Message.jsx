@@ -208,19 +208,24 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       // any other unrecognized status falls through to the neutral style.
       const wasInterrupted = message.status === 'interrupted'
       const failed = message.status === 'failed'
+      // Each terminal state is named explicitly. An unrecognized status (a
+      // legacy row saved without one, or a state added later) must not claim
+      // the user stopped the call, nor that it failed.
+      const succeeded = message.status === 'completed'
       const statusLabel =
         message.status === 'calling' ? 'CALLING' :
         message.status === 'in_progress' ? 'IN PROGRESS' :
-        message.status === 'completed' ? 'SUCCESS' :
-        failed ? 'FAILED' : 'STOPPED'
+        succeeded ? 'SUCCESS' :
+        failed ? 'FAILED' :
+        wasInterrupted ? 'STOPPED' : 'UNKNOWN'
       const statusColor =
         isToolActive ? 'bg-blue-600' :
-        message.status === 'completed' ? 'bg-green-600' :
+        succeeded ? 'bg-green-600' :
         failed ? 'bg-red-600' : 'bg-gray-600'
       // Compact rows show the outcome as a glyph rather than a text pill so the
       // whole row fits one line on a phone (#762).
-      const succeeded = message.status === 'completed'
-      const statusGlyph = succeeded ? '✓' : failed ? '✗' : '⏹'
+      const statusGlyph =
+        succeeded ? '✓' : failed ? '✗' : wasInterrupted ? '⏹' : '–'
       const statusGlyphColor =
         succeeded ? 'text-green-400' : failed ? 'text-red-400' : 'text-gray-400'
       // The compact toggle controls chrome only (avatar / author-header / bubble

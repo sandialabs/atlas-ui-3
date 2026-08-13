@@ -163,18 +163,35 @@ class ToolsModeRunner:
             # agent mode in issue #755. Flush what ran, closing out any call
             # that never reported a result, then let the failure through.
             try:
+                await recorder.notify_incomplete()
+            except BaseException:  # pragma: no cover - transport may be gone
+                logger.debug("Could not notify UI of interrupted tool calls", exc_info=True)
+            try:
                 recorder.flush(session.history, mark_incomplete=True)
             except Exception:  # pragma: no cover - never mask the real failure
                 logger.warning("Failed to flush tool calls while unwinding", exc_info=True)
             raise
 
-        # Process artifacts if handler provided
-        if self.artifact_processor:
-            await self.artifact_processor(session, tool_results, effective_callback)
+        try:
+            # Process artifacts if handler provided
+            if self.artifact_processor:
+                await self.artifact_processor(session, tool_results, effective_callback)
 
-        # Persist the tool calls before the final answer so reloaded history
-        # reads user -> tool_call(s) -> assistant.
-        recorder.flush(session.history)
+            # Persist the tool calls before the final answer so reloaded history
+            # reads user -> tool_call(s) -> assistant.
+            recorder.flush(session.history)
+        except BaseException:
+            # A stop delivered during artifact processing would otherwise unwind
+            # past the flush and discard every completed call (issue #755).
+            try:
+                await recorder.notify_incomplete()
+            except BaseException:  # pragma: no cover - transport may be gone
+                logger.debug("Could not notify UI of interrupted tool calls", exc_info=True)
+            try:
+                recorder.flush(session.history, mark_incomplete=True)
+            except Exception:  # pragma: no cover - never mask the real failure
+                logger.warning("Failed to flush tool calls while unwinding", exc_info=True)
+            raise
 
         # Add final assistant message to history
         assistant_message = Message(
@@ -423,6 +440,10 @@ class ToolsModeRunner:
             # A Stop / disconnect mid-round would otherwise discard every
             # tool call recorded since the turn began -- the recorder only
             # flushes on the success path (issue #755).
+            try:
+                await recorder.notify_incomplete()
+            except BaseException:  # pragma: no cover - transport may be gone
+                logger.debug("Could not notify UI of interrupted tool calls", exc_info=True)
             try:
                 recorder.flush(session.history, mark_incomplete=True)
             except Exception:  # pragma: no cover - never mask the real failure

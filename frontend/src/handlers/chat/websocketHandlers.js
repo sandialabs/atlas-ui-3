@@ -199,9 +199,15 @@ export function createWebSocketHandler(deps) {
             agent_mode: updateData.agent_mode || false
           })
           break
-        case 'tool_result':
-          mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === updateData.tool_call_id ? { ...msg, content: `**Tool: ${updateData.tool_name}** - ${updateData.success ? 'Success' : 'Failed'}`, status: updateData.success ? 'completed' : 'failed', result: updateData.result || updateData.error || null } : msg))
+        case 'tool_result': {
+          // A stopped call carries an explicit status: it is neither a success
+          // nor a tool failure, so it must not be mapped onto either (#755).
+          const stopped = updateData.status === 'interrupted'
+          const label = stopped ? 'Stopped' : updateData.success ? 'Success' : 'Failed'
+          const status = stopped ? 'interrupted' : updateData.success ? 'completed' : 'failed'
+          mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === updateData.tool_call_id ? { ...msg, content: `**Tool: ${updateData.tool_name}** - ${label}`, status, result: updateData.result || updateData.error || null } : msg))
           break
+        }
         case 'tool_log':
           // Log message from MCP server
           if (updateData && updateData.message) {
@@ -400,6 +406,18 @@ export function createWebSocketHandler(deps) {
               status: data.success ? 'completed' : 'failed',
               result: data.result || null,
               content: `**Tool: ${data.tool_name}** - ${data.success ? 'Success' : 'Failed'}`
+            } : msg))
+          break
+        }
+        case 'tool_interrupted': {
+          // The turn was stopped while this call was still running (#755).
+          // Without this the row spins as CALLING until a reload replaces it
+          // with the persisted interrupted row.
+          mapMessages(prev => prev.map(msg => msg.tool_call_id === data.tool_call_id ? {
+              ...msg,
+              status: 'interrupted',
+              result: data.result || null,
+              content: `**Tool: ${data.tool_name}** - Stopped`
             } : msg))
           break
         }

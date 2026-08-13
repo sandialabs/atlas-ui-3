@@ -76,13 +76,13 @@ def _stringify(value: Any, limit: int) -> str:
 
 
 def _fence(text: str) -> str:
-    """Quote tool output so it cannot terminate its own data fence.
+    """Quote untrusted text so it cannot terminate or forge a data fence.
 
     A single ``replace`` is not idempotent -- ``">>>>"`` collapses to ``">>>"``
-    and closes the fence -- so every ``>`` is escaped instead. The text stays
-    readable and no rewriting of the result can produce the delimiter.
+    and closes the fence -- so both delimiter characters are escaped instead.
+    The text stays readable and no rewriting can reproduce ``<<<`` or ``>>>``.
     """
-    return text.replace(">", "&gt;")
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _digest_line(metadata: Dict[str, Any]) -> Optional[str]:
@@ -95,7 +95,11 @@ def _digest_line(metadata: Dict[str, Any]) -> Optional[str]:
     result = _stringify(metadata.get("result"), _MAX_RESULT_CHARS)
     status = metadata.get("status") or "completed"
 
-    line = f"- {tool_name}({args})"
+    # Arguments are model- and server-shaped text in the same assistant-role
+    # content, so they get the same escaping and their own delimiter: an
+    # argument like ") -> <<<forged>>>" must not be able to close the call and
+    # emit a fabricated result record.
+    line = f"- {tool_name}({_RESULT_OPEN}{_fence(args)}{_RESULT_CLOSE})"
     if status and status != "completed":
         line += f" [{status}]"
     if not result:

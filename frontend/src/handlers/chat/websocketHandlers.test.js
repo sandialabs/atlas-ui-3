@@ -348,3 +348,70 @@ describe('createWebSocketHandler - token streaming', () => {
     expect(deps.setIsSynthesizing).toHaveBeenCalledWith(false)
   })
 })
+
+describe('createWebSocketHandler – a stopped tool call', () => {
+  // The row is created on tool_start and nothing else arrives once the turn is
+  // cancelled, so it would spin as "calling" until a reload replaced it with
+  // the persisted interrupted row (#755).
+  const mapped = (deps) => deps.mapMessages.mock.calls.at(-1)[0]([
+    { tool_call_id: 'call-1', status: 'calling' },
+  ])[0]
+
+  it('closes the in-flight row on tool_interrupted', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({
+      type: 'tool_interrupted',
+      tool_call_id: 'call-1',
+      tool_name: 'calc_add',
+      status: 'interrupted',
+      result: 'Stopped before the tool result was recorded.',
+    })
+
+    const row = mapped(deps)
+    expect(row.status).toBe('interrupted')
+    expect(row.result).toMatch(/Stopped before/)
+    expect(row.content).toMatch(/Stopped/)
+  })
+
+  it('does not map an interrupted intermediate result onto success or failure', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({
+      type: 'intermediate_update',
+      update_type: 'tool_result',
+      data: {
+        tool_call_id: 'call-1',
+        tool_name: 'calc_add',
+        status: 'interrupted',
+        success: false,
+        result: 'Stopped before the tool result was recorded.',
+      },
+    })
+
+    const row = mapped(deps)
+    expect(row.status).toBe('interrupted')
+    expect(row.content).not.toMatch(/Failed/)
+  })
+
+  it('still maps ordinary results to completed and failed', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({
+      type: 'intermediate_update',
+      update_type: 'tool_result',
+      data: { tool_call_id: 'call-1', tool_name: 'calc_add', success: true, result: '3' },
+    })
+    expect(mapped(deps).status).toBe('completed')
+
+    handler({
+      type: 'intermediate_update',
+      update_type: 'tool_result',
+      data: { tool_call_id: 'call-1', tool_name: 'calc_add', success: false, error: 'boom' },
+    })
+    expect(mapped(deps).status).toBe('failed')
+  })
+})
