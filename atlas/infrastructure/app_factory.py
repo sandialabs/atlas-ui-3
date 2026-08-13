@@ -5,6 +5,7 @@ from typing import Optional
 
 from atlas.application.chat.service import ChatService
 from atlas.core.auth import is_user_in_group
+from atlas.core.hooks import load_plugins_from_settings
 from atlas.domain.rag_mcp_service import RAGMCPService
 from atlas.domain.unified_rag_service import UnifiedRAGService
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
@@ -24,6 +25,12 @@ class AppFactory:
     def __init__(self) -> None:
         # Configuration
         self.config_manager = ConfigManager()
+
+        # Lifecycle hook plugins. Loaded before any service is built so a
+        # governance plugin is registered before the first request can reach a
+        # hook point. Load failures raise: a policy control that silently fails
+        # to load looks identical to one that was never configured.
+        load_plugins_from_settings(self.config_manager.app_settings)
 
         # MCP tools manager
         self.mcp_tools = MCPToolManager()

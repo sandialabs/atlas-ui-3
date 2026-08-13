@@ -1,6 +1,7 @@
 """Chat service - core business logic for chat operations."""
 
 import asyncio
+import copy
 import logging
 from typing import (
     Any,
@@ -14,6 +15,13 @@ from typing import (
 )
 from uuid import UUID, uuid4
 
+from atlas.core.hooks import (
+    HookPoint,
+    HookTurnContext,
+    SessionStartEvent,
+    get_hook_registry,
+    hook_turn,
+)
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
@@ -239,6 +247,36 @@ class ChatService:
     ) -> Session:
         """Create a new chat session."""
         session = Session(id=session_id, user_email=user_email)
+
+        # SessionStart hook: seed session-scoped policy state, or reject the
+        # session outright. Runs before the session is persisted so a rejected
+        # session never becomes reachable.
+        registry = get_hook_registry()
+        if registry.has_hooks(HookPoint.SESSION_START):
+            event = SessionStartEvent(
+                session_id=str(session_id),
+                user_email=user_email,
+                conversation_id=str(session_id),
+                # Deep copy: a handler that edits a nested value in place and
+                # returns CONTINUE never went through validate_patch(), so its
+                # edit must not reach session.context.
+                context=copy.deepcopy(dict(session.context or {})),
+            )
+            chain = await registry.dispatch(event)
+            if chain.denied:
+                logger.warning(
+                    "Session %s rejected by hook(s) %s: %s",
+                    sanitize_for_logging(str(session_id)),
+                    sanitize_for_logging(", ".join(chain.contributors) or "<unknown>"),
+                    sanitize_for_logging(chain.reason or ""),
+                )
+                raise AuthorizationError(
+                    chain.user_message or "Session rejected by policy.",
+                    code="SESSION_DENIED_BY_HOOK",
+                )
+            if chain.modified:
+                session.context.update(event.context)
+
         await self.session_repository.create(session)
 
         logger.info(f"Created session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
@@ -449,6 +487,16 @@ class ChatService:
             ),
         }
 
+        # Publish the turn's trusted identity for hook points that fire below the
+        # session layer. RAG retrieval is reached through the LLM caller, which
+        # has no session handle, so without this its events would carry no
+        # compliance level and a tiered retrieval policy would see None.
+        hook_context = HookTurnContext(
+            session_id=str(session_id),
+            user_email=user_email,
+            conversation_id=session.context.get("conversation_id", str(session_id)),
+            compliance_level=session.context.get("compliance_level"),
+        )
         # Query-time RAG enforcement engages only when a trusted level actually
         # resolved. If the feature is on but the selected model carries no
         # compliance level (or the lookup failed), enforce=False leaves the
@@ -463,7 +511,7 @@ class ChatService:
             )
 
         try:
-            with start_span("chat.turn", turn_attrs):
+            with start_span("chat.turn", turn_attrs), hook_turn(hook_context):
                 # Delegate to orchestrator. When capture is active, run the turn
                 # inside the capture context so the LLM caller records full I/O,
                 # then flush the accumulated record to storage afterwards.

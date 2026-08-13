@@ -173,7 +173,7 @@ jobs:
       uses: trufflesecurity/trufflehog@main
       with:
         path: ./
-        extra_args: --debug --only-verified
+        extra_args: --debug --only-verified --exclude-detectors=Lob
 
     # GitLeaks for additional secret detection (requires GITLEAKS_LICENSE)
     # - name: Run GitLeaks

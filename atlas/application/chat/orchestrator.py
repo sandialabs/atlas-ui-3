@@ -4,6 +4,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
+from atlas.core.hooks import HookPoint, UserPromptSubmitEvent, get_hook_registry
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.domain.errors import AuthorizationError, SessionNotFoundError
 from atlas.domain.messages.models import Message, MessageRole
@@ -169,6 +171,72 @@ class ChatOrchestrator:
             code="MODEL_ACCESS_DENIED",
         )
 
+    async def _run_user_prompt_hooks(
+        self,
+        session: Any,
+        session_id: UUID,
+        content: str,
+        model: str,
+        user_email: Optional[str],
+        selected_tools: Optional[List[str]],
+        selected_data_sources: Optional[List[str]],
+        agent_mode: bool,
+    ) -> tuple[
+        tuple[str, Optional[List[str]], Optional[List[str]], bool],
+        Optional[Dict[str, Any]],
+    ]:
+        """Run the UserPromptSubmit chain.
+
+        Returns ``(post-hook prompt state, blocking response or None)``. When the
+        chain denies the turn, the denial is surfaced to the user as a normal
+        assistant message so the conversation stays usable.
+        """
+        state = (content, selected_tools, selected_data_sources, agent_mode)
+        registry = get_hook_registry()
+        if not registry.has_hooks(HookPoint.USER_PROMPT_SUBMIT):
+            return state, None
+
+        event = UserPromptSubmitEvent(
+            session_id=str(session_id),
+            user_email=user_email,
+            conversation_id=session.context.get("conversation_id", str(session_id)),
+            compliance_level=session.context.get("compliance_level"),
+            prompt=content,
+            model=model,
+            selected_tools=list(selected_tools) if selected_tools is not None else None,
+            selected_data_sources=list(selected_data_sources) if selected_data_sources is not None else None,
+            agent_mode=agent_mode,
+        )
+        chain = await registry.dispatch(event)
+
+        if chain.denied:
+            message = chain.user_message or "This message was blocked by policy."
+            logger.warning(
+                "Prompt blocked by hook(s) %s: %s",
+                sanitize_for_logging(", ".join(chain.contributors) or "<unknown>"),
+                sanitize_for_logging(chain.reason or ""),
+            )
+            await self.event_publisher.publish_chat_response(
+                message=message,
+                has_pending_tools=False,
+            )
+            await self.event_publisher.publish_response_complete()
+            return state, {"type": "chat_response", "message": message}
+
+        if not chain.modified:
+            # No accepted patch: keep the caller's values rather than reading
+            # them back off the event. A handler that mutated the event in place
+            # and returned CONTINUE never went through ``validate_patch()``, so
+            # its edits are not authorized and must not take effect.
+            return state, None
+
+        return (
+            event.prompt if "prompt" in chain.patched_fields else content,
+            event.selected_tools if "selected_tools" in chain.patched_fields else selected_tools,
+            event.selected_data_sources if "selected_data_sources" in chain.patched_fields else selected_data_sources,
+            event.agent_mode if "agent_mode" in chain.patched_fields else agent_mode,
+        ), None
+
     async def execute(
         self,
         session_id: UUID,
@@ -217,6 +285,23 @@ class ChatOrchestrator:
         # string comes straight off the client, so listing-layer filtering alone
         # is bypassable -- a crafted request must be rejected here too.
         await self._ensure_model_authorized(model, user_email)
+
+        # UserPromptSubmit hook. Fires before the message is written to history
+        # so a redacting plugin's rewrite is what gets stored, logged, and sent
+        # to the model -- not the original text.
+        prompt_state, blocked_response = await self._run_user_prompt_hooks(
+            session=session,
+            session_id=session_id,
+            content=content,
+            model=model,
+            user_email=user_email,
+            selected_tools=selected_tools,
+            selected_data_sources=selected_data_sources,
+            agent_mode=agent_mode,
+        )
+        if blocked_response is not None:
+            return blocked_response
+        content, selected_tools, selected_data_sources, agent_mode = prompt_state
 
         # Rewind/edit-and-resubmit: drop the targeted prompt and everything after
         # it so the new content takes its place in a single linear thread.

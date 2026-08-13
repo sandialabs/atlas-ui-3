@@ -10,6 +10,7 @@ built live under [design-notes/](design-notes/README.md).
 
 - [Architecture Overview](architecture.md) - Backend clean-architecture layers and frontend context model
 - [Development Conventions](conventions.md) - Coding standards and project conventions
+- [Lifecycle Hook / Plugin System](hook-plugin-system.md) - Server-side plugins that can modify, block, or escalate behavior at chat lifecycle boundaries
 
 ## MCP Tool Development
 

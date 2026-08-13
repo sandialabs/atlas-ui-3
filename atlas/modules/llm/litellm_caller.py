@@ -12,6 +12,7 @@ fallbacks, cost tracking, and provider-specific optimizations.
 """
 
 import asyncio
+import copy
 import logging
 import random
 import re
@@ -34,10 +35,20 @@ except ImportError:
 import litellm
 from litellm import acompletion
 
+from atlas.core.hooks import (
+    DEFAULT_DENY_USER_MESSAGE,
+    HookPoint,
+    PreLlmCallEvent,
+    current_hook_context,
+    get_hook_registry,
+)
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
+from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
+    AuthorizationError,
     ContextWindowExceededError,
     DataSourcePermissionError,
     LLMAuthenticationError,
@@ -843,6 +854,111 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 messages = self._enforce_strict_role_ordering(messages)
         return messages
 
+    async def _run_pre_llm_call_hooks(
+        self,
+        model_name: str,
+        messages: List[Dict[str, Any]],
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        streaming: bool = False,
+        has_tools: bool = False,
+        user_email: Optional[str] = None,
+    ) -> Tuple[str, List[Dict[str, Any]], Optional[float]]:
+        """Run the ``pre_llm_call`` chain and return the request to actually send.
+
+        Returns ``(model_name, messages, temperature)``. Called from the four
+        leaf entry points -- ``call_plain``, ``call_with_tools``,
+        ``stream_plain``, ``stream_with_tools`` -- which every other public
+        method funnels through, so each provider round-trip fires exactly once
+        and the RAG-enriched message list is what the plugin sees.
+
+        Runs *before* the model name, API key, and per-model kwargs are
+        resolved, so a plugin that repoints the call gets that model's real
+        credentials rather than the original model's.
+
+        Raises:
+            AuthorizationError: the chain denied the call, or patched in a model
+                this turn's user is not authorized for.
+        """
+        registry = get_hook_registry()
+        if not registry.has_hooks(HookPoint.PRE_LLM_CALL):
+            return model_name, messages, temperature
+
+        turn = current_hook_context()
+        context_fields = turn.as_event_fields() if turn else {}
+        # The turn context is the trusted, server-side identity. The per-call
+        # user_email argument is a fallback for calls made outside a chat turn
+        # (health checks, follow-up suggestions), which have no turn context.
+        if not context_fields.get("user_email"):
+            context_fields["user_email"] = user_email
+
+        event = PreLlmCallEvent(
+            **context_fields,
+            model=model_name,
+            # Deep copy: a handler that edits a message in place and returns
+            # CONTINUE never went through validate_patch(), so its edit must not
+            # reach the provider.
+            messages=copy.deepcopy(list(messages)),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            streaming=streaming,
+            has_tools=has_tools,
+        )
+        chain = await registry.dispatch(event)
+
+        if chain.denied:
+            logger.warning(
+                "LLM call blocked by hook(s) %s: %s",
+                sanitize_for_logging(", ".join(chain.contributors) or "<unknown>"),
+                sanitize_for_logging(chain.reason or ""),
+            )
+            raise AuthorizationError(
+                chain.user_message or DEFAULT_DENY_USER_MESSAGE,
+                code="LLM_CALL_DENIED_BY_HOOK",
+            )
+
+        if not chain.modified:
+            # No accepted patch: send exactly what the caller assembled.
+            return model_name, messages, temperature
+
+        if "model" in chain.patched_fields and event.model != model_name:
+            # A model swap is the one patch ``validate_patch`` cannot settle on
+            # its own -- the group check is async and needs the model catalog --
+            # so it is authorized here, against the turn's user, exactly as the
+            # orchestrator authorizes the model the client asked for.
+            effective_user = context_fields.get("user_email")
+            decision = await check_model_access(
+                getattr(self.llm_config, "models", None),
+                event.model,
+                effective_user,
+                context="pre_llm_call hook",
+            )
+            if decision is not ModelAccessDecision.ALLOWED:
+                logger.warning(
+                    "Hook(s) %s repointed the call to model %s (%s); refusing",
+                    sanitize_for_logging(", ".join(chain.contributors) or "<unknown>"),
+                    sanitize_for_logging(event.model),
+                    decision.value,
+                )
+                raise AuthorizationError(
+                    DEFAULT_DENY_USER_MESSAGE,
+                    code="LLM_MODEL_DENIED_BY_HOOK",
+                )
+            logger.info(
+                "Hook(s) %s repointed the LLM call to model %s",
+                sanitize_for_logging(", ".join(chain.contributors)),
+                sanitize_for_logging(event.model),
+            )
+
+        # Only consume fields that were explicitly patched via MODIFY; an
+        # in-place mutation behind a CONTINUE never passed validate_patch().
+        return (
+            event.model if "model" in chain.patched_fields else model_name,
+            event.messages if "messages" in chain.patched_fields else messages,
+            event.temperature if "temperature" in chain.patched_fields else temperature,
+        )
+
     async def call_plain(
         self,
         model_name: str,
@@ -860,6 +976,17 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             max_tokens: Optional max_tokens override (uses config default if None)
             user_email: Optional user email for metrics logging
         """
+        # PreLlmCall hook, before any model/credential resolution.
+        model_name, messages, temperature = await self._run_pre_llm_call_hooks(
+            model_name,
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            streaming=False,
+            has_tools=False,
+            user_email=user_email,
+        )
+
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
 
@@ -1031,6 +1158,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             DataSourcePermissionError,
         ):
             raise  # Don't mask LLM errors with a fallback retry
+        except AuthorizationError:
+            # A pre_llm_call hook refused this request. Retrying without RAG
+            # would just run the same chain to the same denial, so surface it.
+            raise
         except Exception as exc:
             logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG] Falling back to plain LLM call due to RAG error")
@@ -1049,6 +1180,16 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         if not tools_schema:
             content = await self.call_plain(model_name, messages, temperature=temperature, user_email=user_email)
             return LLMResponse(content=content, model_used=model_name)
+
+        # PreLlmCall hook, before any model/credential resolution.
+        model_name, messages, temperature = await self._run_pre_llm_call_hooks(
+            model_name,
+            messages,
+            temperature=temperature,
+            streaming=False,
+            has_tools=True,
+            user_email=user_email,
+        )
 
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
@@ -1222,6 +1363,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             DataSourcePermissionError,
         ):
             raise  # Don't mask LLM errors with a fallback retry
+        except AuthorizationError:
+            # A pre_llm_call hook refused this request. Retrying without RAG
+            # would just run the same chain to the same denial, so surface it.
+            raise
         except Exception as exc:
             logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG+Tools] Falling back to tools-only call due to RAG error")

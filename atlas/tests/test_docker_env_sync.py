@@ -32,6 +32,17 @@ def parse_env_example(env_file_path: Path) -> dict[str, str]:
     return env_vars
 
 
+def _compose_default(value: str) -> str:
+    """Resolve ``${VAR:-default}`` / ``${VAR-default}`` to its default.
+
+    Compose substitutes the host environment here, so the default is the
+    effective value on a machine that does not set the variable. Anything else
+    (a literal, or a bare ``${VAR}`` with no default) is returned unchanged.
+    """
+    match = re.fullmatch(r"\$\{[A-Za-z_][A-Za-z0-9_]*:?-(.*)\}", value.strip())
+    return match.group(1) if match else value
+
+
 def parse_docker_compose_env(docker_compose_path: Path) -> dict[str, str]:
     """Parse docker-compose.yml and extract environment variables for atlas-ui service.
 
@@ -162,10 +173,13 @@ def test_docker_compose_env_var_values_reasonable():
 
     docker_compose_vars = parse_docker_compose_env(docker_compose_path)
 
-    # Check that boolean feature flags have boolean-like values
+    # Check that boolean feature flags have boolean-like values.
+    # A value may be written as a host passthrough with a default
+    # (``${FEATURE_X:-false}``); the default is what the container sees when the
+    # host does not set the variable, so that is the value to sanity-check.
     feature_flags = [k for k in docker_compose_vars.keys() if k.startswith('FEATURE_')]
     for flag in feature_flags:
-        value = docker_compose_vars[flag].lower()
+        value = _compose_default(docker_compose_vars[flag]).lower()
         assert value in ['true', 'false'], (
             f"Feature flag '{flag}' has non-boolean value: '{docker_compose_vars[flag]}'"
         )
@@ -174,7 +188,7 @@ def test_docker_compose_env_var_values_reasonable():
     numeric_vars = ['PORT', 'AGENT_MAX_STEPS']
     for var in numeric_vars:
         if var in docker_compose_vars:
-            value = docker_compose_vars[var]
+            value = _compose_default(docker_compose_vars[var])
             assert value.isdigit(), (
                 f"Numeric variable '{var}' has non-numeric value: '{value}'"
             )

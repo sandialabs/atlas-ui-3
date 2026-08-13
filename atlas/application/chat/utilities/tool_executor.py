@@ -6,11 +6,21 @@ argument processing, and synthesis decisions without maintaining any state.
 """
 
 import asyncio
+import copy
 import json
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.core.capabilities import create_download_url
+from atlas.core.hooks import (
+    DEFAULT_DENY_USER_MESSAGE,
+    HookPoint,
+    PermissionRequestEvent,
+    PostToolUseEvent,
+    PreToolUseEvent,
+    get_hook_registry,
+)
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.interfaces.llm import LLMResponse
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
@@ -326,6 +336,33 @@ def tool_accepts_atlas_user(tool_name: str, tool_manager) -> bool:
         return False  # Default to not injecting if we can't determine
 
 
+def _hook_denied_result(tool_call, chain) -> ToolResult:
+    """Turn a hook-chain denial into an error ToolResult.
+
+    Denied tool calls become a failed result rather than an exception so the
+    tools/agentic loop continues and the model sees why the call was refused.
+    """
+    # ``reason`` is operator-facing -- it names handlers and quotes the values
+    # that tripped a rule -- so it never becomes user-visible text. The chain
+    # already substitutes a generic message when a plugin supplies none.
+    message = chain.user_message or DEFAULT_DENY_USER_MESSAGE
+    # A hook reason is plugin-authored and routinely quotes the arguments that
+    # tripped the rule, so it is untrusted text on the way to the log.
+    logger.info(
+        "Tool %s blocked by hook(s) %s: %s",
+        sanitize_for_logging(tool_call.function.name),
+        sanitize_for_logging(", ".join(chain.contributors) or "<unknown>"),
+        sanitize_for_logging(chain.reason or ""),
+    )
+    return ToolResult(
+        tool_call_id=tool_call.id,
+        content=f"Tool execution blocked by policy: {message}",
+        success=False,
+        error="blocked_by_policy",
+        meta_data={"hook_denied": True, "hooks": list(chain.contributors)},
+    )
+
+
 async def execute_single_tool(
     tool_call,
     session_context: Dict[str, Any],
@@ -421,6 +458,44 @@ async def execute_single_tool(
             # Filter to only schema-declared parameters so MCP tools don't receive extras
             filtered_args = _filter_args_to_schema(parsed_args, tool_call.function.name, tool_manager)
 
+            # PreToolUse hook: the single control point every tool call passes
+            # through, in tools mode and in the agentic loop alike.
+            hook_registry = get_hook_registry()
+            hook_context = {
+                "session_id": session_context.get("session_id"),
+                "user_email": session_context.get("user_email"),
+                "conversation_id": session_context.get("conversation_id"),
+                "compliance_level": session_context.get("compliance_level"),
+            }
+            force_approval = False
+            if hook_registry.has_hooks(HookPoint.PRE_TOOL_USE):
+                pre_event = PreToolUseEvent(
+                    tool_name=tool_name,
+                    tool_call_id=tool_call.id,
+                    tool_source=tool_source,
+                    arguments=copy.deepcopy(filtered_args),
+                    **hook_context,
+                )
+                pre_chain = await hook_registry.dispatch(pre_event)
+                if pre_chain.denied:
+                    return _finalize_span(_hook_denied_result(tool_call, pre_chain))
+                if pre_chain.modified:
+                    # SECURITY: a plugin's argument patch is untrusted input.
+                    # Re-inject server-side context (_atlas_user, file URLs) and
+                    # re-filter to the tool schema so a hook can shape arguments
+                    # but never forge identity or smuggle undeclared parameters.
+                    filtered_args = _filter_args_to_schema(
+                        inject_context_into_args(
+                            dict(pre_event.arguments),
+                            session_context,
+                            tool_call.function.name,
+                            tool_manager,
+                        ),
+                        tool_call.function.name,
+                        tool_manager,
+                    )
+                force_approval = pre_chain.approval_required
+
             # Sanitize arguments for UI (hide tokens in URLs, etc.)
             display_args = _sanitize_args_for_ui(dict(filtered_args))
 
@@ -437,6 +512,34 @@ async def execute_single_tool(
                 needs_approval = True
                 allow_edit = True
                 admin_required = False
+
+            # PermissionRequest hook: policy may auto-approve, escalate, or deny.
+            # Most-restrictive-wins -- a PreToolUse escalation cannot be undone
+            # here, and PermissionRequestEvent refuses to auto-approve past an
+            # admin-mandated gate.
+            if hook_registry.has_hooks(HookPoint.PERMISSION_REQUEST):
+                permission_event = PermissionRequestEvent(
+                    tool_name=tool_name,
+                    tool_call_id=tool_call.id,
+                    arguments=copy.deepcopy(filtered_args),
+                    needs_approval=needs_approval or force_approval,
+                    admin_required=admin_required,
+                    **hook_context,
+                )
+                permission_chain = await hook_registry.dispatch(permission_event)
+                if permission_chain.denied:
+                    return _finalize_span(_hook_denied_result(tool_call, permission_chain))
+                if permission_chain.modified:
+                    # Only an accepted patch moves the gate. A handler that set
+                    # needs_approval on the event in place and returned CONTINUE
+                    # bypassed validate_patch(), so its value carries none of the
+                    # admin-mandated / monotonic-escalation guarantees.
+                    needs_approval = bool(permission_event.needs_approval)
+                if permission_chain.approval_required:
+                    needs_approval = True
+
+            if force_approval:
+                needs_approval = True
 
             # Track if arguments were edited (for LLM context)
             arguments_were_edited = False
@@ -551,6 +654,39 @@ async def execute_single_tool(
                     "update_callback": update_callback,
                 }
             )
+
+            # PostToolUse hook: last chance to redact or annotate the output
+            # before it reaches the model and the UI.
+            if hook_registry.has_hooks(HookPoint.POST_TOOL_USE):
+                post_event = PostToolUseEvent(
+                    tool_name=tool_name,
+                    tool_call_id=tool_call.id,
+                    arguments=copy.deepcopy(filtered_args),
+                    content=(
+                        result.content if isinstance(result.content, str) else str(result.content)
+                    ),
+                    success=bool(result.success),
+                    error=result.error,
+                    **hook_context,
+                )
+                post_chain = await hook_registry.dispatch(post_event)
+                if post_chain.denied:
+                    # The tool already ran; denial here suppresses the output
+                    # rather than the call, and the loop continues gracefully.
+                    result.content = (
+                        post_chain.user_message or "Tool result withheld by policy."
+                    )
+                    result.success = False
+                    result.error = "blocked_by_policy"
+                    # Withholding means withholding everything the tool produced.
+                    # notify_tool_complete() ships artifacts to the UI and
+                    # persists them behind tokenized download URLs, so rewriting
+                    # only the text would hand over the very files the policy
+                    # just refused to disclose.
+                    result.artifacts = []
+                    result.display_config = None
+                elif post_chain.modified:
+                    result.content = post_event.content
 
             # Capture the raw tool output for telemetry *before* we mutate
             # result.content with an edit_note — the edit note inlines
