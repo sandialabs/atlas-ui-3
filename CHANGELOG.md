@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #787 - 2026-08-13
+- **The tool digest's per-call budget counts content, not escaping** (follow-up to #784, issue #755): arguments and results were escaped before being capped, so the 300/400-character budgets were spent on `&lt;`/`&gt;` entities and a fetched HTML page kept well under two thirds of its intended content. The cap is now spent on source characters, with a separate ceiling on the escaped result, so ordinary output gets its documented budget while a value made only of delimiters still cannot crowd later calls out of the digest. The `status` field goes through the same quoting as every other value on the line — it carries only recorder-written literals today, so nothing observable changes.
+
 ### PR #784 - 2026-08-12
 - **Stopped turns are closed in every mode, and the tool digest is hardened** (follow-up to #776, issue #755): `close_open_turn()` now walks back past display-only rows, so a stopped tools-mode turn — whose flush leaves a `tool_call` row last — is closed instead of reopening the next request as `user -> user`; `ToolsModeRunner.run` keeps artifact processing and its recorder flush inside the unwind guard. Digest arguments are escaped and fenced like results (the escape covers `<` and `>`, so neither field can forge or close a delimiter), and a stopped call now emits `tool_interrupted` so the live row stops spinning instead of contradicting the reloaded transcript. The tool-status ladder names each terminal state, with anything unrecognized rendering neutrally rather than claiming the call failed.
 
