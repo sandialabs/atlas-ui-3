@@ -16,7 +16,13 @@ the token/filename sanitization applied before display.
 The resulting messages are role ``tool`` and carry ``message_type=tool_call``
 metadata, so they are excluded from
 :meth:`ConversationHistory.get_messages_for_llm` and never replayed to the
-model.
+model as conversation turns.
+
+They are not entirely invisible to the model, though: since issue #755 these
+rows are the source for the capped, explicitly-delimited tool digest built by
+:mod:`atlas.application.chat.utilities.agent_digest`, which quotes their
+arguments and results as untrusted data on the turn's closing assistant
+message. Nothing here is replayed verbatim as a ``tool`` message.
 """
 
 import logging
@@ -136,13 +142,28 @@ class ToolCallRecorder:
             ))
         return out
 
-    def flush(self, history: ConversationHistory) -> None:
+    def flush(self, history: ConversationHistory, mark_incomplete: bool = False) -> None:
         """Append recorded tool-call messages to a history, then reset.
 
         Call immediately before adding the turn's final assistant message so
         the persisted order is ``user -> tool_call(s) -> assistant``. Clearing
         afterwards makes repeated flushes within a turn idempotent.
+
+        ``mark_incomplete`` closes out calls that never reported a result --
+        the turn was stopped or the connection dropped mid-execution
+        (issue #755). Without it those rows persist as ``status="calling"`` and
+        reload as a tool that is forever in progress.
         """
+        if mark_incomplete:
+            for entry in self._calls.values():
+                if entry.get("status") in (None, "calling"):
+                    # A distinct status, not "failed": the user stopping their
+                    # own turn is not a tool error, and the UI renders the two
+                    # differently.
+                    entry["status"] = "interrupted"
+                    entry.setdefault(
+                        "result", "Stopped before the tool result was recorded."
+                    )
         for message in self.messages():
             history.add_message(message)
         self._calls.clear()

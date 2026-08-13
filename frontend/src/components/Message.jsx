@@ -203,18 +203,26 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       const isToolActive = message.status === 'calling' || message.status === 'in_progress'
       const argCount = message.arguments ? Object.keys(message.arguments).length : 0
       const hasDetails = argCount > 0 || message.result != null
+      // A call the user stopped is not a tool error, so it gets its own
+      // neutral treatment (#755). Only an explicit 'failed' reads as an error;
+      // any other unrecognized status falls through to the neutral style.
+      const wasInterrupted = message.status === 'interrupted'
+      const failed = message.status === 'failed'
       const statusLabel =
         message.status === 'calling' ? 'CALLING' :
         message.status === 'in_progress' ? 'IN PROGRESS' :
-        message.status === 'completed' ? 'SUCCESS' : 'FAILED'
+        message.status === 'completed' ? 'SUCCESS' :
+        failed ? 'FAILED' : 'STOPPED'
       const statusColor =
         isToolActive ? 'bg-blue-600' :
-        message.status === 'completed' ? 'bg-green-600' : 'bg-red-600'
+        message.status === 'completed' ? 'bg-green-600' :
+        failed ? 'bg-red-600' : 'bg-gray-600'
       // Compact rows show the outcome as a glyph rather than a text pill so the
       // whole row fits one line on a phone (#762).
       const succeeded = message.status === 'completed'
-      const statusGlyph = succeeded ? '✓' : '✗'
-      const statusGlyphColor = succeeded ? 'text-green-400' : 'text-red-400'
+      const statusGlyph = succeeded ? '✓' : failed ? '✗' : '⏹'
+      const statusGlyphColor =
+        succeeded ? 'text-green-400' : failed ? 'text-red-400' : 'text-gray-400'
       // The compact toggle controls chrome only (avatar / author-header / bubble
       // + badge sizing). The collapse behavior is shared across both modes, so
       // details start collapsed and expand on click either way — matching the
@@ -467,9 +475,9 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 </div>
               )}
               {message.result && (
-                <div className={`border-l-2 pl-3 ${message.status === 'failed' ? 'border-red-500' : 'border-green-500'}`}>
-                  <div className={`text-xs font-semibold mb-1 ${message.status === 'failed' ? 'text-red-400' : 'text-green-400'}`}>
-                    {message.status === 'failed' ? 'Error Details' : 'Output Result'}
+                <div className={`border-l-2 pl-3 ${failed ? 'border-red-500' : wasInterrupted ? 'border-gray-500' : 'border-green-500'}`}>
+                  <div className={`text-xs font-semibold mb-1 ${failed ? 'text-red-400' : wasInterrupted ? 'text-gray-400' : 'text-green-400'}`}>
+                    {failed ? 'Error Details' : wasInterrupted ? 'Stopped Before Result' : 'Output Result'}
                   </div>
                   <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
                     {debugMode && (

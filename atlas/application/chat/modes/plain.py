@@ -1,5 +1,6 @@
 """Plain mode runner - handles simple LLM calls without tools or RAG."""
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -85,16 +86,29 @@ class PlainModeRunner:
         user_email: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute plain LLM mode with token streaming."""
-        accumulated = await stream_and_accumulate(
-            token_generator=self.llm.stream_plain(
-                model, messages, temperature=temperature, user_email=user_email,
-            ),
-            event_publisher=self.event_publisher,
-            fallback_fn=lambda: self.llm.call_plain(
-                model, messages, temperature=temperature, user_email=user_email,
-            ),
-            context_label="plain",
-        )
+        # Text the user already watched stream in must survive a Stop
+        # (issue #755); the helper drops it here before re-raising.
+        partial: list = []
+        try:
+            accumulated = await stream_and_accumulate(
+                token_generator=self.llm.stream_plain(
+                    model, messages, temperature=temperature, user_email=user_email,
+                ),
+                event_publisher=self.event_publisher,
+                fallback_fn=lambda: self.llm.call_plain(
+                    model, messages, temperature=temperature, user_email=user_email,
+                ),
+                context_label="plain",
+                partial_sink=partial,
+            )
+        except asyncio.CancelledError:
+            if partial:
+                session.history.add_message(Message(
+                    role=MessageRole.ASSISTANT,
+                    content=partial[0],
+                    metadata={"interrupted": True},
+                ))
+            raise
 
         assistant_message = Message(
             role=MessageRole.ASSISTANT,

@@ -413,6 +413,27 @@ describe('Message — tool-call collapse is shared across compact/classic (regre
     expect(screen.getByLabelText('FAILED')).toHaveTextContent('✗')
   })
 
+  it('renders a stopped call neutrally rather than as an error', () => {
+    // A user's own Stop is not a tool failure: it must not read as a red
+    // FAILED row under "Error Details" (#755).
+    setChat({ settings: { compactMessages: true } })
+    const stopped = {
+      ...toolCall,
+      status: 'interrupted',
+      result: 'Stopped before the tool result was recorded.',
+    }
+    render(<Message message={stopped} />)
+
+    const glyph = screen.getByLabelText('STOPPED')
+    expect(glyph).toHaveTextContent('⏹')
+    expect(glyph.className).not.toMatch(/red/)
+    expect(screen.queryByLabelText('FAILED')).not.toBeInTheDocument()
+
+    fireEvent.click(glyph)
+    expect(screen.getByText('Stopped Before Result')).toBeInTheDocument()
+    expect(screen.queryByText('Error Details')).not.toBeInTheDocument()
+  })
+
   it('labels the active spinner for screen readers in compact and classic modes', () => {
     // The active spinner replaces the outcome glyph while a tool is running.
     // Without an aria-label the spinning state is announced as nothing, so
