@@ -48,6 +48,10 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  // useIsPrinting keeps its flag in module scope, so a test that dispatches
+  // `beforeprint` would leave every later test rendering in the printing
+  // state and make coverage depend on declaration order.
+  window.dispatchEvent(new Event('afterprint'))
 })
 
 const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
@@ -152,6 +156,12 @@ describe('print export -- the rules the DOM changes depend on', () => {
     // meaningless unless the hide rule carries this exception; an edit to
     // either half silently drops tool rows from the PDF.
     expect(printCss).toMatch(/button:not\(\.no-print-hide\)/)
+  })
+
+  it('strips the screen fill from buttons that do print', () => {
+    // Printed text is forced black; a button that keeps its bg-blue-600 fill
+    // prints black-on-blue whenever "Background graphics" is enabled.
+    expect(printCss).toMatch(/button\.no-print-hide\s*\{[^}]*background:\s*transparent\s*!important/)
   })
 
   it('reveals print-only blocks', () => {

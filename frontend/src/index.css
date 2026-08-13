@@ -752,6 +752,14 @@
     text-shadow: none !important;
   }
 
+  /* The buttons that opt into printing (tool call summaries, tool output file
+     names) carry screen fills such as bg-blue-600. The whitening rule above
+     only matches `rounded-lg` boxes, so with "Background graphics" enabled the
+     file names printed black-on-blue against the forced black text (#774). */
+  button.no-print-hide {
+    background: transparent !important;
+  }
+
   /* Code blocks should have light background. Long lines must wrap so the
      right-hand side is not clipped past the printable page width (#774);
      the screen layout gives <pre> a horizontal scroller, but a scroller
