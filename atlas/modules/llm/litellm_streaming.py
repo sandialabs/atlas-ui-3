@@ -31,6 +31,7 @@ class LiteLLMStreamingMixin:
       - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> list
       - _build_rag_completion_response(rag_response, display_source) -> str
       - _combine_rag_contexts(source_responses) -> tuple
+      - _rag_insert_index(messages) -> int
       - _rag_service attribute
     """
 
@@ -272,7 +273,7 @@ class LiteLLMStreamingMixin:
                     "error_type": type(exc).__name__,
                 })
                 logger.error("Error in streaming LLM call with tools: %s", exc, exc_info=True)
-                self._raise_llm_domain_error(exc)
+                self._raise_llm_domain_error(exc, tools_schema=tools_schema)
 
     async def stream_with_rag(
         self,
@@ -298,7 +299,7 @@ class LiteLLMStreamingMixin:
             raise ValueError("RAG service not configured")
 
         # Query RAG sources (non-streaming)
-        source_responses = await self._query_all_rag_sources(
+        source_responses, rag_exclusions = await self._query_all_rag_sources(
             data_sources, rag_service, user_email, messages,
         )
 
@@ -327,10 +328,11 @@ class LiteLLMStreamingMixin:
             citation_block = self._build_citation_instructions(rag_metadata)
 
         messages_with_rag = messages.copy()
-        messages_with_rag.insert(-1, {
+        messages_with_rag.insert(self._rag_insert_index(messages_with_rag), {
             "role": "system",
             "content": (
                 f"{context_label}:\n\n{rag_content}"
+                f"{self._build_rag_exclusion_notice(rag_exclusions)}"
                 f"{citation_block}\n\n"
                 "Use this context to inform your response. "
                 "Cite sources inline using [1], [2], etc. where applicable."
@@ -373,7 +375,7 @@ class LiteLLMStreamingMixin:
         if rag_service is None:
             raise ValueError("RAG service not configured")
 
-        source_responses = await self._query_all_rag_sources(
+        source_responses, rag_exclusions = await self._query_all_rag_sources(
             data_sources, rag_service, user_email, messages,
         )
 
@@ -404,10 +406,11 @@ class LiteLLMStreamingMixin:
             citation_block = self._build_citation_instructions(rag_metadata)
 
         messages_with_rag = messages.copy()
-        messages_with_rag.insert(-1, {
+        messages_with_rag.insert(self._rag_insert_index(messages_with_rag), {
             "role": "system",
             "content": (
                 f"{context_label}:\n\n{rag_content}"
+                f"{self._build_rag_exclusion_notice(rag_exclusions)}"
                 f"{citation_block}\n\n"
                 "Use this context to inform your response. "
                 "Cite sources inline using [1], [2], etc. where applicable."

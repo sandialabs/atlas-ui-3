@@ -108,7 +108,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Create virtual environment and install in editable mode (with dev dependencies)
 uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,mcp-demos]"   # mcp-demos: deps the bundled demo MCP servers need
 ```
 
 This installs the `atlas` package in **editable mode**, meaning:

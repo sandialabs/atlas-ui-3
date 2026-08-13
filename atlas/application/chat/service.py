@@ -316,27 +316,85 @@ class ChatService:
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
 
-        # Establish the trusted, server-side compliance level for this turn.
-        # When the compliance feature is enabled this is a hard boundary: it is
-        # taken from the request (the user's active level) but persisted on the
-        # session so downstream tools/models cannot override or remove it. It is
-        # ignored entirely when the feature is disabled. Set every turn so a
-        # request that omits it clears any stale value. An invalid/unknown level
-        # validates to None (no restriction is applied to an unrecognized level;
-        # the group-membership boundary always still applies).
+        # Compliance levels for this turn. Two distinct values are tracked and
+        # they must not be conflated:
+        #
+        #   session.context["compliance_level"]
+        #       The *user's* level, validated from the client-supplied filter.
+        #       This is the long-standing key that scopes MCP server discovery
+        #       (mcp_execution), tool execution (tool_executor) and agent
+        #       context. Its meaning is unchanged by this PR.
+        #
+        #   session.context["model_compliance_level"]
+        #       The *model's* configured level, read from server-side config.
+        #       This is the trusted boundary used for query-time RAG
+        #       enforcement. A client cannot influence it.
+        #
+        # Both are set every turn so a request that changes model or filter
+        # clears any stale value.
         compliance_level_raw = kwargs.pop("compliance_level", None)
         _config_manager = getattr(self, "config_manager", None)
         compliance_enabled = bool(
             _config_manager
-            and _config_manager.app_settings.feature_compliance_levels_enabled
+            and getattr(
+                _config_manager.app_settings,
+                "feature_compliance_levels_enabled",
+                False,
+            ) is True
         )
-        if compliance_enabled and compliance_level_raw:
+        trusted_compliance_level = None
+        if compliance_enabled:
             from atlas.core.compliance import get_compliance_manager
-            session.context["compliance_level"] = get_compliance_manager().validate_compliance_level(
-                compliance_level_raw, context="chat request"
+            compliance_mgr = get_compliance_manager()
+            try:
+                model_config = _config_manager.llm_config.models.get(model)
+                configured_level = (
+                    getattr(model_config, "compliance_level", None)
+                    if model_config
+                    else None
+                )
+                if isinstance(configured_level, str) and configured_level:
+                    # Context is deliberately non-identifying: this warning path
+                    # must not carry the model name into logs.
+                    trusted_compliance_level = compliance_mgr.validate_compliance_level(
+                        configured_level, context="model configuration"
+                    )
+            except Exception as exc:
+                # The realistic failure modes are attribute/lookup errors on
+                # _config_manager.llm_config.models (AttributeError, TypeError,
+                # KeyError), but the catch stays broad: this guard exists so a
+                # broken compliance lookup can never break a chat turn, and
+                # narrowing it would reintroduce that risk for exception types
+                # not foreseen here. The warning names only the exception type
+                # -- never the model identifier, which compliance warning paths
+                # deliberately keep out of the log stream.
+                logger.warning(
+                    "Could not resolve the selected model's compliance level "
+                    "(%s); RAG compliance enforcement is disabled for this turn.",
+                    type(exc).__name__,
+                )
+                trusted_compliance_level = None
+            session.context["compliance_level"] = (
+                compliance_mgr.validate_compliance_level(
+                    compliance_level_raw, context="chat request"
+                )
+                if compliance_level_raw
+                else None
             )
+            if (
+                compliance_level_raw
+                and trusted_compliance_level
+                and session.context["compliance_level"] != trusted_compliance_level
+            ):
+                # Expected on the normal path (the client filter and the model's
+                # level are separate concepts), so this is not a warning.
+                logger.debug(
+                    "Client compliance filter differs from the model's configured "
+                    "level; RAG enforcement uses the model's level"
+                )
         else:
             session.context["compliance_level"] = None
+        session.context["model_compliance_level"] = trusted_compliance_level
 
         # Opt-in fine-tune capture: when both the system flag and this user's
         # consent are on, activate a capture context for the turn so the LLM
@@ -390,6 +448,19 @@ class ChatService:
             ),
         }
 
+        # Query-time RAG enforcement engages only when a trusted level actually
+        # resolved. If the feature is on but the selected model carries no
+        # compliance level (or the lookup failed), enforce=False leaves the
+        # pre-existing permissive behaviour intact rather than rejecting every
+        # compliance-tagged source.
+        compliance_token = None
+        if compliance_enabled:
+            from atlas.core.compliance import set_active_compliance_context
+            compliance_token = set_active_compliance_context(
+                trusted_compliance_level,
+                enforce=bool(trusted_compliance_level),
+            )
+
         try:
             with start_span("chat.turn", turn_attrs):
                 # Delegate to orchestrator. When capture is active, run the turn
@@ -432,7 +503,6 @@ class ChatService:
                         update_callback=update_callback,
                         **kwargs
                     )
-
             # Messages accumulated while the session was incognito must never
             # be persisted, even after the user later opts in to saving. Track
             # the high-water mark of the leading incognito messages and freeze
@@ -485,6 +555,10 @@ class ChatService:
         except Exception as e:
             # Fallback for unexpected errors in HTTP-style callers
             return error_handler.handle_chat_message_error(e, "chat message handling")
+        finally:
+            if compliance_token is not None:
+                from atlas.core.compliance import reset_active_compliance_context
+                reset_active_compliance_context(compliance_token)
 
     def _validate_conversation_id_owner(
         self,

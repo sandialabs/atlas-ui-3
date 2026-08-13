@@ -12,13 +12,13 @@ import base64
 import logging
 import os
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from atlas.core.auth import get_user_from_header
+from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
+from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.agent_portal import (
     PresetNotFoundError,
@@ -1204,13 +1204,10 @@ async def list_audit(
     return {"events": store.list_audit(current_user, limit=limit)}
 
 
-_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
-
-
-def _extra_allowed_origin_hosts() -> set[str]:
+def _extra_allowed_origin_hosts() -> frozenset[str]:
     """Hostnames from AGENT_PORTAL_ALLOWED_ORIGINS, normalized to lowercase."""
     raw = app_factory.get_config_manager().app_settings.agent_portal_allowed_origins or ""
-    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+    return parse_allowed_hosts(raw)
 
 
 def _origin_is_allowed(origin: Optional[str]) -> bool:
@@ -1221,22 +1218,19 @@ def _origin_is_allowed(origin: Optional[str]) -> bool:
     is always allowed for local dev; additional hostnames may be permitted
     via AGENT_PORTAL_ALLOWED_ORIGINS for deployments behind an auth proxy
     (e.g. Cloudflare Access).
+
+    Unlike the chat socket at /ws, this endpoint does not consult the Host
+    header and does not admit a missing Origin: the portal is a dev-only
+    preview that grants command execution, so its allowlist stays explicit.
     """
-    if not origin:
-        return False
-    try:
-        parsed = urlparse(origin)
-    except ValueError:
-        return False
-    if parsed.scheme not in ("http", "https"):
-        return False
-    hostname = (parsed.hostname or "").lower()
-    if hostname in _LOOPBACK_HOSTS:
-        return True
-    return hostname in _extra_allowed_origin_hosts()
+    # trust_loopback: the portal is a dev-only preview that binds loopback, so
+    # any loopback origin is legitimate here regardless of the Host header.
+    return origin_is_allowed(
+        origin, _extra_allowed_origin_hosts(), trust_loopback=True
+    )
 
 
-def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
+async def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
     """Mirror the authentication flow used by /ws for consistency."""
     config_manager = app_factory.get_config_manager()
     is_debug_mode = config_manager.app_settings.debug_mode
@@ -1248,10 +1242,18 @@ def _authenticate_ws(websocket: WebSocket) -> Optional[str]:
         if websocket.headers.get(header) != config_manager.app_settings.proxy_secret:
             return None
 
-    auth_header_name = config_manager.app_settings.auth_user_header
-    x_header = websocket.headers.get(auth_header_name)
+    # Resolve through the shared helper so the configured header type is
+    # honoured here exactly as it is on HTTP; calling get_user_from_header
+    # directly would accept any non-empty value in aws-alb-jwt deployments.
+    app_settings = config_manager.app_settings
+    x_header = websocket.headers.get(app_settings.auth_user_header)
     if x_header:
-        user_email = get_user_from_header(x_header)
+        user_email = await resolve_user_from_auth_header_async(
+            x_header,
+            header_type=app_settings.auth_user_header_type,
+            expected_alb_arn=app_settings.auth_aws_expected_alb_arn,
+            aws_region=app_settings.auth_aws_region,
+        )
         if user_email:
             return user_email
 
@@ -1291,7 +1293,7 @@ async def stream_process_output(websocket: WebSocket, process_id: str):
         await websocket.close(code=4403, reason="Origin not allowed")
         return
 
-    user_email = _authenticate_ws(websocket)
+    user_email = await _authenticate_ws(websocket)
     if not user_email:
         await websocket.close(code=1008, reason="Authentication required")
         return

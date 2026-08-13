@@ -1,13 +1,14 @@
 """FastAPI middleware for authentication and logging."""
 
 import logging
+from typing import Optional
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from atlas.core.auth import get_user_from_aws_alb_jwt, get_user_from_header
+from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.capabilities import verify_file_token
 from atlas.infrastructure.app_factory import app_factory
 
@@ -40,6 +41,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.proxy_secret_header = proxy_secret_header
         self.proxy_secret = proxy_secret
         self.auth_redirect_url = auth_redirect_url
+
+    async def _resolve_user(self, header_value: Optional[str]) -> Optional[str]:
+        """Resolve identity from the auth header, honouring the configured type.
+
+        Async so JWT verification's blocking key fetch runs off the event
+        loop -- dispatch is a coroutine, so a cache miss here would otherwise
+        stall every concurrent request for up to the 5s HTTP timeout.
+        """
+        return await resolve_user_from_auth_header_async(
+            header_value,
+            header_type=self.auth_header_type,
+            expected_alb_arn=self.auth_aws_expected_alb_arn,
+            aws_region=self.auth_aws_region,
+        )
 
     async def dispatch(self, request: Request, call_next) -> Response:
         # Log request
@@ -136,10 +151,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             x_auth_header = request.headers.get(self.auth_header_name)
             if x_auth_header:
                 # Apply same authentication logic as production for testing
-                if self.auth_header_type == "aws-alb-jwt":
-                    user_email = get_user_from_aws_alb_jwt(x_auth_header, self.auth_aws_expected_alb_arn, self.auth_aws_region)
-                else:
-                    user_email = get_user_from_header(x_auth_header)
+                user_email = await self._resolve_user(x_auth_header)
             else:
                 # Get test user from config
                 config_manager = app_factory.get_config_manager()
@@ -149,10 +161,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             x_auth_header = request.headers.get(self.auth_header_name)
 
             # Extract the user's email, depending on the datatype of auth header
-            if self.auth_header_type == "aws-alb-jwt": # Amazon Application Load Balancer
-                user_email = get_user_from_aws_alb_jwt(x_auth_header, self.auth_aws_expected_alb_arn, self.auth_aws_region)
-            else:
-                user_email = get_user_from_header(x_auth_header)
+            user_email = await self._resolve_user(x_auth_header)
 
             if not user_email:
                 # Distinguish between API endpoints (return 401) and browser endpoints (redirect)

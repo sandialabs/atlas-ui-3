@@ -1,6 +1,6 @@
 # Installation
 
-Last updated: 2026-02-04
+Last updated: 2026-08-09
 
 This guide provides everything you need to get Atlas UI 3 running, whether you prefer using Docker for a quick setup or setting up a local development environment.
 
@@ -8,11 +8,23 @@ This guide provides everything you need to get Atlas UI 3 running, whether you p
 
 Using Docker is the fastest way to get the application running.
 
+#### Generate the required encryption key first
+
+The container has no default for `MCP_TOKEN_ENCRYPTION_KEY`, and Atlas refuses to
+start without it, so generate one before your first `docker run` and reuse the
+same value on every subsequent run — rotating it invalidates all stored MCP tokens:
+
+```bash
+export MCP_TOKEN_ENCRYPTION_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+```
+
 ### Option 1: Use Pre-built Image from Quay.io
 
 ```bash
 docker pull quay.io/agarlan-snl/atlas-ui-3:latest
-docker run -p 8000:8000 quay.io/agarlan-snl/atlas-ui-3:latest
+docker run -p 8000:8000 \
+  -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+  quay.io/agarlan-snl/atlas-ui-3:latest
 ```
 
 ### Option 2: Build Locally
@@ -26,7 +38,9 @@ docker run -p 8000:8000 quay.io/agarlan-snl/atlas-ui-3:latest
 2.  **Run the Container:**
     Once the image is built, start the container:
     ```bash
-    docker run -p 8000:8000 atlas-ui-3
+    docker run -p 8000:8000 \
+      -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+      atlas-ui-3
     ```
 
 3.  **Access the Application:**
@@ -38,7 +52,20 @@ Use the runtime-only Dockerfile when you want a slimmer deployed image with only
 
 ```bash
 docker build -f Dockerfile.runtimeonly -t atlas-ui-3-runtime .
-docker run -p 8000:8000 atlas-ui-3-runtime
+docker run -p 8000:8000 \
+  -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+  atlas-ui-3-runtime
+```
+
+### Option 4: Docker Compose
+
+`docker-compose.yml` requires `MCP_TOKEN_ENCRYPTION_KEY` to be set in the
+environment or in a `.env` file next to it, and fails with a clear message if it
+is missing:
+
+```bash
+echo "MCP_TOKEN_ENCRYPTION_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
+docker compose up
 ```
 
 ## Local Development Setup
@@ -81,7 +108,10 @@ source .venv/bin/activate
 .venv\Scripts\activate
 
 # Install atlas package in editable mode (with dev dependencies)
-uv pip install -e ".[dev]"
+# The mcp-demos extra installs what the bundled demo MCP servers import at
+# startup (python-pptx, pandas, matplotlib, ...). Omit it and servers such as
+# pptx_generator fail tool discovery with "Connection closed".
+uv pip install -e ".[dev,mcp-demos]"
 ```
 
 ### 3. Configure Your Environment
@@ -95,8 +125,10 @@ cp .env.example .env
 Now, open the `.env` file and add your API keys for the LLM providers you intend to use (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
 
 **Important Configuration Notes:**
+*   **`MCP_TOKEN_ENCRYPTION_KEY`**: You must replace the placeholder that ships in `.env.example`. It is a public value, so Atlas rejects it and refuses to start. Generate your own with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and keep it stable — rotating it invalidates all stored MCP tokens.
 *   **`APP_LOG_DIR`**: It is essential to set `APP_LOG_DIR=/workspaces/atlas-ui-3/logs` (or another appropriate path) to ensure application logs are correctly stored.
 *   **`USE_MOCK_S3`**: For local development and personal use, setting `USE_MOCK_S3=true` is acceptable. However, **this must never be used in a production environment** due to security and data durability concerns.
+*   **`SKIP_AUTHORIZATION_CHECKS`** (optional, local-only convenience): In debug mode the mock authorization table only grants admin access to two hardcoded identities (`ADMIN_TEST_USER`, default `admin@example.com`, and `test@test.com`), so a new contributor running locally with their real email would otherwise have to set `ADMIN_TEST_USER` to match it before reaching admin-gated routes. Setting `SKIP_AUTHORIZATION_CHECKS=true` skips that step -- every group check returns `True`, so any locally authenticated user has full access. **Blast radius is broader than admin pages:** because `is_user_in_group` is the single gate for every group-restricted surface, enabling it also unlocks group-restricted models (`atlas/core/model_access.py`), MCP servers gated by `required_groups` (`mcp_execution.py`), and feedback/capture routes. In debug mode a headerless request is assigned the `test_user` identity, so with this flag on any request reaching the port is effectively an administrator. It is strictly opt-in (commented out in `.env.example`), never affects authentication, and the app refuses to start if the flag is set without `DEBUG_MODE=true`, when `ENVIRONMENT=production`, or together with `AUTH_GROUP_CHECK_URL`. See [docs/admin/authentication.md](../admin/authentication.md) for full guardrail details.
 
 ### 4. All-in-One Start Script (Recommended)
 

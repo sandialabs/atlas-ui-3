@@ -238,13 +238,14 @@ class ToolsModeRunner:
 
         # If streaming failed and we got no content, send the error to the frontend
         if streaming_error and not accumulated_content:
-            _error_class, user_msg, log_msg = error_handler.classify_llm_error(
+            error_class, user_msg, log_msg = error_handler.classify_llm_error(
                 streaming_error,
             )
             logger.error("Streaming tools classified error: %s", log_msg)
             await self.event_publisher.send_json({
                 "type": "error",
                 "message": user_msg,
+                "error_type": error_handler.error_type_for(error_class),
             })
             await self.event_publisher.publish_response_complete()
             return event_notifier.create_chat_response(user_msg)
@@ -417,9 +418,15 @@ class ToolsModeRunner:
         update_callback: Optional[UpdateCallback],
     ) -> str:
         """Stream the tool synthesis LLM call."""
-        # Check canvas-only shortcut
-        canvas_calls = [tc for tc in llm_response.tool_calls if tc.function.name == "canvas_canvas"]
-        if len(canvas_calls) == len(llm_response.tool_calls):
+        # Check canvas-only shortcut. ``tool_calls`` is None on the placeholder
+        # response built when a continuation round fails mid-stream, and an
+        # empty list is not "canvas-only" -- neither may take the shortcut.
+        response_tool_calls = llm_response.tool_calls or []
+        canvas_calls = [
+            tc for tc in response_tool_calls
+            if self._tool_call_signature(tc)[0] == "canvas_canvas"
+        ]
+        if response_tool_calls and len(canvas_calls) == len(response_tool_calls):
             return llm_response.content or "Content displayed in canvas."
 
         # Add files manifest

@@ -30,7 +30,14 @@ atlas-init
 atlas-init --minimal
 ```
 
-This creates a `.env` file (and optionally a `config/` folder) with all the settings you need.
+This creates a `.env` file (and optionally a `config/` folder) with all the settings you need, including a freshly generated `MCP_TOKEN_ENCRYPTION_KEY`.
+
+> **If you write your own `.env` instead of running `atlas-init`**, it must contain a
+> `MCP_TOKEN_ENCRYPTION_KEY` of at least 32 characters. `atlas-server` refuses to start
+> without one, because a per-restart key would make previously stored MCP tokens
+> unreadable. Generate one with
+> `python -c "import secrets; print(secrets.token_urlsafe(32))"` and keep it stable —
+> rotating it invalidates all stored MCP tokens.
 
 ### Step 2: Add Your API Key
 
@@ -301,6 +308,8 @@ export OPENAI_API_KEY="sk-your-key-here"
 # Create a .env file in your working directory
 echo 'OPENAI_API_KEY=sk-your-key-here' > .env
 echo 'ANTHROPIC_API_KEY=sk-ant-your-key' >> .env
+# Required by atlas-server: a stable secret of at least 32 characters
+echo "MCP_TOKEN_ENCRYPTION_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
 ```
 
 Atlas automatically loads `.env` files from the current directory.
@@ -374,6 +383,7 @@ print(result.message)
 | `OPENAI_API_KEY` | Yes* | OpenAI API key |
 | `ANTHROPIC_API_KEY` | Yes* | Anthropic API key |
 | `GOOGLE_API_KEY` | Yes* | Google AI API key |
+| `MCP_TOKEN_ENCRYPTION_KEY` | Yes (server) | Stable secret, ≥32 characters, encrypting per-user MCP tokens. `atlas-server` refuses to start without it; `atlas-init` generates one for you. Rotating it invalidates all stored MCP tokens. |
 | `APP_CONFIG_DIR` | No | Path to custom config directory |
 | `APP_LOG_DIR` | No | Directory for log files |
 | `DEBUG_MODE` | No | Enable debug logging (true/false) |
@@ -457,7 +467,8 @@ cd atlas-ui-3
 uv venv && source .venv/bin/activate
 
 # Install atlas package in editable mode (with dev dependencies)
-uv pip install -e ".[dev]"
+# Add the mcp-demos extra to run the bundled demo MCP servers
+uv pip install -e ".[dev,mcp-demos]"
 ```
 
 ### What Editable Mode Does

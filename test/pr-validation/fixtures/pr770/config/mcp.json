@@ -1,0 +1,11 @@
+{
+  "orderdocs": {
+    "command": ["python", "../test/pr-validation/fixtures/pr770/orderdocs_mcp_server.py"],
+    "cwd": "atlas",
+    "groups": ["users"],
+    "description": "One document-lookup tool, so a real tool round happens",
+    "author": "PR validation",
+    "short_description": "document lookup",
+    "compliance_level": "Internal"
+  }
+}

@@ -21,6 +21,11 @@ from starlette.testclient import TestClient
 
 from atlas.routes import telemetry_routes
 
+# Admin group membership is mocked only in debug mode (see core.auth), so these
+# tests must request it explicitly to pass in both CI legs (DEBUG_MODE true and
+# false). See the mock_admin_authorization fixture in conftest.py.
+pytestmark = pytest.mark.usefixtures("mock_admin_authorization")
+
 SEC_NS = 1_000_000_000
 
 

@@ -1,0 +1,8 @@
+models:
+  order-stub:
+    model_url: "http://127.0.0.1:8126/v1"
+    model_name: "openai/order-stub"
+    api_key: "stub"
+    description: "Local stub that enforces assistant/tool message ordering the way providers do"
+    compliance_level: "Internal"
+    supports_tools: true

@@ -13,6 +13,11 @@ from main import app
 from atlas.modules.config import config_manager
 from starlette.testclient import TestClient
 
+# Admin group membership is mocked only in debug mode (see core.auth), so these
+# tests must request it explicitly to pass in both CI legs (DEBUG_MODE true and
+# false). See the mock_admin_authorization fixture in conftest.py.
+pytestmark = pytest.mark.usefixtures("mock_admin_authorization")
+
 
 @pytest.fixture
 def isolated_config_dir(tmp_path, monkeypatch):

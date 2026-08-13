@@ -42,13 +42,19 @@ class ScriptedToolsLLM:
     ):
         self._turns = list(turns)
         self.tool_stream_calls = 0
+        self.seen_messages: List[List[dict]] = []
         self.synthesis = synthesis
         self.synthesis_error = synthesis_error
 
     async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
                                 temperature=0.7, user_email=None):
         self.tool_stream_calls += 1
+        self.seen_messages.append([dict(m) for m in messages])
         text, tool_calls = self._turns.pop(0) if self._turns else (None, None)
+        # A turn scripted with an exception raises it mid-stream, standing in for
+        # a provider rejection of the continuation round.
+        if isinstance(text, Exception):
+            raise text
         if text:
             yield text
         yield LLMResponse(content=text or "", tool_calls=tool_calls)
@@ -269,3 +275,33 @@ async def test_graceful_message_neutral_when_agent_mode_disabled():
 
     assert "Agent Mode" not in resp["message"]
     assert "follow-up" in resp["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_continuation_provider_error_falls_back_to_synthesis():
+    """A provider rejection mid-continuation must degrade to synthesis, not crash.
+
+    The failed round leaves no LLMResponse, so the loop substitutes a placeholder
+    whose ``tool_calls`` is None. Iterating that unguarded raised
+    ``TypeError: 'NoneType' object is not iterable`` in the canvas-only check and
+    turned a recoverable provider error into a hard failure.
+    """
+    err = RuntimeError(
+        "litellm.BadRequestError: An assistant message with 'tool_calls' must be "
+        "followed by tool messages responding to each 'tool_call_id'. The following "
+        "tool_call_ids did not have response messages: call_abc123"
+    )
+    llm = ScriptedToolsLLM(
+        turns=[
+            ("computing", [_tc("c1", "calc", '{"e":"2+2"}')]),
+            (err, None),  # continuation round is rejected by the provider
+        ],
+        synthesis="The calculation returned 4.",
+    )
+    runner = _runner(llm, _config(max_extra_rounds=3))
+    executed: List[str] = []
+
+    resp = await _run(runner, [{"role": "user", "content": "calc"}], executed)
+
+    assert executed == ["calc"]
+    assert resp["message"] == "The calculation returned 4."
