@@ -18,6 +18,7 @@ import {
   downloadReturnedFile,
 } from '../utils/toolResultUtils'
 import { resolveAutoApproved } from '../utils/toolApproval'
+import { useIsPrinting } from '../hooks/useIsPrinting'
 import ToolApprovalMessage from './ToolApprovalMessage'
 import ToolElapsedTime from './ToolElapsedTime'
 
@@ -37,6 +38,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   // when multiple RAG responses exist in the same conversation.
   const rawId = useId()
   const messageScope = rawId.replace(/:/g, '')
+
+  // Collapsed tool details are mounted only while the page is being printed —
+  // see the hook for why they are not simply always rendered (#774).
+  const isPrinting = useIsPrinting()
 
   // A tool call collapses to a single summary line by default; expanding reveals
   // its input arguments and output together. Persisted to localStorage so the
@@ -229,6 +234,16 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       // pre-#673 layout, where tool input/output were collapsible and defaulted
       // collapsed. (Debug mode seeds toolDetailsCollapsed=false → expanded.)
       const showDetails = !toolDetailsCollapsed
+      // Collapsed rows still have to appear in the PDF (#774), but only while
+      // printing: mounting every row's serialized arguments and result all the
+      // time would cost a JSON.stringify and a hidden <pre> per tool call on
+      // screen, and MCP results are not size-bounded.
+      // `hasDetails` also guards the print path: a compact row carries the
+      // server name in this block, but a classic row with no arguments and no
+      // result has nothing to show, and an empty wrapper would print as a
+      // band of indented whitespace.
+      const printableDetails = hasDetails || (compactMessages && !!message.server_name)
+      const renderDetails = showDetails || (isPrinting && printableDetails)
       return (
         <div className="text-gray-200 selectable-markdown">
           {/* Compact: single clickable summary line. Classic: static badge row. */}
@@ -240,7 +255,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                signals that there is something to expand. */
             <button
               onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
-              className={`w-full min-w-0 text-left flex flex-wrap items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              className={`no-print-hide w-full min-w-0 text-left flex flex-wrap items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
               type="button"
               aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
             >
@@ -284,7 +299,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           ) : (
             <button
               onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
-              className={`w-full min-w-0 text-left flex flex-wrap items-center gap-2 mb-3 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              className={`no-print-hide w-full min-w-0 text-left flex flex-wrap items-center gap-2 mb-3 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
               type="button"
               aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
             >
@@ -397,7 +412,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                       <button
                         key={index}
                         onClick={() => downloadFile(filename)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
+                        className="no-print-hide bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
                         title="Download file"
                       >
                         <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -420,7 +435,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                       <button
                         key={index}
                         onClick={() => downloadReturnedFile(filename, parsedResult.returned_file_contents[index])}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
+                        className="no-print-hide bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
                         title="Download file"
                       >
                         <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -437,7 +452,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 <div className="mt-2 ml-5">
                   <button
                     onClick={() => downloadReturnedFile(parsedResult.returned_file_name, parsedResult.returned_file_base64)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
+                    className="no-print-hide bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
                     title="Download file"
                   >
                     <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -452,50 +467,54 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
             return null
           })()}
 
-          {/* Expanded details: input arguments + output, revealed together */}
-          {showDetails && (
-            <div className="mt-2 ml-5 space-y-3">
-              {/* The collapsed compact row drops the server name to stay on one
-                  line (#762), so it lives here instead — the classic row still
-                  shows it inline. */}
-              {compactMessages && message.server_name && (
-                <div className="text-xs text-gray-500">Server: {message.server_name}</div>
-              )}
-              {argCount > 0 && (
-                <div className="border-l-2 border-blue-500 pl-3">
-                  <div className="text-xs font-semibold text-blue-400 mb-1">Input Arguments</div>
-                  <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
-                    {debugMode && (
-                      <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Arguments</div>
-                    )}
-                    <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                      {JSON.stringify(debugMode ? message.arguments : filterArgumentsForDisplay(message.arguments), null, 2)}
-                    </pre>
-                  </div>
+          {/* Expanded details: input arguments + output, revealed together.
+              Also mounted while printing, so the PDF shows tool input/output
+              without requiring the user to expand each row first -- collapsed
+              rows keep `hidden print:block`, which stays out of the on-screen
+              layout and is revealed only in the print rendering (#774). */}
+          {renderDetails && (
+          <div className={`mt-2 ml-5 space-y-3 ${showDetails ? '' : 'hidden print:block'}`}>
+            {/* The collapsed compact row drops the server name to stay on one
+                line (#762), so it lives here instead — the classic row still
+                shows it inline. */}
+            {compactMessages && message.server_name && (
+              <div className="text-xs text-gray-500">Server: {message.server_name}</div>
+            )}
+            {argCount > 0 && (
+              <div className="border-l-2 border-blue-500 pl-3">
+                <div className="text-xs font-semibold text-blue-400 mb-1">Input Arguments</div>
+                <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
+                  {debugMode && (
+                    <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Arguments</div>
+                  )}
+                  <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(debugMode ? message.arguments : filterArgumentsForDisplay(message.arguments), null, 2)}
+                  </pre>
                 </div>
-              )}
-              {message.result && (
-                <div className={`border-l-2 pl-3 ${failed ? 'border-red-500' : wasInterrupted ? 'border-gray-500' : 'border-green-500'}`}>
-                  <div className={`text-xs font-semibold mb-1 ${failed ? 'text-red-400' : wasInterrupted ? 'text-gray-400' : 'text-green-400'}`}>
-                    {failed ? 'Error Details' : wasInterrupted ? 'Stopped Before Result' : 'Output Result'}
-                  </div>
-                  <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
-                    {debugMode && (
-                      <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Output</div>
-                    )}
-                    <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                      {(() => {
-                        if (debugMode) {
-                          return typeof message.result === 'string' ? message.result : JSON.stringify(message.result, null, 2)
-                        }
-                        const processedResult = processToolResult(message.result)
-                        return typeof processedResult === 'string' ? processedResult : JSON.stringify(processedResult, null, 2)
-                      })()}
-                    </pre>
-                  </div>
+              </div>
+            )}
+            {message.result && (
+              <div className={`border-l-2 pl-3 ${failed ? 'border-red-500' : wasInterrupted ? 'border-gray-500' : 'border-green-500'}`}>
+                <div className={`text-xs font-semibold mb-1 ${failed ? 'text-red-400' : wasInterrupted ? 'text-gray-400' : 'text-green-400'}`}>
+                  {failed ? 'Error Details' : wasInterrupted ? 'Stopped Before Result' : 'Output Result'}
                 </div>
-              )}
-            </div>
+                <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
+                  {debugMode && (
+                    <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Output</div>
+                  )}
+                  <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                    {(() => {
+                      if (debugMode) {
+                        return typeof message.result === 'string' ? message.result : JSON.stringify(message.result, null, 2)
+                      }
+                      const processedResult = processToolResult(message.result)
+                      return typeof processedResult === 'string' ? processedResult : JSON.stringify(processedResult, null, 2)
+                    })()}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
           )}
 
           {/* Synthesis indicator - shown on completed tool messages while LLM interprets results */}

@@ -370,7 +370,9 @@ describe('Message — tool-call collapse is shared across compact/classic (regre
 
   // Compact rows label the outcome on a glyph; classic rows keep the text pill.
   const expectCollapsibleDetails = (header) => {
-    // Default collapsed: no Input Arguments until the header is clicked.
+    // Default collapsed: no Input Arguments until the header is clicked. (The
+    // print export mounts them on `beforeprint` instead — see
+    // print-export.test.jsx for that path.)
     expect(screen.queryByText('Input Arguments')).not.toBeInTheDocument()
     fireEvent.click(header())
     expect(screen.getByText('Input Arguments')).toBeInTheDocument()
