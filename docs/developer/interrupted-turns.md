@@ -60,7 +60,10 @@ orphaned `tool` message is ever replayed.
 Bounds, all in `agent_digest.py` and `domain/messages/models.py`:
 
 - 300 characters of arguments and 400 of result per call; 30 calls per digest
-  (head and tail kept, the elided middle announced).
+  (head and tail kept, the elided middle announced). Those budgets are spent on
+  *source* characters, so a fetched HTML page does not pay its budget to its own
+  markup; the escaped form has a separate ceiling (twice the budget) so a value
+  made only of delimiters still cannot crowd later calls out.
 - A digest never exceeds `MAX_FOLDED_DIGEST_CHARS`.
 - A request folds at most `MAX_FOLDED_DIGESTS` digests, newest first, within
   that character budget; an oversized newest digest is trimmed on a line
@@ -74,6 +77,9 @@ several turns. The digest header states that the quoted text is verbatim tool
 output and not instruction, each field is wrapped in a `<<<…>>>` fence, and `&`,
 `<`, `>` are escaped so no value can close or forge a delimiter. `tool_name` is
 whitespace-collapsed and length-capped so it cannot inject extra digest lines.
+`status` carries only literals written by the recorder, but it goes through the
+same quoting, so "every value on the line is escaped" holds by construction
+rather than by an audit of the call sites.
 
 ## Frontend contract
 

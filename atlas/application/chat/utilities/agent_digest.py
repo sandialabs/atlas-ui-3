@@ -56,12 +56,20 @@ _MAX_RESULT_CHARS = 400
 _MAX_CALLS = 30
 # Server-advertised, so bounded like every other untrusted field.
 _MAX_NAME_CHARS = 120
+# Recorder-written today, but it lands on the digest line like any other value,
+# so it is quoted from the same code path rather than trusted by convention.
+_MAX_STATUS_CHARS = 40
 
-
-def _truncate(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit] + f"…[+{len(text) - limit} chars]"
+# Escaping turns one character into up to five, so the caps above have to be
+# read against one of the two forms. Charging them to the escaped form makes a
+# fetched HTML page pay for its own markup and keep a fifth of its documented
+# budget; charging them to the source lets a value built only of delimiters
+# emerge five times over budget and crowd later calls out of the digest. So the
+# cap is spent on source characters and the escaped result gets its own
+# ceiling: ordinary prose (a stray `&`) never reaches it, and the pathological
+# value stops at twice its budget instead of five times.
+_ESCAPED_ALLOWANCE = 2
+_ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;"}
 
 
 def _collapse(value: Any) -> str:
@@ -79,16 +87,31 @@ def _collapse(value: Any) -> str:
 
 
 def _quote(value: Any, limit: int) -> str:
-    """Render, escape, then cap -- in that order, exactly once.
+    """Render, escape and cap a value, spending the cap on source characters.
 
-    Escaping expands each ``&``, ``<`` and ``>`` into a four- or five-character
-    entity, so capping first would let a value made of those characters emerge
-    five times over its budget and crowd later calls out of the digest. Capping
-    only after escaping also keeps one truncation marker with an accurate
-    dropped-character count, instead of nesting a second marker inside a
-    string that was already trimmed.
+    Walks the collapsed source paying each character its escaped cost, and
+    stops at whichever comes first: ``limit`` source characters, or
+    ``limit * _ESCAPED_ALLOWANCE`` escaped ones. Costing the walk rather than
+    slicing the escaped text keeps both properties the two orderings each had
+    on their own -- the budget is denominated in real content, the output is
+    still hard-bounded -- and leaves exactly one truncation marker reporting a
+    dropped count in the same units the reader sees.
     """
-    return _truncate(_fence(_collapse(value)), limit)
+    collapsed = _collapse(value)
+    ceiling = limit * _ESCAPED_ALLOWANCE
+    kept_chars = 0
+    escaped_len = 0
+    for char in collapsed[:limit]:
+        cost = len(_ESCAPES.get(char, char))
+        if escaped_len + cost > ceiling:
+            break
+        escaped_len += cost
+        kept_chars += 1
+    text = _fence(collapsed[:kept_chars])
+    dropped = len(collapsed) - kept_chars
+    if dropped > 0:
+        text += f"…[+{dropped} chars]"
+    return text
 
 
 def _fence(text: str) -> str:
@@ -109,7 +132,10 @@ def _digest_line(metadata: Dict[str, Any]) -> Optional[str]:
         return None
     args = _quote(metadata.get("arguments"), _MAX_ARG_CHARS)
     result = _quote(metadata.get("result"), _MAX_RESULT_CHARS)
-    status = metadata.get("status") or "completed"
+    # Only literals reach this field today, so quoting it changes nothing
+    # observable -- it is here so "every value on the line is escaped" holds by
+    # construction rather than by an audit of the recorder's call sites.
+    status = _quote(metadata.get("status") or "completed", _MAX_STATUS_CHARS)
 
     # Arguments are model- and server-shaped text in the same assistant-role
     # content, so they get the same escaping and their own delimiter: an
