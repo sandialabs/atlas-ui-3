@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #776 - 2026-08-12
+- **Stopping a turn no longer discards it** (closes #755): `asyncio.CancelledError` is a `BaseException`, so a stop / disconnect / `reset_session` skipped `ChatService`'s persistence block entirely and the interrupted turn was lost on reload. Both paths now go through one `_commit_turn()`; agent and tools mode flush the in-flight tool calls while unwinding (a call stopped mid-flight persists as `interrupted`, rendered neutrally rather than as an error), plain/RAG keep the text that already streamed, and every stopped turn is closed by an assistant message marked `interrupted`.
+- **A follow-up turn can see what the agent already ran**: each agent turn's closing assistant message carries a capped digest of its tool calls in `agent_tool_digest` metadata, folded into that message's content by `get_messages_for_llm()` — no new message, no role-sequence change — so the model stops re-deriving work it did in an earlier turn.
+
 ### PR #771 - 2026-08-11
 - **WebSocket authentication honours the configured header type**: `AuthMiddleware` branched on `AUTH_USER_HEADER_TYPE` and cryptographically verified `aws-alb-jwt` tokens, but both WebSocket endpoints called `get_user_from_header()` unconditionally — which only strips whitespace. In an ALB-JWT deployment any non-empty `X-User-Email` value therefore authenticated a socket that the same value could not authenticate over HTTP. All three call sites now resolve identity through one `resolve_user_from_auth_header()` helper, so the header type cannot be interpreted differently in different transports.
 - **Calculator expression syntax is stricter than `eval` was**: `sum([1, 2, 3])` and `round(x, ndigits=2)` no longer work — use `sum((1, 2, 3))` with parentheses and `round(x, 2)` positionally. String literals, complex numbers such as `2j`, and non-finite results (`inf`, `nan`) are now refused as well, the last two because they cannot be encoded in the tool's JSON response. The tool docstring lists every refused form with its replacement.

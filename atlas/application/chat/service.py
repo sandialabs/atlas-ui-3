@@ -1,5 +1,6 @@
 """Chat service - core business logic for chat operations."""
 
+import asyncio
 import logging
 from typing import (
     Any,
@@ -40,6 +41,7 @@ from .preprocessors.prompt_override_service import PromptOverrideService
 
 # Import utilities
 from .utilities import error_handler, file_processor
+from .utilities.interrupted_turn import close_open_turn
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +296,15 @@ class ChatService:
         elif incognito is False:
             self._incognito_sessions.discard(session_id)
 
+        # Snapshot the save policy for this turn. On the cancellation path the
+        # canceller does not await the cancelled task before calling
+        # end_session(), which clears _incognito_sessions / the save floor -- so
+        # by the time _commit_turn runs, re-reading that state could report a
+        # torn-down incognito session as savable. Deciding here, before the turn
+        # runs, makes the policy immune to that race (issue #755).
+        turn_is_incognito = session_id in self._incognito_sessions
+        turn_save_floor = self._incognito_save_floor.get(session_id, 0)
+
         # Default to session_id so MCP tool calls share a persistent session (see MCPSessionManager).
         conversation_id = kwargs.pop("conversation_id", None)
         if isinstance(conversation_id, str):
@@ -493,51 +504,34 @@ class ChatService:
                         update_callback=update_callback,
                         **kwargs
                     )
-            # Messages accumulated while the session was incognito must never
-            # be persisted, even after the user later opts in to saving. Track
-            # the high-water mark of the leading incognito messages and freeze
-            # it once the user opts in so later turns persist normally.
-            if session_id in self._incognito_sessions:
-                if session_id not in self._save_floor_locked:
-                    self._incognito_save_floor[session_id] = len(session.history.messages)
-            else:
-                self._save_floor_locked.add(session_id)
-
-            # Persist conversation (if not incognito and feature enabled)
-            if (
-                self.conversation_repository is not None
-                and session_id not in self._incognito_sessions
-                and user_email
-            ):
-                try:
-                    saved = self._save_conversation(
-                        session,
-                        user_email,
-                        model,
-                        start_index=self._incognito_save_floor.get(session_id, 0),
-                    )
-                    # Notify frontend only when persistence actually succeeded.
-                    # When save_conversation returns None (the TOCTOU window
-                    # between ownership validation and the upsert), surface
-                    # an error frame instead of falsely confirming the save.
-                    conv_id = session.context.get("conversation_id", str(session_id))
-                    if update_callback:
-                        if saved:
-                            await update_callback({
-                                "type": "conversation_saved",
-                                "conversation_id": conv_id,
-                            })
-                        else:
-                            await update_callback({
-                                "type": "error",
-                                "message": "Conversation could not be saved",
-                                "error_type": "conversation_save_rejected",
-                                "conversation_id": conv_id,
-                            })
-                except Exception as e:
-                    logger.error("Failed to persist conversation: %s", e, exc_info=True)
-
+            await self._commit_turn(
+                session, session_id, user_email, model, update_callback,
+                is_incognito=turn_is_incognito, save_floor=turn_save_floor,
+            )
             return result
+        except asyncio.CancelledError:
+            # Stop button, client disconnect (#760), or reset_session all land
+            # here as a plain task cancel. CancelledError is a BaseException, so
+            # without this handler the persistence block above is skipped
+            # entirely and the whole interrupted turn -- user message, agent
+            # narration, every completed tool call -- is lost on reload
+            # (issue #755). Commit what completed, then let the cancel through.
+            logger.info("Chat turn cancelled; committing completed work before unwinding")
+            try:
+                # Agent mode closes its own turn; plain / RAG / tools runners
+                # append their assistant message only on success, so without
+                # this the saved history would end on the user message and the
+                # next request would be user -> user.
+                close_open_turn(session.history)
+                await self._commit_turn(
+                    session, session_id, user_email, model, update_callback,
+                    is_incognito=turn_is_incognito, save_floor=turn_save_floor,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # pragma: no cover - defensive
+                logger.error("Failed to commit cancelled turn: %s", e, exc_info=True)
+            raise
         except DomainError:
             # Let domain-level errors (e.g., LLM / rate limit / validation) bubble up
             # so transport layers (WebSocket/HTTP) can handle them consistently.
@@ -549,6 +543,74 @@ class ChatService:
             if compliance_token is not None:
                 from atlas.core.compliance import reset_active_compliance_context
                 reset_active_compliance_context(compliance_token)
+
+    async def _commit_turn(
+        self,
+        session: Session,
+        session_id: UUID,
+        user_email: Optional[str],
+        model: str,
+        update_callback: Optional[UpdateCallback],
+        is_incognito: bool,
+        save_floor: int,
+    ) -> None:
+        """Persist the turn just executed and notify the client.
+
+        Shared by the normal completion path and the cancellation path
+        (issue #755) so a stopped or disconnected turn is saved exactly the way
+        a completed one is.
+
+        ``is_incognito`` / ``save_floor`` are snapshots taken before the turn
+        ran rather than live lookups: a cancelled turn's cleanup can resume
+        after ``end_session()`` has already discarded this session's incognito
+        state, and a live lookup would then read a torn-down incognito session
+        as savable.
+        """
+        # Messages accumulated while the session was incognito must never
+        # be persisted, even after the user later opts in to saving. Track
+        # the high-water mark of the leading incognito messages and freeze
+        # it once the user opts in so later turns persist normally.
+        if is_incognito:
+            if session_id not in self._save_floor_locked:
+                self._incognito_save_floor[session_id] = len(session.history.messages)
+        else:
+            self._save_floor_locked.add(session_id)
+
+        # Persist conversation (if not incognito and feature enabled)
+        if (
+            self.conversation_repository is not None
+            and not is_incognito
+            and user_email
+        ):
+            try:
+                saved = self._save_conversation(
+                    session,
+                    user_email,
+                    model,
+                    start_index=save_floor,
+                )
+                # Notify frontend only when persistence actually succeeded.
+                # When save_conversation returns None (the TOCTOU window
+                # between ownership validation and the upsert), surface
+                # an error frame instead of falsely confirming the save.
+                conv_id = session.context.get("conversation_id", str(session_id))
+                if update_callback:
+                    if saved:
+                        await update_callback({
+                            "type": "conversation_saved",
+                            "conversation_id": conv_id,
+                        })
+                    else:
+                        await update_callback({
+                            "type": "error",
+                            "message": "Conversation could not be saved",
+                            "error_type": "conversation_save_rejected",
+                            "conversation_id": conv_id,
+                        })
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error("Failed to persist conversation: %s", e, exc_info=True)
 
     def _validate_conversation_id_owner(
         self,
