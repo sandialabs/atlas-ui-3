@@ -108,6 +108,28 @@ curl -X POST \
 
 The frontend consumes `metadata.references[].sections[].text` to display the underlying evidence snippets in the expanded citation area beneath each reference.
 
+### POST /admin/users
+
+Register or update a test user's group memberships at runtime. Test-only helper used by the integration test fixture to register the configured ATLAS test identity so live tests are robust to `TEST_USER` overrides (the mock otherwise ships a fixed user database).
+
+**Headers:**
+- `Authorization: Bearer <token>` (required)
+- `Content-Type: application/json` (required)
+
+**Request Body** (`RegisterUserRequest`):
+```json
+{"user": "custom@example.com", "groups": ["employee", "engineering", "devops", "admin"]}
+```
+Either `groups` or `clone_from` (an existing user whose groups to copy, e.g. `test@test.com`) may be supplied. `clone_from` avoids hand-copying group data owned by `mock_data.json`.
+
+**Example:**
+```bash
+curl -X POST -H "Authorization: Bearer test-atlas-rag-token" \
+     -H "Content-Type: application/json" \
+     -d '{"user":"custom@example.com","clone_from":"test@test.com"}' \
+     http://localhost:8002/admin/users
+```
+
 ## Authentication
 
 The mock uses a `StaticTokenVerifier` pattern with Bearer token authentication.
@@ -137,6 +159,8 @@ test-atlas-rag-token
 | charlie@example.com | employee, engineering, devops |
 | test@test.com | employee, engineering, devops, admin |
 | guest@example.com | (none) |
+
+Users can also be registered or updated at runtime via `POST /admin/users` (e.g. to register the configured ATLAS test identity for integration tests).
 
 ### Available Corpora
 

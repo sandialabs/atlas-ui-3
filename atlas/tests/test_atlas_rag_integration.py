@@ -25,12 +25,12 @@ MOCK_URL = "http://localhost:8002"
 MOCK_TOKEN = "test-atlas-rag-token"
 MOCK_STARTUP_TIMEOUT = 10
 
-# Groups that grant access to every corpus in the mock (matches the
-# ``test@test.com`` entry in mock_data.json). The integration test fixture
-# registers the configured ATLAS test identity with these groups so the live
-# mock recognizes it regardless of TEST_USER overrides -- the mock otherwise
-# ships a fixed user database.
-MOCK_ALL_CORPORA_GROUPS = ["employee", "engineering", "devops", "admin"]
+# The mock ships a fixed user database (see mocks/atlas-rag-api-mock/mock_data.json);
+# ``test@test.com`` is its all-corpora identity. The integration test fixture
+# clones this identity into the configured ATLAS test user so live integration
+# tests are robust to TEST_USER overrides -- the mock otherwise wouldn't
+# recognize an overridden TEST_USER and would only return the public corpus.
+MOCK_ALL_CORPORA_USER = "test@test.com"
 
 
 def is_mock_running() -> bool:
@@ -79,17 +79,21 @@ def mock_service():
             pytest.skip("Could not start mock service")
 
     # Register the configured test identity (works whether the mock was just
-    # spawned or was already running) so it has access to every corpus.
+    # spawned or was already running) by cloning the mock's all-corpora user
+    # groups. ``raise_for_status()`` makes a 4xx/5xx (e.g. an older mock without
+    # the /admin/users endpoint returning 404) skip with a clear reason instead
+    # of silently proceeding and surfacing later as an unrelated assertion.
     try:
-        httpx.post(
+        resp = httpx.post(
             f"{MOCK_URL}/admin/users",
             headers={"Authorization": f"Bearer {MOCK_TOKEN}"},
             json={
                 "user": config_manager.app_settings.test_user,
-                "groups": MOCK_ALL_CORPORA_GROUPS,
+                "clone_from": MOCK_ALL_CORPORA_USER,
             },
             timeout=5.0,
         )
+        resp.raise_for_status()
     except httpx.HTTPError as exc:
         if process is not None:
             process.terminate()

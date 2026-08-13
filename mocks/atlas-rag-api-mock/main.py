@@ -203,11 +203,18 @@ class RegisterUserRequest(BaseModel):
 
     Lets integration tests register the configured ATLAS test identity so the
     live mock recognizes it regardless of ``TEST_USER`` overrides -- the mock
-    otherwise ships a fixed user database (see ``mock_data.json``).
+    otherwise ships a fixed user database (see ``mock_data.json``). Either
+    ``groups`` or ``clone_from`` may be supplied; ``clone_from`` copies an
+    existing user's groups so the test does not hand-copy group data owned by
+    ``mock_data.json``.
     """
 
     user: str = Field(..., description="User ID to register or update")
     groups: List[str] = Field(default_factory=list, description="Group memberships for the user")
+    clone_from: Optional[str] = Field(
+        default=None,
+        description="If set, copy group memberships from this existing user instead of using ``groups``.",
+    )
 
 
 # ------------------------------------------------------------------------------
@@ -514,9 +521,19 @@ async def register_test_user(req: RegisterUserRequest):
     users are overwritten. Used by the integration test fixture to ensure the
     configured ATLAS test identity is recognized regardless of overrides.
     """
-    USERS_GROUPS_DB[req.user] = list(req.groups)
-    logger.info("Registered test user %s with groups %s", req.user, req.groups)
-    return {"user": req.user, "groups": USERS_GROUPS_DB[req.user]}
+    if req.clone_from:
+        source_groups = USERS_GROUPS_DB.get(req.clone_from)
+        if source_groups is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Cannot clone groups: user {req.clone_from!r} not found",
+            )
+        groups = list(source_groups)
+    else:
+        groups = list(req.groups)
+    USERS_GROUPS_DB[req.user] = groups
+    logger.info("Registered test user %s with groups %s", req.user, groups)
+    return {"user": req.user, "groups": groups}
 
 
 @app.get("/")

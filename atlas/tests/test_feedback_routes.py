@@ -16,11 +16,6 @@ import pytest
 from main import app
 from starlette.testclient import TestClient
 
-from atlas.modules.config.config_manager import config_manager
-
-AUTH_HEADERS = {"X-User-Email": config_manager.app_settings.test_user}
-ADMIN_HEADERS = {"X-User-Email": config_manager.app_settings.admin_test_user}
-
 
 @pytest.fixture
 def temp_feedback_dir():
@@ -43,10 +38,10 @@ def mock_feedback_dir(temp_feedback_dir, monkeypatch):
 
 
 @pytest.fixture
-def mock_admin_check():
+def mock_admin_check(admin_test_user):
     """Mock admin group check to allow the configured admin test user."""
     async def mock_is_user_in_group(user: str, group: str) -> bool:
-        return user == config_manager.app_settings.admin_test_user
+        return user == admin_test_user
 
     with patch("atlas.routes.feedback_routes.is_user_in_group", mock_is_user_in_group):
         yield
@@ -55,39 +50,39 @@ def mock_admin_check():
 class TestFeedbackRouteRegistration:
     """Test that feedback routes are properly registered (issue #200)."""
 
-    def test_post_feedback_route_exists(self):
+    def test_post_feedback_route_exists(self, test_user_headers):
         """POST /api/feedback should not return 404."""
         client = TestClient(app)
         resp = client.post(
             "/api/feedback",
             json={"rating": 1, "comment": "test", "session": {}},
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
         assert resp.status_code != 404, "Feedback route not registered (issue #200)"
 
-    def test_get_feedback_route_exists(self):
+    def test_get_feedback_route_exists(self, test_user_headers):
         """GET /api/feedback should not return 404."""
         client = TestClient(app)
-        resp = client.get("/api/feedback", headers=AUTH_HEADERS)
+        resp = client.get("/api/feedback", headers=test_user_headers)
         assert resp.status_code != 404, "Feedback route not registered (issue #200)"
 
-    def test_get_feedback_stats_route_exists(self):
+    def test_get_feedback_stats_route_exists(self, test_user_headers):
         """GET /api/feedback/stats should not return 404."""
         client = TestClient(app)
-        resp = client.get("/api/feedback/stats", headers=AUTH_HEADERS)
+        resp = client.get("/api/feedback/stats", headers=test_user_headers)
         assert resp.status_code != 404, "Feedback stats route not registered (issue #200)"
 
 
 class TestFeedbackSubmission:
     """Test feedback submission by regular users."""
 
-    def test_submit_feedback_success(self, mock_feedback_dir, mock_admin_check):
+    def test_submit_feedback_success(self, mock_feedback_dir, mock_admin_check, test_user_headers):
         """Regular users can submit feedback."""
         client = TestClient(app)
         resp = client.post(
             "/api/feedback",
             json={"rating": 1, "comment": "Great service!", "session": {"model": "gpt-4"}},
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -95,24 +90,24 @@ class TestFeedbackSubmission:
         assert "feedback_id" in data
         assert "timestamp" in data
 
-    def test_submit_feedback_validates_rating(self, mock_feedback_dir, mock_admin_check):
+    def test_submit_feedback_validates_rating(self, mock_feedback_dir, mock_admin_check, test_user_headers):
         """Feedback submission validates rating values."""
         client = TestClient(app)
         resp = client.post(
             "/api/feedback",
             json={"rating": 5, "comment": "Invalid rating"},
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
         assert resp.status_code == 400
         assert "Rating must be -1, 0, or 1" in resp.json()["detail"]
 
-    def test_submit_feedback_creates_file(self, mock_feedback_dir, mock_admin_check):
+    def test_submit_feedback_creates_file(self, mock_feedback_dir, mock_admin_check, test_user, test_user_headers):
         """Feedback submission creates a JSON file."""
         client = TestClient(app)
         resp = client.post(
             "/api/feedback",
             json={"rating": 0, "comment": "Neutral feedback"},
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
         assert resp.status_code == 200
 
@@ -123,47 +118,47 @@ class TestFeedbackSubmission:
             saved_data = json.load(f)
         assert saved_data["rating"] == 0
         assert saved_data["comment"] == "Neutral feedback"
-        assert saved_data["user"] == config_manager.app_settings.test_user
+        assert saved_data["user"] == test_user
 
 
 class TestFeedbackAdminAccess:
     """Test that viewing feedback requires admin access."""
 
-    def test_get_feedback_requires_admin(self, mock_feedback_dir, mock_admin_check):
+    def test_get_feedback_requires_admin(self, mock_feedback_dir, mock_admin_check, test_user_headers):
         """GET /api/feedback returns 403 for non-admin users."""
         client = TestClient(app)
-        resp = client.get("/api/feedback", headers=AUTH_HEADERS)
+        resp = client.get("/api/feedback", headers=test_user_headers)
         assert resp.status_code == 403
         assert "Admin access required" in resp.json()["detail"]
 
-    def test_get_feedback_stats_requires_admin(self, mock_feedback_dir, mock_admin_check):
+    def test_get_feedback_stats_requires_admin(self, mock_feedback_dir, mock_admin_check, test_user_headers):
         """GET /api/feedback/stats returns 403 for non-admin users."""
         client = TestClient(app)
-        resp = client.get("/api/feedback/stats", headers=AUTH_HEADERS)
+        resp = client.get("/api/feedback/stats", headers=test_user_headers)
         assert resp.status_code == 403
         assert "Admin access required" in resp.json()["detail"]
 
-    def test_admin_can_view_feedback(self, mock_feedback_dir, mock_admin_check):
+    def test_admin_can_view_feedback(self, mock_feedback_dir, mock_admin_check, test_user_headers, admin_test_user_headers):
         """Admin users can view feedback list."""
         client = TestClient(app)
 
         client.post(
             "/api/feedback",
             json={"rating": 1, "comment": "Test"},
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
 
-        resp = client.get("/api/feedback", headers=ADMIN_HEADERS)
+        resp = client.get("/api/feedback", headers=admin_test_user_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert "feedback" in data
         assert "pagination" in data
         assert "statistics" in data
 
-    def test_admin_can_view_stats(self, mock_feedback_dir, mock_admin_check):
+    def test_admin_can_view_stats(self, mock_feedback_dir, mock_admin_check, admin_test_user_headers):
         """Admin users can view feedback statistics."""
         client = TestClient(app)
-        resp = client.get("/api/feedback/stats", headers=ADMIN_HEADERS)
+        resp = client.get("/api/feedback/stats", headers=admin_test_user_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert "total_feedback" in data
@@ -173,44 +168,44 @@ class TestFeedbackAdminAccess:
 class TestFeedbackDeletion:
     """Test feedback deletion by admin."""
 
-    def test_delete_feedback_requires_admin(self, mock_feedback_dir, mock_admin_check):
+    def test_delete_feedback_requires_admin(self, mock_feedback_dir, mock_admin_check, test_user_headers):
         """DELETE /api/feedback/{id} returns 403 for non-admin users."""
         client = TestClient(app)
-        resp = client.delete("/api/feedback/fake-id", headers=AUTH_HEADERS)
+        resp = client.delete("/api/feedback/fake-id", headers=test_user_headers)
         assert resp.status_code == 403
 
-    def test_admin_can_delete_feedback(self, mock_feedback_dir, mock_admin_check):
+    def test_admin_can_delete_feedback(self, mock_feedback_dir, mock_admin_check, test_user_headers, admin_test_user_headers):
         """Admin users can delete feedback."""
         client = TestClient(app)
 
         resp = client.post(
             "/api/feedback",
             json={"rating": -1, "comment": "To be deleted"},
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
         feedback_id = resp.json()["feedback_id"]
 
-        resp = client.delete(f"/api/feedback/{feedback_id}", headers=ADMIN_HEADERS)
+        resp = client.delete(f"/api/feedback/{feedback_id}", headers=admin_test_user_headers)
         assert resp.status_code == 200
         assert resp.json()["message"] == "Feedback deleted successfully"
 
-    def test_delete_nonexistent_feedback_returns_404(self, mock_feedback_dir, mock_admin_check):
+    def test_delete_nonexistent_feedback_returns_404(self, mock_feedback_dir, mock_admin_check, admin_test_user_headers):
         """Deleting non-existent feedback returns 404."""
         client = TestClient(app)
-        resp = client.delete("/api/feedback/nonexistent", headers=ADMIN_HEADERS)
+        resp = client.delete("/api/feedback/nonexistent", headers=admin_test_user_headers)
         assert resp.status_code == 404
 
 
 class TestFeedbackDownload:
     """Test feedback download functionality."""
 
-    def test_download_feedback_requires_admin(self, mock_feedback_dir, mock_admin_check):
+    def test_download_feedback_requires_admin(self, mock_feedback_dir, mock_admin_check, test_user_headers):
         """GET /api/feedback/download returns 403 for non-admin users."""
         client = TestClient(app)
-        resp = client.get("/api/feedback/download", headers=AUTH_HEADERS)
+        resp = client.get("/api/feedback/download", headers=test_user_headers)
         assert resp.status_code == 403
 
-    def test_download_feedback_csv_format(self, mock_feedback_dir, mock_admin_check):
+    def test_download_feedback_csv_format(self, mock_feedback_dir, mock_admin_check, test_user_headers, admin_test_user_headers):
         """Admin users can download feedback as CSV."""
         client = TestClient(app)
 
@@ -218,16 +213,16 @@ class TestFeedbackDownload:
         client.post(
             "/api/feedback",
             json={"rating": 1, "comment": "Great service!", "session": {"model": "gpt-4"}},
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
         client.post(
             "/api/feedback",
             json={"rating": -1, "comment": "Poor experience", "session": {"model": "gpt-3"}},
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
 
         # Download as CSV
-        resp = client.get("/api/feedback/download?format=csv", headers=ADMIN_HEADERS)
+        resp = client.get("/api/feedback/download?format=csv", headers=admin_test_user_headers)
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "text/csv; charset=utf-8"
         assert "attachment; filename=" in resp.headers["content-disposition"]
@@ -247,7 +242,7 @@ class TestFeedbackDownload:
         assert found_positive, "Positive feedback not found in CSV"
         assert found_negative, "Negative feedback not found in CSV"
 
-    def test_download_feedback_json_format(self, mock_feedback_dir, mock_admin_check):
+    def test_download_feedback_json_format(self, mock_feedback_dir, mock_admin_check, test_user, test_user_headers, admin_test_user_headers):
         """Admin users can download feedback as JSON."""
         client = TestClient(app)
 
@@ -255,12 +250,12 @@ class TestFeedbackDownload:
         resp1 = client.post(
             "/api/feedback",
             json={"rating": 1, "comment": "JSON test", "session": {"model": "gpt-4"}},
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
         feedback_id = resp1.json()["feedback_id"]
 
         # Download as JSON
-        resp = client.get("/api/feedback/download?format=json", headers=ADMIN_HEADERS)
+        resp = client.get("/api/feedback/download?format=json", headers=admin_test_user_headers)
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/json"
         assert "attachment; filename=" in resp.headers["content-disposition"]
@@ -275,16 +270,16 @@ class TestFeedbackDownload:
         assert feedback["id"] == feedback_id
         assert feedback["rating"] == 1
         assert feedback["comment"] == "JSON test"
-        assert feedback["user"] == config_manager.app_settings.test_user
+        assert feedback["user"] == test_user
         assert "timestamp" in feedback
         assert "session_info" in feedback
         assert "server_context" in feedback
 
-    def test_download_feedback_empty_csv(self, mock_feedback_dir, mock_admin_check):
+    def test_download_feedback_empty_csv(self, mock_feedback_dir, mock_admin_check, admin_test_user_headers):
         """Downloading empty feedback as CSV returns header-only file."""
         client = TestClient(app)
 
-        resp = client.get("/api/feedback/download?format=csv", headers=ADMIN_HEADERS)
+        resp = client.get("/api/feedback/download?format=csv", headers=admin_test_user_headers)
         assert resp.status_code == 200
 
         csv_content = resp.text
@@ -292,17 +287,17 @@ class TestFeedbackDownload:
         assert len(lines) == 1  # Only header row
         assert lines[0] == "id,timestamp,user,rating,comment"
 
-    def test_download_feedback_empty_json(self, mock_feedback_dir, mock_admin_check):
+    def test_download_feedback_empty_json(self, mock_feedback_dir, mock_admin_check, admin_test_user_headers):
         """Downloading empty feedback as JSON returns empty array."""
         client = TestClient(app)
 
-        resp = client.get("/api/feedback/download?format=json", headers=ADMIN_HEADERS)
+        resp = client.get("/api/feedback/download?format=json", headers=admin_test_user_headers)
         assert resp.status_code == 200
 
         json_data = resp.json()
         assert json_data == []
 
-    def test_download_feedback_csv_sanitizes_fields(self, mock_feedback_dir, mock_admin_check):
+    def test_download_feedback_csv_sanitizes_fields(self, mock_feedback_dir, mock_admin_check, admin_test_user_headers):
         """CSV download properly handles missing fields with defaults."""
         client = TestClient(app)
 
@@ -322,7 +317,7 @@ class TestFeedbackDownload:
         with open(feedback_file, 'w') as f:
             json.dump(manual_feedback, f)
 
-        resp = client.get("/api/feedback/download?format=csv", headers=ADMIN_HEADERS)
+        resp = client.get("/api/feedback/download?format=csv", headers=admin_test_user_headers)
         assert resp.status_code == 200
 
         csv_content = resp.text
@@ -338,7 +333,7 @@ class TestFeedbackDownload:
 class TestFeedbackConversationHistory:
     """Test conversation history attachment in feedback (issue #307)."""
 
-    def test_submit_feedback_with_conversation_history(self, mock_feedback_dir, mock_admin_check):
+    def test_submit_feedback_with_conversation_history(self, mock_feedback_dir, mock_admin_check, test_user_headers):
         """Feedback with conversation_history stores it inline in the JSON."""
         client = TestClient(app)
         history_text = "USER:\nWhat is Python?\n\nASSISTANT:\nPython is a programming language.\n"
@@ -351,7 +346,7 @@ class TestFeedbackConversationHistory:
                 "session": {},
                 "conversation_history": history_text
             },
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
         assert resp.status_code == 200
 
@@ -361,13 +356,13 @@ class TestFeedbackConversationHistory:
             data = json.load(f)
         assert data["conversation_history"] == history_text
 
-    def test_submit_feedback_without_conversation_history(self, mock_feedback_dir, mock_admin_check):
+    def test_submit_feedback_without_conversation_history(self, mock_feedback_dir, mock_admin_check, test_user_headers):
         """Feedback without conversation_history stores null."""
         client = TestClient(app)
         resp = client.post(
             "/api/feedback",
             json={"rating": 1, "comment": "All good", "session": {}},
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
         assert resp.status_code == 200
 
@@ -376,7 +371,7 @@ class TestFeedbackConversationHistory:
             data = json.load(f)
         assert data["conversation_history"] is None
 
-    def test_get_feedback_includes_conversation_history(self, mock_feedback_dir, mock_admin_check):
+    def test_get_feedback_includes_conversation_history(self, mock_feedback_dir, mock_admin_check, test_user_headers, admin_test_user_headers):
         """Admin GET /api/feedback returns conversation_history inline."""
         client = TestClient(app)
         history_text = "USER:\nHello\n\nASSISTANT:\nHi\n"
@@ -389,16 +384,16 @@ class TestFeedbackConversationHistory:
                 "session": {},
                 "conversation_history": history_text
             },
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
 
-        resp = client.get("/api/feedback", headers=ADMIN_HEADERS)
+        resp = client.get("/api/feedback", headers=admin_test_user_headers)
         assert resp.status_code == 200
         feedback_list = resp.json()["feedback"]
         assert len(feedback_list) == 1
         assert feedback_list[0]["conversation_history"] == history_text
 
-    def test_json_download_includes_conversation_history(self, mock_feedback_dir, mock_admin_check):
+    def test_json_download_includes_conversation_history(self, mock_feedback_dir, mock_admin_check, test_user_headers, admin_test_user_headers):
         """JSON download includes conversation_history inline."""
         client = TestClient(app)
         history_text = "USER:\nWhat time is it?\n\nASSISTANT:\nI cannot tell time.\n"
@@ -411,10 +406,10 @@ class TestFeedbackConversationHistory:
                 "session": {},
                 "conversation_history": history_text
             },
-            headers=AUTH_HEADERS
+            headers=test_user_headers
         )
 
-        resp = client.get("/api/feedback/download?format=json", headers=ADMIN_HEADERS)
+        resp = client.get("/api/feedback/download?format=json", headers=admin_test_user_headers)
         assert resp.status_code == 200
 
         json_data = resp.json()
