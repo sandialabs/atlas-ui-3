@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
+from atlas.modules.llm.models import ReasoningBlock, ReasoningToken
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
@@ -122,6 +123,7 @@ class AgenticLoop(AgentLoopProtocol):
 
         steps = 0
         final_answer: Optional[str] = None
+        last_reasoning: Optional[str] = None
         use_streaming = streaming and event_publisher
 
         # Record tool input/output as they stream to the UI so agent-mode tool
@@ -151,12 +153,14 @@ class AgenticLoop(AgentLoopProtocol):
 
             if not llm_response.has_tool_calls():
                 final_answer = llm_response.content or ""
+                last_reasoning = getattr(llm_response, 'reasoning_content', None)
                 break
 
             # Model chose to call tools -- execute all in parallel, then loop
             tool_calls = [tc for tc in (llm_response.tool_calls or []) if tc is not None]
             if not tool_calls:
                 final_answer = llm_response.content or ""
+                last_reasoning = getattr(llm_response, 'reasoning_content', None)
                 break
 
             # Convert tool_calls to plain dicts for the assistant message so they
@@ -256,6 +260,7 @@ class AgenticLoop(AgentLoopProtocol):
                 "agent_mode": True,
                 "strategy": "agentic",
             },
+            reasoning_content=last_reasoning,
         )
 
     async def _call_llm(
@@ -317,10 +322,23 @@ class AgenticLoop(AgentLoopProtocol):
         accumulated_content = ""
         final_response: Optional[LLMResponse] = None
         is_first = True
+        sent_reasoning = False
 
         try:
             async for item in stream:
-                if isinstance(item, str):
+                if isinstance(item, ReasoningToken):
+                    sent_reasoning = True
+                    await event_publisher.send_json({
+                        "type": "reasoning_token",
+                        "token": item.token,
+                    })
+                elif isinstance(item, ReasoningBlock):
+                    sent_reasoning = True
+                    await event_publisher.send_json({
+                        "type": "reasoning_content",
+                        "content": item.content,
+                    })
+                elif isinstance(item, str):
                     await event_publisher.publish_token_stream(
                         token=item, is_first=is_first, is_last=False,
                     )
@@ -349,7 +367,10 @@ class AgenticLoop(AgentLoopProtocol):
 
         # Close any streamed text, including narration for tool-call turns, so
         # each iteration finalizes as its own UI bubble before tool rows render.
-        if accumulated_content:
+        # Reasoning counts as streamed output: a reasoning-only turn that then
+        # calls tools must also close, or the next turn's text appends to the
+        # stale reasoning bubble instead of starting a fresh one.
+        if accumulated_content or sent_reasoning:
             await event_publisher.publish_token_stream(
                 token="", is_first=False, is_last=True,
             )

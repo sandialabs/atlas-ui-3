@@ -58,7 +58,7 @@ async def test_stream_and_accumulate_happy_path():
     """Tokens are accumulated and is_last is sent at the end."""
     pub = _make_publisher()
 
-    result = await stream_and_accumulate(
+    result, _reasoning = await stream_and_accumulate(
         token_generator=_async_gen("Hello", " ", "World"),
         event_publisher=pub,
         context_label="test",
@@ -83,7 +83,7 @@ async def test_stream_and_accumulate_empty_with_fallback():
     pub = _make_publisher()
     fallback = AsyncMock(return_value="fallback text")
 
-    result = await stream_and_accumulate(
+    result, _reasoning = await stream_and_accumulate(
         token_generator=_async_gen(),  # yields nothing
         event_publisher=pub,
         fallback_fn=fallback,
@@ -100,7 +100,7 @@ async def test_stream_and_accumulate_empty_no_fallback():
     """Empty stream without fallback returns empty string."""
     pub = _make_publisher()
 
-    result = await stream_and_accumulate(
+    result, _reasoning = await stream_and_accumulate(
         token_generator=_async_gen(),
         event_publisher=pub,
         context_label="test",
@@ -114,7 +114,7 @@ async def test_stream_and_accumulate_error_sends_is_last():
     """Mid-stream error always sends is_last to prevent stuck UI cursor."""
     pub = _make_publisher()
 
-    result = await stream_and_accumulate(
+    result, _reasoning = await stream_and_accumulate(
         token_generator=_async_gen_error("partial"),
         event_publisher=pub,
         context_label="test",
@@ -137,7 +137,7 @@ async def test_stream_and_accumulate_error_no_tokens_with_fallback():
 
     fallback = AsyncMock(return_value="error fallback")
 
-    result = await stream_and_accumulate(
+    result, _reasoning = await stream_and_accumulate(
         token_generator=_immediate_error(),
         event_publisher=pub,
         fallback_fn=fallback,
@@ -217,7 +217,7 @@ async def test_stream_and_accumulate_error_no_tokens_no_fallback_sends_user_mess
         raise RuntimeError("AuthenticationError: invalid api key")
         yield  # makes this an async generator
 
-    result = await stream_and_accumulate(
+    result, _reasoning = await stream_and_accumulate(
         token_generator=_auth_error(),
         event_publisher=pub,
         context_label="test",
@@ -242,7 +242,7 @@ async def test_stream_and_accumulate_error_fallback_also_fails():
 
     fallback = AsyncMock(side_effect=RuntimeError("also fails"))
 
-    result = await stream_and_accumulate(
+    result, _reasoning = await stream_and_accumulate(
         token_generator=_immediate_error(),
         event_publisher=pub,
         fallback_fn=fallback,

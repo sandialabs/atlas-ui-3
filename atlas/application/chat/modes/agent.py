@@ -176,10 +176,13 @@ class AgentModeRunner:
         # returns — reloaded history reads user -> intermediate assistant
         # -> tool_call(s) -> assistant. Guarded by
         # TestAgentModeRunnerPersistedOrder in test_tool_call_persistence.py.
+        metadata = {"agent_mode": True, "steps": result.steps}
+        if result.reasoning_content:
+            metadata["reasoning_content"] = result.reasoning_content
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
             content=result.final_answer,
-            metadata={"agent_mode": True, "steps": result.steps},
+            metadata=metadata,
         )
         session.history.add_message(assistant_message)
 

@@ -10,6 +10,8 @@ const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
 let _tokenBuffer = ''
 let _tokenFlushTimer = null
 let _streamActive = false
+let _reasoningBuffer = ''
+let _reasoningFlushTimer = null
 const FLUSH_INTERVAL_MS = 30
 
 /**
@@ -19,9 +21,14 @@ const FLUSH_INTERVAL_MS = 30
 export function cleanupStreamState() {
   _streamActive = false
   _tokenBuffer = ''
+  _reasoningBuffer = ''
   if (_tokenFlushTimer) {
     clearTimeout(_tokenFlushTimer)
     _tokenFlushTimer = null
+  }
+  if (_reasoningFlushTimer) {
+    clearTimeout(_reasoningFlushTimer)
+    _reasoningFlushTimer = null
   }
 }
 
@@ -50,6 +57,8 @@ export function cleanupStreamState() {
  * @param {Function} [deps.setActiveConversationId] - Set the active conversation ID for chat history tracking.
  * @param {Function} deps.streamToken - Dispatch a STREAM_TOKEN action with a text chunk.
  * @param {Function} deps.streamEnd - Dispatch a STREAM_END action to finalize streaming.
+ * @param {Function} [deps.streamReasoningToken] - Dispatch a STREAM_REASONING_TOKEN action with a reasoning chunk.
+ * @param {Function} [deps.streamReasoningEnd] - Dispatch a STREAM_REASONING_END action to finalize reasoning.
  * @returns {Function} A handler function that processes incoming WebSocket messages.
  */
 export function createWebSocketHandler(deps) {
@@ -76,12 +85,22 @@ export function createWebSocketHandler(deps) {
     setActiveConversationId,
     streamToken,
     streamEnd,
+    streamReasoningToken,
+    streamReasoningEnd,
   } = deps
 
   // Clear the agent-run-in-flight flag on any terminal agent event. Optional so
   // existing handler tests that don't inject the setter keep working.
   function clearAgentRunning() {
     if (typeof setIsAgentRunning === 'function') setIsAgentRunning(false)
+  }
+
+  function flushReasoningBuffer() {
+    if (_reasoningBuffer && typeof streamReasoningToken === 'function') {
+      streamReasoningToken(_reasoningBuffer)
+      _reasoningBuffer = ''
+    }
+    _reasoningFlushTimer = null
   }
 
   function flushTokenBuffer() {
@@ -98,6 +117,15 @@ export function createWebSocketHandler(deps) {
       clearTimeout(_tokenFlushTimer)
       _tokenFlushTimer = null
     }
+    // Flush and clear any pending reasoning buffer/timer too. Without this, a
+    // stream that ends (error, response_complete, final token) before a
+    // reasoning_content event could let the reasoning flush timer fire later
+    // and create an orphan reasoning-only message after the stream finished.
+    if (_reasoningFlushTimer) {
+      clearTimeout(_reasoningFlushTimer)
+      _reasoningFlushTimer = null
+    }
+    flushReasoningBuffer()
     flushTokenBuffer()
     if (typeof streamEnd === 'function') streamEnd()
   }
@@ -473,11 +501,38 @@ export function createWebSocketHandler(deps) {
           }
           break
         }
+        case 'reasoning_token':
+          // Reasoning streams incrementally and arrives before content. Clear
+          // the thinking/synthesizing indicators so the reasoning section shows
+          // up in their place rather than below them.
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+          setIsThinking(false)
+          _reasoningBuffer += data.token
+          if (!_reasoningFlushTimer) {
+            _reasoningFlushTimer = setTimeout(flushReasoningBuffer, FLUSH_INTERVAL_MS)
+          }
+          break
+        case 'reasoning_content':
+          // Final complete reasoning: flush anything buffered, then mark the end.
+          if (_reasoningFlushTimer) {
+            clearTimeout(_reasoningFlushTimer)
+            _reasoningFlushTimer = null
+          }
+          flushReasoningBuffer()
+          // Pass the backend's authoritative full reasoning text so the reducer
+          // can reconcile tokens that were coalesced or dropped while buffering.
+          if (typeof streamReasoningEnd === 'function') streamReasoningEnd(data.content)
+          break
         case 'chat_response':
           setIsThinking(false)
           clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
-          addMessage({ role: 'assistant', content: data.message, timestamp: new Date().toISOString() })
+          addMessage({
+            role: 'assistant',
+            content: data.message,
+            timestamp: new Date().toISOString(),
+            ...(data.reasoning_content ? { reasoning_content: data.reasoning_content } : {}),
+          })
           break
         case 'warning':
           addMessage({ role: 'system', content: `Warning: ${data.message}`, type: 'warning', timestamp: new Date().toISOString() })

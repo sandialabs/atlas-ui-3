@@ -44,7 +44,7 @@ export const ChatProvider = ({ children }) => {
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
-	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd } = useMessages()
+	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, streamReasoningToken, streamReasoningEnd } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
 	const isStreaming = messages.some(m => m._streaming === true)
@@ -147,10 +147,12 @@ export const ChatProvider = ({ children }) => {
 			setActiveConversationId,
 			streamToken,
 			streamEnd,
+			streamReasoningToken,
+			streamReasoningEnd,
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd, streamReasoningToken, streamReasoningEnd])
 
 	// Safety timeout: if isThinking stays true for too long without any response
 	// from the backend, reset it and show an error so the user is not stuck forever.
@@ -793,8 +795,11 @@ export const ChatProvider = ({ children }) => {
 		return () => {
 			if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current)
 		}
-	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [messages?.length, saveMode, activeConversationId, currentModel])
+	// Depends on `messages` (not `messages.length`): content and reasoning stream
+	// in without changing the array length, so keying on length alone would fire
+	// the 1s debounce mid-stream and persist a truncated message. Re-running per
+	// token only resets a timeout, so the save still lands once streaming settles.
+	}, [messages, saveMode, activeConversationId, currentModel])
 
 	// addSystemEvent: adds a system event message to the chat timeline
 	const addSystemEvent = useCallback((subtype, text, meta = {}) => {

@@ -81,6 +81,11 @@ export function buildPersistedMessage(m) {
     }
     persisted.metadata = metadata
   }
+  // Chain-of-thought reasoning is spread onto the message from metadata on
+  // load, so it has to be folded back in here or it is lost on reload.
+  if (m.reasoning_content) {
+    persisted.metadata = { ...persisted.metadata, reasoning_content: m.reasoning_content }
+  }
   return persisted
 }
 

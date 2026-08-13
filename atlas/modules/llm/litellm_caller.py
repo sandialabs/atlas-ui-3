@@ -53,6 +53,95 @@ from .models import LLMResponse, split_provider
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Monkey-patch: map vLLM/SGLang `reasoning` field to `reasoning_content`
+# in LiteLLM's streaming pipeline.
+#
+# vLLM returns `delta.reasoning` in streaming SSE chunks. The OpenAI SDK
+# preserves it as a Pydantic "extra" field (visible in model_dump()).
+# LiteLLM's CustomStreamWrapper then converts chunks to its own models
+# which only recognise `reasoning_content`, so `reasoning` is silently
+# dropped and reasoning-only chunks are treated as empty.
+#
+# Tracked upstream: https://github.com/BerriAI/litellm/issues/20246
+#
+# Fix: wrap the completion_stream inside CustomStreamWrapper so that each
+# raw chunk's delta.reasoning is renamed to delta.reasoning_content before
+# LiteLLM's chunk processing sees it.
+# Safe to remove once the upstream fix lands.
+# ---------------------------------------------------------------------------
+try:
+    from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
+
+    _original_csw_init = CustomStreamWrapper.__init__
+
+    def _inject_reasoning_content(chunk):
+        """If a chunk's delta has `reasoning` (vLLM), copy it to `reasoning_content`."""
+        choices = getattr(chunk, 'choices', None)
+        if not choices:
+            return
+        for choice in choices:
+            delta = getattr(choice, 'delta', None)
+            if delta is None:
+                continue
+            # This patch runs for every chunk of every model, so avoid the
+            # per-token cost of delta.model_dump(). Read `reasoning` cheaply:
+            # first as a direct attribute, then from the Pydantic "extra"
+            # mapping where the OpenAI SDK stashes unknown fields. Only
+            # reasoning models populate it, so non-reasoning streams pay nothing.
+            reasoning_val = getattr(delta, 'reasoning', None)
+            if not reasoning_val:
+                extra = getattr(delta, '__pydantic_extra__', None)
+                if extra:
+                    reasoning_val = extra.get('reasoning')
+            if not reasoning_val:
+                continue
+            # Already mapped by a provider that does this correctly? Leave it.
+            if getattr(delta, 'reasoning_content', None):
+                continue
+            try:
+                delta.reasoning_content = reasoning_val
+            except Exception as exc:
+                logger.debug("Could not set reasoning_content on delta: %s", exc)
+
+    def _wrap_stream_reasoning(stream):
+        """Wrap an async iterable to remap delta.reasoning -> delta.reasoning_content."""
+        class _ReasoningMappedStream:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                chunk = await self._inner.__anext__()
+                _inject_reasoning_content(chunk)
+                return chunk
+
+            async def aclose(self):
+                if hasattr(self._inner, 'aclose'):
+                    await self._inner.aclose()
+
+        return _ReasoningMappedStream(stream)
+
+    def _patched_csw_init(self, *args, **kwargs):
+        _original_csw_init(self, *args, **kwargs)
+        raw_stream = self.completion_stream
+        # Only wrap async streams: the wrapper implements __anext__ only, so
+        # wrapping a sync completion_stream would break sync streaming.
+        if raw_stream is not None and hasattr(raw_stream, "__anext__"):
+            self.completion_stream = _wrap_stream_reasoning(raw_stream)
+
+    CustomStreamWrapper.__init__ = _patched_csw_init
+    logger.debug("Applied reasoning->reasoning_content streaming patch for LiteLLM")
+except Exception:
+    logger.warning(
+        "Could not apply LiteLLM reasoning streaming patch - "
+        "vLLM reasoning tokens may not appear in streaming mode",
+        exc_info=True,
+    )
+# ---------------------------------------------------------------------------
+
 # Configure LiteLLM settings
 litellm.drop_params = True  # Drop unsupported params instead of erroring
 # Allow litellm to inject a dummy tool schema for Anthropic requests when the
@@ -1074,7 +1163,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             return LLMResponse(
                 content=getattr(message, 'content', None) or "",
                 tool_calls=tool_calls,
-                model_used=model_name
+                model_used=model_name,
+                reasoning_content=getattr(message, 'reasoning_content', None),
             )
 
         except Exception as exc:

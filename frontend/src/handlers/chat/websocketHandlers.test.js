@@ -26,6 +26,8 @@ const makeDeps = () => {
     setIsSynthesizing: vi.fn(),
     streamToken: vi.fn(),
     streamEnd: vi.fn(),
+    streamReasoningToken: vi.fn(),
+    streamReasoningEnd: vi.fn(),
   }
 }
 
@@ -346,5 +348,102 @@ describe('createWebSocketHandler - token streaming', () => {
     handler({ type: 'token_stream', is_last: true })
 
     expect(deps.setIsSynthesizing).toHaveBeenCalledWith(false)
+  })
+})
+
+describe('createWebSocketHandler - reasoning token streaming', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    cleanupStreamState()
+  })
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+    cleanupStreamState()
+  })
+
+  it('buffers reasoning tokens and flushes them coalesced after the flush interval', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'reasoning_token', token: 'Let me' })
+    handler({ type: 'reasoning_token', token: ' think' })
+
+    // Nothing dispatched yet - both tokens are still buffered.
+    expect(deps.streamReasoningToken).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(30)
+
+    expect(deps.streamReasoningToken).toHaveBeenCalledTimes(1)
+    expect(deps.streamReasoningToken).toHaveBeenCalledWith('Let me think')
+  })
+
+  it('clears the thinking and synthesizing indicators when reasoning starts', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'reasoning_token', token: 'hmm' })
+
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+    expect(deps.setIsSynthesizing).toHaveBeenCalledWith(false)
+  })
+
+  it('reasoning_content flushes the pending buffer before signalling the end', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'reasoning_token', token: 'partial' })
+    handler({ type: 'reasoning_content', content: 'partial reasoning' })
+
+    expect(deps.streamReasoningToken).toHaveBeenCalledWith('partial')
+    expect(deps.streamReasoningEnd).toHaveBeenCalledWith('partial reasoning')
+  })
+
+  it('passes the authoritative reasoning text through to the reducer', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'reasoning_content', content: 'full text' })
+
+    expect(deps.streamReasoningEnd).toHaveBeenCalledWith('full text')
+  })
+
+  it('does not leave an orphan reasoning flush after the stream ends', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    // Reasoning is buffered, then the stream ends before a reasoning_content
+    // event arrives. The buffer must flush now, not on a later stray timer.
+    handler({ type: 'reasoning_token', token: 'buffered' })
+    handler({ type: 'response_complete' })
+
+    expect(deps.streamReasoningToken).toHaveBeenCalledWith('buffered')
+    expect(deps.streamEnd).toHaveBeenCalled()
+
+    deps.streamReasoningToken.mockClear()
+    vi.advanceTimersByTime(100)
+    expect(deps.streamReasoningToken).not.toHaveBeenCalled()
+  })
+
+  it('attaches reasoning_content from a non-streamed chat_response', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'chat_response', message: 'answer', reasoning_content: 'because' })
+
+    expect(deps.addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'assistant', content: 'answer', reasoning_content: 'because' }),
+    )
+  })
+
+  it('omits reasoning_content from a chat_response that has none', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'chat_response', message: 'answer' })
+
+    const added = deps.addMessage.mock.calls[0][0]
+    expect(added).not.toHaveProperty('reasoning_content')
   })
 })

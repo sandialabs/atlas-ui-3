@@ -5,6 +5,7 @@ import logging
 from atlas.application.chat.utilities.error_handler import classify_llm_error
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
+from atlas.modules.llm.models import ReasoningBlock, ReasoningToken
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,21 @@ async def stream_final_answer(
         async for token in llm.stream_plain(
             model, messages, temperature=temperature, user_email=user_email,
         ):
+            # Reasoning-capable models interleave reasoning markers with text
+            # tokens; forward them as reasoning events instead of appending to
+            # the answer (str concatenation on a marker would raise).
+            if isinstance(token, ReasoningToken):
+                await event_publisher.send_json({
+                    "type": "reasoning_token",
+                    "token": token.token,
+                })
+                continue
+            if isinstance(token, ReasoningBlock):
+                await event_publisher.send_json({
+                    "type": "reasoning_content",
+                    "content": token.content,
+                })
+                continue
             await event_publisher.publish_token_stream(
                 token=token, is_first=is_first, is_last=False,
             )

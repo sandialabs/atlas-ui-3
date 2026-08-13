@@ -85,7 +85,7 @@ class PlainModeRunner:
         user_email: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute plain LLM mode with token streaming."""
-        accumulated = await stream_and_accumulate(
+        accumulated, reasoning = await stream_and_accumulate(
             token_generator=self.llm.stream_plain(
                 model, messages, temperature=temperature, user_email=user_email,
             ),
@@ -96,9 +96,13 @@ class PlainModeRunner:
             context_label="plain",
         )
 
+        metadata = {}
+        if reasoning:
+            metadata["reasoning_content"] = reasoning
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
             content=accumulated,
+            metadata=metadata,
         )
         session.history.add_message(assistant_message)
         await self.event_publisher.publish_response_complete()

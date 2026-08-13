@@ -1,6 +1,6 @@
 """Event publisher interface for transport-agnostic UI updates."""
 
-from typing import Any, Dict, Protocol
+from typing import Any, Dict, Optional, Protocol
 
 
 class EventPublisher(Protocol):
@@ -30,6 +30,7 @@ class EventPublisher(Protocol):
         self,
         message: str,
         has_pending_tools: bool = False,
+        reasoning_content: Optional[str] = None,
     ) -> None:
         """
         Publish a chat response message.
@@ -37,6 +38,7 @@ class EventPublisher(Protocol):
         Args:
             message: Response text from assistant
             has_pending_tools: Whether tools are still executing
+            reasoning_content: Optional chain-of-thought reasoning text
         """
         pass
 

@@ -61,6 +61,11 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
     }
   }, [toolDetailsCollapsed])
 
+  // Per-message reasoning collapse state. Defaults to collapsed and is not
+  // persisted globally: chain-of-thought is supplementary, and unlike tool
+  // output it is rarely something a user wants open on every message.
+  const [reasoningCollapsed, setReasoningCollapsed] = useState(true)
+
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
@@ -598,6 +603,51 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       return <div className="text-gray-200 whitespace-pre-wrap break-words">{message.content}</div>
     }
 
+    // Reasoning section for assistant messages that carry reasoning_content.
+    // While streaming it force-expands so the user can watch it arrive; once
+    // complete it honors the user's collapse toggle.
+    const isReasoningStreaming = message._reasoningStreaming
+    const showReasoningExpanded = isReasoningStreaming || !reasoningCollapsed
+    const reasoningPanelId = `reasoning-${messageScope}`
+    const reasoningBlock = message.reasoning_content ? (
+      <div className="mb-3">
+        <div className="border-l-4 border-purple-500 pl-4">
+          <button
+            type="button"
+            onClick={() => setReasoningCollapsed(!reasoningCollapsed)}
+            aria-expanded={showReasoningExpanded}
+            aria-controls={reasoningPanelId}
+            className="w-full text-left text-sm font-semibold text-purple-400 mb-2 flex items-center gap-2 hover:text-purple-300 transition-colors"
+          >
+            <span className={`transform transition-transform duration-200 ${showReasoningExpanded ? 'rotate-90' : 'rotate-0'}`}>
+              ▶
+            </span>
+            {isReasoningStreaming ? 'Reasoning...' : 'Reasoning'}
+          </button>
+          {showReasoningExpanded && (
+            <div
+              id={reasoningPanelId}
+              className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-96 overflow-y-auto"
+              ref={el => {
+                // Auto-scroll to the bottom during streaming, but only when the
+                // user is already near it — don't yank them back down if they
+                // scrolled up to read earlier reasoning.
+                if (el && isReasoningStreaming) {
+                  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+                  if (nearBottom) el.scrollTop = el.scrollHeight
+                }
+              }}
+            >
+              <pre className="text-xs text-gray-400 whitespace-pre-wrap break-words font-mono">
+                {message.reasoning_content}
+                {isReasoningStreaming && <span className="animate-pulse">▌</span>}
+              </pre>
+            </div>
+          )}
+        </div>
+      </div>
+    ) : null
+
     // Render markdown for assistant messages
     const content = processMessageContent(message.content)
 
@@ -614,35 +664,41 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       const sanitizedHtml = DOMPurify.sanitize(referencesHtml, DOMPURIFY_CONFIG)
 
       return (
-        <div
-          className="prose prose-invert max-w-none selectable-markdown"
-          dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
-          onClick={(e) => {
-            // Citation badge clicks: scroll the referenced entry into view
-            // within the chat container instead of using browser fragment nav.
-            const badge = e.target.closest('[data-citation-target]')
-            if (!badge) return
-            e.preventDefault()
-            const targetId = badge.getAttribute('data-citation-target')
-            const target = document.getElementById(targetId)
-            if (target) {
-              target.scrollIntoView({ behavior: 'smooth', block: 'center' })
-              target.classList.add('rag-ref-highlight')
-              setTimeout(() => target.classList.remove('rag-ref-highlight'), 2000)
-            }
-          }}
-        />
+        <>
+          {reasoningBlock}
+          <div
+            className="prose prose-invert max-w-none selectable-markdown"
+            dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+            onClick={(e) => {
+              // Citation badge clicks: scroll the referenced entry into view
+              // within the chat container instead of using browser fragment nav.
+              const badge = e.target.closest('[data-citation-target]')
+              if (!badge) return
+              e.preventDefault()
+              const targetId = badge.getAttribute('data-citation-target')
+              const target = document.getElementById(targetId)
+              if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                target.classList.add('rag-ref-highlight')
+                setTimeout(() => target.classList.remove('rag-ref-highlight'), 2000)
+              }
+            }}
+          />
+        </>
       )
     } catch (error) {
       console.error('Error parsing markdown content:', error)
       return (
-        <div className="text-gray-200">
-          {/* Every other <pre> in the transcript carries its own scroller; this
-              one is exempted from `overflow-wrap: anywhere` by the pre rule in
-              index.css, so without one a long unbroken token in an
-              already-failing message would be clipped with no way to see it. */}
-          <pre className="whitespace-pre-wrap overflow-x-auto">{content}</pre>
-        </div>
+        <>
+          {reasoningBlock}
+          <div className="text-gray-200">
+            {/* Every other <pre> in the transcript carries its own scroller; this
+                one is exempted from `overflow-wrap: anywhere` by the pre rule in
+                index.css, so without one a long unbroken token in an
+                already-failing message would be clipped with no way to see it. */}
+            <pre className="whitespace-pre-wrap overflow-x-auto">{content}</pre>
+          </div>
+        </>
       )
     }
   }
