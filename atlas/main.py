@@ -39,8 +39,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
 from atlas.core.auth import resolve_user_from_auth_header_async
-from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
+from atlas.core.mcp_dev_only_guard import enforce_dev_only_mcp_servers
 from atlas.core.metrics_logger import log_metric
 
 # Import from atlas.core (only essential middleware and config)
@@ -236,54 +236,76 @@ async def lifespan(app: FastAPI):
     # Ensure feedback directory exists
     _ensure_feedback_directory()
 
-    # Initialize MCP tools manager
-    logger.info("Initializing MCP tools manager...")
+    # Initialize MCP tools manager.
+    # Skipped entirely when tools are disabled: starting MCP subprocesses and
+    # connecting to remote servers is real attack surface, and there is nothing
+    # for them to serve while FEATURE_TOOLS_ENABLED is false. The orchestrator
+    # discards tool requests independently, so this is defence in depth rather
+    # than the enforcement point.
     mcp_manager = app_factory.get_mcp_manager()
+    tools_enabled = config.app_settings.feature_tools_enabled
 
-    try:
-        logger.info("Step 1: Initializing MCP clients...")
-        await mcp_manager.initialize_clients()
-        logger.info("Step 1 complete: MCP clients initialized")
+    if not tools_enabled:
+        logger.info(
+            "Skipping MCP tools manager initialization: FEATURE_TOOLS_ENABLED is false. "
+            "No MCP subprocesses will be started and no servers will be contacted."
+        )
 
-        logger.info("Step 2: Discovering tools...")
-        await mcp_manager.discover_tools()
-        logger.info("Step 2 complete: Tool discovery finished")
+    if tools_enabled:
+        # Refuse to serve development-only MCP servers (arbitrary host file
+        # access, code execution, arbitrary outbound fetches) outside a
+        # development environment. Raises to abort startup; see
+        # atlas/core/mcp_dev_only_guard.py for why this fails closed.
+        enforce_dev_only_mcp_servers(
+            getattr(mcp_manager, "servers_config", {}) or {},
+            config.app_settings,
+        )
 
-        logger.info("Step 3: Discovering prompts...")
-        await mcp_manager.discover_prompts()
-        logger.info("Step 3 complete: Prompt discovery finished")
+        logger.info("Initializing MCP tools manager...")
+        try:
+            logger.info("Step 1: Initializing MCP clients...")
+            await mcp_manager.initialize_clients()
+            logger.info("Step 1 complete: MCP clients initialized")
 
-        logger.info("MCP tools manager initialization complete")
+            logger.info("Step 2: Discovering tools...")
+            await mcp_manager.discover_tools()
+            logger.info("Step 2 complete: Tool discovery finished")
 
-        # Start auto-reconnect background task if enabled
-        logger.info("Step 4: Starting MCP auto-reconnect (if enabled)...")
-        await mcp_manager.start_auto_reconnect()
-        logger.info("Step 4 complete: Auto-reconnect task started (if enabled)")
+            logger.info("Step 3: Discovering prompts...")
+            await mcp_manager.discover_prompts()
+            logger.info("Step 3 complete: Prompt discovery finished")
 
-    except Exception as e:
-        logger.error(f"Error during MCP initialization: {e}", exc_info=True)
-        # Continue startup even if MCP fails
-        logger.warning("Continuing startup without MCP tools")
+            logger.info("MCP tools manager initialization complete")
 
-    # The user-client cache sweeper must run even when MCP discovery
-    # failed above: any per-user HTTP clients created later (e.g. on
-    # reconnect or partial init) still need bounded eviction, otherwise
-    # the leak guard this PR adds is silently disabled in degraded
-    # startup.
-    try:
-        logger.info("Step 5: Starting MCP user client cache sweeper...")
-        await mcp_manager.start_user_client_cache_sweeper()
-        logger.info("Step 5 complete: User client cache sweeper started")
-    except Exception as e:
-        logger.error(f"Failed to start MCP user client cache sweeper: {e}", exc_info=True)
+            # Start auto-reconnect background task if enabled
+            logger.info("Step 4: Starting MCP auto-reconnect (if enabled)...")
+            await mcp_manager.start_auto_reconnect()
+            logger.info("Step 4 complete: Auto-reconnect task started (if enabled)")
+
+        except Exception as e:
+            logger.error(f"Error during MCP initialization: {e}", exc_info=True)
+            # Continue startup even if MCP fails
+            logger.warning("Continuing startup without MCP tools")
+
+        # The user-client cache sweeper must run even when MCP discovery
+        # failed above: any per-user HTTP clients created later (e.g. on
+        # reconnect or partial init) still need bounded eviction, otherwise
+        # the leak guard is silently disabled in degraded startup.
+        try:
+            logger.info("Step 5: Starting MCP user client cache sweeper...")
+            await mcp_manager.start_user_client_cache_sweeper()
+            logger.info("Step 5 complete: User client cache sweeper started")
+        except Exception as e:
+            logger.error(f"Failed to start MCP user client cache sweeper: {e}", exc_info=True)
 
     yield
 
     logger.info("Shutting down Chat UI Backend")
-    # Stop auto-reconnect task
-    await mcp_manager.stop_auto_reconnect()
-    # Cleanup MCP clients
-    await mcp_manager.cleanup()
+    if tools_enabled:
+        # Stop auto-reconnect task
+        await mcp_manager.stop_auto_reconnect()
+        # Cleanup MCP clients
+        await mcp_manager.cleanup()
 
 
 # Create FastAPI app with minimal setup
@@ -321,12 +343,6 @@ if config.app_settings.feature_globus_auth_enabled:
             https_only=False,
             same_site="lax",
         )
-# Domain whitelist check (if enabled) - add before Auth so it runs after
-if config.app_settings.feature_domain_whitelist_enabled:
-    app.add_middleware(
-        DomainWhitelistMiddleware,
-        auth_redirect_url=config.app_settings.auth_redirect_url
-    )
 app.add_middleware(
     AuthMiddleware,
     debug_mode=config.app_settings.debug_mode,
@@ -801,6 +817,30 @@ async def websocket_endpoint(websocket: WebSocket):
                         await handle_chat()
                     except (WebSocketDisconnect, RuntimeError) as e:
                         logger.info("Chat handler ended; websocket already closed: %s", e)
+
+                # One active turn per socket. The reference used to be
+                # overwritten unconditionally, so a client sending several
+                # chat frames left the earlier tasks running with no handle on
+                # them: stop/reset could only cancel the most recent one, the
+                # rest kept making metered model calls and tool calls, and
+                # they raced each other writing shared session history.
+                # HTTP rate limiting does not apply here -- it is HTTP
+                # middleware and never sees WebSocket frames.
+                previous = active_chat_task.get("task")
+                if previous is not None and not previous.done():
+                    logger.warning(
+                        "Rejecting chat frame from %s: a turn is already running",
+                        sanitize_for_logging(user_email),
+                    )
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": (
+                            "A message is already being processed. "
+                            "Wait for it to finish, or stop it first."
+                        ),
+                        "error_type": "turn_in_progress",
+                    })
+                    continue
 
                 # Start chat handling in background
                 active_chat_task["task"] = asyncio.create_task(handle_chat_guarded())

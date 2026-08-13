@@ -418,12 +418,6 @@ class AppSettings(BaseSettings):
         description="Enable compliance level filtering for MCP servers and data sources",
         validation_alias=AliasChoices("FEATURE_COMPLIANCE_LEVELS_ENABLED"),
     )
-    # Email domain whitelist feature gate
-    feature_domain_whitelist_enabled: bool = Field(
-        False,
-        description="Enable email domain whitelist restriction (configured in domain-whitelist.json)",
-        validation_alias=AliasChoices("FEATURE_DOMAIN_WHITELIST_ENABLED", "FEATURE_DOE_LAB_CHECK_ENABLED"),
-    )
     # File content extraction feature gate
     feature_file_content_extraction_enabled: bool = Field(
         False,
@@ -472,6 +466,15 @@ class AppSettings(BaseSettings):
         default="",
         description="Comma-separated extra Origin hostnames allowed for the chat WebSocket",
         validation_alias=AliasChoices("WEBSOCKET_ALLOWED_ORIGINS"),
+    )
+
+    # Ceiling on max_tokens for MCP sampling requests. The value in a sampling
+    # request comes from the MCP server, not from Atlas, so without a ceiling
+    # a server can bill an arbitrary amount against a metered API.
+    mcp_sampling_max_tokens: int = Field(
+        default=4096,
+        description="Maximum max_tokens honoured for an MCP sampling request",
+        validation_alias=AliasChoices("MCP_SAMPLING_MAX_TOKENS"),
     )
 
     # Capability tokens (for headless access to downloads/iframes)

@@ -51,16 +51,23 @@ class _AmbiguousRouting:
 AMBIGUOUS_ROUTING = _AmbiguousRouting()
 
 class _SamplingRoutingContext:
-    """Context for routing sampling requests to the correct tool execution."""
+    """Context for routing sampling requests to the correct tool execution.
+
+    Carries ``user_email`` so the sampling handler can apply the same
+    per-model group ACL that normal chat applies. Without it the handler had
+    no identity to check against and ran whichever model the tool asked for.
+    """
     def __init__(
         self,
         server_name: str,
         tool_call: ToolCall,
         update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+        user_email: Optional[str] = None,
     ):
         self.server_name = server_name
         self.tool_call = tool_call
         self.update_cb = update_cb
+        self.user_email = user_email
 
 # Mapping from MCP log levels to Python logging levels
 MCP_TO_PYTHON_LOG_LEVEL = {
@@ -288,19 +295,90 @@ class RoutingMixin:
         server_name: str,
         tool_call: ToolCall,
         update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+        user_email: Optional[str] = None,
     ) -> AsyncIterator[None]:
         """
         Set up sampling routing for a tool call.
         Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
         Key is (server_name, tool_call.id) to avoid collisions with concurrent tool calls.
         """
-        routing = _SamplingRoutingContext(server_name, tool_call, update_cb)
+        routing = _SamplingRoutingContext(server_name, tool_call, update_cb, user_email)
         routing_key = (server_name, tool_call.id)
         self._sampling_routing[routing_key] = routing
         try:
             yield
         finally:
             self._sampling_routing.pop(routing_key, None)
+
+    def _clamp_sampling_tokens(self, requested: Any) -> int:
+        """Bound a server-supplied max_tokens to the operator's ceiling.
+
+        The value arrives from the MCP server, so an unbounded request is a
+        direct cost lever on a metered API.
+        """
+        from atlas.modules.config import config_manager
+
+        try:
+            ceiling = int(config_manager.app_settings.mcp_sampling_max_tokens)
+        except Exception:
+            ceiling = 4096
+        if not isinstance(requested, int) or isinstance(requested, bool) or requested < 1:
+            return ceiling
+        return min(requested, ceiling)
+
+    async def _authorized_sampling_model(
+        self,
+        models: Dict[str, Any],
+        *,
+        preferred: Optional[str],
+        user_email: Optional[str],
+        server_name: str,
+    ) -> str:
+        """Pick a model for sampling that the calling user may actually use.
+
+        Applies the same policy as chat via ``check_model_access``. The
+        server's preference is honoured only if it passes; otherwise the first
+        model the user is authorized for is used. If nothing is authorized the
+        request is denied rather than silently downgraded, because succeeding
+        with an unauthorized model is exactly the bug this closes.
+        """
+        from atlas.core.model_access import ModelAccessDecision, check_model_access
+
+        async def _permitted(name: str) -> bool:
+            try:
+                decision = await check_model_access(
+                    models, name, user_email, context="mcp_sampling"
+                )
+            except Exception:
+                # Fail closed: an error resolving policy must not grant access.
+                logger.warning(
+                    "Model access check failed for '%s' during sampling; denying",
+                    sanitize_for_logging(name),
+                    exc_info=True,
+                )
+                return False
+            return decision is not ModelAccessDecision.DENIED
+
+        if preferred and await _permitted(preferred):
+            return preferred
+
+        if preferred:
+            logger.warning(
+                "MCP server '%s' requested model '%s' for sampling, which user '%s' "
+                "is not authorized to use; falling back to an authorized model",
+                sanitize_for_logging(server_name),
+                sanitize_for_logging(preferred),
+                sanitize_for_logging(user_email or "unknown"),
+            )
+
+        for name in models.keys():
+            if await _permitted(name):
+                return name
+
+        raise PermissionError(
+            f"No model available to server '{server_name}' for sampling: the "
+            f"calling user is not authorized for any configured model."
+        )
 
     def _create_sampling_handler(self, server_name: str):
         """
@@ -395,7 +473,22 @@ class RoutingMixin:
                             break
 
                 if not model_name:
-                    model_name = next(iter(llm_config.models.keys()))
+                    model_name = None
+
+                # Enforce the per-model group ACL that normal chat enforces.
+                # The model here comes from the MCP server's own preferences,
+                # or from whichever model happens to be configured first, so
+                # without this an MCP server could run a model whose groups
+                # deny the calling user -- the listing-layer filtering that
+                # governs the chat UI never applies to this path.
+                model_name = await self._authorized_sampling_model(
+                    llm_config.models,
+                    preferred=model_name,
+                    user_email=routing.user_email,
+                    server_name=server_name,
+                )
+
+                max_tokens = self._clamp_sampling_tokens(max_tokens)
 
                 logger.debug(
                     f"Using model '{model_name}' for sampling "

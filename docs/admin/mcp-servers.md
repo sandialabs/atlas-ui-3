@@ -206,6 +206,46 @@ export MY_API_KEY="your-secret-api-key"
 
 You can restrict access to MCP servers based on user groups. This is a critical feature for controlling which users can access powerful or sensitive tools. Group checks run at both request time (when tools are listed or selected) and at the single tool-execution choke point inside `MCPToolManager.execute_tool`, keyed on the authenticated user's identity from the request context. A missing user context, a disabled server, an unreachable authorization service, or membership that does not satisfy the `groups` list will all fail closed and deny execution. If a user is not in the required group, the server will be completely invisible to them in the UI, and any attempt to call its functions will be blocked.
 
+## Development-Only Servers
+
+Several example configurations exist for local development and demos, and hand
+an authenticated user the host itself:
+
+| Server | What it gives a user |
+|---|---|
+| `file_viewer` | Reads any local path and returns the bytes |
+| `filesystem` | Same, plus directory traversal |
+| `code-executor`, `code_executor_v2` | Runs supplied code |
+| `transfer` | Fetches arbitrary URLs (internal services, cloud metadata) |
+
+These are fine on a laptop. The risk is copying one into a shared deployment,
+where it becomes arbitrary file read and SSRF for every authenticated user.
+
+**Atlas refuses to start** if any of them is enabled while `ENVIRONMENT` is
+`production` *or* `DEBUG_MODE` is false. Outside those conditions it logs a
+warning naming each one. This mirrors how the Agent Portal is gated — a startup
+refusal rather than a warning, because a line in a startup log is not a control.
+
+The check is by server name, so an operator who copies `mcp-file_viewer.json`
+is covered without having to know the marker exists. Two ways to change the
+verdict for a server:
+
+```jsonc
+{
+  "my_internal_tool": {
+    "dev_only": true      // treat as development-only even though the name is unknown
+  },
+  "filesystem": {
+    "dev_only": false     // opt out after reviewing and hardening it yourself
+  }
+}
+```
+
+Setting `"dev_only": false` is an explicit statement that you have constrained
+the tool — jailed its paths, blocked link-local and metadata addresses, and run
+it without backend secrets in its environment. It is not a way to silence the
+message.
+
 ## A Note on the `_atlas_user` Argument
 
 As a security measure, if a tool is designed to accept an `_atlas_user` argument, the Atlas UI backend will **always** overwrite this argument with the authenticated user's identity before calling the tool. Ordinary `username` arguments are left under LLM control. This ensures tools that opt in to Atlas user context run with the correct user and prevents the LLM from impersonating another user through the injected field.
