@@ -133,7 +133,7 @@ class TestDiscoverDataSourcesUnit:
     """Unit tests for discover_data_sources (no external service needed)."""
 
     @pytest.mark.asyncio
-    async def test_discover_data_sources_success(self):
+    async def test_discover_data_sources_success(self, test_user):
         """Test discovering data sources for a known user."""
         client = AtlasRAGClient(base_url=MOCK_URL, bearer_token=MOCK_TOKEN)
         mock_sources = [
@@ -144,7 +144,7 @@ class TestDiscoverDataSourcesUnit:
         mock_resp = _mock_discover_response(mock_sources)
 
         with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
-            sources = await client.discover_data_sources(config_manager.app_settings.test_user)
+            sources = await client.discover_data_sources(test_user)
 
         assert len(sources) > 0
         source_ids = [s.id for s in sources]
@@ -193,14 +193,14 @@ class TestDiscoverDataSourcesUnit:
         assert "technical-docs" not in source_ids
 
     @pytest.mark.asyncio
-    async def test_discover_connection_error_returns_empty(self):
+    async def test_discover_connection_error_returns_empty(self, test_user):
         """Test that connection errors return empty list gracefully."""
         client = AtlasRAGClient(base_url="http://localhost:99999", bearer_token=MOCK_TOKEN)
-        sources = await client.discover_data_sources(config_manager.app_settings.test_user)
+        sources = await client.discover_data_sources(test_user)
         assert sources == []
 
     @pytest.mark.asyncio
-    async def test_discover_http_error_returns_empty(self):
+    async def test_discover_http_error_returns_empty(self, test_user):
         """Test that HTTP errors return empty list gracefully."""
         client = AtlasRAGClient(base_url=MOCK_URL, bearer_token=MOCK_TOKEN)
         mock_resp = httpx.Response(
@@ -210,7 +210,7 @@ class TestDiscoverDataSourcesUnit:
         )
 
         with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
-            sources = await client.discover_data_sources(config_manager.app_settings.test_user)
+            sources = await client.discover_data_sources(test_user)
 
         assert sources == []
 
