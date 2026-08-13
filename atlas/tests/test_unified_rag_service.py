@@ -65,8 +65,8 @@ def mock_auth_check():
         # The configured test user is in the "users" group only
         if username == config_manager.app_settings.test_user:
             return group == "users"
-        # admin@test.com is in both "users" and "admin" groups
-        if username == "admin@test.com":
+        # The configured admin test user is in both "users" and "admin" groups
+        if username == config_manager.app_settings.admin_test_user:
             return group in ["users", "admin"]
         return False
 
@@ -196,8 +196,8 @@ class TestDiscoverDataSources:
         with patch.object(unified_rag_service, "_discover_http_source", new_callable=AsyncMock) as mock_discover:
             mock_discover.return_value = {"server": "test", "sources": []}
 
-            # admin@test.com is in both "users" and "admin" groups
-            await unified_rag_service.discover_data_sources("admin@test.com")
+            # The configured admin test user is in both "users" and "admin" groups
+            await unified_rag_service.discover_data_sources(config_manager.app_settings.admin_test_user)
 
             # Should discover test_http (users group)
             call_args = [call[0][0] for call in mock_discover.call_args_list]
@@ -306,7 +306,7 @@ class TestQueryRAG:
         # The unified_rag_service fixture has no rag_mcp_service configured
         with pytest.raises(ValueError, match="RAGMCPService not configured"):
             await unified_rag_service.query_rag(
-                username="admin@test.com",
+                username=config_manager.app_settings.admin_test_user,
                 qualified_data_source="test_mcp:corpus1",
                 messages=[],
             )
@@ -339,14 +339,14 @@ class TestQueryRAG:
 
         messages = [{"role": "user", "content": "What is the fleet info?"}]
         result = await service.query_rag(
-            username="admin@test.com",
+            username=config_manager.app_settings.admin_test_user,
             qualified_data_source="test_mcp:corpus1",
             messages=messages,
         )
 
         # Verify RAGMCPService.synthesize was called
         mock_rag_mcp_service.synthesize.assert_called_once_with(
-            username="admin@test.com",
+            username=config_manager.app_settings.admin_test_user,
             query="What is the fleet info?",
             sources=["test_mcp:corpus1"],
         )

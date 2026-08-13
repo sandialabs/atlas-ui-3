@@ -19,7 +19,7 @@ from starlette.testclient import TestClient
 from atlas.modules.config.config_manager import config_manager
 
 AUTH_HEADERS = {"X-User-Email": config_manager.app_settings.test_user}
-ADMIN_HEADERS = {"X-User-Email": "admin@test.com"}
+ADMIN_HEADERS = {"X-User-Email": config_manager.app_settings.admin_test_user}
 
 
 @pytest.fixture
@@ -44,9 +44,9 @@ def mock_feedback_dir(temp_feedback_dir, monkeypatch):
 
 @pytest.fixture
 def mock_admin_check():
-    """Mock admin group check to allow admin@test.com."""
+    """Mock admin group check to allow the configured admin test user."""
     async def mock_is_user_in_group(user: str, group: str) -> bool:
-        return user == "admin@test.com"
+        return user == config_manager.app_settings.admin_test_user
 
     with patch("atlas.routes.feedback_routes.is_user_in_group", mock_is_user_in_group):
         yield

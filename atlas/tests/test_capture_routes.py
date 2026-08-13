@@ -18,7 +18,7 @@ from atlas.application.chat.capture.capture_store import CaptureStore
 from atlas.modules.config.config_manager import config_manager
 
 USER_HEADERS = {"X-User-Email": config_manager.app_settings.test_user}
-ADMIN_HEADERS = {"X-User-Email": "admin@test.com"}
+ADMIN_HEADERS = {"X-User-Email": config_manager.app_settings.admin_test_user}
 
 
 def _config(system_enabled=True):
@@ -49,7 +49,7 @@ def patched_service():
 @pytest.fixture
 def mock_admin():
     async def _is_user_in_group(user: str, group: str) -> bool:
-        return user == "admin@test.com"
+        return user == config_manager.app_settings.admin_test_user
 
     with patch("atlas.routes.capture_routes.is_user_in_group", _is_user_in_group):
         yield
