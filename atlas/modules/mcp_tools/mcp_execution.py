@@ -23,6 +23,7 @@ from atlas.modules.mcp_tools.mcp_errors import (
     _is_task_forbidden_result,
 )
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
+from atlas.modules.rag.client import RAG_MODE_RAW, RAG_MODES
 
 logger = logging.getLogger(__name__)
 
@@ -720,6 +721,14 @@ class ExecutionMixin:
                     error="Missing query",
                 )
 
+            # Tool-shaped RAG asks for evidence by default: the model called a
+            # tool and should reason over what comes back, not hand the user a
+            # backend-written answer. Only v2 sources honour this -- v1 always
+            # synthesizes -- and an unrecognized value falls back to "raw"
+            # rather than failing the call, since ``mode`` is model-supplied.
+            requested_mode = args.get("mode")
+            mode = requested_mode if requested_mode in RAG_MODES else RAG_MODE_RAW
+
             requested_sources = args.get("data_sources")
             if isinstance(requested_sources, list):
                 sources = [s for s in requested_sources if isinstance(s, str) and ":" in s]
@@ -778,9 +787,13 @@ class ExecutionMixin:
                 if not unified_rag:
                     raise RuntimeError("Unified RAG service is not configured")
                 if len(group) == 1:
-                    resp = await unified_rag.query_rag(user_email, group[0], messages)
+                    resp = await unified_rag.query_rag(
+                        user_email, group[0], messages, query=query, mode=mode
+                    )
                 else:
-                    resp = await unified_rag.query_rag_batch(user_email, group, messages)
+                    resp = await unified_rag.query_rag_batch(
+                        user_email, group, messages, query=query, mode=mode
+                    )
                 return {
                     "data_sources": group,
                     "content": resp.content,

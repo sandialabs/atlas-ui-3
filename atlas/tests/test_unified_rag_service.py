@@ -288,6 +288,7 @@ class TestQueryRAG:
             "test@test.com",
             "corpus1",
             [{"role": "user", "content": "test query"}],
+            data_sources=None,
         )
 
     @pytest.mark.asyncio

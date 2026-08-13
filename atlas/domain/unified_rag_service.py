@@ -157,8 +157,15 @@ class UnifiedRAGService:
                 top_k=config.top_k,
                 timeout=config.timeout,
                 strip_domain=config.strip_domain,
+                discovery_path=config.discovery_endpoint,
+                query_path=config.query_endpoint,
+                api_version=config.api_version,
             )
-            logger.info("Created HTTP RAG client for source: %s", source_name)
+            logger.info(
+                "Created HTTP RAG client for source: %s (api_version=%s)",
+                source_name,
+                config.api_version,
+            )
 
         return self._http_clients[source_name]
 
@@ -397,12 +404,59 @@ class UnifiedRAGService:
             logger.error("Failed to discover HTTP source %s: %s", source_name, e)
             return None
 
+    def _resolve_query(self, messages: List[Dict], query: Optional[str]) -> str:
+        """Return the query text to search with.
+
+        An explicit ``query`` wins; otherwise it is derived from the last user
+        message the way v1 always has. v2 backends only ever receive this
+        string -- never ``messages``.
+        """
+        if query is not None:
+            return query
+        return _extract_query_text(messages)
+
+    async def _query_http_client(
+        self,
+        client: AtlasRAGClient,
+        source_config: RAGSourceConfig,
+        username: str,
+        source_ids: List[str],
+        messages: List[Dict],
+        query: Optional[str],
+        mode: Optional[str],
+    ) -> RAGResponse:
+        """Send one query to an HTTP RAG backend over its configured contract.
+
+        v1 posts the conversation and gets a completion; v2 posts only the
+        resolved query string plus a mode. The corpora, authorization and
+        impersonation are identical either way -- the contract decides the
+        request shape, not who may ask.
+        """
+        if source_config.api_version != "v2":
+            return await client.query_rag(
+                username,
+                source_ids[0],
+                messages,
+                data_sources=source_ids if len(source_ids) > 1 else None,
+            )
+
+        query_text = self._resolve_query(messages, query)
+        return await client.query_v2(
+            user_name=username,
+            query=query_text,
+            corpora=source_ids if len(source_ids) > 1 else source_ids[0],
+            mode=mode or source_config.default_mode,
+            top_k=source_config.top_k,
+        )
+
     async def query_rag(
         self,
         username: str,
         qualified_data_source: str,
         messages: List[Dict],
         enforced_compliance_level: Optional[str] = None,
+        query: Optional[str] = None,
+        mode: Optional[str] = None,
     ) -> RAGResponse:
         """Query a RAG source.
 
@@ -410,6 +464,15 @@ class UnifiedRAGService:
             username: The user making the query.
             qualified_data_source: Data source in format "server:source_id" (e.g., "atlas_rag:technical-docs").
             messages: List of message dictionaries.
+            query: The explicit question to search for. When omitted it is
+                derived from the last user message (v1 behaviour). v2 backends
+                are sent this string and never the conversation, so callers
+                that know what they are asking -- the ``atlas_rag_query`` tool,
+                for one -- should pass it.
+            mode: ``"raw"`` (evidence for our own LLM) or ``"synthesized"``
+                (an answer from the backend). v2 only; defaults to the
+                source's ``default_mode``. Ignored by v1 backends, which
+                always synthesize.
             enforced_compliance_level: Overrides the ambient compliance context
                 for this call. This must be a **trusted, server-derived** level
                 (the selected model's configured level) -- never a client-supplied
@@ -424,13 +487,15 @@ class UnifiedRAGService:
             DataSourcePermissionError: The source is disabled, out of group, or
                 outside the active compliance boundary.
         """
-        query_text = _extract_query_text(messages)
+        query_text = self._resolve_query(messages, query)
         span_attrs = {
             "data_source": qualified_data_source,
             "query_hash": hash_short(query_text),
             "query_chars": len(query_text),
             "user_hash": hash_short(username),
             "message_count": len(messages),
+            "explicit_query": query is not None,
+            "mode": mode or "",
             "batch": False,
         }
         token = None
@@ -438,7 +503,9 @@ class UnifiedRAGService:
             token = set_active_compliance_context(enforced_compliance_level, enforce=True)
         try:
             with start_span("rag.query", span_attrs) as span:
-                response = await self._query_rag_impl(username, qualified_data_source, messages)
+                response = await self._query_rag_impl(
+                    username, qualified_data_source, messages, query=query, mode=mode
+                )
                 set_attrs(span, _rag_response_attrs(response))
                 return response
         finally:
@@ -450,6 +517,8 @@ class UnifiedRAGService:
         username: str,
         qualified_data_source: str,
         messages: List[Dict],
+        query: Optional[str] = None,
+        mode: Optional[str] = None,
     ) -> RAGResponse:
         """Internal RAG query implementation (span-free)."""
         logger.debug(
@@ -497,7 +566,15 @@ class UnifiedRAGService:
             logger.debug("[RAG] Routing to HTTP RAG client for server: %s", server_name)
             client = self._get_http_client(server_name, source_config)
             # Pass the unqualified source_id to the HTTP API
-            response = await client.query_rag(username, source_id, messages)
+            response = await self._query_http_client(
+                client,
+                source_config,
+                username,
+                [source_id],
+                messages,
+                query=query,
+                mode=mode,
+            )
             logger.debug(
                 "[RAG] HTTP RAG response received: content_length=%d, has_metadata=%s",
                 len(response.content) if response.content else 0,
@@ -512,25 +589,24 @@ class UnifiedRAGService:
                 logger.error("[RAG] RAGMCPService not configured for MCP RAG queries")
                 raise ValueError("RAGMCPService not configured for MCP RAG queries")
 
-            # Extract the query from messages (last user message)
-            query = ""
-            for msg in reversed(messages):
-                if msg.get("role") == "user":
-                    query = msg.get("content", "")
-                    break
+            # MCP RAG has always taken an explicit query; an explicit ``query``
+            # argument simply replaces the last-user-message derivation.
+            # ``mode`` is not plumbed here yet -- ``synthesize`` is the only
+            # shape ``RAGMCPService`` returns through this path.
+            mcp_query = self._resolve_query(messages, query)
 
             logger.debug(
                 "[RAG] MCP RAG query: server=%s, source=%s, query_preview=%s...",
                 server_name,
                 source_id,
-                sanitize_for_logging(query[:100]) if query else "(empty)",
+                sanitize_for_logging(mcp_query[:100]) if mcp_query else "(empty)",
             )
 
             # Call RAGMCPService.synthesize() for MCP sources
             qualified_sources = [qualified_data_source]  # Format: "server:source_id"
             mcp_response = await self.rag_mcp_service.synthesize(
                 username=username,
-                query=query,
+                query=mcp_query,
                 sources=qualified_sources,
             )
 
@@ -584,6 +660,8 @@ class UnifiedRAGService:
         qualified_data_sources: List[str],
         messages: List[Dict],
         enforced_compliance_level: Optional[str] = None,
+        query: Optional[str] = None,
+        mode: Optional[str] = None,
     ) -> RAGResponse:
         """Query multiple RAG sources on the same server in a single request.
 
@@ -600,6 +678,8 @@ class UnifiedRAGService:
             enforced_compliance_level: Overrides the ambient compliance context
                 for this call. Must be a **trusted, server-derived** level, never
                 a client-supplied filter. See :meth:`query_rag`.
+            query: Explicit query text; see :meth:`query_rag`.
+            mode: v2 response shape; see :meth:`query_rag`.
 
         Returns:
             RAGResponse with content and metadata from the batched query.
@@ -609,13 +689,15 @@ class UnifiedRAGService:
             DataSourcePermissionError: The source is disabled, out of group, or
                 outside the active compliance boundary.
         """
-        query_text = _extract_query_text(messages)
+        query_text = self._resolve_query(messages, query)
         span_attrs = {
             "data_source": ",".join(qualified_data_sources or []),
             "query_hash": hash_short(query_text),
             "query_chars": len(query_text),
             "user_hash": hash_short(username),
             "message_count": len(messages),
+            "explicit_query": query is not None,
+            "mode": mode or "",
             "batch": True,
             "batch_size": len(qualified_data_sources or []),
         }
@@ -624,7 +706,9 @@ class UnifiedRAGService:
             token = set_active_compliance_context(enforced_compliance_level, enforce=True)
         try:
             with start_span("rag.query", span_attrs) as span:
-                response = await self._query_rag_batch_impl(username, qualified_data_sources, messages)
+                response = await self._query_rag_batch_impl(
+                    username, qualified_data_sources, messages, query=query, mode=mode
+                )
                 set_attrs(span, _rag_response_attrs(response))
                 return response
         finally:
@@ -636,6 +720,8 @@ class UnifiedRAGService:
         username: str,
         qualified_data_sources: List[str],
         messages: List[Dict],
+        query: Optional[str] = None,
+        mode: Optional[str] = None,
     ) -> RAGResponse:
         """Internal batched RAG query (span-free)."""
         if not qualified_data_sources:
@@ -681,8 +767,14 @@ class UnifiedRAGService:
 
         if source_config.type == "http":
             client = self._get_http_client(server_name, source_config)
-            response = await client.query_rag(
-                username, source_ids[0], messages, data_sources=source_ids,
+            response = await self._query_http_client(
+                client,
+                source_config,
+                username,
+                source_ids,
+                messages,
+                query=query,
+                mode=mode,
             )
             logger.debug(
                 "[RAG] Batch HTTP response: content_length=%d, has_metadata=%s",

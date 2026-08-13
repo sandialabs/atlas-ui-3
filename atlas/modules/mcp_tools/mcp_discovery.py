@@ -58,6 +58,15 @@ _ATLAS_RAG_TOOL_SCHEMAS = {
                         "items": {"type": "string"},
                         "description": "Optional server-qualified sources (server:source_id).",
                     },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["raw", "synthesized"],
+                        "description": (
+                            "Optional. 'raw' (default) returns retrieved passages to "
+                            "reason over; 'synthesized' returns an answer written by "
+                            "the RAG backend. Sources on the v1 API always synthesize."
+                        ),
+                    },
                 },
                 "required": ["query"],
             },

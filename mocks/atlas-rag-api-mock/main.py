@@ -6,6 +6,22 @@ Implements the newest ATLAS RAG API shape:
   - GET  /api/v1/discover/datasources?role=read|write&as_user=<user>
   - POST /api/v1/rag/completions?as_user=<user>
 
+plus the v2 tool-oriented interface:
+
+  - GET  /api/v2/discover/datasources?role=read|write&as_user=<user>
+  - POST /api/v2/rag/query?as_user=<user>
+
+v2 request body (RagQueryRequest):
+
+    {"query": "...", "corpora": "<id>" | ["<id>", ...],
+     "mode": "raw" | "synthesized", "top_k": 4}
+
+v2 response body (RagQueryResponse):
+
+    {"query": "...", "mode": "raw",
+     "results": {"hits": [...], "stats": {...}},
+     "metadata": {"response_time_ms": 12, "corpora_searched": [...]}}
+
 Request body (RagRequest):
 
     {"messages": [...], "stream": false, "corpora": "<id>" | ["<id>", ...]}
@@ -196,6 +212,73 @@ class RagRequest(BaseModel):
 class RagResponse(BaseModel):
     message: MessageOutput
     metadata: RagMetadata
+
+
+# --- v2: tool-oriented query interface -----------------------------------
+
+class DataSourceV2(DataSource):
+    """v2 discovery entry.
+
+    Same shape as v1 plus ``api_version``, which is how a backend tells
+    ATLAS-UI which contract a given source speaks.
+    """
+    api_version: str = Field("v2", description="RAG API contract this source speaks.")
+
+
+class RagQueryRequest(BaseModel):
+    """v2 request: an explicit query, never the conversation."""
+    query: str = Field(..., description="The specific question to ask.")
+    corpora: Union[str, List[str]] = Field(..., description="Corpus id(s) to search.")
+    mode: Literal["raw", "synthesized"] = Field(
+        "raw", description="raw returns evidence chunks; synthesized returns an answer."
+    )
+    top_k: int = Field(4, ge=1, le=50, description="Max results per corpus.")
+    filters: Optional[Dict[str, Any]] = Field(
+        None, description="Server-defined metadata filters (unused by the mock)."
+    )
+    synthesis_params: Optional[Dict[str, Any]] = Field(
+        None, description="Mode-specific knobs for synthesized (unused by the mock)."
+    )
+
+
+class Hit(BaseModel):
+    """One retrieved document and the sections that matched, for ``raw`` mode."""
+    document_ref: int
+    filename: str
+    title: Optional[str] = None
+    citation: Optional[str] = None
+    sections: List[Section]
+
+
+class Citation(BaseModel):
+    """One document a ``synthesized`` answer was built from."""
+    document_ref: int
+    filename: str
+    title: Optional[str] = None
+    citation: Optional[str] = None
+
+
+class RawResults(BaseModel):
+    hits: List[Hit]
+    stats: Dict[str, int]
+
+
+class SynthesizedResults(BaseModel):
+    answer: str
+    citations: List[Citation]
+
+
+class RagQueryMetadata(BaseModel):
+    response_time_ms: int
+    corpora_searched: List[str]
+    fallback_used: bool = False
+
+
+class RagQueryResponse(BaseModel):
+    query: str
+    mode: Literal["raw", "synthesized"]
+    results: Union[RawResults, SynthesizedResults]
+    metadata: RagQueryMetadata
 
 
 # ------------------------------------------------------------------------------
@@ -489,6 +572,112 @@ async def rag_completions(
     )
 
 
+@app.get("/api/v2/discover/datasources", response_model=List[DataSourceV2])
+async def discover_data_sources_v2(
+    role: Literal["read", "write"] = Query("read"),
+    as_user: Optional[str] = Query(None, description="User ID to impersonate"),
+):
+    """v2 discovery: the v1 list, with each source declaring ``api_version``."""
+    user = as_user or ""
+    logger.info("Discovery request (v2): user=%s role=%s", user, role)
+    accessible = get_accessible_corpora(user)
+    return [DataSourceV2(**src.model_dump(), api_version="v2") for src in accessible]
+
+
+def _resolve_corpora(corpora: Union[str, List[str]], user: str) -> List[str]:
+    """Validate requested corpora and return them as a list.
+
+    Authorization is identical to v1 -- the contract version does not decide
+    who may read what.
+    """
+    corpora_to_search = [corpora] if isinstance(corpora, str) else list(corpora)
+    if not corpora_to_search:
+        raise HTTPException(status_code=400, detail="corpora must name at least one corpus")
+
+    for corpus in corpora_to_search:
+        if corpus not in DATA_SOURCES:
+            raise HTTPException(status_code=404, detail=f"Corpus '{corpus}' not found")
+        if not can_access_corpus(user, corpus):
+            raise HTTPException(status_code=403, detail=f"Access denied to '{corpus}'")
+    return corpora_to_search
+
+
+@app.post("/api/v2/rag/query", response_model=RagQueryResponse)
+async def rag_query_v2(
+    request: RagQueryRequest,
+    as_user: Optional[str] = Query(None, description="User ID to impersonate"),
+):
+    """v2 query: explicit query in, evidence (``raw``) or an answer (``synthesized``) out."""
+    start_time = time.time()
+
+    user = as_user or ""
+    logger.info("---------- RAG query (v2) ----------")
+    logger.info(
+        "RAG v2 query user=%s corpora=%s mode=%s top_k=%d query_chars=%d",
+        user,
+        request.corpora,
+        request.mode,
+        request.top_k,
+        len(request.query),
+    )
+
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="query must be a non-empty string")
+
+    corpora_to_search = _resolve_corpora(request.corpora, user)
+
+    references: List[Reference] = []
+    next_doc_ref = 1
+    for corpus in corpora_to_search:
+        corpus_refs = search_corpus_for_references(
+            request.query, corpus, top_k=request.top_k, start_doc_ref=next_doc_ref,
+        )
+        references.extend(corpus_refs)
+        next_doc_ref += len(corpus_refs)
+
+    response_time_ms = max(1, int((time.time() - start_time) * 1000))
+    metadata = RagQueryMetadata(
+        response_time_ms=response_time_ms,
+        corpora_searched=corpora_to_search,
+        fallback_used=False,
+    )
+
+    if request.mode == "synthesized":
+        results: Union[RawResults, SynthesizedResults] = SynthesizedResults(
+            answer=_compose_assistant_content(corpora_to_search, references, request.query),
+            citations=[
+                Citation(
+                    document_ref=ref.document_ref,
+                    filename=ref.filename,
+                    title=ref.filename,
+                    citation=ref.citation,
+                )
+                for ref in references
+            ],
+        )
+    else:
+        results = RawResults(
+            hits=[
+                Hit(
+                    document_ref=ref.document_ref,
+                    filename=ref.filename,
+                    title=ref.filename,
+                    citation=ref.citation,
+                    sections=ref.sections,
+                )
+                for ref in references
+            ],
+            stats={"total_found": len(references), "top_k": request.top_k},
+        )
+
+    return RagQueryResponse(
+        query=request.query,
+        mode=request.mode,
+        results=results,
+        metadata=metadata,
+    )
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
@@ -507,6 +696,10 @@ async def root():
                 "List accessible data sources",
             "POST /api/v1/rag/completions?as_user=<user>":
                 "Search and query (returns RagResponse with references/sections)",
+            "GET /api/v2/discover/datasources?role=read|write&as_user=<user>":
+                "List accessible data sources, each declaring api_version",
+            "POST /api/v2/rag/query?as_user=<user>":
+                "Query with an explicit query string (mode=raw|synthesized)",
             "GET /health": "Health check",
         },
     }
