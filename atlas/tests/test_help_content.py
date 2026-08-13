@@ -10,8 +10,9 @@ Covers:
 
 import pytest
 from main import app
-from atlas.modules.config import config_manager
 from starlette.testclient import TestClient
+
+from atlas.modules.config import config_manager
 
 # Admin group membership is mocked only in debug mode (see core.auth), so these
 # tests must request it explicitly to pass in both CI legs (DEBUG_MODE true and
@@ -44,7 +45,7 @@ def isolated_config_dir(tmp_path, monkeypatch):
 def test_config_returns_help_content_as_string():
     """help_content must be present and be a string (not a dict/list)."""
     client = TestClient(app)
-    resp = client.get("/api/config", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/config", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert resp.status_code == 200
     data = resp.json()
     assert "help_content" in data, "Response missing help_content field"
@@ -54,7 +55,7 @@ def test_config_returns_help_content_as_string():
 def test_config_help_content_not_empty_with_default_file():
     """With the default help.md shipped in atlas/config/, help_content should not be empty."""
     client = TestClient(app)
-    resp = client.get("/api/config", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/config", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert resp.status_code == 200
     data = resp.json()
     # The shipped help.md has real content
@@ -213,7 +214,7 @@ def test_help_image_serves_shipped_default():
     client = TestClient(app)
     resp = client.get(
         "/help-images/chat-interface.png",
-        headers={"X-User-Email": "test@test.com"},
+        headers={"X-User-Email": config_manager.app_settings.test_user},
     )
     assert resp.status_code == 200
     assert resp.headers.get("content-type", "").startswith("image/")
@@ -224,7 +225,7 @@ def test_help_image_missing_returns_404():
     client = TestClient(app)
     resp = client.get(
         "/help-images/definitely-not-here-xyz.png",
-        headers={"X-User-Email": "test@test.com"},
+        headers={"X-User-Email": config_manager.app_settings.test_user},
     )
     assert resp.status_code == 404
 
@@ -242,7 +243,7 @@ def test_help_image_rejects_path_traversal(traversal_path):
     client = TestClient(app)
     resp = client.get(
         f"/help-images/{traversal_path}",
-        headers={"X-User-Email": "test@test.com"},
+        headers={"X-User-Email": config_manager.app_settings.test_user},
     )
     # Either 404 (traversal blocked by resolve()+relative_to()) or 400 from FastAPI —
     # must NOT be 200, which would mean we served a file outside the roots.

@@ -9,7 +9,7 @@ import pytest
 
 from atlas.domain.errors import DataSourcePermissionError
 from atlas.domain.unified_rag_service import UnifiedRAGService
-from atlas.modules.config.config_manager import RAGSourceConfig, RAGSourcesConfig
+from atlas.modules.config.config_manager import RAGSourceConfig, RAGSourcesConfig, config_manager
 from atlas.modules.rag.client import DataSource, RAGResponse
 
 
@@ -62,8 +62,8 @@ def mock_config_manager():
 def mock_auth_check():
     """Create a mock auth check function."""
     async def auth_check(username: str, group: str) -> bool:
-        # test@test.com is in "users" group only
-        if username == "test@test.com":
+        # The configured test user is in the "users" group only
+        if username == config_manager.app_settings.test_user:
             return group == "users"
         # admin@test.com is in both "users" and "admin" groups
         if username == "admin@test.com":
@@ -143,13 +143,13 @@ class TestUserAuthorization:
     @pytest.mark.asyncio
     async def test_is_user_authorized_user_in_group(self, unified_rag_service):
         """Test authorization when user is in required group."""
-        result = await unified_rag_service._is_user_authorized("test@test.com", ["users"])
+        result = await unified_rag_service._is_user_authorized(config_manager.app_settings.test_user, ["users"])
         assert result is True
 
     @pytest.mark.asyncio
     async def test_is_user_authorized_user_not_in_group(self, unified_rag_service):
         """Test authorization when user is not in required group."""
-        result = await unified_rag_service._is_user_authorized("test@test.com", ["admin"])
+        result = await unified_rag_service._is_user_authorized(config_manager.app_settings.test_user, ["admin"])
         assert result is False
 
     @pytest.mark.asyncio
@@ -170,7 +170,7 @@ class TestDiscoverDataSources:
         with patch.object(unified_rag_service, "_discover_http_source", new_callable=AsyncMock) as mock_discover:
             mock_discover.return_value = {"server": "test", "sources": []}
 
-            await unified_rag_service.discover_data_sources("test@test.com")
+            await unified_rag_service.discover_data_sources(config_manager.app_settings.test_user)
 
             # Should not be called for disabled source
             call_args = [call[0][0] for call in mock_discover.call_args_list]
@@ -182,13 +182,13 @@ class TestDiscoverDataSources:
         with patch.object(unified_rag_service, "_discover_http_source", new_callable=AsyncMock) as mock_discover:
             mock_discover.return_value = {"server": "test", "sources": []}
 
-            # test@test.com is only in "users" group, not "admin"
-            await unified_rag_service.discover_data_sources("test@test.com")
+            # The configured test user is only in "users" group, not "admin"
+            await unified_rag_service.discover_data_sources(config_manager.app_settings.test_user)
 
             # Should only discover test_http (users group), not test_mcp (admin group)
             call_args = [call[0][0] for call in mock_discover.call_args_list]
             assert "test_http" in call_args
-            # test_mcp requires admin group, which test@test.com doesn't have
+            # test_mcp requires admin group, which the configured test user does not have
 
     @pytest.mark.asyncio
     async def test_discover_includes_admin_sources_for_admin(self, unified_rag_service):
@@ -220,7 +220,7 @@ class TestDiscoverHTTPSource:
 
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
             result = await unified_rag_service._discover_http_source(
-                "test_http", source_config, "test@test.com"
+                "test_http", source_config, config_manager.app_settings.test_user
             )
 
         assert result is not None
@@ -243,7 +243,7 @@ class TestDiscoverHTTPSource:
 
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
             result = await unified_rag_service._discover_http_source(
-                "test_http", source_config, "test@test.com"
+                "test_http", source_config, config_manager.app_settings.test_user
             )
 
         assert result is None
@@ -258,7 +258,7 @@ class TestDiscoverHTTPSource:
 
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
             result = await unified_rag_service._discover_http_source(
-                "test_http", source_config, "test@test.com"
+                "test_http", source_config, config_manager.app_settings.test_user
             )
 
         assert result is None
@@ -278,14 +278,14 @@ class TestQueryRAG:
 
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
             result = await unified_rag_service.query_rag(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_source="test_http:corpus1",
                 messages=[{"role": "user", "content": "test query"}],
             )
 
         assert result.content == "Test response"
         mock_client.query_rag.assert_called_once_with(
-            "test@test.com",
+            config_manager.app_settings.test_user,
             "corpus1",
             [{"role": "user", "content": "test query"}],
         )
@@ -295,7 +295,7 @@ class TestQueryRAG:
         """Test querying RAG with unknown server raises error."""
         with pytest.raises(ValueError, match="RAG source not found"):
             await unified_rag_service.query_rag(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_source="unknown_server:corpus1",
                 messages=[],
             )
@@ -380,7 +380,7 @@ class TestQueryRAGCompliance:
             ),
         ):
             result = await unified_rag_service.query_rag(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_source="test_http:corpus1",
                 messages=[{"role": "user", "content": "q"}],
                 enforced_compliance_level="Internal",
@@ -403,7 +403,7 @@ class TestQueryRAGCompliance:
         ):
             with pytest.raises(DataSourcePermissionError, match="not accessible"):
                 await unified_rag_service.query_rag(
-                    username="test@test.com",
+                    username=config_manager.app_settings.test_user,
                     qualified_data_source="test_http:corpus1",
                     messages=[{"role": "user", "content": "q"}],
                     enforced_compliance_level="Public",
@@ -425,7 +425,7 @@ class TestQueryRAGCompliance:
         ):
             with pytest.raises(DataSourcePermissionError, match="not accessible"):
                 await unified_rag_service.query_rag_batch(
-                    username="test@test.com",
+                    username=config_manager.app_settings.test_user,
                     qualified_data_sources=["test_http:corpus1", "test_http:corpus2"],
                     messages=[{"role": "user", "content": "q"}],
                     enforced_compliance_level="Public",
@@ -482,7 +482,7 @@ class TestQueryRAGProductionEnforcementPath:
         ):
             with pytest.raises(DataSourcePermissionError) as excinfo:
                 await unified_rag_service.query_rag(
-                    username="test@test.com",
+                    username=config_manager.app_settings.test_user,
                     qualified_data_source="test_http:corpus1",
                     messages=[{"role": "user", "content": "q"}],
                 )
@@ -509,7 +509,7 @@ class TestQueryRAGProductionEnforcementPath:
             self._turn_context("Internal"),
         ):
             result = await unified_rag_service.query_rag(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_source="test_http:corpus1",
                 messages=[{"role": "user", "content": "q"}],
             )
@@ -528,7 +528,7 @@ class TestQueryRAGProductionEnforcementPath:
         ):
             with pytest.raises(DataSourcePermissionError) as excinfo:
                 await unified_rag_service.query_rag(
-                    username="test@test.com",
+                    username=config_manager.app_settings.test_user,
                     qualified_data_source="test_http:corpus1",
                     messages=[{"role": "user", "content": "q"}],
                 )
@@ -547,7 +547,7 @@ class TestQueryRAGProductionEnforcementPath:
             self._turn_context(None, enforce=False),
         ):
             result = await unified_rag_service.query_rag(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_source="test_http:corpus1",
                 messages=[{"role": "user", "content": "q"}],
             )
@@ -560,11 +560,11 @@ class TestQueryRAGProductionEnforcementPath:
         """A group-authorization failure is a permission error, not a backend call."""
         mock_client = AsyncMock()
 
-        # test@test.com is in "users" only; test_mcp requires "admin".
+        # The configured test user is in "users" only; test_mcp requires "admin".
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
             with pytest.raises(DataSourcePermissionError) as excinfo:
                 await unified_rag_service.query_rag(
-                    username="test@test.com",
+                    username=config_manager.app_settings.test_user,
                     qualified_data_source="test_mcp:corpus1",
                     messages=[{"role": "user", "content": "q"}],
                 )
@@ -586,7 +586,7 @@ class TestQueryRAGProductionEnforcementPath:
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
             with pytest.raises(DataSourcePermissionError) as excinfo:
                 await unified_rag_service.query_rag(
-                    username="test@test.com",
+                    username=config_manager.app_settings.test_user,
                     qualified_data_source="disabled:corpus1",
                     messages=[{"role": "user", "content": "q"}],
                 )
@@ -617,7 +617,7 @@ class TestQueryRAGProductionEnforcementPath:
         ):
             with pytest.raises(DataSourcePermissionError) as excinfo:
                 await unified_rag_service.query_rag_batch(
-                    username="test@test.com",
+                    username=config_manager.app_settings.test_user,
                     qualified_data_sources=["test_http:corpus1", "test_http:corpus2"],
                     messages=[{"role": "user", "content": "q"}],
                 )
@@ -646,7 +646,7 @@ class TestQueryRAGProductionEnforcementPath:
             ),
         ):
             await unified_rag_service.query_rag(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_source="test_http:corpus1",
                 messages=[{"role": "user", "content": "q"}],
                 enforced_compliance_level="Internal",
@@ -706,7 +706,7 @@ class TestGateAgainstTheRealComplianceManager:
                 ),
             ):
                 response = await unified_rag_service.query_rag(
-                    username="test@test.com",
+                    username=config_manager.app_settings.test_user,
                     qualified_data_source="test_http:corpus1",
                     messages=[{"role": "user", "content": "q"}],
                 )
@@ -758,7 +758,7 @@ class TestGateAgainstTheRealComplianceManager:
                     # test_http is tagged Internal; Public is not cleared for it.
                     with pytest.raises(DataSourcePermissionError) as excinfo:
                         await unified_rag_service.query_rag(
-                            username="test@test.com",
+                            username=config_manager.app_settings.test_user,
                             qualified_data_source="test_http:corpus1",
                             messages=[{"role": "user", "content": "q"}],
                         )
@@ -807,7 +807,7 @@ class TestQueryRAGWithoutQualification:
         """Test querying without server prefix raises error."""
         with pytest.raises(ValueError, match="Could not find server"):
             await unified_rag_service.query_rag(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_source="corpus1",  # No server prefix
                 messages=[],
             )
@@ -827,7 +827,7 @@ class TestQueryRAGBatch:
 
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
             result = await unified_rag_service.query_rag_batch(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_sources=["test_http:corpus1", "test_http:corpus2"],
                 messages=[{"role": "user", "content": "test"}],
             )
@@ -842,7 +842,7 @@ class TestQueryRAGBatch:
         """Test that mixing servers in a batch raises ValueError."""
         with pytest.raises(ValueError, match="same server"):
             await unified_rag_service.query_rag_batch(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_sources=["test_http:corpus1", "other_server:corpus2"],
                 messages=[],
             )
@@ -852,7 +852,7 @@ class TestQueryRAGBatch:
         """Test that empty sources list raises ValueError."""
         with pytest.raises(ValueError, match="No data sources"):
             await unified_rag_service.query_rag_batch(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_sources=[],
                 messages=[],
             )
@@ -862,7 +862,7 @@ class TestQueryRAGBatch:
         """Test that unqualified sources raise ValueError."""
         with pytest.raises(ValueError, match="Unqualified source"):
             await unified_rag_service.query_rag_batch(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_sources=["corpus_without_server"],
                 messages=[],
             )
@@ -872,7 +872,7 @@ class TestQueryRAGBatch:
         """Test that unknown server raises ValueError."""
         with pytest.raises(ValueError, match="RAG source not found"):
             await unified_rag_service.query_rag_batch(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_sources=["nonexistent:corpus1"],
                 messages=[],
             )
@@ -892,7 +892,7 @@ class TestQueryRAGBatch:
         )
 
         result = await service.query_rag_batch(
-            username="test@test.com",
+            username=config_manager.app_settings.test_user,
             qualified_data_sources=["test_mcp:src1", "test_mcp:src2"],
             messages=[{"role": "user", "content": "query"}],
         )
@@ -908,7 +908,7 @@ class TestQueryRAGBatch:
 
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
             await unified_rag_service.query_rag_batch(
-                username="test@test.com",
+                username=config_manager.app_settings.test_user,
                 qualified_data_sources=["test_http:alpha", "test_http:beta"],
                 messages=[{"role": "user", "content": "q"}],
             )

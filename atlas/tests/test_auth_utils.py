@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from atlas.core.authorization_manager import AuthorizationManager, create_authorization_manager
+from atlas.modules.config.config_manager import config_manager
 
 
 class TestAuthorizationManager:
@@ -32,7 +33,7 @@ class TestAuthorizationManager:
     async def test_is_admin_returns_true_for_admin_user(self, auth_manager, mock_auth_check_func):
         """Test that is_admin returns True when auth check function returns True."""
         # Arrange
-        user_email = "admin@example.com"
+        user_email = config_manager.app_settings.admin_test_user
         mock_auth_check_func.return_value = True
 
         # Act
@@ -67,7 +68,7 @@ class TestAuthorizationManager:
         with patch('atlas.core.authorization_manager.get_app_settings', return_value=mock_settings):
             auth_manager = AuthorizationManager(mock_auth_check_func)
 
-        user_email = "admin@example.com"
+        user_email = config_manager.app_settings.admin_test_user
         mock_auth_check_func.return_value = True
 
         # Act

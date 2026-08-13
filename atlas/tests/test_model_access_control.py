@@ -21,6 +21,7 @@ from atlas.core.model_access import filter_authorized_models, is_model_allowed
 from atlas.domain.errors import AuthorizationError
 from atlas.domain.sessions.models import Session
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
+from atlas.modules.config.config_manager import config_manager
 from atlas.modules.config.models import LLMConfig, ModelConfig
 
 # Group membership is mocked only in debug mode (see core.auth), so these tests
@@ -258,9 +259,9 @@ def test_config_shows_restricted_model_to_member(restricted_model_config):
     from starlette.testclient import TestClient
 
     client = TestClient(app)
-    # test@test.com is in the admin mock group.
+    # The configured test user is in the admin mock group.
     for path in ("/api/config", "/api/config/shell"):
-        resp = client.get(path, headers={"X-User-Email": "test@test.com"})
+        resp = client.get(path, headers={"X-User-Email": config_manager.app_settings.test_user})
         assert resp.status_code == 200
         assert "admin-only-model" in _model_names(resp), path
 
@@ -337,7 +338,7 @@ def test_suggest_followups_allows_authorized_model(
     from starlette.testclient import TestClient
 
     client = TestClient(app)
-    resp = _suggest(client, "test@test.com", "admin-only-model")
+    resp = _suggest(client, config_manager.app_settings.test_user, "admin-only-model")
     assert resp.status_code == 200
     assert resp.json()["questions"] == ["a?", "b?", "c?"]
     stub_llm_caller.call_plain.assert_called_once()
@@ -349,6 +350,7 @@ def test_suggest_followups_allows_unrestricted_model(
     """Models without ``groups`` remain reachable by everyone."""
     from main import app
     from starlette.testclient import TestClient
+
     from atlas.infrastructure.app_factory import app_factory
 
     models = app_factory.get_config_manager().llm_config.models

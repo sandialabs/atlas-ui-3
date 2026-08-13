@@ -4,6 +4,7 @@ from main import app
 from starlette.testclient import TestClient
 
 from atlas.core.capabilities import generate_file_token
+from atlas.modules.config.config_manager import config_manager
 
 
 def test_files_download_with_token(monkeypatch):
@@ -28,7 +29,7 @@ def test_files_download_with_token(monkeypatch):
 
     monkeypatch.setattr(s3, "get_file", fake_get_file)
 
-    token = generate_file_token(user_email="test@test.com", file_key="k1", ttl_seconds=60)
+    token = generate_file_token(user_email=config_manager.app_settings.test_user, file_key="k1", ttl_seconds=60)
 
     resp = client.get(
         "/api/files/download/k1",
