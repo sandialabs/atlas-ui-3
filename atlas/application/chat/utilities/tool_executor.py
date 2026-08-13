@@ -454,6 +454,12 @@ async def execute_single_tool(
             # Both are opt-in; zero overhead without config/hooks.json.
             hook_mgr = get_hook_manager()
             _hook_denied_result: Optional[ToolResult] = None
+            # A PermissionRequest auto-approval is scoped to the arguments that hook
+            # inspected. If a later PreToolUse hook rewrites those arguments, the
+            # approval no longer covers what will actually run, so it is revoked and
+            # the gate falls back to the pre-hook decision.
+            _perm_auto_approved = False
+            _needs_approval_before_hooks = bool(needs_approval)
             if hook_mgr is not None:
                 _sc = {
                     "session_id": session_context.get("session_id"),
@@ -492,10 +498,14 @@ async def execute_single_tool(
                             display_args = _sanitize_args_for_ui(dict(filtered_args))
                             arguments_were_edited = True
                         if perm_outcome.verdict == "require_approval":
+                            # Force the gate, but do NOT raise admin_required: that
+                            # would turn "ask the user" into "only an admin may
+                            # approve", which a non-admin user cannot satisfy. The
+                            # tool's own admin_required stays authoritative.
                             needs_approval = True
-                            admin_required = True
                         elif perm_outcome.verdict == "modify" and perm_outcome.payload.get("needs_approval") is False:
                             needs_approval = False
+                            _perm_auto_approved = True
 
                 if _hook_denied_result is None and hook_mgr.has_hooks(HookEvent.PRE_TOOL_USE):
                     pre_outcome = await hook_mgr.run_event(
@@ -525,9 +535,21 @@ async def execute_single_tool(
                             )
                             display_args = _sanitize_args_for_ui(dict(filtered_args))
                             arguments_were_edited = True
+                            if _perm_auto_approved:
+                                # The arguments the PermissionRequest hook approved
+                                # are not the arguments that will run; revoke the
+                                # auto-approval rather than let rewritten args
+                                # inherit it.
+                                logger.info(
+                                    "Tool %s: PreToolUse rewrote arguments after a "
+                                    "PermissionRequest auto-approval; revoking it",
+                                    tool_call.function.name,
+                                )
+                                needs_approval = _needs_approval_before_hooks
                         if pre_outcome.verdict == "require_approval":
+                            # As above: escalate to the gate without escalating to
+                            # admin-only.
                             needs_approval = True
-                            admin_required = True
 
             if _hook_denied_result is not None:
                 await event_notifier.notify_tool_error(tool_call, _hook_denied_result.error or "blocked", update_callback)

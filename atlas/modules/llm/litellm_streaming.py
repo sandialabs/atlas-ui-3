@@ -57,7 +57,7 @@ class LiteLLMStreamingMixin:
         # Deny raises HookBlockedError which propagates through the generator.
         mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email)
         if mod is not None:
-            model_name, messages, _ = await self._apply_pre_llm_modify(mod, model_name, messages)
+            model_name, messages, _ = await self._apply_pre_llm_modify(mod, model_name, messages, user_email=user_email)
             litellm_model = self._get_litellm_model_name(model_name)
             model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
             if max_tokens is not None:
@@ -162,7 +162,7 @@ class LiteLLMStreamingMixin:
         mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email, tools_schema=tools_schema)
         if mod is not None:
             model_name, messages, tools_schema = await self._apply_pre_llm_modify(
-                mod, model_name, messages, tools_schema
+                mod, model_name, messages, tools_schema, user_email=user_email
             )
             litellm_model = self._get_litellm_model_name(model_name)
             model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)

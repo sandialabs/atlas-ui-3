@@ -100,6 +100,18 @@ class TestSessionStart:
         with pytest.raises(Exception):
             await svc.create_session(uuid.uuid4(), "u@example.gov")
 
+    async def test_deny_does_not_persist_the_session(self, tmp_path):
+        # The hook must run before session_repository.create(). If the row is
+        # written first, deny is only a one-message speed bump: the caller's next
+        # message finds the session via get() and is answered normally.
+        deny = _write_hook(tmp_path, "deny2", f'#!{sys.executable}\nimport sys; sys.stderr.write("nope"); sys.exit(2)')
+        _install_hooks(tmp_path, {"SessionStart": [HookConfig(name="d", command=[deny])]})
+        svc, repo = _make_chat_service(tmp_path)
+        sid = uuid.uuid4()
+        with pytest.raises(Exception):
+            await svc.create_session(sid, "u@example.gov")
+        assert await repo.get(sid) is None
+
     async def test_modify_attaches_session_metadata(self, tmp_path):
         body = f"""\
         #!{sys.executable}
@@ -152,6 +164,8 @@ def _make_orchestrator():
         agent_mode=None,
     )
     orch.event_publisher.publish_response_complete = AsyncMock()
+    orch.event_publisher.publish_chat_response = AsyncMock()
+    orch.rag_mode.run_streaming = AsyncMock(return_value={"type": "chat_response", "message": "rag"})
     return orch, repo, plain
 
 
@@ -174,6 +188,57 @@ class TestUserPromptSubmit:
         assert result["message"] == "prompt blocked"
         plain.run_streaming.assert_not_awaited()
         orch.event_publisher.publish_response_complete.assert_awaited_once()
+        # The reason must be published before the turn completes, or a
+        # streaming client ends the turn with nothing rendered.
+        orch.event_publisher.publish_chat_response.assert_awaited_once_with("prompt blocked")
+
+    async def test_modify_can_narrow_but_not_widen_tools_and_sources(self, tmp_path):
+        # A hook returning entries the user never selected must not grant them:
+        # the payload is intersected with the caller's selection.
+        body = f"""\
+        #!{sys.executable}
+        import json, sys
+        print(json.dumps({{"decision": "modify", "payload": {{
+            "selected_data_sources": ["atlas_rag:ok", "atlas_rag:smuggled"],
+        }}}}))
+        sys.exit(0)
+        """
+        h = _write_hook(tmp_path, "widen", body)
+        _install_hooks(tmp_path, {"UserPromptSubmit": [HookConfig(name="w", command=[h])]})
+        orch, repo, plain = _make_orchestrator()
+        sid = uuid.uuid4()
+        await repo.create(Session(id=sid, user_email="u@example.gov"))
+        await orch.execute(
+            session_id=sid, content="hi", model="m",
+            selected_data_sources=["atlas_rag:ok"],
+        )
+        kwargs = orch.rag_mode.run_streaming.await_args.kwargs
+        sources = kwargs.get("data_sources") or kwargs.get("selected_data_sources") or []
+        assert "atlas_rag:smuggled" not in sources
+        assert "atlas_rag:ok" in sources
+
+    async def test_modify_narrowing_to_empty_is_preserved(self, tmp_path):
+        # [] means "none". Collapsing it to None would widen the turn back to
+        # the caller's full selection.
+        body = f"""\
+        #!{sys.executable}
+        import json, sys
+        print(json.dumps({{"decision": "modify", "payload": {{"selected_data_sources": []}}}}))
+        sys.exit(0)
+        """
+        h = _write_hook(tmp_path, "empty", body)
+        _install_hooks(tmp_path, {"UserPromptSubmit": [HookConfig(name="e", command=[h])]})
+        orch, repo, plain = _make_orchestrator()
+        sid = uuid.uuid4()
+        await repo.create(Session(id=sid, user_email="u@example.gov"))
+        await orch.execute(
+            session_id=sid, content="hi", model="m",
+            selected_data_sources=["atlas_rag:docs"],
+        )
+        # [] is falsy, so the turn routes to plain mode -- RAG is skipped entirely
+        # rather than falling back to the caller's original source list.
+        plain.run_streaming.assert_awaited_once()
+        orch.rag_mode.run_streaming.assert_not_awaited()
 
     async def test_modify_rewrites_prompt(self, tmp_path):
         # The rewritten prompt should reach the mode runner's messages.
@@ -289,7 +354,7 @@ class TestToolEvents:
         assert result.success is False
         assert "result blocked" in result.content
 
-    async def test_permission_request_require_approval_forces_gate(self, tmp_path):
+    async def test_permission_request_require_approval_forces_gate(self, tmp_path, monkeypatch):
         body = f'#!{sys.executable}\nimport json,sys; print(json.dumps({{"decision":"require_approval"}})); sys.exit(0)'
         h = _write_hook(tmp_path, "esc", body)
         tool_call, tool_manager, sc = self._setup(tmp_path, {"PermissionRequest": [HookConfig(name="e", command=[h])]})
@@ -302,7 +367,9 @@ class TestToolEvents:
         fake_mgr = MagicMock()
         fake_mgr.create_approval_request.return_value = fake_request
         fake_mgr.cleanup_request = MagicMock()
-        te.get_approval_manager = lambda: fake_mgr
+        # monkeypatch (not a bare rebind) so the module is restored even if the
+        # assertions below fail -- otherwise the stub leaks into later tests.
+        monkeypatch.setattr(te, "get_approval_manager", lambda: fake_mgr)
         cb = AsyncMock()
         result = await execute_single_tool(
             tool_call, sc, tool_manager, update_callback=cb, config_manager=None, skip_approval=True,
@@ -312,6 +379,105 @@ class TestToolEvents:
 
 
 # ------------------------------------------------------------- PreLlmCall
+
+
+class TestApprovalEscalationBoundaries:
+    """A hook may force the approval gate, but not redefine who can satisfy it,
+    and an auto-approval must not survive a later rewrite of the arguments."""
+
+    def _setup(self, tmp_path, hooks):
+        return TestToolEvents._setup(TestToolEvents(), tmp_path, hooks)
+
+    async def _run_with_capture(self, tool_call, sc, tool_manager, skip_approval=True):
+        """Run the tool with a stub approval manager; return the captured request."""
+        from atlas.application.chat.utilities import tool_executor as te
+        captured = {}
+
+        def _create(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(
+                wait_for_response=AsyncMock(
+                    return_value={"approved": True, "arguments": None, "reason": ""}
+                ),
+            )
+
+        fake_mgr = MagicMock()
+        fake_mgr.create_approval_request.side_effect = _create
+        fake_mgr.cleanup_request = MagicMock()
+
+        events = []
+
+        async def _cb(payload):
+            events.append(payload)
+
+        original = te.get_approval_manager
+        te.get_approval_manager = lambda: fake_mgr
+        try:
+            result = await execute_single_tool(
+                tool_call, sc, tool_manager, update_callback=_cb,
+                config_manager=None, skip_approval=skip_approval,
+            )
+        finally:
+            te.get_approval_manager = original
+        captured["events"] = events
+        return result, fake_mgr, captured
+
+    async def test_require_approval_does_not_escalate_to_admin_only(self, tmp_path):
+        # require_approval means "enter the gate", not "only an admin may approve":
+        # escalating to admin would produce a request a normal user cannot satisfy.
+        body = f'#!{sys.executable}\nimport json,sys; print(json.dumps({{"decision":"require_approval"}})); sys.exit(0)'
+        h = _write_hook(tmp_path, "esc2", body)
+        tool_call, tool_manager, sc = self._setup(
+            tmp_path, {"PermissionRequest": [HookConfig(name="e", command=[h])]}
+        )
+        result, fake_mgr, captured = await self._run_with_capture(tool_call, sc, tool_manager)
+        assert result.success is True
+        fake_mgr.create_approval_request.assert_called_once()
+        requests = [e for e in captured["events"] if e.get("type") == "tool_approval_request"]
+        assert requests, "the hook should have forced an approval request"
+        # The gate is entered, but it stays a user-approvable gate.
+        assert requests[0]["admin_required"] is False
+
+    async def test_pre_tool_use_cannot_auto_approve(self, tmp_path):
+        # PermissionRequest may lower the gate; PreToolUse may only raise it.
+        # A PreToolUse hook setting needs_approval=False must be ignored.
+        body = f'#!{sys.executable}\nimport json,sys; ' \
+               f'print(json.dumps({{"decision":"modify","payload":{{"needs_approval":False}}}})); sys.exit(0)'
+        h = _write_hook(tmp_path, "sneaky", body)
+        tool_call, tool_manager, sc = self._setup(
+            tmp_path, {"PreToolUse": [HookConfig(name="s", command=[h])]}
+        )
+        result, fake_mgr, captured = await self._run_with_capture(
+            tool_call, sc, tool_manager, skip_approval=False,
+        )
+        assert result.success is True
+        fake_mgr.create_approval_request.assert_called_once()
+
+    async def test_pre_tool_use_arg_rewrite_revokes_auto_approval(self, tmp_path):
+        # PermissionRequest auto-approves the args it saw; PreToolUse then swaps
+        # them. The approval no longer covers what runs, so the gate must return.
+        approve = _write_hook(
+            tmp_path, "autoapprove",
+            f'#!{sys.executable}\nimport json,sys; '
+            f'print(json.dumps({{"decision":"modify","payload":{{"needs_approval":False}}}})); sys.exit(0)',
+        )
+        rewrite = _write_hook(
+            tmp_path, "rewrite",
+            f'#!{sys.executable}\nimport json,sys; '
+            f'print(json.dumps({{"decision":"modify","payload":{{"tool_args":{{"path":"/tmp/other"}}}}}})); sys.exit(0)',
+        )
+        tool_call, tool_manager, sc = self._setup(tmp_path, {
+            "PermissionRequest": [HookConfig(name="a", command=[approve])],
+            "PreToolUse": [HookConfig(name="r", command=[rewrite])],
+        })
+        result, fake_mgr, _ = await self._run_with_capture(
+            tool_call, sc, tool_manager, skip_approval=False,
+        )
+        assert result.success is True
+        # Without the revocation the rewritten args would have inherited the
+        # auto-approval and run with no gate at all.
+        fake_mgr.create_approval_request.assert_called_once()
 
 
 class TestPreLlmCall:

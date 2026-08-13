@@ -406,6 +406,7 @@ class ConfigManager:
                 file_paths = self._search_paths(hooks_filename)
                 data = self._load_file_with_error_handling(file_paths, "JSON")
 
+                self._hooks_config_load_failed = False
                 if data:
                     self._hooks_config = HooksConfig(**data)
                     total = sum(len(v) for v in self._hooks_config.hooks.values())
@@ -419,6 +420,10 @@ class ConfigManager:
                     self._hooks_config = HooksConfig()
                     logger.info("No hooks.json found; hook system disabled (zero overhead)")
             except Exception as e:
+                # Degrading to an empty config disables every hook, including the
+                # fail-closed ones. Record it so validate_config can report the
+                # controls are off rather than leaving it to a single log line.
+                self._hooks_config_load_failed = True
                 logger.error(f"Failed to parse hooks configuration: {e}", exc_info=True)
                 from atlas.hooks.models import HooksConfig
                 self._hooks_config = HooksConfig()
@@ -546,5 +551,22 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"MCP config validation failed: {e}", exc_info=True)
             status["mcp_config"] = False
+
+        # Hooks are security controls, so a malformed hooks.json must be visible
+        # here and not only as a line in the startup log: the load path degrades
+        # to an empty config, which disables every fail-closed hook.
+        try:
+            hooks_config = self.hooks_config
+            status["hooks_config"] = not getattr(self, "_hooks_config_load_failed", False)
+            if not status["hooks_config"]:
+                logger.error(
+                    "hooks.json failed to load; ALL hooks are disabled, including "
+                    "fail-closed policy hooks. Fix the file or remove it deliberately."
+                )
+            elif not hooks_config.hooks:
+                logger.info("No hooks configured (hook system disabled)")
+        except Exception as e:
+            logger.error(f"Hooks config validation failed: {e}", exc_info=True)
+            status["hooks_config"] = False
 
         return status

@@ -18,7 +18,7 @@ Trusted envelope fields (``session_id``, ``user_email``, ``compliance_level``)
 are always re-asserted server-side and never taken from hook output. The
 mutable ``payload`` is the only part a hook may replace, and call sites
 re-apply security-critical invariants (e.g. re-inject ``_atlas_user`` into tool
-args) after applying a ``modify``. See ``docs/hooks.md``.
+args) after applying a ``modify``. See ``docs/admin/hooks.md``.
 """
 
 from __future__ import annotations
@@ -287,7 +287,7 @@ class HookManager:
         env = self._build_env(config_dir, project_dir)
         stdin_bytes = (json.dumps(envelope) + "\n").encode("utf-8")
 
-        t0 = asyncio.get_event_loop().time()
+        t0 = asyncio.get_running_loop().time()
         hook_attrs = {"hook.name": hook.name, "hook.timeout_ms": hook.timeout_ms}
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -307,26 +307,34 @@ class HookManager:
             return self._error_decision(hook, event, f"spawn error: {e}")
 
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(stdin_bytes), timeout=timeout_s
+            stdout, stderr, overflowed = await asyncio.wait_for(
+                self._communicate_bounded(proc, stdin_bytes), timeout=timeout_s
             )
         except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            await proc.wait()
+            await self._kill(proc)
             logger.warning("hooks: hook %s timed out after %dms", hook.name, hook.timeout_ms)
             set_attrs(span, {**hook_attrs, "hook.error": "timeout", "hook.timed_out": True})
             return self._error_decision(hook, event, "timeout")
         except Exception as e:
+            await self._kill(proc)
             logger.error("hooks: hook %s I/O error: %s", hook.name, e, exc_info=True)
             set_attrs(span, {**hook_attrs, "hook.error": f"io_error:{type(e).__name__}"})
             return self._error_decision(hook, event, f"io error: {e}")
 
-        duration_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
-        stdout_s = self._truncate(stdout.decode("utf-8", "replace"))
-        stderr_s = self._truncate(stderr.decode("utf-8", "replace"))
+        if overflowed:
+            # The child was killed mid-stream, so what we hold is a prefix. Parsing
+            # it would risk misreading truncated JSON as a decision (or as non-JSON
+            # garbage); treat overflow as a hook error and let on_error decide.
+            logger.warning(
+                "hooks: hook %s exceeded the %d-byte output cap; killed and treated as error",
+                hook.name, _MAX_OUTPUT_BYTES,
+            )
+            set_attrs(span, {**hook_attrs, "hook.error": "output_overflow"})
+            return self._error_decision(hook, event, "output exceeded 1 MB cap")
+
+        duration_ms = int((asyncio.get_running_loop().time() - t0) * 1000)
+        stdout_s = stdout.decode("utf-8", "replace")
+        stderr_s = stderr.decode("utf-8", "replace")
         set_attrs(span, {
             **hook_attrs,
             "hook.exit_code": proc.returncode,
@@ -387,12 +395,73 @@ class HookManager:
         return HookDecision(decision="continue")
 
     @staticmethod
-    def _truncate(s: str) -> str:
-        if len(s.encode("utf-8", "replace")) <= _MAX_OUTPUT_BYTES:
-            return s
-        # Truncate on a UTF-8 boundary to avoid producing surrogate pairs.
-        encoded = s.encode("utf-8", "replace")[:_MAX_OUTPUT_BYTES]
-        return encoded.decode("utf-8", "replace")
+    async def _kill(proc: Any) -> None:
+        """Kill a hook subprocess and reap it, tolerating an already-dead child."""
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            # Already exited between the check and the signal -- nothing to kill.
+            pass
+        try:
+            await proc.wait()
+        except Exception:  # pragma: no cover - defensive
+            # Reaping is best-effort; a failure here must not mask the original
+            # timeout/IO error the caller is about to report.
+            logger.debug("hooks: failed to reap killed hook process", exc_info=True)
+
+    @classmethod
+    async def _communicate_bounded(
+        cls, proc: Any, stdin_bytes: bytes
+    ) -> Tuple[bytes, bytes, bool]:
+        """Feed stdin and read stdout/stderr with the cap enforced *at read time*.
+
+        ``proc.communicate()`` buffers the entire stream before returning, so a
+        hook emitting hundreds of megabytes would exhaust server memory no matter
+        what we truncated afterwards. Here each stream is read in chunks and the
+        child is killed as soon as their combined size crosses
+        ``_MAX_OUTPUT_BYTES``. Returns ``(stdout, stderr, overflowed)``.
+        """
+        total = 0
+        overflowed = False
+
+        async def _feed() -> None:
+            if proc.stdin is None:
+                return
+            try:
+                proc.stdin.write(stdin_bytes)
+                await proc.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                # A hook that ignores stdin and exits early is legitimate (e.g. an
+                # unconditional allow); its exit code still decides the outcome.
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except Exception:  # pragma: no cover - defensive
+                    logger.debug("hooks: failed to close hook stdin", exc_info=True)
+
+        async def _drain(stream: Any) -> bytes:
+            nonlocal total, overflowed
+            if stream is None:
+                return b""
+            buf = bytearray()
+            while True:
+                chunk = await stream.read(65536)
+                if not chunk:
+                    return bytes(buf)
+                total += len(chunk)
+                if total > _MAX_OUTPUT_BYTES:
+                    overflowed = True
+                    await cls._kill(proc)
+                    return bytes(buf)
+                buf += chunk
+
+        _, stdout, stderr = await asyncio.gather(
+            _feed(), _drain(proc.stdout), _drain(proc.stderr)
+        )
+        if not overflowed:
+            await proc.wait()
+        return stdout, stderr, overflowed
 
     @staticmethod
     def _interpolate_command(command: List[str], config_dir: str, project_dir: str) -> List[str]:
@@ -417,7 +486,7 @@ class HookManager:
         Hooks get a small allow-list (``PATH``/``HOME`` so interpreters resolve)
         plus ``ATLAS_CONFIG_DIR`` / ``ATLAS_PROJECT_DIR``. They do NOT inherit the
         server's full environment, which holds provider API keys and other
-        secrets -- mirroring the boundary Claude Code applies.
+        secrets.
         """
         env: Dict[str, str] = {}
         for key in ("PATH", "HOME", "SYSTEMROOT", "LANG", "LC_ALL", "USER"):

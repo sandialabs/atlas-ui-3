@@ -8,7 +8,7 @@ referenced via the client module to preserve test patch targets.
 import asyncio
 import json
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
@@ -633,11 +633,16 @@ class ExecutionMixin:
         # fail closed if the trusted context has no user.
         args.pop("_atlas_user", None)
         user_email = None
-        selected_data_sources: List[str] = []
+        # ``None`` means "no selection was made for this turn"; ``[]`` means "an
+        # explicit selection of nothing" (e.g. a UserPromptSubmit hook narrowed the
+        # sources away). Collapsing the two would let a narrow-to-nothing decision
+        # fall through to the every-authorized-source default below.
+        selected_data_sources: Optional[List[str]] = None
         compliance_level = None
         if isinstance(context, dict):
             user_email = context.get("user_email")
-            selected_data_sources = list(context.get("selected_data_sources") or [])
+            _ctx_sources = context.get("selected_data_sources")
+            selected_data_sources = list(_ctx_sources) if isinstance(_ctx_sources, list) else None
             compliance_level = context.get("compliance_level")
 
         if not user_email:
@@ -727,9 +732,15 @@ class ExecutionMixin:
             else:
                 sources = []
             if not sources:
-                sources = [s for s in selected_data_sources if isinstance(s, str) and ":" in s]
-            if not sources:
-                sources = deduped_sources
+                if selected_data_sources is None:
+                    # No selection at all for this turn: default to everything the
+                    # user is authorized for.
+                    sources = deduped_sources
+                else:
+                    # An explicit selection is a ceiling, not a hint. An empty list
+                    # means "no sources" -- widening it back to every authorized
+                    # source would undo a hook that narrowed the turn to nothing.
+                    sources = [s for s in selected_data_sources if isinstance(s, str) and ":" in s]
 
             # Authorization gate: only query sources in the user's discovered
             # (group/compliance-authorized) set. ``data_sources`` may be filled
@@ -766,14 +777,16 @@ class ExecutionMixin:
             # MCP sources via rag_mcp.synthesize. Without this split, MCP sources
             # (which live in rag_mcp_config, not rag_sources_config) pass the auth
             # gate but fail unified_rag.query_rag with "RAG source not found".
-            http_groups: Dict[str, List[str]] = {}
-            mcp_groups: Dict[str, List[str]] = {}
-            for source in sources:
-                server_name = source.split(":", 1)[0]
-                if source_origin.get(source) == "mcp":
-                    mcp_groups.setdefault(server_name, []).append(source)
-                else:
-                    http_groups.setdefault(server_name, []).append(source)
+            def _group_sources(srcs: List[str]) -> Tuple[Dict[str, List[str]], Dict[str, List[str]]]:
+                http_groups: Dict[str, List[str]] = {}
+                mcp_groups: Dict[str, List[str]] = {}
+                for source in srcs:
+                    server_name = source.split(":", 1)[0]
+                    if source_origin.get(source) == "mcp":
+                        mcp_groups.setdefault(server_name, []).append(source)
+                    else:
+                        http_groups.setdefault(server_name, []).append(source)
+                return http_groups, mcp_groups
 
             async def _query_http(group: List[str]) -> Dict[str, Any]:
                 if not unified_rag:
@@ -800,12 +813,6 @@ class ExecutionMixin:
                     "content": results.get("answer", ""),
                     "is_completion": False,
                 }
-
-            # Run per-server queries concurrently; isolate failures so one backend
-            # error does not discard every other source's answer.
-            group_lists = list(http_groups.values()) + list(mcp_groups.values())
-            coros = [_query_http(g) for g in http_groups.values()]
-            coros += [_query_mcp(g) for g in mcp_groups.values()]
 
             # RagCall hook (GH #713): fires once for the whole agentic atlas_rag_query
             # call (covering both HTTP and MCP sources). HTTP sources skip the
@@ -840,18 +847,6 @@ class ExecutionMixin:
                             _rag_blocked = rag_call.payload.get("reason") or "RAG query narrowed to no sources by hook"
                         else:
                             sources = narrowed
-                            # Rebuild groups for the narrowed source set
-                            http_groups = {}
-                            mcp_groups = {}
-                            for source in sources:
-                                server_name = source.split(":", 1)[0]
-                                if source_origin.get(source) == "mcp":
-                                    mcp_groups.setdefault(server_name, []).append(source)
-                                else:
-                                    http_groups.setdefault(server_name, []).append(source)
-                            group_lists = list(http_groups.values()) + list(mcp_groups.values())
-                            coros = [_query_http(g) for g in http_groups.values()]
-                            coros += [_query_mcp(g) for g in mcp_groups.values()]
 
             if _rag_blocked is not None:
                 return ToolResult(
@@ -860,6 +855,17 @@ class ExecutionMixin:
                     success=False,
                     error=_rag_blocked,
                 )
+
+            # Build the query coroutines only once the RagCall hook has settled the
+            # source set. Constructing them earlier means the deny and narrow paths
+            # discard un-awaited coroutines (a RuntimeWarning on every retrieval)
+            # and force the grouping block to be duplicated for the narrowed set.
+            # Run per-server queries concurrently; isolate failures so one backend
+            # error does not discard every other source's answer.
+            http_groups, mcp_groups = _group_sources(sources)
+            group_lists = list(http_groups.values()) + list(mcp_groups.values())
+            coros = [_query_http(g) for g in http_groups.values()]
+            coros += [_query_mcp(g) for g in mcp_groups.values()]
 
             settled = await asyncio.gather(*coros, return_exceptions=True)
 

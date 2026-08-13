@@ -4,7 +4,7 @@ A "hook" is an arbitrary executable (bash, Python, anything) registered in
 ``config/hooks.json`` against a chat lifecycle event. Atlas spawns it as a
 subprocess at the event's chokepoint, sends the event payload as JSON on stdin,
 and reads a decision (exit code + optional JSON on stdout) that can allow,
-modify, block, or escalate the operation. See ``docs/hooks.md`` and GH #713.
+modify, block, or escalate the operation. See ``docs/admin/hooks.md`` and GH #713.
 
 This module holds only data models + the event enumeration -- no I/O -- so it
 can be imported without pulling in the subprocess machinery.
@@ -12,10 +12,14 @@ can be imported without pulling in the subprocess machinery.
 
 from __future__ import annotations
 
+import logging
+import re
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class HookEvent(str, Enum):
@@ -56,6 +60,15 @@ _EVENT_DEFAULT_ON_ERROR: Dict[HookEvent, Literal["deny", "allow"]] = {
 }
 
 
+# Events that carry no natural matcher value. A hook registered against one of
+# these with an explicit ``matcher`` can never fire (see ``HookConfig.matches``).
+_MATCHERLESS_EVENTS = frozenset({
+    HookEvent.SESSION_START.value,
+    HookEvent.SESSION_END.value,
+    HookEvent.USER_PROMPT_SUBMIT.value,
+})
+
+
 def default_on_error(event: HookEvent) -> Literal["deny", "allow"]:
     """Return the fail-closed/fail-open default for an event."""
     return _EVENT_DEFAULT_ON_ERROR.get(event, "allow")
@@ -64,15 +77,19 @@ def default_on_error(event: HookEvent) -> Literal["deny", "allow"]:
 class HookConfig(BaseModel):
     """A single hook registration (one entry under ``hooks.<EventName>``).
 
-    Mirrors the Claude Code ``settings.json`` hook entry shape so operators
-    familiar with that system can reuse muscle memory.
+    Mirrors the settings-file hook entry shape used by agent CLIs, so operators
+    familiar with that pattern can reuse muscle memory.
 
     Fields:
         name: Human-readable identifier used in logs/audit spans.
         matcher: Optional regex over the event's "matcher value" (the tool name
             for tool events, the qualified data source for RAG events). Omit or
-            set to ``"*"`` to match everything. Ignored for events without a
-            natural matcher value (SessionStart/SessionEnd/UserPromptSubmit).
+            set to ``"*"`` to match everything. Events without a natural matcher
+            value (SessionStart/SessionEnd/UserPromptSubmit) supply no value, so
+            an explicit matcher on those events matches *nothing* and the hook
+            never fires -- ``HooksConfig`` logs a warning at load time rather
+            than letting the hook silently do nothing. The pattern is compiled
+            at config-load time; an invalid regex is a config error.
         command: argv array spawned with ``asyncio.create_subprocess_exec`` --
             **never** ``shell=True``. Supports ``${ATLAS_CONFIG_DIR}`` and
             ``${ATLAS_PROJECT_DIR}`` interpolation so config-relative script
@@ -105,28 +122,46 @@ class HookConfig(BaseModel):
             raise ValueError("hook name must be non-empty")
         return v
 
+    @field_validator("matcher")
+    @classmethod
+    def _matcher_is_valid_regex(cls, v: Optional[str]) -> Optional[str]:
+        """Reject a malformed matcher at config-load time.
+
+        Silently treating an uncompilable pattern as a non-match would disable
+        a fail-closed hook (PreToolUse/PermissionRequest) while leaving the rest
+        of the config working -- a typo in a regex would quietly remove a
+        security control. Failing validation instead surfaces it where every
+        other config error surfaces.
+        """
+        if v is None or v in ("", "*"):
+            return v
+        try:
+            re.compile(v)
+        except re.error as e:
+            raise ValueError(f"hook matcher is not a valid regex: {e}") from e
+        return v
+
     def matches(self, matcher_value: Optional[str]) -> bool:
         """Return True if ``matcher_value`` satisfies this hook's matcher.
 
-        ``None``/``"*"`` matcher = match all. A missing ``matcher_value`` (event
-        has no natural value) only matches a wildcard matcher, so a hook that
-        set an explicit matcher on e.g. SessionStart simply never fires -- the
-        operator gets a clear signal rather than silent over-firing.
+        ``None``/``"*"``/``""`` matcher = match all. A missing ``matcher_value``
+        (the event has no natural value) matches only a wildcard matcher, so an
+        explicit matcher on SessionStart/SessionEnd/UserPromptSubmit means the
+        hook never fires; ``HooksConfig`` warns about that at load time.
         """
         pattern = self.matcher
         if pattern is None or pattern == "*" or pattern == "":
             return True
         if matcher_value is None:
             return False
-        import re
-
         try:
             return re.search(pattern, matcher_value) is not None
         except re.error:
-            # Treat an invalid matcher as a non-match rather than crashing the
-            # turn; the misconfiguration is surfaced via the validate_config
-            # path and the startup log.
-            return False
+            # Unreachable via config load (the validator compiles the pattern),
+            # but if a hook is constructed directly with a bad pattern, fire it
+            # rather than skip it: over-firing a policy hook is the safe
+            # direction, silently disabling one is not.
+            return True
 
     def effective_on_error(self, event: HookEvent) -> Literal["deny", "allow"]:
         return self.on_error if self.on_error is not None else default_on_error(event)
@@ -141,6 +176,25 @@ class HooksConfig(BaseModel):
     """
 
     hooks: Dict[str, List[HookConfig]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _warn_on_inert_matchers(self) -> "HooksConfig":
+        """Warn about matchers that can never match.
+
+        SessionStart/SessionEnd/UserPromptSubmit carry no matcher value, so a
+        hook that sets one never fires. That is a misconfiguration an operator
+        would otherwise only discover by noticing their policy is not running.
+        """
+        for event_name in _MATCHERLESS_EVENTS:
+            for hook in self.hooks.get(event_name, []) or []:
+                if hook.matcher not in (None, "", "*"):
+                    logger.warning(
+                        "hooks: hook %r on %s sets matcher %r, but %s supplies no "
+                        "matcher value -- this hook will never fire. Remove the "
+                        "matcher to run it on every %s event.",
+                        hook.name, event_name, hook.matcher, event_name, event_name,
+                    )
+        return self
 
     def hooks_for(self, event_name: str) -> List[HookConfig]:
         """Return the ordered hook list for an event name (empty if none)."""

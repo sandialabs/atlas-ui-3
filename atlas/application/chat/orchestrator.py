@@ -290,6 +290,10 @@ class ChatOrchestrator:
                 reason = outcome.reason or "Prompt blocked by policy hook."
                 block_msg = Message(role=MessageRole.ASSISTANT, content=reason, metadata={"blocked_by_hook": True})
                 session.history.add_message(block_msg)
+                # Publish the reason before completing the turn: a streaming
+                # client renders what it receives, so completing without a
+                # message would end the turn silently and look like a hang.
+                await self.event_publisher.publish_chat_response(reason)
                 await self.event_publisher.publish_response_complete()
                 return event_notifier.create_chat_response(reason)
             if outcome.verdict == "modify":
@@ -298,12 +302,20 @@ class ChatOrchestrator:
                     content = new_prompt
                     # Reflect the (possibly redacted) prompt in the stored user message
                     user_message.content = content
+                # Tools/sources may only be *narrowed*: intersect the hook's list
+                # with what the user actually selected so a hook cannot grant
+                # access to a tool or source the user never chose. An explicitly
+                # empty list is preserved (it means "none"), not treated as
+                # "unset" -- collapsing [] to None would widen the turn back to
+                # the caller's full selection.
                 new_tools = outcome.payload.get("selected_tools")
                 if isinstance(new_tools, list):
-                    selected_tools = new_tools or None
+                    allowed_tools = set(selected_tools or [])
+                    selected_tools = [t for t in new_tools if t in allowed_tools]
                 new_sources = outcome.payload.get("selected_data_sources")
                 if isinstance(new_sources, list):
-                    selected_data_sources = new_sources or None
+                    allowed_sources = set(selected_data_sources or [])
+                    selected_data_sources = [s for s in new_sources if s in allowed_sources]
                 new_agent = outcome.payload.get("agent_mode")
                 if isinstance(new_agent, bool):
                     agent_mode = new_agent

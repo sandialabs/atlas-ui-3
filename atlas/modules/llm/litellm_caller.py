@@ -36,7 +36,9 @@ except ImportError:
 import litellm
 from litellm import acompletion
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
+from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
@@ -180,7 +182,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             from atlas.core.compliance import get_active_compliance_context
             compliance_level, _ = get_active_compliance_context()
         except Exception:
-            pass
+            # Compliance context is informational in the hook envelope; when it is
+            # unavailable (no active request context) the hook still runs with
+            # compliance_level=None rather than failing the LLM call.
+            logger.debug("hooks: no active compliance context for PreLlmCall", exc_info=True)
         payload: Dict[str, Any] = {
             "model": model_name,
             "messages": messages,
@@ -205,18 +210,33 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         model_name: str,
         messages: List[Dict[str, str]],
         tools_schema: Optional[List[Dict]] = None,
+        *,
+        user_email: Optional[str] = None,
     ):
-        """Apply a PreLlmCall modify payload and re-resolve the litellm model.
+        """Apply a PreLlmCall modify payload.
 
-        Returns ``(model_name, litellm_model, messages, tools_schema)`` after a
-        hook may have swapped the model or rewritten messages/tools. Model swaps
-        re-resolve the provider-qualified name and kwargs upstream callers reuse.
+        Returns ``(model_name, messages, tools_schema)`` after a hook may have
+        swapped the model or rewritten messages/tools.
+
+        A model swap is re-authorized against the same per-model group check
+        ``ChatOrchestrator`` ran for the originally selected model. Without that,
+        a hook could route a turn to a model the user is not cleared for, since
+        the orchestrator's check only ever saw the original name. An unauthorized
+        swap is refused and the original model is kept.
         """
         if mod is None:
             return model_name, messages, tools_schema
         new_model = mod.get("model")
         if isinstance(new_model, str) and new_model and new_model != model_name:
-            model_name = new_model
+            if await self._hook_model_swap_allowed(new_model, user_email):
+                model_name = new_model
+            else:
+                logger.warning(
+                    "hooks: PreLlmCall model swap to %s refused (user not authorized); "
+                    "keeping %s",
+                    sanitize_for_logging(new_model),
+                    sanitize_for_logging(model_name),
+                )
         new_messages = mod.get("messages")
         if isinstance(new_messages, list):
             messages = new_messages
@@ -225,6 +245,23 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             if isinstance(new_tools, list):
                 tools_schema = new_tools
         return model_name, messages, tools_schema
+
+    async def _hook_model_swap_allowed(self, model_name: str, user_email: Optional[str]) -> bool:
+        """Re-run the per-model group check for a hook-supplied model name.
+
+        Mirrors ``ChatOrchestrator``'s gate. An unknown model is left to the
+        downstream caller (same policy as chat), but a model the user's groups do
+        not cover is refused here.
+        """
+        try:
+            models = self.llm_config.models
+        except Exception:
+            # Without a model registry there is nothing to check against; refuse
+            # the swap rather than assume the replacement is authorized.
+            logger.warning("hooks: cannot verify PreLlmCall model swap (no llm_config); refusing")
+            return False
+        decision = await check_model_access(models, model_name, user_email, context="PreLlmCall hook")
+        return decision is not ModelAccessDecision.DENIED
 
     @staticmethod
     def _tools_implicated_by(error_str: str, tools_schema: Optional[List[Dict]]) -> List[str]:
@@ -950,7 +987,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             # or block the call. Zero-overhead when no hooks registered.
             mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email)
             if mod is not None:
-                model_name, messages, _ = await self._apply_pre_llm_modify(mod, model_name, messages)
+                model_name, messages, _ = await self._apply_pre_llm_modify(mod, model_name, messages, user_email=user_email)
                 litellm_model = self._get_litellm_model_name(model_name)
                 model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
                 if max_tokens is not None:
@@ -1154,7 +1191,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email, tools_schema=tools_schema)
             if mod is not None:
                 model_name, messages, tools_schema = await self._apply_pre_llm_modify(
-                    mod, model_name, messages, tools_schema
+                    mod, model_name, messages, tools_schema, user_email=user_email
                 )
                 litellm_model = self._get_litellm_model_name(model_name)
                 model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)

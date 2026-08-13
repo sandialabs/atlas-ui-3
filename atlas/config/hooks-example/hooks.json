@@ -1,25 +1,25 @@
 {
-  "_comment": "Example hooks.json (GH #713). Copy to config/hooks.json to enable. This file is NOT auto-loaded -- the loader searches for 'hooks.json' directly, so this example under hooks-example/ is purely illustrative.",
+  "_comment": "Example hooks.json (GH #713). This file is NOT auto-loaded. To enable it: (1) copy this file to <APP_CONFIG_DIR>/hooks.json, and (2) copy the scripts in this directory to <APP_CONFIG_DIR>/hooks/ and make them executable -- the commands below resolve to ${ATLAS_CONFIG_DIR}/hooks/, not to this example directory. Skipping step 2 leaves the PreToolUse hooks unable to spawn, and because PreToolUse fails closed that would deny every matching tool call.",
   "hooks": {
     "PreToolUse": [
       {
         "name": "block-destructive-fs",
         "matcher": "filesystem__.*",
-        "command": ["${ATLAS_CONFIG_DIR}/hooks-example/block_destructive.sh"],
+        "command": ["${ATLAS_CONFIG_DIR}/hooks/block_destructive.sh"],
         "timeout_ms": 2000,
         "on_error": "deny"
       },
       {
         "name": "require-approval-network",
         "matcher": "(http_|fetch_).*",
-        "command": ["${ATLAS_CONFIG_DIR}/hooks-example/require_approval_network.py"],
+        "command": ["${ATLAS_CONFIG_DIR}/hooks/require_approval_network.py"],
         "timeout_ms": 1000
       }
     ],
     "PostToolUse": [
       {
         "name": "audit-log",
-        "command": ["${ATLAS_CONFIG_DIR}/hooks-example/audit_tool.sh"],
+        "command": ["${ATLAS_CONFIG_DIR}/hooks/audit_tool.sh"],
         "timeout_ms": 1000,
         "on_error": "allow"
       }
@@ -27,7 +27,7 @@
     "UserPromptSubmit": [
       {
         "name": "redact-pii",
-        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks-example/redact_pii.py"],
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/redact_pii.py"],
         "timeout_ms": 3000
       }
     ]

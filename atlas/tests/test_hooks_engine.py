@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from atlas.hooks import (
     HookBlockedError,
@@ -87,9 +88,34 @@ class TestHookConfig:
         assert h.matches("anything")
         assert h.matches(None)
 
-    def test_invalid_regex_does_not_crash(self):
-        h = HookConfig(name="a", command=["true"], matcher="(unclosed")
-        assert h.matches("x") is False  # invalid matcher -> non-match, no raise
+    def test_invalid_regex_is_rejected_at_config_load(self):
+        # A malformed matcher must fail validation rather than silently never
+        # matching: on a fail-closed event that would quietly delete a control.
+        with pytest.raises(ValidationError, match="not a valid regex"):
+            HookConfig(name="a", command=["true"], matcher="(unclosed")
+
+    def test_invalid_regex_built_directly_fires_rather_than_skips(self):
+        # Bypassing validation (model_construct) should still not silently
+        # disable the hook -- an uncompilable pattern errs toward firing.
+        h = HookConfig.model_construct(name="a", command=["true"], matcher="(unclosed")
+        assert h.matches("x") is True
+
+    def test_matcher_on_matcherless_event_warns_at_load(self, caplog):
+        # SessionStart supplies no matcher value, so this hook can never fire.
+        # The operator must learn that at load time, not by noticing their policy
+        # silently never ran.
+        with caplog.at_level("WARNING"):
+            HooksConfig(hooks={"SessionStart": [
+                HookConfig(name="never-fires", command=["true"], matcher="something"),
+            ]})
+        assert any("will never fire" in r.getMessage() for r in caplog.records)
+
+    def test_wildcard_matcher_on_matcherless_event_does_not_warn(self, caplog):
+        with caplog.at_level("WARNING"):
+            HooksConfig(hooks={"SessionStart": [
+                HookConfig(name="fine", command=["true"], matcher="*"),
+            ]})
+        assert not [r for r in caplog.records if "will never fire" in r.getMessage()]
 
     def test_effective_on_error_uses_event_default(self):
         h = HookConfig(name="a", command=["true"])
@@ -491,6 +517,52 @@ class TestFailureModes:
         # PreToolUse default on_error is deny
         assert outcome.verdict == "deny"
         assert "timeout" in outcome.reason
+
+    async def test_output_over_cap_is_killed_and_treated_as_error(self, tmp_path):
+        # The cap must be enforced while reading, not by truncating a buffer that
+        # already holds the whole stream: a hook emitting far more than the cap
+        # would otherwise be fully buffered in server memory first.
+        body = f"""\
+        #!{sys.executable}
+        import sys
+        chunk = "x" * 65536
+        try:
+            for _ in range(200):          # ~13 MB, well over the 1 MB cap
+                sys.stdout.write(chunk)
+                sys.stdout.flush()
+        except Exception:
+            pass
+        sys.exit(0)
+        """
+        script = _write_hook(tmp_path, "flood", body)
+        mgr = _make_manager(tmp_path, {"PreToolUse": [
+            HookConfig(name="f", command=[script], timeout_ms=20000),
+        ]})
+        outcome = await mgr.run_event(
+            HookEvent.PRE_TOOL_USE, {"tool_name": "t", "tool_args": {}},
+            session_context=_session_ctx(), matcher_value="t",
+        )
+        # PreToolUse fails closed, and a truncated stream is never parsed as a
+        # decision.
+        assert outcome.verdict == "deny"
+        assert "1 MB" in outcome.reason
+
+    async def test_output_within_the_cap_is_returned_intact(self, tmp_path):
+        payload = "y" * 10000
+        body = f"""\
+        #!{sys.executable}
+        import json, sys
+        print(json.dumps({{"decision": "modify", "payload": {{"tool_args": {{"blob": "{payload}"}}}}}}))
+        sys.exit(0)
+        """
+        script = _write_hook(tmp_path, "chatty", body)
+        mgr = _make_manager(tmp_path, {"PreToolUse": [HookConfig(name="c", command=[script])]})
+        outcome = await mgr.run_event(
+            HookEvent.PRE_TOOL_USE, {"tool_name": "t", "tool_args": {}},
+            session_context=_session_ctx(), matcher_value="t",
+        )
+        assert outcome.verdict == "modify"
+        assert outcome.payload["tool_args"]["blob"] == payload
 
     async def test_missing_executable(self, tmp_path):
         mgr = _make_manager(tmp_path, {"PreToolUse": [

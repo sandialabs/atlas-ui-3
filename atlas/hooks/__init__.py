@@ -3,7 +3,7 @@
 Operator-installed executables (bash, Python, anything) registered in
 ``config/hooks.json`` run as subprocesses at chat lifecycle chokepoints. The
 event payload arrives as JSON on stdin; the hook's JSON on stdout (plus exit
-code) can allow, modify, block, or escalate the operation. See ``docs/hooks.md``.
+code) can allow, modify, block, or escalate the operation. See ``docs/admin/hooks.md``.
 
 Public API:
     HookEvent          -- lifecycle event enum (also the config key / wire name)

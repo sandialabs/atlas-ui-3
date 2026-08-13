@@ -1,7 +1,8 @@
 # Hook system (config-driven lifecycle hooks)
 
-Atlas supports an **opt-in, config-driven hook system** modeled on Claude Code
-and OpenCode: an operator writes a bash or Python script, registers it in
+Atlas supports an **opt-in, config-driven hook system** modeled on the
+lifecycle-hook pattern common to agent CLIs: an operator writes a bash or
+Python script, registers it in
 `config/hooks.json` against a lifecycle event, and Atlas runs it as a
 subprocess at that point in the turn. The event payload arrives as **JSON on
 stdin**; the script's **JSON on stdout** (plus its exit code) can allow,
@@ -29,7 +30,7 @@ design proposal.
          {
            "name": "block-destructive-fs",
            "matcher": "filesystem__.*",
-           "command": ["${ATLAS_CONFIG_DIR}/hooks/block_destructive.py"],
+           "command": ["${ATLAS_CONFIG_DIR}/hooks/block_destructive.sh"],
            "timeout_ms": 2000
          }
        ]
@@ -37,7 +38,7 @@ design proposal.
    }
    ```
 
-2. Put the script at `config/hooks/block_destructive.py` and make it executable.
+2. Put the script at `config/hooks/block_destructive.sh` and make it executable.
 
 3. Restart Atlas (config is loaded through `ConfigManager`, so hook changes
    follow the same reload story as the rest of Atlas config).
@@ -53,7 +54,7 @@ Each hook entry under `hooks.<EventName>` is:
 | Field        | Type                | Default | Description                                                                 |
 | ------------ | ------------------- | ------- | -------------------------------------------------------------------------- |
 | `name`       | string (required)   | —       | Identifier used in logs/audit spans.                                       |
-| `matcher`    | string (regex)      | `"*"`   | Regex over the event's matcher value (tool name / RAG source). `*`/omit = all. |
+| `matcher`    | string (regex)      | `"*"`   | Regex over the event's matcher value (tool name / RAG source). `*`/omit = all. Compiled at load time (an invalid regex is a config error). `SessionStart`/`SessionEnd`/`UserPromptSubmit` supply no matcher value, so setting one there means the hook **never fires** — a warning is logged at load. |
 | `command`    | string[] (required) | —       | argv array, spawned with **no shell**. Supports `${ATLAS_CONFIG_DIR}` and `${ATLAS_PROJECT_DIR}` interpolation. |
 | `timeout_ms` | int                 | `2000`  | Wall-clock budget; on expiry the process is killed and `on_error` applies. |
 | `on_error`   | `"deny"` / `"allow"` | per-event default | Outcome when the hook crashes, times out, or emits malformed output. |
@@ -74,14 +75,14 @@ previous hook's `modify` output. The first `deny` short-circuits the chain; a
 | `SessionStart`      | `ChatService.create_session`                      | Attach session metadata (`modify`); reject the session (`deny`).         | `allow`          |
 | `UserPromptSubmit`  | `ChatOrchestrator.execute`, after user msg added  | Rewrite/redact the prompt; narrow tools/sources; block the turn (`deny`). | `allow`       |
 | `PreLlmCall`        | `call_plain` / `call_with_tools` (+ streaming)    | Inspect/redact outgoing messages; swap the model; block the call.       | `deny`           |
-| `PreToolUse` ⭐     | `execute_single_tool`, before invoke              | Mutate tool args (re-injected with security params after); deny; force approval. | `deny`     |
+| `PreToolUse` (*)   | `execute_single_tool`, before invoke              | Mutate tool args (re-injected with security params after); deny; force approval. | `deny`     |
 | `PostToolUse`       | `execute_single_tool`, after invoke              | Transform/redact the result; annotate; deny (replace with error).       | `allow`          |
 | `PermissionRequest` | `execute_single_tool`, at the approval gate      | Auto-approve / auto-deny / escalate to a human; add audit reason.       | `deny`           |
 | `RagCall`          | `UnifiedRAGService.query_rag(_batch)` + agentic   | Rewrite the query; narrow sources (batch, cannot widen); block retrieval. | `deny`        |
-| `RagResponse`      | after retrieval, before prompt injection         | Redact/replace synthesized content; filter chunks; block (empty result). | `allow`        |
+| `RagResponse`      | after retrieval, before prompt injection         | Redact/replace the synthesized `content`; block (empty result). Only `payload["content"]` is read back -- returned metadata is ignored. | `allow`        |
 | `SessionEnd`        | `ChatService.end_session`                         | Flush audit records; notify. (Cannot block; deny is treated as continue.) | `allow`       |
 
-⭐ **PreToolUse** is the most powerful control point: every tool call — tools
+(*) **PreToolUse** is the most powerful control point: every tool call — tools
 mode *and* the agentic loop — passes through `execute_single_tool`, so one hook
 uniformly governs arguments, denial, and approval escalation.
 
@@ -148,10 +149,22 @@ The simplest useful hook is three lines of bash with no JSON emitted at all.
   `tool_executor.py`.
 - `modify` on `RagCall` (batch) may **narrow** the source list; sources the
   hook lists that were not in the original request are dropped. A hook can
-  never add a source outside the compliance-filtered allow-list.
+  never add a source outside the compliance-filtered allow-list. The same rule
+  applies to `UserPromptSubmit`: `selected_tools` / `selected_data_sources` are
+  intersected with what the user actually selected, and an explicitly empty
+  list means *none* (it is never re-widened to the original selection).
 - `PermissionRequest` may auto-approve (`modify` with `needs_approval: false`)
   or escalate (`require_approval`). `PreToolUse` may escalate but **cannot
-  auto-approve** — a hook may never lower a boundary another hook raised.
+  auto-approve** — a hook may never lower a boundary another hook raised. If a
+  `PreToolUse` hook rewrites the arguments after a `PermissionRequest`
+  auto-approval, that approval is **revoked**: it covered the arguments the
+  first hook inspected, not the ones that would now run.
+- `require_approval` forces the approval gate but does **not** make the request
+  admin-only; the tool's own `admin_required` setting stays authoritative, so a
+  hook cannot produce a request the requesting user is unable to satisfy.
+- A `PreLlmCall` hook that swaps `model` has the replacement re-checked against
+  the same per-model group ACL the orchestrator applied to the original
+  selection; an unauthorized swap is refused and the original model is kept.
 - Every hook invocation emits an OpenTelemetry span (`hook.event`) with the
   event name, verdict, exit code, and duration (no raw prompts/args/outputs —
   see the telemetry sensitive-data policy). The audit trail flows through the
@@ -159,8 +172,16 @@ The simplest useful hook is three lines of bash with no JSON emitted at all.
 - **Environment allow-list**: hooks get `PATH`, `HOME`, `LANG`, `SYSTEMROOT`,
   `USER`, plus `ATLAS_CONFIG_DIR` and `ATLAS_PROJECT_DIR`. They do **not**
   inherit the server's full environment (which holds provider API keys).
-- **Bounded output**: stdout/stderr are capped at 1 MB; overflow is treated as
-  a hook error (handled per `on_error`).
+- **Bounded output**: stdout/stderr are capped at 1 MB *at read time* — the
+  child is killed as soon as its combined output crosses the cap, so a runaway
+  hook cannot be buffered into server memory first. Overflow is treated as a
+  hook error (handled per `on_error`); the truncated prefix is never parsed as
+  a decision.
+- A `SessionStart` `deny` runs **before** the session is persisted, so a
+  rejected session leaves no row behind for a retry to pick up.
+- A malformed `hooks.json` disables every hook. `ConfigManager.validate_config`
+  reports `hooks_config: false` in that case — treat it as a failed security
+  control, not a warning.
 
 ## Example hooks
 
