@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
 from atlas.domain.messages.models import ToolCall, ToolResult
+from atlas.hooks import HookEvent, get_hook_manager
 from atlas.modules.mcp_tools.mcp_discovery import (
     _ATLAS_RAG_DISCOVER_TOOL,
     _ATLAS_RAG_QUERY_TOOL,
@@ -778,9 +779,9 @@ class ExecutionMixin:
                 if not unified_rag:
                     raise RuntimeError("Unified RAG service is not configured")
                 if len(group) == 1:
-                    resp = await unified_rag.query_rag(user_email, group[0], messages)
+                    resp = await unified_rag.query_rag(user_email, group[0], messages, _skip_hooks=True)
                 else:
-                    resp = await unified_rag.query_rag_batch(user_email, group, messages)
+                    resp = await unified_rag.query_rag_batch(user_email, group, messages, _skip_hooks=True)
                 return {
                     "data_sources": group,
                     "content": resp.content,
@@ -805,6 +806,61 @@ class ExecutionMixin:
             group_lists = list(http_groups.values()) + list(mcp_groups.values())
             coros = [_query_http(g) for g in http_groups.values()]
             coros += [_query_mcp(g) for g in mcp_groups.values()]
+
+            # RagCall hook (GH #713): fires once for the whole agentic atlas_rag_query
+            # call (covering both HTTP and MCP sources). HTTP sources skip the
+            # per-source hooks inside unified_rag (_skip_hooks=True) to avoid
+            # double-firing. A hook may rewrite the query or narrow sources; it
+            # can never widen (only entries from the authorized set survive).
+            rag_mgr = get_hook_manager()
+            _rag_blocked: Optional[str] = None
+            if rag_mgr is not None and rag_mgr.has_hooks(HookEvent.RAG_CALL):
+                rag_call = await rag_mgr.run_event(
+                    HookEvent.RAG_CALL,
+                    {"query": query, "qualified_data_sources": list(sources), "username": user_email},
+                    session_context={
+                        "user_email": user_email,
+                        "compliance_level": compliance_level,
+                        "session_id": context.get("session_id") if isinstance(context, dict) else None,
+                    },
+                    matcher_value=",".join(sources),
+                )
+                if rag_call.verdict == "deny":
+                    _rag_blocked = rag_call.reason or "RAG query blocked by policy hook"
+                elif rag_call.verdict == "modify":
+                    new_q = rag_call.payload.get("query")
+                    if isinstance(new_q, str) and new_q and new_q != query:
+                        query = new_q
+                        messages = [{"role": "user", "content": query}]
+                    new_sources = rag_call.payload.get("qualified_data_sources")
+                    if isinstance(new_sources, list):
+                        allowed = set(sources)
+                        narrowed = [s for s in new_sources if s in allowed]
+                        if not narrowed:
+                            _rag_blocked = rag_call.payload.get("reason") or "RAG query narrowed to no sources by hook"
+                        else:
+                            sources = narrowed
+                            # Rebuild groups for the narrowed source set
+                            http_groups = {}
+                            mcp_groups = {}
+                            for source in sources:
+                                server_name = source.split(":", 1)[0]
+                                if source_origin.get(source) == "mcp":
+                                    mcp_groups.setdefault(server_name, []).append(source)
+                                else:
+                                    http_groups.setdefault(server_name, []).append(source)
+                            group_lists = list(http_groups.values()) + list(mcp_groups.values())
+                            coros = [_query_http(g) for g in http_groups.values()]
+                            coros += [_query_mcp(g) for g in mcp_groups.values()]
+
+            if _rag_blocked is not None:
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content=f"RAG query blocked by policy hook: {_rag_blocked}",
+                    success=False,
+                    error=_rag_blocked,
+                )
+
             settled = await asyncio.gather(*coros, return_exceptions=True)
 
             answers: List[Dict[str, Any]] = []
@@ -820,6 +876,39 @@ class ExecutionMixin:
                     errors.append({"data_sources": group_sources, "error": str(outcome)})
                 else:
                     answers.append(outcome)
+
+            # RagResponse hook (GH #713): redact/replace the combined answer before
+            # it is returned to the model. The agentic path reduces per-source
+            # RAGResponse objects to {data_sources, content} dicts (metadata is
+            # dropped), so the hook operates on the combined content. Observability
+            # default fail-open; deny yields an empty combined answer.
+            if rag_mgr is not None and rag_mgr.has_hooks(HookEvent.RAG_RESPONSE):
+                combined_answer = "\n\n".join(
+                    a["content"] for a in answers if a.get("content")
+                )
+                rag_resp = await rag_mgr.run_event(
+                    HookEvent.RAG_RESPONSE,
+                    {
+                        "query": query,
+                        "qualified_data_sources": list(sources),
+                        "username": user_email,
+                        "content": combined_answer,
+                        "answers": answers,
+                    },
+                    session_context={
+                        "user_email": user_email,
+                        "compliance_level": compliance_level,
+                        "session_id": context.get("session_id") if isinstance(context, dict) else None,
+                    },
+                    matcher_value=",".join(sources),
+                )
+                if rag_resp.verdict == "deny":
+                    answers = []
+                elif rag_resp.verdict == "modify":
+                    new_combined = rag_resp.payload.get("content")
+                    if isinstance(new_combined, str):
+                        # Replace the combined answer by collapsing to a single answer entry.
+                        answers = [{"data_sources": sources, "content": new_combined, "is_completion": False}] if new_combined else []
 
             results_payload: Dict[str, Any] = {
                 "query": query,

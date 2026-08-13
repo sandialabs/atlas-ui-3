@@ -26,6 +26,7 @@ from atlas.core.telemetry import (
     start_span,
 )
 from atlas.domain.errors import DataSourcePermissionError
+from atlas.hooks import HookEvent, get_hook_manager
 from atlas.modules.config.config_manager import ConfigManager, RAGSourceConfig, resolve_env_var
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
 from atlas.modules.rag.client import RAGResponse
@@ -142,6 +143,87 @@ class UnifiedRAGService:
 
         # Cache of HTTP RAG clients by source name
         self._http_clients: Dict[str, AtlasRAGClient] = {}
+
+    # ----------------------------------------------------- RAG hooks (GH #713)
+
+    @staticmethod
+    def _rag_session_context(username: str) -> Dict[str, Any]:
+        cl, _ = get_active_compliance_context()
+        return {"user_email": username, "compliance_level": cl}
+
+    async def _fire_rag_call_hook(
+        self,
+        query_text: str,
+        sources: List[str],
+        username: str,
+    ) -> Optional[Any]:
+        """RagCall hook: rewrite the query, narrow sources (batch), or block.
+
+        Returns the ``HookOutcome`` or ``None`` when no hooks fired. Call sites
+        apply: ``deny`` -> empty RAGResponse; ``modify`` with ``query`` rewrites
+        the last user message; ``modify`` with ``qualified_data_sources`` narrows
+        a batch to a subset (sources outside the original allow-list are dropped;
+        a hook can never widen). ``require_approval`` is a no-op at the RAG layer.
+        """
+        mgr = get_hook_manager()
+        if mgr is None or not mgr.has_hooks(HookEvent.RAG_CALL):
+            return None
+        return await mgr.run_event(
+            HookEvent.RAG_CALL,
+            {"query": query_text, "qualified_data_sources": list(sources), "username": username},
+            session_context=self._rag_session_context(username),
+            matcher_value=",".join(sources) if sources else None,
+        )
+
+    async def _fire_rag_response_hook(
+        self,
+        query_text: str,
+        sources: List[str],
+        username: str,
+        response: "RAGResponse",
+    ) -> "RAGResponse":
+        """RagResponse hook: redact/filter chunks or replace synthesized content.
+
+        Returns the (possibly modified) ``RAGResponse``. ``deny`` returns an empty
+        response (retrieval blocked). Observability-default fail-open so a broken
+        audit hook does not discard results. Source narrowing is NOT honored
+        here (retrieval already happened); use RagCall for that.
+        """
+        mgr = get_hook_manager()
+        if mgr is None or not mgr.has_hooks(HookEvent.RAG_RESPONSE):
+            return response
+        outcome = await mgr.run_event(
+            HookEvent.RAG_RESPONSE,
+            {
+                "query": query_text,
+                "qualified_data_sources": list(sources),
+                "username": username,
+                "content": response.content,
+                "metadata": response.metadata.model_dump() if response.metadata else None,
+            },
+            session_context=self._rag_session_context(username),
+            matcher_value=",".join(sources) if sources else None,
+        )
+        if outcome.verdict == "deny":
+            return RAGResponse(content="", metadata=None)
+        if outcome.verdict == "modify":
+            new_content = outcome.payload.get("content")
+            if isinstance(new_content, str):
+                response.content = new_content
+        return response
+
+    @staticmethod
+    def _rewrite_query_messages(messages: List[Dict], new_query: str) -> List[Dict]:
+        """Return a shallow-copied messages list with the last user message
+        content replaced by ``new_query`` (so the backend extracts the rewritten
+        query). Non-mutating; if no user message is present, appends one."""
+        out = list(messages)
+        for i in range(len(out) - 1, -1, -1):
+            if out[i].get("role") == "user":
+                out[i] = {**out[i], "content": new_query}
+                return out
+        out.append({"role": "user", "content": new_query})
+        return out
 
     def _get_http_client(self, source_name: str, config: RAGSourceConfig) -> AtlasRAGClient:
         """Get or create an HTTP RAG client for a source."""
@@ -403,12 +485,13 @@ class UnifiedRAGService:
         qualified_data_source: str,
         messages: List[Dict],
         enforced_compliance_level: Optional[str] = None,
+        _skip_hooks: bool = False,
     ) -> RAGResponse:
         """Query a RAG source.
 
         Args:
             username: The user making the query.
-            qualified_data_source: Data source in format "server:source_id" (e.g., "atlas_rag:technical-docs").
+            qualified_data_source: Data source in format "server:source_id" (e.g. "atlas_rag:technical-docs").
             messages: List of message dictionaries.
             enforced_compliance_level: Overrides the ambient compliance context
                 for this call. This must be a **trusted, server-derived** level
@@ -416,6 +499,10 @@ class UnifiedRAGService:
                 filter. Production callers leave this ``None`` and let
                 ``ChatService`` establish the context for the whole turn; it
                 exists for callers that run outside a chat turn, and for tests.
+            _skip_hooks: When True, skip the RagCall/RagResponse hooks. Used by
+                the agentic atlas_rag_query path, which fires its own single
+                RagCall/RagResponse over all sources to avoid double-firing for
+                HTTP sources that route through this method (GH #713).
 
         Returns:
             RAGResponse with content and metadata.
@@ -438,7 +525,26 @@ class UnifiedRAGService:
             token = set_active_compliance_context(enforced_compliance_level, enforce=True)
         try:
             with start_span("rag.query", span_attrs) as span:
+                # RagCall hook (GH #713): rewrite query / block retrieval.
+                call_outcome = None if _skip_hooks else await self._fire_rag_call_hook(
+                    query_text, [qualified_data_source], username
+                )
+                if call_outcome is not None and call_outcome.verdict == "deny":
+                    set_attrs(span, {"rag.blocked_by_hook": True})
+                    return RAGResponse(content="", metadata=None)
+                if call_outcome is not None and call_outcome.verdict == "modify":
+                    new_q = call_outcome.payload.get("query")
+                    if isinstance(new_q, str) and new_q:
+                        messages = self._rewrite_query_messages(messages, new_q)
+                        query_text = new_q
+
                 response = await self._query_rag_impl(username, qualified_data_source, messages)
+
+                # RagResponse hook (GH #713): redact/filter before injection.
+                if not _skip_hooks:
+                    response = await self._fire_rag_response_hook(
+                        query_text, [qualified_data_source], username, response
+                    )
                 set_attrs(span, _rag_response_attrs(response))
                 return response
         finally:
@@ -584,6 +690,7 @@ class UnifiedRAGService:
         qualified_data_sources: List[str],
         messages: List[Dict],
         enforced_compliance_level: Optional[str] = None,
+        _skip_hooks: bool = False,
     ) -> RAGResponse:
         """Query multiple RAG sources on the same server in a single request.
 
@@ -600,6 +707,8 @@ class UnifiedRAGService:
             enforced_compliance_level: Overrides the ambient compliance context
                 for this call. Must be a **trusted, server-derived** level, never
                 a client-supplied filter. See :meth:`query_rag`.
+            _skip_hooks: When True, skip the RagCall/RagResponse hooks (agentic
+                path fires its own; see :meth:`query_rag`).
 
         Returns:
             RAGResponse with content and metadata from the batched query.
@@ -624,7 +733,37 @@ class UnifiedRAGService:
             token = set_active_compliance_context(enforced_compliance_level, enforce=True)
         try:
             with start_span("rag.query", span_attrs) as span:
+                # RagCall hook (GH #713): rewrite query / narrow sources / block.
+                # A hook may only NARROW the source list (drop entries); sources
+                # it adds that were not in the original request are discarded so
+                # a hook can never widen the retrieval boundary.
+                call_outcome = None if _skip_hooks else await self._fire_rag_call_hook(
+                    query_text, qualified_data_sources, username
+                )
+                if call_outcome is not None and call_outcome.verdict == "deny":
+                    set_attrs(span, {"rag.blocked_by_hook": True})
+                    return RAGResponse(content="", metadata=None)
+                if call_outcome is not None and call_outcome.verdict == "modify":
+                    new_q = call_outcome.payload.get("query")
+                    if isinstance(new_q, str) and new_q:
+                        messages = self._rewrite_query_messages(messages, new_q)
+                        query_text = new_q
+                    new_sources = call_outcome.payload.get("qualified_data_sources")
+                    if isinstance(new_sources, list):
+                        allowed = set(qualified_data_sources)
+                        narrowed = [s for s in new_sources if s in allowed]
+                        if not narrowed:
+                            set_attrs(span, {"rag.blocked_by_hook": True})
+                            return RAGResponse(content="", metadata=None)
+                        qualified_data_sources = narrowed
+
                 response = await self._query_rag_batch_impl(username, qualified_data_sources, messages)
+
+                # RagResponse hook (GH #713)
+                if not _skip_hooks:
+                    response = await self._fire_rag_response_hook(
+                        query_text, qualified_data_sources, username, response
+                    )
                 set_attrs(span, _rag_response_attrs(response))
                 return response
         finally:

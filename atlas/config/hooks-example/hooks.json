@@ -1,0 +1,35 @@
+{
+  "_comment": "Example hooks.json (GH #713). Copy to config/hooks.json to enable. This file is NOT auto-loaded -- the loader searches for 'hooks.json' directly, so this example under hooks-example/ is purely illustrative.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "name": "block-destructive-fs",
+        "matcher": "filesystem__.*",
+        "command": ["${ATLAS_CONFIG_DIR}/hooks-example/block_destructive.sh"],
+        "timeout_ms": 2000,
+        "on_error": "deny"
+      },
+      {
+        "name": "require-approval-network",
+        "matcher": "(http_|fetch_).*",
+        "command": ["${ATLAS_CONFIG_DIR}/hooks-example/require_approval_network.py"],
+        "timeout_ms": 1000
+      }
+    ],
+    "PostToolUse": [
+      {
+        "name": "audit-log",
+        "command": ["${ATLAS_CONFIG_DIR}/hooks-example/audit_tool.sh"],
+        "timeout_ms": 1000,
+        "on_error": "allow"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "name": "redact-pii",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks-example/redact_pii.py"],
+        "timeout_ms": 3000
+      }
+    ]
+  }
+}

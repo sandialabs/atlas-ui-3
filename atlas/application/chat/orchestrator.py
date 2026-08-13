@@ -7,6 +7,7 @@ from uuid import UUID
 from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.domain.errors import AuthorizationError, SessionNotFoundError
 from atlas.domain.messages.models import Message, MessageRole
+from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 from atlas.interfaces.sessions import SessionRepository
@@ -20,7 +21,7 @@ from .modes.tools import ToolsModeRunner
 from .policies.tool_authorization import ToolAuthorizationService
 from .preprocessors.message_builder import MessageBuilder
 from .preprocessors.prompt_override_service import PromptOverrideService
-from .utilities import file_processor
+from .utilities import event_notifier, file_processor
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +263,50 @@ class ChatOrchestrator:
         )
         session.history.add_message(user_message)
         session.update_timestamp()
+
+        # UserPromptSubmit hook (GH #713): fires after the user message is added,
+        # before file ingestion and mode dispatch. A hook may rewrite/redact the
+        # prompt text, narrow selected_tools/data_sources, disable agent_mode,
+        # or block the turn with a message. Opt-in; zero overhead without
+        # config/hooks.json.
+        hook_mgr = get_hook_manager()
+        if hook_mgr is not None and hook_mgr.has_hooks(HookEvent.USER_PROMPT_SUBMIT):
+            payload = {
+                "prompt": content,
+                "selected_tools": list(selected_tools) if selected_tools else [],
+                "selected_data_sources": list(selected_data_sources) if selected_data_sources else [],
+                "agent_mode": bool(agent_mode),
+            }
+            outcome = await hook_mgr.run_event(
+                HookEvent.USER_PROMPT_SUBMIT,
+                payload,
+                session_context={
+                    "session_id": str(session_id),
+                    "user_email": user_email,
+                    "compliance_level": session.context.get("compliance_level"),
+                },
+            )
+            if outcome.verdict == "deny":
+                reason = outcome.reason or "Prompt blocked by policy hook."
+                block_msg = Message(role=MessageRole.ASSISTANT, content=reason, metadata={"blocked_by_hook": True})
+                session.history.add_message(block_msg)
+                await self.event_publisher.publish_response_complete()
+                return event_notifier.create_chat_response(reason)
+            if outcome.verdict == "modify":
+                new_prompt = outcome.payload.get("prompt")
+                if isinstance(new_prompt, str) and new_prompt:
+                    content = new_prompt
+                    # Reflect the (possibly redacted) prompt in the stored user message
+                    user_message.content = content
+                new_tools = outcome.payload.get("selected_tools")
+                if isinstance(new_tools, list):
+                    selected_tools = new_tools or None
+                new_sources = outcome.payload.get("selected_data_sources")
+                if isinstance(new_sources, list):
+                    selected_data_sources = new_sources or None
+                new_agent = outcome.payload.get("agent_mode")
+                if isinstance(new_agent, bool):
+                    agent_mode = new_agent
 
         # Handle file ingestion
         update_callback = kwargs.get("update_callback")

@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.core.capabilities import create_download_url
 from atlas.domain.messages.models import ToolCall, ToolResult
+from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.llm import LLMResponse
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
@@ -442,6 +443,96 @@ async def execute_single_tool(
             arguments_were_edited = False
             original_display_args = dict(display_args) if isinstance(display_args, dict) else display_args
 
+            # --- Hook system (GH #713) -----------------------------------------
+            # PermissionRequest fires at the approval gate: a hook may
+            # auto-approve (modify with needs_approval=False), auto-deny, or
+            # escalate (require_approval forces the human gate even when
+            # skip_approval or the default would not). PreToolUse fires next:
+            # it may mutate args (re-injected with security-critical params
+            # afterward) or deny, and can escalate to approval but NOT
+            # auto-approve (a hook may tighten but never widen a boundary).
+            # Both are opt-in; zero overhead without config/hooks.json.
+            hook_mgr = get_hook_manager()
+            _hook_denied_result: Optional[ToolResult] = None
+            if hook_mgr is not None:
+                _sc = {
+                    "session_id": session_context.get("session_id"),
+                    "user_email": session_context.get("user_email"),
+                    "compliance_level": session_context.get("compliance_level"),
+                }
+                if hook_mgr.has_hooks(HookEvent.PERMISSION_REQUEST):
+                    perm_outcome = await hook_mgr.run_event(
+                        HookEvent.PERMISSION_REQUEST,
+                        {
+                            "tool_name": tool_call.function.name,
+                            "tool_args": dict(filtered_args),
+                            "tool_call_id": tool_call.id,
+                            "needs_approval": bool(needs_approval),
+                            "allow_edit": allow_edit,
+                            "admin_required": admin_required,
+                        },
+                        session_context=_sc,
+                        matcher_value=tool_call.function.name,
+                    )
+                    if perm_outcome.verdict == "deny":
+                        _hook_denied_result = ToolResult(
+                            tool_call_id=tool_call.id,
+                            content=f"Tool blocked by policy hook: {perm_outcome.reason}",
+                            success=False, error=perm_outcome.reason,
+                        )
+                    else:
+                        if perm_outcome.verdict == "modify" and isinstance(perm_outcome.payload.get("tool_args"), dict):
+                            filtered_args = _filter_args_to_schema(
+                                inject_context_into_args(
+                                    perm_outcome.payload["tool_args"], session_context,
+                                    tool_call.function.name, tool_manager,
+                                ),
+                                tool_call.function.name, tool_manager,
+                            )
+                            display_args = _sanitize_args_for_ui(dict(filtered_args))
+                            arguments_were_edited = True
+                        if perm_outcome.verdict == "require_approval":
+                            needs_approval = True
+                            admin_required = True
+                        elif perm_outcome.verdict == "modify" and perm_outcome.payload.get("needs_approval") is False:
+                            needs_approval = False
+
+                if _hook_denied_result is None and hook_mgr.has_hooks(HookEvent.PRE_TOOL_USE):
+                    pre_outcome = await hook_mgr.run_event(
+                        HookEvent.PRE_TOOL_USE,
+                        {
+                            "tool_name": tool_call.function.name,
+                            "tool_args": dict(filtered_args),
+                            "tool_call_id": tool_call.id,
+                        },
+                        session_context=_sc,
+                        matcher_value=tool_call.function.name,
+                    )
+                    if pre_outcome.verdict == "deny":
+                        _hook_denied_result = ToolResult(
+                            tool_call_id=tool_call.id,
+                            content=f"Tool blocked by policy hook: {pre_outcome.reason}",
+                            success=False, error=pre_outcome.reason,
+                        )
+                    else:
+                        if pre_outcome.verdict == "modify" and isinstance(pre_outcome.payload.get("tool_args"), dict):
+                            filtered_args = _filter_args_to_schema(
+                                inject_context_into_args(
+                                    pre_outcome.payload["tool_args"], session_context,
+                                    tool_call.function.name, tool_manager,
+                                ),
+                                tool_call.function.name, tool_manager,
+                            )
+                            display_args = _sanitize_args_for_ui(dict(filtered_args))
+                            arguments_were_edited = True
+                        if pre_outcome.verdict == "require_approval":
+                            needs_approval = True
+                            admin_required = True
+
+            if _hook_denied_result is not None:
+                await event_notifier.notify_tool_error(tool_call, _hook_denied_result.error or "blocked", update_callback)
+                return _finalize_span(_hook_denied_result)
+
             # If approval is required, request it from the user
             if needs_approval:
                 logger.info(f"Tool {tool_call.function.name} requires approval (admin_required={admin_required})")
@@ -559,6 +650,46 @@ async def execute_single_tool(
             raw_output_for_telemetry = (
                 result.content if isinstance(result.content, str) else str(result.content)
             )
+
+            # PostToolUse hook (GH #713): a hook may transform/redact the result
+            # before it reaches the model/UI, or deny (replace with an error
+            # result). Observability-default fail-open so a broken audit hook
+            # does not kill the turn. Security-critical result fields are not
+            # re-injected (results have none); a hook can only narrow content.
+            if hook_mgr is not None and hook_mgr.has_hooks(HookEvent.POST_TOOL_USE):
+                post_outcome = await hook_mgr.run_event(
+                    HookEvent.POST_TOOL_USE,
+                    {
+                        "tool_name": tool_call.function.name,
+                        "tool_args": dict(filtered_args),
+                        "tool_call_id": tool_call.id,
+                        "result_content": result.content if isinstance(result.content, str) else str(result.content),
+                        "result_success": bool(result.success),
+                        "result_error": result.error,
+                    },
+                    session_context={
+                        "session_id": session_context.get("session_id"),
+                        "user_email": session_context.get("user_email"),
+                        "compliance_level": session_context.get("compliance_level"),
+                    },
+                    matcher_value=tool_call.function.name,
+                )
+                if post_outcome.verdict == "deny":
+                    result = ToolResult(
+                        tool_call_id=tool_call.id,
+                        content=f"Tool result blocked by policy hook: {post_outcome.reason}",
+                        success=False, error=post_outcome.reason,
+                    )
+                    raw_output_for_telemetry = result.content
+                elif post_outcome.verdict == "modify":
+                    new_content = post_outcome.payload.get("result_content")
+                    if isinstance(new_content, str):
+                        result.content = new_content
+                        raw_output_for_telemetry = new_content
+                    new_success = post_outcome.payload.get("result_success")
+                    if isinstance(new_success, bool):
+                        result.success = new_success
+
             # If arguments were edited, prepend a note to the result for LLM context
             if arguments_were_edited:
                 edit_note = (

@@ -10,6 +10,7 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 - [MCP Server Configuration](mcp-servers.md) - Setting up and configuring MCP tool servers
 - [LLM Configuration](llm-config.md) - Configuring Large Language Models
 - [RAG Configuration](external-rag-api.md) - Configuring RAG providers (mock, ATLAS API, MCP)
+- [Lifecycle Hooks](hooks.md) - Config-driven bash/python hooks at chat lifecycle events (audit, redaction, approval gates)
 - [Model Capabilities Enforcement](model-capabilities-2026-04-02.md) - Declaring and enforcing per-model tool/vision support
 
 ## Security & Access Control

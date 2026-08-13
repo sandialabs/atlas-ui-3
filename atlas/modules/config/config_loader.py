@@ -42,6 +42,7 @@ class ConfigManager:
         self._rag_sources_config: Optional[RAGSourcesConfig] = None
         self._tool_approvals_config: Optional[ToolApprovalsConfig] = None
         self._file_extractors_config: Optional[FileExtractorsConfig] = None
+        self._hooks_config: Optional[Any] = None
 
     def _search_paths(self, file_name: str) -> List[Path]:
         """Generate search paths for a configuration file.
@@ -386,6 +387,44 @@ class ConfigManager:
 
         return self._file_extractors_config
 
+    @property
+    def hooks_config(self):
+        """Get hook configuration (cached) from hooks.json.
+
+        Follows the same two-layer lookup (user ``config/`` overrides packaged
+        ``atlas/config/``) and error tolerance as the other file-backed configs.
+        Hooks are opt-in: a missing file yields an empty config, which means the
+        hook manager short-circuits with zero overhead on the hot path (GH #713).
+        """
+        if self._hooks_config is None:
+            try:
+                # Lazy import avoids a config -> hooks package init cycle at
+                # module load time; the model itself has no I/O or config deps.
+                from atlas.hooks.models import HooksConfig
+
+                hooks_filename = self.app_settings.hooks_config_file
+                file_paths = self._search_paths(hooks_filename)
+                data = self._load_file_with_error_handling(file_paths, "JSON")
+
+                if data:
+                    self._hooks_config = HooksConfig(**data)
+                    total = sum(len(v) for v in self._hooks_config.hooks.values())
+                    logger.info(
+                        "Loaded hooks config with %d hook(s) across %d event(s): %s",
+                        total,
+                        len(self._hooks_config.hooks),
+                        list(self._hooks_config.hooks.keys()),
+                    )
+                else:
+                    self._hooks_config = HooksConfig()
+                    logger.info("No hooks.json found; hook system disabled (zero overhead)")
+            except Exception as e:
+                logger.error(f"Failed to parse hooks configuration: {e}", exc_info=True)
+                from atlas.hooks.models import HooksConfig
+                self._hooks_config = HooksConfig()
+
+        return self._hooks_config
+
     def _resolve_file_extractor_env_vars(self) -> None:
         """Resolve environment variables in file extractor configurations.
 
@@ -462,6 +501,7 @@ class ConfigManager:
         self._rag_sources_config = None
         self._tool_approvals_config = None
         self._file_extractors_config = None
+        self._hooks_config = None
         logger.info("Configuration cache cleared, will reload on next access")
 
     def reload_mcp_config(self) -> MCPConfig:
