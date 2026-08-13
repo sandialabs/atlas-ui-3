@@ -1,9 +1,15 @@
 """Agent mode runner - handles LLM calls with agent loop execution."""
 
+import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from atlas.domain.messages.models import Message, MessageRole, ToolResult
+from atlas.domain.messages.models import (
+    AGENT_TOOL_DIGEST_KEY,
+    Message,
+    MessageRole,
+    ToolResult,
+)
 from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
 
@@ -11,6 +17,11 @@ from ..agent import AgentLoopFactory
 from ..agent.protocols import AgentContext
 from ..events.agent_event_relay import AgentEventRelay
 from ..utilities import event_notifier
+from ..utilities.agent_digest import build_tool_digest
+from ..utilities.interrupted_turn import (
+    INTERRUPTED_TURN_CONTENT,
+    INTERRUPTED_TURN_CONTENT_WITH_DIGEST,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +153,10 @@ class AgentModeRunner:
             artifact_processor=process_artifacts,
         )
 
+        # Everything the loop appends to history from here on belongs to this
+        # turn; remember where it starts so the tool digest covers only it.
+        turn_start_index = len(session.history.messages)
+
         # Run the loop (always streaming final answer)
         try:
             result = await agent_loop.run(
@@ -156,17 +171,28 @@ class AgentModeRunner:
                 streaming=True,
                 event_publisher=self.event_publisher,
             )
+        except asyncio.CancelledError:
+            # Stop button, client disconnect, or reset_session (issue #755).
+            # The loop has already flushed every completed step's narration and
+            # tool_call rows into history, but nothing closes the turn, so the
+            # saved conversation would end mid-trajectory and the next turn
+            # would see no trace of the work. Append a terminal assistant
+            # message carrying the same tool digest a completed turn gets, so
+            # the turn is well-formed and the follow-up can pick up from there.
+            self._close_turn(
+                session,
+                turn_start_index,
+                content=INTERRUPTED_TURN_CONTENT,
+                metadata={"agent_mode": True, "interrupted": True},
+                content_with_digest=INTERRUPTED_TURN_CONTENT_WITH_DIGEST,
+            )
+            await self._publish_completion(steps=0)
+            raise
         except Exception:
             # Send agent completion event so the frontend clears agent UI state
             # (currentAgentStep, thinking indicator, etc.) before the error
             # message arrives via the WebSocket error handler.
-            try:
-                await self.event_publisher.publish_agent_update(
-                    update_type="agent_completion",
-                    steps=0,
-                )
-            except Exception as cleanup_exc:
-                logger.warning("Failed to send agent_completion cleanup event: %s", cleanup_exc)
+            await self._publish_completion(steps=0)
             raise
 
         # Append final message. Ordering contract with AgenticLoop: the loop
@@ -176,12 +202,12 @@ class AgentModeRunner:
         # returns — reloaded history reads user -> intermediate assistant
         # -> tool_call(s) -> assistant. Guarded by
         # TestAgentModeRunnerPersistedOrder in test_tool_call_persistence.py.
-        assistant_message = Message(
-            role=MessageRole.ASSISTANT,
+        self._close_turn(
+            session,
+            turn_start_index,
             content=result.final_answer,
             metadata={"agent_mode": True, "steps": result.steps},
         )
-        session.history.add_message(assistant_message)
 
         # Completion update
         await self.event_publisher.publish_agent_update(
@@ -190,3 +216,48 @@ class AgentModeRunner:
         )
 
         return event_notifier.create_chat_response(result.final_answer)
+
+    def _close_turn(
+        self,
+        session: Session,
+        turn_start_index: int,
+        content: str,
+        metadata: Dict[str, Any],
+        content_with_digest: Optional[str] = None,
+    ) -> Message:
+        """Append the turn's closing assistant message, carrying a tool digest.
+
+        The digest (issue #755) is the only model-visible record of what the
+        agent ran: the loop's working transcript dies with the turn and the
+        persisted ``tool_call`` rows are display-only. Without it a follow-up
+        turn re-derives everything the agent already established — measured at
+        roughly a fifth of tool calls in ordinary, uninterrupted use.
+        """
+        try:
+            digest = build_tool_digest(session.history.messages, turn_start_index)
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("Failed to build agent tool digest", exc_info=True)
+            digest = None
+        if digest:
+            metadata = {**metadata, AGENT_TOOL_DIGEST_KEY: digest}
+            if content_with_digest:
+                # Only claim a record exists when one is actually attached.
+                content = content_with_digest
+
+        message = Message(
+            role=MessageRole.ASSISTANT,
+            content=content,
+            metadata=metadata,
+        )
+        session.history.add_message(message)
+        return message
+
+    async def _publish_completion(self, steps: int) -> None:
+        """Emit agent_completion, tolerating a dead transport."""
+        try:
+            await self.event_publisher.publish_agent_update(
+                update_type="agent_completion",
+                steps=steps,
+            )
+        except Exception as cleanup_exc:
+            logger.warning("Failed to send agent_completion cleanup event: %s", cleanup_exc)

@@ -143,19 +143,30 @@ class ToolsModeRunner:
         recorder = ToolCallRecorder(effective_callback)
         effective_callback = recorder
 
-        final_response, tool_results = await tool_executor.execute_tools_workflow(
-            llm_response=llm_response,
-            messages=messages,
-            model=model,
-            session_context=session_context,
-            tool_manager=self.tool_manager,
-            llm_caller=self.llm,
-            prompt_provider=self.prompt_provider,
-            update_callback=effective_callback,
-            config_manager=self.config_manager,
-            skip_approval=self.skip_approval,
-            user_email=user_email,
-        )
+        try:
+            final_response, tool_results = await tool_executor.execute_tools_workflow(
+                llm_response=llm_response,
+                messages=messages,
+                model=model,
+                session_context=session_context,
+                tool_manager=self.tool_manager,
+                llm_caller=self.llm,
+                prompt_provider=self.prompt_provider,
+                update_callback=effective_callback,
+                config_manager=self.config_manager,
+                skip_approval=self.skip_approval,
+                user_email=user_email,
+            )
+        except BaseException:
+            # A Stop / disconnect during tool execution would otherwise discard
+            # every call that already completed, the same defect fixed for
+            # agent mode in issue #755. Flush what ran, closing out any call
+            # that never reported a result, then let the failure through.
+            try:
+                recorder.flush(session.history, mark_incomplete=True)
+            except Exception:  # pragma: no cover - never mask the real failure
+                logger.warning("Failed to flush tool calls while unwinding", exc_info=True)
+            raise
 
         # Process artifacts if handler provided
         if self.artifact_processor:
@@ -299,114 +310,124 @@ class ToolsModeRunner:
         executed_signatures: set = set()
         extra_round = 0
 
-        while True:
-            tool_calls = [tc for tc in (current_response.tool_calls or []) if tc is not None]
+        try:
+            while True:
+                tool_calls = [tc for tc in (current_response.tool_calls or []) if tc is not None]
 
-            # Append the assistant message with tool_calls as plain dicts so they
-            # round-trip to the next LLM call (streaming yields SimpleNamespace
-            # objects, which serialize to an empty array and get rejected).
-            messages.append({
-                "role": "assistant",
-                "content": current_response.content,
-                "tool_calls": [self._tool_call_dict(tc) for tc in tool_calls],
-            })
-
-            repeated_ids = {
-                self._tool_call_id(tc)
-                for tc in tool_calls
-                if self._tool_call_signature(tc) in executed_signatures
-            }
-            fresh = [
-                tc for tc in tool_calls
-                if self._tool_call_signature(tc) not in executed_signatures
-            ]
-
-            if not fresh:
-                # Anti-loop: the model is only repeating calls it already made.
-                # Satisfy the API (every tool_call_id needs a tool message) with
-                # cached-result notes, then stop and synthesize a final answer.
-                for tc in tool_calls:
-                    messages.append({
-                        "role": "tool",
-                        "content": "(skipped: identical tool call already executed this turn)",
-                        "tool_call_id": self._tool_call_id(tc),
-                    })
-                break
-
-            results = await tool_executor.execute_multiple_tools(
-                tool_calls=fresh,
-                session_context=session_context,
-                tool_manager=self.tool_manager,
-                update_callback=effective_callback,
-                config_manager=self.config_manager,
-                skip_approval=self.skip_approval,
-            )
-            for tc in fresh:
-                executed_signatures.add(self._tool_call_signature(tc))
-            result_by_id = {r.tool_call_id: r.content for r in results}
-            # Append tool results in the SAME order as the assistant tool_calls.
-            for tc in tool_calls:
-                tc_id = self._tool_call_id(tc)
-                if tc_id in repeated_ids:
-                    content = "(skipped: identical tool call already executed this turn)"
-                else:
-                    content = result_by_id.get(tc_id, "")
+                # Append the assistant message with tool_calls as plain dicts so they
+                # round-trip to the next LLM call (streaming yields SimpleNamespace
+                # objects, which serialize to an empty array and get rejected).
                 messages.append({
-                    "role": "tool",
-                    "content": content,
-                    "tool_call_id": tc_id,
+                    "role": "assistant",
+                    "content": current_response.content,
+                    "tool_calls": [self._tool_call_dict(tc) for tc in tool_calls],
                 })
 
-            if self.artifact_processor:
-                await self.artifact_processor(session, results, effective_callback)
+                repeated_ids = {
+                    self._tool_call_id(tc)
+                    for tc in tool_calls
+                    if self._tool_call_signature(tc) in executed_signatures
+                }
+                fresh = [
+                    tc for tc in tool_calls
+                    if self._tool_call_signature(tc) not in executed_signatures
+                ]
 
-            # Budget check: stop chaining once the extra-round budget is spent.
-            if extra_round >= max_extra_rounds:
-                break
-            extra_round += 1
+                if not fresh:
+                    # Anti-loop: the model is only repeating calls it already made.
+                    # Satisfy the API (every tool_call_id needs a tool message) with
+                    # cached-result notes, then stop and synthesize a final answer.
+                    for tc in tool_calls:
+                        messages.append({
+                            "role": "tool",
+                            "content": "(skipped: identical tool call already executed this turn)",
+                            "tool_call_id": self._tool_call_id(tc),
+                        })
+                    break
 
-            # Continue WITH tools so the model can chain another dependent call.
-            next_text, current_response, err = await self._stream_tools_round(
-                model, messages, tools_schema, selected_data_sources,
-                user_email, temperature,
-            )
-            if err is not None:
-                # Provider error mid-continuation (e.g. the tool-choice
-                # rejection) -- fall back to a graceful final synthesis.
-                if current_response is None:
-                    current_response = LLMResponse(content="")
-                break
-            if current_response is None or not current_response.has_tool_calls():
-                # Model produced its final text answer -- finalize and return.
-                final_text = next_text or (current_response.content if current_response else "")
-                return await self._finalize_text_response(
-                    session, final_text, bool(next_text),
-                    selected_tools, selected_data_sources, recorder,
+                results = await tool_executor.execute_multiple_tools(
+                    tool_calls=fresh,
+                    session_context=session_context,
+                    tool_manager=self.tool_manager,
+                    update_callback=effective_callback,
+                    config_manager=self.config_manager,
+                    skip_approval=self.skip_approval,
                 )
-            # else: loop to execute the newly requested tools.
+                for tc in fresh:
+                    executed_signatures.add(self._tool_call_signature(tc))
+                result_by_id = {r.tool_call_id: r.content for r in results}
+                # Append tool results in the SAME order as the assistant tool_calls.
+                for tc in tool_calls:
+                    tc_id = self._tool_call_id(tc)
+                    if tc_id in repeated_ids:
+                        content = "(skipped: identical tool call already executed this turn)"
+                    else:
+                        content = result_by_id.get(tc_id, "")
+                    messages.append({
+                        "role": "tool",
+                        "content": content,
+                        "tool_call_id": tc_id,
+                    })
 
-        # Budget exhausted or anti-loop tripped while the model still wanted
-        # tools -> force a closing text answer via no-tools synthesis, hardened
-        # against another tool-call attempt with a graceful message if the model
-        # ignores that and the provider rejects.
-        synthesis_content = await self._stream_synthesis(
-            current_response, messages, model, session_context, user_email, effective_callback,
-        )
+                if self.artifact_processor:
+                    await self.artifact_processor(session, results, effective_callback)
 
-        # Persist tool calls before the closing answer (issue #684).
-        recorder.flush(session.history)
+                # Budget check: stop chaining once the extra-round budget is spent.
+                if extra_round >= max_extra_rounds:
+                    break
+                extra_round += 1
 
-        assistant_message = Message(
-            role=MessageRole.ASSISTANT,
-            content=synthesis_content,
-            metadata={
-                "tools": selected_tools,
-                **({"data_sources": selected_data_sources} if selected_data_sources else {}),
-            },
-        )
-        session.history.add_message(assistant_message)
-        await self.event_publisher.publish_response_complete()
-        return event_notifier.create_chat_response(synthesis_content)
+                # Continue WITH tools so the model can chain another dependent call.
+                next_text, current_response, err = await self._stream_tools_round(
+                    model, messages, tools_schema, selected_data_sources,
+                    user_email, temperature,
+                )
+                if err is not None:
+                    # Provider error mid-continuation (e.g. the tool-choice
+                    # rejection) -- fall back to a graceful final synthesis.
+                    if current_response is None:
+                        current_response = LLMResponse(content="")
+                    break
+                if current_response is None or not current_response.has_tool_calls():
+                    # Model produced its final text answer -- finalize and return.
+                    final_text = next_text or (current_response.content if current_response else "")
+                    return await self._finalize_text_response(
+                        session, final_text, bool(next_text),
+                        selected_tools, selected_data_sources, recorder,
+                    )
+                # else: loop to execute the newly requested tools.
+
+            # Budget exhausted or anti-loop tripped while the model still wanted
+            # tools -> force a closing text answer via no-tools synthesis, hardened
+            # against another tool-call attempt with a graceful message if the model
+            # ignores that and the provider rejects.
+            synthesis_content = await self._stream_synthesis(
+                current_response, messages, model, session_context, user_email, effective_callback,
+            )
+
+            # Persist tool calls before the closing answer (issue #684).
+            recorder.flush(session.history)
+
+            assistant_message = Message(
+                role=MessageRole.ASSISTANT,
+                content=synthesis_content,
+                metadata={
+                    "tools": selected_tools,
+                    **({"data_sources": selected_data_sources} if selected_data_sources else {}),
+                },
+            )
+            session.history.add_message(assistant_message)
+            await self.event_publisher.publish_response_complete()
+            return event_notifier.create_chat_response(synthesis_content)
+        except BaseException:
+            # A Stop / disconnect mid-round would otherwise discard every
+            # tool call recorded since the turn began -- the recorder only
+            # flushes on the success path (issue #755).
+            try:
+                recorder.flush(session.history, mark_incomplete=True)
+            except Exception:  # pragma: no cover - never mask the real failure
+                logger.warning("Failed to flush tool calls while unwinding", exc_info=True)
+            raise
 
     async def _stream_synthesis(
         self,

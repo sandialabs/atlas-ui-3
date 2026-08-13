@@ -17,7 +17,7 @@ to manage its own control flow.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
@@ -120,8 +120,6 @@ class AgenticLoop(AgentLoopProtocol):
                 self.tool_manager, selected_tools,
             )
 
-        steps = 0
-        final_answer: Optional[str] = None
         use_streaming = streaming and event_publisher
 
         # Record tool input/output as they stream to the UI so agent-mode tool
@@ -130,6 +128,80 @@ class AgenticLoop(AgentLoopProtocol):
         # mode executes tools through this loop's own callback, so it needs the
         # same wrapper here.
         recorder = ToolCallRecorder(self.connection.send_json if self.connection else None)
+
+        try:
+            steps, final_answer = await self._run_steps(
+                model=model,
+                messages=messages,
+                context=context,
+                tools_schema=tools_schema,
+                data_sources=data_sources,
+                max_steps=max_steps,
+                temperature=temperature,
+                event_handler=event_handler,
+                use_streaming=use_streaming,
+                event_publisher=event_publisher,
+                recorder=recorder,
+            )
+        except BaseException:
+            # A stop, a client disconnect, or a mid-step failure leaves this
+            # step's already-executed tool calls only in the recorder. Flush
+            # them so the interrupted turn still persists what actually ran
+            # (issue #755); anything that never reported a result is closed out
+            # rather than left rendering as in-progress forever.
+            try:
+                recorder.flush(context.history, mark_incomplete=True)
+            except Exception:  # pragma: no cover - never mask the real failure
+                logger.warning("Failed to flush tool calls while unwinding", exc_info=True)
+            raise
+
+        # Max steps exhausted without a text-only response
+        if final_answer is None:
+            if use_streaming:
+                final_answer = await stream_final_answer(
+                    self.llm, event_publisher, model, messages,
+                    temperature, context.user_email,
+                )
+            else:
+                final_answer = await self.llm.call_plain(
+                    model, messages, temperature=temperature,
+                    user_email=context.user_email,
+                )
+
+        await event_handler(AgentEvent(
+            type="agent_completion", payload={"steps": steps},
+        ))
+        return AgentResult(
+            final_answer=final_answer,
+            steps=steps,
+            metadata={
+                "agent_mode": True,
+                "strategy": "agentic",
+            },
+        )
+
+    async def _run_steps(
+        self,
+        *,
+        model: str,
+        messages: List[Dict[str, Any]],
+        context: AgentContext,
+        tools_schema: List[Dict[str, Any]],
+        data_sources: Optional[List[str]],
+        max_steps: int,
+        temperature: float,
+        event_handler: AgentEventHandler,
+        use_streaming: bool,
+        event_publisher,
+        recorder: ToolCallRecorder,
+    ) -> Tuple[int, Optional[str]]:
+        """Run the tool-calling steps, returning ``(steps, final_answer)``.
+
+        ``final_answer`` is ``None`` when the step budget ran out before the
+        model produced a text-only response.
+        """
+        steps = 0
+        final_answer: Optional[str] = None
 
         while steps < max_steps:
             steps += 1
@@ -233,30 +305,7 @@ class AgenticLoop(AgentLoopProtocol):
             # final assistant message the caller appends after run() returns.
             recorder.flush(context.history)
 
-        # Max steps exhausted without a text-only response
-        if final_answer is None:
-            if use_streaming:
-                final_answer = await stream_final_answer(
-                    self.llm, event_publisher, model, messages,
-                    temperature, context.user_email,
-                )
-            else:
-                final_answer = await self.llm.call_plain(
-                    model, messages, temperature=temperature,
-                    user_email=context.user_email,
-                )
-
-        await event_handler(AgentEvent(
-            type="agent_completion", payload={"steps": steps},
-        ))
-        return AgentResult(
-            final_answer=final_answer,
-            steps=steps,
-            metadata={
-                "agent_mode": True,
-                "strategy": "agentic",
-            },
-        )
+        return steps, final_answer
 
     async def _call_llm(
         self,

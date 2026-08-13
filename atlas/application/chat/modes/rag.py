@@ -1,5 +1,6 @@
 """RAG mode runner - handles LLM calls with RAG integration."""
 
+import asyncio
 import logging
 from typing import Any, Dict, List
 
@@ -91,16 +92,29 @@ class RagModeRunner:
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
         """Execute RAG mode with token streaming."""
-        accumulated = await stream_and_accumulate(
-            token_generator=self.llm.stream_with_rag(
-                model, messages, data_sources, user_email, temperature=temperature,
-            ),
-            event_publisher=self.event_publisher,
-            fallback_fn=lambda: self.llm.call_with_rag(
-                model, messages, data_sources, user_email, temperature=temperature,
-            ),
-            context_label="RAG",
-        )
+        # Text the user already watched stream in must survive a Stop
+        # (issue #755); the helper drops it here before re-raising.
+        partial: list = []
+        try:
+            accumulated = await stream_and_accumulate(
+                token_generator=self.llm.stream_with_rag(
+                    model, messages, data_sources, user_email, temperature=temperature,
+                ),
+                event_publisher=self.event_publisher,
+                fallback_fn=lambda: self.llm.call_with_rag(
+                    model, messages, data_sources, user_email, temperature=temperature,
+                ),
+                context_label="RAG",
+                partial_sink=partial,
+            )
+        except asyncio.CancelledError:
+            if partial:
+                session.history.add_message(Message(
+                    role=MessageRole.ASSISTANT,
+                    content=partial[0],
+                    metadata={"interrupted": True, "data_sources": data_sources},
+                ))
+            raise
 
         assistant_message = Message(
             role=MessageRole.ASSISTANT,

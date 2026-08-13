@@ -12,6 +12,18 @@ from uuid import UUID, uuid4
 # back to the LLM as conversation turns.
 DISPLAY_ONLY_MESSAGE_TYPES = frozenset({"tool_call", "agent_intermediate"})
 
+# Metadata key holding a compact, model-visible summary of the tool calls an
+# agent turn made (issue #755). Set on the turn's closing assistant message and
+# merged into its content by ConversationHistory.get_messages_for_llm().
+AGENT_TOOL_DIGEST_KEY = "agent_tool_digest"
+
+# How much digest text a single request may carry. Each agent turn adds one
+# digest, so an unbounded fold would grow the prompt linearly with the number
+# of turns; the most recent turns are what a follow-up is about, so the fold
+# walks newest-first and stops at these limits.
+MAX_FOLDED_DIGESTS = 3
+MAX_FOLDED_DIGEST_CHARS = 12000
+
 
 class MessageRole(Enum):
     """Message role enumeration."""
@@ -170,12 +182,55 @@ class ConversationHistory:
         reloaded conversation (e.g. persisted ``tool_call`` rows from issue #684);
         they carry no role/content the model should reason over and, in the case
         of orphaned ``tool`` rows, would make some providers reject the request.
+
+        Because those rows are excluded, an agent turn's tool work would be
+        invisible to every later turn (issue #755). A turn's closing assistant
+        message can therefore carry an :data:`AGENT_TOOL_DIGEST_KEY` metadata
+        digest of the calls it made; it is folded into that message's content
+        here. Folding into an existing message keeps the role sequence
+        identical, so strict-alternation providers are unaffected.
+
+        Digests are folded newest-first and bounded by
+        :data:`MAX_FOLDED_DIGESTS` / :data:`MAX_FOLDED_DIGEST_CHARS`: every turn
+        of a long agent conversation carries one, and re-sending all of them
+        would grow the prompt without limit. The recent turns are the ones a
+        follow-up is about, so older digests are dropped first.
         """
-        return [
-            {"role": msg.role.value, "content": msg.content}
-            for msg in self.messages
-            if msg.metadata.get("message_type") not in DISPLAY_ONLY_MESSAGE_TYPES
-        ]
+        folded: Dict[int, str] = {}
+        budget = MAX_FOLDED_DIGEST_CHARS
+        kept = 0
+        for index in range(len(self.messages) - 1, -1, -1):
+            if kept >= MAX_FOLDED_DIGESTS or budget <= 0:
+                break
+            msg = self.messages[index]
+            if msg.metadata.get("message_type") in DISPLAY_ONLY_MESSAGE_TYPES:
+                continue
+            digest = msg.metadata.get(AGENT_TOOL_DIGEST_KEY)
+            if not digest:
+                continue
+            if len(digest) > budget:
+                # Trim on a line boundary rather than dropping the whole
+                # digest: skipping it would silently lose the newest (largest)
+                # turn -- exactly the turn a follow-up is about -- while a
+                # smaller, older one still got folded.
+                cut = digest.rfind("\n", 0, budget)
+                if cut <= 0:
+                    break
+                digest = digest[:cut] + "\n[…digest truncated]"
+            folded[index] = digest
+            budget -= len(digest)
+            kept += 1
+
+        out: List[Dict[str, str]] = []
+        for index, msg in enumerate(self.messages):
+            if msg.metadata.get("message_type") in DISPLAY_ONLY_MESSAGE_TYPES:
+                continue
+            content = msg.content
+            digest = folded.get(index)
+            if digest:
+                content = f"{content}\n\n{digest}" if content else digest
+            out.append({"role": msg.role.value, "content": content})
+        return out
 
     def to_dict(self) -> List[Dict[str, Any]]:
         """Convert to dictionary list."""

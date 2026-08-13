@@ -864,6 +864,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 if task and not task.done():
                     logger.info("Cancelling active chat task (reset_session)")
                     task.cancel()
+                    # Let the cancelled turn finish committing before the reset
+                    # (issue #755). Its cleanup now persists the interrupted
+                    # turn and emits conversation_saved for the *old*
+                    # conversation; arriving after session_reset, that event
+                    # would re-point the fresh empty chat at the abandoned
+                    # conversation id. Bounded so a wedged task cannot block the
+                    # reset the user asked for.
+                    try:
+                        await asyncio.wait([task], timeout=5)
+                    except Exception as e:  # pragma: no cover - defensive
+                        logger.warning("Error waiting for cancelled chat task: %s", e)
 
                 # Handle session reset (use authenticated user from connection).
                 # handle_reset_session itself releases the old conversation's

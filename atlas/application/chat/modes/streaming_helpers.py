@@ -22,6 +22,7 @@ async def stream_and_accumulate(
     fallback_fn=None,
     context_label: str = "LLM",
     on_error_message=None,
+    partial_sink=None,
 ) -> str:
     """Consume a token async generator, publishing each chunk and accumulating the result.
 
@@ -33,6 +34,10 @@ async def stream_and_accumulate(
         on_error_message: Optional callable ``(exc) -> str`` building the
             user-facing message when both the stream and fallback fail. Defaults
             to ``classify_llm_error``'s generic message when not provided.
+        partial_sink: Optional list. On cancellation the text accumulated so far
+            is appended to it before the ``CancelledError`` propagates, so the
+            caller can persist what the user already watched stream in instead
+            of losing it with the frame (issue #755).
 
     Returns:
         The accumulated response text.
@@ -70,6 +75,8 @@ async def stream_and_accumulate(
             )
     except asyncio.CancelledError:
         logger.info("%s stream cancelled by user", context_label)
+        if partial_sink is not None and accumulated:
+            partial_sink.append(accumulated)
         await event_publisher.publish_token_stream(
             token="", is_first=False, is_last=True,
         )
