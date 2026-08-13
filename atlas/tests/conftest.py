@@ -158,6 +158,12 @@ def admin_test_user():
 
 
 @pytest.fixture
+def admin_group():
+    """Return the configured admin group name (the group admin-route checks test against)."""
+    return _config_manager.app_settings.admin_group
+
+
+@pytest.fixture
 def test_user_headers(test_user):
     """Return auth headers for the configured non-admin test identity."""
     return {"X-User-Email": test_user}

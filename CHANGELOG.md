@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #794 - 2026-08-13
+- **Test-identity cleanup follow-up (review nits on #789)**: the RAG integration fixture's mock registration now calls `raise_for_status()` and verifies the returned groups are non-empty, so a 4xx/5xx or an older mock without `clone_from` (which would register an empty group list) skips with a clear reason instead of silently proceeding; the configured test user is registered via `clone_from` (cloning the mock's all-corpora identity) rather than hand-copying group data from `mock_data.json`; the mock's `POST /admin/users` enforces an either/or contract for `groups`/`clone_from` via a `model_validator`; the shared `test_user_headers` / `admin_test_user_headers` / `test_user` fixtures are now adopted by the capture/feedback route tests and the AtlasRAGClient unit tests, replacing module-level header constants that snapshotted config at import time; the `POST /admin/users` endpoint is documented in the RAG mock README and covered by unit tests.
+
 ### PR #789 - 2026-08-13
 - **Tests use configured development identities**: Python tests now reference the configured `test_user` and `admin_test_user` values instead of hardcoded default email strings (including the remaining `admin@test.com` admin-route mocks), with shared pytest fixtures available for future auth-focused tests. The RAG API mock gains an authenticated `POST /admin/users` endpoint so live integration tests can register the configured identity and stay robust to `TEST_USER` overrides.
 
