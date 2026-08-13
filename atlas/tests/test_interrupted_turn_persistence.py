@@ -34,6 +34,19 @@ from atlas.domain.messages.models import (
 )
 
 
+def _kept(field):
+    """Source text a quoted digest field kept: marker stripped, unescaped.
+
+    The caps are denominated in source characters, so measuring them means
+    undoing the escaping. ``&amp;`` last, since it is the escape character.
+    """
+    text = field.split("…", 1)[0]
+    for entity, char in (("&#91;", "["), ("&#93;", "]"),
+                         ("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&")):
+        text = text.replace(entity, char)
+    return text
+
+
 def _tool_row(name, arguments, result, status="completed"):
     return Message(
         role=MessageRole.TOOL,
@@ -142,17 +155,19 @@ class TestBuildToolDigest:
         from atlas.application.chat.utilities import agent_digest
 
         html = "<li>item alpha</li>" * 200
-        digest = build_tool_digest([_tool_row("web_fetch", {}, html)])
-        result = digest.split("-> <<<", 1)[1].split(">>>", 1)[0]
-        kept = result.split("…[+", 1)[0]
+        digest = build_tool_digest([_tool_row("web_fetch", html, html)])
+        line = digest.split("\n")[1]
+        args = line.split("(<<<", 1)[1].split(">>>)", 1)[0]
+        result = line.split("-> <<<", 1)[1].split(">>>", 1)[0]
         # Escaping is reversible, so what survived is measurable in source
-        # characters: the full documented budget, where charging it to the
-        # escaped form would have kept well under two thirds of it.
-        source = kept.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
-        assert len(source) == agent_digest._MAX_RESULT_CHARS
+        # characters: the full documented budget for both fields, where
+        # charging it to the escaped form would have kept well under two
+        # thirds of it.
+        assert len(_kept(result)) == agent_digest._MAX_RESULT_CHARS
+        assert len(_kept(args)) == agent_digest._MAX_ARG_CHARS
         # ...and the dropped count is reported in those same units.
-        dropped = int(digest.split("…[+", 1)[1].split(" chars]", 1)[0])
-        assert len(source) + dropped == len(html)
+        dropped = int(result.split("…[+", 1)[1].split(" chars]", 1)[0])
+        assert len(_kept(result)) + dropped == len(html)
 
     def test_a_status_cannot_forge_a_result_record(self):
         """The last interpolated field is quoted like every other one."""
@@ -166,13 +181,17 @@ class TestBuildToolDigest:
         assert len(digest.split("\n")) == 2
 
     def test_a_status_cannot_close_its_own_bracket(self):
-        """The status is delimited by `[...]`, not by a fence, so `]` counts."""
-        digest = build_tool_digest([
-            _tool_row("boom", {}, "kaboom", status="failed] and [ok"),
-        ])
-        line = digest.split("\n")[1]
-        status = line.split(" [", 1)[1].split("] ->", 1)[0]
-        assert "]" not in status and "[" not in status
+        """The status is delimited by `[...]`, not by a fence, so `]` counts.
+
+        Both a short status and one long enough to be truncated: the truncation
+        marker carries brackets of its own, so it has to be escaped with the
+        field's mapping too.
+        """
+        for hostile in ("failed] and [ok", "failed] and [ok" + "z" * 500):
+            digest = build_tool_digest([_tool_row("boom", {}, "kaboom", status=hostile)])
+            line = digest.split("\n")[1]
+            status = line.split(" [", 1)[1].split("] ->", 1)[0]
+            assert "]" not in status and "[" not in status, hostile
 
     def test_the_status_cap_binds(self):
         from atlas.application.chat.utilities import agent_digest
@@ -181,8 +200,14 @@ class TestBuildToolDigest:
             _tool_row("boom", {}, "kaboom", status="z" * 500),
         ])
         status = digest.split(" [", 1)[1].split("] ->", 1)[0]
-        kept = status.split("…[+", 1)[0].replace("&#91;", "[")
-        assert len(kept) == agent_digest._MAX_STATUS_CHARS
+        assert len(_kept(status)) == agent_digest._MAX_STATUS_CHARS
+
+    def test_the_tool_name_cap_binds(self):
+        from atlas.application.chat.utilities import agent_digest
+
+        digest = build_tool_digest([_tool_row("n" * 5000, {}, "ok")])
+        name = digest.split("\n")[1][len("- "):].split("(", 1)[0]
+        assert len(_kept(name)) == agent_digest._MAX_NAME_CHARS
 
     def test_every_escape_is_charged_what_it_actually_costs(self):
         """One mapping drives both the cost walk and the substitution."""
@@ -193,7 +218,7 @@ class TestBuildToolDigest:
         # costing them at one would let this field run past its ceiling.
         digest = build_tool_digest([_tool_row("boom", {}, "ok", status="]" * 500)])
         status = digest.split(" [", 1)[1].split("] ->", 1)[0]
-        assert len(status.split("…[+", 1)[0]) <= ceiling
+        assert len(_kept(status)) <= ceiling
 
     def test_marks_failed_calls(self):
         digest = build_tool_digest([_tool_row("boom", {}, "kaboom", status="failed")])
