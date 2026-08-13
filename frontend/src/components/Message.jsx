@@ -232,7 +232,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                signals that there is something to expand. */
             <button
               onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
-              className={`w-full min-w-0 text-left flex flex-wrap items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              className={`no-print-hide w-full min-w-0 text-left flex flex-wrap items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
               type="button"
               aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
             >
@@ -276,7 +276,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           ) : (
             <button
               onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
-              className={`w-full min-w-0 text-left flex flex-wrap items-center gap-2 mb-3 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              className={`no-print-hide w-full min-w-0 text-left flex flex-wrap items-center gap-2 mb-3 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
               type="button"
               aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
             >
@@ -444,51 +444,53 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
             return null
           })()}
 
-          {/* Expanded details: input arguments + output, revealed together */}
-          {showDetails && (
-            <div className="mt-2 ml-5 space-y-3">
-              {/* The collapsed compact row drops the server name to stay on one
-                  line (#762), so it lives here instead — the classic row still
-                  shows it inline. */}
-              {compactMessages && message.server_name && (
-                <div className="text-xs text-gray-500">Server: {message.server_name}</div>
-              )}
-              {argCount > 0 && (
-                <div className="border-l-2 border-blue-500 pl-3">
-                  <div className="text-xs font-semibold text-blue-400 mb-1">Input Arguments</div>
-                  <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
-                    {debugMode && (
-                      <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Arguments</div>
-                    )}
-                    <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                      {JSON.stringify(debugMode ? message.arguments : filterArgumentsForDisplay(message.arguments), null, 2)}
-                    </pre>
-                  </div>
+          {/* Expanded details: input arguments + output, revealed together.
+              Always rendered so the print export shows tool input/output
+              without requiring the user to expand each row first -- when
+              collapsed the block is hidden on screen but `print:block`
+              reveals it in the PDF (#774). */}
+          <div className={`mt-2 ml-5 space-y-3 ${showDetails ? '' : 'hidden print:block'}`}>
+            {/* The collapsed compact row drops the server name to stay on one
+                line (#762), so it lives here instead — the classic row still
+                shows it inline. */}
+            {compactMessages && message.server_name && (
+              <div className="text-xs text-gray-500">Server: {message.server_name}</div>
+            )}
+            {argCount > 0 && (
+              <div className="border-l-2 border-blue-500 pl-3">
+                <div className="text-xs font-semibold text-blue-400 mb-1">Input Arguments</div>
+                <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
+                  {debugMode && (
+                    <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Arguments</div>
+                  )}
+                  <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(debugMode ? message.arguments : filterArgumentsForDisplay(message.arguments), null, 2)}
+                  </pre>
                 </div>
-              )}
-              {message.result && (
-                <div className={`border-l-2 pl-3 ${message.status === 'failed' ? 'border-red-500' : 'border-green-500'}`}>
-                  <div className={`text-xs font-semibold mb-1 ${message.status === 'failed' ? 'text-red-400' : 'text-green-400'}`}>
-                    {message.status === 'failed' ? 'Error Details' : 'Output Result'}
-                  </div>
-                  <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
-                    {debugMode && (
-                      <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Output</div>
-                    )}
-                    <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                      {(() => {
-                        if (debugMode) {
-                          return typeof message.result === 'string' ? message.result : JSON.stringify(message.result, null, 2)
-                        }
-                        const processedResult = processToolResult(message.result)
-                        return typeof processedResult === 'string' ? processedResult : JSON.stringify(processedResult, null, 2)
-                      })()}
-                    </pre>
-                  </div>
+              </div>
+            )}
+            {message.result && (
+              <div className={`border-l-2 pl-3 ${message.status === 'failed' ? 'border-red-500' : 'border-green-500'}`}>
+                <div className={`text-xs font-semibold mb-1 ${message.status === 'failed' ? 'text-red-400' : 'text-green-400'}`}>
+                  {message.status === 'failed' ? 'Error Details' : 'Output Result'}
                 </div>
-              )}
-            </div>
-          )}
+                <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
+                  {debugMode && (
+                    <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Output</div>
+                  )}
+                  <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                    {(() => {
+                      if (debugMode) {
+                        return typeof message.result === 'string' ? message.result : JSON.stringify(message.result, null, 2)
+                      }
+                      const processedResult = processToolResult(message.result)
+                      return typeof processedResult === 'string' ? processedResult : JSON.stringify(processedResult, null, 2)
+                    })()}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Synthesis indicator - shown on completed tool messages while LLM interprets results */}
           {message.status === 'completed' && isSynthesizing && (

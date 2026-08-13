@@ -733,8 +733,11 @@
     position: static !important;
   }
 
-  /* Style messages for print */
+  /* Style messages for print. bg-gray-900 is added so tool call argument/
+     result boxes and markdown code-block containers do not keep their dark
+     screen background behind the now-printable details (#774). */
   [class*="rounded-lg"][class*="bg-gray-800"],
+  [class*="rounded-lg"][class*="bg-gray-900"],
   [class*="rounded-lg"][class*="bg-blue-600"] {
     background: white !important;
     border: 1px solid #ccc !important;
@@ -749,20 +752,51 @@
     text-shadow: none !important;
   }
 
-  /* Code blocks should have light background */
+  /* Code blocks should have light background. Long lines must wrap so the
+     right-hand side is not clipped past the printable page width (#774);
+     the screen layout gives <pre> a horizontal scroller, but a scroller
+     cannot be panned on paper. */
   pre, code {
     background: #f5f5f5 !important;
     border: 1px solid #ddd !important;
     color: black !important;
   }
 
-  /* Scrollable areas should show all content */
+  /* The inner <code> and the highlight.js spans inside it are targeted too:
+     the screen rule for #747 sets `overflow-wrap: normal` on
+     `.chat-messages pre code` so snippets keep their indentation behind the
+     horizontal scroller, and that declaration is inherited by every token
+     span -- overriding only <pre> left the long tokens unbreakable and the
+     line still ran off the right edge of the page (#774). */
+  pre,
+  pre code,
+  pre code * {
+    overflow: visible !important;
+    overflow-wrap: anywhere !important;
+    white-space: pre-wrap !important;
+  }
+
+  /* Scrollable areas should show all content. overflow-x-auto is added
+     alongside overflow-y-auto so horizontal scrollers (code blocks, wide
+     tables, display math) do not clip their right edge in print (#774). */
   [class*="overflow-y-auto"],
+  [class*="overflow-x-auto"],
   [class*="overflow-hidden"],
   [class*="custom-scrollbar"] {
     overflow: visible !important;
     max-height: none !important;
     height: auto !important;
+  }
+
+  /* Nothing may be wider than the page. The chat column is a flex item, and
+     a flex item's default `min-width: auto` lets it grow to its content's
+     intrinsic width -- on screen that never shows because the column also
+     clips horizontally, but the rule above lifts that clip for print, so a
+     single long code line stretched the whole layout several page-widths
+     wide and everything past the first page-width was cut off (#774). */
+  body * {
+    min-width: 0 !important;
+    max-width: 100% !important;
   }
 
   /* Show print-only elements */
