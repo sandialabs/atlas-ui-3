@@ -66,6 +66,44 @@ jobs:
           cat npm-audit-report.json
         fi
 
+    # --- Enforcing gates -------------------------------------------------
+    # Everything above reports without failing (continue-on-error / || true),
+    # which is deliberate: those scans cover the whole dev environment and are
+    # noisy. The two checks below are the ones that actually block, so a green
+    # "Security Checks" means something specific rather than "a scan ran".
+
+    - name: Lockfile is in sync with pyproject.toml
+      run: |
+        # A stale lock silently resolves versions below the floors declared in
+        # pyproject.toml -- reportlab sat at 4.4.10 under a >=5.0.0 constraint
+        # until this was added. `uv export --locked` fails rather than
+        # regenerating, so it is the check, not just a build step.
+        pip install uv
+        uv export --locked --no-emit-project -o /dev/null
+
+    - name: Fail on high or critical advisories in shipped frontend deps
+      run: |
+        cd frontend
+        # --omit=dev is the point: the full tree is dominated by build tooling
+        # (vitest, vite, esbuild) that never reaches a browser, and failing on
+        # that trains people to ignore this job. This gate covers only what is
+        # actually served to users.
+        npm audit --omit=dev --audit-level=high --json > prod-audit.json || true
+        COUNT=$(python -c "
+        import json
+        with open('prod-audit.json') as f:
+            data = json.load(f)
+        meta = data.get('metadata', {}).get('vulnerabilities', {})
+        print(meta.get('high', 0) + meta.get('critical', 0))
+        ")
+        echo "High/critical advisories in production dependencies: $COUNT"
+        if [ "$COUNT" -gt 0 ]; then
+          echo '::error::High or critical advisory in a shipped frontend dependency.'
+          echo 'Fix it, or if it is unreachable in this app, record why in docs/developer/dependency-advisories.md.'
+          npm audit --omit=dev --audit-level=high || true
+          exit 1
+        fi
+
     # Advanced dependency scanning with Snyk (requires SNYK_TOKEN)
     # - name: Run Snyk to check for vulnerabilities
     #   uses: snyk/actions/setup@master

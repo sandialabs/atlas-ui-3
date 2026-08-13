@@ -39,7 +39,6 @@ from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
 from atlas.core.auth import resolve_user_from_auth_header_async
-from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from atlas.core.mcp_dev_only_guard import enforce_dev_only_mcp_servers
 from atlas.core.metrics_logger import log_metric
@@ -344,12 +343,6 @@ if config.app_settings.feature_globus_auth_enabled:
             https_only=False,
             same_site="lax",
         )
-# Domain whitelist check (if enabled) - add before Auth so it runs after
-if config.app_settings.feature_domain_whitelist_enabled:
-    app.add_middleware(
-        DomainWhitelistMiddleware,
-        auth_redirect_url=config.app_settings.auth_redirect_url
-    )
 app.add_middleware(
     AuthMiddleware,
     debug_mode=config.app_settings.debug_mode,

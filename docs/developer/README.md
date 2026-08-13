@@ -10,6 +10,7 @@ built live under [design-notes/](design-notes/README.md).
 
 - [Architecture Overview](architecture.md) - Backend clean-architecture layers and frontend context model
 - [Development Conventions](conventions.md) - Coding standards and project conventions
+- [Dependency Advisories](dependency-advisories.md) - Which security scans block a merge, and how to accept an advisory
 
 ## MCP Tool Development
 
