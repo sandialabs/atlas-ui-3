@@ -149,10 +149,7 @@ class AgenticLoop(AgentLoopProtocol):
             # them so the interrupted turn still persists what actually ran
             # (issue #755); anything that never reported a result is closed out
             # rather than left rendering as in-progress forever.
-            try:
-                recorder.flush(context.history, mark_incomplete=True)
-            except Exception:  # pragma: no cover - never mask the real failure
-                logger.warning("Failed to flush tool calls while unwinding", exc_info=True)
+            await recorder.unwind(context.history)
             raise
 
         # Max steps exhausted without a text-only response

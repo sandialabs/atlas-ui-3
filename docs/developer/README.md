@@ -30,6 +30,10 @@ built live under [design-notes/](design-notes/README.md).
 
 - [Fine-tune Capture](finetune-capture.md) - Opt-in capture of chat traffic for fine-tuning, with rollback-driven preference pairs
 
+## Chat Behavior
+
+- [Interrupted Turns](interrupted-turns.md) - What is persisted when a turn is stopped, and how a later turn sees the tool work
+
 ## Error Handling
 
 - [Error Handling Improvements](error-handling-improvements.md) - LLM error classification and surfacing
