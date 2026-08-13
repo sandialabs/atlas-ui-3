@@ -436,6 +436,20 @@ describe('Message — tool-call collapse is shared across compact/classic (regre
     expect(screen.queryByText('Error Details')).not.toBeInTheDocument()
   })
 
+  it('does not claim a status-less legacy row was stopped or failed', () => {
+    // Rows saved before tool status was persisted have no status. The ladder
+    // names each terminal state explicitly so they fall through to a neutral
+    // unknown state instead of asserting an outcome (#755).
+    setChat({ settings: { compactMessages: true } })
+    const legacy = { ...toolCall }
+    delete legacy.status
+    render(<Message message={legacy} />)
+
+    expect(screen.getByLabelText('NO STATUS')).toBeInTheDocument()
+    expect(screen.queryByLabelText('FAILED')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('STOPPED')).not.toBeInTheDocument()
+  })
+
   it('labels the active spinner for screen readers in compact and classic modes', () => {
     // The active spinner replaces the outcome glyph while a tool is running.
     // Without an aria-label the spinning state is announced as nothing, so

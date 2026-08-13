@@ -25,6 +25,7 @@ arguments and results as untrusted data on the turn's closing assistant
 message. Nothing here is replayed verbatim as a ``tool`` message.
 """
 
+import asyncio
 import logging
 from collections import OrderedDict
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -44,6 +45,14 @@ UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 _MAX_STR_CHARS = 8000
 # Stop walking absurdly deep structures; anything past this is stored as-is.
 _MAX_DEPTH = 6
+
+# Total budget for announcing every interrupted call. A half-open socket can
+# accept a write that never completes, and the unwind must not park on a
+# best-effort notification.
+_NOTIFY_BUDGET_SECONDS = 2.0
+
+# Shown in the stopped tool row, live and after a reload.
+_INTERRUPTED_RESULT = "Stopped before the tool result was recorded."
 
 
 def _elide_for_storage(value: Any, depth: int = 0) -> Any:
@@ -70,6 +79,9 @@ class ToolCallRecorder:
         # Keyed by tool_call_id, insertion-ordered so persisted rows match the
         # order the tools were invoked in this turn.
         self._calls: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        # Payloads queued by a mark_incomplete flush, drained by
+        # notify_incomplete() once the history write is done.
+        self._interrupted_notices: List[Dict[str, Any]] = []
 
     async def __call__(self, payload: Dict[str, Any]) -> None:
         # Record defensively: a malformed payload must never break the actual
@@ -142,6 +154,66 @@ class ToolCallRecorder:
             ))
         return out
 
+    async def notify_incomplete(self) -> None:
+        """Tell the UI about calls the last flush closed out as interrupted.
+
+        The live row was created on ``tool_start`` and nothing else arrives on
+        the cancel path, so without this it spins as "CALLING" until a reload
+        replaces it with the persisted ``interrupted`` row -- the live view
+        contradicting the saved one (issue #755).
+
+        Queued by ``flush(mark_incomplete=True)`` and drained here, so
+        persistence never waits on a socket. The whole drain shares one
+        deadline: a concurrent round can leave many calls pending, and a
+        per-write timeout would multiply into a stall long enough to outlast
+        the reset_session wait that keeps ``conversation_saved`` ahead of
+        ``session_reset``.
+        """
+        notices, self._interrupted_notices = self._interrupted_notices, []
+        if self._inner is None or not notices:
+            return
+        deadline = asyncio.get_event_loop().time() + _NOTIFY_BUDGET_SECONDS
+        for payload in notices:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                logger.warning(
+                    "Interrupt announcement budget exhausted; %d tool row(s) "
+                    "will show as in-progress until reload",
+                    len(notices) - notices.index(payload),
+                )
+                return
+            try:
+                await asyncio.wait_for(self._inner(payload), timeout=remaining)
+            except (Exception, asyncio.CancelledError):
+                # CancelledError is listed explicitly because it is not an
+                # Exception: the frontend sends stop_streaming then
+                # reset_session, so a second cancel can land mid-write, and
+                # letting it through would replace the exception being unwound
+                # -- which may be a real failure, not a user stop. Interpreter
+                # signals (KeyboardInterrupt, SystemExit) are deliberately
+                # still allowed to propagate.
+                logger.warning(
+                    "Could not announce interrupted tool call %s; its row will "
+                    "show as in-progress until reload",
+                    payload.get("tool_call_id"),
+                    exc_info=True,
+                )
+                continue
+
+    async def unwind(self, history: ConversationHistory) -> None:
+        """Close out a turn that is being cancelled: persist, then announce.
+
+        The order is the contract. ``flush`` is synchronous and cannot block;
+        the announcement is a socket write a half-open connection can park on.
+        Losing the announcement costs a spinning row until reload -- losing the
+        flush costs the turn's completed work.
+        """
+        try:
+            self.flush(history, mark_incomplete=True)
+        except Exception:  # pragma: no cover - never mask the real failure
+            logger.warning("Failed to flush tool calls while unwinding", exc_info=True)
+        await self.notify_incomplete()
+
     def flush(self, history: ConversationHistory, mark_incomplete: bool = False) -> None:
         """Append recorded tool-call messages to a history, then reset.
 
@@ -157,13 +229,21 @@ class ToolCallRecorder:
         if mark_incomplete:
             for entry in self._calls.values():
                 if entry.get("status") in (None, "calling"):
+                    if entry.get("tool_name"):
+                        # Queued for notify_incomplete(), which the caller
+                        # awaits once persistence is safely done.
+                        self._interrupted_notices.append({
+                            "type": "tool_interrupted",
+                            "tool_call_id": entry["tool_call_id"],
+                            "tool_name": entry["tool_name"],
+                            "status": "interrupted",
+                            "result": _INTERRUPTED_RESULT,
+                        })
                     # A distinct status, not "failed": the user stopping their
                     # own turn is not a tool error, and the UI renders the two
                     # differently.
                     entry["status"] = "interrupted"
-                    entry.setdefault(
-                        "result", "Stopped before the tool result was recorded."
-                    )
+                    entry.setdefault("result", _INTERRUPTED_RESULT)
         for message in self.messages():
             history.add_message(message)
         self._calls.clear()
