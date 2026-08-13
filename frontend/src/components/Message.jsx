@@ -404,7 +404,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                       <button
                         key={index}
                         onClick={() => downloadFile(filename)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
+                        className="no-print-hide bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
                         title="Download file"
                       >
                         <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -427,7 +427,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                       <button
                         key={index}
                         onClick={() => downloadReturnedFile(filename, parsedResult.returned_file_contents[index])}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
+                        className="no-print-hide bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
                         title="Download file"
                       >
                         <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -444,7 +444,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 <div className="mt-2 ml-5">
                   <button
                     onClick={() => downloadReturnedFile(parsedResult.returned_file_name, parsedResult.returned_file_base64)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
+                    className="no-print-hide bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm flex items-center gap-1 transition-colors max-w-full min-w-0 break-all text-left"
                     title="Download file"
                   >
                     <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

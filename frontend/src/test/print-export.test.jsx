@@ -121,6 +121,15 @@ describe('print export -- right side not clipped (#774)', () => {
     expect(printCss).toMatch(/body \*\s*\{[^}]*max-width:\s*100%/)
   })
 
+  it('reaches scrollers that come from a stylesheet rule, not a utility class', () => {
+    // `.chat-messages .katex-display` and the markdown table get `overflow-x:
+    // auto` from index.css itself, so the `[class*="overflow-x-auto"]`
+    // selector cannot match them -- long equations and wide tables kept their
+    // clipped right edge in the PDF until they were named explicitly.
+    expect(printCss).toMatch(/\.chat-messages \.katex-display/)
+    expect(printCss).toMatch(/\.chat-messages \.selectable-markdown table/)
+  })
+
   it('keeps the existing overflow-y-auto / overflow-hidden overrides', () => {
     // Regression guard: adding overflow-x-auto must not drop the existing
     // selectors that the #150 print stylesheet relied on.
@@ -134,6 +143,21 @@ describe('print export -- right side not clipped (#774)', () => {
     // would be black-on-dark and unreadable. The print block must whiten
     // bg-gray-900 alongside the existing bg-gray-800 / bg-blue-600 rules.
     expect(printCss).toMatch(/\[class\*="rounded-lg"\]\[class\*="bg-gray-900"\]/)
+  })
+})
+
+describe('print export -- the rules the DOM changes depend on', () => {
+  it('hides buttons only when they have not opted out', () => {
+    // The `no-print-hide` class on the tool summary and download buttons is
+    // meaningless unless the hide rule carries this exception; an edit to
+    // either half silently drops tool rows from the PDF.
+    expect(printCss).toMatch(/button:not\(\.no-print-hide\)/)
+  })
+
+  it('reveals print-only blocks', () => {
+    // Collapsed tool details are mounted with `hidden print:block`, and
+    // `hidden` (display: none) only loses to this !important rule.
+    expect(printCss).toMatch(/\.print\\:block\s*\{[^}]*display:\s*block\s*!important/)
   })
 })
 
@@ -248,6 +272,31 @@ describe('print export -- tool calls render in the PDF (#774)', () => {
     )
     expect(summary).not.toBeNull()
     expect(summary.className).toContain('no-print-hide')
+  })
+})
+
+describe('print export -- tool output file names (#774)', () => {
+  it('prints the download file names under their label', () => {
+    // The "N file(s) available for download:" label is plain text, but each
+    // file name is a download <button> -- so the label printed with nothing
+    // under it. The buttons opt out of the hide rule so the names survive.
+    const { container } = render(
+      <Message
+        message={{
+          role: 'assistant',
+          type: 'tool_call',
+          tool_name: 'basic_fns_plot',
+          status: 'completed',
+          arguments: { kind: 'scatter' },
+          result: { meta_data: { output_files: ['chart.png'] } },
+        }}
+      />
+    )
+    const downloadButton = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent.includes('chart.png')
+    )
+    expect(downloadButton).toBeTruthy()
+    expect(downloadButton.className).toContain('no-print-hide')
   })
 })
 

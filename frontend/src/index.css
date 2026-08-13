@@ -777,12 +777,20 @@
   }
 
   /* Scrollable areas should show all content. overflow-x-auto is added
-     alongside overflow-y-auto so horizontal scrollers (code blocks, wide
-     tables, display math) do not clip their right edge in print (#774). */
+     alongside overflow-y-auto so horizontal scrollers do not clip their right
+     edge in print (#774). Code blocks recover fully because they also wrap
+     (see the <pre> rule above); a display equation wider than the page is
+     still truncated at the page edge, since KaTeX lays it out at a fixed
+     width and nothing can reflow it. */
   [class*="overflow-y-auto"],
   [class*="overflow-x-auto"],
   [class*="overflow-hidden"],
-  [class*="custom-scrollbar"] {
+  [class*="custom-scrollbar"],
+  /* Display math and phone-width tables get their scroller from a stylesheet
+     rule rather than a utility class, so the attribute selectors above cannot
+     reach them and their right-hand side stayed clipped in the PDF (#774). */
+  .chat-messages .katex-display,
+  .chat-messages .selectable-markdown table {
     overflow: visible !important;
     max-height: none !important;
     height: auto !important;
