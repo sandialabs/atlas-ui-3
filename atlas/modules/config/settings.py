@@ -138,6 +138,28 @@ class AppSettings(BaseSettings):
     # When true, all tools require approval (admin-enforced), overriding per-tool and default settings
     force_tool_approval_globally: bool = Field(default=False, validation_alias="FORCE_TOOL_APPROVAL_GLOBALLY")
 
+    # Hook / plugin system settings (see docs/developer/hook-plugin-system.md)
+    feature_hooks_enabled: bool = Field(
+        default=False,
+        description="Enable the server-side lifecycle hook/plugin bus",
+        validation_alias=AliasChoices("FEATURE_HOOKS_ENABLED"),
+    )
+    hook_plugins: str = Field(
+        default="",
+        description=(
+            "Comma-separated allow-list of hook plugin entry points, each "
+            "'module' or 'module:attribute'. Loaded at startup; a plugin that "
+            "fails to import aborts startup."
+        ),
+        validation_alias=AliasChoices("HOOK_PLUGINS"),
+    )
+    hook_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description="Default per-handler timeout for async hook handlers",
+        validation_alias=AliasChoices("HOOK_TIMEOUT_SECONDS"),
+    )
+
     # LLM Health Check settings
     llm_health_check_interval: int = 5  # minutes
 

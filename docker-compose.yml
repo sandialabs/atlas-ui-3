@@ -136,6 +136,14 @@ services:
       # Tool approval configuration
       - REQUIRE_TOOL_APPROVAL_BY_DEFAULT=false
       - FORCE_TOOL_APPROVAL_GLOBALLY=false
+      # Lifecycle hook / plugin system (see docs/developer/hook-plugin-system.md).
+      # All three pass through from the host environment with the same defaults
+      # the settings model uses, so an operator can turn the bus on without
+      # editing this file -- and pinning one of them here (rather than all
+      # three) cannot leave the feature half-configured.
+      - FEATURE_HOOKS_ENABLED=${FEATURE_HOOKS_ENABLED:-false}
+      - HOOK_PLUGINS=${HOOK_PLUGINS:-}
+      - HOOK_TIMEOUT_SECONDS=${HOOK_TIMEOUT_SECONDS:-5.0}
       
       - APP_LOG_DIR=/app/logs
       

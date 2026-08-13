@@ -16,6 +16,13 @@ from atlas.core.compliance import (
     reset_active_compliance_context,
     set_active_compliance_context,
 )
+from atlas.core.hooks import (
+    HookPoint,
+    RagCallEvent,
+    RagResponseEvent,
+    current_hook_context,
+    get_hook_registry,
+)
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import (
     LABEL_MAX_CHARS,
@@ -33,6 +40,21 @@ from atlas.modules.rag.client import RAGResponse
 logger = logging.getLogger(__name__)
 
 
+def _hook_event_context(username: str) -> Dict[str, Any]:
+    """Build the trusted base fields for a RAG hook event.
+
+    Retrieval is reached through the LLM caller, which holds no session, so the
+    session/conversation/compliance identity comes from the per-turn context the
+    chat service activates. ``username`` is the caller's own parameter and stays
+    authoritative for ``user_email``; the rest is ``None`` outside a chat turn
+    (e.g. a direct service call), exactly as it was before.
+    """
+    turn = current_hook_context()
+    fields = turn.as_event_fields() if turn is not None else {}
+    fields["user_email"] = username
+    return fields
+
+
 def _extract_query_text(messages: List[Dict]) -> str:
     """Return the last user message content used as the RAG query."""
     for msg in reversed(messages or []):
@@ -40,6 +62,22 @@ def _extract_query_text(messages: List[Dict]) -> str:
             content = msg.get("content", "")
             return content if isinstance(content, str) else str(content)
     return ""
+
+
+def _replace_query_text(messages: List[Dict], new_query: str) -> List[Dict]:
+    """Return a copy of *messages* with the last user message rewritten.
+
+    Used when a ``rag_call`` hook rewrites the query: the retrieval backends all
+    derive the query from the message list, so the rewrite has to land there
+    rather than in a separate parameter.
+    """
+    rewritten = [dict(m) for m in (messages or [])]
+    for msg in reversed(rewritten):
+        if msg.get("role") == "user":
+            msg["content"] = new_query
+            return rewritten
+    rewritten.append({"role": "user", "content": new_query})
+    return rewritten
 
 
 def _describe_sources(
@@ -397,6 +435,89 @@ class UnifiedRAGService:
             logger.error("Failed to discover HTTP source %s: %s", source_name, e)
             return None
 
+    async def _run_rag_call_hooks(
+        self,
+        username: str,
+        query: str,
+        data_sources: List[str],
+        messages: List[Dict],
+        batch: bool,
+    ) -> tuple[List[Dict], List[str], Optional[RAGResponse]]:
+        """Run the ``rag_call`` chain before retrieval.
+
+        Returns ``(messages, data_sources, blocking response or None)``. The
+        source list passed in has already been compliance- and authorization-
+        filtered; ``RagCallEvent`` only permits narrowing it, so a plugin can
+        never widen retrieval past that boundary.
+        """
+        registry = get_hook_registry()
+        if not registry.has_hooks(HookPoint.RAG_CALL):
+            return messages, data_sources, None
+
+        event = RagCallEvent(
+            **_hook_event_context(username),
+            query=query,
+            data_sources=list(data_sources),
+            batch=batch,
+        )
+        chain = await registry.dispatch(event)
+        if chain.denied:
+            logger.warning(
+                "RAG retrieval blocked by hook(s) %s: %s",
+                ", ".join(chain.contributors) or "<unknown>",
+                sanitize_for_logging(chain.reason or ""),
+            )
+            return (
+                messages,
+                data_sources,
+                RAGResponse(
+                    content=chain.user_message or "Retrieval was blocked by policy.",
+                    metadata=None,
+                ),
+            )
+
+        if chain.modified:
+            if event.query != query:
+                messages = _replace_query_text(messages, event.query)
+            data_sources = list(event.data_sources)
+        return messages, data_sources, None
+
+    async def _run_rag_response_hooks(
+        self,
+        username: str,
+        query: str,
+        data_sources: List[str],
+        response: RAGResponse,
+        batch: bool,
+    ) -> RAGResponse:
+        """Run the ``rag_response`` chain on retrieved content before it is used."""
+        registry = get_hook_registry()
+        if not registry.has_hooks(HookPoint.RAG_RESPONSE):
+            return response
+
+        event = RagResponseEvent(
+            **_hook_event_context(username),
+            query=query,
+            data_sources=list(data_sources),
+            content=response.content or "",
+            metadata=response.metadata,
+            batch=batch,
+        )
+        chain = await registry.dispatch(event)
+        if chain.denied:
+            logger.warning(
+                "RAG content withheld by hook(s) %s: %s",
+                ", ".join(chain.contributors) or "<unknown>",
+                sanitize_for_logging(chain.reason or ""),
+            )
+            return RAGResponse(
+                content=chain.user_message or "Retrieved content was withheld by policy.",
+                metadata=None,
+            )
+        if chain.modified:
+            response.content = event.content
+        return response
+
     async def query_rag(
         self,
         username: str,
@@ -438,7 +559,27 @@ class UnifiedRAGService:
             token = set_active_compliance_context(enforced_compliance_level, enforce=True)
         try:
             with start_span("rag.query", span_attrs) as span:
+                messages, hooked_sources, blocked = await self._run_rag_call_hooks(
+                    username=username,
+                    query=query_text,
+                    data_sources=[qualified_data_source],
+                    messages=messages,
+                    batch=False,
+                )
+                if blocked is not None:
+                    set_attrs(span, {"hook_denied": True})
+                    return blocked
+                qualified_data_source = hooked_sources[0]
+                query_text = _extract_query_text(messages)
+
                 response = await self._query_rag_impl(username, qualified_data_source, messages)
+                response = await self._run_rag_response_hooks(
+                    username=username,
+                    query=query_text,
+                    data_sources=hooked_sources,
+                    response=response,
+                    batch=False,
+                )
                 set_attrs(span, _rag_response_attrs(response))
                 return response
         finally:
@@ -624,7 +765,26 @@ class UnifiedRAGService:
             token = set_active_compliance_context(enforced_compliance_level, enforce=True)
         try:
             with start_span("rag.query", span_attrs) as span:
+                messages, qualified_data_sources, blocked = await self._run_rag_call_hooks(
+                    username=username,
+                    query=query_text,
+                    data_sources=list(qualified_data_sources or []),
+                    messages=messages,
+                    batch=True,
+                )
+                if blocked is not None:
+                    set_attrs(span, {"hook_denied": True})
+                    return blocked
+                query_text = _extract_query_text(messages)
+
                 response = await self._query_rag_batch_impl(username, qualified_data_sources, messages)
+                response = await self._run_rag_response_hooks(
+                    username=username,
+                    query=query_text,
+                    data_sources=qualified_data_sources,
+                    response=response,
+                    batch=True,
+                )
                 set_attrs(span, _rag_response_attrs(response))
                 return response
         finally:

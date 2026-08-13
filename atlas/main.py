@@ -98,6 +98,22 @@ otel_config = setup_opentelemetry("atlas-ui-3-backend", "1.0.0")
 logger = logging.getLogger(__name__)
 
 
+def _domain_error_frame(exc: DomainError) -> dict:
+    """Render a ``DomainError`` as the WebSocket error frame the client expects.
+
+    Authorization failures get their own ``error_type`` so the UI can present a
+    "you are not allowed to do this" state rather than a generic failure. Shared
+    by every non-chat handler so the frame cannot drift between them.
+    """
+    return {
+        "type": "error",
+        "message": str(exc.message if hasattr(exc, "message") else exc),
+        "error_type": (
+            "authorization" if isinstance(exc, AuthorizationError) else "domain"
+        ),
+    }
+
+
 async def websocket_update_callback(websocket: WebSocket, message: dict):
     """
     Callback function to handle websocket updates with logging.
@@ -843,15 +859,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "Domain error in restore_conversation: %s", e
                     )
                     log_metric("error", user_email, error_type="domain")
-                    response = {
-                        "type": "error",
-                        "message": str(e.message if hasattr(e, "message") else e),
-                        "error_type": (
-                            "authorization"
-                            if isinstance(e, AuthorizationError)
-                            else "domain"
-                        ),
-                    }
+                    response = _domain_error_frame(e)
                 await websocket.send_json(response)
 
             elif message_type == "reset_session":
@@ -868,20 +876,37 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Handle session reset (use authenticated user from connection).
                 # handle_reset_session itself releases the old conversation's
                 # MCP sessions before generating a new conversation_id.
-                response = await chat_service.handle_reset_session(
-                    session_id=session_id,
-                    user_email=user_email
-                )
+                #
+                # Both this branch and attach_file below lazily create a session,
+                # which runs the SESSION_START hook chain -- a deny there raises
+                # AuthorizationError. An unhandled DomainError here would tear
+                # down the WebSocket instead of telling the user why, so both
+                # branches answer with the same error frame the chat and
+                # restore_conversation handlers use.
+                try:
+                    response = await chat_service.handle_reset_session(
+                        session_id=session_id,
+                        user_email=user_email
+                    )
+                except DomainError as e:
+                    logger.warning("Domain error in reset_session: %s", e)
+                    log_metric("error", user_email, error_type="domain")
+                    response = _domain_error_frame(e)
                 await websocket.send_json(response)
 
             elif message_type == "attach_file":
                 # Handle file attachment to session (use authenticated user, not client-sent)
-                response = await chat_service.handle_attach_file(
-                    session_id=session_id,
-                    s3_key=data.get("s3_key"),
-                    user_email=user_email,  # Use authenticated user from connection
-                    update_callback=lambda message: websocket_update_callback(websocket, message)
-                )
+                try:
+                    response = await chat_service.handle_attach_file(
+                        session_id=session_id,
+                        s3_key=data.get("s3_key"),
+                        user_email=user_email,  # Use authenticated user from connection
+                        update_callback=lambda message: websocket_update_callback(websocket, message)
+                    )
+                except DomainError as e:
+                    logger.warning("Domain error in attach_file: %s", e)
+                    log_metric("error", user_email, error_type="domain")
+                    response = _domain_error_frame(e)
                 await websocket.send_json(response)
 
             elif message_type == "tool_approval_response":

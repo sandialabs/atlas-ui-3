@@ -28,6 +28,7 @@ class LiteLLMStreamingMixin:
       - _get_litellm_model_name(model_name) -> str
       - _get_model_kwargs(model_name, temperature, user_email) -> dict
       - _prepare_messages(model_name, messages) -> list
+      - _run_pre_llm_call_hooks(model_name, messages, ...) -> (model, messages, temperature)
       - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> list
       - _build_rag_completion_response(rag_response, display_source) -> str
       - _combine_rag_contexts(source_responses) -> tuple
@@ -47,6 +48,17 @@ class LiteLLMStreamingMixin:
 
         Yields string chunks as they arrive from the LLM provider.
         """
+        # PreLlmCall hook, before any model/credential resolution.
+        model_name, messages, temperature = await self._run_pre_llm_call_hooks(
+            model_name,
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            streaming=True,
+            has_tools=False,
+            user_email=user_email,
+        )
+
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
 
@@ -144,6 +156,16 @@ class LiteLLMStreamingMixin:
             async for chunk in self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email):
                 yield chunk
             return
+
+        # PreLlmCall hook, before any model/credential resolution.
+        model_name, messages, temperature = await self._run_pre_llm_call_hooks(
+            model_name,
+            messages,
+            temperature=temperature,
+            streaming=True,
+            has_tools=True,
+            user_email=user_email,
+        )
 
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
