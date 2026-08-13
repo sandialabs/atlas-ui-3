@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #790 - 2026-08-13
+- **MCP prompt keys now support underscore server names** (closes #790): prompt and tool key cleanup resolves keys against known full server names before falling back to the legacy first-underscore split, so servers like `file_viewer` keep prompt injection, compliance cleanup, and prompt-selector labels working without changing persisted key format.
+
 ### PR #784 - 2026-08-12
 - **Stopped turns are closed in every mode, and the tool digest is hardened** (follow-up to #776, issue #755): `close_open_turn()` now walks back past display-only rows, so a stopped tools-mode turn — whose flush leaves a `tool_call` row last — is closed instead of reopening the next request as `user -> user`; `ToolsModeRunner.run` keeps artifact processing and its recorder flush inside the unwind guard. Digest arguments are escaped and fenced like results (the escape covers `<` and `>`, so neither field can forge or close a delimiter), and a stopped call now emits `tool_interrupted` so the live row stops spinning instead of contradicting the reloaded transcript. The tool-status ladder names each terminal state, with anything unrecognized rendering neutrally rather than claiming the call failed.
 

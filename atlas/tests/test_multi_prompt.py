@@ -88,6 +88,26 @@ class TestMultiPromptSupport:
         )
 
     @pytest.mark.asyncio
+    async def test_prompt_server_names_may_include_underscores(self, service, mock_tool_manager):
+        """Prompt keys resolve against known full server names before splitting."""
+        mock_tool_manager.available_prompts = {"file_viewer": {"prompts": []}}
+        mock_tool_manager.get_prompt.return_value = "Use the file viewer prompt."
+        messages = [{"role": "user", "content": "Hello"}]
+
+        result = await service.apply_prompt_override(
+            messages, ["file_viewer_custom_prompt"]
+        )
+
+        assert result[0] == {"role": "system", "content": "Use the file viewer prompt."}
+        mock_tool_manager.get_prompt.assert_called_once_with(
+            "file_viewer",
+            "custom_prompt",
+            meta=None,
+            user_email=None,
+            conversation_id=None,
+        )
+
+    @pytest.mark.asyncio
     async def test_no_prompts_returns_unchanged(self, service):
         messages = [{"role": "user", "content": "Hello"}]
         result = await service.apply_prompt_override(messages, None)

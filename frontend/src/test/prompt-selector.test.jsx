@@ -134,6 +134,25 @@ describe('PromptSelector', () => {
       expect(screen.getByText('test_prompt')).toBeInTheDocument()
     })
 
+    it('should display prompt names correctly when the server name has underscores', () => {
+      useChat.mockReturnValue({
+        ...defaultChatContext,
+        prompts: [{
+          server: 'file_viewer',
+          prompts: [{
+            name: 'custom_prompt',
+            description: 'A file viewer prompt'
+          }]
+        }],
+        selectedPrompts: new Set(['file_viewer_custom_prompt']),
+        activePromptKey: 'file_viewer_custom_prompt'
+      })
+
+      render(<PromptSelector />)
+      expect(screen.getByText('custom_prompt')).toBeInTheDocument()
+      expect(screen.queryByText('viewer_custom_prompt')).not.toBeInTheDocument()
+    })
+
     it('should show selected prompt in dropdown with checkmark', () => {
       render(<PromptSelector />)
       
