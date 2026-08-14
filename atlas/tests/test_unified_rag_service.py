@@ -16,7 +16,11 @@ from atlas.modules.rag.client import DataSource, RAGResponse
 @pytest.fixture
 def mock_config_manager():
     """Create a mock config manager with test RAG sources."""
-    config_manager = MagicMock()
+    # Named ``mock_cm`` rather than ``config_manager`` so the real singleton
+    # imported at module scope stays reachable inside this fixture -- the
+    # admin-only source below must be tagged with the *configured* admin group,
+    # not a hardcoded "admin".
+    mock_cm = MagicMock()
 
     # Create test RAG sources config
     http_source = RAGSourceConfig(
@@ -35,7 +39,7 @@ def mock_config_manager():
         display_name="Test MCP RAG",
         description="Test MCP RAG source",
         command=["python", "test_mcp.py"],
-        groups=["admin"],
+        groups=[config_manager.app_settings.admin_group],
         compliance_level="SOC2",
         enabled=True,
     )
@@ -47,7 +51,7 @@ def mock_config_manager():
         enabled=False,
     )
 
-    config_manager.rag_sources_config = RAGSourcesConfig(
+    mock_cm.rag_sources_config = RAGSourcesConfig(
         sources={
             "test_http": http_source,
             "test_mcp": mcp_source,
@@ -55,7 +59,7 @@ def mock_config_manager():
         }
     )
 
-    return config_manager
+    return mock_cm
 
 
 @pytest.fixture
@@ -65,9 +69,10 @@ def mock_auth_check():
         # The configured test user is in the "users" group only
         if username == config_manager.app_settings.test_user:
             return group == "users"
-        # The configured admin test user is in both "users" and "admin" groups
+        # The configured admin test user is in both "users" and the configured
+        # admin group
         if username == config_manager.app_settings.admin_test_user:
-            return group in ["users", "admin"]
+            return group in ["users", config_manager.app_settings.admin_group]
         return False
 
     return auth_check
@@ -149,14 +154,19 @@ class TestUserAuthorization:
     @pytest.mark.asyncio
     async def test_is_user_authorized_user_not_in_group(self, unified_rag_service):
         """Test authorization when user is not in required group."""
-        result = await unified_rag_service._is_user_authorized(config_manager.app_settings.test_user, ["admin"])
+        result = await unified_rag_service._is_user_authorized(
+            config_manager.app_settings.test_user,
+            [config_manager.app_settings.admin_group],
+        )
         assert result is False
 
     @pytest.mark.asyncio
     async def test_is_user_authorized_no_auth_func(self, mock_config_manager):
         """Test authorization when no auth check function is provided."""
         service = UnifiedRAGService(config_manager=mock_config_manager)
-        result = await service._is_user_authorized("anyone@test.com", ["admin"])
+        result = await service._is_user_authorized(
+            "anyone@test.com", [config_manager.app_settings.admin_group]
+        )
         # Should return True when no auth function (permissive by default)
         assert result is True
 

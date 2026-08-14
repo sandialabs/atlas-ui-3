@@ -48,6 +48,24 @@ from atlas.modules.config.settings import AppSettings  # noqa: E402
 
 AppSettings.model_config["env_file"] = None
 
+# --- External authorizer isolation ---------------------------------------
+# ``core.auth.is_user_in_group`` prefers a configured external authorization
+# service over its local group logic: when AUTH_GROUP_CHECK_URL and
+# AUTH_GROUP_CHECK_API_KEY are both set, *every* membership decision becomes an
+# outbound HTTPS POST. That is exactly the runtime behaviour we want in a real
+# deployment, and exactly what must not leak into the suite -- a contributor or
+# CI runner with those vars exported turns ~50 admin/authorization tests into
+# calls against a live authorization service (or, more usually, into 403s and
+# connection errors), for reasons that have nothing to do with their change.
+#
+# Clearing them for the session makes the local branch deterministic. Tests that
+# specifically exercise the external path (see ``test_core_auth.py``) set both
+# vars via monkeypatch, which takes precedence over this session-level clear, so
+# the production path keeps real coverage. This is a test-isolation guard, not a
+# product behavior change -- runtime authorization is untouched.
+for _authorizer_var in ("AUTH_GROUP_CHECK_URL", "AUTH_GROUP_CHECK_API_KEY"):
+    os.environ.pop(_authorizer_var, None)
+
 # MCP token storage now refuses to start without an explicit encryption key
 # (previously a per-process ephemeral key was generated, which silently lost
 # every stored token on restart). Provide a deterministic test key so module
