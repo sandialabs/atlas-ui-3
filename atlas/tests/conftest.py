@@ -139,6 +139,38 @@ def _isolate_config_cache():
             setattr(_config_manager, attr, value)
 
 
+# Groups the debug-only mock table in ``core.auth`` grants to the *non-admin*
+# baseline identity ``user@example.com`` (plus ``users``, which is granted to
+# literally everyone before the table is even consulted).
+_NON_ADMIN_BASELINE_GROUPS = frozenset({"users", "mcp_basic"})
+
+
+@pytest.fixture
+def distinct_admin_group():
+    """Return the configured admin group, skipping if it is not actually exclusive.
+
+    Allow/deny pairs that tag a resource with ``ADMIN_GROUP`` and then assert a
+    non-admin identity is refused only mean something when the configured admin
+    group is one the denial identity lacks. Point ``ADMIN_GROUP`` at ``users``
+    (which ``core.auth`` grants to everyone unconditionally) or ``mcp_basic``,
+    and the resource becomes reachable by the very identity the test expects to
+    be turned away -- the assertion inverts and the suite reports a failure that
+    says nothing about the code under test.
+
+    Such a deployment has no working admin gate at all, so this is a broken
+    configuration rather than a case worth supporting. Skip with the reason
+    stated plainly instead of failing (a spurious red) or silently passing
+    (a test that no longer tests anything).
+    """
+    admin_group = _config_manager.app_settings.admin_group
+    if admin_group in _NON_ADMIN_BASELINE_GROUPS:
+        pytest.skip(
+            f"ADMIN_GROUP={admin_group!r} is a group every non-admin identity "
+            "already has, so admin allow/deny pairs cannot be distinguished."
+        )
+    return admin_group
+
+
 @pytest.fixture
 def mock_admin_authorization(monkeypatch):
     """Enable the debug-only mock group table so admin routes are reachable.

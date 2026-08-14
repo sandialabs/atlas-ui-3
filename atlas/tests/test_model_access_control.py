@@ -222,7 +222,7 @@ async def test_execute_allows_unrestricted_model(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 @pytest.fixture
-def restricted_model_config():
+def restricted_model_config(distinct_admin_group):
     """Inject an admin-restricted model into the live config for one test.
 
     The restriction is tagged with the *configured* admin group rather than a
@@ -230,6 +230,10 @@ def restricted_model_config():
     ``test_user``, whose admin membership comes from ``core.auth``'s
     ``test_user``/``admin_group`` branch. Hardcoding "admin" makes them fail on
     any deployment whose ``ADMIN_GROUP`` is named something else.
+
+    ``distinct_admin_group`` supplies that group and skips when it is one the
+    non-admin denial identity below already holds, which would otherwise invert
+    the paired deny assertions.
     """
     from atlas.infrastructure.app_factory import app_factory
 
@@ -238,7 +242,7 @@ def restricted_model_config():
     models["admin-only-model"] = ModelConfig(
         model_name="admin/only",
         model_url="http://x/v1",
-        groups=[config_manager.app_settings.admin_group],
+        groups=[distinct_admin_group],
     )
     try:
         yield

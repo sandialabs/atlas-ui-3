@@ -14,8 +14,13 @@ from atlas.modules.rag.client import DataSource, RAGResponse
 
 
 @pytest.fixture
-def mock_config_manager():
-    """Create a mock config manager with test RAG sources."""
+def mock_config_manager(distinct_admin_group):
+    """Create a mock config manager with test RAG sources.
+
+    ``distinct_admin_group`` supplies the admin-only source's group and skips
+    when it is one the non-admin ``test_user`` already holds -- otherwise the
+    paired denial tests below (test_user must not reach ``test_mcp``) invert.
+    """
     # Named ``mock_cm`` rather than ``config_manager`` so the real singleton
     # imported at module scope stays reachable inside this fixture -- the
     # admin-only source below must be tagged with the *configured* admin group,
@@ -39,7 +44,7 @@ def mock_config_manager():
         display_name="Test MCP RAG",
         description="Test MCP RAG source",
         command=["python", "test_mcp.py"],
-        groups=[config_manager.app_settings.admin_group],
+        groups=[distinct_admin_group],
         compliance_level="SOC2",
         enabled=True,
     )

@@ -145,11 +145,16 @@ async def test_is_user_in_group_denied_in_production_mode(monkeypatch):
 # without these tests nothing pins the branch that production actually runs.
 
 
+_AUTHORIZER_URL = "https://auth.example.com/check"
+# Not a credential -- an arbitrary token this test asserts is forwarded verbatim.
+_AUTHORIZER_API_KEY = "test-authorizer-key-not-a-credential"
+
+
 def _external_authorizer_env(monkeypatch, *, debug_mode: str = "false"):
     monkeypatch.setenv("DEBUG_MODE", debug_mode)
     monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
-    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
-    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "secret")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", _AUTHORIZER_URL)
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", _AUTHORIZER_API_KEY)
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
     config_manager.reload_configs()
 
@@ -185,10 +190,19 @@ async def test_is_user_in_group_delegates_to_external_authorizer(monkeypatch, is
     with patcher:
         assert await is_user_in_group(admin_test_user, admin_group) is is_member
 
+    # Assert the request against the *configured* endpoint and key rather than
+    # literals repeated from the fixture, so a regression that drops the
+    # credential (or posts somewhere other than AUTH_GROUP_CHECK_URL) cannot be
+    # masked by the test and the fixture drifting together.
+    app_settings = config_manager.app_settings
     client.post.assert_awaited_once()
-    _, kwargs = client.post.call_args
+    args, kwargs = client.post.call_args
+    assert args[0] == app_settings.auth_group_check_url
     assert kwargs["json"] == {"user_id": admin_test_user, "group_id": admin_group}
-    assert kwargs["headers"]["Authorization"] == "Bearer secret"
+    assert (
+        kwargs["headers"]["Authorization"]
+        == f"Bearer {app_settings.auth_group_check_api_key}"
+    )
 
 
 @pytest.mark.asyncio
