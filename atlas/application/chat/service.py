@@ -263,7 +263,7 @@ class ChatService:
                     sanitize_for_logging(user_email),
                 )
                 raise DomainError(f"Session creation blocked by hook: {outcome.reason}")
-            if outcome.verdict == "modify" and isinstance(outcome.payload, dict):
+            if outcome.modified and isinstance(outcome.payload, dict):
                 session.context.update(outcome.payload)
 
         await self.session_repository.create(session)

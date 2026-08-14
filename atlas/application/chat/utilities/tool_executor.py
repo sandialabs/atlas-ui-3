@@ -487,7 +487,7 @@ async def execute_single_tool(
                             success=False, error=perm_outcome.reason,
                         )
                     else:
-                        if perm_outcome.verdict == "modify" and isinstance(perm_outcome.payload.get("tool_args"), dict):
+                        if perm_outcome.modified and isinstance(perm_outcome.payload.get("tool_args"), dict):
                             filtered_args = _filter_args_to_schema(
                                 inject_context_into_args(
                                     perm_outcome.payload["tool_args"], session_context,
@@ -503,7 +503,7 @@ async def execute_single_tool(
                             # approve", which a non-admin user cannot satisfy. The
                             # tool's own admin_required stays authoritative.
                             needs_approval = True
-                        elif perm_outcome.verdict == "modify" and perm_outcome.payload.get("needs_approval") is False:
+                        elif perm_outcome.modified and perm_outcome.payload.get("needs_approval") is False:
                             needs_approval = False
                             _perm_auto_approved = True
 
@@ -525,7 +525,7 @@ async def execute_single_tool(
                             success=False, error=pre_outcome.reason,
                         )
                     else:
-                        if pre_outcome.verdict == "modify" and isinstance(pre_outcome.payload.get("tool_args"), dict):
+                        if pre_outcome.modified and isinstance(pre_outcome.payload.get("tool_args"), dict):
                             filtered_args = _filter_args_to_schema(
                                 inject_context_into_args(
                                     pre_outcome.payload["tool_args"], session_context,
@@ -703,7 +703,7 @@ async def execute_single_tool(
                         success=False, error=post_outcome.reason,
                     )
                     raw_output_for_telemetry = result.content
-                elif post_outcome.verdict == "modify":
+                elif post_outcome.modified:
                     new_content = post_outcome.payload.get("result_content")
                     if isinstance(new_content, str):
                         result.content = new_content

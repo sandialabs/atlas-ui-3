@@ -652,3 +652,103 @@ class TestHookBlockedError:
         assert err.reason == "policy says no"
         assert "PreLlmCall" in str(err)
         assert "policy says no" in str(err)
+
+
+# ------------------------------------- modify survives a verdict escalation
+
+
+class TestModifiedFlag:
+    """``modified`` must be independent of the ranked verdict.
+
+    Verdicts are ranked (deny > require_approval > modify), so a chain where one
+    hook redacts and a later hook escalates reports ``require_approval``. Call
+    sites gate payload application on ``modified``; gating on
+    ``verdict == "modify"`` would silently drop the redaction.
+    """
+
+    async def test_modify_then_require_approval_keeps_payload(self, tmp_path):
+        redact = f"""\
+        #!{sys.executable}
+        import json, sys
+        env = json.load(sys.stdin)
+        env["payload"]["tool_args"]["secret"] = "[REDACTED]"
+        print(json.dumps({{"decision": "modify", "payload": env["payload"]}}))
+        sys.exit(0)
+        """
+        escalate = f'#!{sys.executable}\nimport json,sys; print(json.dumps({{"decision":"require_approval"}})); sys.exit(0)'
+        s1 = _write_hook(tmp_path, "redact", redact)
+        s2 = _write_hook(tmp_path, "escalate", escalate)
+        mgr = _make_manager(tmp_path, {"PreToolUse": [
+            HookConfig(name="redact", command=[s1]),
+            HookConfig(name="escalate", command=[s2]),
+        ]})
+        outcome = await mgr.run_event(
+            HookEvent.PRE_TOOL_USE,
+            {"tool_name": "t", "tool_args": {"secret": "hunter2"}},
+            session_context=_session_ctx(), matcher_value="t",
+        )
+        # The escalation outranks modify...
+        assert outcome.verdict == "require_approval"
+        # ...but the redaction must not be lost.
+        assert outcome.modified is True
+        assert outcome.payload["tool_args"]["secret"] == "[REDACTED]"
+
+    async def test_modified_false_when_nothing_rewritten(self, tmp_path):
+        noop = f'#!{sys.executable}\nimport sys; sys.exit(0)'
+        s = _write_hook(tmp_path, "noop", noop)
+        mgr = _make_manager(tmp_path, {"PreToolUse": [HookConfig(name="n", command=[s])]})
+        outcome = await mgr.run_event(
+            HookEvent.PRE_TOOL_USE, {"tool_name": "t", "tool_args": {"a": 1}},
+            session_context=_session_ctx(), matcher_value="t",
+        )
+        assert outcome.modified is False
+        assert outcome.verdict == "continue"
+
+    async def test_modified_true_on_plain_modify(self, tmp_path):
+        body = f"""\
+        #!{sys.executable}
+        import json, sys
+        env = json.load(sys.stdin)
+        env["payload"]["tool_args"]["path"] = "/tmp/safe.txt"
+        print(json.dumps({{"decision": "modify", "payload": env["payload"]}}))
+        sys.exit(0)
+        """
+        s = _write_hook(tmp_path, "m", body)
+        mgr = _make_manager(tmp_path, {"PreToolUse": [HookConfig(name="m", command=[s])]})
+        outcome = await mgr.run_event(
+            HookEvent.PRE_TOOL_USE, {"tool_name": "t", "tool_args": {"path": "/etc/passwd"}},
+            session_context=_session_ctx(), matcher_value="t",
+        )
+        assert outcome.verdict == "modify"
+        assert outcome.modified is True
+
+
+# --------------------------------------------- malformed hooks.json is loud
+
+
+class TestMalformedConfigIsDetected:
+    """A hooks.json that exists but does not parse disables every hook, including
+    the fail-closed ones. That must be reported, not silently equated with
+    "no hooks configured"."""
+
+    def _cm_with_config_dir(self, tmp_path: Path) -> ConfigManager:
+        cm = ConfigManager(atlas_root=Path(__file__).resolve().parents[1])
+        cm._search_paths = lambda filename: [tmp_path / filename]
+        return cm
+
+    def test_malformed_hooks_json_sets_load_failed(self, tmp_path):
+        (tmp_path / "hooks.json").write_text('{"hooks": {,,, broken}')
+        cm = self._cm_with_config_dir(tmp_path)
+        config = cm.hooks_config
+        # Degrades to empty so a broken file cannot take the server down...
+        assert config.hooks == {}
+        # ...but the failure is recorded.
+        assert cm._hooks_config_load_failed is True
+        assert cm.validate_config()["hooks_config"] is False
+
+    def test_absent_hooks_json_is_not_a_failure(self, tmp_path):
+        cm = self._cm_with_config_dir(tmp_path)  # no file written
+        config = cm.hooks_config
+        assert config.hooks == {}
+        assert cm._hooks_config_load_failed is False
+        assert cm.validate_config()["hooks_config"] is True

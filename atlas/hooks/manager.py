@@ -82,12 +82,20 @@ class HookOutcome:
 
     ``fired`` is False when no hook ran at all (no config / no match), which lets
     call sites skip downstream translation cheaply.
+
+    ``modified`` is the flag call sites must check before applying ``payload``.
+    It is independent of ``verdict``: verdicts are ranked (deny >
+    require_approval > modify), so a chain where one hook redacts and a later
+    hook escalates reports ``verdict == "require_approval"`` while still
+    carrying a rewritten payload. Gating payload application on
+    ``verdict == "modify"`` would silently drop that redaction.
     """
 
     verdict: str = "continue"
     reason: Optional[str] = None
     payload: Dict[str, Any] = field(default_factory=dict)
     fired: bool = False
+    modified: bool = False
     hook_names: List[str] = field(default_factory=list)
 
 
@@ -119,6 +127,14 @@ class HookManager:
             return bool(self.hooks_config.hooks_for(event.value))
         except Exception:
             # A broken config must not take down the chat turn; treat as empty.
+            # Log it, though: this silently disables the fail-closed events too,
+            # and without a diagnostic that is indistinguishable from "no hooks
+            # configured".
+            logger.exception(
+                "Failed to read hooks config for event %s; treating as no hooks "
+                "(fail-closed controls for this event are NOT in effect)",
+                event.value,
+            )
             return False
 
     # -------------------------------------------------------------- directories
@@ -188,6 +204,7 @@ class HookManager:
         verdict_rank = 0  # continue
         reason: Optional[str] = None
         fired = False
+        modified = False
         hook_names: List[str] = []
 
         with start_span("hook.event", {
@@ -219,6 +236,10 @@ class HookManager:
                         reason = decision.reason
                 if d == "modify":
                     if self._apply_modify(envelope, decision, hook):
+                        # Track the mutation separately from the verdict rank: a
+                        # later require_approval outranks "modify" and would
+                        # otherwise hide that the payload was rewritten.
+                        modified = True
                         if verdict_rank < _VERDICT_RANK["modify"]:
                             verdict_rank = _VERDICT_RANK["modify"]
                 # continue: no state change
@@ -232,6 +253,7 @@ class HookManager:
             reason=reason,
             payload=envelope["payload"],
             fired=fired,
+            modified=modified,
             hook_names=hook_names,
         )
         # Re-assert trusted fields: even though we only ever read them from the

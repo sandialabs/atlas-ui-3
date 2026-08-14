@@ -206,7 +206,7 @@ class UnifiedRAGService:
         )
         if outcome.verdict == "deny":
             return RAGResponse(content="", metadata=None)
-        if outcome.verdict == "modify":
+        if outcome.modified:
             new_content = outcome.payload.get("content")
             if isinstance(new_content, str):
                 response.content = new_content
@@ -532,7 +532,7 @@ class UnifiedRAGService:
                 if call_outcome is not None and call_outcome.verdict == "deny":
                     set_attrs(span, {"rag.blocked_by_hook": True})
                     return RAGResponse(content="", metadata=None)
-                if call_outcome is not None and call_outcome.verdict == "modify":
+                if call_outcome is not None and call_outcome.modified:
                     new_q = call_outcome.payload.get("query")
                     if isinstance(new_q, str) and new_q:
                         messages = self._rewrite_query_messages(messages, new_q)
@@ -743,7 +743,7 @@ class UnifiedRAGService:
                 if call_outcome is not None and call_outcome.verdict == "deny":
                     set_attrs(span, {"rag.blocked_by_hook": True})
                     return RAGResponse(content="", metadata=None)
-                if call_outcome is not None and call_outcome.verdict == "modify":
+                if call_outcome is not None and call_outcome.modified:
                     new_q = call_outcome.payload.get("query")
                     if isinstance(new_q, str) and new_q:
                         messages = self._rewrite_query_messages(messages, new_q)

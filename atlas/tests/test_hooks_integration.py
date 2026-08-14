@@ -691,3 +691,90 @@ class TestNoConfigInvariant:
         monkeypatch.setattr(UnifiedRAGService, "_query_rag_impl", fake_impl)
         await svc.query_rag("u", "atlas_rag:docs", [{"role": "user", "content": "q"}])
         assert spawned == []
+
+
+# ------------------------------------ None vs [] data-source plumbing (#786)
+
+
+class TestDataSourceSelectionPlumbing:
+    """``selected_data_sources`` carries a three-state meaning end to end.
+
+    ``None``/absent = the user selected nothing specific, so ``atlas_rag_query``
+    falls back to every authorized source. ``[]`` = an explicit ceiling of zero
+    (e.g. a ``UserPromptSubmit`` hook narrowed the turn to no sources).
+
+    Collapsing either into the other breaks a boundary in one direction or the
+    other: ``None -> []`` silently disables RAG for ordinary agent turns, and
+    ``[] -> None`` widens a narrowing hook into the *widest* possible query.
+    """
+
+    def _run_agent_loop(self, data_sources):
+        """Run one agent step and return the session_context it built."""
+        from unittest.mock import patch
+        from uuid import uuid4
+
+        from atlas.application.chat.agent.agentic_loop import AgenticLoop
+        from atlas.application.chat.agent.protocols import AgentContext
+        from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
+        from atlas.interfaces.llm import LLMResponse
+
+        captured = {}
+
+        async def fake_execute_multiple_tools(**kwargs):
+            captured["session_context"] = kwargs["session_context"]
+            r = MagicMock()
+            r.content = "3"
+            r.tool_call_id = "tc1"
+            return [r]
+
+        history = ConversationHistory()
+        history.add_message(Message(role=MessageRole.USER, content="hi"))
+        context = AgentContext(
+            session_id=uuid4(), user_email="user@example.com", files={}, history=history,
+        )
+
+        responses = [
+            LLMResponse(content="", tool_calls=[{
+                "id": "tc1", "type": "function",
+                "function": {"name": "calc_add", "arguments": '{"a": 1}'},
+            }]),
+            LLMResponse(content="done"),
+        ]
+        llm = MagicMock()
+        llm.call_with_tools = AsyncMock(side_effect=list(responses))
+        # A non-empty source list routes through the RAG-aware entry point.
+        llm.call_with_rag_and_tools = AsyncMock(side_effect=list(responses))
+
+        connection = MagicMock()
+        connection.send_json = AsyncMock()
+        loop = AgenticLoop(
+            llm=llm, tool_manager=MagicMock(), prompt_provider=None, connection=connection,
+        )
+
+        async def event_handler(evt):
+            pass
+
+        with patch("atlas.application.chat.agent.agentic_loop.error_handler.safe_get_tools_schema",
+                   new=AsyncMock(return_value=[])), \
+             patch("atlas.application.chat.agent.agentic_loop.tool_executor.execute_multiple_tools",
+                   new=fake_execute_multiple_tools):
+            asyncio.run(loop.run(
+                model="m", messages=[{"role": "user", "content": "hi"}],
+                context=context, selected_tools=["calc_add"], data_sources=data_sources,
+                max_steps=5, temperature=0.7, event_handler=event_handler, streaming=False,
+            ))
+        return captured["session_context"]
+
+    def test_agent_mode_no_selection_stays_none(self):
+        # Regression: `data_sources or []` here made every no-selection agent
+        # turn look like an explicit "query nothing".
+        sc = self._run_agent_loop(None)
+        assert sc["selected_data_sources"] is None
+
+    def test_agent_mode_explicit_empty_is_preserved(self):
+        sc = self._run_agent_loop([])
+        assert sc["selected_data_sources"] == []
+
+    def test_agent_mode_selection_is_passed_through(self):
+        sc = self._run_agent_loop(["atlas_rag:docs"])
+        assert sc["selected_data_sources"] == ["atlas_rag:docs"]

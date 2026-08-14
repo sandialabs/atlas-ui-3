@@ -229,13 +229,28 @@ sys.exit(0)
 
 ### Audit every tool call (bash, fire-and-forget style)
 
+> **Envelopes are secret-bearing.** `tool_args` can contain tokenized download
+> URLs (HMAC capability tokens), file paths, and prompt text; `result_content`
+> carries retrieved document text. Log a projection, not the raw envelope — or
+> treat the audit log itself as a secret store.
+
 ```bash
 #!/usr/bin/env bash
 # config/hooks/audit.sh  (PostToolUse, on_error: allow)
-read -r envelope
-echo "$envelope" >> "${ATLAS_PROJECT_DIR}/logs/tool-audit.jsonl"
+envelope="$(cat)"
+python3 -c '
+import json, sys
+env = json.load(sys.stdin); p = env.get("payload") or {}
+args = p.get("tool_args") or {}
+json.dump({"user_email": env.get("user_email"), "tool_name": p.get("tool_name"),
+           "arg_keys": sorted(args) if isinstance(args, dict) else None,
+           "result_success": p.get("result_success")}, sys.stdout)
+sys.stdout.write("\n")
+' <<<"$envelope" >> "${ATLAS_PROJECT_DIR}/logs/tool-audit.jsonl"
 exit 0
 ```
+
+See `atlas/config/hooks-example/audit_tool.sh` for the full version.
 
 ## Relationship to existing extension points
 

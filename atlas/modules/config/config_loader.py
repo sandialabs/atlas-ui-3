@@ -418,7 +418,22 @@ class ConfigManager:
                     )
                 else:
                     self._hooks_config = HooksConfig()
-                    logger.info("No hooks.json found; hook system disabled (zero overhead)")
+                    # _load_file_with_error_handling() returns None both when the
+                    # file is absent and when it exists but failed to parse -- it
+                    # logs and continues. Those cases are not equivalent here: a
+                    # typo in hooks.json silently disables every fail-closed
+                    # control, so distinguish them by checking whether any
+                    # candidate path actually exists on disk.
+                    if any(p.exists() for p in file_paths):
+                        self._hooks_config_load_failed = True
+                        logger.error(
+                            "hooks.json exists but could not be parsed; ALL hooks are "
+                            "disabled, including fail-closed policy hooks. "
+                            "Searched: %s",
+                            [str(p) for p in file_paths],
+                        )
+                    else:
+                        logger.info("No hooks.json found; hook system disabled (zero overhead)")
             except Exception as e:
                 # Degrading to an empty config disables every hook, including the
                 # fail-closed ones. Record it so validate_config can report the

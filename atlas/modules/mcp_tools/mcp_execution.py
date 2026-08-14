@@ -834,7 +834,7 @@ class ExecutionMixin:
                 )
                 if rag_call.verdict == "deny":
                     _rag_blocked = rag_call.reason or "RAG query blocked by policy hook"
-                elif rag_call.verdict == "modify":
+                elif rag_call.modified:
                     new_q = rag_call.payload.get("query")
                     if isinstance(new_q, str) and new_q and new_q != query:
                         query = new_q
@@ -910,7 +910,7 @@ class ExecutionMixin:
                 )
                 if rag_resp.verdict == "deny":
                     answers = []
-                elif rag_resp.verdict == "modify":
+                elif rag_resp.modified:
                     new_combined = rag_resp.payload.get("content")
                     if isinstance(new_combined, str):
                         # Replace the combined answer by collapsing to a single answer entry.

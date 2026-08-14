@@ -200,7 +200,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         )
         if outcome.verdict == "deny":
             raise HookBlockedError(HookEvent.PRE_LLM_CALL, outcome.reason or "LLM call blocked by policy hook")
-        if outcome.verdict == "modify":
+        if outcome.modified:
             return outcome.payload
         return None
 

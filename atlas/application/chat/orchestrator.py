@@ -296,7 +296,7 @@ class ChatOrchestrator:
                 await self.event_publisher.publish_chat_response(reason)
                 await self.event_publisher.publish_response_complete()
                 return event_notifier.create_chat_response(reason)
-            if outcome.verdict == "modify":
+            if outcome.modified:
                 new_prompt = outcome.payload.get("prompt")
                 if isinstance(new_prompt, str) and new_prompt:
                     content = new_prompt
