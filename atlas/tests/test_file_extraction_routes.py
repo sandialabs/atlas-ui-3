@@ -6,13 +6,13 @@ from main import app
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
-from atlas.modules.config.config_manager import FileExtractorConfig, FileExtractorsConfig
+from atlas.modules.config.config_manager import FileExtractorConfig, FileExtractorsConfig, config_manager
 
 
 def test_config_endpoint_includes_file_extraction_feature_flag():
     """Config endpoint should include file_content_extraction in features."""
     client = TestClient(app)
-    resp = client.get("/api/config", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/config", headers={"X-User-Email": config_manager.app_settings.test_user})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -24,7 +24,7 @@ def test_config_endpoint_includes_file_extraction_feature_flag():
 def test_config_endpoint_includes_file_extraction_config():
     """Config endpoint should include file_extraction configuration."""
     client = TestClient(app)
-    resp = client.get("/api/config", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/config", headers={"X-User-Email": config_manager.app_settings.test_user})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -44,7 +44,7 @@ def test_file_extraction_disabled_when_feature_flag_off():
         config_manager.app_settings.feature_file_content_extraction_enabled = False
 
         client = TestClient(app)
-        resp = client.get("/api/config", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/config", headers={"X-User-Email": config_manager.app_settings.test_user})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -79,7 +79,7 @@ def test_file_extraction_enabled_with_correct_extensions():
         )
 
         client = TestClient(app)
-        resp = client.get("/api/config", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/config", headers={"X-User-Email": config_manager.app_settings.test_user})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -113,7 +113,7 @@ def test_file_extraction_handles_config_errors_gracefully():
             property(lambda self: (_ for _ in ()).throw(Exception("Config error")))
         ):
             client = TestClient(app)
-            resp = client.get("/api/config", headers={"X-User-Email": "test@test.com"})
+            resp = client.get("/api/config", headers={"X-User-Email": config_manager.app_settings.test_user})
 
             assert resp.status_code == 200
             data = resp.json()
@@ -147,7 +147,7 @@ def test_file_extraction_extensions_sorted():
         )
 
         client = TestClient(app)
-        resp = client.get("/api/config", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/config", headers={"X-User-Email": config_manager.app_settings.test_user})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -176,7 +176,7 @@ def test_file_extraction_includes_plain_text_types():
         )
 
         client = TestClient(app)
-        resp = client.get("/api/config", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/config", headers={"X-User-Email": config_manager.app_settings.test_user})
 
         assert resp.status_code == 200
         extensions = resp.json()["file_extraction"]["supported_extensions"]

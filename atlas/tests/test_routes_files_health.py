@@ -1,6 +1,8 @@
 from main import app
 from starlette.testclient import TestClient
 
+from atlas.modules.config.config_manager import config_manager
+
 
 def test_files_health_endpoint(monkeypatch):
     # Stub out S3 client call to avoid external dependency sensitivity
@@ -10,7 +12,7 @@ def test_files_health_endpoint(monkeypatch):
     assert hasattr(s3, "endpoint_url")
 
     client = TestClient(app)
-    resp = client.get("/api/files/healthz", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/files/healthz", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "healthy"
