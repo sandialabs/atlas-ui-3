@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from atlas.domain.messages.models import ToolCall
+from atlas.modules.config.config_manager import config_manager
 from atlas.modules.mcp_tools.client import MCPToolManager
 
 
@@ -99,7 +100,7 @@ async def test_execute_tool_allows_restricted_server_for_authorized_user():
         with patch("atlas.core.auth.is_user_in_group", is_admin):
             result = await manager.execute_tool(
                 ToolCall(id="call-3", name="admin_server_secret", arguments={}),
-                context={"user_email": "admin@example.com"},
+                context={"user_email": config_manager.app_settings.admin_test_user},
             )
 
     assert result.success is True
@@ -133,7 +134,7 @@ async def test_execute_tool_fails_closed_when_group_check_raises():
     with patch("atlas.core.auth.is_user_in_group", side_effect=boom):
         result = await manager.execute_tool(
             ToolCall(id="call-5", name="admin_server_secret", arguments={}),
-            context={"user_email": "admin@example.com"},
+            context={"user_email": config_manager.app_settings.admin_test_user},
         )
 
     assert result.success is False

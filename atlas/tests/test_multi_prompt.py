@@ -88,6 +88,52 @@ class TestMultiPromptSupport:
         )
 
     @pytest.mark.asyncio
+    async def test_prompt_server_names_may_include_underscores(self, service, mock_tool_manager):
+        """Prompt keys resolve against known full server names before splitting."""
+        mock_tool_manager.available_prompts = {"file_viewer": {"prompts": []}}
+        mock_tool_manager.get_prompt.return_value = "Use the file viewer prompt."
+        messages = [{"role": "user", "content": "Hello"}]
+
+        result = await service.apply_prompt_override(
+            messages, ["file_viewer_custom_prompt"]
+        )
+
+        assert result[0] == {"role": "system", "content": "Use the file viewer prompt."}
+        mock_tool_manager.get_prompt.assert_called_once_with(
+            "file_viewer",
+            "custom_prompt",
+            meta=None,
+            user_email=None,
+            conversation_id=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_underscore_server_name_wins_over_shorter_prefix(self, service, mock_tool_manager):
+        """With both `file` and `file_viewer` configured, a key starting with
+        `file_viewer_` resolves to the longer server name, not the `file`
+        prefix followed by `viewer_...`. This is the disambiguation case the
+        underscore fix exists for; a single-server test cannot exercise it."""
+        mock_tool_manager.available_prompts = {
+            "file": {"prompts": []},
+            "file_viewer": {"prompts": []},
+        }
+        mock_tool_manager.get_prompt.return_value = "Resolved prompt."
+        messages = [{"role": "user", "content": "Hello"}]
+
+        result = await service.apply_prompt_override(
+            messages, ["file_viewer_custom_prompt"]
+        )
+
+        assert result[0] == {"role": "system", "content": "Resolved prompt."}
+        mock_tool_manager.get_prompt.assert_called_once_with(
+            "file_viewer",
+            "custom_prompt",
+            meta=None,
+            user_email=None,
+            conversation_id=None,
+        )
+
+    @pytest.mark.asyncio
     async def test_no_prompts_returns_unchanged(self, service):
         messages = [{"role": "user", "content": "Hello"}]
         result = await service.apply_prompt_override(messages, None)

@@ -115,10 +115,18 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
                 group_id == app_settings.admin_group):
             return True
 
+        # The admin entries use the *configured* admin group rather than a
+        # literal "admin": ADMIN_GROUP is deployment-specific, and the
+        # test_user branch above already honours it. Hardcoding "admin" here
+        # meant that on any deployment with a renamed admin group the
+        # configured ADMIN_TEST_USER was granted a group nothing checks, so
+        # debug-mode admin routes were unreachable for that identity.
         mock_groups = {
-            "test@test.com": ["users", "mcp_basic", "admin"],
+            "test@test.com": ["users", "mcp_basic", app_settings.admin_group],
             "user@example.com": ["users", "mcp_basic"],
-            app_settings.admin_test_user: ["admin", "users", "mcp_basic", "mcp_advanced"]
+            app_settings.admin_test_user: [
+                app_settings.admin_group, "users", "mcp_basic", "mcp_advanced"
+            ],
         }
         user_groups = mock_groups.get(user_id, [])
         return group_id in user_groups

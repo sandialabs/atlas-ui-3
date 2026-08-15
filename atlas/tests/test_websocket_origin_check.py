@@ -22,6 +22,7 @@ from atlas.core.websocket_origin import (
     origin_is_allowed,
     parse_allowed_hosts,
 )
+from atlas.modules.config.config_manager import config_manager
 
 # --- parse_allowed_hosts --------------------------------------------------
 
@@ -283,7 +284,7 @@ def mock_app_factory():
     """Mock app factory to avoid initializing the full application."""
     with patch('main.app_factory') as mock_factory:
         mock_config = MagicMock()
-        mock_config.app_settings.test_user = 'test@test.com'
+        mock_config.app_settings.test_user = config_manager.app_settings.test_user
         mock_config.app_settings.debug_mode = False
         mock_config.app_settings.auth_user_header = 'X-User-Email'
         mock_config.app_settings.feature_proxy_secret_enabled = False

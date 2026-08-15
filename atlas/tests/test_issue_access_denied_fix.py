@@ -14,6 +14,8 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app
 
+from atlas.modules.config.config_manager import config_manager
+
 
 @pytest.fixture
 def mock_components():
@@ -21,7 +23,7 @@ def mock_components():
     with patch('main.app_factory') as mock_factory:
         # Mock config
         mock_config = MagicMock()
-        mock_config.app_settings.test_user = 'test@test.com'
+        mock_config.app_settings.test_user = config_manager.app_settings.test_user
         mock_config.app_settings.auth_user_header = 'X-User-Email'
         mock_factory.get_config_manager.return_value = mock_config
 
@@ -73,9 +75,9 @@ def test_issue_scenario_fixed_with_correct_user(mock_components):
     Test the exact scenario from the issue, demonstrating the fix.
 
     Before fix:
-    - WebSocket would use test@test.com (from fallback)
+    - WebSocket would use the configured test user (from fallback)
     - Attempting to access users/agarlan@sandia.gov/generated/file.pdf would fail
-    - Error: "Access denied: test@test.com attempted to access users/agarlan@sandia.gov/..."
+    - Error: the fallback test user attempted to access users/agarlan@sandia.gov/...
 
     After fix:
     - WebSocket uses agarlan@sandia.gov (from X-User-Email header)
@@ -92,7 +94,7 @@ def test_issue_scenario_fixed_with_correct_user(mock_components):
         call_args = mock_components['factory'].create_chat_service.call_args
         connection_adapter = call_args[0][0]
 
-        # This should be the actual user, not test@test.com
+        # This should be the actual user, not the configured test user
         assert connection_adapter.user_email == actual_user, (
             f"Expected user to be {actual_user}, but got {connection_adapter.user_email}. "
             "This would cause 'Access denied' errors when accessing user's files."
@@ -107,7 +109,7 @@ def test_issue_scenario_would_fail_without_header():
     with patch('main.app_factory') as mock_factory:
         # Mock config
         mock_config = MagicMock()
-        mock_config.app_settings.test_user = 'test@test.com'
+        mock_config.app_settings.test_user = config_manager.app_settings.test_user
         mock_config.app_settings.auth_user_header = 'X-User-Email'
         mock_factory.get_config_manager.return_value = mock_config
 
@@ -125,13 +127,13 @@ def test_issue_scenario_would_fail_without_header():
             connection_adapter = call_args[0][0]
 
             # Without header, it falls back to test user
-            assert connection_adapter.user_email == 'test@test.com', (
+            assert connection_adapter.user_email == config_manager.app_settings.test_user, (
                 "Without X-User-Email header, should fall back to test user"
             )
 
             # This would cause access denied when trying to access:
             # users/agarlan@sandia.gov/generated/file.pdf
-            # because connection is authenticated as test@test.com
+            # because connection is authenticated as the configured test user
 
 
 if __name__ == "__main__":

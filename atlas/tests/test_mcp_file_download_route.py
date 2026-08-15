@@ -12,6 +12,7 @@ from main import app
 from starlette.testclient import TestClient
 
 from atlas.core.capabilities import generate_file_token
+from atlas.modules.config.config_manager import config_manager
 
 
 def _fake_s3_get_file(content=b"hello", filename="hello.txt", content_type="text/plain"):
@@ -39,7 +40,7 @@ def test_mcp_download_with_valid_token(monkeypatch):
     s3 = app_factory.get_file_storage()
     monkeypatch.setattr(s3, "get_file", _fake_s3_get_file())
 
-    token = generate_file_token(user_email="test@test.com", file_key="k1", ttl_seconds=60)
+    token = generate_file_token(user_email=config_manager.app_settings.test_user, file_key="k1", ttl_seconds=60)
 
     resp = client.get(
         "/mcp/files/download/k1",
@@ -103,7 +104,7 @@ def test_mcp_download_token_wrong_key_returns_403(monkeypatch):
     monkeypatch.setattr(s3, "get_file", _fake_s3_get_file())
 
     # Token for "other-key" but requesting "k1"
-    token = generate_file_token("test@test.com", "other-key", ttl_seconds=60)
+    token = generate_file_token(config_manager.app_settings.test_user, "other-key", ttl_seconds=60)
     resp = client.get(
         "/mcp/files/download/k1",
         params={"token": token},
@@ -119,7 +120,7 @@ def test_api_download_still_works_with_token(monkeypatch):
     s3 = app_factory.get_file_storage()
     monkeypatch.setattr(s3, "get_file", _fake_s3_get_file())
 
-    token = generate_file_token(user_email="test@test.com", file_key="k1", ttl_seconds=60)
+    token = generate_file_token(user_email=config_manager.app_settings.test_user, file_key="k1", ttl_seconds=60)
 
     resp = client.get(
         "/api/files/download/k1",

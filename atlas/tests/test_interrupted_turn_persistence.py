@@ -32,6 +32,7 @@ from atlas.domain.messages.models import (
     Message,
     MessageRole,
 )
+from atlas.modules.config.config_manager import config_manager
 
 
 def _kept(field):
@@ -893,7 +894,7 @@ class TestToolsModeCancelThroughService:
                     session_id=session_id,
                     content="add 1 and 2",
                     model="test-model",
-                    user_email="test@test.com",
+                    user_email=config_manager.app_settings.test_user,
                 )
 
         session = sessions[session_id]
@@ -976,7 +977,7 @@ class TestNonAgentModeCancel:
                     session_id=session_id,
                     content="write me a poem",
                     model="test-model",
-                    user_email="test@test.com",
+                    user_email=config_manager.app_settings.test_user,
                 )
 
         session = sessions[session_id]
@@ -1252,7 +1253,7 @@ class TestChatServiceCancelPersistence:
                     session_id=session_id,
                     content="add 1 and 2",
                     model="test-model",
-                    user_email="test@test.com",
+                    user_email=config_manager.app_settings.test_user,
                     update_callback=update_callback,
                 )
 
@@ -1279,7 +1280,7 @@ class TestChatServiceCancelPersistence:
                     session_id=session_id,
                     content="secret",
                     model="test-model",
-                    user_email="test@test.com",
+                    user_email=config_manager.app_settings.test_user,
                     incognito=True,
                 )
 
@@ -1318,7 +1319,7 @@ class TestChatServiceCancelPersistence:
                     session_id=session_id,
                     content="secret",
                     model="test-model",
-                    user_email="test@test.com",
+                    user_email=config_manager.app_settings.test_user,
                     incognito=True,
                 )
 

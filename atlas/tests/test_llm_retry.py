@@ -16,6 +16,7 @@ from atlas.domain.errors import (
     LLMTimeoutError,
     RateLimitError,
 )
+from atlas.modules.config.config_manager import config_manager
 from atlas.modules.llm import litellm_caller as caller_module
 from atlas.modules.llm.litellm_caller import (
     MAX_LLM_RETRIES,
@@ -295,7 +296,7 @@ class TestRagFallbackDoesNotMaskLLMErrors:
             with pytest.raises(RateLimitError):
                 await caller.call_with_rag(
                     "test", [{"role": "user", "content": "hi"}],
-                    data_sources=["src"], user_email="test@test.com",
+                    data_sources=["src"], user_email=config_manager.app_settings.test_user,
                 )
 
     @pytest.mark.asyncio
@@ -316,7 +317,7 @@ class TestRagFallbackDoesNotMaskLLMErrors:
                     "test", [{"role": "user", "content": "hi"}],
                     data_sources=["src"],
                     tools_schema=[{"type": "function", "function": {"name": "t"}}],
-                    user_email="test@test.com",
+                    user_email=config_manager.app_settings.test_user,
                 )
 
     @pytest.mark.asyncio
@@ -335,7 +336,7 @@ class TestRagFallbackDoesNotMaskLLMErrors:
             with pytest.raises(ContextWindowExceededError):
                 await caller.call_with_rag(
                     "test", [{"role": "user", "content": "hi"}],
-                    data_sources=["src"], user_email="test@test.com",
+                    data_sources=["src"], user_email=config_manager.app_settings.test_user,
                 )
 
     @pytest.mark.asyncio
@@ -356,5 +357,5 @@ class TestRagFallbackDoesNotMaskLLMErrors:
                     "test", [{"role": "user", "content": "hi"}],
                     data_sources=["src"],
                     tools_schema=[{"type": "function", "function": {"name": "t"}}],
-                    user_email="test@test.com",
+                    user_email=config_manager.app_settings.test_user,
                 )

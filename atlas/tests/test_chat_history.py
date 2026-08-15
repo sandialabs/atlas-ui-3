@@ -11,6 +11,7 @@ import pytest
 
 # Ensure clean engine state before each test
 from atlas.modules.chat_history.database import reset_engine
+from atlas.modules.config.config_manager import config_manager
 
 
 @pytest.fixture(autouse=True)
@@ -781,7 +782,7 @@ class TestRoutesSecurity:
     def test_get_nonexistent_returns_404(self, client):
         resp = client.get(
             "/api/conversations/does-not-exist",
-            headers={"X-User-Email": "test@test.com"},
+            headers={"X-User-Email": config_manager.app_settings.test_user},
         )
         assert resp.status_code == 404
 
@@ -1105,19 +1106,19 @@ class TestConversationRoutes:
             yield TestClient(app)
 
     def test_list_empty(self, client):
-        resp = client.get("/api/conversations", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/conversations", headers={"X-User-Email": config_manager.app_settings.test_user})
         assert resp.status_code == 200
         assert resp.json()["conversations"] == []
 
     def test_list_after_save(self, client, repo):
         repo.save_conversation(
             conversation_id="api-conv1",
-            user_email="test@test.com",
+            user_email=config_manager.app_settings.test_user,
             title="API Test",
             model="gpt-4",
             messages=_make_messages(2),
         )
-        resp = client.get("/api/conversations", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/conversations", headers={"X-User-Email": config_manager.app_settings.test_user})
         assert resp.status_code == 200
         convs = resp.json()["conversations"]
         assert len(convs) == 1
@@ -1126,12 +1127,12 @@ class TestConversationRoutes:
     def test_get_by_id(self, client, repo):
         repo.save_conversation(
             conversation_id="api-conv2",
-            user_email="test@test.com",
+            user_email=config_manager.app_settings.test_user,
             title="Get By ID",
             model="gpt-4",
             messages=_make_messages(3),
         )
-        resp = client.get("/api/conversations/api-conv2", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/conversations/api-conv2", headers={"X-User-Email": config_manager.app_settings.test_user})
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == "api-conv2"
@@ -1140,24 +1141,24 @@ class TestConversationRoutes:
     def test_search(self, client, repo):
         repo.save_conversation(
             conversation_id="api-search",
-            user_email="test@test.com",
+            user_email=config_manager.app_settings.test_user,
             title="Python Tips",
             model="gpt-4",
             messages=[{"role": "user", "content": "Python tips"}],
         )
-        resp = client.get("/api/conversations/search?q=Python", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/conversations/search?q=Python", headers={"X-User-Email": config_manager.app_settings.test_user})
         assert resp.status_code == 200
         assert len(resp.json()["conversations"]) == 1
 
     def test_delete_single(self, client, repo):
         repo.save_conversation(
             conversation_id="api-del",
-            user_email="test@test.com",
+            user_email=config_manager.app_settings.test_user,
             title="Delete Me",
             model="gpt-4",
             messages=_make_messages(1),
         )
-        resp = client.delete("/api/conversations/api-del", headers={"X-User-Email": "test@test.com"})
+        resp = client.delete("/api/conversations/api-del", headers={"X-User-Email": config_manager.app_settings.test_user})
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
 
@@ -1165,7 +1166,7 @@ class TestConversationRoutes:
         for i in range(3):
             repo.save_conversation(
                 conversation_id=f"api-mdel-{i}",
-                user_email="test@test.com",
+                user_email=config_manager.app_settings.test_user,
                 title=f"Multi {i}",
                 model="gpt-4",
                 messages=_make_messages(1),
@@ -1173,7 +1174,7 @@ class TestConversationRoutes:
         resp = client.post(
             "/api/conversations/delete",
             json={"ids": ["api-mdel-0", "api-mdel-1"]},
-            headers={"X-User-Email": "test@test.com"},
+            headers={"X-User-Email": config_manager.app_settings.test_user},
         )
         assert resp.status_code == 200
         assert resp.json()["deleted_count"] == 2
@@ -1181,7 +1182,7 @@ class TestConversationRoutes:
     def test_update_title(self, client, repo):
         repo.save_conversation(
             conversation_id="api-title",
-            user_email="test@test.com",
+            user_email=config_manager.app_settings.test_user,
             title="Old",
             model="gpt-4",
             messages=_make_messages(1),
@@ -1189,7 +1190,7 @@ class TestConversationRoutes:
         resp = client.patch(
             "/api/conversations/api-title/title",
             json={"title": "New Title"},
-            headers={"X-User-Email": "test@test.com"},
+            headers={"X-User-Email": config_manager.app_settings.test_user},
         )
         assert resp.status_code == 200
         assert resp.json()["updated"] is True
@@ -1197,7 +1198,7 @@ class TestConversationRoutes:
     def test_add_tag(self, client, repo):
         repo.save_conversation(
             conversation_id="api-tag",
-            user_email="test@test.com",
+            user_email=config_manager.app_settings.test_user,
             title="Tag Me",
             model="gpt-4",
             messages=_make_messages(1),
@@ -1205,7 +1206,7 @@ class TestConversationRoutes:
         resp = client.post(
             "/api/conversations/api-tag/tags",
             json={"name": "important"},
-            headers={"X-User-Email": "test@test.com"},
+            headers={"X-User-Email": config_manager.app_settings.test_user},
         )
         assert resp.status_code == 200
         assert resp.json()["name"] == "important"
@@ -1214,12 +1215,12 @@ class TestConversationRoutes:
         for i in range(2):
             repo.save_conversation(
                 conversation_id=f"api-export-{i}",
-                user_email="test@test.com",
+                user_email=config_manager.app_settings.test_user,
                 title=f"Export {i}",
                 model="gpt-4",
                 messages=_make_messages(2),
             )
-        resp = client.get("/api/conversations/export", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/conversations/export", headers={"X-User-Email": config_manager.app_settings.test_user})
         assert resp.status_code == 200
         data = resp.json()
         assert data["conversation_count"] == 2
@@ -1231,7 +1232,7 @@ class TestConversationRoutes:
             assert len(conv["messages"]) == 2
 
     def test_export_empty(self, client):
-        resp = client.get("/api/conversations/export", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/conversations/export", headers={"X-User-Email": config_manager.app_settings.test_user})
         assert resp.status_code == 200
         data = resp.json()
         assert data["conversation_count"] == 0
@@ -1258,6 +1259,6 @@ class TestConversationRoutes:
 
         with patch("atlas.routes.conversation_routes._get_repo", return_value=None):
             client = TestClient(app)
-            resp = client.get("/api/conversations", headers={"X-User-Email": "test@test.com"})
+            resp = client.get("/api/conversations", headers={"X-User-Email": config_manager.app_settings.test_user})
             assert resp.status_code == 200
             assert resp.json()["conversations"] == []

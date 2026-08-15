@@ -13,6 +13,7 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, formatToolCallForText } from '../utils/chatExport'
+import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 
 // Safety timeout for stuck thinking state (no backend response)
@@ -710,8 +711,7 @@ export const ChatProvider = ({ children }) => {
 			// Clear tools that don't match the new compliance level
 			const toolsToRemove = []
 			selectedTools.forEach(toolKey => {
-				const serverName = toolKey.split('_')[0]
-				const server = config.tools.find(t => t.server === serverName)
+				const server = findServerConfigForMcpKey(toolKey, config.tools)
 				if (server && server.compliance_level && server.compliance_level !== newLevel) {
 					toolsToRemove.push(toolKey)
 				}
@@ -723,8 +723,7 @@ export const ChatProvider = ({ children }) => {
 			// Clear prompts that don't match the new compliance level
 			const promptsToRemove = []
 			selectedPrompts.forEach(promptKey => {
-				const serverName = promptKey.split('_')[0]
-				const server = config.prompts.find(p => p.server === serverName)
+				const server = findServerConfigForMcpKey(promptKey, config.prompts)
 				if (server && server.compliance_level && server.compliance_level !== newLevel) {
 					promptsToRemove.push(promptKey)
 				}

@@ -4,6 +4,7 @@
 from unittest.mock import Mock
 
 from atlas.application.chat.utilities.tool_executor import _filter_args_to_schema, inject_context_into_args
+from atlas.modules.config.config_manager import config_manager
 
 
 class TestAtlasUserOverrideInApproval:
@@ -172,7 +173,7 @@ class TestAtlasUserOverrideInApproval:
 
         # User (alice) tries to impersonate admin via approval dialog
         user_edited_args = {
-            "_atlas_user": "admin@example.com",  # Impersonation attempt
+            "_atlas_user": config_manager.app_settings.admin_test_user,  # Impersonation attempt
             "action": "delete_all_data"
         }
 

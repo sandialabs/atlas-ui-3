@@ -48,6 +48,24 @@ from atlas.modules.config.settings import AppSettings  # noqa: E402
 
 AppSettings.model_config["env_file"] = None
 
+# --- External authorizer isolation ---------------------------------------
+# ``core.auth.is_user_in_group`` prefers a configured external authorization
+# service over its local group logic: when AUTH_GROUP_CHECK_URL and
+# AUTH_GROUP_CHECK_API_KEY are both set, *every* membership decision becomes an
+# outbound HTTPS POST. That is exactly the runtime behaviour we want in a real
+# deployment, and exactly what must not leak into the suite -- a contributor or
+# CI runner with those vars exported turns ~50 admin/authorization tests into
+# calls against a live authorization service (or, more usually, into 403s and
+# connection errors), for reasons that have nothing to do with their change.
+#
+# Clearing them for the session makes the local branch deterministic. Tests that
+# specifically exercise the external path (see ``test_core_auth.py``) set both
+# vars via monkeypatch, which takes precedence over this session-level clear, so
+# the production path keeps real coverage. This is a test-isolation guard, not a
+# product behavior change -- runtime authorization is untouched.
+for _authorizer_var in ("AUTH_GROUP_CHECK_URL", "AUTH_GROUP_CHECK_API_KEY"):
+    os.environ.pop(_authorizer_var, None)
+
 # MCP token storage now refuses to start without an explicit encryption key
 # (previously a per-process ephemeral key was generated, which silently lost
 # every stored token on restart). Provide a deterministic test key so module
@@ -121,12 +139,44 @@ def _isolate_config_cache():
             setattr(_config_manager, attr, value)
 
 
+# Groups the debug-only mock table in ``core.auth`` grants to the *non-admin*
+# baseline identity ``user@example.com`` (plus ``users``, which is granted to
+# literally everyone before the table is even consulted).
+_NON_ADMIN_BASELINE_GROUPS = frozenset({"users", "mcp_basic"})
+
+
+@pytest.fixture
+def distinct_admin_group():
+    """Return the configured admin group, skipping if it is not actually exclusive.
+
+    Allow/deny pairs that tag a resource with ``ADMIN_GROUP`` and then assert a
+    non-admin identity is refused only mean something when the configured admin
+    group is one the denial identity lacks. Point ``ADMIN_GROUP`` at ``users``
+    (which ``core.auth`` grants to everyone unconditionally) or ``mcp_basic``,
+    and the resource becomes reachable by the very identity the test expects to
+    be turned away -- the assertion inverts and the suite reports a failure that
+    says nothing about the code under test.
+
+    Such a deployment has no working admin gate at all, so this is a broken
+    configuration rather than a case worth supporting. Skip with the reason
+    stated plainly instead of failing (a spurious red) or silently passing
+    (a test that no longer tests anything).
+    """
+    admin_group = _config_manager.app_settings.admin_group
+    if admin_group in _NON_ADMIN_BASELINE_GROUPS:
+        pytest.skip(
+            f"ADMIN_GROUP={admin_group!r} is a group every non-admin identity "
+            "already has, so admin allow/deny pairs cannot be distinguished."
+        )
+    return admin_group
+
+
 @pytest.fixture
 def mock_admin_authorization(monkeypatch):
     """Enable the debug-only mock group table so admin routes are reachable.
 
     ``core.auth.is_user_in_group`` consults its mock group table (which is what
-    makes ``admin_test_user`` / ``test@test.com`` an admin) only when
+    makes the configured ``admin_test_user`` / ``test_user`` an admin) only when
     ``debug_mode`` is on; with DEBUG_MODE=false no user can be an admin unless an
     external auth endpoint is configured. Admin-route tests assert real 200
     responses, so they need debug mode declared explicitly rather than inherited
@@ -143,6 +193,36 @@ def mock_admin_authorization(monkeypatch):
     settings = _config_manager.app_settings
     assert settings.debug_mode is True
     return settings
+
+
+@pytest.fixture
+def test_user():
+    """Return the configured non-admin test identity."""
+    return _config_manager.app_settings.test_user
+
+
+@pytest.fixture
+def admin_test_user():
+    """Return the configured admin test identity."""
+    return _config_manager.app_settings.admin_test_user
+
+
+@pytest.fixture
+def admin_group():
+    """Return the configured admin group name (the group admin-route checks test against)."""
+    return _config_manager.app_settings.admin_group
+
+
+@pytest.fixture
+def test_user_headers(test_user):
+    """Return auth headers for the configured non-admin test identity."""
+    return {"X-User-Email": test_user}
+
+
+@pytest.fixture
+def admin_test_user_headers(admin_test_user):
+    """Return auth headers for the configured admin test identity."""
+    return {"X-User-Email": admin_test_user}
 
 
 # Env vars that the dev-only authorization bypass touches. Tests that need the
