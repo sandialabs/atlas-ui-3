@@ -1,14 +1,32 @@
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from atlas.modules.config.config_manager import config_manager
 from atlas.modules.config.settings import AppSettings
 
 
+def _disable_external_authorizer(monkeypatch):
+    """Force ``core.auth`` down its local (mock-table) branch.
+
+    ``is_user_in_group`` prefers a configured external authorizer over the
+    local table, so a developer or CI runner with ``AUTH_GROUP_CHECK_URL`` +
+    ``AUTH_GROUP_CHECK_API_KEY`` exported would otherwise send these tests at a
+    live authorization service over the network. The external path has its own
+    dedicated coverage below.
+    """
+    monkeypatch.delenv("AUTH_GROUP_CHECK_URL", raising=False)
+    monkeypatch.delenv("AUTH_GROUP_CHECK_API_KEY", raising=False)
+
+
 @pytest.mark.asyncio
 async def test_is_user_in_group_debug_admin(monkeypatch):
-    # Enable debug mode so test user is treated as admin per core.auth logic
+    """The documented debug-only bypass: the configured ``test_user`` is granted
+    the configured admin group when DEBUG_MODE=true and no external authorizer
+    is configured."""
     monkeypatch.setenv("DEBUG_MODE", "true")
+    _disable_external_authorizer(monkeypatch)
     config_manager.reload_configs()
 
     from atlas.core.auth import is_user_in_group  # import after reload to use env
@@ -17,6 +35,23 @@ async def test_is_user_in_group_debug_admin(monkeypatch):
     admin_group = config_manager.app_settings.admin_group
 
     assert await is_user_in_group(test_user, admin_group) is True
+
+
+@pytest.mark.asyncio
+async def test_is_user_in_group_users_group_allowed_without_authorizer(monkeypatch):
+    """The ``users`` group short-circuits to True for anyone, in debug mode or
+    not, whenever no external authorizer is configured. This is what keeps a
+    default deployment usable, so it must survive changes to the mock table."""
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    # Dev-only preview flag; AppSettings refuses to build with it on outside
+    # debug mode.
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    _disable_external_authorizer(monkeypatch)
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    assert await is_user_in_group("nobody-in-any-table@example.com", "users") is True
 
 
 @pytest.mark.asyncio
@@ -90,8 +125,7 @@ async def test_is_user_in_group_denied_in_production_mode(monkeypatch):
     """
     monkeypatch.setenv("DEBUG_MODE", "false")
     monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
-    monkeypatch.delenv("AUTH_GROUP_CHECK_URL", raising=False)
-    monkeypatch.delenv("AUTH_GROUP_CHECK_API_KEY", raising=False)
+    _disable_external_authorizer(monkeypatch)
     config_manager.reload_configs()
 
     from atlas.core.auth import is_user_in_group
@@ -99,6 +133,111 @@ async def test_is_user_in_group_denied_in_production_mode(monkeypatch):
     admin_test_user = config_manager.app_settings.admin_test_user
     admin_group = config_manager.app_settings.admin_group
     assert await is_user_in_group(admin_test_user, admin_group) is False
+
+
+# ---------------------------------------------------------------------------
+# External authorizer delegation (the production path)
+# ---------------------------------------------------------------------------
+#
+# A real deployment configures AUTH_GROUP_CHECK_URL + AUTH_GROUP_CHECK_API_KEY,
+# and every membership decision -- admin included -- is the external service's
+# to make. The mock-table tests above deliberately switch that endpoint off, so
+# without these tests nothing pins the branch that production actually runs.
+
+
+_AUTHORIZER_URL = "https://auth.example.com/check"
+# Not a credential -- an arbitrary token this test asserts is forwarded verbatim.
+_AUTHORIZER_API_KEY = "test-authorizer-key-not-a-credential"
+
+
+def _external_authorizer_env(monkeypatch, *, debug_mode: str = "false"):
+    monkeypatch.setenv("DEBUG_MODE", debug_mode)
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", _AUTHORIZER_URL)
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", _AUTHORIZER_API_KEY)
+    monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
+    config_manager.reload_configs()
+
+
+def _patched_authorizer(is_member):
+    """Patch httpx so ``is_user_in_group`` sees an authorizer replying ``is_member``."""
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.json = MagicMock(return_value={"is_member": is_member})
+
+    client = MagicMock()
+    client.post = AsyncMock(return_value=response)
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+
+    return patch("atlas.core.auth.httpx.AsyncClient", return_value=client), client
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_member", [True, False])
+async def test_is_user_in_group_delegates_to_external_authorizer(monkeypatch, is_member):
+    """With an authorizer configured, the verdict is whatever it returns -- for the
+    configured admin group and the configured admin identity alike. The local
+    mock table must not be consulted at all."""
+    _external_authorizer_env(monkeypatch)
+
+    from atlas.core.auth import is_user_in_group
+
+    admin_test_user = config_manager.app_settings.admin_test_user
+    admin_group = config_manager.app_settings.admin_group
+
+    patcher, client = _patched_authorizer(is_member)
+    with patcher:
+        assert await is_user_in_group(admin_test_user, admin_group) is is_member
+
+    # Assert the request against the *configured* endpoint and key rather than
+    # literals repeated from the fixture, so a regression that drops the
+    # credential (or posts somewhere other than AUTH_GROUP_CHECK_URL) cannot be
+    # masked by the test and the fixture drifting together.
+    app_settings = config_manager.app_settings
+    client.post.assert_awaited_once()
+    args, kwargs = client.post.call_args
+    assert args[0] == app_settings.auth_group_check_url
+    assert kwargs["json"] == {"user_id": admin_test_user, "group_id": admin_group}
+    assert (
+        kwargs["headers"]["Authorization"]
+        == f"Bearer {app_settings.auth_group_check_api_key}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_external_authorizer_wins_over_debug_mock_table(monkeypatch):
+    """DEBUG_MODE must not resurrect the mock table once a real authorizer is
+    configured: the configured ``test_user`` is an admin locally, but a denying
+    authorizer still denies."""
+    _external_authorizer_env(monkeypatch, debug_mode="true")
+
+    from atlas.core.auth import is_user_in_group
+
+    test_user = config_manager.app_settings.test_user
+    admin_group = config_manager.app_settings.admin_group
+
+    patcher, _client = _patched_authorizer(False)
+    with patcher:
+        assert await is_user_in_group(test_user, admin_group) is False
+
+
+@pytest.mark.asyncio
+async def test_external_authorizer_failure_denies(monkeypatch):
+    """A transport failure talking to the authorizer must fail closed."""
+    import httpx
+
+    _external_authorizer_env(monkeypatch)
+
+    from atlas.core.auth import is_user_in_group
+
+    client = MagicMock()
+    client.post = AsyncMock(side_effect=httpx.RequestError("boom"))
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("atlas.core.auth.httpx.AsyncClient", return_value=client):
+        assert await is_user_in_group("anyone@example.com", "users") is False
 
 
 def test_skip_authorization_checks_boot_path_refuses_to_start(monkeypatch):
