@@ -1,15 +1,15 @@
 import { useChat } from '../contexts/ChatContext'
 import { X, ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
+import { getMcpNameFromKey } from '../utils/mcpKeys'
 
 const EnabledToolsIndicator = () => {
-  const { selectedTools, toggleTool, settings, updateSettings } = useChat()
+  const { selectedTools, toggleTool, settings, updateSettings, tools = [] } = useChat()
   const [isExpanded, setIsExpanded] = useState(false)
   const autoApproveOn = Boolean(settings?.autoApproveTools)
 
   const allTools = Array.from(selectedTools).map(key => {
-    const parts = key.split('_')
-    return { name: parts.slice(1).join('_'), key, type: 'tool' }
+    return { name: getMcpNameFromKey(key, tools), key, type: 'tool' }
   })
 
   // Only show tools (prompts are now in the PromptSelector)

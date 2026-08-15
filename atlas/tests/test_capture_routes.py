@@ -16,9 +16,6 @@ from starlette.testclient import TestClient
 from atlas.application.chat.capture.capture_service import CaptureService
 from atlas.application.chat.capture.capture_store import CaptureStore
 
-USER_HEADERS = {"X-User-Email": "test@test.com"}
-ADMIN_HEADERS = {"X-User-Email": "admin@test.com"}
-
 
 def _config(system_enabled=True):
     return SimpleNamespace(
@@ -46,66 +43,68 @@ def patched_service():
 
 
 @pytest.fixture
-def mock_admin():
+def mock_admin(admin_test_user, admin_group):
     async def _is_user_in_group(user: str, group: str) -> bool:
-        return user == "admin@test.com"
+        # Match on both identity and group so a route checking the wrong group
+        # name (e.g. a typo'd admin_group) fails the test instead of passing.
+        return user == admin_test_user and group == admin_group
 
     with patch("atlas.routes.capture_routes.is_user_in_group", _is_user_in_group):
         yield
 
 
 class TestConsent:
-    def test_get_consent_defaults_off(self, patched_service):
+    def test_get_consent_defaults_off(self, patched_service, test_user_headers):
         client = TestClient(app)
-        resp = client.get("/api/capture/consent", headers=USER_HEADERS)
+        resp = client.get("/api/capture/consent", headers=test_user_headers)
         assert resp.status_code == 200
         body = resp.json()
         assert body["user_enabled"] is False
         assert body["system_enabled"] is True
 
-    def test_opt_in_then_out(self, patched_service):
+    def test_opt_in_then_out(self, patched_service, test_user_headers):
         client = TestClient(app)
         resp = client.post(
-            "/api/capture/consent", json={"enabled": True}, headers=USER_HEADERS
+            "/api/capture/consent", json={"enabled": True}, headers=test_user_headers
         )
         assert resp.status_code == 200
         assert resp.json()["user_enabled"] is True
 
         resp = client.post(
-            "/api/capture/consent", json={"enabled": False}, headers=USER_HEADERS
+            "/api/capture/consent", json={"enabled": False}, headers=test_user_headers
         )
         assert resp.json()["user_enabled"] is False
 
-    def test_opt_in_rejected_when_system_disabled(self, patched_service):
+    def test_opt_in_rejected_when_system_disabled(self, patched_service, test_user_headers):
         store = patched_service["service"].store
         patched_service["service"] = CaptureService(_config(False), store=store)
         client = TestClient(app)
         resp = client.post(
-            "/api/capture/consent", json={"enabled": True}, headers=USER_HEADERS
+            "/api/capture/consent", json={"enabled": True}, headers=test_user_headers
         )
         assert resp.status_code == 409
 
 
 class TestSelfDelete:
-    def test_delete_my_data(self, patched_service):
+    def test_delete_my_data(self, patched_service, test_user, test_user_headers):
         service = patched_service["service"]
-        service.set_consent("test@test.com", True)
+        service.set_consent(test_user, True)
         client = TestClient(app)
-        resp = client.delete("/api/capture/me", headers=USER_HEADERS)
+        resp = client.delete("/api/capture/me", headers=test_user_headers)
         assert resp.status_code == 200
         assert "deleted_records" in resp.json()
 
 
 class TestAdminGating:
-    def test_stats_requires_admin(self, patched_service, mock_admin):
+    def test_stats_requires_admin(self, patched_service, mock_admin, test_user_headers, admin_test_user_headers):
         client = TestClient(app)
-        assert client.get("/api/admin/capture/stats", headers=USER_HEADERS).status_code == 403
-        ok = client.get("/api/admin/capture/stats", headers=ADMIN_HEADERS)
+        assert client.get("/api/admin/capture/stats", headers=test_user_headers).status_code == 403
+        ok = client.get("/api/admin/capture/stats", headers=admin_test_user_headers)
         assert ok.status_code == 200
         assert "total_records" in ok.json()
 
-    def test_export_requires_admin(self, patched_service, mock_admin):
+    def test_export_requires_admin(self, patched_service, mock_admin, test_user_headers, admin_test_user_headers):
         client = TestClient(app)
-        assert client.get("/api/admin/capture/export", headers=USER_HEADERS).status_code == 403
-        ok = client.get("/api/admin/capture/export", headers=ADMIN_HEADERS)
+        assert client.get("/api/admin/capture/export", headers=test_user_headers).status_code == 403
+        ok = client.get("/api/admin/capture/export", headers=admin_test_user_headers)
         assert ok.status_code == 200

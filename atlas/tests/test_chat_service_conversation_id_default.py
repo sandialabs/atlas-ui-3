@@ -18,6 +18,7 @@ import pytest
 
 from atlas.application.chat.service import ChatService
 from atlas.domain.errors import AuthorizationError
+from atlas.modules.config.config_manager import config_manager
 
 
 def _make_service():
@@ -79,7 +80,7 @@ async def test_first_message_defaults_conversation_id_to_session_id():
             session_id=session_id,
             content="hello",
             model="test-model",
-            user_email="test@test.com",
+            user_email=config_manager.app_settings.test_user,
         )
 
     assert captured["conversation_id"] == str(session_id), (
@@ -111,7 +112,7 @@ async def test_explicit_conversation_id_wins_over_default():
             session_id=session_id,
             content="hello",
             model="test-model",
-            user_email="test@test.com",
+            user_email=config_manager.app_settings.test_user,
             conversation_id=explicit_conv_id,
         )
 
@@ -222,7 +223,7 @@ async def test_default_does_not_overwrite_existing_context_value():
     session_id = uuid4()
 
     # Pre-create session with an existing conversation_id
-    session = await service.create_session(session_id, "test@test.com")
+    session = await service.create_session(session_id, config_manager.app_settings.test_user)
     session.context["conversation_id"] = "existing-conv-id"
 
     captured = {}
@@ -239,7 +240,7 @@ async def test_default_does_not_overwrite_existing_context_value():
             session_id=session_id,
             content="hello",
             model="test-model",
-            user_email="test@test.com",
+            user_email=config_manager.app_settings.test_user,
         )
 
     assert captured["conversation_id"] == "existing-conv-id"

@@ -1,7 +1,7 @@
 """Prompt override service - handles MCP system prompt injection."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,11 @@ class PromptOverrideService:
         system_messages: List[Dict[str, Any]] = []
 
         for key in selected_prompts:
-            if not isinstance(key, str) or "_" not in key:
+            prompt_key_parts = self._split_prompt_key(key)
+            if not prompt_key_parts:
                 continue
 
-            server, prompt_name = key.split("_", 1)
+            server, prompt_name = prompt_key_parts
 
             try:
                 meta = {}
@@ -86,6 +87,26 @@ class PromptOverrideService:
             messages = system_messages + messages
 
         return messages
+
+    def _split_prompt_key(self, key: Any) -> Optional[Tuple[str, str]]:
+        """Split a stored prompt key into server and prompt names."""
+        if not isinstance(key, str) or "_" not in key:
+            return None
+
+        known_server_names = set()
+        for attr in ("available_prompts", "servers_config"):
+            value = getattr(self.tool_manager, attr, None)
+            if isinstance(value, dict):
+                known_server_names.update(
+                    server for server in value.keys() if isinstance(server, str)
+                )
+
+        for server in sorted(known_server_names, key=len, reverse=True):
+            prefix = f"{server}_"
+            if key.startswith(prefix) and len(key) > len(prefix):
+                return server, key[len(prefix):]
+
+        return tuple(key.split("_", 1))
 
     def _extract_prompt_text(self, prompt_obj: Any) -> Optional[str]:
         """

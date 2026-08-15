@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from atlas.application.chat.service import ChatService
+from atlas.modules.config.config_manager import config_manager
 
 
 def _ensure_real_litellm_module():
@@ -116,7 +117,7 @@ class TestLogLevelSensitiveData:
         # Set log level to INFO
         with caplog.at_level(logging.INFO):
             # Create test session first
-            asyncio.run(service.create_session("test-session", "test@test.com"))
+            asyncio.run(service.create_session("test-session", config_manager.app_settings.test_user))
 
             # Clear logs from session creation
             caplog.clear()
@@ -127,7 +128,7 @@ class TestLogLevelSensitiveData:
                     session_id="test-session",
                     content="This is sensitive user input that should not be logged at INFO level",
                     model="test-model",
-                    user_email="test@test.com"
+                    user_email=config_manager.app_settings.test_user
                 ))
             except Exception:
                 pass  # We expect this to fail, we're just checking logs
@@ -169,7 +170,7 @@ class TestLogLevelSensitiveData:
         # Set log level to DEBUG
         with caplog.at_level(logging.DEBUG):
             # Create test session first
-            asyncio.run(service.create_session("test-session", "test@test.com"))
+            asyncio.run(service.create_session("test-session", config_manager.app_settings.test_user))
 
             # Clear logs from session creation
             caplog.clear()
@@ -180,7 +181,7 @@ class TestLogLevelSensitiveData:
                     session_id="test-session",
                     content="This is sensitive user input",
                     model="test-model",
-                    user_email="test@test.com"
+                    user_email=config_manager.app_settings.test_user
                 ))
             except Exception:
                 pass  # We expect this to fail, we're just checking logs

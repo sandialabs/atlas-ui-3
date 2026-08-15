@@ -15,6 +15,8 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app
 
+from atlas.modules.config.config_manager import config_manager
+
 
 @pytest.fixture
 def mock_app_factory():
@@ -22,7 +24,7 @@ def mock_app_factory():
     with patch('main.app_factory') as mock_factory:
         # Mock config manager
         mock_config = MagicMock()
-        mock_config.app_settings.test_user = 'test@test.com'
+        mock_config.app_settings.test_user = config_manager.app_settings.test_user
         mock_config.app_settings.debug_mode = False
         mock_config.app_settings.auth_user_header = 'X-User-Email'
         mock_config.app_settings.feature_proxy_secret_enabled = False
@@ -99,7 +101,7 @@ def mock_app_factory_debug_mode():
     with patch('main.app_factory') as mock_factory:
         # Mock config manager with debug_mode=True
         mock_config = MagicMock()
-        mock_config.app_settings.test_user = 'test@test.com'
+        mock_config.app_settings.test_user = config_manager.app_settings.test_user
         mock_config.app_settings.debug_mode = True  # Debug mode enabled
         mock_config.app_settings.auth_user_header = 'X-User-Email'
         mock_config.app_settings.feature_proxy_secret_enabled = False
@@ -140,14 +142,14 @@ def test_websocket_fallback_to_test_user_debug_mode(mock_app_factory_debug_mode)
     # Connect without header or query param - should work in debug mode
     with client.websocket_connect("/ws") as websocket:
         # Send a test message
-        websocket.send_json({"type": "attach_file", "s3_key": "users/test@test.com/test.txt"})
+        websocket.send_json({"type": "attach_file", "s3_key": f"users/{config_manager.app_settings.test_user}/test.txt"})
 
         # Get the chat service instance
         call_args = mock_app_factory_debug_mode.create_chat_service.call_args
         connection_adapter = call_args[0][0]
 
         # Should use test user from config in debug mode
-        assert connection_adapter.user_email == "test@test.com"
+        assert connection_adapter.user_email == config_manager.app_settings.test_user
 
 
 def test_websocket_header_takes_precedence_over_query_param(mock_app_factory):

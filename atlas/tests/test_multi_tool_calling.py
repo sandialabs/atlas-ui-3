@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from atlas.modules.config.config_manager import config_manager
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from atlas.application.chat.utilities.tool_executor import (
@@ -264,7 +266,7 @@ class TestAgentLoopMultiToolMessages:
         result = await loop.run(
             model="test",
             messages=[{"role": "user", "content": "test"}],
-            context=AgentContext(session_id="s1", user_email="test@test.com", files={}, history=ConversationHistory()),
+            context=AgentContext(session_id="s1", user_email=config_manager.app_settings.test_user, files={}, history=ConversationHistory()),
             selected_tools=["toolA", "toolB"],
             data_sources=None,
             max_steps=5,
