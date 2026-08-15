@@ -2,6 +2,7 @@ import { useChat } from '../contexts/ChatContext'
 import { ChevronDown, Sparkles, User } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import { getMcpNameFromKey } from '../utils/mcpKeys'
 
 const PromptSelector = () => {
   const {
@@ -71,9 +72,7 @@ const PromptSelector = () => {
       const match = userPrompts.find(p => p.id === id)
       return match ? match.title : 'Custom Prompt'
     }
-    // Extract prompt name from the key (format: "server_promptname")
-    const idx = activePromptKey.indexOf('_')
-    return idx === -1 ? activePromptKey : activePromptKey.slice(idx + 1)
+    return getMcpNameFromKey(activePromptKey, prompts)
   }
 
   return (
