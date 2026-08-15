@@ -15,7 +15,7 @@ Dependency direction: ``config_loader`` -> ``settings`` -> ``models``.
 
 import os
 import re
-from typing import Dict, List, Literal, Optional
+from typing import ClassVar, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -221,9 +221,32 @@ class RAGSourceConfig(BaseModel):
     timeout: float = 60.0  # Request timeout in seconds
     strip_domain: bool = False  # Strip @domain from username (e.g. user@corp.com -> user)
 
-    # API endpoint customization (HTTP type)
-    discovery_endpoint: str = "/api/v1/discover/datasources"
-    query_endpoint: str = "/api/v1/rag/completions"
+    # Which ATLAS RAG contract this backend speaks (HTTP type).
+    # "v1" posts the conversation to /rag/completions and gets a completion
+    # back; "v2" posts an explicit query to /rag/query and picks raw evidence
+    # or a synthesized answer. See docs/admin/external-rag-api.md.
+    api_version: Literal["v1", "v2"] = "v1"
+
+    # API endpoint customization (HTTP type). Left unset, each resolves to the
+    # default path for ``api_version``.
+    discovery_endpoint: Optional[str] = None
+    query_endpoint: Optional[str] = None
+
+    # Default response shape for v2 queries. "synthesized" preserves the v1
+    # user-visible behaviour (the backend answers); "raw" returns evidence for
+    # Atlas UI's own LLM to reason over. Callers can override per query.
+    default_mode: Literal["raw", "synthesized"] = "synthesized"
+
+    DEFAULT_ENDPOINTS: ClassVar[Dict[str, Dict[str, str]]] = {
+        "v1": {
+            "discovery": "/api/v1/discover/datasources",
+            "query": "/api/v1/rag/completions",
+        },
+        "v2": {
+            "discovery": "/api/v2/discover/datasources",
+            "query": "/api/v2/rag/query",
+        },
+    }
 
     @model_validator(mode='after')
     def validate_type_specific_fields(self):
@@ -236,6 +259,12 @@ class RAGSourceConfig(BaseModel):
             # HTTP type requires url
             if not self.url:
                 raise ValueError("HTTP RAG source requires 'url'")
+
+        defaults = self.DEFAULT_ENDPOINTS[self.api_version]
+        if not self.discovery_endpoint:
+            self.discovery_endpoint = defaults["discovery"]
+        if not self.query_endpoint:
+            self.query_endpoint = defaults["query"]
         return self
 
 

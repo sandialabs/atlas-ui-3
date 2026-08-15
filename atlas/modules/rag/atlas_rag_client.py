@@ -5,6 +5,14 @@ Implements the newest ATLAS RAG spec:
   - GET  /api/v1/discover/datasources?role=read|write&as_user={user}
   - POST /api/v1/rag/completions?as_user={user}
 
+and the v2 tool-oriented interface (``api_version="v2"``):
+
+  - GET  /api/v2/discover/datasources?role=read|write&as_user={user}
+  - POST /api/v2/rag/query?as_user={user}
+
+v2 sends an explicit ``query`` string instead of the conversation and picks
+the shape of the answer with ``mode`` (see :meth:`AtlasRAGClient.query_v2`).
+
 Request body (RagRequest):
 
     {"messages": [...], "stream": false, "corpora": "<id>" | ["<id>", ...]}
@@ -31,13 +39,16 @@ Response body (RagResponse):
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import httpx
 from fastapi import HTTPException
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.modules.rag.client import (
+    RAG_MODE_RAW,
+    RAG_MODE_SYNTHESIZED,
+    RAG_MODES,
     DataSource,
     DocumentMetadata,
     RAGMetadata,
@@ -60,6 +71,9 @@ class AtlasRAGClient:
     DEFAULT_DISCOVERY_PATH = "/api/v1/discover/datasources"
     DEFAULT_QUERY_PATH = "/api/v1/rag/completions"
 
+    DEFAULT_DISCOVERY_PATH_V2 = "/api/v2/discover/datasources"
+    DEFAULT_QUERY_PATH_V2 = "/api/v2/rag/query"
+
     def __init__(
         self,
         base_url: str,
@@ -70,6 +84,7 @@ class AtlasRAGClient:
         strip_domain: bool = False,
         discovery_path: Optional[str] = None,
         query_path: Optional[str] = None,
+        api_version: str = "v1",
     ):
         """Initialize the external RAG client.
 
@@ -85,9 +100,14 @@ class AtlasRAGClient:
             strip_domain: If True, strip ``@domain`` from usernames before
                 sending to the RAG API (``user@corp.com`` -> ``user``).
             discovery_path: Override for the discovery endpoint path.
-                Defaults to ``/api/v1/discover/datasources``.
-            query_path: Override for the completions endpoint path.
-                Defaults to ``/api/v1/rag/completions``.
+                Defaults to the discovery path of ``api_version``.
+            query_path: Override for the query endpoint path. Defaults to the
+                query path of ``api_version``.
+            api_version: Which ATLAS RAG contract this backend speaks --
+                ``"v1"`` (conversation + completion) or ``"v2"`` (explicit
+                query + ``raw``/``synthesized`` mode). Only the default paths
+                and which query method the caller may use depend on it;
+                authentication and impersonation are identical.
         """
         self.base_url = base_url.rstrip("/")
         self.bearer_token = bearer_token
@@ -95,13 +115,20 @@ class AtlasRAGClient:
         self.top_k = top_k
         self.timeout = timeout
         self.strip_domain = strip_domain
-        self.discovery_path = discovery_path or self.DEFAULT_DISCOVERY_PATH
-        self.query_path = query_path or self.DEFAULT_QUERY_PATH
+        self.api_version = "v2" if str(api_version).lower() == "v2" else "v1"
+        is_v2 = self.api_version == "v2"
+        self.discovery_path = discovery_path or (
+            self.DEFAULT_DISCOVERY_PATH_V2 if is_v2 else self.DEFAULT_DISCOVERY_PATH
+        )
+        self.query_path = query_path or (
+            self.DEFAULT_QUERY_PATH_V2 if is_v2 else self.DEFAULT_QUERY_PATH
+        )
 
         logger.info(
-            "AtlasRAGClient initialized: url=%s, model=%s, top_k=%d, "
+            "AtlasRAGClient initialized: url=%s, api_version=%s, model=%s, top_k=%d, "
             "strip_domain=%s, discovery=%s, query=%s",
             self.base_url,
+            self.api_version,
             self.default_model,
             self.top_k,
             self.strip_domain,
@@ -334,6 +361,328 @@ class AtlasRAGClient:
                     exc_info=True,
                 )
                 raise HTTPException(status_code=500, detail="Internal server error")
+
+    async def query_v2(
+        self,
+        user_name: str,
+        query: str,
+        corpora: Union[str, List[str]],
+        mode: str = RAG_MODE_RAW,
+        top_k: Optional[int] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        synthesis_params: Optional[Dict[str, Any]] = None,
+    ) -> RAGResponse:
+        """Query the v2 endpoint with an explicit query string.
+
+        Calls ``POST {query_path}?as_user={user_name}`` with a v2 request body.
+        The conversation is never sent -- only ``query`` -- so a v2 backend
+        receives the question and nothing else.
+
+        Args:
+            user_name: The username making the query.
+            query: The specific question to ask. Must be non-empty.
+            corpora: Corpus id or list of corpus ids to search.
+            mode: ``"raw"`` returns retrieved evidence for the caller's LLM to
+                reason over (``is_completion=False``); ``"synthesized"``
+                returns an answer the backend's LLM composed
+                (``is_completion=True``, i.e. usable verbatim).
+            top_k: Max results per corpus. Falls back to the client's
+                configured ``top_k`` when omitted.
+            filters: Server-defined metadata filters, passed through as-is.
+            synthesis_params: Mode-specific knobs for ``synthesized``, passed
+                through as-is. Ignored by the server in ``raw`` mode.
+
+        Returns:
+            RAGResponse whose ``content`` is the evidence block (``raw``) or
+            the synthesized answer (``synthesized``), with the retrieved
+            documents in ``metadata``.
+
+        Raises:
+            ValueError: ``query`` is empty/blank or ``mode`` is not one of
+                ``raw``/``synthesized``. Both are caller bugs, not backend
+                failures, so they are not mapped to an HTTPException.
+            HTTPException: The backend rejected or failed the request.
+        """
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a non-empty string")
+        if mode not in RAG_MODES:
+            raise ValueError(
+                f"mode must be one of {sorted(RAG_MODES)}, got {mode!r}"
+            )
+
+        corpora_list = [corpora] if isinstance(corpora, str) else list(corpora or [])
+        if not corpora_list:
+            raise ValueError("corpora must name at least one corpus")
+
+        user_name = self._resolve_username(user_name)
+
+        payload: Dict[str, Any] = {
+            "query": query,
+            "corpora": corpora if isinstance(corpora, str) else corpora_list,
+            "mode": mode,
+            "top_k": self.top_k if top_k is None else top_k,
+        }
+        if filters:
+            payload["filters"] = filters
+        if synthesis_params and mode == RAG_MODE_SYNTHESIZED:
+            payload["synthesis_params"] = synthesis_params
+
+        # The query text itself is never logged -- v2 exists partly to keep
+        # user text away from places it does not need to be.
+        logger.info(
+            "[HTTP-RAG-v2] query called: user=%s, corpora=%s, mode=%s, query_chars=%d",
+            user_name,
+            corpora_list,
+            mode,
+            len(query),
+        )
+
+        # The corpus label on the parsed metadata: a single corpus names
+        # itself, several are joined so the UI footer says what was searched.
+        data_source_label = (
+            corpora_list[0] if len(corpora_list) == 1 else ", ".join(corpora_list)
+        )
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                response = await client.post(
+                    f"{self.base_url}{self.query_path}",
+                    headers=self._get_headers(),
+                    params={"as_user": user_name},
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                if not isinstance(data, dict):
+                    logger.error(
+                        "[HTTP-RAG-v2] Unexpected response type: %s",
+                        type(data).__name__,
+                    )
+                    raise HTTPException(status_code=500, detail="RAG service error")
+
+                # Trust the mode the caller asked for: a server that echoes
+                # nothing still gets parsed correctly, and a server echoing a
+                # different mode cannot silently change the response shape the
+                # caller is about to consume.
+                content, documents = self._parse_v2_results(
+                    data.get("results") or {}, mode, data_source_label
+                )
+                metadata = self._build_v2_metadata(
+                    data.get("metadata") or {}, documents, data_source_label, mode
+                )
+
+                logger.info(
+                    "[HTTP-RAG-v2] query complete: user=%s, corpora=%s, mode=%s, "
+                    "content_length=%d, documents=%d",
+                    user_name,
+                    corpora_list,
+                    mode,
+                    len(content),
+                    len(documents),
+                )
+                return RAGResponse(
+                    content=content,
+                    metadata=metadata,
+                    is_completion=(mode == RAG_MODE_SYNTHESIZED),
+                )
+
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                # The response body is deliberately not logged: a backend can
+                # echo the query (or other user text) into its error detail,
+                # and v2 exists to keep that text out of places it does not
+                # need to be. The status and endpoint are what diagnose this.
+                logger.error(
+                    "HTTP error querying RAG v2 for %s: status %d from %s",
+                    user_name,
+                    status_code,
+                    self.query_path,
+                )
+                if status_code == 400:
+                    raise HTTPException(
+                        status_code=400, detail="Invalid RAG query request"
+                    )
+                elif status_code == 403:
+                    raise HTTPException(
+                        status_code=403, detail="Access denied to data source"
+                    )
+                elif status_code == 404:
+                    raise HTTPException(
+                        status_code=404, detail="Data source not found"
+                    )
+                else:
+                    raise HTTPException(status_code=500, detail="RAG service error")
+
+            except httpx.RequestError as exc:
+                logger.error(
+                    "Request error querying RAG v2 for %s: %s",
+                    user_name,
+                    str(exc),
+                )
+                raise HTTPException(
+                    status_code=500, detail="Failed to connect to RAG service"
+                )
+
+            except HTTPException:
+                raise
+
+            except Exception as exc:
+                logger.error(
+                    "Unexpected error querying RAG v2 for %s: %s",
+                    user_name,
+                    str(exc),
+                    exc_info=True,
+                )
+                raise HTTPException(status_code=500, detail="Internal server error")
+
+    @classmethod
+    def _parse_v2_results(
+        cls,
+        results: Dict[str, Any],
+        mode: str,
+        data_source: str,
+    ) -> tuple[str, List[DocumentMetadata]]:
+        """Turn a v2 ``results`` block into content plus document metadata."""
+        if not isinstance(results, dict):
+            return ("No response from RAG system.", [])
+
+        if mode == RAG_MODE_SYNTHESIZED:
+            answer = results.get("answer")
+            content = answer if isinstance(answer, str) and answer else (
+                "No response from RAG system."
+            )
+            documents = cls._parse_v2_documents(
+                results.get("citations") or [], data_source
+            )
+            return content, documents
+
+        documents = cls._parse_v2_documents(results.get("hits") or [], data_source)
+        return cls._format_raw_evidence(documents), documents
+
+    @staticmethod
+    def _parse_v2_documents(
+        entries: Any,
+        data_source: str,
+    ) -> List[DocumentMetadata]:
+        """Map v2 ``hits``/``citations`` entries to ``DocumentMetadata``.
+
+        Both shapes share the reference fields (``document_ref``,
+        ``filename``, ``title``, ``citation``); only ``hits`` carry
+        ``sections``, so citations simply parse with none.
+        """
+        documents: List[DocumentMetadata] = []
+        if not isinstance(entries, list):
+            return documents
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+
+            sections: List[Section] = []
+            for sec in entry.get("sections") or []:
+                if not isinstance(sec, dict):
+                    continue
+                try:
+                    sections.append(Section(**sec))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Skipping malformed v2 section: %s", exc)
+
+            filename = entry.get("filename") or ""
+            relevance = entry.get("relevance")
+            if isinstance(relevance, (int, float)):
+                confidence = float(relevance)
+            else:
+                confidence = max((s.relevance for s in sections), default=0.0)
+
+            try:
+                documents.append(
+                    DocumentMetadata(
+                        source=data_source or filename,
+                        content_type="atlas-search",
+                        confidence_score=confidence,
+                        chunk_id=None,
+                        last_modified=None,
+                        title=entry.get("title") or filename or None,
+                        url=entry.get("url"),
+                        citation=entry.get("citation"),
+                        document_ref=entry.get("document_ref"),
+                        sections=sections,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Skipping malformed v2 reference (filename=%s): %s",
+                    filename,
+                    exc,
+                )
+
+        return documents
+
+    @staticmethod
+    def _format_raw_evidence(documents: List[DocumentMetadata]) -> str:
+        """Render retrieved evidence as the text an LLM reasons over.
+
+        ``raw`` mode returns chunks, not prose, so the client composes the
+        block the caller injects as context. Snippets keep their ``[N]``
+        document markers, which is what the existing citation pipeline in the
+        UI matches on -- so a v2 raw answer cites exactly like a v1 one.
+        """
+        if not documents:
+            return "No relevant documents were retrieved."
+
+        parts: List[str] = [
+            f"Retrieved {len(documents)} document(s):",
+            "",
+        ]
+        for doc in documents:
+            ref = doc.document_ref
+            marker = f"[{ref}] " if ref is not None else ""
+            heading = doc.title or doc.source or "document"
+            parts.append(f"{marker}{heading}")
+            for section in doc.sections:
+                parts.append(f"  - {section.text}")
+            if not doc.sections and doc.citation:
+                parts.append(f"  - {doc.citation}")
+            parts.append("")
+        return "\n".join(parts).rstrip()
+
+    @staticmethod
+    def _build_v2_metadata(
+        metadata: Dict[str, Any],
+        documents: List[DocumentMetadata],
+        data_source: str,
+        mode: str,
+    ) -> Optional[RAGMetadata]:
+        """Build ``RAGMetadata`` from the v2 ``metadata`` block.
+
+        v2 reports ``response_time_ms`` directly, unlike v1's whole seconds.
+        """
+        if not documents and not metadata:
+            return None
+
+        raw_ms = metadata.get("response_time_ms") if isinstance(metadata, dict) else None
+        try:
+            processing_ms = int(raw_ms) if raw_ms is not None else 0
+        except (TypeError, ValueError):
+            logger.warning("Ignoring non-numeric v2 response_time_ms: %r", raw_ms)
+            processing_ms = 0
+
+        corpora_searched = (
+            metadata.get("corpora_searched") if isinstance(metadata, dict) else None
+        )
+        if isinstance(corpora_searched, list) and corpora_searched:
+            data_source_name = ", ".join(str(c) for c in corpora_searched)
+        else:
+            data_source_name = data_source or ""
+
+        return RAGMetadata(
+            query_processing_time_ms=max(0, processing_ms),
+            total_documents_searched=len(documents),
+            documents_found=documents,
+            data_source_name=data_source_name,
+            retrieval_method=f"v2_{mode}",
+        )
 
     @staticmethod
     def _extract_message(data: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:

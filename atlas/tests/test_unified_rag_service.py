@@ -303,6 +303,7 @@ class TestQueryRAG:
             config_manager.app_settings.test_user,
             "corpus1",
             [{"role": "user", "content": "test query"}],
+            data_sources=None,
         )
 
     @pytest.mark.asyncio

@@ -23,8 +23,44 @@ from atlas.modules.mcp_tools.mcp_errors import (
     _is_task_forbidden_result,
 )
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
+from atlas.modules.rag.client import RAG_MODE_RAW, RAG_MODES
 
 logger = logging.getLogger(__name__)
+
+# Cap on citations echoed into a RAG tool result. The list exists so the model
+# can name its sources, not so it can re-read the corpus; a backend returning
+# hundreds of hits must not be able to inflate the tool payload without bound.
+_MAX_TOOL_REFERENCES = 20
+
+
+def _tool_references(response: Any) -> List[Dict[str, Any]]:
+    """Compact citation list for a RAG tool result.
+
+    ``ToolResult.content`` is all the agent loop forwards, so document identity
+    that lives only on ``RAGResponse.metadata`` -- which is where a synthesized
+    answer's citations live -- would otherwise never reach the model or the
+    references UI. Raw evidence already carries its ``[N]`` markers inline;
+    this surfaces the same identity for either mode without repeating the
+    snippet text.
+    """
+    metadata = getattr(response, "metadata", None)
+    documents = getattr(metadata, "documents_found", None) or []
+
+    references: List[Dict[str, Any]] = []
+    for doc in documents[:_MAX_TOOL_REFERENCES]:
+        entry = {
+            key: value
+            for key, value in (
+                ("document_ref", getattr(doc, "document_ref", None)),
+                ("filename", getattr(doc, "title", None) or getattr(doc, "source", None)),
+                ("citation", getattr(doc, "citation", None)),
+                ("url", getattr(doc, "url", None)),
+            )
+            if value
+        }
+        if entry:
+            references.append(entry)
+    return references
 
 
 def _client():
@@ -720,6 +756,14 @@ class ExecutionMixin:
                     error="Missing query",
                 )
 
+            # Tool-shaped RAG asks for evidence by default: the model called a
+            # tool and should reason over what comes back, not hand the user a
+            # backend-written answer. Only v2 sources honour this -- v1 always
+            # synthesizes -- and an unrecognized value falls back to "raw"
+            # rather than failing the call, since ``mode`` is model-supplied.
+            requested_mode = args.get("mode")
+            mode = requested_mode if requested_mode in RAG_MODES else RAG_MODE_RAW
+
             requested_sources = args.get("data_sources")
             if isinstance(requested_sources, list):
                 sources = [s for s in requested_sources if isinstance(s, str) and ":" in s]
@@ -778,14 +822,22 @@ class ExecutionMixin:
                 if not unified_rag:
                     raise RuntimeError("Unified RAG service is not configured")
                 if len(group) == 1:
-                    resp = await unified_rag.query_rag(user_email, group[0], messages)
+                    resp = await unified_rag.query_rag(
+                        user_email, group[0], messages, query=query, mode=mode
+                    )
                 else:
-                    resp = await unified_rag.query_rag_batch(user_email, group, messages)
-                return {
+                    resp = await unified_rag.query_rag_batch(
+                        user_email, group, messages, query=query, mode=mode
+                    )
+                payload: Dict[str, Any] = {
                     "data_sources": group,
                     "content": resp.content,
                     "is_completion": bool(resp.is_completion),
                 }
+                references = _tool_references(resp)
+                if references:
+                    payload["references"] = references
+                return payload
 
             async def _query_mcp(group: List[str]) -> Dict[str, Any]:
                 if not rag_mcp:

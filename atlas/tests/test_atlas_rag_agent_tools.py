@@ -42,13 +42,13 @@ class FakeUnifiedRAG:
             }
         ]
 
-    async def query_rag(self, username, qualified_data_source, messages):
+    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None):
         self.query_calls.append(qualified_data_source)
         return SimpleNamespace(
             content=f"Result from {qualified_data_source}", is_completion=False
         )
 
-    async def query_rag_batch(self, username, qualified_data_sources, messages):
+    async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None):
         self.batch_calls.append(list(qualified_data_sources))
         return SimpleNamespace(
             content=f"Batched {','.join(qualified_data_sources)}", is_completion=True
@@ -270,11 +270,11 @@ class ComplianceAwareRAG:
         ids = self.by_level.get(user_compliance_level, [])
         return [{"server": "atlas_rag", "sources": [{"id": i} for i in ids]}]
 
-    async def query_rag(self, username, qualified_data_source, messages):
+    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None):
         self.query_calls.append(qualified_data_source)
         return SimpleNamespace(content=f"ok {qualified_data_source}", is_completion=False)
 
-    async def query_rag_batch(self, username, qualified_data_sources, messages):
+    async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None):
         raise AssertionError("batch not expected in this test")
 
 
@@ -398,12 +398,12 @@ async def test_execute_atlas_rag_query_isolates_partial_failures(monkeypatch):
                 {"server": "srvB", "sources": [{"id": "broken"}]},
             ]
 
-        async def query_rag(self, username, qualified_data_source, messages):
+        async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None):
             if qualified_data_source == "srvB:broken":
                 raise RuntimeError("backend down")
             return SimpleNamespace(content=f"ok {qualified_data_source}", is_completion=False)
 
-        async def query_rag_batch(self, username, qualified_data_sources, messages):
+        async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None):
             raise AssertionError("each server has a single source; batch not expected")
 
     _patch_app_factory(monkeypatch, unified_rag=TwoServerRAG())
@@ -435,7 +435,7 @@ async def test_execute_atlas_rag_query_all_failures_reports_failure(monkeypatch)
     manager = _manager()
 
     class BrokenUnifiedRAG(FakeUnifiedRAG):
-        async def query_rag(self, username, qualified_data_source, messages):
+        async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None):
             raise RuntimeError("total outage")
 
     unified = BrokenUnifiedRAG(discovered=["technical-docs"])

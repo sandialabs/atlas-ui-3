@@ -9,6 +9,13 @@ from pydantic import BaseModel, Field, field_validator
 
 from atlas.core.http_client import create_rag_client
 
+# Response shapes a v2 RAG backend can return. ``raw`` hands back retrieved
+# evidence for the caller's LLM to reason over; ``synthesized`` hands back an
+# answer the backend's own LLM composed.
+RAG_MODE_RAW = "raw"
+RAG_MODE_SYNTHESIZED = "synthesized"
+RAG_MODES = frozenset({RAG_MODE_RAW, RAG_MODE_SYNTHESIZED})
+
 
 class DataSource(BaseModel):
     """Represents a RAG data source with compliance information."""
@@ -16,6 +23,9 @@ class DataSource(BaseModel):
     label: str
     compliance_level: str = "CUI"
     description: str = ""
+    # Advertised by v2 discovery so a backend can declare, per source, which
+    # contract it speaks. Absent means v1 (see docs/admin/external-rag-api.md).
+    api_version: Optional[str] = None
 
 logger = logging.getLogger(__name__)
 
