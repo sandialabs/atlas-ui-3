@@ -106,7 +106,7 @@ class PromptOverrideService:
             if key.startswith(prefix) and len(key) > len(prefix):
                 return server, key[len(prefix):]
 
-        return key.split("_", 1)
+        return tuple(key.split("_", 1))
 
     def _extract_prompt_text(self, prompt_obj: Any) -> Optional[str]:
         """
