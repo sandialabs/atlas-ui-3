@@ -3,7 +3,12 @@
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from atlas.domain.messages.models import Message, MessageRole, ToolResult
+from atlas.domain.messages.models import (
+    AGENT_TOOL_DIGEST_KEY,
+    Message,
+    MessageRole,
+    ToolResult,
+)
 from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
@@ -12,6 +17,7 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..preprocessors.message_builder import build_session_context
 from ..utilities import error_handler, event_notifier, tool_executor
+from ..utilities.agent_digest import build_tool_digest
 from ..utilities.tool_history import ToolCallRecorder
 from .streaming_helpers import stream_and_accumulate
 
@@ -90,6 +96,11 @@ class ToolsModeRunner:
         Returns:
             Response dictionary
         """
+        # The user message was appended by the orchestrator before this call,
+        # so anything added from here on belongs to this turn. Remember where
+        # it starts so the tool digest (issue #798) covers only this turn.
+        turn_start_index = len(session.history.messages)
+
         # Resolve tool schemas
         tools_schema = await error_handler.safe_get_tools_schema(self.tool_manager, selected_tools)
 
@@ -179,16 +190,18 @@ class ToolsModeRunner:
             await recorder.unwind(session.history)
             raise
 
-        # Add final assistant message to history
-        assistant_message = Message(
-            role=MessageRole.ASSISTANT,
+        # Add final assistant message to history. The digest folds this turn's
+        # tool calls into the model-visible content so a follow-up turn does not
+        # re-derive them (issue #798, extending the agent-mode fix from #755).
+        self._close_turn(
+            session,
+            turn_start_index,
             content=final_response,
             metadata={
                 "tools": selected_tools,
                 **({"data_sources": selected_data_sources} if selected_data_sources else {}),
             },
         )
-        session.history.add_message(assistant_message)
 
         # Emit final chat response
         await self.event_publisher.publish_chat_response(
@@ -211,6 +224,11 @@ class ToolsModeRunner:
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
         """Execute tools mode with token streaming."""
+        # The user message was appended by the orchestrator before this call,
+        # so anything added from here on belongs to this turn. Remember where
+        # it starts so the tool digest (issue #798) covers only this turn.
+        turn_start_index = len(session.history.messages)
+
         tools_schema = await error_handler.safe_get_tools_schema(self.tool_manager, selected_tools)
 
         tool_choice = "auto"
@@ -397,6 +415,7 @@ class ToolsModeRunner:
                     return await self._finalize_text_response(
                         session, final_text, bool(next_text),
                         selected_tools, selected_data_sources, recorder,
+                        turn_start_index=turn_start_index,
                     )
                 # else: loop to execute the newly requested tools.
 
@@ -411,15 +430,18 @@ class ToolsModeRunner:
             # Persist tool calls before the closing answer (issue #684).
             recorder.flush(session.history)
 
-            assistant_message = Message(
-                role=MessageRole.ASSISTANT,
+            # Carry a digest of the turn's tool calls so the next turn can see
+            # what already ran (issue #798, extending the agent-mode fix from
+            # #755 to the default tools-mode path).
+            self._close_turn(
+                session,
+                turn_start_index,
                 content=synthesis_content,
                 metadata={
                     "tools": selected_tools,
                     **({"data_sources": selected_data_sources} if selected_data_sources else {}),
                 },
             )
-            session.history.add_message(assistant_message)
             await self.event_publisher.publish_response_complete()
             return event_notifier.create_chat_response(synthesis_content)
         except BaseException:
@@ -654,6 +676,8 @@ class ToolsModeRunner:
         selected_tools: List[str],
         selected_data_sources: Optional[List[str]],
         recorder: Optional[ToolCallRecorder] = None,
+        *,
+        turn_start_index: int,
     ) -> Dict[str, Any]:
         """Persist and emit a plain-text final answer produced mid-loop."""
         if not already_streamed:
@@ -664,17 +688,54 @@ class ToolsModeRunner:
         # user -> tool_call(s) -> assistant (issue #684).
         if recorder is not None:
             recorder.flush(session.history)
-        assistant_message = Message(
-            role=MessageRole.ASSISTANT,
+        # Carry a digest of the turn's tool calls so the next turn can see what
+        # already ran (issue #798, extending the agent-mode fix from #755).
+        self._close_turn(
+            session,
+            turn_start_index,
             content=content,
             metadata={
                 "tools": selected_tools,
                 **({"data_sources": selected_data_sources} if selected_data_sources else {}),
             },
         )
-        session.history.add_message(assistant_message)
         await self.event_publisher.publish_response_complete()
         return event_notifier.create_chat_response(content)
+
+    def _close_turn(
+        self,
+        session: Session,
+        turn_start_index: int,
+        content: str,
+        metadata: Dict[str, Any],
+    ) -> Message:
+        """Append the turn's closing assistant message, carrying a tool digest.
+
+        Mirrors ``AgentModeRunner._close_turn`` (issue #755) so a tools-mode
+        turn also leaves a model-visible record of what its tools did. The
+        recorder's working state dies with the turn and the persisted
+        ``tool_call`` rows are display-only, so without a digest a follow-up
+        turn re-derives everything the tools already established (issue #798).
+
+        Tools mode closes with the model's own answer text (unlike the agent
+        interrupted path, which substitutes a placeholder), so the digest only
+        rides as metadata here -- ``get_messages_for_llm`` folds it into the
+        content when the next turn reads history.
+        """
+        try:
+            digest = build_tool_digest(session.history.messages, turn_start_index)
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("Failed to build tools-mode tool digest", exc_info=True)
+            digest = None
+        if digest:
+            metadata = {**metadata, AGENT_TOOL_DIGEST_KEY: digest}
+        message = Message(
+            role=MessageRole.ASSISTANT,
+            content=content,
+            metadata=metadata,
+        )
+        session.history.add_message(message)
+        return message
 
     def _get_send_json(self) -> Optional[UpdateCallback]:
         """Get send_json callback from event publisher if available."""

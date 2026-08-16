@@ -18,10 +18,7 @@ from ..agent.protocols import AgentContext
 from ..events.agent_event_relay import AgentEventRelay
 from ..utilities import event_notifier
 from ..utilities.agent_digest import build_tool_digest
-from ..utilities.interrupted_turn import (
-    INTERRUPTED_TURN_CONTENT,
-    INTERRUPTED_TURN_CONTENT_WITH_DIGEST,
-)
+from ..utilities.interrupted_turn import INTERRUPTED_TURN_CONTENT
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +181,6 @@ class AgentModeRunner:
                 turn_start_index,
                 content=INTERRUPTED_TURN_CONTENT,
                 metadata={"agent_mode": True, "interrupted": True},
-                content_with_digest=INTERRUPTED_TURN_CONTENT_WITH_DIGEST,
             )
             await self._publish_completion(steps=0)
             raise
@@ -223,7 +219,6 @@ class AgentModeRunner:
         turn_start_index: int,
         content: str,
         metadata: Dict[str, Any],
-        content_with_digest: Optional[str] = None,
     ) -> Message:
         """Append the turn's closing assistant message, carrying a tool digest.
 
@@ -240,9 +235,6 @@ class AgentModeRunner:
             digest = None
         if digest:
             metadata = {**metadata, AGENT_TOOL_DIGEST_KEY: digest}
-            if content_with_digest:
-                # Only claim a record exists when one is actually attached.
-                content = content_with_digest
 
         message = Message(
             role=MessageRole.ASSISTANT,
